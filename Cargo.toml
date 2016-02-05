@@ -1,0 +1,7 @@
+[package]
+name = "tox"
+version = "0.0.1"
+authors = ["Zetok Zalbavar <zetok@openmailbox.org>"]
+
+[dependencies.sodiumoxide]
+git = "https://github.com/dnaq/sodiumoxide.git"
