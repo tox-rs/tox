@@ -6,7 +6,7 @@
 |----------|-------------|
 | libsodium | 1.0.8 |
 
-# Building
+## Building
 Fairly simple. You'll need [Rust](http://www.rust-lang.org/) and libsodium.
 
 Currently git version of `sodiumoxide` is required. To compile it successfully:
@@ -32,6 +32,14 @@ cargo doc
 ```
 They will be located under `target/doc/`
 
-# License
+
+## Goals
+ - toxcore implementation in Rust
+ - Rust API
+ - "old" C API for compatibility
+ - more in the future?
+
+
+## License
 
 Licensed under GPLv3+. For details, see [COPYING](/COPYING).

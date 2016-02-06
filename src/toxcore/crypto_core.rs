@@ -265,20 +265,19 @@ fn decrypt_data_symmetric_test() {
 
 /// Inrement given nonce by 1.
 #[inline]
-// FIXME: sodiumoxide is broken - nonce isn't incremented
 // TODO: since sodiumoxide/sodium don't check for arithmetic overflow, do it
 //
 // overflow doesn't /seem/ to be likely to happen in the first place, given
 // that no nonce should be incremented long enough for it to happen, but still..
 pub fn increment_nonce(nonce: &mut Nonce) {
-    nonce.increment_le();
+    nonce.increment_le_inplace();
 }
 
 #[test]
 fn increment_nonce_test_zero_plus_one() {
-    let cmp_nonce = Nonce::from_slice(&[0, 0, 0, 0, 0, 0, 0, 0,
+    let cmp_nonce = Nonce::from_slice(&[1, 0, 0, 0, 0, 0, 0, 0,
                                         0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 1]).unwrap();
+                                        0, 0, 0, 0, 0, 0, 0, 0]).unwrap();
 
     let mut nonce = Nonce::from_slice(&[0; NONCEBYTES]).unwrap();
     increment_nonce(&mut nonce);
@@ -287,26 +286,26 @@ fn increment_nonce_test_zero_plus_one() {
 
 #[test]
 fn increment_nonce_test_0xf_plus_one() {
-    let cmp_nonce = Nonce::from_slice(&[0, 0, 0, 0, 0, 0, 0, 0,
+    let cmp_nonce = Nonce::from_slice(&[0x10, 0, 0, 0, 0, 0, 0, 0,
                                         0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 0x10]).unwrap();
+                                        0, 0, 0, 0, 0, 0, 0, 0]).unwrap();
 
-    let mut nonce = Nonce::from_slice(&[0, 0, 0, 0, 0, 0, 0, 0,
+    let mut nonce = Nonce::from_slice(&[0xf, 0, 0, 0, 0, 0, 0, 0,
                                         0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 0xf]).unwrap();
+                                        0, 0, 0, 0, 0, 0, 0, 0]).unwrap();
     increment_nonce(&mut nonce);
     assert!(nonce == cmp_nonce);
 }
 
 #[test]
 fn increment_nonce_test_0xff_plus_one() {
-    let cmp_nonce = Nonce::from_slice(&[0, 0, 0, 0, 0, 0, 0, 0,
+    let cmp_nonce = Nonce::from_slice(&[0, 1, 0, 0, 0, 0, 0, 0,
                                         0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 1, 0]).unwrap();
+                                        0, 0, 0, 0, 0, 0, 0, 0]).unwrap();
 
-    let mut nonce = Nonce::from_slice(&[0, 0, 0, 0, 0, 0, 0, 0,
+    let mut nonce = Nonce::from_slice(&[0xff, 0, 0, 0, 0, 0, 0, 0,
                                         0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 0xff]).unwrap();
+                                        0, 0, 0, 0, 0, 0, 0, 0]).unwrap();
     increment_nonce(&mut nonce);
     assert!(nonce == cmp_nonce);
 }
@@ -321,7 +320,6 @@ fn increment_nonce_test_random() {
 
 
 /// Inrement given nonce by number `num`.
-// FIXME: sodiumoxide is broken - nonce isn't incremented
 // TODO: since sodiumoxide/sodium don't check for arithmetic overflow, do it
 pub fn increment_nonce_number(mut nonce: &mut Nonce, num: usize) {
     for _ in 0..num {
@@ -331,9 +329,9 @@ pub fn increment_nonce_number(mut nonce: &mut Nonce, num: usize) {
 
 #[test]
 fn increment_nonce_number_test_zero_plus_0xff00() {
-    let cmp_nonce = Nonce::from_slice(&[0, 0, 0, 0, 0, 0, 0, 0,
+    let cmp_nonce = Nonce::from_slice(&[0, 0xff, 0, 0, 0, 0, 0, 0,
                                         0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0xff, 0]).unwrap();
+                                        0, 0, 0, 0, 0, 0, 0, 0]).unwrap();
     let mut nonce = Nonce::from_slice(&[0; NONCEBYTES]).unwrap();
 
     increment_nonce_number(&mut nonce, 0xff00);
@@ -342,13 +340,13 @@ fn increment_nonce_number_test_zero_plus_0xff00() {
 
 #[test]
 fn increment_nonce_number_test_0xff0000_plus_0x011000() {
-    let cmp_nonce = Nonce::from_slice(&[0, 0, 0, 0, 0, 0, 0, 0,
+    let cmp_nonce = Nonce::from_slice(&[0, 0x10, 0, 1, 0, 0, 0, 0,
                                         0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 1, 0, 0x10, 0]).unwrap();
+                                        0, 0, 0, 0, 0, 0, 0, 0]).unwrap();
 
-    let mut nonce = Nonce::from_slice(&[0, 0, 0, 0, 0, 0, 0, 0,
+    let mut nonce = Nonce::from_slice(&[0, 0, 0xff, 0, 0, 0, 0, 0,
                                         0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0xff, 0, 0]).unwrap();
+                                        0, 0, 0, 0, 0, 0, 0, 0]).unwrap();
 
     increment_nonce_number(&mut nonce, 0x11000);
     assert!(nonce == cmp_nonce);
