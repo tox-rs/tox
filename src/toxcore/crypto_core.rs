@@ -60,6 +60,7 @@ pub fn random_u32() -> u32 {
     let mut array = [0; BYTES];
     randombytes_into(&mut array);
 
+    // TODO: put converting array to int in a separate file, `toxcore/binary_io.rs`
     let mut result: u32 = 0;
     for byte in 0..array.len() {
         result = result << 8;
@@ -86,6 +87,7 @@ pub fn random_u64() -> u64 {
     let mut array = [0; BYTES];
     randombytes_into(&mut array);
 
+    // TODO: put converting array to int in a separate file, `toxcore/binary_io.rs`
     let mut result: u64 = 0;
     for byte in 0..array.len() {
         result = result << 8;
@@ -110,7 +112,7 @@ fn random_u64_test() {
 ///
 /// Returns `true` if valid, `false` otherwise.
 pub fn public_key_valid(&PublicKey(ref pk): &PublicKey) -> bool {
-    pk[PUBLICKEYBYTES - 1] <= 127 /* Last bit of key is always zero. */
+    pk[PUBLICKEYBYTES - 1] <= 127 // Last bit of key is always zero.
 }
 
 #[test]
@@ -505,6 +507,8 @@ fn create_request_test_min_length() {
 //      - data from the payload should be located after the first byte - if
 //        there was nothing there, it means that there was no data, and rest
 //        was just padding that decrypting removed.
+//
+// TODO: Return `Result<_, ENUM_ERR>` instead of `Option<_>`
 pub fn handle_request(our_public_key: &PublicKey,
                       our_secret_key: &SecretKey,
                       packet: &[u8])
@@ -543,4 +547,91 @@ pub fn handle_request(our_public_key: &PublicKey,
     None
 }
 
-// TODO: test ↑
+#[test]
+fn handle_request_test_invalid_empty() {
+    let (pk, sk) = gen_keypair();
+    match handle_request(&pk, &sk, &[0; 100]) {
+        None => {},
+        Some(_) => panic!("This should have failed, since packed did not have *any* valid data!"),
+    }
+}
+
+#[test]
+fn handle_request_test_too_short() {
+    let (pk, sk) = gen_keypair();
+    match handle_request(&pk, &sk, &[0; 0]) {
+        None => {},
+        Some(_) => panic!("This should have failed, since packed was too short!"),
+    }
+    match handle_request(&pk, &sk, &[0; 1]) {
+        None => {},
+        Some(_) => panic!("This should have failed, since packed was too short!"),
+    }
+    match handle_request(&pk, &sk, &[0; 73]) {
+        None => {},
+        Some(_) => panic!("This should have failed, since packed was too short!"),
+    }
+}
+
+#[test]
+fn handle_request_test_invalid_pk() {
+    let (alice_pk, alice_sk) = gen_keypair();
+    let (bob_pk, bob_sk) = gen_keypair();
+
+    let packet = create_request(&alice_pk,
+                                &alice_sk,
+                                &bob_pk,
+                                &[],
+                                CryptoPacket::FriendReq);
+
+    // test whether..
+    //  ..testing method is correct
+    let PublicKey(alice_pk_bytes) = alice_pk;
+    let mut packet_test = Vec::with_capacity(packet.len());
+    packet_test.extend_from_slice(&packet[..1]);
+    packet_test.extend_from_slice(&alice_pk_bytes[..]);
+    packet_test.extend_from_slice(&packet[(1 + PUBLICKEYBYTES)..]);
+    match handle_request(&bob_pk, &bob_sk, &packet_test) {
+        None => panic!("This should *not* have failed!"),
+        Some(_) => {},
+    }
+
+    //  ..fails when PK of sender is `0`s
+    let mut packet_zeros = Vec::with_capacity(packet.len());
+    packet_zeros.extend_from_slice(&packet[..1]);
+    packet_zeros.extend_from_slice(&[0; PUBLICKEYBYTES]);
+    packet_zeros.extend_from_slice(&packet[(1 + PUBLICKEYBYTES)..]);
+    match handle_request(&bob_pk, &bob_sk, &packet_zeros) {
+        None => {},
+        Some(_) => panic!("This should have failed, since sender's PK was `0`s!"),
+    }
+
+    //  ..fails when PK of sender is the same as receiver
+    let PublicKey(ref bob_pk_bytes) = bob_pk;
+    let mut packet_receiver = Vec::with_capacity(packet.len());
+    packet_receiver.extend_from_slice(&packet[..1]);
+    packet_receiver.extend_from_slice(&bob_pk_bytes[..]);
+    packet_receiver.extend_from_slice(&packet[(1 + PUBLICKEYBYTES)..]);
+    match handle_request(&bob_pk, &bob_sk, &packet_receiver[..]) {
+        None => {},
+        Some(_) => panic!("This should have failed, since sender's PK was our own!"),
+    }
+
+    //  ..fails when PK of sender is wrong (random)
+    let (PublicKey(rand_pk), _) = gen_keypair();
+    let mut packet_random = Vec::with_capacity(packet.len());
+    packet_random.extend_from_slice(&packet[..1]);
+    packet_random.extend_from_slice(&rand_pk[..]);
+    packet_random.extend_from_slice(&packet[(1 + PUBLICKEYBYTES)..]);
+
+    //  ..fails when received own packet
+    match handle_request(&alice_pk, &alice_sk, &packet[..]) {
+        None => {},
+        Some(_) => panic!("This should have failed, since it was own packet!"),
+    }
+}
+
+// TODO: write more test for when `handle_request`..
+//  ..fails when Nonce is wrong
+//  ..fails when ciphertext is wrong
+//  ..fails when decrypted payload is wrong (e.g. request id doesn't match)
