@@ -491,6 +491,22 @@ fn create_request_test_min_length() {
 
 /// Returns senders public key, request id, and data from the request,
 /// or `None` if request was invalid.
+//
+// The way it's supposed™ to work:
+//  1. Check if length of received packet is at least 74 bytes long, if it's
+//     not, return `None`.
+//      - 74 bytes is a miminum when ~no encrypted data is being sent, spare
+//        for the request ID (1 byte).
+//  2. Check if public key is valid, if it's not, return `None`.
+//  3. Check if public key is not our own, if it is, return `None`.
+//  4. Check if payload can be decrypted, if it can't, return `None`.
+//  5. Check if request id matches some existing one, if not, return `None`.
+//      - request id is the first byte of decrypted payload.
+//  6. If everything else was successful, return sender's PK, request id and
+//     data.
+//      - data from the payload should be located after the first byte - if
+//        there was nothing there, it means that there was no data, and rest
+//        was just padding that decrypting removed.
 pub fn handle_request(our_public_key: &PublicKey,
                       our_secret_key: &SecretKey,
                       packet: &[u8])
@@ -500,6 +516,10 @@ pub fn handle_request(our_public_key: &PublicKey,
     }
 
     if let Some(pk) = PublicKey::from_slice(&packet[1..(PUBLICKEYBYTES + 1)]) {
+        if !public_key_valid(&pk) {
+            return None;
+        }
+
         if &pk == our_public_key {
             return None;
         }
