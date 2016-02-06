@@ -1,5 +1,7 @@
 # Tox
 
+[![Build Status](https://travis-ci.org/zetok/tox.svg)](https://travis-ci.org/zetok/tox)
+
 
 ## Dependencies
 | **Name** | **Version** |

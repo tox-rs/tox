@@ -1,0 +1,25 @@
+language: rust
+rust:
+  - stable
+  - beta
+  - nightly
+matrix:
+  allow_failure:
+  - rust: nightly
+
+sudo: required
+
+before_install:
+  - sudo apt-get update -qq
+  - sudo apt-get install -y build-essential libtool autotools-dev automake checkinstall check git yasm pkg-config
+  - git clone git://github.com/jedisct1/libsodium.git
+  - cd libsodium
+  - git checkout tags/1.0.8
+  - ./autogen.sh
+  - ./configure && make -j$(nproc)
+  - sudo checkinstall --install --pkgname libsodium --pkgversion 1.0.8 --nodoc -y
+  - sudo ldconfig
+#
+  - git clone https://github.com/dnaq/sodiumoxide
+  - mkdir .cargo
+  - echo 'paths = ["sodiumoxide/libsodium-sys"]' >> .cargo/config
