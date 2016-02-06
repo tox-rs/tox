@@ -21,7 +21,6 @@
 
 //! Functions for the core crypto.
 
-use std::mem::transmute;
 use sodiumoxide::randombytes::randombytes_into;
 
 pub use sodiumoxide::crypto::box_::*;
@@ -55,13 +54,18 @@ fn public_key_cmp_test_random() {
 
 
 /// Return a random number.
-// TODO: rename it to something better
 pub fn random_u32() -> u32 {
     const BYTES: usize = 4;
 
     let mut array = [0; BYTES];
     randombytes_into(&mut array);
-    unsafe { transmute::<[u8; BYTES], u32>(array) }
+
+    let mut result: u32 = 0;
+    for byte in 0..array.len() {
+        result = result << 8;
+        result = result | array[byte] as u32;
+    }
+    result
 }
 
 #[test]
@@ -76,13 +80,18 @@ fn random_u32_test() {
 
 
 /// Return a random number.
-// TODO: rename it to something better
 pub fn random_u64() -> u64 {
     const BYTES: usize = 8;
 
     let mut array = [0; BYTES];
     randombytes_into(&mut array);
-    unsafe { transmute::<[u8; BYTES], u64>(array) }
+
+    let mut result: u64 = 0;
+    for byte in 0..array.len() {
+        result = result << 8;
+        result = result | array[byte] as u64;
+    }
+    result
 }
 
 #[test]
@@ -183,7 +192,7 @@ pub fn encrypt_data_symmetric(precomputed_key: &PrecomputedKey,
                               plain: &[u8]) -> Vec<u8> {
     seal_precomputed(plain, nonce, precomputed_key)
 }
-// not using `pub use _ as;` since it doesn't allow to add additional documentation
+// not using ↓ since it doesn't allow to add additional documentation
 //pub use sodiumoxide::crypto::box_::seal_precomputed as encrypt_data_symmetric;
 
 #[test]
@@ -259,9 +268,8 @@ fn decrypt_data_symmetric_test() {
 // FIXME: sodiumoxide is broken - nonce isn't incremented
 // TODO: since sodiumoxide/sodium don't check for arithmetic overflow, do it
 //
-// overflow in the first place doesn't /seem/ to be likely to happen in the
-// first place, given that no nonce should be incremented long enough for it
-// to happen, but still..
+// overflow doesn't /seem/ to be likely to happen in the first place, given
+// that no nonce should be incremented long enough for it to happen, but still..
 pub fn increment_nonce(nonce: &mut Nonce) {
     nonce.increment_le();
 }
