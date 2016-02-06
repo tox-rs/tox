@@ -34,10 +34,12 @@ They will be located under `target/doc/`
 
 
 ## Goals
- - toxcore implementation in Rust
+ - improved toxcore implementation in Rust
  - Rust API
  - "old" C API for compatibility
- - more in the future?
+ - documentation
+ - tests
+ - more
 
 
 ## License

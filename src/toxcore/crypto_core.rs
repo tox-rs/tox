@@ -527,7 +527,7 @@ pub fn handle_request(our_public_key: &PublicKey,
         }
 
         if let Some(nonce) = Nonce::from_slice(&packet[(1 + PUBLICKEYBYTES)..(1 + PUBLICKEYBYTES + NONCEBYTES)]) {
-            if let Ok(payload) = open(&packet[(1 + PUBLICKEYBYTES + NONCEBYTES)..], 
+            if let Ok(payload) = open(&packet[(1 + PUBLICKEYBYTES + NONCEBYTES)..],
                                    &nonce, &pk, our_secret_key) {
                 let request_id = match payload[0] {
                     32 => CryptoPacket::FriendReq,
@@ -545,6 +545,78 @@ pub fn handle_request(our_public_key: &PublicKey,
     }
 
     None
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn handle_request_test_correct_empty_FriendReq() {
+    let (alice_pk, alice_sk) = gen_keypair();
+    let (bob_pk, bob_sk) = gen_keypair();
+
+    let packet = create_request(&alice_pk,
+                                &alice_sk,
+                                &bob_pk,
+                                &[],
+                                CryptoPacket::FriendReq);
+
+    match handle_request(&bob_pk, &bob_sk, &packet[..]) {
+        None => panic!("This should have worked, since it was a correct request!"),
+        Some(_) => {},
+    }
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn handle_request_test_correct_empty_Hardening() {
+    let (alice_pk, alice_sk) = gen_keypair();
+    let (bob_pk, bob_sk) = gen_keypair();
+
+    let packet = create_request(&alice_pk,
+                                &alice_sk,
+                                &bob_pk,
+                                &[],
+                                CryptoPacket::Hardening);
+
+    match handle_request(&bob_pk, &bob_sk, &packet[..]) {
+        None => panic!("This should have worked, since it was a correct request!"),
+        Some(_) => {},
+    }
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn handle_request_test_correct_empty_DHT_PK() {
+    let (alice_pk, alice_sk) = gen_keypair();
+    let (bob_pk, bob_sk) = gen_keypair();
+
+    let packet = create_request(&alice_pk,
+                                &alice_sk,
+                                &bob_pk,
+                                &[],
+                                CryptoPacket::DHT_PK);
+
+    match handle_request(&bob_pk, &bob_sk, &packet[..]) {
+        None => panic!("This should have worked, since it was a correct request!"),
+        Some(_) => {},
+    }
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn handle_request_test_correct_empty_NAT_Ping() {
+    let (alice_pk, alice_sk) = gen_keypair();
+    let (bob_pk, bob_sk) = gen_keypair();
+
+    let packet = create_request(&alice_pk,
+                                &alice_sk,
+                                &bob_pk,
+                                &[],
+                                CryptoPacket::NAT_Ping);
+
+    match handle_request(&bob_pk, &bob_sk, &packet[..]) {
+        None => panic!("This should have worked, since it was a correct request!"),
+        Some(_) => {},
+    }
 }
 
 #[test]
@@ -583,7 +655,6 @@ fn handle_request_test_invalid_pk() {
                                 &bob_pk,
                                 &[],
                                 CryptoPacket::FriendReq);
-
     // test whether..
     //  ..testing method is correct
     let PublicKey(alice_pk_bytes) = alice_pk;
@@ -631,7 +702,29 @@ fn handle_request_test_invalid_pk() {
     }
 }
 
+#[test]
+fn handle_request_test_nonce() {
+    let (alice_pk, alice_sk) = gen_keypair();
+    let (bob_pk, bob_sk) = gen_keypair();
+
+    let packet = create_request(&alice_pk,
+                                &alice_sk,
+                                &bob_pk,
+                                &[],
+                                CryptoPacket::FriendReq);
+
+    // test whether it fails
+    let Nonce(ref nonce) = gen_nonce();
+    let mut test = Vec::with_capacity(packet.len());
+    test.extend_from_slice(&packet[..(1 + PUBLICKEYBYTES)]);
+    test.extend_from_slice(nonce);
+    test.extend_from_slice(&packet[(1 + PUBLICKEYBYTES + NONCEBYTES)..]);
+    match handle_request(&bob_pk, &bob_sk, &test[..]) {
+        None => {},
+        Some(_) => panic!("This should have failed, since nonce was wrong!"),
+    }
+}
+
 // TODO: write more test for when `handle_request`..
-//  ..fails when Nonce is wrong
 //  ..fails when ciphertext is wrong
 //  ..fails when decrypted payload is wrong (e.g. request id doesn't match)
