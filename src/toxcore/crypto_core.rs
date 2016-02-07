@@ -375,7 +375,7 @@ pub enum CryptoPacket {
 //  |  - Data                (varies)             |
 //  +---------------------------------------------+
 //
-// TODO: use some enums for things? perhaps for created packet?
+// TODO: use some structs for things? perhaps for created packet?
 pub fn create_request(&PublicKey(ref send_public_key): &PublicKey,
                       send_secret_key: &SecretKey,
                       recv_public_key: &PublicKey,
