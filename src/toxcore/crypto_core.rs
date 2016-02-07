@@ -25,6 +25,7 @@ use sodiumoxide::randombytes::randombytes_into;
 
 pub use sodiumoxide::crypto::box_::*;
 
+use toxcore::binary_io::{slice_to_u32, slice_to_u64};
 use toxcore::network::NetPacket;
 
 #[test]
@@ -55,18 +56,9 @@ fn public_key_cmp_test_random() {
 
 /// Return a random number.
 pub fn random_u32() -> u32 {
-    const BYTES: usize = 4;
-
-    let mut array = [0; BYTES];
+    let mut array = [0; 4];
     randombytes_into(&mut array);
-
-    // TODO: put converting array to int in a separate file, `toxcore/binary_io.rs`
-    let mut result: u32 = 0;
-    for byte in 0..array.len() {
-        result = result << 8;
-        result = result | array[byte] as u32;
-    }
-    result
+    slice_to_u32(&array)
 }
 
 #[test]
@@ -82,18 +74,9 @@ fn random_u32_test() {
 
 /// Return a random number.
 pub fn random_u64() -> u64 {
-    const BYTES: usize = 8;
-
-    let mut array = [0; BYTES];
+    let mut array = [0; 8];
     randombytes_into(&mut array);
-
-    // TODO: put converting array to int in a separate file, `toxcore/binary_io.rs`
-    let mut result: u64 = 0;
-    for byte in 0..array.len() {
-        result = result << 8;
-        result = result | array[byte] as u64;
-    }
-    result
+    slice_to_u64(&array)
 }
 
 #[test]
