@@ -32,7 +32,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "sodiumoxide"
 version = "0.0.9"
-source = "git+https://github.com/dnaq/sodiumoxide.git#7cd94ccd48a9b0cc07fc7a52a08a3e3de9efebcb"
+source = "git+https://github.com/dnaq/sodiumoxide.git#444b3c432b07426166b8db64952761d1f05d4c6b"
 dependencies = [
  "libc 0.2.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "libsodium-sys 0.0.9 (registry+https://github.com/rust-lang/crates.io-index)",

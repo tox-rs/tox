@@ -26,6 +26,7 @@ To ensure consistency throughout the source code, keep these rules in mind as yo
 * All functions **must be documented**, *especially* APIs.
 
 * Preferably wrap all the code at **80 characters**, or max 100 if you have to. This is not a *hard* rule - just keep it sane.
+* Spaces, 4 of them for an indent level, no tabs.
 
 *This section needs to be improved - if you're interested in doing that, please do.*
 
