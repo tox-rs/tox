@@ -24,8 +24,6 @@
 
 pub const MAX_UDP_PACKET_SIZE: usize = 2048;
 
-// those are needed by:
-//  - crypto_core
 #[derive(Clone, Copy, Debug)]
 pub enum NetPacket {
     PingRequest     = 0,  // Ping request packet ID.
@@ -36,6 +34,10 @@ pub enum NetPacket {
     CookieResponse  = 25, // Cookie response packet.
     CryptoHs        = 26, // Crypto handshake packet.
     CryptoData      = 27, // Crypto data packet.
+    // Needed by `crypto_core`
     Crypto          = 32, // Encrypted data packet ID.
     LanDiscovery    = 33, // LAN discovery packet ID.
 }
+
+// Functionality needed by this module is going to be stabilized in Rust 1.7:
+// https://github.com/rust-lang/rust/issues/27709

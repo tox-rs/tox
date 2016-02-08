@@ -5,3 +5,6 @@ authors = ["Zetok Zalbavar <zetok@openmailbox.org>"]
 
 [dependencies.sodiumoxide]
 git = "https://github.com/dnaq/sodiumoxide.git"
+
+[dev-dependencies]
+quickcheck = "0.2"
