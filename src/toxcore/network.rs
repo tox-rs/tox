@@ -22,21 +22,34 @@
 //! Datatypes, functions and constants for the core networking.
 
 
+/// Maximum size in bytes of an UDP packet.
 pub const MAX_UDP_PACKET_SIZE: usize = 2048;
 
+/// Type of packet received/sent by `toxcore`.
 #[derive(Clone, Copy, Debug)]
 pub enum NetPacket {
-    PingRequest     = 0,  // Ping request packet ID.
-    PingResponse    = 1,  // Ping response packet ID.
-    GetNodes        = 2,  // Get nodes request packet ID.
-    SendNodesIpv6   = 4,  // Send nodes response packet ID for other addresses.
-    CookieRequest   = 24, // Cookie request packet.
-    CookieResponse  = 25, // Cookie response packet.
-    CryptoHs        = 26, // Crypto handshake packet.
-    CryptoData      = 27, // Crypto data packet.
-    // Needed by `crypto_core`
-    Crypto          = 32, // Encrypted data packet ID.
-    LanDiscovery    = 33, // LAN discovery packet ID.
+    /// Ping request packet ID.
+    PingRequest     = 0,
+    /// Ping response packet ID.
+    PingResponse    = 1,
+    /// Get nodes request packet ID.
+    GetNodes        = 2,
+    ///Send nodes response packet ID for other addresses.
+    SendNodesIpv6   = 4,
+    /// Cookie request packet.
+    CookieRequest   = 24,
+    /// Cookie response packet.
+    CookieResponse  = 25,
+    /// Crypto handshake packet.
+    CryptoHs        = 26,
+    /// Crypto data packet.
+    CryptoData      = 27,
+    /// Encrypted data packet ID.
+    ///
+    /// Needed by `crypto_core`
+    Crypto          = 32,
+    /// LAN discovery packet ID.
+    LanDiscovery    = 33,
 }
 
 // Functionality needed by this module is going to be stabilized in Rust 1.7:

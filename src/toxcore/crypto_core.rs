@@ -107,6 +107,8 @@ fn public_key_valid_test() {
     assert_eq!(true, public_key_valid(&(PublicKey::from_slice(&[0b01111111; PUBLICKEYBYTES]).unwrap()))); // 127
     assert_eq!(false, public_key_valid(&(PublicKey::from_slice(&[0b10000000; PUBLICKEYBYTES]).unwrap()))); // 128
     assert_eq!(false, public_key_valid(&(PublicKey::from_slice(&[0b11111111; PUBLICKEYBYTES]).unwrap()))); // 255
+
+    // TODO: see if property-based test(s) can be used with `quickcheck` - issue #1
 }
 
 
@@ -197,6 +199,7 @@ pub fn encrypt_data_symmetric_test() {
     let bob_plain = open(&ciphertext, &nonce, &alice_pk, &bob_sk).unwrap();
 
     assert!(alice_plain == &bob_plain[..]);
+    // TODO: see if property-based test(s) can be used with `quickcheck` - issue #1
 }
 
 // TODO: test for pubkey/skey/nonce being all `0`s, which would produce
@@ -245,6 +248,7 @@ fn decrypt_data_symmetric_test() {
     let bob_plain = decrypt_data_symmetric(&precomputed_key, &nonce, &ciphertext).unwrap();
 
     assert!(alice_plain == &bob_plain[..]);
+    // TODO: see if property-based test(s) can be used with `quickcheck` - issue #1
 }
 
 
@@ -337,8 +341,12 @@ fn increment_nonce_number_test_0xff0000_plus_0x011000() {
     assert!(nonce == cmp_nonce);
 }
 
+/// Max size of data in crypto request. Should be used in `create_request` and
+/// in `handle_request` to check if request isn't too big.
 pub const MAX_CRYPTO_REQUEST_SIZE: usize = 1024;
 
+/// Types of packets that `crypto_request` can create, and `handle_request`
+/// should handle. It should be located in the first byte of a packet.
 #[allow(non_camel_case_types)]
 #[derive(Copy, Clone, Debug)]
 pub enum CryptoPacket {
