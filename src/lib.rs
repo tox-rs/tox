@@ -1,3 +1,4 @@
+extern crate libsodium_sys;
 extern crate sodiumoxide;
 
 #[cfg(test)]

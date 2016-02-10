@@ -24,6 +24,7 @@
 use sodiumoxide::randombytes::randombytes_into;
 
 pub use sodiumoxide::crypto::box_::*;
+use libsodium_sys::crypto_box_curve25519xsalsa20poly1305_MACBYTES as MACBYTES;
 
 use toxcore::binary_io::{slice_to_u32, slice_to_u64};
 use toxcore::network::NetPacket;
@@ -341,23 +342,26 @@ fn increment_nonce_number_test_0xff0000_plus_0x011000() {
     assert!(nonce == cmp_nonce);
 }
 
-/// Max size of data in crypto request. Should be used in `create_request` and
-/// in `handle_request` to check if request isn't too big.
+/// Max size of crypto request. Should be used in `create_request` and
+/// `handle_request` to check if request isn't too big.
 pub const MAX_CRYPTO_REQUEST_SIZE: usize = 1024;
 
 /// Types of packets that `crypto_request` can create, and `handle_request`
-/// should handle. It should be located in the first byte of a packet.
+/// should handle. It should be located in the first encrypted byte of a packet.
 #[allow(non_camel_case_types)]
 #[derive(Copy, Clone, Debug)]
 pub enum CryptoPacket {
+    /// Friend request crypto packet ID.
     FriendReq = 32,
+    /// Hardening crypto packet ID.
     Hardening = 48,
     DHT_PK    = 156,
+    /// NAT ping crypto packet ID.
     NAT_Ping  = 254,
 }
 
 
-/// Create a request to the peer.
+/// Create a request to the peer. Fails if data is bigger than `918` bytes.
 ///
 /// `send_public_key` - sender's public key.
 ///
@@ -370,25 +374,36 @@ pub enum CryptoPacket {
 /// `request_id` - id of the request. Use either `FriendReq` or `NAT_Ping`.
 ///
 /// Upon success, return created packet, and `None` on faliure.
-//                   ↓      ↓      ↓
-// Packet structure          (74 bytes minimum)
-//  +---------------------------------------------+
-//  | *Unencrypted section:* (57 bytes total)     |
-//  |  - Packet type         (1 byte, value `32`) |
-//  |  - Sender public key   (32 bytes)           |
-//  |  - Random nonce        (24 bytes)           |
-//  +---------------------------------------------+
-//  | *Encrypted payload:*   (17 bytes minimum)   |
-//  |  - Request ID          (1 byte)             |
-//  |  - Data                (varies)             |
-//  +---------------------------------------------+
+///
+/// Maximum size of returned packet equals
+/// [`MAX_CRYPTO_REQUEST_SIZE`](./constant.MAX_CRYPTO_REQUEST_SIZE.html).
+///
+/// ```text
+/// Packet structure          (106 bytes minimum, 1024 max)
+///  +----------------------------------------------+
+///  | *Unencrypted section:* (89 bytes total)      |
+///  |  - Packet type         (1 byte, value `32`)  |
+///  |  - Receiver public key (32 bytes)            |
+///  |  - Sender public key   (32 bytes)            |
+///  |  - Random nonce        (24 bytes)            |
+///  +----------------------------------------------+
+///  | *Encrypted payload:*   (17 bytes minimum)    |
+///  |  - Request ID          (1 byte)              |
+///  |  - Data                (varies, <=918 bytes) |
+///  +----------------------------------------------+
+/// ```
 //
 // TODO: use some structs for things? perhaps for created packet?
 pub fn create_request(&PublicKey(ref send_public_key): &PublicKey,
                       send_secret_key: &SecretKey,
                       recv_public_key: &PublicKey,
                       data: &[u8],
-                      request_id: CryptoPacket) -> Vec<u8> {
+                      request_id: CryptoPacket) -> Option<Vec<u8>> {
+
+    // too much data for a request
+    if 1 + PUBLICKEYBYTES * 2 + NONCEBYTES + 1 + data.len() + MACBYTES > MAX_CRYPTO_REQUEST_SIZE {
+        return None;
+    }
 
     let nonce = gen_nonce();
 
@@ -399,17 +414,20 @@ pub fn create_request(&PublicKey(ref send_public_key): &PublicKey,
     let encrypted = seal(&temp, &nonce, recv_public_key, send_secret_key);
 
     let mut packet: Vec<u8> = Vec::with_capacity(1 // NetPacket
-                                                 + 32 // PublicKey
+                                                 + 32 // Receiver PublicKey
+                                                 + 32 // Sender PublicKey
                                                  + 24 // Nonce
                                                  + encrypted.len());
 
     packet.push(NetPacket::Crypto as u8);
+    let &PublicKey(ref recv_pk_bytes) = recv_public_key;
+    packet.extend_from_slice(recv_pk_bytes);
     packet.extend_from_slice(send_public_key);
     let Nonce(ref nonce) = nonce;
     packet.extend_from_slice(nonce);
     packet.extend_from_slice(&encrypted);
 
-    packet
+    Some(packet)
 }
 
 #[test]
@@ -420,25 +438,36 @@ fn create_request_test() {
     let alice_msg = b"Hi, bub.";
 
     let packet_friend1 = create_request(&alice_pk, &alice_sk, &bob_pk,
-                                        alice_msg, CryptoPacket::FriendReq);
+                                        alice_msg, CryptoPacket::FriendReq
+                                       ).unwrap();
     let packet_friend2 = create_request(&alice_pk, &alice_sk, &bob_pk,
-                                        alice_msg, CryptoPacket::FriendReq);
+                                        alice_msg, CryptoPacket::FriendReq
+                                       ).unwrap();
+
+    let i2pk: usize = 1 + PUBLICKEYBYTES * 2;
+    let i2pkn: usize = i2pk + NONCEBYTES;
+
     // should differ by nonce, and thus also ciphertext
     assert!(packet_friend1 != packet_friend2);
-    assert!(&packet_friend1[0..33] == &packet_friend2[0..33]); // request id + PK
-    assert!(&packet_friend1[33..57] != &packet_friend2[33..57]); // nonce
-    assert!(&packet_friend1[57..] != &packet_friend2[57..]);
+    // packet type (1 byte), 2 * PK (64 bytes)
+    assert!(&packet_friend1[..i2pk] == &packet_friend2[..i2pk]);
+    // nonce (24 bytes)
+    assert!(&packet_friend1[i2pk..i2pkn] != &packet_friend2[i2pk..i2pkn]);
+    // encrypted data (1 byte packet id + ..)
+    assert!(&packet_friend1[i2pkn..] != &packet_friend2[i2pkn..]);
 
 
     let packet_ping1 = create_request(&alice_pk, &alice_sk, &bob_pk,
-                                        alice_msg, CryptoPacket::NAT_Ping);
+                                      alice_msg, CryptoPacket::NAT_Ping
+                                     ).unwrap();
     let packet_ping2 = create_request(&alice_pk, &alice_sk, &bob_pk,
-                                        alice_msg, CryptoPacket::NAT_Ping);
+                                      alice_msg, CryptoPacket::NAT_Ping
+                                     ).unwrap();
     // should differ by nonce, and thus also ciphertext
     assert!(packet_ping1 != packet_ping2);
-    assert!(&packet_ping1[0..33] == &packet_ping2[0..33]); // request id + PK
-    assert!(&packet_ping1[33..57] != &packet_ping2[33..57]);
-    assert!(&packet_ping1[57..] != &packet_ping2[57..]);
+    assert!(&packet_ping1[..i2pk] == &packet_ping2[..i2pk]); // request id + PK
+    assert!(&packet_ping1[i2pk..i2pkn] != &packet_ping2[i2pk..i2pkn]);
+    assert!(&packet_ping1[i2pkn..] != &packet_ping2[i2pkn..]);
 
     assert!(&packet_friend1[0] == &packet_ping1[0]);
     assert!(packet_friend1[0] == NetPacket::Crypto as u8);
@@ -446,18 +475,18 @@ fn create_request_test() {
 
     // and decrypting..
     // ..fr
-    let recv_pk_fr = PublicKey::from_slice(&packet_friend1[1..33]).unwrap();
-    let nonce_fr1 = Nonce::from_slice(&packet_friend1[33..57]).unwrap();
-    let ciphertext_fr1 = &packet_friend1[57..];
+    let recv_pk_fr = PublicKey::from_slice(&packet_friend1[33..i2pk]).unwrap();
+    let nonce_fr1 = Nonce::from_slice(&packet_friend1[i2pk..i2pkn]).unwrap();
+    let ciphertext_fr1 = &packet_friend1[i2pkn..];
 
     let bob_msg_fr1 = open(ciphertext_fr1, &nonce_fr1, &recv_pk_fr, &bob_sk).unwrap();
     assert!(bob_msg_fr1[0] == CryptoPacket::FriendReq as u8);
     assert!(&bob_msg_fr1[1..] == alice_msg);
 
     // ..ping
-    let recv_pk_ping = PublicKey::from_slice(&packet_ping1[1..33]).unwrap();
-    let nonce_ping1 = Nonce::from_slice(&packet_ping1[33..57]).unwrap();
-    let ciphertext_ping1 = &packet_ping1[57..];
+    let recv_pk_ping = PublicKey::from_slice(&packet_ping1[33..i2pk]).unwrap();
+    let nonce_ping1 = Nonce::from_slice(&packet_ping1[i2pk..i2pkn]).unwrap();
+    let ciphertext_ping1 = &packet_ping1[i2pkn..];
 
     let bob_msg_ping1 = open(ciphertext_ping1, &nonce_ping1, &recv_pk_ping, &bob_sk).unwrap();
     assert!(bob_msg_ping1[0] == CryptoPacket::NAT_Ping as u8);
@@ -472,21 +501,42 @@ fn create_request_test_min_length() {
     let msg = b"";
 
     let packet = create_request(&alice_pk, &alice_sk, &bob_pk, msg,
-                                CryptoPacket::FriendReq);
-    assert!(packet.len() == 74);
+                                CryptoPacket::FriendReq).unwrap();
+    assert!(packet.len() == 106);
 }
 
-// TODO: check max request packet size and make test for it
-//  - should fail if packet size can exceed limit
+#[test]
+fn create_request_test_max_length() {
+    let (alice_pk, alice_sk) = gen_keypair();
+    let (bob_pk, _) = gen_keypair();
+
+    let msg = [0; MAX_CRYPTO_REQUEST_SIZE - (2 + 2 * PUBLICKEYBYTES + NONCEBYTES + MACBYTES)];
+
+    let packet = create_request(&alice_pk, &alice_sk, &bob_pk, &msg,
+                                CryptoPacket::FriendReq).unwrap();
+    assert!(packet.len() == MAX_CRYPTO_REQUEST_SIZE);
+}
+
+#[test]
+fn create_request_test_max_length_plus_1() {
+    let (alice_pk, alice_sk) = gen_keypair();
+    let (bob_pk, _) = gen_keypair();
+
+    let msg = [0; MAX_CRYPTO_REQUEST_SIZE - (2 + 2 * PUBLICKEYBYTES + NONCEBYTES + MACBYTES) + 1];
+
+    let packet = create_request(&alice_pk, &alice_sk, &bob_pk, &msg,
+                                CryptoPacket::FriendReq);
+    assert!(packet == None);
+}
 
 
 /// Returns senders public key, request id, and data from the request,
 /// or `None` if request was invalid.
 //
 // The way it's supposed™ to work:
-//  1. Check if length of received packet is at least 74 bytes long, if it's
+//  1. Check if length of received packet is at least 106 bytes long, if it's
 //     not, return `None`.
-//      - 74 bytes is a miminum when ~no encrypted data is being sent, spare
+//      - 106 bytes is a miminum when ~no encrypted data is being sent, spare
 //        for the request ID (1 byte).
 //  2. Check if public key is valid, if it's not, return `None`.
 //  3. Check if public key is not our own, if it is, return `None`.
@@ -499,16 +549,18 @@ fn create_request_test_min_length() {
 //        there was nothing there, it means that there was no data, and rest
 //        was just padding that decrypting removed.
 //
+// TODO: use some struct for packet, and `impl` for it needed methods
 // TODO: Return `Result<_, ENUM_ERR>` instead of `Option<_>`
 pub fn handle_request(our_public_key: &PublicKey,
                       our_secret_key: &SecretKey,
                       packet: &[u8])
                 -> Option<(PublicKey, CryptoPacket, Vec<u8>)> {
-    if packet.len() < 74 {
+    if packet.len() < 106 || packet.len() > MAX_CRYPTO_REQUEST_SIZE {
         return None;
     }
 
-    if let Some(pk) = PublicKey::from_slice(&packet[1..(PUBLICKEYBYTES + 1)]) {
+    let send_pk_bytes = &packet[(1 + PUBLICKEYBYTES)..(1 + 2 * PUBLICKEYBYTES)];
+    if let Some(pk) = PublicKey::from_slice(send_pk_bytes) {
         if !public_key_valid(&pk) {
             return None;
         }
@@ -517,8 +569,8 @@ pub fn handle_request(our_public_key: &PublicKey,
             return None;
         }
 
-        if let Some(nonce) = Nonce::from_slice(&packet[(1 + PUBLICKEYBYTES)..(1 + PUBLICKEYBYTES + NONCEBYTES)]) {
-            if let Ok(payload) = open(&packet[(1 + PUBLICKEYBYTES + NONCEBYTES)..],
+        if let Some(nonce) = Nonce::from_slice(&packet[(1 + 2 * PUBLICKEYBYTES)..(1 + 2 * PUBLICKEYBYTES + NONCEBYTES)]) {
+            if let Ok(payload) = open(&packet[(1 + 2 * PUBLICKEYBYTES + NONCEBYTES)..],
                                    &nonce, &pk, our_secret_key) {
                 let request_id = match payload[0] {
                     32 => CryptoPacket::FriendReq,
@@ -548,7 +600,7 @@ fn handle_request_test_correct_empty_FriendReq() {
                                 &alice_sk,
                                 &bob_pk,
                                 &[],
-                                CryptoPacket::FriendReq);
+                                CryptoPacket::FriendReq).unwrap();
 
     match handle_request(&bob_pk, &bob_sk, &packet[..]) {
         None => panic!("This should have worked, since it was a correct request!"),
@@ -566,7 +618,7 @@ fn handle_request_test_correct_empty_Hardening() {
                                 &alice_sk,
                                 &bob_pk,
                                 &[],
-                                CryptoPacket::Hardening);
+                                CryptoPacket::Hardening).unwrap();
 
     match handle_request(&bob_pk, &bob_sk, &packet[..]) {
         None => panic!("This should have worked, since it was a correct request!"),
@@ -584,7 +636,7 @@ fn handle_request_test_correct_empty_DHT_PK() {
                                 &alice_sk,
                                 &bob_pk,
                                 &[],
-                                CryptoPacket::DHT_PK);
+                                CryptoPacket::DHT_PK).unwrap();
 
     match handle_request(&bob_pk, &bob_sk, &packet[..]) {
         None => panic!("This should have worked, since it was a correct request!"),
@@ -602,7 +654,7 @@ fn handle_request_test_correct_empty_NAT_Ping() {
                                 &alice_sk,
                                 &bob_pk,
                                 &[],
-                                CryptoPacket::NAT_Ping);
+                                CryptoPacket::NAT_Ping).unwrap();
 
     match handle_request(&bob_pk, &bob_sk, &packet[..]) {
         None => panic!("This should have worked, since it was a correct request!"),
@@ -613,7 +665,7 @@ fn handle_request_test_correct_empty_NAT_Ping() {
 #[test]
 fn handle_request_test_invalid_empty() {
     let (pk, sk) = gen_keypair();
-    match handle_request(&pk, &sk, &[0; 100]) {
+    match handle_request(&pk, &sk, &[0; 106]) {
         None => {},
         Some(_) => panic!("This should have failed, since packed did not have *any* valid data!"),
     }
@@ -630,7 +682,7 @@ fn handle_request_test_too_short() {
         None => {},
         Some(_) => panic!("This should have failed, since packed was too short!"),
     }
-    match handle_request(&pk, &sk, &[0; 73]) {
+    match handle_request(&pk, &sk, &[0; 105]) {
         None => {},
         Some(_) => panic!("This should have failed, since packed was too short!"),
     }
@@ -645,14 +697,14 @@ fn handle_request_test_invalid_pk() {
                                 &alice_sk,
                                 &bob_pk,
                                 &[],
-                                CryptoPacket::FriendReq);
+                                CryptoPacket::FriendReq).unwrap();
     // test whether..
     //  ..testing method is correct
     let PublicKey(alice_pk_bytes) = alice_pk;
     let mut packet_test = Vec::with_capacity(packet.len());
-    packet_test.extend_from_slice(&packet[..1]);
+    packet_test.extend_from_slice(&packet[..(1 + PUBLICKEYBYTES)]);
     packet_test.extend_from_slice(&alice_pk_bytes[..]);
-    packet_test.extend_from_slice(&packet[(1 + PUBLICKEYBYTES)..]);
+    packet_test.extend_from_slice(&packet[(1 + 2 * PUBLICKEYBYTES)..]);
     match handle_request(&bob_pk, &bob_sk, &packet_test) {
         None => panic!("This should *not* have failed!"),
         Some(_) => {},
@@ -660,9 +712,9 @@ fn handle_request_test_invalid_pk() {
 
     //  ..fails when PK of sender is `0`s
     let mut packet_zeros = Vec::with_capacity(packet.len());
-    packet_zeros.extend_from_slice(&packet[..1]);
+    packet_zeros.extend_from_slice(&packet[..(1 + PUBLICKEYBYTES)]);
     packet_zeros.extend_from_slice(&[0; PUBLICKEYBYTES]);
-    packet_zeros.extend_from_slice(&packet[(1 + PUBLICKEYBYTES)..]);
+    packet_zeros.extend_from_slice(&packet[(1 + 2 * PUBLICKEYBYTES)..]);
     match handle_request(&bob_pk, &bob_sk, &packet_zeros) {
         None => {},
         Some(_) => panic!("This should have failed, since sender's PK was `0`s!"),
@@ -671,9 +723,9 @@ fn handle_request_test_invalid_pk() {
     //  ..fails when PK of sender is the same as receiver
     let PublicKey(ref bob_pk_bytes) = bob_pk;
     let mut packet_receiver = Vec::with_capacity(packet.len());
-    packet_receiver.extend_from_slice(&packet[..1]);
+    packet_receiver.extend_from_slice(&packet[..(1 + PUBLICKEYBYTES)]);
     packet_receiver.extend_from_slice(&bob_pk_bytes[..]);
-    packet_receiver.extend_from_slice(&packet[(1 + PUBLICKEYBYTES)..]);
+    packet_receiver.extend_from_slice(&packet[(1 + 2 * PUBLICKEYBYTES)..]);
     match handle_request(&bob_pk, &bob_sk, &packet_receiver[..]) {
         None => {},
         Some(_) => panic!("This should have failed, since sender's PK was our own!"),
@@ -682,9 +734,9 @@ fn handle_request_test_invalid_pk() {
     //  ..fails when PK of sender is wrong (random)
     let (PublicKey(rand_pk), _) = gen_keypair();
     let mut packet_random = Vec::with_capacity(packet.len());
-    packet_random.extend_from_slice(&packet[..1]);
+    packet_random.extend_from_slice(&packet[..(1 + PUBLICKEYBYTES)]);
     packet_random.extend_from_slice(&rand_pk[..]);
-    packet_random.extend_from_slice(&packet[(1 + PUBLICKEYBYTES)..]);
+    packet_random.extend_from_slice(&packet[(1 + 2 * PUBLICKEYBYTES)..]);
 
     //  ..fails when received own packet
     match handle_request(&alice_pk, &alice_sk, &packet[..]) {
@@ -702,14 +754,14 @@ fn handle_request_test_nonce() {
                                 &alice_sk,
                                 &bob_pk,
                                 &[],
-                                CryptoPacket::FriendReq);
+                                CryptoPacket::FriendReq).unwrap();
 
     // test whether it fails
     let Nonce(ref nonce) = gen_nonce();
     let mut test = Vec::with_capacity(packet.len());
-    test.extend_from_slice(&packet[..(1 + PUBLICKEYBYTES)]);
+    test.extend_from_slice(&packet[..(1 + 2 * PUBLICKEYBYTES)]);
     test.extend_from_slice(nonce);
-    test.extend_from_slice(&packet[(1 + PUBLICKEYBYTES + NONCEBYTES)..]);
+    test.extend_from_slice(&packet[(1 + 2 * PUBLICKEYBYTES + NONCEBYTES)..]);
     match handle_request(&bob_pk, &bob_sk, &test[..]) {
         None => {},
         Some(_) => panic!("This should have failed, since nonce was wrong!"),

@@ -2,6 +2,7 @@
 name = "tox"
 version = "0.0.1"
 dependencies = [
+ "libsodium-sys 0.0.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "quickcheck 0.2.25 (registry+https://github.com/rust-lang/crates.io-index)",
  "sodiumoxide 0.0.9 (git+https://github.com/dnaq/sodiumoxide.git)",
 ]
