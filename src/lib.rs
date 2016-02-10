@@ -1,6 +1,8 @@
 extern crate libsodium_sys;
 extern crate sodiumoxide;
 
+extern crate ip;
+
 #[cfg(test)]
 extern crate quickcheck;
 
@@ -10,5 +12,6 @@ extern crate quickcheck;
 pub mod toxcore {
     pub mod binary_io;
     pub mod crypto_core;
+    pub mod dht;
     pub mod network;
 }

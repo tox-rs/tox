@@ -2,6 +2,7 @@
 name = "tox"
 version = "0.0.1"
 dependencies = [
+ "ip 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libsodium-sys 0.0.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "quickcheck 0.2.25 (registry+https://github.com/rust-lang/crates.io-index)",
  "sodiumoxide 0.0.9 (git+https://github.com/dnaq/sodiumoxide.git)",
@@ -32,6 +33,11 @@ dependencies = [
  "log 0.3.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "regex 0.1.48 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
+
+[[package]]
+name = "ip"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "libc"
