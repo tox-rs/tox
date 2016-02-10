@@ -19,13 +19,56 @@
 
 //! Functions for binary IO.
 
-#[cfg(test)]
-use quickcheck::quickcheck;
-#[cfg(test)]
+// TODO: ↓ don't use
 use std::mem::transmute;
 
+#[cfg(test)]
+use quickcheck::quickcheck;
 
-/// Convert `&[u8; 4]` to `u32`.
+
+/// Safely cast `[u8; 2]` to `u16` using shift+or.
+pub fn slice_to_u16(slice: &[u8; 2]) -> u16 {
+    let mut result: u16 = 0;
+    for byte in 0..slice.len() {
+        result = result << 8;
+        result = result | slice[1 - byte] as u16;
+    }
+    result
+}
+
+#[test]
+fn slice_to_u16_test() {
+    assert_eq!(slice_to_u16(&[0, 0]), 0);
+    assert_eq!(slice_to_u16(&[1, 0]), 1);
+    assert_eq!(slice_to_u16(&[0, 1]), 256);
+    assert_eq!(slice_to_u16(&[1, 1]), 257);
+    assert_eq!(slice_to_u16(&[255, 255]), 65535);
+
+    fn to_slice_and_back(num: u16) {
+        assert!(num == slice_to_u16(&u16_to_slice(num)));
+    }
+    quickcheck(to_slice_and_back as fn(u16));
+}
+
+/// Cast `u16` to `[u8; 2]` via unsafe `transmute()`.
+pub fn u16_to_slice(num: u16) -> [u8; 2] {
+    unsafe { transmute::<u16, [u8; 2]>(num) }
+}
+
+#[test]
+fn u16_to_slice_test() {
+    assert_eq!([0, 0], u16_to_slice(0));
+    assert_eq!([1, 0], u16_to_slice(1));
+    assert_eq!([0, 1], u16_to_slice(256));
+    assert_eq!([255, 255], u16_to_slice(65535));
+
+    fn to_slice_and_back(num: u16) {
+        assert!(num == slice_to_u16(&u16_to_slice(num)));
+    }
+    quickcheck(to_slice_and_back as fn(u16));
+}
+
+/// Safely cast `&[u8; 4]` to `u32`.
 pub fn slice_to_u32(slice: &[u8; 4]) -> u32 {
     let mut result: u32 = 0;
     for byte in 0..slice.len() {
@@ -56,7 +99,7 @@ fn slice_to_u32_test() {
 }
 
 
-/// Convert `&[u8; 8]` to `u64`.
+/// Safely cast `&[u8; 8]` to `u64`.
 pub fn slice_to_u64(slice: &[u8; 8]) -> u64 {
     let mut result: u64 = 0;
     for byte in 0..slice.len() {

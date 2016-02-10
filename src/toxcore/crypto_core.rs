@@ -532,6 +532,9 @@ fn create_request_test_max_length_plus_1() {
 
 /// Returns senders public key, request id, and data from the request,
 /// or `None` if request was invalid.
+///
+// Not checked by this function:
+//  * packet type (first byte of the packet)
 //
 // The way it's supposed™ to work:
 //  1. Check if length of received packet is at least 106 bytes long, if it's
