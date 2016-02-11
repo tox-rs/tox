@@ -24,35 +24,10 @@
 use sodiumoxide::randombytes::randombytes_into;
 
 pub use sodiumoxide::crypto::box_::*;
-use libsodium_sys::crypto_box_curve25519xsalsa20poly1305_MACBYTES as MACBYTES;
+pub use libsodium_sys::crypto_box_curve25519xsalsa20poly1305_MACBYTES as MACBYTES;
 
 use toxcore::binary_io::{slice_to_u32, slice_to_u64};
 use toxcore::network::NetPacket;
-
-#[test]
-// test comparing empty keys
-// testing since it would appear that sodiumoxide doesn't do testing for it
-fn public_key_cmp_test_empty() {
-    let alice_publickey = PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap();
-    let bob_publickey = PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap();
-
-    assert_eq!(alice_publickey.eq(&bob_publickey), true);
-    assert_eq!(bob_publickey.eq(&alice_publickey), true);
-}
-
-#[test]
-// test comparing random public keys
-// testing since it would appear that sodiumoxide doesn't do testing for it
-fn public_key_cmp_test_random() {
-    let (alice_publickey, _alice_secretkey) = gen_keypair();
-    let (bob_publickey, _bob_secretkey) = gen_keypair();
-
-    assert_eq!(alice_publickey.eq(&bob_publickey), false);
-    assert_eq!(bob_publickey.eq(&alice_publickey), false);
-
-    assert_eq!(alice_publickey.eq(&alice_publickey), true);
-    assert_eq!(bob_publickey.eq(&bob_publickey), true);
-}
 
 
 /// Return a random number.
@@ -62,32 +37,11 @@ pub fn random_u32() -> u32 {
     slice_to_u32(&array)
 }
 
-#[test]
-fn random_u32_test() {
-    let a = random_u32();
-    let b = random_u32();
-    assert!(a != 0);
-    assert!(b != 0);
-    // The probability to fail equals 5.4*10^-20
-    assert!(a != b);
-}
-
-
 /// Return a random number.
 pub fn random_u64() -> u64 {
     let mut array = [0; 8];
     randombytes_into(&mut array);
     slice_to_u64(&array)
-}
-
-#[test]
-fn random_u64_test() {
-    let a = random_u64();
-    let b = random_u64();
-    assert!(a != 0);
-    assert!(b != 0);
-    // The probability to fail equals 2.9*10^-39
-    assert!(a != b);
 }
 
 
@@ -97,19 +51,6 @@ fn random_u64_test() {
 /// Returns `true` if valid, `false` otherwise.
 pub fn public_key_valid(&PublicKey(ref pk): &PublicKey) -> bool {
     pk[PUBLICKEYBYTES - 1] <= 127 // Last bit of key is always zero.
-}
-
-#[test]
-fn public_key_valid_test() {
-    let (pk, _) = gen_keypair();
-    assert_eq!(true, public_key_valid(&pk));
-
-    assert_eq!(true, public_key_valid(&(PublicKey::from_slice(&[0b00000000; PUBLICKEYBYTES]).unwrap()))); // 0
-    assert_eq!(true, public_key_valid(&(PublicKey::from_slice(&[0b01111111; PUBLICKEYBYTES]).unwrap()))); // 127
-    assert_eq!(false, public_key_valid(&(PublicKey::from_slice(&[0b10000000; PUBLICKEYBYTES]).unwrap()))); // 128
-    assert_eq!(false, public_key_valid(&(PublicKey::from_slice(&[0b11111111; PUBLICKEYBYTES]).unwrap()))); // 255
-
-    // TODO: see if property-based test(s) can be used with `quickcheck` - issue #1
 }
 
 
@@ -134,33 +75,6 @@ pub fn encrypt_precompute(their_public_key: &PublicKey,
 // ↓ can't use, since there's no way to add additional docs
 //pub use sodiumoxide::crypto::box_::precompute as encrypt_precompute;
 
-#[test]
-// test uses "bare" functions provided by `sodiumoxide`, with an exception
-// of the tested function
-fn encrypt_precompute_test() {
-    let (alice_pk, alice_sk) = gen_keypair();
-    let (bob_pk, bob_sk) = gen_keypair();
-
-    let alice_precomputed_key = encrypt_precompute(&bob_pk, &alice_sk);
-
-    let nonce1 = gen_nonce();
-    let nonce2 = gen_nonce();
-
-    let alice_plaintext1 = b"Hi, Bob.";
-    let alice_plaintext2 = b"Pls respond.";
-
-    let ciphertext1 = seal_precomputed(alice_plaintext1, &nonce1, &alice_precomputed_key);
-    let ciphertext2 = seal_precomputed(alice_plaintext2, &nonce2, &alice_precomputed_key);
-
-    let bob_precomputed_key = encrypt_precompute(&alice_pk, &bob_sk);
-
-    let bob_plaintext1 = open_precomputed(&ciphertext1, &nonce1, &bob_precomputed_key).unwrap();
-    let bob_plaintext2 = open_precomputed(&ciphertext2, &nonce2, &bob_precomputed_key).unwrap();
-
-    assert!(alice_plaintext1 == &bob_plaintext1[..]);
-    assert!(alice_plaintext2 == &bob_plaintext2[..]);
-}
-
 
 /// Returns encrypted data from `plain`, with length of `plain + 16` due to
 /// padding.
@@ -183,35 +97,6 @@ pub fn encrypt_data_symmetric(precomputed_key: &PrecomputedKey,
 // not using ↓ since it doesn't allow to add additional documentation
 //pub use sodiumoxide::crypto::box_::seal_precomputed as encrypt_data_symmetric;
 
-#[test]
-// test uses "bare" functions provided by `sodiumoxide`, with an "exception"
-// of the tested function
-pub fn encrypt_data_symmetric_test() {
-    let (alice_pk, alice_sk) = gen_keypair();
-    let (bob_pk, bob_sk) = gen_keypair();
-
-    let alice_plain = b"Hi, Bob.";
-
-    let precomputed_key = precompute(&bob_pk, &alice_sk);
-    let nonce = gen_nonce();
-
-    let ciphertext = encrypt_data_symmetric(&precomputed_key, &nonce, alice_plain);
-
-    let bob_plain = open(&ciphertext, &nonce, &alice_pk, &bob_sk).unwrap();
-
-    assert!(alice_plain == &bob_plain[..]);
-    // TODO: see if property-based test(s) can be used with `quickcheck` - issue #1
-}
-
-// TODO: test for pubkey/skey/nonce being all `0`s, which would produce
-// ciphertext that should be compared to already known result of this
-// computation. This way it would be ensured that cipher algorithm is
-// actually working as it should.
-// There should be also some additional variations of this test, with different
-// pkey/skey/nonce values that would produce known ciphertext.
-//
-// Also, similar test for decrypting.
-
 
 /// Returns plain data from `encrypted`, with length of `encrypted - 16` due to
 /// padding, or `()` if data couldn't be decrypted.
@@ -232,26 +117,6 @@ pub fn decrypt_data_symmetric(precomputed_key: &PrecomputedKey,
     open_precomputed(encrypted, nonce, precomputed_key)
 }
 
-#[test]
-// test uses "bare" functions provided by `sodiumoxide`, with an exception
-// of the tested function
-fn decrypt_data_symmetric_test() {
-    let (alice_pk, alice_sk) = gen_keypair();
-    let (bob_pk, bob_sk) = gen_keypair();
-
-    let alice_plain = b"Hi, Bob.";
-
-    let precomputed_key = precompute(&alice_pk, &bob_sk);
-    let nonce = gen_nonce();
-
-    let ciphertext = seal(alice_plain, &nonce, &bob_pk, &alice_sk);
-
-    let bob_plain = decrypt_data_symmetric(&precomputed_key, &nonce, &ciphertext).unwrap();
-
-    assert!(alice_plain == &bob_plain[..]);
-    // TODO: see if property-based test(s) can be used with `quickcheck` - issue #1
-}
-
 
 /// Inrement given nonce by 1.
 #[inline]
@@ -263,51 +128,6 @@ pub fn increment_nonce(nonce: &mut Nonce) {
     nonce.increment_le_inplace();
 }
 
-#[test]
-fn increment_nonce_test_zero_plus_one() {
-    let cmp_nonce = Nonce::from_slice(&[1, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 0]).unwrap();
-
-    let mut nonce = Nonce::from_slice(&[0; NONCEBYTES]).unwrap();
-    increment_nonce(&mut nonce);
-    assert!(nonce == cmp_nonce);
-}
-
-#[test]
-fn increment_nonce_test_0xf_plus_one() {
-    let cmp_nonce = Nonce::from_slice(&[0x10, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 0]).unwrap();
-
-    let mut nonce = Nonce::from_slice(&[0xf, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 0]).unwrap();
-    increment_nonce(&mut nonce);
-    assert!(nonce == cmp_nonce);
-}
-
-#[test]
-fn increment_nonce_test_0xff_plus_one() {
-    let cmp_nonce = Nonce::from_slice(&[0, 1, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 0]).unwrap();
-
-    let mut nonce = Nonce::from_slice(&[0xff, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 0]).unwrap();
-    increment_nonce(&mut nonce);
-    assert!(nonce == cmp_nonce);
-}
-
-#[test]
-fn increment_nonce_test_random() {
-    let mut nonce = gen_nonce();
-    let cmp_nonce = nonce.clone();
-    increment_nonce(&mut nonce);
-    assert!(nonce != cmp_nonce);
-}
-
 
 /// Inrement given nonce by number `num`.
 // TODO: since sodiumoxide/sodium don't check for arithmetic overflow, do it
@@ -317,30 +137,6 @@ pub fn increment_nonce_number(mut nonce: &mut Nonce, num: usize) {
     }
 }
 
-#[test]
-fn increment_nonce_number_test_zero_plus_0xff00() {
-    let cmp_nonce = Nonce::from_slice(&[0, 0xff, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 0]).unwrap();
-    let mut nonce = Nonce::from_slice(&[0; NONCEBYTES]).unwrap();
-
-    increment_nonce_number(&mut nonce, 0xff00);
-    assert!(nonce == cmp_nonce);
-}
-
-#[test]
-fn increment_nonce_number_test_0xff0000_plus_0x011000() {
-    let cmp_nonce = Nonce::from_slice(&[0, 0x10, 0, 1, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 0]).unwrap();
-
-    let mut nonce = Nonce::from_slice(&[0, 0, 0xff, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 0]).unwrap();
-
-    increment_nonce_number(&mut nonce, 0x11000);
-    assert!(nonce == cmp_nonce);
-}
 
 /// Max size of crypto request. Should be used in `create_request` and
 /// `handle_request` to check if request isn't too big.
@@ -430,105 +226,6 @@ pub fn create_request(&PublicKey(ref send_public_key): &PublicKey,
     Some(packet)
 }
 
-#[test]
-fn create_request_test() {
-    let (alice_pk, alice_sk) = gen_keypair();
-    let (bob_pk, bob_sk) = gen_keypair();
-
-    let alice_msg = b"Hi, bub.";
-
-    let packet_friend1 = create_request(&alice_pk, &alice_sk, &bob_pk,
-                                        alice_msg, CryptoPacket::FriendReq
-                                       ).unwrap();
-    let packet_friend2 = create_request(&alice_pk, &alice_sk, &bob_pk,
-                                        alice_msg, CryptoPacket::FriendReq
-                                       ).unwrap();
-
-    let i2pk: usize = 1 + PUBLICKEYBYTES * 2;
-    let i2pkn: usize = i2pk + NONCEBYTES;
-
-    // should differ by nonce, and thus also ciphertext
-    assert!(packet_friend1 != packet_friend2);
-    // packet type (1 byte), 2 * PK (64 bytes)
-    assert!(&packet_friend1[..i2pk] == &packet_friend2[..i2pk]);
-    // nonce (24 bytes)
-    assert!(&packet_friend1[i2pk..i2pkn] != &packet_friend2[i2pk..i2pkn]);
-    // encrypted data (1 byte packet id + ..)
-    assert!(&packet_friend1[i2pkn..] != &packet_friend2[i2pkn..]);
-
-
-    let packet_ping1 = create_request(&alice_pk, &alice_sk, &bob_pk,
-                                      alice_msg, CryptoPacket::NAT_Ping
-                                     ).unwrap();
-    let packet_ping2 = create_request(&alice_pk, &alice_sk, &bob_pk,
-                                      alice_msg, CryptoPacket::NAT_Ping
-                                     ).unwrap();
-    // should differ by nonce, and thus also ciphertext
-    assert!(packet_ping1 != packet_ping2);
-    assert!(&packet_ping1[..i2pk] == &packet_ping2[..i2pk]); // request id + PK
-    assert!(&packet_ping1[i2pk..i2pkn] != &packet_ping2[i2pk..i2pkn]);
-    assert!(&packet_ping1[i2pkn..] != &packet_ping2[i2pkn..]);
-
-    assert!(&packet_friend1[0] == &packet_ping1[0]);
-    assert!(packet_friend1[0] == NetPacket::Crypto as u8);
-    assert!(packet_ping1[0] == NetPacket::Crypto as u8);
-
-    // and decrypting..
-    // ..fr
-    let recv_pk_fr = PublicKey::from_slice(&packet_friend1[33..i2pk]).unwrap();
-    let nonce_fr1 = Nonce::from_slice(&packet_friend1[i2pk..i2pkn]).unwrap();
-    let ciphertext_fr1 = &packet_friend1[i2pkn..];
-
-    let bob_msg_fr1 = open(ciphertext_fr1, &nonce_fr1, &recv_pk_fr, &bob_sk).unwrap();
-    assert!(bob_msg_fr1[0] == CryptoPacket::FriendReq as u8);
-    assert!(&bob_msg_fr1[1..] == alice_msg);
-
-    // ..ping
-    let recv_pk_ping = PublicKey::from_slice(&packet_ping1[33..i2pk]).unwrap();
-    let nonce_ping1 = Nonce::from_slice(&packet_ping1[i2pk..i2pkn]).unwrap();
-    let ciphertext_ping1 = &packet_ping1[i2pkn..];
-
-    let bob_msg_ping1 = open(ciphertext_ping1, &nonce_ping1, &recv_pk_ping, &bob_sk).unwrap();
-    assert!(bob_msg_ping1[0] == CryptoPacket::NAT_Ping as u8);
-    assert!(&bob_msg_ping1[1..] == alice_msg);
-}
-
-#[test]
-fn create_request_test_min_length() {
-    let (alice_pk, alice_sk) = gen_keypair();
-    let (bob_pk, _) = gen_keypair();
-
-    let msg = b"";
-
-    let packet = create_request(&alice_pk, &alice_sk, &bob_pk, msg,
-                                CryptoPacket::FriendReq).unwrap();
-    assert!(packet.len() == 106);
-}
-
-#[test]
-fn create_request_test_max_length() {
-    let (alice_pk, alice_sk) = gen_keypair();
-    let (bob_pk, _) = gen_keypair();
-
-    let msg = [0; MAX_CRYPTO_REQUEST_SIZE - (2 + 2 * PUBLICKEYBYTES + NONCEBYTES + MACBYTES)];
-
-    let packet = create_request(&alice_pk, &alice_sk, &bob_pk, &msg,
-                                CryptoPacket::FriendReq).unwrap();
-    assert!(packet.len() == MAX_CRYPTO_REQUEST_SIZE);
-}
-
-#[test]
-fn create_request_test_max_length_plus_1() {
-    let (alice_pk, alice_sk) = gen_keypair();
-    let (bob_pk, _) = gen_keypair();
-
-    let msg = [0; MAX_CRYPTO_REQUEST_SIZE - (2 + 2 * PUBLICKEYBYTES + NONCEBYTES + MACBYTES) + 1];
-
-    let packet = create_request(&alice_pk, &alice_sk, &bob_pk, &msg,
-                                CryptoPacket::FriendReq);
-    assert!(packet == None);
-}
-
 
 /// Returns senders public key, request id, and data from the request,
 /// or `None` if request was invalid.
@@ -592,185 +289,3 @@ pub fn handle_request(our_public_key: &PublicKey,
 
     None
 }
-
-#[test]
-#[allow(non_snake_case)]
-fn handle_request_test_correct_empty_FriendReq() {
-    let (alice_pk, alice_sk) = gen_keypair();
-    let (bob_pk, bob_sk) = gen_keypair();
-
-    let packet = create_request(&alice_pk,
-                                &alice_sk,
-                                &bob_pk,
-                                &[],
-                                CryptoPacket::FriendReq).unwrap();
-
-    match handle_request(&bob_pk, &bob_sk, &packet[..]) {
-        None => panic!("This should have worked, since it was a correct request!"),
-        Some(_) => {},
-    }
-}
-
-#[test]
-#[allow(non_snake_case)]
-fn handle_request_test_correct_empty_Hardening() {
-    let (alice_pk, alice_sk) = gen_keypair();
-    let (bob_pk, bob_sk) = gen_keypair();
-
-    let packet = create_request(&alice_pk,
-                                &alice_sk,
-                                &bob_pk,
-                                &[],
-                                CryptoPacket::Hardening).unwrap();
-
-    match handle_request(&bob_pk, &bob_sk, &packet[..]) {
-        None => panic!("This should have worked, since it was a correct request!"),
-        Some(_) => {},
-    }
-}
-
-#[test]
-#[allow(non_snake_case)]
-fn handle_request_test_correct_empty_DHT_PK() {
-    let (alice_pk, alice_sk) = gen_keypair();
-    let (bob_pk, bob_sk) = gen_keypair();
-
-    let packet = create_request(&alice_pk,
-                                &alice_sk,
-                                &bob_pk,
-                                &[],
-                                CryptoPacket::DHT_PK).unwrap();
-
-    match handle_request(&bob_pk, &bob_sk, &packet[..]) {
-        None => panic!("This should have worked, since it was a correct request!"),
-        Some(_) => {},
-    }
-}
-
-#[test]
-#[allow(non_snake_case)]
-fn handle_request_test_correct_empty_NAT_Ping() {
-    let (alice_pk, alice_sk) = gen_keypair();
-    let (bob_pk, bob_sk) = gen_keypair();
-
-    let packet = create_request(&alice_pk,
-                                &alice_sk,
-                                &bob_pk,
-                                &[],
-                                CryptoPacket::NAT_Ping).unwrap();
-
-    match handle_request(&bob_pk, &bob_sk, &packet[..]) {
-        None => panic!("This should have worked, since it was a correct request!"),
-        Some(_) => {},
-    }
-}
-
-#[test]
-fn handle_request_test_invalid_empty() {
-    let (pk, sk) = gen_keypair();
-    match handle_request(&pk, &sk, &[0; 106]) {
-        None => {},
-        Some(_) => panic!("This should have failed, since packed did not have *any* valid data!"),
-    }
-}
-
-#[test]
-fn handle_request_test_too_short() {
-    let (pk, sk) = gen_keypair();
-    match handle_request(&pk, &sk, &[0; 0]) {
-        None => {},
-        Some(_) => panic!("This should have failed, since packed was too short!"),
-    }
-    match handle_request(&pk, &sk, &[0; 1]) {
-        None => {},
-        Some(_) => panic!("This should have failed, since packed was too short!"),
-    }
-    match handle_request(&pk, &sk, &[0; 105]) {
-        None => {},
-        Some(_) => panic!("This should have failed, since packed was too short!"),
-    }
-}
-
-#[test]
-fn handle_request_test_invalid_pk() {
-    let (alice_pk, alice_sk) = gen_keypair();
-    let (bob_pk, bob_sk) = gen_keypair();
-
-    let packet = create_request(&alice_pk,
-                                &alice_sk,
-                                &bob_pk,
-                                &[],
-                                CryptoPacket::FriendReq).unwrap();
-    // test whether..
-    //  ..testing method is correct
-    let PublicKey(alice_pk_bytes) = alice_pk;
-    let mut packet_test = Vec::with_capacity(packet.len());
-    packet_test.extend_from_slice(&packet[..(1 + PUBLICKEYBYTES)]);
-    packet_test.extend_from_slice(&alice_pk_bytes[..]);
-    packet_test.extend_from_slice(&packet[(1 + 2 * PUBLICKEYBYTES)..]);
-    match handle_request(&bob_pk, &bob_sk, &packet_test) {
-        None => panic!("This should *not* have failed!"),
-        Some(_) => {},
-    }
-
-    //  ..fails when PK of sender is `0`s
-    let mut packet_zeros = Vec::with_capacity(packet.len());
-    packet_zeros.extend_from_slice(&packet[..(1 + PUBLICKEYBYTES)]);
-    packet_zeros.extend_from_slice(&[0; PUBLICKEYBYTES]);
-    packet_zeros.extend_from_slice(&packet[(1 + 2 * PUBLICKEYBYTES)..]);
-    match handle_request(&bob_pk, &bob_sk, &packet_zeros) {
-        None => {},
-        Some(_) => panic!("This should have failed, since sender's PK was `0`s!"),
-    }
-
-    //  ..fails when PK of sender is the same as receiver
-    let PublicKey(ref bob_pk_bytes) = bob_pk;
-    let mut packet_receiver = Vec::with_capacity(packet.len());
-    packet_receiver.extend_from_slice(&packet[..(1 + PUBLICKEYBYTES)]);
-    packet_receiver.extend_from_slice(&bob_pk_bytes[..]);
-    packet_receiver.extend_from_slice(&packet[(1 + 2 * PUBLICKEYBYTES)..]);
-    match handle_request(&bob_pk, &bob_sk, &packet_receiver[..]) {
-        None => {},
-        Some(_) => panic!("This should have failed, since sender's PK was our own!"),
-    }
-
-    //  ..fails when PK of sender is wrong (random)
-    let (PublicKey(rand_pk), _) = gen_keypair();
-    let mut packet_random = Vec::with_capacity(packet.len());
-    packet_random.extend_from_slice(&packet[..(1 + PUBLICKEYBYTES)]);
-    packet_random.extend_from_slice(&rand_pk[..]);
-    packet_random.extend_from_slice(&packet[(1 + 2 * PUBLICKEYBYTES)..]);
-
-    //  ..fails when received own packet
-    match handle_request(&alice_pk, &alice_sk, &packet[..]) {
-        None => {},
-        Some(_) => panic!("This should have failed, since it was own packet!"),
-    }
-}
-
-#[test]
-fn handle_request_test_nonce() {
-    let (alice_pk, alice_sk) = gen_keypair();
-    let (bob_pk, bob_sk) = gen_keypair();
-
-    let packet = create_request(&alice_pk,
-                                &alice_sk,
-                                &bob_pk,
-                                &[],
-                                CryptoPacket::FriendReq).unwrap();
-
-    // test whether it fails
-    let Nonce(ref nonce) = gen_nonce();
-    let mut test = Vec::with_capacity(packet.len());
-    test.extend_from_slice(&packet[..(1 + 2 * PUBLICKEYBYTES)]);
-    test.extend_from_slice(nonce);
-    test.extend_from_slice(&packet[(1 + 2 * PUBLICKEYBYTES + NONCEBYTES)..]);
-    match handle_request(&bob_pk, &bob_sk, &test[..]) {
-        None => {},
-        Some(_) => panic!("This should have failed, since nonce was wrong!"),
-    }
-}
-
-// TODO: write more test for when `handle_request`..
-//  ..fails when ciphertext is wrong
-//  ..fails when decrypted payload is wrong (e.g. request id doesn't match)

@@ -25,13 +25,10 @@
 use ip::*;
 use std::net::SocketAddr;
 
-#[cfg(test)]
-use std::net::{Ipv4Addr, SocketAddrV4};
-
 use toxcore::binary_io::{u16_to_slice};//, slice_to_u16};
 use toxcore::crypto_core::*;
 
-/// `IpType` is used by [`PackedNode`](./struct.PackedNode.html).
+/// Used by [`PackedNode`](./struct.PackedNode.html).
 ///
 /// * 1st bit – protocol
 /// * 3 bits – `0`
@@ -82,7 +79,8 @@ pub enum IpType {
 ///
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct PackedNode {
-    ip_type: IpType,
+    /// IP type, includes also info about protocol used.
+    pub ip_type: IpType,
     socketaddr: SocketAddr,
     node_id: PublicKey,
 }
@@ -91,11 +89,13 @@ pub struct PackedNode {
 
 // TODO: ↓ add a method for printing either Ipv{4,6}
 impl PackedNode {
-    /// New `PackedNode`
+    /// New `PackedNode`.
+    //
+    // TODO: Should fail if type of IP address supplied in
+    // `socketaddr` doesn't match `IpType`..?
     pub fn new(ip_type: IpType,
                socketaddr: SocketAddr,
                node_id: &PublicKey) -> Self {
-
         PackedNode {
             ip_type: ip_type,
             socketaddr: socketaddr,
@@ -103,12 +103,16 @@ impl PackedNode {
         }
     }
 
+/*
+    /// Get an IP address from the `PackedNode`.
+    pub fn
+*/
     /// Serialize `PackedNode` into bytes.
     ///
     /// Can be either `39` or `51` bytes long, depending on whether IPv4 or
     /// IPv6 is being used.
     // TODO: test ↑
-    pub fn into_bytes(&self) -> Vec<u8> {
+    pub fn as_bytes(&self) -> Vec<u8> {
         let mut result: Vec<u8> = Vec::with_capacity(39);
 
         result.push(self.ip_type as u8);
@@ -134,28 +138,3 @@ impl PackedNode {
         result
     }
 }
-
-#[test]
-fn packed_node_new_test() {
-    let info = PackedNode::new(IpType::UdpIpv4,
-                               SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0)),
-                               &PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap());
-    assert_eq!(IpType::UdpIpv4, info.ip_type);
-    // TODO: finish writing test; include:
-    //  * assert whether IP matches
-    //  * assert whether PK matches
-}
-
-
-#[test]
-fn packed_node_into_bytes_test() {
-    let info = PackedNode::new(IpType::UdpIpv4,
-                               SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 1)),
-                               &PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap());
-
-    assert_eq!(info.into_bytes()[0], 2);
-    assert!(info.into_bytes().len() == 39);
-}
-
-// TODO: write more tests for `packed_node_into_bytes` - including, but not
-// limited to info with IPv6
