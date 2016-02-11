@@ -3,6 +3,11 @@ rust:
   - stable
   - beta
   - nightly
+
+branches:
+  except:
+    - test
+
 matrix:
   allow_failure:
   - rust: nightly
