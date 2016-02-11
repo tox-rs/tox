@@ -19,9 +19,6 @@
 
 //! Functions for binary IO.
 
-// TODO: ↓ don't use
-use std::mem::transmute;
-
 #[cfg(test)]
 use quickcheck::quickcheck;
 
@@ -50,9 +47,13 @@ fn slice_to_u16_test() {
     quickcheck(to_slice_and_back as fn(u16));
 }
 
-/// Cast `u16` to `[u8; 2]` via unsafe `transmute()`.
+/// Safely cast `u16` to `[u8; 2]`.
 pub fn u16_to_slice(num: u16) -> [u8; 2] {
-    unsafe { transmute::<u16, [u8; 2]>(num) }
+    let mut array: [u8; 2] = [0; 2];
+    for n in 0..array.len() {
+        array[n] = (num >> (8 * n)) as u8;
+    }
+    array
 }
 
 #[test]
@@ -89,7 +90,11 @@ fn slice_to_u32_test() {
     assert_eq!(slice_to_u32(&[0xff, 0xff, 0xff, 0xff]), u32::max_value());
 
     fn u32_to_slice(num: u32) -> [u8; 4] {
-        unsafe { transmute::<u32, [u8; 4]>(num) }
+        let mut array: [u8; 4] = [0; 4];
+        for n in 0..array.len() {
+            array[n] = (num >> (8 * n)) as u8;
+        }
+        array
     }
 
     fn to_slice_and_back(num: u32) {
@@ -124,7 +129,11 @@ fn slice_to_u64_test() {
     assert_eq!(slice_to_u64(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]), u64::max_value());
 
     fn u64_to_slice(num: u64) -> [u8; 8] {
-        unsafe { transmute::<u64, [u8; 8]>(num) }
+        let mut array: [u8; 8] = [0; 8];
+        for n in 0..array.len() {
+            array[n] = (num >> (8 * n)) as u8;
+        }
+        array
     }
 
     fn to_slice_and_back(num: u64) {
