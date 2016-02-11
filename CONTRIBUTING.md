@@ -23,6 +23,7 @@ If you find a bug in the source code or a mistake in the documentation, you can 
 ## <a name="rules"></a> Coding Rules
 To ensure consistency throughout the source code, keep these rules in mind as you are working:
 * All features or bug fixes **must be tested** by one or more tests.
+  - Whenever possible, use property-based testing in addition to example-based testing. [QuickCheck](https://github.com/BurntSushi/quickcheck) helps with that.
 * All functions **must be documented**, *especially* APIs.
 
 * Preferably wrap all the code at **80 characters**, or max 100 if you have to. This is not a *hard* rule - just keep it sane.

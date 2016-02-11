@@ -21,6 +21,9 @@
 
 //! Tests for `crypto_core` module.
 
+use quickcheck::quickcheck;
+
+use std::str::FromStr;
 
 use toxcore::crypto_core::*;
 use toxcore::network::NetPacket;
@@ -84,7 +87,16 @@ fn public_key_valid_test() {
     assert_eq!(false, public_key_valid(&(PublicKey::from_slice(&[0b10000000; PUBLICKEYBYTES]).unwrap()))); // 128
     assert_eq!(false, public_key_valid(&(PublicKey::from_slice(&[0b11111111; PUBLICKEYBYTES]).unwrap()))); // 255
 
-    // TODO: see if property-based test(s) can be used with `quickcheck` - issue #1
+    fn pk_from_u8(num: u8) {
+        let pk = PublicKey::from_slice(&[num; PUBLICKEYBYTES]).unwrap();
+
+        if num < 128 {
+            assert_eq!(true, public_key_valid(&pk));
+        } else {
+            assert_eq!(false, public_key_valid(&pk));
+        }
+    }
+    quickcheck(pk_from_u8 as fn(u8));
 }
 
 
@@ -92,27 +104,24 @@ fn public_key_valid_test() {
 // test uses "bare" functions provided by `sodiumoxide`, with an exception
 // of the tested function
 fn encrypt_precompute_test() {
-    let (alice_pk, alice_sk) = gen_keypair();
-    let (bob_pk, bob_sk) = gen_keypair();
+    fn encrypt_decrypt_msg(msg: String) {
+        let (alice_pk, alice_sk) = gen_keypair();
+        let (bob_pk, bob_sk) = gen_keypair();
 
-    let alice_precomputed_key = encrypt_precompute(&bob_pk, &alice_sk);
+        let alice_plaintext = &msg.into_bytes()[..];
+        let alice_precomputed_key = encrypt_precompute(&bob_pk, &alice_sk);
 
-    let nonce1 = gen_nonce();
-    let nonce2 = gen_nonce();
+        let nonce = gen_nonce();
 
-    let alice_plaintext1 = b"Hi, Bob.";
-    let alice_plaintext2 = b"Pls respond.";
+        let ciphertext = seal_precomputed(alice_plaintext, &nonce, &alice_precomputed_key);
 
-    let ciphertext1 = seal_precomputed(alice_plaintext1, &nonce1, &alice_precomputed_key);
-    let ciphertext2 = seal_precomputed(alice_plaintext2, &nonce2, &alice_precomputed_key);
+        let bob_precomputed_key = encrypt_precompute(&alice_pk, &bob_sk);
+        let bob_plaintext = open_precomputed(&ciphertext, &nonce, &bob_precomputed_key).unwrap();
 
-    let bob_precomputed_key = encrypt_precompute(&alice_pk, &bob_sk);
-
-    let bob_plaintext1 = open_precomputed(&ciphertext1, &nonce1, &bob_precomputed_key).unwrap();
-    let bob_plaintext2 = open_precomputed(&ciphertext2, &nonce2, &bob_precomputed_key).unwrap();
-
-    assert!(alice_plaintext1 == &bob_plaintext1[..]);
-    assert!(alice_plaintext2 == &bob_plaintext2[..]);
+        assert!(alice_plaintext == &bob_plaintext[..]);
+    }
+    encrypt_decrypt_msg(String::from_str("Hi, Bob.").unwrap());
+    quickcheck(encrypt_decrypt_msg as fn(String));
 }
 
 
@@ -120,20 +129,23 @@ fn encrypt_precompute_test() {
 // test uses "bare" functions provided by `sodiumoxide`, with an "exception"
 // of the tested function
 pub fn encrypt_data_symmetric_test() {
-    let (alice_pk, alice_sk) = gen_keypair();
-    let (bob_pk, bob_sk) = gen_keypair();
+    fn encrypt_decrypt_msg(msg: String) {
+        let (alice_pk, alice_sk) = gen_keypair();
+        let (bob_pk, bob_sk) = gen_keypair();
 
-    let alice_plain = b"Hi, Bob.";
+        let alice_plain = &msg.into_bytes()[..];
 
-    let precomputed_key = precompute(&bob_pk, &alice_sk);
-    let nonce = gen_nonce();
+        let precomputed_key = precompute(&bob_pk, &alice_sk);
+        let nonce = gen_nonce();
 
-    let ciphertext = encrypt_data_symmetric(&precomputed_key, &nonce, alice_plain);
+        let ciphertext = encrypt_data_symmetric(&precomputed_key, &nonce, alice_plain);
 
-    let bob_plain = open(&ciphertext, &nonce, &alice_pk, &bob_sk).unwrap();
+        let bob_plain = open(&ciphertext, &nonce, &alice_pk, &bob_sk).unwrap();
 
-    assert!(alice_plain == &bob_plain[..]);
-    // TODO: see if property-based test(s) can be used with `quickcheck` - issue #1
+        assert!(alice_plain == &bob_plain[..]);
+    }
+    encrypt_decrypt_msg(String::from_str("Hi, Bob.").unwrap());
+    quickcheck(encrypt_decrypt_msg as fn(String));
 }
 
 // TODO: test for pubkey/skey/nonce being all `0`s, which would produce
@@ -150,20 +162,23 @@ pub fn encrypt_data_symmetric_test() {
 // test uses "bare" functions provided by `sodiumoxide`, with an exception
 // of the tested function
 fn decrypt_data_symmetric_test() {
-    let (alice_pk, alice_sk) = gen_keypair();
-    let (bob_pk, bob_sk) = gen_keypair();
+    fn encrypt_decrypt_msg(msg: String) {
+        let (alice_pk, alice_sk) = gen_keypair();
+        let (bob_pk, bob_sk) = gen_keypair();
 
-    let alice_plain = b"Hi, Bob.";
+        let alice_plain = &msg.into_bytes()[..];
 
-    let precomputed_key = precompute(&alice_pk, &bob_sk);
-    let nonce = gen_nonce();
+        let precomputed_key = precompute(&alice_pk, &bob_sk);
+        let nonce = gen_nonce();
 
-    let ciphertext = seal(alice_plain, &nonce, &bob_pk, &alice_sk);
+        let ciphertext = seal(alice_plain, &nonce, &bob_pk, &alice_sk);
 
-    let bob_plain = decrypt_data_symmetric(&precomputed_key, &nonce, &ciphertext).unwrap();
+        let bob_plain = decrypt_data_symmetric(&precomputed_key, &nonce, &ciphertext).unwrap();
 
-    assert!(alice_plain == &bob_plain[..]);
-    // TODO: see if property-based test(s) can be used with `quickcheck` - issue #1
+        assert!(alice_plain == &bob_plain[..]);
+    }
+    encrypt_decrypt_msg(String::from_str("Hi, Bob.").unwrap());
+    quickcheck(encrypt_decrypt_msg as fn(String));
 }
 
 
@@ -336,6 +351,25 @@ fn create_request_test_max_length_plus_1() {
     let packet = create_request(&alice_pk, &alice_sk, &bob_pk, &msg,
                                 CryptoPacket::FriendReq);
     assert!(packet == None);
+}
+
+#[test]
+fn create_request_test_random_length() {
+    fn with_some_vec(vec: Vec<u8>) {
+        let (alice_pk, alice_sk) = gen_keypair();
+        let (bob_pk, _) = gen_keypair();
+
+        let packet = create_request(&alice_pk, &alice_sk, &bob_pk, &vec,
+                                    CryptoPacket::FriendReq);
+
+        if vec.len() < 918 {
+            let length = 1 + 2 * PUBLICKEYBYTES + NONCEBYTES + 1 + vec.len() + MACBYTES;
+            assert_eq!(length, packet.unwrap().len());
+        } else {
+            assert_eq!(None, packet);
+        }
+    }
+    quickcheck(with_some_vec as fn(Vec<u8>));
 }
 
 

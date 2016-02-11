@@ -197,7 +197,7 @@ pub fn create_request(&PublicKey(ref send_public_key): &PublicKey,
                       request_id: CryptoPacket) -> Option<Vec<u8>> {
 
     // too much data for a request
-    if 1 + PUBLICKEYBYTES * 2 + NONCEBYTES + 1 + data.len() + MACBYTES > MAX_CRYPTO_REQUEST_SIZE {
+    if 1 + 2 * PUBLICKEYBYTES + NONCEBYTES + 1 + data.len() + MACBYTES > MAX_CRYPTO_REQUEST_SIZE {
         return None;
     }
 
