@@ -103,10 +103,14 @@ impl PackedNode {
         }
     }
 
-/*
     /// Get an IP address from the `PackedNode`.
-    pub fn
-*/
+    pub fn ip(&self) -> IpAddr {
+        match self.socketaddr {
+            SocketAddr::V4(addr) => IpAddr::V4(*addr.ip()),
+            SocketAddr::V6(addr) => IpAddr::V6(*addr.ip()),
+        }
+    }
+
     /// Serialize `PackedNode` into bytes.
     ///
     /// Can be either `39` or `51` bytes long, depending on whether IPv4 or
@@ -117,12 +121,11 @@ impl PackedNode {
 
         result.push(self.ip_type as u8);
 
-        let addr: Vec<u8> = match self.socketaddr {
-            SocketAddr::V4(addr) => addr.ip().octets().iter()
-                                        .map(|b| *b).collect(),
-            SocketAddr::V6(addr) => {
+        let addr: Vec<u8> = match self.ip() {
+            IpAddr::V4(a) => a.octets().iter().map(|b| *b).collect(),
+            IpAddr::V6(a) => {
                 let mut result: Vec<u8> = vec![];
-                for n in addr.ip().segments().iter() {
+                for n in a.segments().iter() {
                     result.extend_from_slice(&u16_to_slice(*n));
                 }
                 result
