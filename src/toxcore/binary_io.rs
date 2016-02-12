@@ -21,17 +21,17 @@
 
 
 /// Safely cast `[u8; 2]` to `u16` using shift+or.
-pub fn slice_to_u16(slice: &[u8; 2]) -> u16 {
+pub fn array_to_u16(array: &[u8; 2]) -> u16 {
     let mut result: u16 = 0;
-    for byte in 0..slice.len() {
+    for byte in 0..array.len() {
         result = result << 8;
-        result = result | slice[1 - byte] as u16;
+        result = result | array[1 - byte] as u16;
     }
     result
 }
 
 /// Safely cast `u16` to `[u8; 2]`.
-pub fn u16_to_slice(num: u16) -> [u8; 2] {
+pub fn u16_to_array(num: u16) -> [u8; 2] {
     let mut array: [u8; 2] = [0; 2];
     for n in 0..array.len() {
         array[n] = (num >> (8 * n)) as u8;
@@ -41,22 +41,22 @@ pub fn u16_to_slice(num: u16) -> [u8; 2] {
 
 
 /// Safely cast `&[u8; 4]` to `u32`.
-pub fn slice_to_u32(slice: &[u8; 4]) -> u32 {
+pub fn array_to_u32(array: &[u8; 4]) -> u32 {
     let mut result: u32 = 0;
-    for byte in 0..slice.len() {
+    for byte in 0..array.len() {
         result = result << 8;
-        result = result | slice[3 - byte] as u32;
+        result = result | array[3 - byte] as u32;
     }
     result
 }
 
 
 /// Safely cast `&[u8; 8]` to `u64`.
-pub fn slice_to_u64(slice: &[u8; 8]) -> u64 {
+pub fn array_to_u64(array: &[u8; 8]) -> u64 {
     let mut result: u64 = 0;
-    for byte in 0..slice.len() {
+    for byte in 0..array.len() {
         result = result << 8;
-        result = result | slice[7 - byte] as u64;
+        result = result | array[7 - byte] as u64;
     }
     result
 }

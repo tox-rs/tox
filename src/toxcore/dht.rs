@@ -25,7 +25,7 @@
 use ip::*;
 use std::net::SocketAddr;
 
-use toxcore::binary_io::{u16_to_slice};//, slice_to_u16};
+use toxcore::binary_io::u16_to_array;
 use toxcore::crypto_core::*;
 
 /// Used by [`PackedNode`](./struct.PackedNode.html).
@@ -85,7 +85,7 @@ pub struct PackedNode {
     node_id: PublicKey,
 }
 
-// TODO: {de,}serliazation of `PackedNode`
+// TODO: deserliazation of `PackedNode`
 
 // TODO: ↓ add a method for printing either Ipv{4,6}
 impl PackedNode {
@@ -126,14 +126,14 @@ impl PackedNode {
             IpAddr::V6(a) => {
                 let mut result: Vec<u8> = vec![];
                 for n in a.segments().iter() {
-                    result.extend_from_slice(&u16_to_slice(*n));
+                    result.extend_from_slice(&u16_to_array(*n));
                 }
                 result
             },
         };
         result.extend_from_slice(&addr);
         // port
-        result.extend_from_slice(&u16_to_slice(self.socketaddr.port()));
+        result.extend_from_slice(&u16_to_array(self.socketaddr.port()));
 
         let PublicKey(ref pk) = self.node_id;
         result.extend_from_slice(pk);

@@ -26,7 +26,7 @@ use sodiumoxide::randombytes::randombytes_into;
 pub use sodiumoxide::crypto::box_::*;
 pub use libsodium_sys::crypto_box_curve25519xsalsa20poly1305_MACBYTES as MACBYTES;
 
-use toxcore::binary_io::{slice_to_u32, slice_to_u64};
+use toxcore::binary_io::{array_to_u32, array_to_u64};
 use toxcore::network::NetPacket;
 
 
@@ -34,14 +34,14 @@ use toxcore::network::NetPacket;
 pub fn random_u32() -> u32 {
     let mut array = [0; 4];
     randombytes_into(&mut array);
-    slice_to_u32(&array)
+    array_to_u32(&array)
 }
 
 /// Return a random number.
 pub fn random_u64() -> u64 {
     let mut array = [0; 8];
     randombytes_into(&mut array);
-    slice_to_u64(&array)
+    array_to_u64(&array)
 }
 
 

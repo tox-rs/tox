@@ -24,79 +24,79 @@ use quickcheck::quickcheck;
 use toxcore::binary_io::*;
 
 
-fn u16_to_slice_and_back(num: u16) {
-    assert!(num == slice_to_u16(&u16_to_slice(num)));
+fn u16_to_array_and_back(num: u16) {
+    assert!(num == array_to_u16(&u16_to_array(num)));
 }
 
-fn u32_to_slice(num: u32) -> [u8; 4] {
+fn u32_to_array(num: u32) -> [u8; 4] {
     let mut array: [u8; 4] = [0; 4];
     for n in 0..array.len() {
         array[n] = (num >> (8 * n)) as u8;
     }
     array
 }
-fn u32_to_slice_and_back(num: u32) {
-    assert!(num == slice_to_u32(&u32_to_slice(num)));
+fn u32_to_array_and_back(num: u32) {
+    assert!(num == array_to_u32(&u32_to_array(num)));
 }
 
-fn u64_to_slice(num: u64) -> [u8; 8] {
+fn u64_to_array(num: u64) -> [u8; 8] {
     let mut array: [u8; 8] = [0; 8];
     for n in 0..array.len() {
         array[n] = (num >> (8 * n)) as u8;
     }
     array
 }
-fn u64_to_slice_and_back(num: u64) {
-    assert!(num == slice_to_u64(&u64_to_slice(num)));
+fn u64_to_array_and_back(num: u64) {
+    assert!(num == array_to_u64(&u64_to_array(num)));
 }
 
 #[test]
-fn slice_to_u16_test() {
-    assert_eq!(slice_to_u16(&[0, 0]), 0);
-    assert_eq!(slice_to_u16(&[1, 0]), 1);
-    assert_eq!(slice_to_u16(&[0, 1]), 256);
-    assert_eq!(slice_to_u16(&[1, 1]), 257);
-    assert_eq!(slice_to_u16(&[255, 255]), 65535);
+fn array_to_u16_test() {
+    assert_eq!(array_to_u16(&[0, 0]), 0);
+    assert_eq!(array_to_u16(&[1, 0]), 1);
+    assert_eq!(array_to_u16(&[0, 1]), 256);
+    assert_eq!(array_to_u16(&[1, 1]), 257);
+    assert_eq!(array_to_u16(&[255, 255]), 65535);
 
-    quickcheck(u16_to_slice_and_back as fn(u16));
+    quickcheck(u16_to_array_and_back as fn(u16));
 }
 
 #[test]
-fn u16_to_slice_test() {
-    assert_eq!([0, 0], u16_to_slice(0));
-    assert_eq!([1, 0], u16_to_slice(1));
-    assert_eq!([0, 1], u16_to_slice(256));
-    assert_eq!([255, 255], u16_to_slice(65535));
+fn u16_to_array_test() {
+    assert_eq!([0, 0], u16_to_array(0));
+    assert_eq!([1, 0], u16_to_array(1));
+    assert_eq!([0, 1], u16_to_array(256));
+    assert_eq!([255, 255], u16_to_array(65535));
 
-    quickcheck(u16_to_slice_and_back as fn(u16));
+    quickcheck(u16_to_array_and_back as fn(u16));
 }
 
 #[test]
-fn slice_to_u32_test() {
-    assert_eq!(slice_to_u32(&[0, 0, 0, 0]), 0);
-    assert_eq!(slice_to_u32(&[1, 0, 0, 0]), 1);
-    assert_eq!(slice_to_u32(&[0, 1, 0, 0]), 256);
-    assert_eq!(slice_to_u32(&[0, 0, 1, 0]), 65536);
-    assert_eq!(slice_to_u32(&[0, 0, 0, 1]), 16777216);
-    assert_eq!(slice_to_u32(&[0, 0, 0, 0xff]), 4278190080);
-    assert_eq!(slice_to_u32(&[0xff, 0xff, 0xff, 0xff]), u32::max_value());
+fn array_to_u32_test() {
+    assert_eq!(array_to_u32(&[0, 0, 0, 0]), 0);
+    assert_eq!(array_to_u32(&[1, 0, 0, 0]), 1);
+    assert_eq!(array_to_u32(&[0, 1, 0, 0]), 256);
+    assert_eq!(array_to_u32(&[0, 0, 1, 0]), 65536);
+    assert_eq!(array_to_u32(&[0, 0, 0, 1]), 16777216);
+    assert_eq!(array_to_u32(&[0, 0, 0, 0xff]), 4278190080);
+    assert_eq!(array_to_u32(&[0xff, 0xff, 0xff, 0xff]), u32::max_value());
 
-    quickcheck(u32_to_slice_and_back as fn(u32));
+    quickcheck(u32_to_array_and_back as fn(u32));
 }
 
 #[test]
-fn slice_to_u64_test() {
-    assert_eq!(slice_to_u64(&[0, 0, 0, 0, 0, 0, 0, 0]), 0);
-    assert_eq!(slice_to_u64(&[1, 0, 0, 0, 0, 0, 0, 0]), 1);
-    assert_eq!(slice_to_u64(&[0, 1, 0, 0, 0, 0, 0, 0]), 256);
-    assert_eq!(slice_to_u64(&[0, 0, 1, 0, 0, 0, 0, 0]), 65536);
-    assert_eq!(slice_to_u64(&[0, 0, 0, 1, 0, 0, 0, 0]), 16777216);
-    assert_eq!(slice_to_u64(&[0, 0, 0, 0, 1, 0, 0, 0]), 4294967296);
-    assert_eq!(slice_to_u64(&[0, 0, 0, 0, 0, 1, 0, 0]), 1099511627776);
-    assert_eq!(slice_to_u64(&[0, 0, 0, 0, 0, 0, 1, 0]), 281474976710656);
-    assert_eq!(slice_to_u64(&[0, 0, 0, 0, 0, 0, 0, 1]), 72057594037927936);
-    assert_eq!(slice_to_u64(&[0, 0, 0, 0, 0, 0, 0, 0xff]), 18374686479671623680);
-    assert_eq!(slice_to_u64(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]), u64::max_value());
+fn array_to_u64_test() {
+    assert_eq!(array_to_u64(&[0, 0, 0, 0, 0, 0, 0, 0]), 0);
+    assert_eq!(array_to_u64(&[1, 0, 0, 0, 0, 0, 0, 0]), 1);
+    assert_eq!(array_to_u64(&[0, 1, 0, 0, 0, 0, 0, 0]), 256);
+    assert_eq!(array_to_u64(&[0, 0, 1, 0, 0, 0, 0, 0]), 65536);
+    assert_eq!(array_to_u64(&[0, 0, 0, 1, 0, 0, 0, 0]), 16777216);
+    assert_eq!(array_to_u64(&[0, 0, 0, 0, 1, 0, 0, 0]), 4294967296);
+    assert_eq!(array_to_u64(&[0, 0, 0, 0, 0, 1, 0, 0]), 1099511627776);
+    assert_eq!(array_to_u64(&[0, 0, 0, 0, 0, 0, 1, 0]), 281474976710656);
+    assert_eq!(array_to_u64(&[0, 0, 0, 0, 0, 0, 0, 1]), 72057594037927936);
+    assert_eq!(array_to_u64(&[0, 0, 0, 0, 0, 0, 0, 0xff]), 18374686479671623680);
+    assert_eq!(array_to_u64(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]), u64::max_value());
 
-    quickcheck(u64_to_slice_and_back as fn(u64));
+    quickcheck(u64_to_array_and_back as fn(u64));
 }
