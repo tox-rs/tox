@@ -19,7 +19,6 @@
 
 //! Tests for the DHT module.
 
-//#![cfg(test)]
 
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
@@ -127,8 +126,8 @@ fn packed_node_as_bytes_test_ipv4() {
         assert!(t4.as_bytes()[4] == d);
 
         // check whether length matches
-        assert!(u4.as_bytes().len() == 39);
-        assert!(t4.as_bytes().len() == 39);
+        assert!(u4.as_bytes().len() == PACKED_NODE_IPV4_SIZE);
+        assert!(t4.as_bytes().len() == PACKED_NODE_IPV4_SIZE);
     }
     quickcheck(with_random_ip as fn(u8, u8, u8, u8));
 }
@@ -152,8 +151,8 @@ fn packed_node_as_bytes_test_ipv6() {
                    /*port*/ 1, flowinfo, scope_id));
         let (_, u6, _, t6) = packed_node_all_ip_types(saddr, pk);
         // check whether ip_type variant matches
-        assert!(u6.as_bytes()[0] == 10);
-        assert!(t6.as_bytes()[0] == 138);
+        assert_eq!(u6.as_bytes()[0], IpType::UdpIpv6 as u8);
+        assert_eq!(t6.as_bytes()[0], IpType::TcpIpv6 as u8);
 
         // check whether IP matches ..
         //  ..with UDP
@@ -176,8 +175,8 @@ fn packed_node_as_bytes_test_ipv6() {
         assert_eq!(&t6.as_bytes()[15..17], &u16_to_array(h)[..]);
 
         // check whether length matches
-        assert!(u6.as_bytes().len() == 51);
-        assert!(t6.as_bytes().len() == 51);
+        assert!(u6.as_bytes().len() == PACKED_NODE_IPV6_SIZE);
+        assert!(t6.as_bytes().len() == PACKED_NODE_IPV6_SIZE);
     }
     quickcheck(with_random_ip as fn(u64, u64, u32, u32));
 }
@@ -232,3 +231,5 @@ fn packed_nodes_as_bytes_test_pk() {
     }
     quickcheck(with_pk as fn(u64, u64, u64, u64));
 }
+
+// TODO: tests for deserialization of `PackedNode`

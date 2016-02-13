@@ -23,9 +23,9 @@
 //! DHT part of the toxcore
 
 use ip::*;
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
-use toxcore::binary_io::u16_to_array;
+use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 
 /// Used by [`PackedNode`](./struct.PackedNode.html).
@@ -85,7 +85,12 @@ pub struct PackedNode {
     node_id: PublicKey,
 }
 
-// TODO: deserliazation of `PackedNode`
+/// Size in bytes of serialized [`PackedNode`](./struct.PackedNode.html) with
+/// IPv4.
+pub const PACKED_NODE_IPV4_SIZE: usize = 39;
+/// Size in bytes of serialized [`PackedNode`](./struct.PackedNode.html) with
+/// IPv6.
+pub const PACKED_NODE_IPV6_SIZE: usize = 51;
 
 // TODO: ↓ add a method for printing either Ipv{4,6}
 impl PackedNode {
@@ -138,5 +143,68 @@ impl PackedNode {
         result.extend_from_slice(pk);
 
         result
+    }
+
+    /// Deserialize bytes into `PackedNode`. Returns `None` if deseralizing
+    /// failed.
+    ///
+    /// Can fail if:
+    ///
+    ///  - length and [`IpType`](./enum.IpType.html) don't match
+    ///  - PK can't be parsed
+    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() == PACKED_NODE_IPV4_SIZE {
+            let iptype = match bytes[0] {
+                2   => IpType::UdpIpv4,
+                130 => IpType::TcpIpv4,
+                _ => return None,
+            };
+
+            let addr = Ipv4Addr::new(bytes[1], bytes[2], bytes[3], bytes[4]);
+            let port = array_to_u16(&[bytes[5], bytes[6]]);
+            let saddr = SocketAddrV4::new(addr, port);
+
+            let pk = match PublicKey::from_slice(&bytes[7..]) {
+                Some(pk) => pk,
+                None => return None,
+            };
+
+            return Some(PackedNode {
+                ip_type: iptype,
+                socketaddr: SocketAddr::V4(saddr),
+                node_id: pk,
+            });
+        } else if bytes.len() == PACKED_NODE_IPV6_SIZE {
+            let iptype = match bytes[0] {
+                10  => IpType::UdpIpv6,
+                138 => IpType::TcpIpv6,
+                _ => return None,
+            };
+
+            // get `u16`s from &[u8], so that it could be used to make IPv6
+            let (a, b, c, d, e, f, g, h) = {
+                let mut v: Vec<u16> = Vec::with_capacity(8);
+                for slice in bytes[1..17].chunks(2) {
+                    v.push(array_to_u16(&[slice[0], slice[1]]));
+                }
+                (v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7])
+            };
+            let addr = Ipv6Addr::new(a, b, c, d, e, f, g, h);
+            let port = array_to_u16(&[bytes[17], bytes[18]]);
+            let saddr = SocketAddrV6::new(addr, port, 0, 0);
+
+            let pk = match PublicKey::from_slice(&bytes[19..]) {
+                Some(p) => p,
+                None => return None,
+            };
+
+            return Some(PackedNode {
+                ip_type: iptype,
+                socketaddr: SocketAddr::V6(saddr),
+                node_id: pk,
+            });
+        }
+        // `if` not triggered, make sure to return `None`
+        None
     }
 }
