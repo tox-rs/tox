@@ -1,4 +1,3 @@
-extern crate libsodium_sys;
 extern crate sodiumoxide;
 
 extern crate ip;

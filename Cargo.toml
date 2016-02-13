@@ -7,7 +7,6 @@ authors = ["Zetok Zalbavar <zetok@openmailbox.org>"]
 git = "https://github.com/dnaq/sodiumoxide.git"
 
 [dependencies]
-libsodium-sys = "0.0.9"
 ip = "1.1"
 
 [dev-dependencies]

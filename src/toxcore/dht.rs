@@ -92,7 +92,7 @@ pub const PACKED_NODE_IPV4_SIZE: usize = 39;
 /// IPv6.
 pub const PACKED_NODE_IPV6_SIZE: usize = 51;
 
-// TODO: ↓ add a method for printing either Ipv{4,6}
+// TODO: ↓ add a method for printing either Ipv{4,6} .. maybe?
 impl PackedNode {
     /// New `PackedNode`.
     //

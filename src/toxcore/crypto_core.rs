@@ -24,7 +24,6 @@
 use sodiumoxide::randombytes::randombytes_into;
 
 pub use sodiumoxide::crypto::box_::*;
-pub use libsodium_sys::crypto_box_curve25519xsalsa20poly1305_MACBYTES as MACBYTES;
 
 use toxcore::binary_io::{array_to_u32, array_to_u64};
 use toxcore::network::NetPacket;
@@ -151,6 +150,8 @@ pub enum CryptoPacket {
     FriendReq = 32,
     /// Hardening crypto packet ID.
     Hardening = 48,
+    /// Used by some onion stuff .. ???
+    // FIXME: ↑
     DHT_PK    = 156,
     /// NAT ping crypto packet ID.
     NAT_Ping  = 254,
