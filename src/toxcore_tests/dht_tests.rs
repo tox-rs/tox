@@ -80,15 +80,6 @@ fn packed_node_ip_test() {
 
 // ::as_bytes()
 
-// TODO: tests for `::as_bytes()` should include:
-// * tests for various PKs - quickcheck doesn't support supplying more than 4
-//   function arguments
-//    - this requires a workaround with loops and hops - i.e. supply to the
-//      quickcheck 4 `u64` arguments, cast to arrays, put elements from arrays
-//      into a single vec and use vec to create PK
-//
-// Each test ↑ should have all possible types of `IpType`
-
 /// Returns all possible variants of `PackedNode` `ip_type`, in order
 /// listed by `IpType` enum.
 fn packed_node_all_ip_types(saddr: SocketAddr, pk: &PublicKey)
@@ -197,18 +188,47 @@ fn packed_nodes_as_bytes_test_port() {
     fn with_port(port: u16) {
         let pk = &PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap();
         let saddr4 = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(1, 1, 1, 1), port));
+        let saddr6 = SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::from_str("::0").unwrap(), port, 0, 0));
 
         let (u4, _, t4, _) = packed_node_all_ip_types(saddr4, pk);
         assert_eq!(&u16_to_array(port)[..], &u4.as_bytes()[5..7]);
         assert_eq!(&u16_to_array(port)[..], &t4.as_bytes()[5..7]);
 
         // and IPv6
-        let saddr6 = SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::from_str("::0").unwrap(), port, 0, 0));
-
         let (_, u6, _, t6) = packed_node_all_ip_types(saddr6, pk);
         assert_eq!(&u16_to_array(port)[..], &u6.as_bytes()[17..19]);
         assert_eq!(&u16_to_array(port)[..], &t6.as_bytes()[17..19]);
 
     }
     quickcheck(with_port as fn (u16));
+}
+
+#[test]
+// test for serialization of random PKs
+//  - this requires a workaround with loops and hops - i.e. supply to the
+//    quickcheck 4 `u64` arguments, cast to arrays, put elements from arrays
+//    into a single vec and use vec to create PK
+fn packed_nodes_as_bytes_test_pk() {
+    fn with_pk(a: u64, b: u64, c: u64, d: u64) {
+        let saddr4 = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(1, 1, 1, 1), 1));
+        let saddr6 = SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::from_str("::0").unwrap(), 1, 0, 0));
+
+        let mut pk_bytes: Vec<u8> = Vec::with_capacity(PUBLICKEYBYTES);
+        pk_bytes.extend_from_slice(&u64_to_array(a));
+        pk_bytes.extend_from_slice(&u64_to_array(b));
+        pk_bytes.extend_from_slice(&u64_to_array(c));
+        pk_bytes.extend_from_slice(&u64_to_array(d));
+        let pk_bytes = &pk_bytes[..];
+
+        let pk = &PublicKey::from_slice(pk_bytes).unwrap();
+
+        let (u4, _, t4, _) = packed_node_all_ip_types(saddr4, pk);
+        assert_eq!(&u4.as_bytes()[7..], pk_bytes);
+        assert_eq!(&t4.as_bytes()[7..], pk_bytes);
+
+        let (_, u6, _, t6) = packed_node_all_ip_types(saddr6, pk);
+        assert_eq!(&u6.as_bytes()[19..], pk_bytes);
+        assert_eq!(&t6.as_bytes()[19..], pk_bytes);
+    }
+    quickcheck(with_pk as fn(u64, u64, u64, u64));
 }
