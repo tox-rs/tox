@@ -81,8 +81,6 @@ fn packed_node_ip_test() {
 // ::as_bytes()
 
 // TODO: tests for `::as_bytes()` should include:
-// * tests for various ports with both IPv4 and IPv6 – can be done, but easily
-//   only with same hardcoded IPv{4,6}, since quickcheck ↑
 // * tests for various PKs - quickcheck doesn't support supplying more than 4
 //   function arguments
 //    - this requires a workaround with loops and hops - i.e. supply to the
@@ -102,6 +100,17 @@ fn packed_node_all_ip_types(saddr: SocketAddr, pk: &PublicKey)
     let t6 = PackedNode::new(IpType::TcpIpv6, saddr, pk);
     (u4, u6, t4, t6)
 }
+
+/// Safely casts `u64` to 4 `u16`.
+fn u64_as_u16s(num: u64) -> (u16, u16, u16, u16) {
+    let mut array: [u16; 4] = [0; 4];
+    for n in 0..array.len() {
+        array[n] = (num >> (16 * n)) as u16;
+    }
+    let (a, b, c, d) = (array[0], array[1], array[2], array[3]);
+    (a, b, c, d)
+}
+
 
 #[test]
 // tests for various IPv4 – use quickcheck
@@ -141,26 +150,6 @@ fn packed_node_as_bytes_test_ipv4() {
 //    quickcheck a function that takes 2 `u64` arguments, convert those
 //    numbers to arrays, and use numbers from arrays to do the job
 fn packed_node_as_bytes_test_ipv6() {
-    fn u64_as_u16s(num: u64) -> (u16, u16, u16, u16) {
-        let mut array: [u16; 4] = [0; 4];
-        for n in 0..array.len() {
-            array[n] = (num >> (16 * n)) as u16;
-        }
-        let (a, b, c, d) = (array[0], array[1], array[2], array[3]);
-        (a, b, c, d)
-    }
-
-    // slice to array. hopefully supplied slice is at least 2 bytes long.
-    // uses only 2 first elements from slice.
-    fn s_ar(slice: &[u8]) -> [u8; 2] {
-        let mut array = [0; 2];
-        for n in 0..2 {
-            array[n] = slice[n];
-        }
-        array
-    }
-
-
     fn with_random_ip(num1: u64, num2: u64, flowinfo: u32, scope_id: u32) {
         let pk = &PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap();
 
@@ -177,27 +166,49 @@ fn packed_node_as_bytes_test_ipv6() {
 
         // check whether IP matches ..
         //  ..with UDP
-        assert!(array_to_u16(&s_ar(&u6.as_bytes()[1..3])) == a);
-        assert!(array_to_u16(&s_ar(&u6.as_bytes()[3..5])) == b);
-        assert!(array_to_u16(&s_ar(&u6.as_bytes()[5..7])) == c);
-        assert!(array_to_u16(&s_ar(&u6.as_bytes()[7..9])) == d);
-        assert!(array_to_u16(&s_ar(&u6.as_bytes()[9..11])) == e);
-        assert!(array_to_u16(&s_ar(&u6.as_bytes()[11..13])) == f);
-        assert!(array_to_u16(&s_ar(&u6.as_bytes()[13..15])) == g);
-        assert!(array_to_u16(&s_ar(&u6.as_bytes()[15..17])) == h);
+        assert_eq!(&u6.as_bytes()[1..3], &u16_to_array(a)[..]);
+        assert_eq!(&u6.as_bytes()[3..5], &u16_to_array(b)[..]);
+        assert_eq!(&u6.as_bytes()[5..7], &u16_to_array(c)[..]);
+        assert_eq!(&u6.as_bytes()[7..9], &u16_to_array(d)[..]);
+        assert_eq!(&u6.as_bytes()[9..11], &u16_to_array(e)[..]);
+        assert_eq!(&u6.as_bytes()[11..13], &u16_to_array(f)[..]);
+        assert_eq!(&u6.as_bytes()[13..15], &u16_to_array(g)[..]);
+        assert_eq!(&u6.as_bytes()[15..17], &u16_to_array(h)[..]);
         //  ..with TCP
-        assert!(array_to_u16(&s_ar(&t6.as_bytes()[1..3])) == a);
-        assert!(array_to_u16(&s_ar(&t6.as_bytes()[3..5])) == b);
-        assert!(array_to_u16(&s_ar(&t6.as_bytes()[5..7])) == c);
-        assert!(array_to_u16(&s_ar(&t6.as_bytes()[7..9])) == d);
-        assert!(array_to_u16(&s_ar(&t6.as_bytes()[9..11])) == e);
-        assert!(array_to_u16(&s_ar(&t6.as_bytes()[11..13])) == f);
-        assert!(array_to_u16(&s_ar(&t6.as_bytes()[13..15])) == g);
-        assert!(array_to_u16(&s_ar(&t6.as_bytes()[15..17])) == h);
+        assert_eq!(&t6.as_bytes()[1..3], &u16_to_array(a)[..]);
+        assert_eq!(&t6.as_bytes()[3..5], &u16_to_array(b)[..]);
+        assert_eq!(&t6.as_bytes()[5..7], &u16_to_array(c)[..]);
+        assert_eq!(&t6.as_bytes()[7..9], &u16_to_array(d)[..]);
+        assert_eq!(&t6.as_bytes()[9..11], &u16_to_array(e)[..]);
+        assert_eq!(&t6.as_bytes()[11..13], &u16_to_array(f)[..]);
+        assert_eq!(&t6.as_bytes()[13..15], &u16_to_array(g)[..]);
+        assert_eq!(&t6.as_bytes()[15..17], &u16_to_array(h)[..]);
 
         // check whether length matches
         assert!(u6.as_bytes().len() == 51);
         assert!(t6.as_bytes().len() == 51);
     }
     quickcheck(with_random_ip as fn(u64, u64, u32, u32));
+}
+
+#[test]
+// test serialization of various ports
+fn packed_nodes_as_bytes_test_port() {
+    fn with_port(port: u16) {
+        let pk = &PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap();
+        let saddr4 = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(1, 1, 1, 1), port));
+
+        let (u4, _, t4, _) = packed_node_all_ip_types(saddr4, pk);
+        assert_eq!(&u16_to_array(port)[..], &u4.as_bytes()[5..7]);
+        assert_eq!(&u16_to_array(port)[..], &t4.as_bytes()[5..7]);
+
+        // and IPv6
+        let saddr6 = SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::from_str("::0").unwrap(), port, 0, 0));
+
+        let (_, u6, _, t6) = packed_node_all_ip_types(saddr6, pk);
+        assert_eq!(&u16_to_array(port)[..], &u6.as_bytes()[17..19]);
+        assert_eq!(&u16_to_array(port)[..], &t6.as_bytes()[17..19]);
+
+    }
+    quickcheck(with_port as fn (u16));
 }

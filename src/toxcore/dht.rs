@@ -115,7 +115,6 @@ impl PackedNode {
     ///
     /// Can be either `39` or `51` bytes long, depending on whether IPv4 or
     /// IPv6 is being used.
-    // TODO: test ↑
     pub fn as_bytes(&self) -> Vec<u8> {
         let mut result: Vec<u8> = Vec::with_capacity(39);
 
