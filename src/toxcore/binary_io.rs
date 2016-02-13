@@ -60,3 +60,12 @@ pub fn array_to_u64(array: &[u8; 8]) -> u64 {
     }
     result
 }
+
+/// Safely case `u64` to `[u8; 8]`
+pub fn u64_to_array(num: u64) -> [u8; 8] {
+    let mut array: [u8; 8] = [0; 8];
+    for n in 0..array.len() {
+        array[n] = (num >> (8 * n)) as u8;
+    }
+    array
+}

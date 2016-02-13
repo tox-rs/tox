@@ -39,13 +39,6 @@ fn u32_to_array_and_back(num: u32) {
     assert!(num == array_to_u32(&u32_to_array(num)));
 }
 
-fn u64_to_array(num: u64) -> [u8; 8] {
-    let mut array: [u8; 8] = [0; 8];
-    for n in 0..array.len() {
-        array[n] = (num >> (8 * n)) as u8;
-    }
-    array
-}
 fn u64_to_array_and_back(num: u64) {
     assert!(num == array_to_u64(&u64_to_array(num)));
 }
@@ -97,6 +90,23 @@ fn array_to_u64_test() {
     assert_eq!(array_to_u64(&[0, 0, 0, 0, 0, 0, 0, 1]), 72057594037927936);
     assert_eq!(array_to_u64(&[0, 0, 0, 0, 0, 0, 0, 0xff]), 18374686479671623680);
     assert_eq!(array_to_u64(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]), u64::max_value());
+
+    quickcheck(u64_to_array_and_back as fn(u64));
+}
+
+#[test]
+fn u64_to_array_test() {
+    assert_eq!([0, 0, 0, 0, 0, 0, 0, 0], u64_to_array(0));
+    assert_eq!([1, 0, 0, 0, 0, 0, 0, 0], u64_to_array(1));
+    assert_eq!([0, 1, 0, 0, 0, 0, 0, 0], u64_to_array(256));
+    assert_eq!([0, 0, 1, 0, 0, 0, 0, 0], u64_to_array(65536));
+    assert_eq!([0, 0, 0, 1, 0, 0, 0, 0], u64_to_array(16777216));
+    assert_eq!([0, 0, 0, 0, 1, 0, 0, 0], u64_to_array(4294967296));
+    assert_eq!([0, 0, 0, 0, 0, 1, 0, 0], u64_to_array(1099511627776));
+    assert_eq!([0, 0, 0, 0, 0, 0, 1, 0], u64_to_array(281474976710656));
+    assert_eq!([0, 0, 0, 0, 0, 0, 0, 1], u64_to_array(72057594037927936));
+    assert_eq!([0, 0, 0, 0, 0, 0, 0, 0xff], u64_to_array(18374686479671623680));
+    assert_eq!([0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff], u64_to_array(u64::max_value()));
 
     quickcheck(u64_to_array_and_back as fn(u64));
 }
