@@ -28,14 +28,36 @@ use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::str::FromStr;
 
 use ip::IpAddr;
-use quickcheck::quickcheck;
+use quickcheck::{Arbitrary, Gen, quickcheck};
 
 
 // PackedNode::
 
-// TODO: finish writing test; include:
-//  * assert whether IP matches
-//  * assert whether PK matches
+impl Arbitrary for PackedNode {
+    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+        let udp: bool = g.gen();
+        let ipv4: bool = g.gen();
+
+        let mut pk_bytes = [0; PUBLICKEYBYTES];
+        g.fill_bytes(&mut pk_bytes);
+        let pk = PublicKey::from_slice(&pk_bytes).unwrap();
+
+        if ipv4 {
+            let iptype = { if udp { IpType::UdpIpv4 } else { IpType::TcpIpv4 }};
+            let addr = Ipv4Addr::new(g.gen(), g.gen(), g.gen(), g.gen());
+            let saddr = SocketAddrV4::new(addr, g.gen());
+
+            return PackedNode::new(iptype, SocketAddr::V4(saddr), &pk);
+        } else {
+            let iptype = { if udp { IpType::UdpIpv6 } else { IpType::TcpIpv6 }};
+            let addr = Ipv6Addr::new(g.gen(), g.gen(), g.gen(), g.gen(),
+                                     g.gen(), g.gen(), g.gen(), g.gen());
+            let saddr = SocketAddrV6::new(addr, g.gen(), 0, 0);
+
+            return PackedNode::new(iptype, SocketAddr::V6(saddr), &pk);
+        }
+    }
+}
 
 // ::new()
 
@@ -232,4 +254,69 @@ fn packed_nodes_as_bytes_test_pk() {
     quickcheck(with_pk as fn(u64, u64, u64, u64));
 }
 
-// TODO: tests for deserialization of `PackedNode`
+
+// ::from_bytes()
+
+#[test]
+fn packed_nodes_from_bytes_test() {
+    fn fully_random(pn: PackedNode) {
+        assert_eq!(pn, PackedNode::from_bytes(&pn.as_bytes()[..]).unwrap());
+    }
+    quickcheck(fully_random as fn(PackedNode));
+}
+
+#[test]
+// test for fail when length is too small
+fn packed_nodes_from_bytes_test_length_short() {
+    fn fully_random(pn: PackedNode) {
+        let pnb = pn.as_bytes();
+        assert_eq!(None, PackedNode::from_bytes(&pnb[1..]));
+        assert_eq!(None, PackedNode::from_bytes(&pnb[..(pnb.len() - 1)]));
+    }
+    quickcheck(fully_random as fn(PackedNode));
+}
+
+#[test]
+// test for fail when length is too big
+fn packed_nodes_from_bytes_test_length_too_long() {
+    fn fully_random(pn: PackedNode, r_u8: u8) {
+        let mut vec = Vec::with_capacity(PACKED_NODE_IPV6_SIZE);
+        vec.extend_from_slice(&pn.as_bytes()[..]);
+        vec.push(r_u8);
+        assert_eq!(None, PackedNode::from_bytes(&vec[..]));
+    }
+    quickcheck(fully_random as fn(PackedNode, u8));
+}
+
+#[test]
+// test for fail when first byte is not an `IpType`
+fn packed_nodes_from_bytes_test_no_iptype() {
+    fn fully_random(pn: PackedNode, r_u8: u8) {
+        // not interested in valid options
+        if r_u8 == 2 || r_u8 == 10 || r_u8 == 130 || r_u8 == 138 {
+            return;
+        }
+        let mut vec = Vec::with_capacity(PACKED_NODE_IPV6_SIZE);
+        vec.push(r_u8);
+        vec.extend_from_slice(&pn.as_bytes()[1..]);
+        assert_eq!(None, PackedNode::from_bytes(&vec[..]));
+    }
+    quickcheck(fully_random as fn(PackedNode, u8));
+}
+
+#[test]
+// test for when `IpType` doesn't match length
+fn packed_nodes_from_bytes_test_wrong_iptype() {
+    fn fully_random(pn: PackedNode) {
+        let mut vec = Vec::with_capacity(PACKED_NODE_IPV6_SIZE);
+        match pn.ip_type {
+            IpType::UdpIpv4 => vec.push(IpType::UdpIpv6 as u8),
+            IpType::TcpIpv4 => vec.push(IpType::TcpIpv6 as u8),
+            IpType::UdpIpv6 => vec.push(IpType::UdpIpv4 as u8),
+            IpType::TcpIpv6 => vec.push(IpType::TcpIpv4 as u8),
+        }
+        vec.extend_from_slice(&pn.as_bytes()[1..]);
+        assert_eq!(None, PackedNode::from_bytes(&vec[..]));
+    }
+    quickcheck(fully_random as fn(PackedNode));
+}
