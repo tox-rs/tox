@@ -28,13 +28,14 @@ use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 
+
 /// Used by [`PackedNode`](./struct.PackedNode.html).
 ///
 /// * 1st bit – protocol
 /// * 3 bits – `0`
 /// * 4th bit – address family
 ///
-/// Values for 1st byte:
+/// Values:
 ///
 /// * `2` – UDP IPv4
 /// * `10` – UDP IPv6
@@ -65,7 +66,7 @@ pub enum IpType {
 /// Packed node format:
 ///
 /// ```text
-///                          (39 bytes minimum, 51 max)
+///                          (39 bytes for IPv4, 51 for IPv6)
 /// +-----------------------------------+
 /// | ip_type                ( 1 byte ) |
 /// |                                   |
@@ -115,12 +116,14 @@ impl PackedNode {
             SocketAddr::V6(addr) => IpAddr::V6(*addr.ip()),
         }
     }
+}
 
-    /// Serialize `PackedNode` into bytes.
-    ///
-    /// Can be either `39` or `51` bytes long, depending on whether IPv4 or
-    /// IPv6 is being used.
-    pub fn as_bytes(&self) -> Vec<u8> {
+/// Serialize `PackedNode` into bytes.
+///
+/// Can be either `39` or `51` bytes long, depending on whether IPv4 or
+/// IPv6 is being used.
+impl AsBytes for PackedNode {
+    fn as_bytes(&self) -> Vec<u8> {
         let mut result: Vec<u8> = Vec::with_capacity(39);
 
         result.push(self.ip_type as u8);
@@ -144,15 +147,17 @@ impl PackedNode {
 
         result
     }
+}
 
-    /// Deserialize bytes into `PackedNode`. Returns `None` if deseralizing
-    /// failed.
-    ///
-    /// Can fail if:
-    ///
-    ///  - length and [`IpType`](./enum.IpType.html) don't match
-    ///  - PK can't be parsed
-    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
+/// Deserialize bytes into `PackedNode`. Returns `None` if deseralizing
+/// failed.
+///
+/// Can fail if:
+///
+///  - length and [`IpType`](./enum.IpType.html) don't match
+///  - PK can't be parsed
+impl FromBytes<PackedNode> for PackedNode {
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
         if bytes.len() == PACKED_NODE_IPV4_SIZE {
             let iptype = match bytes[0] {
                 2   => IpType::UdpIpv4,

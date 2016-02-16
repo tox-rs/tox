@@ -28,6 +28,7 @@ pub use sodiumoxide::crypto::box_::*;
 use toxcore::binary_io::{array_to_u32, array_to_u64};
 use toxcore::network::NetPacket;
 
+// TODO: check if `#[inline]` is actually useful
 
 /// Return a random number.
 pub fn random_u32() -> u32 {

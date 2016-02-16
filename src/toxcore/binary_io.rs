@@ -20,6 +20,19 @@
 //! Functions for binary IO.
 
 
+/// Serialization into bytes.
+pub trait AsBytes {
+    /// Serialize into bytes.
+    fn as_bytes(&self) -> Vec<u8>;
+}
+
+/// De-serialize from bytes, or return `None` if de-serialization failed.
+pub trait FromBytes<Output> {
+    /// De-serialize from bytes, or return `None` if de-serialization failed.
+    fn from_bytes(bytes: &[u8]) -> Option<Output>;
+}
+
+
 /// Safely cast `[u8; 2]` to `u16` using shift+or.
 pub fn array_to_u16(array: &[u8; 2]) -> u16 {
     let mut result: u16 = 0;
@@ -61,7 +74,7 @@ pub fn array_to_u64(array: &[u8; 8]) -> u64 {
     result
 }
 
-/// Safely case `u64` to `[u8; 8]`
+/// Safely cast `u64` to `[u8; 8]`
 pub fn u64_to_array(num: u64) -> [u8; 8] {
     let mut array: [u8; 8] = [0; 8];
     for n in 0..array.len() {
