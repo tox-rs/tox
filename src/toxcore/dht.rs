@@ -37,7 +37,7 @@ use toxcore::crypto_core::*;
 pub enum PingType {
     /// Request ping response.
     Req  = 0,
-    /// Respwer to ping request.
+    /// Respond to ping request.
     Resp = 1,
 }
 

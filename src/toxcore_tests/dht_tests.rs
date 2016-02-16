@@ -31,9 +31,8 @@ use ip::IpAddr;
 use quickcheck::{Arbitrary, Gen, quickcheck};
 
 
-// PingType::
 
-// ::from_bytes()
+// PingType::from_bytes()
 
 #[test]
 fn ping_type_from_bytes_test() {
@@ -71,14 +70,14 @@ fn ping_new_test() {
     assert!(p1.id != p2.id);
 }
 
-// ::is_request()
+// Ping::is_request()
 
 #[test]
 fn ping_is_request_test() {
     assert_eq!(true, Ping::new().is_request());
 }
 
-// ::response()
+// Ping::response()
 
 #[test]
 fn ping_response_test() {
@@ -89,7 +88,7 @@ fn ping_response_test() {
     assert_eq!(None, ping_res.response());
 }
 
-// ::as_bytes()
+// Ping::as_bytes()
 
 #[test]
 fn ping_as_bytes_test() {
@@ -105,7 +104,7 @@ fn ping_as_bytes_test() {
     assert_eq!(pb[1..], prb[1..]);
 }
 
-// ::from_bytes()
+// Ping::from_bytes()
 
 #[test]
 fn ping_from_bytes_test() {
@@ -165,7 +164,7 @@ impl Arbitrary for PackedNode {
     }
 }
 
-// ::new()
+// PackedNode::new()
 
 #[test]
 #[allow(non_snake_case)]
@@ -180,7 +179,7 @@ fn packed_node_new_test_ip_type_UDP_IPv4() {
 }
 
 
-// ::ip()
+// PackedNode::ip()
 
 #[test]
 fn packed_node_ip_test() {
@@ -205,7 +204,7 @@ fn packed_node_ip_test() {
 }
 
 
-// ::as_bytes()
+// PackedNode::as_bytes()
 
 /// Returns all possible variants of `PackedNode` `ip_type`, in order
 /// listed by `IpType` enum.
@@ -361,7 +360,7 @@ fn packed_nodes_as_bytes_test_pk() {
 }
 
 
-// ::from_bytes()
+// PackedNode::from_bytes()
 
 #[test]
 fn packed_nodes_from_bytes_test() {
