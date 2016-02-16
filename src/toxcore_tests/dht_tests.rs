@@ -31,6 +31,112 @@ use ip::IpAddr;
 use quickcheck::{Arbitrary, Gen, quickcheck};
 
 
+// PingType::
+
+// ::from_bytes()
+
+#[test]
+fn ping_type_from_bytes_test() {
+    fn random_invalid(bytes: Vec<u8>) {
+        if bytes.len() == 0 {
+            return;
+        } else if bytes[0] == 0 {
+            assert_eq!(PingType::Req, PingType::from_bytes(&bytes).unwrap());
+        } else if bytes[0] == 1 {
+            assert_eq!(PingType::Resp, PingType::from_bytes(&bytes).unwrap());
+        } else {
+            assert_eq!(None, PingType::from_bytes(&bytes));
+        }
+    }
+    quickcheck(random_invalid as fn(Vec<u8>));
+
+    // just in case
+    let p0 = vec![0];
+    assert_eq!(PingType::Req, PingType::from_bytes(&p0).unwrap());
+
+    let p1 = vec![1];
+    assert_eq!(PingType::Resp, PingType::from_bytes(&p1).unwrap());
+}
+
+
+// Ping::
+
+// ::new()
+
+#[test]
+fn ping_new_test() {
+    let p1 = Ping::new();
+    let p2 = Ping::new();
+    assert!(p1 != p2);
+    assert!(p1.id != p2.id);
+}
+
+// ::is_request()
+
+#[test]
+fn ping_is_request_test() {
+    assert_eq!(true, Ping::new().is_request());
+}
+
+// ::response()
+
+#[test]
+fn ping_response_test() {
+    let ping_req = Ping::new();
+    let ping_res = ping_req.response().unwrap();
+    assert_eq!(ping_req.id, ping_res.id);
+    assert_eq!(false, ping_res.is_request());
+    assert_eq!(None, ping_res.response());
+}
+
+// ::as_bytes()
+
+#[test]
+fn ping_as_bytes_test() {
+    let p = Ping::new();
+    let pb = p.as_bytes();
+    assert_eq!(PING_SIZE, pb.len());
+    // new ping is always a request
+    assert_eq!(0, pb[0]);
+    let prb = p.response().unwrap().as_bytes();
+    // and response is `1`
+    assert_eq!(1, prb[0]);
+    // `id` of ping should not change
+    assert_eq!(pb[1..], prb[1..]);
+}
+
+// ::from_bytes()
+
+#[test]
+fn ping_from_bytes_test() {
+    fn with_bytes(bytes: Vec<u8>) {
+        if bytes.len() < PING_SIZE || bytes[0] != 0 && bytes[0] != 1 {
+            assert_eq!(None, Ping::from_bytes(&bytes));
+        } else {
+            let p = Ping::from_bytes(&bytes).unwrap();
+            // `id` should not differ
+            assert_eq!(&u64_to_array(p.id)[..], &bytes[1..9]);
+
+            if bytes[0] == 0 {
+                assert_eq!(true, p.is_request());
+            } else {
+                assert_eq!(false, p.is_request());
+            }
+        }
+    }
+    quickcheck(with_bytes as fn(Vec<u8>));
+
+    // just in case
+    let mut p_req = vec![0];
+    p_req.extend_from_slice(&u64_to_array(random_u64()));
+    with_bytes(p_req);
+
+    let mut p_resp = vec![1];
+    p_resp.extend_from_slice(&u64_to_array(random_u64()));
+    with_bytes(p_resp);
+}
+
+
 // PackedNode::
 
 impl Arbitrary for PackedNode {

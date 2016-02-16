@@ -29,6 +29,107 @@ use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 
 
+/// Type of [`Ping`](./struct.Ping.html) packet. Either a request or response.
+///
+/// * `0` – if ping is a request;
+/// * `1` – if ping is a response.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum PingType {
+    /// Request ping response.
+    Req  = 0,
+    /// Respwer to ping request.
+    Resp = 1,
+}
+
+/// Uses the first byte from the provided slice to de-serialize
+/// [`PingType`](./enum.PingType.html). Returns `None` if first byte of slice
+/// doesn't match `PingType` or slice has no elements.
+impl FromBytes<PingType> for PingType {
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() == 0 { return None }
+        match bytes[0] {
+            0 => Some(PingType::Req),
+            1 => Some(PingType::Resp),
+            _ => None,
+        }
+    }
+}
+
+
+/// Used to request/respond to ping. Use in an encrypted form in DHT packets.
+///
+/// ```text
+///                 (9 bytes)
+/// +-------------------------+
+/// | Ping type     (1 byte ) |
+/// | ping_id       (8 bytes) |
+/// +-------------------------+
+/// ```
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct Ping {
+    p_type: PingType,
+    /// An ID of the request. Response ID must match ID of the request,
+    /// otherwise ping is invalid.
+    pub id: u64,
+}
+
+/// Length in bytes of [`Ping`](./struct.Ping) when serialized into bytes.
+pub const PING_SIZE: usize = 9;
+
+impl Ping {
+    /// Create new ping request with a randomly generated `id`.
+    pub fn new() -> Self {
+        Ping { p_type: PingType::Req, id: random_u64(), }
+    }
+
+    /// Check whether given `Ping` is a request.
+    pub fn is_request(&self) -> bool {
+        self.p_type == PingType::Req
+    }
+
+    /// Create answer to ping request. Returns `None` if supplied `Ping` is
+    /// already a ping response.
+    // TODO: make sure that checking whether `Ping` is not a response is needed
+    //       here
+    pub fn response(&self) -> Option<Self> {
+        if self.p_type == PingType::Resp {
+            return None;
+        }
+
+        Some(Ping { p_type: PingType::Resp, id: self.id })
+    }
+}
+
+/// Serializes [`Ping`](./struct.Ping.html) into bytes.
+impl AsBytes for Ping {
+    fn as_bytes(&self) -> Vec<u8> {
+        let mut res = Vec::with_capacity(PING_SIZE);
+        // `PingType`
+        res.push(self.p_type as u8);
+        // And random ping_id as bytes
+        res.extend_from_slice(&u64_to_array(self.id));
+        res
+    }
+}
+
+/// De-seralize [`Ping`](./struct.Ping.html) from bytes. Tries to parse first
+/// [`PING_SIZE`](./const.PING_SIZE.html) bytes from supplied slice as `Ping`.
+impl FromBytes<Ping> for Ping {
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() < PING_SIZE { return None; }
+        if let Some(ping_type) = PingType::from_bytes(bytes) {
+            return Some(Ping {
+                p_type: ping_type,
+                id: array_to_u64(&[bytes[1], bytes[2], bytes[3], bytes[4],
+                                   bytes[5], bytes[6], bytes[7], bytes[8]]),
+            })
+        }
+        // parsing failed
+        None
+    }
+}
+
+
 /// Used by [`PackedNode`](./struct.PackedNode.html).
 ///
 /// * 1st bit – protocol
