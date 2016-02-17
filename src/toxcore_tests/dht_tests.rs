@@ -136,6 +136,9 @@ fn ping_from_bytes_test() {
 }
 
 
+// TODO: test for {de-,}serialization of `IpAddr` and `IpType`
+
+
 // PackedNode::
 
 impl Arbitrary for PackedNode {
@@ -148,13 +151,13 @@ impl Arbitrary for PackedNode {
         let pk = PublicKey::from_slice(&pk_bytes).unwrap();
 
         if ipv4 {
-            let iptype = { if udp { IpType::UdpIpv4 } else { IpType::TcpIpv4 }};
+            let iptype = { if udp { IpType::U4 } else { IpType::T4 }};
             let addr = Ipv4Addr::new(g.gen(), g.gen(), g.gen(), g.gen());
             let saddr = SocketAddrV4::new(addr, g.gen());
 
             return PackedNode::new(iptype, SocketAddr::V4(saddr), &pk);
         } else {
-            let iptype = { if udp { IpType::UdpIpv6 } else { IpType::TcpIpv6 }};
+            let iptype = { if udp { IpType::U6 } else { IpType::T6 }};
             let addr = Ipv6Addr::new(g.gen(), g.gen(), g.gen(), g.gen(),
                                      g.gen(), g.gen(), g.gen(), g.gen());
             let saddr = SocketAddrV6::new(addr, g.gen(), 0, 0);
@@ -170,12 +173,12 @@ impl Arbitrary for PackedNode {
 #[allow(non_snake_case)]
 // TODO: when `::new()` will be able to fail, this test should check for whether
 // it works/fails when needed;
-// e.g. `IpType::UdpIpv4` and supplied `SocketAddr:V6(_)` should fail
+// e.g. `IpType::U4` and supplied `SocketAddr:V6(_)` should fail
 fn packed_node_new_test_ip_type_UDP_IPv4() {
-    let info = PackedNode::new(IpType::UdpIpv4,
+    let info = PackedNode::new(IpType::U4,
                                SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0)),
                                &PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap());
-    assert_eq!(IpType::UdpIpv4, info.ip_type);
+    assert_eq!(IpType::U4, info.ip_type);
 }
 
 
@@ -183,7 +186,7 @@ fn packed_node_new_test_ip_type_UDP_IPv4() {
 
 #[test]
 fn packed_node_ip_test() {
-    let ipv4 = PackedNode::new(IpType::UdpIpv4,
+    let ipv4 = PackedNode::new(IpType::U4,
                                SocketAddr::V4(SocketAddrV4::from_str("0.0.0.0:0").unwrap()),
                                &PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap());
 
@@ -192,7 +195,7 @@ fn packed_node_ip_test() {
         IpAddr::V6(_) => panic!("This should not have happened, since IPv4 was supplied!"),
     }
 
-    let ipv6 = PackedNode::new(IpType::UdpIpv6,
+    let ipv6 = PackedNode::new(IpType::U6,
                                SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::from_str("::0").unwrap(),
                                    0, 0, 0)),
                                &PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap());
@@ -211,10 +214,10 @@ fn packed_node_ip_test() {
 fn packed_node_all_ip_types(saddr: SocketAddr, pk: &PublicKey)
     -> (PackedNode, PackedNode, PackedNode, PackedNode)
 {
-    let u4 = PackedNode::new(IpType::UdpIpv4, saddr, pk);
-    let u6 = PackedNode::new(IpType::UdpIpv6, saddr, pk);
-    let t4 = PackedNode::new(IpType::TcpIpv4, saddr, pk);
-    let t6 = PackedNode::new(IpType::TcpIpv6, saddr, pk);
+    let u4 = PackedNode::new(IpType::U4, saddr, pk);
+    let u6 = PackedNode::new(IpType::U6, saddr, pk);
+    let t4 = PackedNode::new(IpType::T4, saddr, pk);
+    let t6 = PackedNode::new(IpType::T6, saddr, pk);
     (u4, u6, t4, t6)
 }
 
@@ -278,8 +281,8 @@ fn packed_node_as_bytes_test_ipv6() {
                    /*port*/ 1, flowinfo, scope_id));
         let (_, u6, _, t6) = packed_node_all_ip_types(saddr, pk);
         // check whether ip_type variant matches
-        assert_eq!(u6.as_bytes()[0], IpType::UdpIpv6 as u8);
-        assert_eq!(t6.as_bytes()[0], IpType::TcpIpv6 as u8);
+        assert_eq!(u6.as_bytes()[0], IpType::U6 as u8);
+        assert_eq!(t6.as_bytes()[0], IpType::T6 as u8);
 
         // check whether IP matches ..
         //  ..with UDP
@@ -415,10 +418,10 @@ fn packed_nodes_from_bytes_test_wrong_iptype() {
     fn fully_random(pn: PackedNode) {
         let mut vec = Vec::with_capacity(PACKED_NODE_IPV6_SIZE);
         match pn.ip_type {
-            IpType::UdpIpv4 => vec.push(IpType::UdpIpv6 as u8),
-            IpType::TcpIpv4 => vec.push(IpType::TcpIpv6 as u8),
-            IpType::UdpIpv6 => vec.push(IpType::UdpIpv4 as u8),
-            IpType::TcpIpv6 => vec.push(IpType::TcpIpv4 as u8),
+            IpType::U4 => vec.push(IpType::U6 as u8),
+            IpType::T4 => vec.push(IpType::T6 as u8),
+            IpType::U6 => vec.push(IpType::U4 as u8),
+            IpType::T6 => vec.push(IpType::T4 as u8),
         }
         vec.extend_from_slice(&pn.as_bytes()[1..]);
         assert_eq!(None, PackedNode::from_bytes(&vec[..]));

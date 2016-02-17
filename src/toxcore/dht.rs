@@ -144,14 +144,46 @@ impl FromBytes<Ping> for Ping {
 /// * `138` – TCP IPv6
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum IpType {
-    /// UDP over IPv4
-    UdpIpv4 = 2,
-    /// UDP over IPv6
-    UdpIpv6 = 10,
-    /// TCP over IPv4
-    TcpIpv4 = 130,
-    /// TCP over IPv6
-    TcpIpv6 = 138,
+    /// UDP over IPv4.
+    U4 = 2,
+    /// UDP over IPv6.
+    U6 = 10,
+    /// TCP over IPv4.
+    T4 = 130,
+    /// TCP over IPv6.
+    T6 = 138,
+}
+
+/// Match first byte from the provided slice as `IpType`. If no match found,
+/// return `None`.
+impl FromBytes<IpType> for IpType {
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() == 0 { return None }
+        match bytes[0] {
+            2   => Some(IpType::U4),
+            10  => Some(IpType::U6),
+            130 => Some(IpType::T4),
+            138 => Some(IpType::T6),
+            _   => None,
+        }
+    }
+}
+
+
+// TODO: not sure if this is the best place for it..
+impl AsBytes for IpAddr {
+    fn as_bytes(&self) -> Vec<u8> {
+        match *self {
+            IpAddr::V4(a) => a.octets().iter().map(|b| *b).collect(),
+            IpAddr::V6(a) => {
+                let mut result: Vec<u8> = vec![];
+                for n in a.segments().iter() {
+                    result.extend_from_slice(&u16_to_array(*n));
+                }
+                result
+            },
+        }
+    }
 }
 
 
@@ -187,13 +219,6 @@ pub struct PackedNode {
     node_id: PublicKey,
 }
 
-/// Size in bytes of serialized [`PackedNode`](./struct.PackedNode.html) with
-/// IPv4.
-pub const PACKED_NODE_IPV4_SIZE: usize = 39;
-/// Size in bytes of serialized [`PackedNode`](./struct.PackedNode.html) with
-/// IPv6.
-pub const PACKED_NODE_IPV6_SIZE: usize = 51;
-
 // TODO: ↓ add a method for printing either Ipv{4,6} .. maybe?
 impl PackedNode {
     /// New `PackedNode`.
@@ -219,6 +244,14 @@ impl PackedNode {
     }
 }
 
+/// Size in bytes of serialized [`PackedNode`](./struct.PackedNode.html) with
+/// IPv4.
+pub const PACKED_NODE_IPV4_SIZE: usize = 39;
+/// Size in bytes of serialized [`PackedNode`](./struct.PackedNode.html) with
+/// IPv6.
+pub const PACKED_NODE_IPV6_SIZE: usize = 51;
+
+
 /// Serialize `PackedNode` into bytes.
 ///
 /// Can be either `39` or `51` bytes long, depending on whether IPv4 or
@@ -229,16 +262,7 @@ impl AsBytes for PackedNode {
 
         result.push(self.ip_type as u8);
 
-        let addr: Vec<u8> = match self.ip() {
-            IpAddr::V4(a) => a.octets().iter().map(|b| *b).collect(),
-            IpAddr::V6(a) => {
-                let mut result: Vec<u8> = vec![];
-                for n in a.segments().iter() {
-                    result.extend_from_slice(&u16_to_array(*n));
-                }
-                result
-            },
-        };
+        let addr: Vec<u8> = self.ip().as_bytes();
         result.extend_from_slice(&addr);
         // port
         result.extend_from_slice(&u16_to_array(self.socketaddr.port()));
@@ -261,8 +285,8 @@ impl FromBytes<PackedNode> for PackedNode {
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
         if bytes.len() == PACKED_NODE_IPV4_SIZE {
             let iptype = match bytes[0] {
-                2   => IpType::UdpIpv4,
-                130 => IpType::TcpIpv4,
+                2   => IpType::U4,
+                130 => IpType::T4,
                 _ => return None,
             };
 
@@ -282,8 +306,8 @@ impl FromBytes<PackedNode> for PackedNode {
             });
         } else if bytes.len() == PACKED_NODE_IPV6_SIZE {
             let iptype = match bytes[0] {
-                10  => IpType::UdpIpv6,
-                138 => IpType::TcpIpv6,
+                10  => IpType::U6,
+                138 => IpType::T6,
                 _ => return None,
             };
 
