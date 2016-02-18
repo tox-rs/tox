@@ -31,6 +31,15 @@ use ip::IpAddr;
 use quickcheck::{Arbitrary, Gen, quickcheck};
 
 
+/// Safely casts `u64` to 4 `u16`.
+fn u64_as_u16s(num: u64) -> (u16, u16, u16, u16) {
+    let mut array: [u16; 4] = [0; 4];
+    for n in 0..array.len() {
+        array[n] = (num >> (16 * n)) as u16;
+    }
+    (array[0], array[1], array[2], array[3])
+}
+
 
 // PingType::from_bytes()
 
@@ -161,7 +170,43 @@ fn ip_type_from_bytes_test() {
 }
 
 
-// TODO: tests for {de-,}serialization of `IpAddr`
+// IpAddr::as_bytes()
+
+// NOTE: sadly, implementing `Arbitrary` for `IpAddr` doesn't appear to be
+// (easily/nicely) dobale, since neither is a part of this crate.
+
+#[test]
+fn ip_addr_as_bytes_test() {
+    fn with_ipv4(a: u8, b: u8, c: u8, d: u8) {
+        let a4 = Ipv4Addr::new(a, b, c, d);
+        let ab = IpAddr::V4(a4).as_bytes();
+        assert_eq!(4, ab.len());
+        assert_eq!(a, ab[0]);
+        assert_eq!(b, ab[1]);
+        assert_eq!(c, ab[2]);
+        assert_eq!(d, ab[3]);
+    }
+    quickcheck(with_ipv4 as fn(u8, u8, u8, u8));
+
+    fn with_ipv6(n1: u64, n2: u64) {
+        let (a, b, c, d) = u64_as_u16s(n1);
+        let (e, f, g, h) = u64_as_u16s(n2);
+        let a6 = Ipv6Addr::new(a, b, c, d, e, f, g, h);
+        let ab = IpAddr::V6(a6).as_bytes();
+        assert_eq!(16, ab.len());
+        assert_eq!(a, array_to_u16(&[ab[0], ab[1]]));
+        assert_eq!(b, array_to_u16(&[ab[2], ab[3]]));
+        assert_eq!(c, array_to_u16(&[ab[4], ab[5]]));
+        assert_eq!(d, array_to_u16(&[ab[6], ab[7]]));
+        assert_eq!(e, array_to_u16(&[ab[8], ab[9]]));
+        assert_eq!(f, array_to_u16(&[ab[10], ab[11]]));
+        assert_eq!(g, array_to_u16(&[ab[12], ab[13]]));
+        assert_eq!(h, array_to_u16(&[ab[14], ab[15]]));
+    }
+    quickcheck(with_ipv6 as fn(u64, u64));
+
+}
+// TODO: tests for de-serialization of `IpAddr`
 
 
 // PackedNode::
@@ -244,16 +289,6 @@ fn packed_node_all_ip_types(saddr: SocketAddr, pk: &PublicKey)
     let t4 = PackedNode::new(IpType::T4, saddr, pk);
     let t6 = PackedNode::new(IpType::T6, saddr, pk);
     (u4, u6, t4, t6)
-}
-
-/// Safely casts `u64` to 4 `u16`.
-fn u64_as_u16s(num: u64) -> (u16, u16, u16, u16) {
-    let mut array: [u16; 4] = [0; 4];
-    for n in 0..array.len() {
-        array[n] = (num >> (16 * n)) as u16;
-    }
-    let (a, b, c, d) = (array[0], array[1], array[2], array[3]);
-    (a, b, c, d)
 }
 
 
