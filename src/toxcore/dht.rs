@@ -170,7 +170,7 @@ impl FromBytes<IpType> for IpType {
 }
 
 
-// TODO: not sure if this is the best place for it..
+// TODO: move it somewhere else
 impl AsBytes for IpAddr {
     fn as_bytes(&self) -> Vec<u8> {
         match *self {
@@ -219,7 +219,6 @@ pub struct PackedNode {
     node_id: PublicKey,
 }
 
-// TODO: ↓ add a method for printing either Ipv{4,6} .. maybe?
 impl PackedNode {
     /// New `PackedNode`.
     //

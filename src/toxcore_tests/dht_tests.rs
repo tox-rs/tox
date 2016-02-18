@@ -136,7 +136,32 @@ fn ping_from_bytes_test() {
 }
 
 
-// TODO: test for {de-,}serialization of `IpAddr` and `IpType`
+// IpType::from_bytes()
+
+#[test]
+fn ip_type_from_bytes_test() {
+    fn with_bytes(bytes: Vec<u8>) {
+        if bytes.len() == 0 { return }
+        match bytes[0] {
+            2   => assert_eq!(IpType::U4, IpType::from_bytes(&bytes).unwrap()),
+            10  => assert_eq!(IpType::U6, IpType::from_bytes(&bytes).unwrap()),
+            130 => assert_eq!(IpType::T4, IpType::from_bytes(&bytes).unwrap()),
+            138 => assert_eq!(IpType::T6, IpType::from_bytes(&bytes).unwrap()),
+            _   => assert_eq!(None, IpType::from_bytes(&bytes)),
+        }
+    }
+    quickcheck(with_bytes as fn(Vec<u8>));
+
+    // just in case
+    with_bytes(vec![0]);
+    with_bytes(vec![2]);
+    with_bytes(vec![10]);
+    with_bytes(vec![130]);
+    with_bytes(vec![138]);
+}
+
+
+// TODO: tests for {de-,}serialization of `IpAddr`
 
 
 // PackedNode::
