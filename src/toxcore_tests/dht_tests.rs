@@ -174,6 +174,7 @@ fn ip_type_from_bytes_test() {
 
 // NOTE: sadly, implementing `Arbitrary` for `IpAddr` doesn't appear to be
 // (easily/nicely) dobale, since neither is a part of this crate.
+// https://github.com/rust-lang/rfcs/pull/1023
 
 #[test]
 fn ip_addr_as_bytes_test() {
@@ -502,3 +503,35 @@ fn packed_nodes_from_bytes_test_wrong_iptype() {
     }
     quickcheck(fully_random as fn(PackedNode));
 }
+
+
+// GetNodes::
+
+impl Arbitrary for GetNodes {
+    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+        let mut a: [u8; PUBLICKEYBYTES] = [0; PUBLICKEYBYTES];
+        g.fill_bytes(&mut a);
+        let pk = PublicKey::from_slice(&a).unwrap();
+        GetNodes { pk: pk, id: g.gen() }
+    }
+}
+
+// GetNodes::new()
+
+#[test]
+fn get_nodes_new_test() {
+    fn with_pk(a: u64, b: u64, c: u64, d: u64) {
+        let mut v: Vec<u8> = Vec::with_capacity(PUBLICKEYBYTES);
+        v.extend_from_slice(&u64_to_array(a));
+        v.extend_from_slice(&u64_to_array(b));
+        v.extend_from_slice(&u64_to_array(c));
+        v.extend_from_slice(&u64_to_array(d));
+        let pk = PublicKey::from_slice(&v).unwrap();
+        let gn = GetNodes::new(&pk);
+        assert_eq!(gn.pk, pk);
+    }
+    quickcheck(with_pk as fn(u64, u64, u64, u64));
+}
+
+// GetNodes::as_bytes()
+// TODO: ↑

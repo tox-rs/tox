@@ -58,6 +58,8 @@ impl FromBytes<PingType> for PingType {
 
 /// Used to request/respond to ping. Use in an encrypted form in DHT packets.
 ///
+/// Serialized form:
+///
 /// ```text
 ///                 (9 bytes)
 /// +-------------------------+
@@ -65,6 +67,8 @@ impl FromBytes<PingType> for PingType {
 /// | ping_id       (8 bytes) |
 /// +-------------------------+
 /// ```
+///
+/// Serialized form should be put in the encrypted part of DHT packet.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Ping {
     p_type: PingType,
@@ -351,3 +355,76 @@ impl FromBytes<PackedNode> for PackedNode {
         None
     }
 }
+
+
+// TODO: make sure ↓ it's correct
+/// Request to get address of given DHT PK, or nodes that are closest in DHT
+/// to the given PK.
+///
+/// Packet type `2`.
+///
+/// Serialized form:
+///
+/// ```text
+/// +-----------------------------------+
+/// | DHT PUBKEY             (32 bytes) |
+/// | ping_id                ( 8 bytes) |
+/// +-----------------------------------+
+/// ```
+///
+/// Serialized form should be put in the encrypted part of DHT packet.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct GetNodes {
+    /// Public Key of the DHT node `GetNodes` is supposed to get address of.
+    pub pk: PublicKey,
+    /// An ID of the request.
+    pub id: u64,
+}
+
+impl GetNodes {
+    /// Create new `GetNodes` with given PK.
+    pub fn new(their_public_key: &PublicKey) -> Self {
+        GetNodes { pk: *their_public_key, id: random_u64() }
+    }
+}
+
+/// Serialization of `GetNodes`. Resulting lenght should be `40` –
+/// `PUBLICKEYBYTES` (32) + ping_id (8).
+impl AsBytes for GetNodes {
+    fn as_bytes(&self) -> Vec<u8> {
+        let mut result = Vec::with_capacity(PUBLICKEYBYTES + 8);
+        let PublicKey(pk_bytes) = self.pk;
+        result.extend_from_slice(&pk_bytes);
+        result.extend_from_slice(&u64_to_array(self.id));
+        result
+    }
+}
+// TODO: ↑ test for it
+
+
+/// Response to [`GetNodes`](./struct.GetNodes.html) request, containing up to
+/// `4` nodes closest to the requested node.
+///
+/// Packet type `4`.
+///
+/// Serialized form:
+///
+/// ```text
+/// +-----------------------------------+
+/// | Encrypted payload:                |
+/// | Number of packed nodes ( 1 byte ) |
+/// | Nodes in packed format (max of 4) |
+/// |      (39 bytes for IPv4) * number |
+/// |      (41 bytes for IPv6) * number |
+/// | ping_id                ( 8 bytes) |
+/// +-----------------------------------+
+/// ```
+///
+/// Serialized form should be put in the encrypted part of DHT packet.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SendNodes {
+    nodes: Vec<PackedNode>,
+    id: u64,
+}
+
+// TODO: implement `SendNodes`
