@@ -204,9 +204,23 @@ fn ip_addr_as_bytes_test() {
         assert_eq!(h, array_to_u16(&[ab[14], ab[15]]));
     }
     quickcheck(with_ipv6 as fn(u64, u64));
-
 }
-// TODO: tests for de-serialization of `IpAddr`
+
+
+// Ipv6Addr::from_bytes()
+
+#[test]
+fn ipv6_addr_from_bytes_test() {
+    fn with_bytes(b: Vec<u8>) {
+        if b.len() < 16 {
+            assert_eq!(None, Ipv6Addr::from_bytes(&b));
+        } else {
+            let addr = Ipv6Addr::from_bytes(&b).unwrap();
+            assert_eq!(&IpAddr::V6(addr).as_bytes()[..16], &b[..16]);
+        }
+    }
+    quickcheck(with_bytes as fn(Vec<u8>));
+}
 
 
 // PackedNode::

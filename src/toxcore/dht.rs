@@ -187,6 +187,25 @@ impl AsBytes for IpAddr {
 }
 
 
+// TODO: move it somewhere else
+/// Can fail if there are less than 16 bytes supplied, otherwise parses first
+/// 16 bytes as an `Ipv6Addr`.
+impl FromBytes<Ipv6Addr> for Ipv6Addr {
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() < 16 { return None }
+
+        let (a, b, c, d, e, f, g, h) = {
+            let mut v: Vec<u16> = Vec::with_capacity(8);
+            for slice in bytes[..16].chunks(2) {
+                v.push(array_to_u16(&[slice[0], slice[1]]));
+            }
+            (v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7])
+        };
+        Some(Ipv6Addr::new(a, b, c, d, e, f, g, h))
+    }
+}
+
+
 /// `Packed Node` format is a way to store the node info in a small yet easy to
 /// parse format.
 ///
@@ -283,9 +302,9 @@ impl AsBytes for PackedNode {
 impl FromBytes<PackedNode> for PackedNode {
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
         if bytes.len() == PACKED_NODE_IPV4_SIZE {
-            let iptype = match bytes[0] {
-                2   => IpType::U4,
-                130 => IpType::T4,
+            let iptype = match IpType::from_bytes(bytes) {
+                Some(IpType::U4) => IpType::U4,
+                Some(IpType::T4) => IpType::T4,
                 _ => return None,
             };
 
@@ -304,21 +323,16 @@ impl FromBytes<PackedNode> for PackedNode {
                 node_id: pk,
             });
         } else if bytes.len() == PACKED_NODE_IPV6_SIZE {
-            let iptype = match bytes[0] {
-                10  => IpType::U6,
-                138 => IpType::T6,
+            let iptype = match IpType::from_bytes(bytes) {
+                Some(IpType::U6) => IpType::U6,
+                Some(IpType::T6) => IpType::T6,
                 _ => return None,
             };
 
-            // get `u16`s from &[u8], so that it could be used to make IPv6
-            let (a, b, c, d, e, f, g, h) = {
-                let mut v: Vec<u16> = Vec::with_capacity(8);
-                for slice in bytes[1..17].chunks(2) {
-                    v.push(array_to_u16(&[slice[0], slice[1]]));
-                }
-                (v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7])
+            let addr = match Ipv6Addr::from_bytes(&bytes[1..]) {
+                Some(a) => a,
+                None    => return None,
             };
-            let addr = Ipv6Addr::new(a, b, c, d, e, f, g, h);
             let port = array_to_u16(&[bytes[17], bytes[18]]);
             let saddr = SocketAddrV6::new(addr, port, 0, 0);
 
