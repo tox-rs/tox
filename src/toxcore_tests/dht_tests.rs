@@ -534,4 +534,34 @@ fn get_nodes_new_test() {
 }
 
 // GetNodes::as_bytes()
-// TODO: ↑
+
+#[test]
+fn get_nodes_as_bytes_test() {
+    fn with_gn(gn: GetNodes) {
+        let g_bytes = gn.as_bytes();
+        let PublicKey(pk_bytes) = gn.pk;
+        assert_eq!(&pk_bytes, &g_bytes[..PUBLICKEYBYTES]);
+        assert_eq!(&u64_to_array(gn.id), &g_bytes[PUBLICKEYBYTES..]);
+    }
+    quickcheck(with_gn as fn(GetNodes));
+}
+
+// GetNodes::from_bytes()
+
+#[test]
+fn get_nodes_from_bytes_test() {
+    fn with_bytes(bytes: Vec<u8>) {
+        if bytes.len() < 40 {
+            assert_eq!(None, GetNodes::from_bytes(&bytes));
+        } else {
+            let gn = GetNodes::from_bytes(&bytes).unwrap();
+            // ping_id as bytes should match "original" bytes
+            assert_eq!(&bytes[PUBLICKEYBYTES..(PUBLICKEYBYTES + 8)],
+                       &u64_to_array(gn.id));
+
+            let PublicKey(ref pk) = gn.pk;
+            assert_eq!(pk, &bytes[..PUBLICKEYBYTES]);
+        }
+    }
+    quickcheck(with_bytes as fn(Vec<u8>));
+}

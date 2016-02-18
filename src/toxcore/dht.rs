@@ -357,6 +357,34 @@ impl FromBytes<PackedNode> for PackedNode {
 }
 
 
+/// Response to [`GetNodes`](./struct.GetNodes.html) request, containing up to
+/// `4` nodes closest to the requested node.
+///
+/// Packet type `4`.
+///
+/// Serialized form:
+///
+/// ```text
+/// +-----------------------------------+
+/// | Encrypted payload:                |
+/// | Number of packed nodes ( 1 byte ) |
+/// | Nodes in packed format (max of 4) |
+/// |      (39 bytes for IPv4) * number |
+/// |      (41 bytes for IPv6) * number |
+/// | ping_id                ( 8 bytes) |
+/// +-----------------------------------+
+/// ```
+///
+/// Serialized form should be put in the encrypted part of DHT packet.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SendNodes {
+    nodes: Vec<PackedNode>,
+    id: u64,
+}
+
+// TODO: implement `SendNodes`
+
+
 // TODO: make sure ↓ it's correct
 /// Request to get address of given DHT PK, or nodes that are closest in DHT
 /// to the given PK.
@@ -399,32 +427,19 @@ impl AsBytes for GetNodes {
         result
     }
 }
-// TODO: ↑ test for it
 
-
-/// Response to [`GetNodes`](./struct.GetNodes.html) request, containing up to
-/// `4` nodes closest to the requested node.
-///
-/// Packet type `4`.
-///
-/// Serialized form:
-///
-/// ```text
-/// +-----------------------------------+
-/// | Encrypted payload:                |
-/// | Number of packed nodes ( 1 byte ) |
-/// | Nodes in packed format (max of 4) |
-/// |      (39 bytes for IPv4) * number |
-/// |      (41 bytes for IPv6) * number |
-/// | ping_id                ( 8 bytes) |
-/// +-----------------------------------+
-/// ```
-///
-/// Serialized form should be put in the encrypted part of DHT packet.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SendNodes {
-    nodes: Vec<PackedNode>,
-    id: u64,
+/// De-serialization of bytes into `GetNodes`. If less than `40` bytes are
+/// provided, de-serialization will fail, returning `None`.
+impl FromBytes<GetNodes> for GetNodes {
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() < 40 { return None }
+        if let Some(pk) = PublicKey::from_slice(&bytes[..PUBLICKEYBYTES]) {
+            let ib = &bytes[PUBLICKEYBYTES..(PUBLICKEYBYTES + 8)];
+            let id = array_to_u64(&[ib[0], ib[1], ib[2], ib[3],
+                                    ib[4], ib[5], ib[6], ib[7]]);
+            return Some(GetNodes { pk: pk, id: id })
+        }
+        // de-serialization failed
+        None
+    }
 }
-
-// TODO: implement `SendNodes`
