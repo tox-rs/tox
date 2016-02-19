@@ -20,7 +20,7 @@
 
 
 // ↓ FIXME doc
-//! DHT part of the toxcore
+//! DHT part of the toxcore.
 
 use ip::*;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
@@ -117,7 +117,8 @@ impl AsBytes for Ping {
 }
 
 /// De-seralize [`Ping`](./struct.Ping.html) from bytes. Tries to parse first
-/// [`PING_SIZE`](./const.PING_SIZE.html) bytes from supplied slice as `Ping`.
+/// [`PING_SIZE`](./constant.PING_SIZE.html) bytes from supplied slice as
+/// `Ping`.
 impl FromBytes<Ping> for Ping {
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
         if bytes.len() < PING_SIZE { return None; }
@@ -128,8 +129,7 @@ impl FromBytes<Ping> for Ping {
                                    bytes[5], bytes[6], bytes[7], bytes[8]]),
             })
         }
-        // parsing failed
-        None
+        None  // parsing failed
     }
 }
 
@@ -146,6 +146,11 @@ impl FromBytes<Ping> for Ping {
 /// * `10` – UDP IPv6
 /// * `130` – TCP IPv4
 /// * `138` – TCP IPv6
+///
+/// DHT module *should* use only UDP variants of `IpType`, given that DHT runs
+/// solely over the UDP.
+///
+/// TCP variants are to be used for sending/receiving info about TCP relays.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum IpType {
     /// UDP over IPv4.
@@ -210,6 +215,8 @@ impl FromBytes<Ipv6Addr> for Ipv6Addr {
 }
 
 
+// TODO: probably needs to be renamed & moved out of DHT, given that it most
+// likely will be used not only for DHT node info, but also for TCP relay info.
 /// `Packed Node` format is a way to store the node info in a small yet easy to
 /// parse format.
 ///
@@ -234,6 +241,8 @@ impl FromBytes<Ipv6Addr> for Ipv6Addr {
 /// +-----------------------------------+
 /// ```
 ///
+/// DHT module *should* use only UDP variants of `IpType`, given that DHT runs
+/// solely on the UDP.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct PackedNode {
     /// IP type, includes also info about protocol used.
@@ -241,6 +250,13 @@ pub struct PackedNode {
     socketaddr: SocketAddr,
     node_id: PublicKey,
 }
+
+/// Size in bytes of serialized [`PackedNode`](./struct.PackedNode.html) with
+/// IPv4.
+pub const PACKED_NODE_IPV4_SIZE: usize = PUBLICKEYBYTES + 7;
+/// Size in bytes of serialized [`PackedNode`](./struct.PackedNode.html) with
+/// IPv6.
+pub const PACKED_NODE_IPV6_SIZE: usize = PUBLICKEYBYTES + 19;
 
 impl PackedNode {
     /// New `PackedNode`.
@@ -266,18 +282,12 @@ impl PackedNode {
     }
 }
 
-/// Size in bytes of serialized [`PackedNode`](./struct.PackedNode.html) with
-/// IPv4.
-pub const PACKED_NODE_IPV4_SIZE: usize = 39;
-/// Size in bytes of serialized [`PackedNode`](./struct.PackedNode.html) with
-/// IPv6.
-pub const PACKED_NODE_IPV6_SIZE: usize = 51;
-
-
 /// Serialize `PackedNode` into bytes.
 ///
-/// Can be either `39` or `51` bytes long, depending on whether IPv4 or
-/// IPv6 is being used.
+/// Can be either [`PACKED_NODE_IPV4_SIZE`]
+/// (./constant.PACKED_NODE_IPV4_SIZE.html) or [`PACKED_NODE_IPV6_SIZE`]
+/// (./constant.PACKED_NODE_IPV6_SIZE.html) bytes long, depending on whether
+/// IPv4 or IPv6 is being used.
 impl AsBytes for PackedNode {
     fn as_bytes(&self) -> Vec<u8> {
         let mut result: Vec<u8> = Vec::with_capacity(39);
@@ -409,6 +419,9 @@ pub struct GetNodes {
     pub id: u64,
 }
 
+/// Size of serialized [`GetNodes`](./struct.GetNodes.html) in bytes.
+pub const GET_NODES_SIZE: usize = PUBLICKEYBYTES + 8;
+
 impl GetNodes {
     /// Create new `GetNodes` with given PK.
     pub fn new(their_public_key: &PublicKey) -> Self {
@@ -416,11 +429,11 @@ impl GetNodes {
     }
 }
 
-/// Serialization of `GetNodes`. Resulting lenght should be `40` –
-/// `PUBLICKEYBYTES` (32) + ping_id (8).
+/// Serialization of `GetNodes`. Resulting lenght should be
+/// [`GET_NODES_SIZE`](./constant.GET_NODES_SIZE.html).
 impl AsBytes for GetNodes {
     fn as_bytes(&self) -> Vec<u8> {
-        let mut result = Vec::with_capacity(PUBLICKEYBYTES + 8);
+        let mut result = Vec::with_capacity(GET_NODES_SIZE);
         let PublicKey(pk_bytes) = self.pk;
         result.extend_from_slice(&pk_bytes);
         result.extend_from_slice(&u64_to_array(self.id));
@@ -428,18 +441,19 @@ impl AsBytes for GetNodes {
     }
 }
 
-/// De-serialization of bytes into `GetNodes`. If less than `40` bytes are
-/// provided, de-serialization will fail, returning `None`.
+/// De-serialization of bytes into `GetNodes`. If less than
+/// [`GET_NODES_SIZE`](./constant.GET_NODES_SIZE.html) bytes are provided,
+/// de-serialization will fail, returning `None`.
 impl FromBytes<GetNodes> for GetNodes {
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() < 40 { return None }
+        if bytes.len() < GET_NODES_SIZE { return None }
         if let Some(pk) = PublicKey::from_slice(&bytes[..PUBLICKEYBYTES]) {
-            let ib = &bytes[PUBLICKEYBYTES..(PUBLICKEYBYTES + 8)];
-            let id = array_to_u64(&[ib[0], ib[1], ib[2], ib[3],
-                                    ib[4], ib[5], ib[6], ib[7]]);
+            // need shorter name for ID bytes
+            let b = &bytes[PUBLICKEYBYTES..GET_NODES_SIZE];
+            let id = array_to_u64(&[b[0], b[1], b[2], b[3],
+                                    b[4], b[5], b[6], b[7]]);
             return Some(GetNodes { pk: pk, id: id })
         }
-        // de-serialization failed
-        None
+        None  // de-serialization failed
     }
 }

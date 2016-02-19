@@ -551,12 +551,12 @@ fn get_nodes_as_bytes_test() {
 #[test]
 fn get_nodes_from_bytes_test() {
     fn with_bytes(bytes: Vec<u8>) {
-        if bytes.len() < 40 {
+        if bytes.len() < GET_NODES_SIZE {
             assert_eq!(None, GetNodes::from_bytes(&bytes));
         } else {
             let gn = GetNodes::from_bytes(&bytes).unwrap();
             // ping_id as bytes should match "original" bytes
-            assert_eq!(&bytes[PUBLICKEYBYTES..(PUBLICKEYBYTES + 8)],
+            assert_eq!(&bytes[PUBLICKEYBYTES..GET_NODES_SIZE],
                        &u64_to_array(gn.id));
 
             let PublicKey(ref pk) = gn.pk;
