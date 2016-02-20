@@ -6,7 +6,7 @@ IRC channel: [#tox-dev @ freenode](https://webchat.freenode.net/?channels=tox-de
 ## Documentation
 
 Documentation to use when implementing toxcore in Rust is a bit scattered around. It can be found at:
- - [Tox-Docs/Text](https://github.com/Tox-Docs/Text/tree/master/src_text)
+ - [The Tox Reference](https://github.com/iphydf/tox-spec)
  - [Docs bundled with toxcore](https://github.com/irungentoo/toxcore/tree/master/docs)
  - [Comments in toxcore source code](https://github.com/irungentoo/toxcore/tree/master/toxcore)
 
