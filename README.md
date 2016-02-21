@@ -1,7 +1,7 @@
 # Tox  [![Build Status](https://travis-ci.org/zetok/tox.svg)](https://travis-ci.org/zetok/tox)
 This library is an implementation of [toxcore][toxcore] in Rust - P2P, distributed, encrypted, easy to use DHT-based network.
 
-IRC channel: [#tox-dev @ freenode](https://webchat.freenode.net/?channels=tox-dev)
+IRC channel: [#zetox @ freenode](https://webchat.freenode.net/?channels=zetox)
 
 ## Documentation
 
