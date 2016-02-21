@@ -565,3 +565,22 @@ fn get_nodes_from_bytes_test() {
     }
     quickcheck(with_bytes as fn(Vec<u8>));
 }
+
+
+// SendNodes::from_request()
+
+#[test]
+fn send_nodes_from_request_test() {
+    fn with_request(req: GetNodes, nodes: Vec<PackedNode>) {
+        if nodes.len() > 4 || nodes.len() == 0 {
+            assert_eq!(None, SendNodes::from_request(&req, nodes));
+        } else {
+            let sn = SendNodes::from_request(&req, nodes.clone()).unwrap();
+            assert_eq!(req.id, sn.id);
+            assert_eq!(nodes, sn.nodes);
+        }
+    }
+    quickcheck(with_request as fn(GetNodes, Vec<PackedNode>));
+}
+
+// TODO: test SendNodes::as_bytes()

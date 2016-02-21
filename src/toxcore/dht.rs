@@ -367,34 +367,6 @@ impl FromBytes<PackedNode> for PackedNode {
 }
 
 
-/// Response to [`GetNodes`](./struct.GetNodes.html) request, containing up to
-/// `4` nodes closest to the requested node.
-///
-/// Packet type `4`.
-///
-/// Serialized form:
-///
-/// ```text
-/// +-----------------------------------+
-/// | Encrypted payload:                |
-/// | Number of packed nodes ( 1 byte ) |
-/// | Nodes in packed format (max of 4) |
-/// |      (39 bytes for IPv4) * number |
-/// |      (41 bytes for IPv6) * number |
-/// | ping_id                ( 8 bytes) |
-/// +-----------------------------------+
-/// ```
-///
-/// Serialized form should be put in the encrypted part of DHT packet.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SendNodes {
-    nodes: Vec<PackedNode>,
-    id: u64,
-}
-
-// TODO: implement `SendNodes`
-
-
 // TODO: make sure ↓ it's correct
 /// Request to get address of given DHT PK, or nodes that are closest in DHT
 /// to the given PK.
@@ -457,3 +429,62 @@ impl FromBytes<GetNodes> for GetNodes {
         None  // de-serialization failed
     }
 }
+
+
+/// Response to [`GetNodes`](./struct.GetNodes.html) request, containing up to
+/// `4` nodes closest to the requested node.
+///
+/// Packet type `4`.
+///
+/// Serialized form:
+///
+/// ```text
+/// +-----------------------------------+
+/// | Encrypted payload:                |
+/// | Number of packed nodes ( 1 byte ) |
+/// | Nodes in packed format (max of 4) |
+/// |      (39 bytes for IPv4) * number |
+/// |      (51 bytes for IPv6) * number |
+/// | ping_id                ( 8 bytes) |
+/// +-----------------------------------+
+/// ```
+///
+/// Serialized form should be put in the encrypted part of DHT packet.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SendNodes {
+    /// Nodes sent in response to [`GetNodes`](./struct.GetNodes.html) request.
+    ///
+    /// There can be only 1 to 4 nodes in `SendNodes`.
+    pub nodes: Vec<PackedNode>,
+    /// Ping id that was received in [`GetNodes`](./struct.GetNodes.html)
+    /// request.
+    pub id: u64,
+}
+
+impl SendNodes {
+    /// Create new `SendNodes`. Returns `None` if 0 or more than 4 nodes are
+    /// supplied.
+    ///
+    /// Created as an answer to `GetNodes` request.
+    pub fn from_request(request: &GetNodes, nodes: Vec<PackedNode>) -> Option<Self> {
+        if nodes.len() == 0 || nodes.len() > 4 { return None }
+
+        Some(SendNodes { nodes: nodes, id: request.id })
+    }
+}
+
+/// Method assumes that supplied `SendNodes` has correct number of nodes
+/// inluded – (1, 4).
+impl AsBytes for SendNodes {
+    fn as_bytes(&self) -> Vec<u8> {
+        let mut result: Vec<u8> = vec![self.nodes.len() as u8];
+        for node in &*self.nodes {
+            result.extend_from_slice(&node.as_bytes());
+        }
+        result.extend_from_slice(&u64_to_array(self.id));
+        result
+    }
+}
+// TODO: test ↑
+
+// TODO: SendNodes::from_bytes()
