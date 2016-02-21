@@ -474,9 +474,10 @@ impl SendNodes {
 }
 
 /// Method assumes that supplied `SendNodes` has correct number of nodes
-/// inluded – (1, 4).
+/// included – `(1, 4)`.
 impl AsBytes for SendNodes {
     fn as_bytes(&self) -> Vec<u8> {
+        // first byte is number of nodes
         let mut result: Vec<u8> = vec![self.nodes.len() as u8];
         for node in &*self.nodes {
             result.extend_from_slice(&node.as_bytes());
@@ -485,6 +486,5 @@ impl AsBytes for SendNodes {
         result
     }
 }
-// TODO: test ↑
 
 // TODO: SendNodes::from_bytes()

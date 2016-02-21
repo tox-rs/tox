@@ -583,4 +583,37 @@ fn send_nodes_from_request_test() {
     quickcheck(with_request as fn(GetNodes, Vec<PackedNode>));
 }
 
-// TODO: test SendNodes::as_bytes()
+// SendNodes::as_bytes()
+
+#[test]
+fn send_nodes_as_bytes() {
+    // there should be at least 1 valid node; there can be up to 4 nodes
+    fn with_nodes(req: GetNodes, n1: PackedNode, n2: Option<PackedNode>,
+                  n3: Option<PackedNode>, n4: Option<PackedNode>) {
+
+        let mut nodes = vec![n1];
+        if let Some(n) = n2 { nodes.push(n); }
+        if let Some(n) = n3 { nodes.push(n); }
+        if let Some(n) = n4 { nodes.push(n); }
+        let sn_bytes = SendNodes::from_request(&req, nodes.clone())
+                        .unwrap().as_bytes();
+
+        // number of nodes should match
+        assert_eq!(nodes.len(), sn_bytes[0] as usize);
+
+        // bytes before current PackedNode in serialized SendNodes
+        // starts from `1` since first byte of serialized SendNodes is number of
+        // nodes
+        let mut len_before = 1;
+        for node in 0..nodes.len() {
+            let cur_len = nodes[node].as_bytes().len();
+            assert_eq!(&nodes[node].as_bytes()[..],
+                       &sn_bytes[len_before..(len_before + cur_len)]);
+            len_before += cur_len;
+        }
+        // ping id should be the same as in request
+        assert_eq!(&u64_to_array(req.id), &sn_bytes[len_before..]);
+    }
+    quickcheck(with_nodes as fn(GetNodes, PackedNode, Option<PackedNode>,
+                                Option<PackedNode>, Option<PackedNode>));
+}
