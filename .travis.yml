@@ -8,6 +8,14 @@ branches:
   except:
     - test
 
+notifications:
+  irc:
+    channels: "chat.freenode.net#zetox"
+    template:
+      - "%{repository}#%{build_number} (%{branch} - %{commit} : %{author}): %{message}"
+      - "Change view: %{compare_url}"
+    skip_join: true
+
 matrix:
   allow_failure:
   - rust: nightly
