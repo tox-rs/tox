@@ -280,6 +280,37 @@ impl PackedNode {
             SocketAddr::V6(addr) => IpAddr::V6(*addr.ip()),
         }
     }
+
+    /// Parse bytes into multiple `PackedNode`s.
+    ///
+    /// If provided bytes are smaller than [`PACKED_NODE_IPV4_SIZE`]
+    /// (./constant.PACKED_NODE_IPV4_SIZE.html) or can't be parsed, returns
+    /// `None`.
+    ///
+    /// Parses nodes until first error is encountered.
+    pub fn from_bytes_multiple(bytes: &[u8]) -> Option<Vec<PackedNode>> {
+        if bytes.len() < PACKED_NODE_IPV4_SIZE { return None }
+
+        let mut cur_pos = 0;
+        let mut result = vec![];
+
+        while let Some(node) = PackedNode::from_bytes(&bytes[cur_pos..]) {
+            cur_pos += {
+                match node.ip_type {
+                    IpType::U4 | IpType::T4 => PACKED_NODE_IPV4_SIZE,
+                    IpType::U6 | IpType::T6 => PACKED_NODE_IPV6_SIZE,
+                }
+            };
+            result.push(node);
+        }
+
+        if result.len() == 0 {
+            return None
+        } else {
+            return Some(result)
+        }
+    }
+
 }
 
 /// Serialize `PackedNode` into bytes.
@@ -290,7 +321,8 @@ impl PackedNode {
 /// IPv4 or IPv6 is being used.
 impl AsBytes for PackedNode {
     fn as_bytes(&self) -> Vec<u8> {
-        let mut result: Vec<u8> = Vec::with_capacity(39);
+        // TODO: ↓ perhaps capacity PACKED_NODE_IPV6_SIZE ?
+        let mut result: Vec<u8> = Vec::with_capacity(PACKED_NODE_IPV4_SIZE);
 
         result.push(self.ip_type as u8);
 
@@ -311,37 +343,32 @@ impl AsBytes for PackedNode {
 ///
 /// Can fail if:
 ///
-///  - length and [`IpType`](./enum.IpType.html) don't match
+///  - length is too short for given [`IpType`](./enum.IpType.html)
 ///  - PK can't be parsed
+///
+/// Blindly trusts that provided `IpType` matches - i.e. if there are provided
+/// 51 bytes (which is lenght of `PackedNode` that contains IPv6), and `IpType`
+/// says that it's actually IPv4, bytes will be parsed as if that was an IPv4
+/// address.
 impl FromBytes<PackedNode> for PackedNode {
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() == PACKED_NODE_IPV4_SIZE {
-            let iptype = match IpType::from_bytes(bytes) {
-                Some(IpType::U4) => IpType::U4,
-                Some(IpType::T4) => IpType::T4,
-                _ => return None,
-            };
-
+        // parse bytes as IPv4
+        fn as_ipv4(bytes: &[u8]) -> Option<(SocketAddr, PublicKey)> {
             let addr = Ipv4Addr::new(bytes[1], bytes[2], bytes[3], bytes[4]);
             let port = array_to_u16(&[bytes[5], bytes[6]]);
             let saddr = SocketAddrV4::new(addr, port);
 
-            let pk = match PublicKey::from_slice(&bytes[7..]) {
+            let pk = match PublicKey::from_slice(&bytes[7..PACKED_NODE_IPV4_SIZE]) {
                 Some(pk) => pk,
                 None => return None,
             };
 
-            return Some(PackedNode {
-                ip_type: iptype,
-                socketaddr: SocketAddr::V4(saddr),
-                node_id: pk,
-            });
-        } else if bytes.len() == PACKED_NODE_IPV6_SIZE {
-            let iptype = match IpType::from_bytes(bytes) {
-                Some(IpType::U6) => IpType::U6,
-                Some(IpType::T6) => IpType::T6,
-                _ => return None,
-            };
+            Some((SocketAddr::V4(saddr), pk))
+        }
+
+        // parse bytes as IPv4
+        fn as_ipv6(bytes: &[u8]) -> Option<(SocketAddr, PublicKey)> {
+            if bytes.len() < PACKED_NODE_IPV6_SIZE { return None }
 
             let addr = match Ipv6Addr::from_bytes(&bytes[1..]) {
                 Some(a) => a,
@@ -350,14 +377,32 @@ impl FromBytes<PackedNode> for PackedNode {
             let port = array_to_u16(&[bytes[17], bytes[18]]);
             let saddr = SocketAddrV6::new(addr, port, 0, 0);
 
-            let pk = match PublicKey::from_slice(&bytes[19..]) {
+            let pk = match PublicKey::from_slice(&bytes[19..PACKED_NODE_IPV6_SIZE]) {
                 Some(p) => p,
+                None    => return None,
+            };
+
+            Some((SocketAddr::V6(saddr), pk))
+        }
+
+
+        if bytes.len() >= PACKED_NODE_IPV4_SIZE {
+            let (iptype, saddr_and_pk) = match IpType::from_bytes(bytes) {
+                Some(IpType::U4) => (IpType::U4, as_ipv4(bytes)),
+                Some(IpType::T4) => (IpType::T4, as_ipv4(bytes)),
+                Some(IpType::U6) => (IpType::U6, as_ipv6(bytes)),
+                Some(IpType::T6) => (IpType::T6, as_ipv6(bytes)),
+                None => return None,
+            };
+
+            let (saddr, pk) = match saddr_and_pk {
+                Some(v) => v,
                 None => return None,
             };
 
             return Some(PackedNode {
                 ip_type: iptype,
-                socketaddr: SocketAddr::V6(saddr),
+                socketaddr: saddr,
                 node_id: pk,
             });
         }
@@ -474,7 +519,7 @@ impl SendNodes {
 }
 
 /// Method assumes that supplied `SendNodes` has correct number of nodes
-/// included – `(1, 4)`.
+/// included – `[1, 4]`.
 impl AsBytes for SendNodes {
     fn as_bytes(&self) -> Vec<u8> {
         // first byte is number of nodes
@@ -487,4 +532,33 @@ impl AsBytes for SendNodes {
     }
 }
 
-// TODO: SendNodes::from_bytes()
+/// Method to parse received bytes as `SendNodes`.
+///
+/// Returns `None` if bytes can't be parsed into `SendNodes`.
+impl FromBytes<SendNodes> for SendNodes {
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        // first byte should say how many `PackedNode`s `SendNodes` has.
+        // There has to be at least 1 node, and no more than 4.
+        if bytes[0] < 1 || bytes[0] > 4 { return None }
+
+        if let Some(nodes) = PackedNode::from_bytes_multiple(&bytes[1..]) {
+            if nodes.len() > 4 { return None }
+
+            // TODO: ↓ most likely can be done more efficiently
+            // since 1st byte is a number of nodes
+            let mut nodes_bytes_len = 1;
+            for n in &nodes {
+                nodes_bytes_len += n.as_bytes().len();
+            }
+
+            // for ping id
+            let mut arr: [u8; 8] = [0; 8];
+            for num in 0..arr.len() {
+                arr[num] = bytes[nodes_bytes_len + num];
+            }
+
+            return Some(SendNodes { nodes: nodes, id: array_to_u64(&arr) })
+        }
+        None  // parsing failed
+    }
+}

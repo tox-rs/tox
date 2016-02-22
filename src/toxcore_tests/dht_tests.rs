@@ -226,6 +226,7 @@ fn ipv6_addr_from_bytes_test() {
 
 // PackedNode::
 
+/// Valid, random PackedNode.
 impl Arbitrary for PackedNode {
     fn arbitrary<G: Gen>(g: &mut G) -> Self {
         let udp: bool = g.gen();
@@ -289,6 +290,28 @@ fn packed_node_ip_test() {
         IpAddr::V4(_) => panic!("This should not have happened, since IPv6 was supplied!"),
         IpAddr::V6(_) => {},
     }
+}
+
+
+// PackedNode::from_bytes_multiple()
+
+#[test]
+fn packed_node_from_bytes_multiple_test() {
+    fn with_nodes(nodes: Vec<PackedNode>) {
+        if nodes.len() == 0 {
+            assert_eq!(None, PackedNode::from_bytes_multiple(&vec![]));
+            return
+        }
+        let mut bytes = vec![];
+        for n in nodes.clone() {
+            bytes.extend_from_slice(&n.as_bytes());
+        }
+        let nodes2 = PackedNode::from_bytes_multiple(&bytes).unwrap();
+
+        assert_eq!(nodes.len(), nodes2.len());
+        assert_eq!(nodes, nodes2);
+    }
+    quickcheck(with_nodes as fn(Vec<PackedNode>));
 }
 
 
@@ -453,22 +476,24 @@ fn packed_nodes_from_bytes_test() {
 fn packed_nodes_from_bytes_test_length_short() {
     fn fully_random(pn: PackedNode) {
         let pnb = pn.as_bytes();
-        assert_eq!(None, PackedNode::from_bytes(&pnb[1..]));
         assert_eq!(None, PackedNode::from_bytes(&pnb[..(pnb.len() - 1)]));
+        if let None = IpType::from_bytes(&pnb[1..]) {
+            assert_eq!(None, PackedNode::from_bytes(&pnb[1..]));
+        }
     }
     quickcheck(fully_random as fn(PackedNode));
 }
 
 #[test]
-// test for fail when length is too big
+// test for when length is too big - should work, and parse only first bytes
 fn packed_nodes_from_bytes_test_length_too_long() {
-    fn fully_random(pn: PackedNode, r_u8: u8) {
+    fn fully_random(pn: PackedNode, r_u8: Vec<u8>) {
         let mut vec = Vec::with_capacity(PACKED_NODE_IPV6_SIZE);
         vec.extend_from_slice(&pn.as_bytes()[..]);
-        vec.push(r_u8);
-        assert_eq!(None, PackedNode::from_bytes(&vec[..]));
+        vec.extend_from_slice(&r_u8);
+        assert_eq!(pn, PackedNode::from_bytes(&vec[..]).unwrap());
     }
-    quickcheck(fully_random as fn(PackedNode, u8));
+    quickcheck(fully_random as fn(PackedNode, Vec<u8>));
 }
 
 #[test]
@@ -495,10 +520,10 @@ fn packed_nodes_from_bytes_test_wrong_iptype() {
         match pn.ip_type {
             IpType::U4 => vec.push(IpType::U6 as u8),
             IpType::T4 => vec.push(IpType::T6 as u8),
-            IpType::U6 => vec.push(IpType::U4 as u8),
-            IpType::T6 => vec.push(IpType::T4 as u8),
+            _ => return,
         }
         vec.extend_from_slice(&pn.as_bytes()[1..]);
+
         assert_eq!(None, PackedNode::from_bytes(&vec[..]));
     }
     quickcheck(fully_random as fn(PackedNode));
@@ -567,6 +592,8 @@ fn get_nodes_from_bytes_test() {
 }
 
 
+// SendNodes::
+
 // SendNodes::from_request()
 
 #[test]
@@ -586,7 +613,7 @@ fn send_nodes_from_request_test() {
 // SendNodes::as_bytes()
 
 #[test]
-fn send_nodes_as_bytes() {
+fn send_nodes_as_bytes_test() {
     // there should be at least 1 valid node; there can be up to 4 nodes
     fn with_nodes(req: GetNodes, n1: PackedNode, n2: Option<PackedNode>,
                   n3: Option<PackedNode>, n4: Option<PackedNode>) {
@@ -616,4 +643,28 @@ fn send_nodes_as_bytes() {
     }
     quickcheck(with_nodes as fn(GetNodes, PackedNode, Option<PackedNode>,
                                 Option<PackedNode>, Option<PackedNode>));
+}
+
+
+// SendNodes::from_bytes()
+
+#[test]
+fn send_nodes_from_bytes_test() {
+    fn with_nodes(nodes: Vec<PackedNode>, r_u64: u64) {
+        let mut bytes = vec![nodes.len() as u8];
+        for node in &nodes {
+            bytes.extend_from_slice(&node.as_bytes());
+        }
+        // and ping id
+        bytes.extend_from_slice(&u64_to_array(r_u64));
+
+        if nodes.len() > 4 || nodes.len() == 0 {
+            assert_eq!(None, SendNodes::from_bytes(&bytes));
+        } else {
+            let nodes2 = SendNodes::from_bytes(&bytes).unwrap();
+            assert_eq!(&nodes, &nodes2.nodes);
+            assert_eq!(r_u64, nodes2.id);
+        }
+    }
+    quickcheck(with_nodes as fn(Vec<PackedNode>, u64));
 }
