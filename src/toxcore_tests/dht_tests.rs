@@ -41,6 +41,15 @@ fn u64_as_u16s(num: u64) -> (u16, u16, u16, u16) {
 }
 
 
+// Ping::
+
+impl Arbitrary for Ping {
+    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+        let request: bool = g.gen();
+        if request { Ping::new() } else { Ping::new().response().unwrap() }
+    }
+}
+
 // PingType::from_bytes()
 
 #[test]
@@ -594,6 +603,16 @@ fn get_nodes_from_bytes_test() {
 
 // SendNodes::
 
+impl Arbitrary for SendNodes {
+    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+        let mut nodes: Vec<PackedNode> = vec![];
+        for _ in 0..g.gen_range(1, 4) {
+            nodes.push(Arbitrary::arbitrary(g));
+        }
+        SendNodes { nodes: nodes, id: g.gen() }
+    }
+}
+
 // SendNodes::from_request()
 
 #[test]
@@ -667,4 +686,78 @@ fn send_nodes_from_bytes_test() {
         }
     }
     quickcheck(with_nodes as fn(Vec<PackedNode>, u64));
+}
+
+
+// DPacketT::
+
+impl Arbitrary for DPacketT {
+    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+        let choice = g.gen_range(0, 3);
+        match choice {
+            0 => DPacketT::Ping(Arbitrary::arbitrary(g)),
+            1 => DPacketT::GetNodes(Arbitrary::arbitrary(g)),
+            2 => DPacketT::SendNodes(Arbitrary::arbitrary(g)),
+            _ => panic!("Arbitrary for DPacketT – should not have happened!"),
+        }
+    }
+}
+
+// DPacketT::as_bytes()
+
+#[test]
+fn d_packet_t_as_bytes_test() {
+    fn with_dpacket(dp: DPacketT) {
+        let dbytes = dp.as_bytes();
+        match dp {
+            DPacketT::Ping(d)      => assert_eq!(d.as_bytes(), dbytes),
+            DPacketT::GetNodes(d)  => assert_eq!(d.as_bytes(), dbytes),
+            DPacketT::SendNodes(d) => assert_eq!(d.as_bytes(), dbytes),
+        }
+    }
+    quickcheck(with_dpacket as fn(DPacketT));
+}
+
+
+// DPacketTnum::from_bytes()
+
+#[test]
+fn d_packet_t_num_from_bytes_test() {
+    fn with_bytes(bytes: Vec<u8>) {
+        if bytes.len() == 0 {
+            assert_eq!(None, DPacketTnum::from_bytes(&bytes));
+            return
+        }
+        match bytes[0] {
+            0 => assert_eq!(DPacketTnum::PingReq, DPacketTnum::from_bytes(&bytes).unwrap()),
+            1 => assert_eq!(DPacketTnum::PingResp, DPacketTnum::from_bytes(&bytes).unwrap()),
+            2 => assert_eq!(DPacketTnum::GetN, DPacketTnum::from_bytes(&bytes).unwrap()),
+            4 => assert_eq!(DPacketTnum::SendN, DPacketTnum::from_bytes(&bytes).unwrap()),
+            _ => assert_eq!(None, DPacketTnum::from_bytes(&bytes)),
+        }
+    }
+    quickcheck(with_bytes as fn(Vec<u8>));
+
+    // just in case
+    with_bytes(vec![]);
+    with_bytes(vec![0]);
+    with_bytes(vec![1]);
+    with_bytes(vec![2]);
+    with_bytes(vec![3]);  // incorrect
+    with_bytes(vec![4]);
+}
+
+
+// DhtPacket::new()
+
+// TODO: improve test ↓ (perhaps by making other struct fields public?)
+#[test]
+fn dht_packet_new_test() {
+    fn with_dpacket(dpt: DPacketT) {
+        let (pk, sk) = gen_keypair();
+        let nonce = gen_nonce();
+        let dhtp = DhtPacket::new(&sk, &pk, &pk, &nonce, dpt);
+        assert_eq!(dhtp.sender_pk, pk);
+    }
+    quickcheck(with_dpacket as fn(DPacketT));
 }

@@ -544,21 +544,123 @@ impl FromBytes<SendNodes> for SendNodes {
         if let Some(nodes) = PackedNode::from_bytes_multiple(&bytes[1..]) {
             if nodes.len() > 4 { return None }
 
-            // TODO: ↓ most likely can be done more efficiently
             // since 1st byte is a number of nodes
             let mut nodes_bytes_len = 1;
-            for n in &nodes {
-                nodes_bytes_len += n.as_bytes().len();
+            // TODO: ↓ most likely can be done more efficiently
+            for node in &nodes {
+                nodes_bytes_len += node.as_bytes().len();
             }
 
-            // for ping id
-            let mut arr: [u8; 8] = [0; 8];
-            for num in 0..arr.len() {
-                arr[num] = bytes[nodes_bytes_len + num];
+            // need u64 from bytes
+            let mut ping_id: [u8; 8] = [0; 8];
+            for pos in 0..ping_id.len() {
+                ping_id[pos] = bytes[nodes_bytes_len + pos];
             }
 
-            return Some(SendNodes { nodes: nodes, id: array_to_u64(&arr) })
+            return Some(SendNodes { nodes: nodes, id: array_to_u64(&ping_id) })
         }
         None  // parsing failed
+    }
+}
+
+/// Types of DHT packets that can be put in `DHT Packet`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DPacketT {
+    /// `Ping` packet type.
+    Ping(Ping),
+    /// `GetNodes` packet type. Used to request nodes.
+    GetNodes(GetNodes),
+    /// `SendNodes` response to `GetNodes` request.
+    SendNodes(SendNodes),
+}
+
+impl AsBytes for DPacketT {
+    fn as_bytes(&self) -> Vec<u8> {
+        match *self {
+            DPacketT::Ping(ref d)      => d.as_bytes(),
+            DPacketT::GetNodes(ref d)  => d.as_bytes(),
+            DPacketT::SendNodes(ref d) => d.as_bytes(),
+        }
+    }
+}
+
+
+/// Packet type number associated with packet.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DPacketTnum {
+    /// [`Ping`](./struct.Ping.html) request number.
+    PingReq  = 0,
+    /// [`Ping`](./struct.Ping.html) response number.
+    PingResp = 1,
+    /// [`GetNodes`](./struct.GetNodes.html) packet number.
+    GetN     = 2,
+    /// [`SendNodes`](./struct.SendNodes.html) packet number.
+    SendN    = 4,
+}
+
+/// Parse first byte from provided `bytes` as `DPacketTnum`.
+///
+/// Returns `None` if no bytes provided, or first byte doesn't match.
+impl FromBytes<DPacketTnum> for DPacketTnum {
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() == 0 { return None }
+
+        match bytes[0] {
+            0 => Some(DPacketTnum::PingReq),
+            1 => Some(DPacketTnum::PingResp),
+            2 => Some(DPacketTnum::GetN),
+            4 => Some(DPacketTnum::SendN),
+            _ => None,
+        }
+    }
+}
+
+
+/// Standard DHT packet that encapsulates in the encrypted payload
+/// [`DhtPacketT`](./enum.DhtPacketT.html).
+///
+/// Length      | Contents
+/// ----------- | --------
+/// `1`         | `uint8_t` packet kind (see other packets)
+/// `32`        | Sender DHT Public Key
+/// `24`        | Random nonce
+/// variable    | Encrypted payload
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DhtPacket {
+    p_type: DPacketTnum,
+    /// Public key of sender.
+    pub sender_pk: PublicKey,
+    nonce: Nonce,
+    payload: Vec<u8>,
+}
+
+// TODO: perhaps methods `is_ping(&self)` `is_get(&self)`, `is_send(&self)`
+impl DhtPacket {
+    /// Create new `DhtPacket`.
+    pub fn new(own_secret_key: &SecretKey, own_public_key: &PublicKey,
+               receiver_public_key: &PublicKey, nonce: &Nonce, packet: DPacketT)
+        -> Self {
+
+        let packet_type = match packet {
+            DPacketT::GetNodes(_) => DPacketTnum::GetN,
+            DPacketT::SendNodes(_) => DPacketTnum::SendN,
+            DPacketT::Ping(ping) => {
+                if ping.is_request() {
+                    DPacketTnum::PingReq
+                } else {
+                    DPacketTnum::PingResp
+                }
+            },
+        };
+
+        let payload = seal(&packet.as_bytes(), nonce, receiver_public_key,
+                           own_secret_key);
+
+        DhtPacket {
+            p_type: packet_type,
+            sender_pk: *own_public_key,
+            nonce: *nonce,
+            payload: payload,
+        }
     }
 }
