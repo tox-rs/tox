@@ -761,3 +761,44 @@ fn dht_packet_new_test() {
     }
     quickcheck(with_dpacket as fn(DPacketT));
 }
+
+// DhtPacket::as_bytes()
+
+#[test]
+fn dht_packet_as_bytes_test() {
+    fn with_dpacket(dpt: DPacketT) {
+        // Alice serializes & encrypts packet, Bob decrypts
+        let (alice_pk, alice_sk) = gen_keypair();
+        let (bob_pk, bob_sk) = gen_keypair();
+        let nonce = gen_nonce();
+
+        let packet = DhtPacket::new(&alice_sk, &alice_pk, &bob_pk, &nonce, dpt.clone())
+                        .as_bytes();
+
+        // check whether packet type was serialized correctly
+        let packet_type = match dpt {
+            DPacketT::Ping(ref ping) => { if ping.is_request() { 0 } else { 1 } },
+            DPacketT::GetNodes(_) => 2,
+            DPacketT::SendNodes(_) => 4,
+        };
+        assert_eq!(packet_type, packet[0]);
+
+        // sender's PK
+        let PublicKey(send_pk) = alice_pk;
+        assert_eq!(send_pk, packet[1..(1 + PUBLICKEYBYTES)]);
+
+        // nonce
+        let nonce_start = 1 + PUBLICKEYBYTES;
+        let nonce_end = nonce_start + NONCEBYTES;
+        let Nonce(nonce_bytes) = nonce;
+        assert_eq!(nonce_bytes, packet[nonce_start..nonce_end]);
+
+        let decrypted = open(&packet[nonce_end..], &nonce, &alice_pk, &bob_sk).unwrap();
+        match dpt {
+            DPacketT::Ping(d) => assert_eq!(d, Ping::from_bytes(&decrypted).unwrap()),
+            DPacketT::GetNodes(d) => assert_eq!(d, GetNodes::from_bytes(&decrypted).unwrap()),
+            DPacketT::SendNodes(d) => assert_eq!(d, SendNodes::from_bytes(&decrypted).unwrap()),
+        }
+    }
+    quickcheck(with_dpacket as fn(DPacketT));
+}

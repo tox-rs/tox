@@ -582,6 +582,7 @@ impl AsBytes for DPacketT {
             DPacketT::SendNodes(ref d) => d.as_bytes(),
         }
     }
+    // TODO: impl `as_type() -> DPacketTnum`
 }
 
 
@@ -627,12 +628,20 @@ impl FromBytes<DPacketTnum> for DPacketTnum {
 /// variable    | Encrypted payload
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DhtPacket {
-    p_type: DPacketTnum,
+    packet_type: DPacketTnum,
     /// Public key of sender.
     pub sender_pk: PublicKey,
     nonce: Nonce,
     payload: Vec<u8>,
 }
+
+// TODO: max dht packet size?
+/// Minimal size of [`DhtPacket`](./struct.DhtPacket.html) in bytes.
+pub const DHT_PACKET_MIN_SIZE: usize = 1
+                                     + PUBLICKEYBYTES
+                                     + NONCEBYTES
+                                     + MACBYTES
+                                     + PACKED_NODE_IPV4_SIZE;
 
 // TODO: perhaps methods `is_ping(&self)` `is_get(&self)`, `is_send(&self)`
 impl DhtPacket {
@@ -657,10 +666,27 @@ impl DhtPacket {
                            own_secret_key);
 
         DhtPacket {
-            p_type: packet_type,
+            packet_type: packet_type,
             sender_pk: *own_public_key,
             nonce: *nonce,
             payload: payload,
         }
+    }
+}
+
+/// Serialize `DhtPacket` into bytes.
+impl AsBytes for DhtPacket {
+    fn as_bytes(&self) -> Vec<u8> {
+        let mut result = Vec::with_capacity(DHT_PACKET_MIN_SIZE);
+        result.push(self.packet_type as u8);
+
+        let PublicKey(pk) = self.sender_pk;
+        result.extend_from_slice(&pk);
+
+        let Nonce(nonce) = self.nonce;
+        result.extend_from_slice(&nonce);
+
+        result.extend_from_slice(&self.payload);
+        result
     }
 }
