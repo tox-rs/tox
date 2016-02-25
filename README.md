@@ -5,13 +5,12 @@ IRC channel: [#zetox @ freenode](https://webchat.freenode.net/?channels=zetox)
 
 ## Documentation
 
-Documentation to use when implementing toxcore in Rust is a bit scattered around. It can be found at:
- - [The Tox Reference](https://github.com/iphydf/tox-spec)
- - [Docs bundled with toxcore](https://github.com/irungentoo/toxcore/tree/master/docs)
- - [Comments in toxcore source code](https://github.com/irungentoo/toxcore/tree/master/toxcore)
+[The Tox Reference](https://github.com/TokTok/tox-spec) should be used for
+implementing toxcore in Rust.
 
-Existing documentation may not be complete, and as such reading toxcore's source in C might be a necessity.
-
+If existing documentation appears to not be complete, or is not clear enough,
+issue / pull request should be filled on the [reference repository]
+(https://github.com/TokTok/tox-spec/issues/new).
 
 ## Contributing
 Contributing guidelines: [CONTRIBUTING.md](/CONTRIBUTING.md).
