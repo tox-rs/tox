@@ -574,6 +574,25 @@ pub enum DPacketT {
     SendNodes(SendNodes),
 }
 
+impl DPacketT {
+    /// Provide packet type number.
+    ///
+    /// To use for serialization: `.as_type() as u8`.
+    pub fn as_type(&self) -> DPacketTnum {
+        match *self {
+            DPacketT::GetNodes(_) => DPacketTnum::GetN,
+            DPacketT::SendNodes(_) => DPacketTnum::SendN,
+            DPacketT::Ping(p) => {
+                if p.is_request() {
+                    DPacketTnum::PingReq
+                } else {
+                    DPacketTnum::PingResp
+                }
+            },
+        }
+    }
+}
+
 impl AsBytes for DPacketT {
     fn as_bytes(&self) -> Vec<u8> {
         match *self {
@@ -582,7 +601,6 @@ impl AsBytes for DPacketT {
             DPacketT::SendNodes(ref d) => d.as_bytes(),
         }
     }
-    // TODO: impl `as_type() -> DPacketTnum`
 }
 
 
@@ -650,23 +668,11 @@ impl DhtPacket {
                receiver_public_key: &PublicKey, nonce: &Nonce, packet: DPacketT)
         -> Self {
 
-        let packet_type = match packet {
-            DPacketT::GetNodes(_) => DPacketTnum::GetN,
-            DPacketT::SendNodes(_) => DPacketTnum::SendN,
-            DPacketT::Ping(ping) => {
-                if ping.is_request() {
-                    DPacketTnum::PingReq
-                } else {
-                    DPacketTnum::PingResp
-                }
-            },
-        };
-
         let payload = seal(&packet.as_bytes(), nonce, receiver_public_key,
                            own_secret_key);
 
         DhtPacket {
-            packet_type: packet_type,
+            packet_type: packet.as_type(),
             sender_pk: *own_public_key,
             nonce: *nonce,
             payload: payload,

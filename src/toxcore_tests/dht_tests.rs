@@ -703,6 +703,26 @@ impl Arbitrary for DPacketT {
     }
 }
 
+// DPacketT::as_type()
+
+#[test]
+fn d_packet_t_as_type_test() {
+    fn with_dpacket(dpt: DPacketT) {
+        match dpt {
+            DPacketT::GetNodes(_) => assert_eq!(DPacketTnum::GetN, dpt.as_type()),
+            DPacketT::SendNodes(_) => assert_eq!(DPacketTnum::SendN, dpt.as_type()),
+            DPacketT::Ping(p) => {
+                if p.is_request() {
+                    assert_eq!(DPacketTnum::PingReq, dpt.as_type());
+                } else {
+                    assert_eq!(DPacketTnum::PingResp, dpt.as_type());
+                }
+            },
+        }
+    }
+    quickcheck(with_dpacket as fn(DPacketT));
+}
+
 // DPacketT::as_bytes()
 
 #[test]
