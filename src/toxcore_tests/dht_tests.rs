@@ -768,6 +768,20 @@ fn d_packet_t_num_from_bytes_test() {
 }
 
 
+// DhtPacket::
+
+impl Arbitrary for DhtPacket {
+    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+        let (pk, sk) = gen_keypair();  // "sender" keypair
+        let (r_pk, _) = gen_keypair();  // receiver PK
+        let nonce = gen_nonce();
+
+        let packet: DPacketT = Arbitrary::arbitrary(g);
+
+        DhtPacket::new(&sk, &pk, &r_pk, &nonce, packet)
+    }
+}
+
 // DhtPacket::new()
 
 // TODO: improve test ↓ (perhaps by making other struct fields public?)
@@ -821,4 +835,19 @@ fn dht_packet_as_bytes_test() {
         }
     }
     quickcheck(with_dpacket as fn(DPacketT));
+}
+
+// DhtPacket::from_bytes()
+
+#[test]
+fn dht_packet_from_bytes_test() {
+    fn with_packet(p: DhtPacket, invalid: Vec<u8>) {
+        let from_bytes = DhtPacket::from_bytes(&p.as_bytes()).unwrap();
+        assert_eq!(p, from_bytes);
+
+        if let None = DPacketTnum::from_bytes(&invalid) {
+            assert_eq!(None, DhtPacket::from_bytes(&invalid));
+        }
+    }
+    quickcheck(with_packet as fn(DhtPacket, Vec<u8>));
 }

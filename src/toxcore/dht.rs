@@ -77,7 +77,7 @@ pub struct Ping {
     pub id: u64,
 }
 
-/// Length in bytes of [`Ping`](./struct.Ping) when serialized into bytes.
+/// Length in bytes of [`Ping`](./struct.Ping.html) when serialized into bytes.
 pub const PING_SIZE: usize = 9;
 
 impl Ping {
@@ -569,8 +569,10 @@ pub enum DPacketT {
     /// `Ping` packet type.
     Ping(Ping),
     /// `GetNodes` packet type. Used to request nodes.
+    // TODO: rename to `GetN()` ? – consistency with DPacketTnum
     GetNodes(GetNodes),
     /// `SendNodes` response to `GetNodes` request.
+    // TODO: rename to `SendN()` ? – consistency with DPacketTnum
     SendNodes(SendNodes),
 }
 
@@ -655,11 +657,11 @@ pub struct DhtPacket {
 
 // TODO: max dht packet size?
 /// Minimal size of [`DhtPacket`](./struct.DhtPacket.html) in bytes.
-pub const DHT_PACKET_MIN_SIZE: usize = 1
+pub const DHT_PACKET_MIN_SIZE: usize = 1 // packet type, plain
                                      + PUBLICKEYBYTES
                                      + NONCEBYTES
                                      + MACBYTES
-                                     + PACKED_NODE_IPV4_SIZE;
+                                     + PING_SIZE; // smallest payload
 
 // TODO: perhaps methods `is_ping(&self)` `is_get(&self)`, `is_send(&self)`
 impl DhtPacket {
@@ -694,5 +696,36 @@ impl AsBytes for DhtPacket {
 
         result.extend_from_slice(&self.payload);
         result
+    }
+}
+
+/// De-serialize bytes into `DhtPacket`.
+impl FromBytes<DhtPacket> for DhtPacket {
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() < DHT_PACKET_MIN_SIZE { return None }
+
+        let packet_type = match DPacketTnum::from_bytes(bytes) {
+            Some(b) => b,
+            None => return None,
+        };
+
+        const NONCE_POS: usize = 1 + PUBLICKEYBYTES;
+        let sender_pk = match PublicKey::from_slice(&bytes[1..NONCE_POS]) {
+            Some(pk) => pk,
+            None => return None,
+        };
+
+        const PAYLOAD_POS: usize = NONCE_POS + NONCEBYTES;
+        let nonce = match Nonce::from_slice(&bytes[NONCE_POS..PAYLOAD_POS]) {
+            Some(n) => n,
+            None => return None,
+        };
+
+        Some(DhtPacket {
+            packet_type: packet_type,
+            sender_pk: sender_pk,
+            nonce: nonce,
+            payload: bytes[(PAYLOAD_POS)..].to_vec(),
+        })
     }
 }
