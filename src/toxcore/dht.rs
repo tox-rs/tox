@@ -666,6 +666,10 @@ pub const DHT_PACKET_MIN_SIZE: usize = 1 // packet type, plain
 // TODO: perhaps methods `is_ping(&self)` `is_get(&self)`, `is_send(&self)`
 impl DhtPacket {
     /// Create new `DhtPacket`.
+    // TODO: perhaps switch to using precomputed symmetric key?
+    //        - given that computing shared key is apparently the most
+    //          costly operation when it comes to crypto, using precomputed
+    //          key might (would significantly?) lower resource usage
     pub fn new(own_secret_key: &SecretKey, own_public_key: &PublicKey,
                receiver_public_key: &PublicKey, nonce: &Nonce, packet: DPacketT)
         -> Self {
@@ -679,6 +683,37 @@ impl DhtPacket {
             nonce: *nonce,
             payload: payload,
         }
+    }
+
+    /// Get packet data. This functino decrypts payload and tries to parse it
+    /// as packet type.
+    ///
+    /// Returns `None` in case of faliure.
+    pub fn get_packet(&self, own_secret_key: &SecretKey) -> Option<DPacketT> {
+        let decrypted = match open(&self.payload, &self.nonce, &self.sender_pk,
+                            own_secret_key) {
+            Ok(d) => d,
+            Err(_) => return None,
+        };
+
+        match self.packet_type {
+            DPacketTnum::PingReq | DPacketTnum::PingResp => {
+                if let Some(p) = Ping::from_bytes(&decrypted) {
+                    return Some(DPacketT::Ping(p))
+                }
+            },
+            DPacketTnum::GetN => {
+                if let Some(n) = GetNodes::from_bytes(&decrypted) {
+                    return Some(DPacketT::GetNodes(n))
+                }
+            },
+            DPacketTnum::SendN => {
+                if let Some(n) = SendNodes::from_bytes(&decrypted) {
+                    return Some(DPacketT::SendNodes(n))
+                }
+            },
+        }
+        None  // parsing failed
     }
 }
 

@@ -124,6 +124,12 @@ pub fn decrypt_data_symmetric(precomputed_key: &PrecomputedKey,
 //
 // overflow doesn't /seem/ to be likely to happen in the first place, given
 // that no nonce should be incremented long enough for it to happen, but still..
+// FIXME: since toxcore increments nonce as big endian num, same has to be done
+//        here: https://toktok.github.io/spec#nonce-2
+//
+//        Alternatively, make toxcore C reference use libsodium function for
+//        incrementing nonces, which is LE – this is marked in toxcore as
+//        `FIXME`.
 pub fn increment_nonce(nonce: &mut Nonce) {
     nonce.increment_le_inplace();
 }

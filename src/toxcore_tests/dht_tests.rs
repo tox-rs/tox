@@ -796,6 +796,24 @@ fn dht_packet_new_test() {
     quickcheck(with_dpacket as fn(DPacketT));
 }
 
+// DhtPacket::get_packet()
+
+#[test]
+fn dht_paket_get_packet_test() {
+    fn with_dpackett(dpt: DPacketT) {
+        let (alice_pk, alice_sk) = gen_keypair();
+        let (bob_pk, bob_sk) = gen_keypair();
+        let nonce = gen_nonce();
+
+        let new_packet = DhtPacket::new(&alice_sk, &alice_pk, &bob_pk, &nonce,
+                                        dpt.clone());
+
+        let bob_packet = new_packet.get_packet(&bob_sk).unwrap();
+        assert_eq!(dpt, bob_packet);
+    }
+    quickcheck(with_dpackett as fn(DPacketT));
+}
+
 // DhtPacket::as_bytes()
 
 #[test]
