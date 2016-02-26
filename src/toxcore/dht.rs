@@ -666,16 +666,10 @@ pub const DHT_PACKET_MIN_SIZE: usize = 1 // packet type, plain
 // TODO: perhaps methods `is_ping(&self)` `is_get(&self)`, `is_send(&self)`
 impl DhtPacket {
     /// Create new `DhtPacket`.
-    // TODO: perhaps switch to using precomputed symmetric key?
-    //        - given that computing shared key is apparently the most
-    //          costly operation when it comes to crypto, using precomputed
-    //          key might (would significantly?) lower resource usage
-    pub fn new(own_secret_key: &SecretKey, own_public_key: &PublicKey,
-               receiver_public_key: &PublicKey, nonce: &Nonce, packet: DPacketT)
-        -> Self {
+    pub fn new(symmetric_key: &PrecomputedKey, own_public_key: &PublicKey,
+               nonce: &Nonce, packet: DPacketT) -> Self {
 
-        let payload = seal(&packet.as_bytes(), nonce, receiver_public_key,
-                           own_secret_key);
+        let payload = seal_precomputed(&packet.as_bytes(), nonce, symmetric_key);
 
         DhtPacket {
             packet_type: packet.as_type(),
@@ -689,6 +683,13 @@ impl DhtPacket {
     /// as packet type.
     ///
     /// Returns `None` in case of faliure.
+    // TODO: perhaps switch to using precomputed symmetric key?
+    //        - given that computing shared key is apparently the most
+    //          costly operation when it comes to crypto, using precomputed
+    //          key might (would significantly?) lower resource usage
+    //
+    //          Alternatively, another method `get_packetnm() which would use
+    //          symmetric key.
     pub fn get_packet(&self, own_secret_key: &SecretKey) -> Option<DPacketT> {
         let decrypted = match open(&self.payload, &self.nonce, &self.sender_pk,
                             own_secret_key) {

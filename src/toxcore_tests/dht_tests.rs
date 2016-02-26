@@ -774,11 +774,12 @@ impl Arbitrary for DhtPacket {
     fn arbitrary<G: Gen>(g: &mut G) -> Self {
         let (pk, sk) = gen_keypair();  // "sender" keypair
         let (r_pk, _) = gen_keypair();  // receiver PK
+        let precomputed = precompute(&r_pk, &sk);
         let nonce = gen_nonce();
 
         let packet: DPacketT = Arbitrary::arbitrary(g);
 
-        DhtPacket::new(&sk, &pk, &r_pk, &nonce, packet)
+        DhtPacket::new(&precomputed, &pk, &nonce, packet)
     }
 }
 
@@ -789,8 +790,9 @@ impl Arbitrary for DhtPacket {
 fn dht_packet_new_test() {
     fn with_dpacket(dpt: DPacketT) {
         let (pk, sk) = gen_keypair();
+        let precomputed = precompute(&pk, &sk);
         let nonce = gen_nonce();
-        let dhtp = DhtPacket::new(&sk, &pk, &pk, &nonce, dpt);
+        let dhtp = DhtPacket::new(&precomputed, &pk, &nonce, dpt);
         assert_eq!(dhtp.sender_pk, pk);
     }
     quickcheck(with_dpacket as fn(DPacketT));
@@ -803,9 +805,10 @@ fn dht_paket_get_packet_test() {
     fn with_dpackett(dpt: DPacketT) {
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, bob_sk) = gen_keypair();
+        let precomputed = precompute(&bob_pk, &alice_sk);
         let nonce = gen_nonce();
 
-        let new_packet = DhtPacket::new(&alice_sk, &alice_pk, &bob_pk, &nonce,
+        let new_packet = DhtPacket::new(&precomputed, &alice_pk, &nonce,
                                         dpt.clone());
 
         let bob_packet = new_packet.get_packet(&bob_sk).unwrap();
@@ -822,9 +825,10 @@ fn dht_packet_as_bytes_test() {
         // Alice serializes & encrypts packet, Bob decrypts
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, bob_sk) = gen_keypair();
+        let precomputed = precompute(&bob_pk, &alice_sk);
         let nonce = gen_nonce();
 
-        let packet = DhtPacket::new(&alice_sk, &alice_pk, &bob_pk, &nonce, dpt.clone())
+        let packet = DhtPacket::new(&precomputed, &alice_pk, &nonce, dpt.clone())
                         .as_bytes();
 
         // check whether packet type was serialized correctly
