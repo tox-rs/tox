@@ -23,6 +23,7 @@
 //! DHT part of the toxcore.
 
 use ip::*;
+use std::cmp::{Ord, Ordering};
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
 use toxcore::binary_io::*;
@@ -688,7 +689,7 @@ impl DhtPacket {
     //          costly operation when it comes to crypto, using precomputed
     //          key might (would significantly?) lower resource usage
     //
-    //          Alternatively, another method `get_packetnm() which would use
+    //          Alternatively, another method `get_packetnm()` which would use
     //          symmetric key.
     pub fn get_packet(&self, own_secret_key: &SecretKey) -> Option<DPacketT> {
         let decrypted = match open(&self.payload, &self.nonce, &self.sender_pk,
@@ -763,5 +764,31 @@ impl FromBytes<DhtPacket> for DhtPacket {
             nonce: nonce,
             payload: bytes[(PAYLOAD_POS)..].to_vec(),
         })
+    }
+}
+
+
+/// Trait for functionality related to distance between `PublicKey`s.
+pub trait Distance {
+    /// Check whether distance between PK1 and own PK is smaller than distance
+    /// between PK2 and own PK.
+    // TODO: perhaps simple bool would suffice?
+    fn distance(&self, &PublicKey, &PublicKey) -> Ordering;
+}
+
+// NOTE: Due to relying on XOR, this doesn't work well in a case where one of
+//       compared keys is `0` – i.e. key `0` will always be "closest".
+//       TODO: check whether this could be used to really badly affect DHT
+impl Distance for PublicKey {
+    fn distance(&self,
+                &PublicKey(ref pk1): &PublicKey,
+                &PublicKey(ref pk2): &PublicKey) -> Ordering {
+        let &PublicKey(own) = self;
+        for i in 0..PUBLICKEYBYTES {
+            if pk1[i] != pk2[i] {
+                return Ord::cmp(&(own[i] ^ pk1[i]), &(own[i] ^ pk2[i]))
+            }
+        }
+        Ordering::Equal
     }
 }

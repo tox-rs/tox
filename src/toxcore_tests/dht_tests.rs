@@ -24,6 +24,7 @@ use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 use toxcore::dht::*;
 
+use std::cmp::Ordering;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::str::FromStr;
 
@@ -872,4 +873,24 @@ fn dht_packet_from_bytes_test() {
         }
     }
     quickcheck(with_packet as fn(DhtPacket, Vec<u8>));
+}
+
+// PublicKey::distance()
+
+#[test]
+// TODO: possible to use quickcheck?
+fn public_key_distance_test() {
+    let pk_0 = PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap();
+    let pk_1 = PublicKey::from_slice(&[1; PUBLICKEYBYTES]).unwrap();
+    let pk_2 = PublicKey::from_slice(&[2; PUBLICKEYBYTES]).unwrap();
+    let pk_ff = PublicKey::from_slice(&[0xff; PUBLICKEYBYTES]).unwrap();
+    let pk_fe = PublicKey::from_slice(&[0xfe; PUBLICKEYBYTES]).unwrap();
+
+    assert_eq!(Ordering::Less, pk_0.distance(&pk_1, &pk_2));
+    assert_eq!(Ordering::Equal, pk_2.distance(&pk_2, &pk_2));
+    // `0` key is always closest due to XOR used
+    assert_eq!(Ordering::Less, pk_2.distance(&pk_0, &pk_1));
+    assert_eq!(Ordering::Greater, pk_2.distance(&pk_ff, &pk_fe));
+    assert_eq!(Ordering::Greater, pk_2.distance(&pk_ff, &pk_fe));
+    assert_eq!(Ordering::Less, pk_fe.distance(&pk_ff, &pk_2));
 }
