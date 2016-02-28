@@ -47,7 +47,7 @@ pub enum PingType {
 /// doesn't match `PingType` or slice has no elements.
 impl FromBytes<PingType> for PingType {
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() == 0 { return None }
+        if bytes.is_empty() { return None }
         match bytes[0] {
             0 => Some(PingType::Req),
             1 => Some(PingType::Resp),
@@ -168,7 +168,7 @@ pub enum IpType {
 /// return `None`.
 impl FromBytes<IpType> for IpType {
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() == 0 { return None }
+        if bytes.is_empty() { return None }
         match bytes[0] {
             2   => Some(IpType::U4),
             10  => Some(IpType::U6),
@@ -305,7 +305,7 @@ impl PackedNode {
             result.push(node);
         }
 
-        if result.len() == 0 {
+        if result.is_empty() {
             return None
         } else {
             return Some(result)
@@ -513,7 +513,7 @@ impl SendNodes {
     ///
     /// Created as an answer to `GetNodes` request.
     pub fn from_request(request: &GetNodes, nodes: Vec<PackedNode>) -> Option<Self> {
-        if nodes.len() == 0 || nodes.len() > 4 { return None }
+        if nodes.is_empty() || nodes.len() > 4 { return None }
 
         Some(SendNodes { nodes: nodes, id: request.id })
     }
@@ -625,7 +625,7 @@ pub enum DPacketTnum {
 /// Returns `None` if no bytes provided, or first byte doesn't match.
 impl FromBytes<DPacketTnum> for DPacketTnum {
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() == 0 { return None }
+        if bytes.is_empty() { return None }
 
         match bytes[0] {
             0 => Some(DPacketTnum::PingReq),
