@@ -888,7 +888,6 @@ fn public_key_distance_test() {
 
     assert_eq!(Ordering::Less, pk_0.distance(&pk_1, &pk_2));
     assert_eq!(Ordering::Equal, pk_2.distance(&pk_2, &pk_2));
-    // `0` key is always closest due to XOR used
     assert_eq!(Ordering::Less, pk_2.distance(&pk_0, &pk_1));
     assert_eq!(Ordering::Greater, pk_2.distance(&pk_ff, &pk_fe));
     assert_eq!(Ordering::Greater, pk_2.distance(&pk_ff, &pk_fe));

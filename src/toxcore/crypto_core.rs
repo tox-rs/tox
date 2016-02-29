@@ -22,7 +22,6 @@
 //! Functions for the core crypto.
 
 use sodiumoxide::randombytes::randombytes_into;
-
 pub use sodiumoxide::crypto::box_::*;
 
 use toxcore::binary_io::{array_to_u32, array_to_u64};

@@ -776,9 +776,6 @@ pub trait Distance {
     fn distance(&self, &PublicKey, &PublicKey) -> Ordering;
 }
 
-// NOTE: Due to relying on XOR, this doesn't work well in a case where one of
-//       compared keys is `0` – i.e. key `0` will always be "closest".
-//       TODO: check whether this could be used to really badly affect DHT
 impl Distance for PublicKey {
     fn distance(&self,
                 &PublicKey(ref pk1): &PublicKey,
