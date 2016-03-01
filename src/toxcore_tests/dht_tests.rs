@@ -704,19 +704,19 @@ impl Arbitrary for DPacketT {
     }
 }
 
-// DPacketT::as_type()
+// DPacketT::as_kind()
 
 #[test]
-fn d_packet_t_as_type_test() {
+fn d_packet_t_as_kind_test() {
     fn with_dpacket(dpt: DPacketT) {
         match dpt {
-            DPacketT::GetNodes(_) => assert_eq!(DPacketTnum::GetN, dpt.as_type()),
-            DPacketT::SendNodes(_) => assert_eq!(DPacketTnum::SendN, dpt.as_type()),
+            DPacketT::GetNodes(_) => assert_eq!(PacketKind::GetN, dpt.as_kind()),
+            DPacketT::SendNodes(_) => assert_eq!(PacketKind::SendN, dpt.as_kind()),
             DPacketT::Ping(p) => {
                 if p.is_request() {
-                    assert_eq!(DPacketTnum::PingReq, dpt.as_type());
+                    assert_eq!(PacketKind::PingReq, dpt.as_kind());
                 } else {
-                    assert_eq!(DPacketTnum::PingResp, dpt.as_type());
+                    assert_eq!(PacketKind::PingResp, dpt.as_kind());
                 }
             },
         }
@@ -740,21 +740,37 @@ fn d_packet_t_as_bytes_test() {
 }
 
 
-// DPacketTnum::from_bytes()
+// PacketKind::from_bytes()
 
 #[test]
-fn d_packet_t_num_from_bytes_test() {
+fn packet_kind_from_bytes_test() {
     fn with_bytes(bytes: Vec<u8>) {
-        if bytes.len() == 0 {
-            assert_eq!(None, DPacketTnum::from_bytes(&bytes));
+        if bytes.is_empty() {
+            assert_eq!(None, PacketKind::from_bytes(&bytes));
             return
         }
         match bytes[0] {
-            0 => assert_eq!(DPacketTnum::PingReq, DPacketTnum::from_bytes(&bytes).unwrap()),
-            1 => assert_eq!(DPacketTnum::PingResp, DPacketTnum::from_bytes(&bytes).unwrap()),
-            2 => assert_eq!(DPacketTnum::GetN, DPacketTnum::from_bytes(&bytes).unwrap()),
-            4 => assert_eq!(DPacketTnum::SendN, DPacketTnum::from_bytes(&bytes).unwrap()),
-            _ => assert_eq!(None, DPacketTnum::from_bytes(&bytes)),
+            0x00 => assert_eq!(PacketKind::PingReq, PacketKind::from_bytes(&bytes).unwrap()),
+            0x01 => assert_eq!(PacketKind::PingResp, PacketKind::from_bytes(&bytes).unwrap()),
+            0x02 => assert_eq!(PacketKind::GetN, PacketKind::from_bytes(&bytes).unwrap()),
+            0x04 => assert_eq!(PacketKind::SendN, PacketKind::from_bytes(&bytes).unwrap()),
+            0x18 => assert_eq!(PacketKind::CookieReq, PacketKind::from_bytes(&bytes).unwrap()),
+            0x19 => assert_eq!(PacketKind::CookieResp, PacketKind::from_bytes(&bytes).unwrap()),
+            0x1a => assert_eq!(PacketKind::CryptoHs, PacketKind::from_bytes(&bytes).unwrap()),
+            0x1b => assert_eq!(PacketKind::CryptoData, PacketKind::from_bytes(&bytes).unwrap()),
+            0x20 => assert_eq!(PacketKind::DhtReq, PacketKind::from_bytes(&bytes).unwrap()),
+            0x21 => assert_eq!(PacketKind::LanDisc, PacketKind::from_bytes(&bytes).unwrap()),
+            0x80 => assert_eq!(PacketKind::OnionReq0, PacketKind::from_bytes(&bytes).unwrap()),
+            0x81 => assert_eq!(PacketKind::OnionReq1, PacketKind::from_bytes(&bytes).unwrap()),
+            0x82 => assert_eq!(PacketKind::OnionReq2, PacketKind::from_bytes(&bytes).unwrap()),
+            0x83 => assert_eq!(PacketKind::AnnReq, PacketKind::from_bytes(&bytes).unwrap()),
+            0x84 => assert_eq!(PacketKind::AnnResp, PacketKind::from_bytes(&bytes).unwrap()),
+            0x85 => assert_eq!(PacketKind::OnionDataReq, PacketKind::from_bytes(&bytes).unwrap()),
+            0x86 => assert_eq!(PacketKind::OnionDataResp, PacketKind::from_bytes(&bytes).unwrap()),
+            0x8c => assert_eq!(PacketKind::OnionResp3, PacketKind::from_bytes(&bytes).unwrap()),
+            0x8d => assert_eq!(PacketKind::OnionResp2, PacketKind::from_bytes(&bytes).unwrap()),
+            0x8e => assert_eq!(PacketKind::OnionResp2, PacketKind::from_bytes(&bytes).unwrap()),
+            _ => assert_eq!(None, PacketKind::from_bytes(&bytes)),
         }
     }
     quickcheck(with_bytes as fn(Vec<u8>));
@@ -868,7 +884,7 @@ fn dht_packet_from_bytes_test() {
         let from_bytes = DhtPacket::from_bytes(&p.as_bytes()).unwrap();
         assert_eq!(p, from_bytes);
 
-        if let None = DPacketTnum::from_bytes(&invalid) {
+        if let None = PacketKind::from_bytes(&invalid) {
             assert_eq!(None, DhtPacket::from_bytes(&invalid));
         }
     }

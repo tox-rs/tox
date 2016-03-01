@@ -570,26 +570,26 @@ pub enum DPacketT {
     /// `Ping` packet type.
     Ping(Ping),
     /// `GetNodes` packet type. Used to request nodes.
-    // TODO: rename to `GetN()` ? – consistency with DPacketTnum
+    // TODO: rename to `GetN()` ? – consistency with PacketKind
     GetNodes(GetNodes),
     /// `SendNodes` response to `GetNodes` request.
-    // TODO: rename to `SendN()` ? – consistency with DPacketTnum
+    // TODO: rename to `SendN()` ? – consistency with PacketKind
     SendNodes(SendNodes),
 }
 
 impl DPacketT {
     /// Provide packet type number.
     ///
-    /// To use for serialization: `.as_type() as u8`.
-    pub fn as_type(&self) -> DPacketTnum {
+    /// To use for serialization: `.as_kind() as u8`.
+    pub fn as_kind(&self) -> PacketKind {
         match *self {
-            DPacketT::GetNodes(_) => DPacketTnum::GetN,
-            DPacketT::SendNodes(_) => DPacketTnum::SendN,
+            DPacketT::GetNodes(_) => PacketKind::GetN,
+            DPacketT::SendNodes(_) => PacketKind::SendN,
             DPacketT::Ping(p) => {
                 if p.is_request() {
-                    DPacketTnum::PingReq
+                    PacketKind::PingReq
                 } else {
-                    DPacketTnum::PingResp
+                    PacketKind::PingResp
                 }
             },
         }
@@ -606,33 +606,83 @@ impl AsBytes for DPacketT {
     }
 }
 
-
-/// Packet type number associated with packet.
+/// Top-level packet kind names and their associated numbers.
+///
+/// According to https://toktok.github.io/spec.html#packet-kind.
+// TODO: move it somewhere else
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DPacketTnum {
+pub enum PacketKind {
     /// [`Ping`](./struct.Ping.html) request number.
-    PingReq  = 0,
+    PingReq       = 0,
     /// [`Ping`](./struct.Ping.html) response number.
-    PingResp = 1,
+    PingResp      = 1,
     /// [`GetNodes`](./struct.GetNodes.html) packet number.
-    GetN     = 2,
+    GetN          = 2,
     /// [`SendNodes`](./struct.SendNodes.html) packet number.
-    SendN    = 4,
+    SendN         = 4,
+    /// Cookie Request.
+    CookieReq     = 24,
+    /// Cookie Response.
+    CookieResp    = 25,
+    /// Crypto Handshake.
+    CryptoHs      = 26,
+    /// Crypto Data (general purpose packet for transporting encrypted data).
+    CryptoData    = 27,
+    /// DHT Request.
+    DhtReq        = 32,
+    /// LAN Discovery.
+    LanDisc       = 33,
+    /// Onion Reuqest 0.
+    OnionReq0     = 128,
+    /// Onion Request 1.
+    OnionReq1     = 129,
+    /// Onion Request 2.
+    OnionReq2     = 130,
+    /// Announce Request.
+    AnnReq        = 131,
+    /// Announce Response.
+    AnnResp       = 132,
+    /// Onion Data Request.
+    OnionDataReq  = 133,
+    /// Onion Data Response.
+    OnionDataResp = 134,
+    /// Onion Response 3.
+    OnionResp3    = 140,
+    /// Onion Response 2.
+    OnionResp2    = 141,
+    /// Onion Response 1.
+    OnionResp1    = 142,
 }
 
-/// Parse first byte from provided `bytes` as `DPacketTnum`.
+/// Parse first byte from provided `bytes` as `PacketKind`.
 ///
 /// Returns `None` if no bytes provided, or first byte doesn't match.
-impl FromBytes<DPacketTnum> for DPacketTnum {
+impl FromBytes<PacketKind> for PacketKind {
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
         if bytes.is_empty() { return None }
 
         match bytes[0] {
-            0 => Some(DPacketTnum::PingReq),
-            1 => Some(DPacketTnum::PingResp),
-            2 => Some(DPacketTnum::GetN),
-            4 => Some(DPacketTnum::SendN),
-            _ => None,
+            0   => Some(PacketKind::PingReq),
+            1   => Some(PacketKind::PingResp),
+            2   => Some(PacketKind::GetN),
+            4   => Some(PacketKind::SendN),
+            24  => Some(PacketKind::CookieReq),
+            25  => Some(PacketKind::CookieResp),
+            26  => Some(PacketKind::CryptoHs),
+            27  => Some(PacketKind::CryptoData),
+            32  => Some(PacketKind::DhtReq),
+            33  => Some(PacketKind::LanDisc),
+            128 => Some(PacketKind::OnionReq0),
+            129 => Some(PacketKind::OnionReq1),
+            130 => Some(PacketKind::OnionReq2),
+            131 => Some(PacketKind::AnnReq),
+            132 => Some(PacketKind::AnnResp),
+            133 => Some(PacketKind::OnionDataReq),
+            134 => Some(PacketKind::OnionDataResp),
+            140 => Some(PacketKind::OnionResp3),
+            141 => Some(PacketKind::OnionResp2),
+            142 => Some(PacketKind::OnionResp1),
+            _   => None,
         }
     }
 }
@@ -643,13 +693,15 @@ impl FromBytes<DPacketTnum> for DPacketTnum {
 ///
 /// Length      | Contents
 /// ----------- | --------
-/// `1`         | `uint8_t` packet kind (see other packets)
+/// `1`         | `uint8_t` [`PacketKind`](./enum.PacketKind.html)
 /// `32`        | Sender DHT Public Key
 /// `24`        | Random nonce
 /// variable    | Encrypted payload
+///
+/// `PacketKind` values for `DhtPacket` can be only `<= 4`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DhtPacket {
-    packet_type: DPacketTnum,
+    packet_type: PacketKind,
     /// Public key of sender.
     pub sender_pk: PublicKey,
     nonce: Nonce,
@@ -673,7 +725,7 @@ impl DhtPacket {
         let payload = seal_precomputed(&packet.as_bytes(), nonce, symmetric_key);
 
         DhtPacket {
-            packet_type: packet.as_type(),
+            packet_type: packet.as_kind(),
             sender_pk: *own_public_key,
             nonce: *nonce,
             payload: payload,
@@ -699,21 +751,22 @@ impl DhtPacket {
         };
 
         match self.packet_type {
-            DPacketTnum::PingReq | DPacketTnum::PingResp => {
+            PacketKind::PingReq | PacketKind::PingResp => {
                 if let Some(p) = Ping::from_bytes(&decrypted) {
                     return Some(DPacketT::Ping(p))
                 }
             },
-            DPacketTnum::GetN => {
+            PacketKind::GetN => {
                 if let Some(n) = GetNodes::from_bytes(&decrypted) {
                     return Some(DPacketT::GetNodes(n))
                 }
             },
-            DPacketTnum::SendN => {
+            PacketKind::SendN => {
                 if let Some(n) = SendNodes::from_bytes(&decrypted) {
                     return Some(DPacketT::SendNodes(n))
                 }
             },
+            _ => {},  // not a DHT packet
         }
         None  // parsing failed
     }
@@ -741,8 +794,14 @@ impl FromBytes<DhtPacket> for DhtPacket {
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
         if bytes.len() < DHT_PACKET_MIN_SIZE { return None }
 
-        let packet_type = match DPacketTnum::from_bytes(bytes) {
-            Some(b) => b,
+        let packet_type = match PacketKind::from_bytes(bytes) {
+            Some(b) => {
+                match b {
+                    PacketKind::PingReq | PacketKind::PingResp |
+                    PacketKind::GetN | PacketKind::SendN => b,
+                    _ => return None,  // not a DHT packet
+                }
+            },
             None => return None,
         };
 
