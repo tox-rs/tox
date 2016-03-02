@@ -61,13 +61,14 @@ impl FromBytes<PingType> for PingType {
 ///
 /// Serialized form:
 ///
-/// ```text
-///                 (9 bytes)
-/// +-------------------------+
-/// | Ping type     (1 byte ) |
-/// | ping_id       (8 bytes) |
-/// +-------------------------+
-/// ```
+/// Ping Packet (Request and response)
+///
+/// Packet type `0x00` for request, `0x01` for response.
+///
+/// Length      | Contents
+/// ----------- | --------
+/// `1`         | `u8` packet type
+/// `8`         | Ping ID
 ///
 /// Serialized form should be put in the encrypted part of DHT packet.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -102,6 +103,12 @@ impl Ping {
         }
 
         Some(Ping { p_type: PingType::Resp, id: self.id })
+    }
+
+    /// Encapsulate in `DPacketT` to use in [`DhtPacket`]
+    /// (./struct.DhtPacket.html).
+    pub fn as_packet(&self) -> DPacketT {
+        DPacketT::Ping(*self)
     }
 }
 
@@ -445,6 +452,12 @@ impl GetNodes {
     pub fn new(their_public_key: &PublicKey) -> Self {
         GetNodes { pk: *their_public_key, id: random_u64() }
     }
+
+    /// Encapsulate in `DPacketT` to use in [`DhtPacket`]
+    /// (./struct.DhtPacket.html).
+    pub fn as_packet(&self) -> DPacketT {
+        DPacketT::GetNodes(*self)
+    }
 }
 
 /// Serialization of `GetNodes`. Resulting lenght should be
@@ -480,20 +493,18 @@ impl FromBytes<GetNodes> for GetNodes {
 /// Response to [`GetNodes`](./struct.GetNodes.html) request, containing up to
 /// `4` nodes closest to the requested node.
 ///
-/// Packet type `4`.
+/// Packet type `0x04`.
 ///
 /// Serialized form:
 ///
-/// ```text
-/// +-----------------------------------+
-/// | Encrypted payload:                |
-/// | Number of packed nodes ( 1 byte ) |
-/// | Nodes in packed format (max of 4) |
-/// |      (39 bytes for IPv4) * number |
-/// |      (51 bytes for IPv6) * number |
-/// | ping_id                ( 8 bytes) |
-/// +-----------------------------------+
-/// ```
+/// Length      | Contents
+/// ----------- | --------
+/// `1`         | Number of packed nodes (maximum 4)
+/// `[39, 204]` | Nodes in packed format
+/// `8`         | Ping ID
+///
+/// An IPv4 node is 39 bytes, an IPv6 node is 51 bytes, so the maximum size is
+/// `51 * 4 = 204` bytes.
 ///
 /// Serialized form should be put in the encrypted part of DHT packet.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -516,6 +527,12 @@ impl SendNodes {
         if nodes.is_empty() || nodes.len() > 4 { return None }
 
         Some(SendNodes { nodes: nodes, id: request.id })
+    }
+
+    /// Encapsulate in `DPacketT` to easily use in [`DhtPacket`]
+    /// (./struct.DhtPacket.html).
+    pub fn as_packet(self) -> DPacketT {
+        DPacketT::SendNodes(self)
     }
 }
 

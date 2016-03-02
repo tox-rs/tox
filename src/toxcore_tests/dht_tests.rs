@@ -42,15 +42,6 @@ fn u64_as_u16s(num: u64) -> (u16, u16, u16, u16) {
 }
 
 
-// Ping::
-
-impl Arbitrary for Ping {
-    fn arbitrary<G: Gen>(g: &mut G) -> Self {
-        let request: bool = g.gen();
-        if request { Ping::new() } else { Ping::new().response().unwrap() }
-    }
-}
-
 // PingType::from_bytes()
 
 #[test]
@@ -79,6 +70,13 @@ fn ping_type_from_bytes_test() {
 
 // Ping::
 
+impl Arbitrary for Ping {
+    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+        let request: bool = g.gen();
+        if request { Ping::new() } else { Ping::new().response().unwrap() }
+    }
+}
+
 // ::new()
 
 #[test]
@@ -105,6 +103,16 @@ fn ping_response_test() {
     assert_eq!(ping_req.id, ping_res.id);
     assert_eq!(false, ping_res.is_request());
     assert_eq!(None, ping_res.response());
+}
+
+// Ping::as_packet()
+
+#[test]
+fn ping_as_packet_test() {
+    fn with_ping(p: Ping) {
+        assert_eq!(DPacketT::Ping(p), p.as_packet());
+    }
+    quickcheck(with_ping as fn(Ping));
 }
 
 // Ping::as_bytes()
@@ -568,6 +576,16 @@ fn get_nodes_new_test() {
     quickcheck(with_pk as fn(u64, u64, u64, u64));
 }
 
+// GetNodes::as_packet()
+
+#[test]
+fn get_nodes_as_packet_test() {
+    fn with_gn(gn: GetNodes) {
+        assert_eq!(DPacketT::GetNodes(gn), gn.as_packet());
+    }
+    quickcheck(with_gn as fn(GetNodes));
+}
+
 // GetNodes::as_bytes()
 
 #[test]
@@ -628,6 +646,16 @@ fn send_nodes_from_request_test() {
         }
     }
     quickcheck(with_request as fn(GetNodes, Vec<PackedNode>));
+}
+
+// SendNodes::as_packet()
+
+#[test]
+fn send_nodes_as_packet_test() {
+    fn with_sn(sn: SendNodes) {
+        assert_eq!(DPacketT::SendNodes(sn.clone()), sn.as_packet());
+    }
+    quickcheck(with_sn as fn(SendNodes));
 }
 
 // SendNodes::as_bytes()
