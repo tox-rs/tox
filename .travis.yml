@@ -4,6 +4,10 @@ rust:
   - beta
   - nightly
 
+os:
+  - linux
+  - osx
+
 branches:
   except:
     - test
@@ -20,20 +24,12 @@ notifications:
 matrix:
   allow_failure:
   - rust: nightly
+  - branches: travis
 
 sudo: required
 
 before_install:
-  - sudo apt-get update -qq
-  - sudo apt-get install -y build-essential libtool autotools-dev automake checkinstall check git yasm pkg-config
-  - git clone git://github.com/jedisct1/libsodium.git
-  - cd libsodium
-  - git checkout tags/1.0.8
-  - ./autogen.sh
-  - ./configure && make -j$(nproc)
-  - sudo checkinstall --install --pkgname libsodium --pkgversion 1.0.8 --nodoc -y
-  - sudo ldconfig
-#
-  - git clone https://github.com/dnaq/sodiumoxide
-  - mkdir .cargo
-  - echo 'paths = ["sodiumoxide/libsodium-sys"]' >> .cargo/config
+  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then bash ./bootstrap-ubuntu-14-04.sh; fi
+  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then bash ./bootstrap-osx.sh; fi
+  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then export PKG_CONFIG_PATH=$HOME/installed_libsodium/lib/pkgconfig:$PKG_CONFIG_PATH ; fi
+  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then export LD_LIBRARY_PATH=$HOME/installed_libsodium/lib:$LD_LIBRARY_PATH ; fi

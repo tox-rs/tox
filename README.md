@@ -1,4 +1,4 @@
-# Tox  [![Build Status](https://travis-ci.org/zetok/tox.svg)](https://travis-ci.org/zetok/tox)
+# Tox  [![Build Status](https://travis-ci.org/zetok/tox.svg?branch=master)](https://travis-ci.org/zetok/tox)
 This library is an implementation of [toxcore][toxcore] in Rust - P2P, distributed, encrypted, easy to use DHT-based network.
 
 IRC channel: [#zetox @ freenode](https://webchat.freenode.net/?channels=zetox)
