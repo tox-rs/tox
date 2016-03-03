@@ -17,28 +17,31 @@
     along with Tox.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-extern crate sodiumoxide;
-
-extern crate ip;
+//! Tests for network module.
 
 
-/// Core Tox module. Provides an API on top of which other modules and
-/// applications may be build.
-#[warn(missing_docs)]
-pub mod toxcore {
-    pub mod binary_io;
-    pub mod crypto_core;
-    pub mod dht;
-    pub mod network;
-}
+use std::thread;
+use std::time::Duration;
 
-#[cfg(test)]
-extern crate quickcheck;
+use toxcore::network::*;
 
-#[cfg(test)]
-mod toxcore_tests {
-    mod binary_io_tests;
-    mod crypto_core_tests;
-    mod dht_tests;
-    mod network_tests;
+// bind_udp()
+
+#[test]
+// there's no way to reliably test whole range for both success and faliure;
+// at least as long as there's no assumption that there are no other instances
+// running.
+//
+// Thus test only whether binding to at least 50 ports works :/
+fn bind_udp_test() {
+    for _ in 0..50 {
+        thread::spawn(move || {
+            let socket = bind_udp();
+            match socket {
+                Some(_) => {},
+                None => panic!("This should have worked; bind_udp()"),
+            }
+            thread::sleep(Duration::from_millis(100)); // probably enough?
+        });
+    }
 }
