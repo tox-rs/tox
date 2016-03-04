@@ -279,10 +279,12 @@ impl Arbitrary for PackedNode {
 // it works/fails when needed;
 // e.g. `IpType::U4` and supplied `SocketAddr:V6(_)` should fail
 fn packed_node_new_test_ip_type_UDP_IPv4() {
+    let pk = PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap();
     let info = PackedNode::new(IpType::U4,
-                               SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0)),
-                               &PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap());
+                               SocketAddr::V4("0.0.0.0:0".parse().unwrap()),
+                               &pk);
     assert_eq!(IpType::U4, info.ip_type);
+    assert_eq!(pk, info.pk);
 }
 
 
@@ -936,4 +938,19 @@ fn public_key_distance_test() {
     assert_eq!(Ordering::Greater, pk_2.distance(&pk_ff, &pk_fe));
     assert_eq!(Ordering::Greater, pk_2.distance(&pk_ff, &pk_fe));
     assert_eq!(Ordering::Less, pk_fe.distance(&pk_ff, &pk_2));
+}
+
+
+// Node::new()
+
+#[test]
+fn node_new_test() {
+    fn with_pn(pn: PackedNode) {
+        let node = Node::new(pn);
+        assert_eq!(0, node.req);
+        assert_eq!(0, node.resp);
+        assert_eq!(0, node.id);
+        assert_eq!(pn, node.node);
+    }
+    quickcheck(with_pn as fn(PackedNode));
 }

@@ -255,8 +255,9 @@ impl FromBytes<Ipv6Addr> for Ipv6Addr {
 pub struct PackedNode {
     /// IP type, includes also info about protocol used.
     pub ip_type: IpType,
-    socketaddr: SocketAddr,
-    node_id: PublicKey,
+    saddr: SocketAddr,
+    /// Public Key of the node.
+    pub pk: PublicKey,
 }
 
 /// Size in bytes of serialized [`PackedNode`](./struct.PackedNode.html) with
@@ -270,20 +271,20 @@ impl PackedNode {
     /// New `PackedNode`.
     //
     // TODO: Should fail if type of IP address supplied in
-    // `socketaddr` doesn't match `IpType`..?
+    // `saddr` doesn't match `IpType`..?
     pub fn new(ip_type: IpType,
-               socketaddr: SocketAddr,
-               node_id: &PublicKey) -> Self {
+               saddr: SocketAddr,
+               pk: &PublicKey) -> Self {
         PackedNode {
             ip_type: ip_type,
-            socketaddr: socketaddr,
-            node_id: *node_id,
+            saddr: saddr,
+            pk: *pk,
         }
     }
 
     /// Get an IP address from the `PackedNode`.
     pub fn ip(&self) -> IpAddr {
-        match self.socketaddr {
+        match self.saddr {
             SocketAddr::V4(addr) => IpAddr::V4(*addr.ip()),
             SocketAddr::V6(addr) => IpAddr::V6(*addr.ip()),
         }
@@ -337,9 +338,9 @@ impl AsBytes for PackedNode {
         let addr: Vec<u8> = self.ip().as_bytes();
         result.extend_from_slice(&addr);
         // port
-        result.extend_from_slice(&u16_to_array(self.socketaddr.port()));
+        result.extend_from_slice(&u16_to_array(self.saddr.port()));
 
-        let PublicKey(ref pk) = self.node_id;
+        let PublicKey(ref pk) = self.pk;
         result.extend_from_slice(pk);
 
         result
@@ -410,8 +411,8 @@ impl FromBytes<PackedNode> for PackedNode {
 
             return Some(PackedNode {
                 ip_type: iptype,
-                socketaddr: saddr,
-                node_id: pk,
+                saddr: saddr,
+                pk: pk,
             });
         }
         // `if` not triggered, make sure to return `None`
@@ -734,6 +735,7 @@ pub const DHT_PACKET_MIN_SIZE: usize = 1 // packet type, plain
                                      + PING_SIZE; // smallest payload
 
 // TODO: perhaps methods `is_ping(&self)` `is_get(&self)`, `is_send(&self)`
+// TODO: create methods `ping_node` that will take `&mut Node` ?
 impl DhtPacket {
     /// Create new `DhtPacket`.
     pub fn new(symmetric_key: &PrecomputedKey, own_public_key: &PublicKey,
@@ -863,5 +865,31 @@ impl Distance for PublicKey {
             }
         }
         Ordering::Equal
+    }
+}
+
+
+/// DHT Node and its associated info.
+// TODO: move it up ↑
+// TODO: perhaps merge functionality with the `PackedNode` ?
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Node {
+    /// Time of last [`Ping`](./struct.Ping.html) request in secods since UNIX
+    /// epoch.
+    pub req: u64,
+    /// Time of last [`Ping`](./struct.Ping.html) response in secods since UNIX
+    /// epoch.
+    pub resp: u64,
+    /// Ping ID of last sent [`Ping`](./struct.Ping.html) request.
+    pub id: u64,
+    /// Packed Node that Node contains.
+    pub node: PackedNode,
+}
+
+impl Node {
+    /// Create a new `Node`. New node has `req`, `resp` and `id` values set to
+    /// `0`.
+    pub fn new(pn: PackedNode) -> Self {
+        Node { req: 0, resp: 0, id: 0, node: pn }
     }
 }
