@@ -598,8 +598,8 @@ pub enum DPacketT {
 impl DPacketT {
     /// Provide packet type number.
     ///
-    /// To use for serialization: `.as_kind() as u8`.
-    pub fn as_kind(&self) -> PacketKind {
+    /// To use for serialization: `.kind() as u8`.
+    pub fn kind(&self) -> PacketKind {
         match *self {
             DPacketT::GetNodes(_) => PacketKind::GetN,
             DPacketT::SendNodes(_) => PacketKind::SendN,
@@ -611,6 +611,20 @@ impl DPacketT {
                 }
             },
         }
+    }
+
+    /// Create [`Ping`](./struct.Ping.html) response if `DPacketT` is a `Ping`
+    /// request.
+    ///
+    /// Returns `None` if `DPacketT` is not a ping request, and thus `Ping`
+    /// response could not be created.
+    pub fn ping_resp(&self) -> Option<Self> {
+        if let &DPacketT::Ping(ping) = self {
+            if let Some(ping_resp) = ping.response() {
+                return Some(DPacketT::Ping(ping_resp))
+            }
+        }
+        None
     }
 }
 
@@ -734,8 +748,6 @@ pub const DHT_PACKET_MIN_SIZE: usize = 1 // packet type, plain
                                      + MACBYTES
                                      + PING_SIZE; // smallest payload
 
-// TODO: perhaps methods `is_ping(&self)` `is_get(&self)`, `is_send(&self)`
-// TODO: create methods `ping_node` that will take `&mut Node` ?
 impl DhtPacket {
     /// Create new `DhtPacket`.
     pub fn new(symmetric_key: &PrecomputedKey, own_public_key: &PublicKey,
@@ -744,7 +756,7 @@ impl DhtPacket {
         let payload = seal_precomputed(&packet.as_bytes(), nonce, symmetric_key);
 
         DhtPacket {
-            packet_type: packet.as_kind(),
+            packet_type: packet.kind(),
             sender_pk: *own_public_key,
             nonce: *nonce,
             payload: payload,
@@ -788,6 +800,29 @@ impl DhtPacket {
             _ => {},  // not a DHT packet
         }
         None  // parsing failed
+    }
+
+    /// Create DHT Packet with [`Ping`](./struct.Ping.html) response to `Ping`
+    /// request that packet contained.
+    ///
+    /// Nonce for the response is automatically generated.
+    pub fn ping_resp(&self, secret_key: &SecretKey,
+                     symmetric_key: &PrecomputedKey,
+                     own_public_key: &PublicKey) -> Option<Self> {
+
+        let payload = match self.get_packet(secret_key) {
+            Some(dpt) => dpt,
+            None => return None,  // TODO: logging?
+        };
+
+        let resp = match payload.ping_resp() {
+            Some(pr) => pr,
+            None => return None,  // TODO: logging?
+        };
+
+        let nonce = gen_nonce();
+
+        Some(DhtPacket::new(symmetric_key, own_public_key, &nonce, resp))
     }
 }
 

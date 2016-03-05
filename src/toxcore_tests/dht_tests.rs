@@ -734,24 +734,40 @@ impl Arbitrary for DPacketT {
     }
 }
 
-// DPacketT::as_kind()
+// DPacketT::kind()
 
 #[test]
 fn d_packet_t_as_kind_test() {
     fn with_dpacket(dpt: DPacketT) {
         match dpt {
-            DPacketT::GetNodes(_) => assert_eq!(PacketKind::GetN, dpt.as_kind()),
-            DPacketT::SendNodes(_) => assert_eq!(PacketKind::SendN, dpt.as_kind()),
+            DPacketT::GetNodes(_) => assert_eq!(PacketKind::GetN, dpt.kind()),
+            DPacketT::SendNodes(_) => assert_eq!(PacketKind::SendN, dpt.kind()),
             DPacketT::Ping(p) => {
                 if p.is_request() {
-                    assert_eq!(PacketKind::PingReq, dpt.as_kind());
+                    assert_eq!(PacketKind::PingReq, dpt.kind());
                 } else {
-                    assert_eq!(PacketKind::PingResp, dpt.as_kind());
+                    assert_eq!(PacketKind::PingResp, dpt.kind());
                 }
             },
         }
     }
     quickcheck(with_dpacket as fn(DPacketT));
+}
+
+// DPacketT::ping_resp()
+
+#[test]
+fn d_packet_t_ping_resp_test() {
+    fn with_dpt(dpt: DPacketT) {
+        if let DPacketT::Ping(p) = dpt {
+            if p.is_request() {
+                assert_eq!(PacketKind::PingResp, dpt.ping_resp().unwrap().kind());
+                return;
+            }
+        }
+        assert_eq!(None, dpt.ping_resp());
+    }
+    quickcheck(with_dpt as fn(DPacketT));
 }
 
 // DPacketT::as_bytes()
@@ -862,6 +878,27 @@ fn dht_paket_get_packet_test() {
         assert_eq!(dpt, bob_packet);
     }
     quickcheck(with_dpackett as fn(DPacketT));
+}
+
+// DhtPacket::ping_resp()
+
+#[test]
+fn dht_packet_ping_resp_test() {
+    fn with_dpt(dpt: DPacketT) {
+        let (pk, sk) = gen_keypair();
+        let prec = precompute(&pk, &sk);
+        let nonce = gen_nonce();
+
+        let response = DhtPacket::new(&prec, &pk, &nonce, dpt.clone())
+            .ping_resp(&sk, &prec, &pk);
+
+        if let Some(_) = dpt.ping_resp() {
+            // FIXME: assume that it's a correct response ;/
+        } else {
+            assert_eq!(None, response);
+        }
+    }
+    quickcheck(with_dpt as fn(DPacketT));
 }
 
 // DhtPacket::as_bytes()
