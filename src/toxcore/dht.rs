@@ -255,7 +255,8 @@ impl FromBytes<Ipv6Addr> for Ipv6Addr {
 pub struct PackedNode {
     /// IP type, includes also info about protocol used.
     pub ip_type: IpType,
-    saddr: SocketAddr,
+    /// Socket addr of node.
+    pub saddr: SocketAddr,
     /// Public Key of the node.
     pub pk: PublicKey,
 }
@@ -338,7 +339,7 @@ impl AsBytes for PackedNode {
         let addr: Vec<u8> = self.ip().as_bytes();
         result.extend_from_slice(&addr);
         // port
-        result.extend_from_slice(&u16_to_array(self.saddr.port()));
+        result.extend_from_slice(&u16_to_array(self.saddr.port().to_be()));
 
         let PublicKey(ref pk) = self.pk;
         result.extend_from_slice(pk);
@@ -364,7 +365,7 @@ impl FromBytes<PackedNode> for PackedNode {
         // parse bytes as IPv4
         fn as_ipv4(bytes: &[u8]) -> Option<(SocketAddr, PublicKey)> {
             let addr = Ipv4Addr::new(bytes[1], bytes[2], bytes[3], bytes[4]);
-            let port = array_to_u16(&[bytes[5], bytes[6]]);
+            let port = u16::from_be(array_to_u16(&[bytes[5], bytes[6]]));
             let saddr = SocketAddrV4::new(addr, port);
 
             let pk = match PublicKey::from_slice(&bytes[7..PACKED_NODE_IPV4_SIZE]) {
@@ -383,7 +384,7 @@ impl FromBytes<PackedNode> for PackedNode {
                 Some(a) => a,
                 None    => return None,
             };
-            let port = array_to_u16(&[bytes[17], bytes[18]]);
+            let port = u16::from_be(array_to_u16(&[bytes[17], bytes[18]]));
             let saddr = SocketAddrV6::new(addr, port, 0, 0);
 
             let pk = match PublicKey::from_slice(&bytes[19..PACKED_NODE_IPV6_SIZE]) {
@@ -875,7 +876,7 @@ impl FromBytes<DhtPacket> for DhtPacket {
             packet_type: packet_type,
             sender_pk: sender_pk,
             nonce: nonce,
-            payload: bytes[(PAYLOAD_POS)..].to_vec(),
+            payload: bytes[PAYLOAD_POS..].to_vec(),
         })
     }
 }
@@ -928,3 +929,7 @@ impl Node {
         Node { req: 0, resp: 0, id: 0, node: pn }
     }
 }
+
+// TODO: create k-bucket struct(?):
+//       https://en.wikipedia.org/wiki/Kademlia#Routing_tables
+//       https://toktok.github.io/spec.html#packed-node-format-3

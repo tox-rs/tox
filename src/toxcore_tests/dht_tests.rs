@@ -438,13 +438,13 @@ fn packed_nodes_as_bytes_test_port() {
         let saddr6 = SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::from_str("::0").unwrap(), port, 0, 0));
 
         let (u4, _, t4, _) = packed_node_all_ip_types(saddr4, pk);
-        assert_eq!(&u16_to_array(port)[..], &u4.as_bytes()[5..7]);
-        assert_eq!(&u16_to_array(port)[..], &t4.as_bytes()[5..7]);
+        assert_eq!(&u16_to_array(port.to_be())[..], &u4.as_bytes()[5..7]);
+        assert_eq!(&u16_to_array(port.to_be())[..], &t4.as_bytes()[5..7]);
 
         // and IPv6
         let (_, u6, _, t6) = packed_node_all_ip_types(saddr6, pk);
-        assert_eq!(&u16_to_array(port)[..], &u6.as_bytes()[17..19]);
-        assert_eq!(&u16_to_array(port)[..], &t6.as_bytes()[17..19]);
+        assert_eq!(&u16_to_array(port.to_be())[..], &u6.as_bytes()[17..19]);
+        assert_eq!(&u16_to_array(port.to_be())[..], &t6.as_bytes()[17..19]);
 
     }
     quickcheck(with_port as fn (u16));
