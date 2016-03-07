@@ -29,7 +29,15 @@ matrix:
 sudo: required
 
 before_install:
-  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then bash ./bootstrap-ubuntu-14-04.sh; fi
-  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then bash ./bootstrap-osx.sh; fi
+  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then bash ./scripts/bootstrap-ubuntu-14-04.sh; fi
+  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then bash ./scripts/bootstrap-osx.sh; fi
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then export PKG_CONFIG_PATH=$HOME/installed_libsodium/lib/pkgconfig:$PKG_CONFIG_PATH ; fi
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then export LD_LIBRARY_PATH=$HOME/installed_libsodium/lib:$LD_LIBRARY_PATH ; fi
+
+script:
+  - cargo build --verbose
+  - cargo test --verbose
+  - cargo doc
+
+after_success:
+  - test $TRAVIS_PULL_REQUEST == "false" && (test $TRAVIS_BRANCH == "travis" || test $TRAVIS_BRANCH == "master" ) && bash ./scripts/deploy-gh-pages.sh

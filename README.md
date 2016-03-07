@@ -1,5 +1,6 @@
 # Tox  [![Build Status](https://travis-ci.org/zetok/tox.svg?branch=master)](https://travis-ci.org/zetok/tox)
-This library is an implementation of [toxcore][toxcore] in Rust - P2P, distributed, encrypted, easy to use DHT-based network.
+This library is an implementation of [toxcore][toxcore] in Rust - P2P,
+distributed, encrypted, easy to use DHT-based network.
 
 IRC channel: [#zetox @ freenode](https://webchat.freenode.net/?channels=zetox)
 
@@ -11,6 +12,8 @@ implementing toxcore in Rust.
 If existing documentation appears to not be complete, or is not clear enough,
 issue / pull request should be filled on the [reference repository]
 (https://github.com/TokTok/tox-spec/issues/new).
+
+Current [API docs](https://zetok.github.io/tox) are a subject to changes.
 
 ## Contributing
 Contributing guidelines: [CONTRIBUTING.md](/CONTRIBUTING.md).
