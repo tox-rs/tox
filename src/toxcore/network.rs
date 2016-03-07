@@ -17,6 +17,8 @@
     along with Tox.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+
+// ↓ FIXME expand doc
 //! Networking part of the toxcore.
 
 
@@ -38,10 +40,9 @@ pub const PORT_MAX: u16 = 33545;
 //          them to do the binding
 pub fn bind_udp() -> Option<UdpSocket> {
     for port in PORT_MIN..(PORT_MAX + 1) {
-        // TODO: bind to `[::]` ?
-        //       Would that work if platform has IPv6 disalbed, and/or
-        //       there's no access to IPv6?
-        match UdpSocket::bind(&format!("0.0.0.0:{}", port)[..]) {
+        // TODO: check if `[::]` always works, even on platforms with disabled
+        //       IPv6
+        match UdpSocket::bind(&format!("[::]:{}", port)[..]) {
             Ok(s) => return Some(s),
             Err(_) => {},  // TODO: logging – `log` crate?
         }

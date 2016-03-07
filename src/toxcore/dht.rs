@@ -19,15 +19,100 @@
 */
 
 
-// ↓ FIXME doc
+// ↓ FIXME expand doc
 //! DHT part of the toxcore.
+//!
+//! * takes care of the serializing and de-serializing DHT packets
+//! * ..
 
-use ip::*;
+use ip::*; // ← won't be needed with Rust 1.7, since it finally got stabilized
 use std::cmp::{Ord, Ordering};
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
+
+
+/// Top-level packet kind names and their associated numbers.
+///
+/// According to https://toktok.github.io/spec.html#packet-kind.
+// TODO: move it somewhere else
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PacketKind {
+    /// [`Ping`](./struct.Ping.html) request number.
+    PingReq       = 0,
+    /// [`Ping`](./struct.Ping.html) response number.
+    PingResp      = 1,
+    /// [`GetNodes`](./struct.GetNodes.html) packet number.
+    GetN          = 2,
+    /// [`SendNodes`](./struct.SendNodes.html) packet number.
+    SendN         = 4,
+    /// Cookie Request.
+    CookieReq     = 24,
+    /// Cookie Response.
+    CookieResp    = 25,
+    /// Crypto Handshake.
+    CryptoHs      = 26,
+    /// Crypto Data (general purpose packet for transporting encrypted data).
+    CryptoData    = 27,
+    /// DHT Request.
+    DhtReq        = 32,
+    /// LAN Discovery.
+    LanDisc       = 33,
+    /// Onion Reuqest 0.
+    OnionReq0     = 128,
+    /// Onion Request 1.
+    OnionReq1     = 129,
+    /// Onion Request 2.
+    OnionReq2     = 130,
+    /// Announce Request.
+    AnnReq        = 131,
+    /// Announce Response.
+    AnnResp       = 132,
+    /// Onion Data Request.
+    OnionDataReq  = 133,
+    /// Onion Data Response.
+    OnionDataResp = 134,
+    /// Onion Response 3.
+    OnionResp3    = 140,
+    /// Onion Response 2.
+    OnionResp2    = 141,
+    /// Onion Response 1.
+    OnionResp1    = 142,
+}
+
+/// Parse first byte from provided `bytes` as `PacketKind`.
+///
+/// Returns `None` if no bytes provided, or first byte doesn't match.
+impl FromBytes<PacketKind> for PacketKind {
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.is_empty() { return None }
+
+        match bytes[0] {
+            0   => Some(PacketKind::PingReq),
+            1   => Some(PacketKind::PingResp),
+            2   => Some(PacketKind::GetN),
+            4   => Some(PacketKind::SendN),
+            24  => Some(PacketKind::CookieReq),
+            25  => Some(PacketKind::CookieResp),
+            26  => Some(PacketKind::CryptoHs),
+            27  => Some(PacketKind::CryptoData),
+            32  => Some(PacketKind::DhtReq),
+            33  => Some(PacketKind::LanDisc),
+            128 => Some(PacketKind::OnionReq0),
+            129 => Some(PacketKind::OnionReq1),
+            130 => Some(PacketKind::OnionReq2),
+            131 => Some(PacketKind::AnnReq),
+            132 => Some(PacketKind::AnnResp),
+            133 => Some(PacketKind::OnionDataReq),
+            134 => Some(PacketKind::OnionDataResp),
+            140 => Some(PacketKind::OnionResp3),
+            141 => Some(PacketKind::OnionResp2),
+            142 => Some(PacketKind::OnionResp1),
+            _   => None,
+        }
+    }
+}
 
 
 /// Type of [`Ping`](./struct.Ping.html) packet. Either a request or response.
@@ -36,10 +121,12 @@ use toxcore::crypto_core::*;
 /// * `1` – if ping is a response.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum PingType {
-    /// Request ping response.
-    Req  = 0,
-    /// Respond to ping request.
-    Resp = 1,
+    /// Request ping response. Wrapper over [`PacketKind::PingReq`]
+    /// (./enum.PacketKind.html).
+    Req  = PacketKind::PingReq as isize,
+    /// Respond to ping request. Wrapper over [`PacketKind::PingResp`]
+    /// (./enum.PacketKind.html).
+    Resp = PacketKind::PingResp as isize,
 }
 
 /// Uses the first byte from the provided slice to de-serialize
@@ -47,10 +134,9 @@ pub enum PingType {
 /// doesn't match `PingType` or slice has no elements.
 impl FromBytes<PingType> for PingType {
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.is_empty() { return None }
-        match bytes[0] {
-            0 => Some(PingType::Req),
-            1 => Some(PingType::Resp),
+        match PacketKind::from_bytes(bytes) {
+            Some(PacketKind::PingReq)  => Some(PingType::Req),
+            Some(PacketKind::PingResp) => Some(PingType::Resp),
             _ => None,
         }
     }
@@ -223,8 +309,6 @@ impl FromBytes<Ipv6Addr> for Ipv6Addr {
 }
 
 
-// TODO: probably needs to be renamed & moved out of DHT, given that it most
-// likely will be used not only for DHT node info, but also for TCP relay info.
 /// `Packed Node` format is a way to store the node info in a small yet easy to
 /// parse format.
 ///
@@ -270,12 +354,22 @@ pub const PACKED_NODE_IPV6_SIZE: usize = PUBLICKEYBYTES + 19;
 
 impl PackedNode {
     /// New `PackedNode`.
-    //
-    // TODO: Should fail if type of IP address supplied in
-    // `saddr` doesn't match `IpType`..?
-    pub fn new(ip_type: IpType,
-               saddr: SocketAddr,
-               pk: &PublicKey) -> Self {
+    ///
+    /// `udp` – whether UDP or TCP should be used. UDP is used for DHT nodes,
+    /// whereas TCP is used for TCP relays.
+    pub fn new(udp: bool, saddr: SocketAddr, pk: &PublicKey) -> Self {
+        let v4: bool = match saddr {
+            SocketAddr::V4(_) => true,
+            SocketAddr::V6(_) => false,
+        };
+
+        let ip_type = match (udp, v4) {
+            (true, true)   => IpType::U4,
+            (true, false)  => IpType::U6,
+            (false, true)  => IpType::T4,
+            (false, false) => IpType::T6,
+        };
+
         PackedNode {
             ip_type: ip_type,
             saddr: saddr,
@@ -331,8 +425,7 @@ impl PackedNode {
 /// IPv4 or IPv6 is being used.
 impl AsBytes for PackedNode {
     fn as_bytes(&self) -> Vec<u8> {
-        // TODO: ↓ perhaps capacity PACKED_NODE_IPV6_SIZE ?
-        let mut result: Vec<u8> = Vec::with_capacity(PACKED_NODE_IPV4_SIZE);
+        let mut result: Vec<u8> = Vec::with_capacity(PACKED_NODE_IPV6_SIZE);
 
         result.push(self.ip_type as u8);
 
@@ -487,6 +580,7 @@ impl FromBytes<GetNodes> for GetNodes {
                                     b[4], b[5], b[6], b[7]]);
             return Some(GetNodes { pk: pk, id: id })
         }
+        // TODO: ↓ logging
         None  // de-serialization failed
     }
 }
@@ -579,6 +673,7 @@ impl FromBytes<SendNodes> for SendNodes {
 
             return Some(SendNodes { nodes: nodes, id: array_to_u64(&ping_id) })
         }
+        // TODO: ↓ logging
         None  // parsing failed
     }
 }
@@ -635,87 +730,6 @@ impl AsBytes for DPacketT {
             DPacketT::Ping(ref d)      => d.as_bytes(),
             DPacketT::GetNodes(ref d)  => d.as_bytes(),
             DPacketT::SendNodes(ref d) => d.as_bytes(),
-        }
-    }
-}
-
-/// Top-level packet kind names and their associated numbers.
-///
-/// According to https://toktok.github.io/spec.html#packet-kind.
-// TODO: move it somewhere else
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum PacketKind {
-    /// [`Ping`](./struct.Ping.html) request number.
-    PingReq       = 0,
-    /// [`Ping`](./struct.Ping.html) response number.
-    PingResp      = 1,
-    /// [`GetNodes`](./struct.GetNodes.html) packet number.
-    GetN          = 2,
-    /// [`SendNodes`](./struct.SendNodes.html) packet number.
-    SendN         = 4,
-    /// Cookie Request.
-    CookieReq     = 24,
-    /// Cookie Response.
-    CookieResp    = 25,
-    /// Crypto Handshake.
-    CryptoHs      = 26,
-    /// Crypto Data (general purpose packet for transporting encrypted data).
-    CryptoData    = 27,
-    /// DHT Request.
-    DhtReq        = 32,
-    /// LAN Discovery.
-    LanDisc       = 33,
-    /// Onion Reuqest 0.
-    OnionReq0     = 128,
-    /// Onion Request 1.
-    OnionReq1     = 129,
-    /// Onion Request 2.
-    OnionReq2     = 130,
-    /// Announce Request.
-    AnnReq        = 131,
-    /// Announce Response.
-    AnnResp       = 132,
-    /// Onion Data Request.
-    OnionDataReq  = 133,
-    /// Onion Data Response.
-    OnionDataResp = 134,
-    /// Onion Response 3.
-    OnionResp3    = 140,
-    /// Onion Response 2.
-    OnionResp2    = 141,
-    /// Onion Response 1.
-    OnionResp1    = 142,
-}
-
-/// Parse first byte from provided `bytes` as `PacketKind`.
-///
-/// Returns `None` if no bytes provided, or first byte doesn't match.
-impl FromBytes<PacketKind> for PacketKind {
-    fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.is_empty() { return None }
-
-        match bytes[0] {
-            0   => Some(PacketKind::PingReq),
-            1   => Some(PacketKind::PingResp),
-            2   => Some(PacketKind::GetN),
-            4   => Some(PacketKind::SendN),
-            24  => Some(PacketKind::CookieReq),
-            25  => Some(PacketKind::CookieResp),
-            26  => Some(PacketKind::CryptoHs),
-            27  => Some(PacketKind::CryptoData),
-            32  => Some(PacketKind::DhtReq),
-            33  => Some(PacketKind::LanDisc),
-            128 => Some(PacketKind::OnionReq0),
-            129 => Some(PacketKind::OnionReq1),
-            130 => Some(PacketKind::OnionReq2),
-            131 => Some(PacketKind::AnnReq),
-            132 => Some(PacketKind::AnnResp),
-            133 => Some(PacketKind::OnionDataReq),
-            134 => Some(PacketKind::OnionDataResp),
-            140 => Some(PacketKind::OnionResp3),
-            141 => Some(PacketKind::OnionResp2),
-            142 => Some(PacketKind::OnionResp1),
-            _   => None,
         }
     }
 }
@@ -779,6 +793,7 @@ impl DhtPacket {
         let decrypted = match open(&self.payload, &self.nonce, &self.sender_pk,
                             own_secret_key) {
             Ok(d) => d,
+            // TODO: ↓ logging
             Err(_) => return None,
         };
 
@@ -800,6 +815,7 @@ impl DhtPacket {
             },
             _ => {},  // not a DHT packet
         }
+        // TODO: ↓ logging
         None  // parsing failed
     }
 
@@ -925,8 +941,8 @@ pub struct Node {
 impl Node {
     /// Create a new `Node`. New node has `req`, `resp` and `id` values set to
     /// `0`.
-    pub fn new(pn: PackedNode) -> Self {
-        Node { req: 0, resp: 0, id: 0, node: pn }
+    pub fn new(pn: &PackedNode) -> Self {
+        Node { req: 0, resp: 0, id: 0, node: *pn }
     }
 }
 

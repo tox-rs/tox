@@ -247,7 +247,6 @@ fn ipv6_addr_from_bytes_test() {
 /// Valid, random PackedNode.
 impl Arbitrary for PackedNode {
     fn arbitrary<G: Gen>(g: &mut G) -> Self {
-        let udp: bool = g.gen();
         let ipv4: bool = g.gen();
 
         let mut pk_bytes = [0; PUBLICKEYBYTES];
@@ -255,18 +254,16 @@ impl Arbitrary for PackedNode {
         let pk = PublicKey::from_slice(&pk_bytes).unwrap();
 
         if ipv4 {
-            let iptype = { if udp { IpType::U4 } else { IpType::T4 }};
             let addr = Ipv4Addr::new(g.gen(), g.gen(), g.gen(), g.gen());
             let saddr = SocketAddrV4::new(addr, g.gen());
 
-            return PackedNode::new(iptype, SocketAddr::V4(saddr), &pk);
+            return PackedNode::new(g.gen(), SocketAddr::V4(saddr), &pk);
         } else {
-            let iptype = { if udp { IpType::U6 } else { IpType::T6 }};
             let addr = Ipv6Addr::new(g.gen(), g.gen(), g.gen(), g.gen(),
                                      g.gen(), g.gen(), g.gen(), g.gen());
             let saddr = SocketAddrV6::new(addr, g.gen(), 0, 0);
 
-            return PackedNode::new(iptype, SocketAddr::V6(saddr), &pk);
+            return PackedNode::new(g.gen(), SocketAddr::V6(saddr), &pk);
         }
     }
 }
@@ -275,12 +272,9 @@ impl Arbitrary for PackedNode {
 
 #[test]
 #[allow(non_snake_case)]
-// TODO: when `::new()` will be able to fail, this test should check for whether
-// it works/fails when needed;
-// e.g. `IpType::U4` and supplied `SocketAddr:V6(_)` should fail
 fn packed_node_new_test_ip_type_UDP_IPv4() {
     let pk = PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap();
-    let info = PackedNode::new(IpType::U4,
+    let info = PackedNode::new(true,
                                SocketAddr::V4("0.0.0.0:0".parse().unwrap()),
                                &pk);
     assert_eq!(IpType::U4, info.ip_type);
@@ -292,8 +286,8 @@ fn packed_node_new_test_ip_type_UDP_IPv4() {
 
 #[test]
 fn packed_node_ip_test() {
-    let ipv4 = PackedNode::new(IpType::U4,
-                               SocketAddr::V4(SocketAddrV4::from_str("0.0.0.0:0").unwrap()),
+    let ipv4 = PackedNode::new(true,
+                               SocketAddr::V4("0.0.0.0:0".parse().unwrap()),
                                &PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap());
 
     match ipv4.ip() {
@@ -301,7 +295,7 @@ fn packed_node_ip_test() {
         IpAddr::V6(_) => panic!("This should not have happened, since IPv4 was supplied!"),
     }
 
-    let ipv6 = PackedNode::new(IpType::U6,
+    let ipv6 = PackedNode::new(true,
                                SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::from_str("::0").unwrap(),
                                    0, 0, 0)),
                                &PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap());
@@ -339,14 +333,12 @@ fn packed_node_from_bytes_multiple_test() {
 
 /// Returns all possible variants of `PackedNode` `ip_type`, in order
 /// listed by `IpType` enum.
-fn packed_node_all_ip_types(saddr: SocketAddr, pk: &PublicKey)
-    -> (PackedNode, PackedNode, PackedNode, PackedNode)
+fn packed_node_protocol(saddr: SocketAddr, pk: &PublicKey)
+    -> (PackedNode, PackedNode)
 {
-    let u4 = PackedNode::new(IpType::U4, saddr, pk);
-    let u6 = PackedNode::new(IpType::U6, saddr, pk);
-    let t4 = PackedNode::new(IpType::T4, saddr, pk);
-    let t6 = PackedNode::new(IpType::T6, saddr, pk);
-    (u4, u6, t4, t6)
+    let u = PackedNode::new(true, saddr, pk);
+    let t = PackedNode::new(false, saddr, pk);
+    (u, t)
 }
 
 
@@ -356,26 +348,26 @@ fn packed_node_as_bytes_test_ipv4() {
     fn with_random_ip(a: u8, b: u8, c: u8, d: u8) {
         let pk = &PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap();
         let saddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(a, b, c, d), 1));
-        let (u4, _, t4, _) = packed_node_all_ip_types(saddr, pk);
+        let (u, t) = packed_node_protocol(saddr, pk);
         // check whether ip_type variant matches
-        assert!(u4.as_bytes()[0] == 2);
-        assert!(t4.as_bytes()[0] == 130);
+        assert!(u.as_bytes()[0] == IpType::U4 as u8);
+        assert!(t.as_bytes()[0] == IpType::T4 as u8);
 
         // check whether IP matches ..
         //  ..with UDP
-        assert!(u4.as_bytes()[1] == a);
-        assert!(u4.as_bytes()[2] == b);
-        assert!(u4.as_bytes()[3] == c);
-        assert!(u4.as_bytes()[4] == d);
+        assert!(u.as_bytes()[1] == a);
+        assert!(u.as_bytes()[2] == b);
+        assert!(u.as_bytes()[3] == c);
+        assert!(u.as_bytes()[4] == d);
         //  ..with TCP
-        assert!(t4.as_bytes()[1] == a);
-        assert!(t4.as_bytes()[2] == b);
-        assert!(t4.as_bytes()[3] == c);
-        assert!(t4.as_bytes()[4] == d);
+        assert!(t.as_bytes()[1] == a);
+        assert!(t.as_bytes()[2] == b);
+        assert!(t.as_bytes()[3] == c);
+        assert!(t.as_bytes()[4] == d);
 
         // check whether length matches
-        assert!(u4.as_bytes().len() == PACKED_NODE_IPV4_SIZE);
-        assert!(t4.as_bytes().len() == PACKED_NODE_IPV4_SIZE);
+        assert!(u.as_bytes().len() == PACKED_NODE_IPV4_SIZE);
+        assert!(t.as_bytes().len() == PACKED_NODE_IPV4_SIZE);
     }
     quickcheck(with_random_ip as fn(u8, u8, u8, u8));
 }
@@ -397,34 +389,34 @@ fn packed_node_as_bytes_test_ipv6() {
                         SocketAddrV6::new(
                             Ipv6Addr::new(a, b, c, d, e, f, g, h),
                    /*port*/ 1, flowinfo, scope_id));
-        let (_, u6, _, t6) = packed_node_all_ip_types(saddr, pk);
+        let (u, t) = packed_node_protocol(saddr, pk);
         // check whether ip_type variant matches
-        assert_eq!(u6.as_bytes()[0], IpType::U6 as u8);
-        assert_eq!(t6.as_bytes()[0], IpType::T6 as u8);
+        assert_eq!(u.as_bytes()[0], IpType::U6 as u8);
+        assert_eq!(t.as_bytes()[0], IpType::T6 as u8);
 
         // check whether IP matches ..
         //  ..with UDP
-        assert_eq!(&u6.as_bytes()[1..3], &u16_to_array(a)[..]);
-        assert_eq!(&u6.as_bytes()[3..5], &u16_to_array(b)[..]);
-        assert_eq!(&u6.as_bytes()[5..7], &u16_to_array(c)[..]);
-        assert_eq!(&u6.as_bytes()[7..9], &u16_to_array(d)[..]);
-        assert_eq!(&u6.as_bytes()[9..11], &u16_to_array(e)[..]);
-        assert_eq!(&u6.as_bytes()[11..13], &u16_to_array(f)[..]);
-        assert_eq!(&u6.as_bytes()[13..15], &u16_to_array(g)[..]);
-        assert_eq!(&u6.as_bytes()[15..17], &u16_to_array(h)[..]);
+        assert_eq!(&u.as_bytes()[1..3], &u16_to_array(a)[..]);
+        assert_eq!(&u.as_bytes()[3..5], &u16_to_array(b)[..]);
+        assert_eq!(&u.as_bytes()[5..7], &u16_to_array(c)[..]);
+        assert_eq!(&u.as_bytes()[7..9], &u16_to_array(d)[..]);
+        assert_eq!(&u.as_bytes()[9..11], &u16_to_array(e)[..]);
+        assert_eq!(&u.as_bytes()[11..13], &u16_to_array(f)[..]);
+        assert_eq!(&u.as_bytes()[13..15], &u16_to_array(g)[..]);
+        assert_eq!(&u.as_bytes()[15..17], &u16_to_array(h)[..]);
         //  ..with TCP
-        assert_eq!(&t6.as_bytes()[1..3], &u16_to_array(a)[..]);
-        assert_eq!(&t6.as_bytes()[3..5], &u16_to_array(b)[..]);
-        assert_eq!(&t6.as_bytes()[5..7], &u16_to_array(c)[..]);
-        assert_eq!(&t6.as_bytes()[7..9], &u16_to_array(d)[..]);
-        assert_eq!(&t6.as_bytes()[9..11], &u16_to_array(e)[..]);
-        assert_eq!(&t6.as_bytes()[11..13], &u16_to_array(f)[..]);
-        assert_eq!(&t6.as_bytes()[13..15], &u16_to_array(g)[..]);
-        assert_eq!(&t6.as_bytes()[15..17], &u16_to_array(h)[..]);
+        assert_eq!(&t.as_bytes()[1..3], &u16_to_array(a)[..]);
+        assert_eq!(&t.as_bytes()[3..5], &u16_to_array(b)[..]);
+        assert_eq!(&t.as_bytes()[5..7], &u16_to_array(c)[..]);
+        assert_eq!(&t.as_bytes()[7..9], &u16_to_array(d)[..]);
+        assert_eq!(&t.as_bytes()[9..11], &u16_to_array(e)[..]);
+        assert_eq!(&t.as_bytes()[11..13], &u16_to_array(f)[..]);
+        assert_eq!(&t.as_bytes()[13..15], &u16_to_array(g)[..]);
+        assert_eq!(&t.as_bytes()[15..17], &u16_to_array(h)[..]);
 
         // check whether length matches
-        assert!(u6.as_bytes().len() == PACKED_NODE_IPV6_SIZE);
-        assert!(t6.as_bytes().len() == PACKED_NODE_IPV6_SIZE);
+        assert!(u.as_bytes().len() == PACKED_NODE_IPV6_SIZE);
+        assert!(t.as_bytes().len() == PACKED_NODE_IPV6_SIZE);
     }
     quickcheck(with_random_ip as fn(u64, u64, u32, u32));
 }
@@ -437,12 +429,12 @@ fn packed_nodes_as_bytes_test_port() {
         let saddr4 = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(1, 1, 1, 1), port));
         let saddr6 = SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::from_str("::0").unwrap(), port, 0, 0));
 
-        let (u4, _, t4, _) = packed_node_all_ip_types(saddr4, pk);
+        let (u4, t4) = packed_node_protocol(saddr4, pk);
         assert_eq!(&u16_to_array(port.to_be())[..], &u4.as_bytes()[5..7]);
         assert_eq!(&u16_to_array(port.to_be())[..], &t4.as_bytes()[5..7]);
 
         // and IPv6
-        let (_, u6, _, t6) = packed_node_all_ip_types(saddr6, pk);
+        let (u6, t6) = packed_node_protocol(saddr6, pk);
         assert_eq!(&u16_to_array(port.to_be())[..], &u6.as_bytes()[17..19]);
         assert_eq!(&u16_to_array(port.to_be())[..], &t6.as_bytes()[17..19]);
 
@@ -469,11 +461,11 @@ fn packed_nodes_as_bytes_test_pk() {
 
         let pk = &PublicKey::from_slice(pk_bytes).unwrap();
 
-        let (u4, _, t4, _) = packed_node_all_ip_types(saddr4, pk);
+        let (u4, t4) = packed_node_protocol(saddr4, pk);
         assert_eq!(&u4.as_bytes()[7..], pk_bytes);
         assert_eq!(&t4.as_bytes()[7..], pk_bytes);
 
-        let (_, u6, _, t6) = packed_node_all_ip_types(saddr6, pk);
+        let (u6, t6) = packed_node_protocol(saddr6, pk);
         assert_eq!(&u6.as_bytes()[19..], pk_bytes);
         assert_eq!(&t6.as_bytes()[19..], pk_bytes);
     }
@@ -983,7 +975,7 @@ fn public_key_distance_test() {
 #[test]
 fn node_new_test() {
     fn with_pn(pn: PackedNode) {
-        let node = Node::new(pn);
+        let node = Node::new(&pn);
         assert_eq!(0, node.req);
         assert_eq!(0, node.resp);
         assert_eq!(0, node.id);
