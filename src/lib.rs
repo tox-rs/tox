@@ -62,30 +62,60 @@ fn main() {
 
     // and since packet is ready, prepare the network part;
     // bind to some UDP socket
-    let socket = bind_udp().unwrap();
+    let socket = match bind_udp() {
+        Some(s) => s,
+        None => {
+            println!("Failed to bind to socket, exiting.");
+            return;
+        },
+    };
 
     // send DhtPacket via socket to the node (Imppy's)
-    let sent_bytes = socket.send_to(&dhtpacket, "178.62.250.138:33445").unwrap();
+    let sent_bytes = match socket.send_to(&dhtpacket, "178.62.250.138:33445") {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            println!("Failed to send bytes: {}", e);
+            return;
+        },
+    };
+
     println!("Sent {} bytes of Ping request to the bootstrap node", sent_bytes);
     // since data was sent, now receive response – for that, first prepare
     // buffer to receive data into
     let mut buf = [0; 2048];  // Tox UDP packet won't be bigger
 
     // and wait for the answer
-    let (bytes, sender) = socket.recv_from(&mut buf).unwrap();
+    let (bytes, sender) = match socket.recv_from(&mut buf) {
+        Ok(d) => d,
+        Err(e) => {
+            println!("Failed to receive data from socket: {}", e);
+            return;
+        },
+    };
 
     // try to de-serialize received bytes as `DhtPacket`
     let recv_packet = match DhtPacket::from_bytes(&buf[..bytes]) {
         Some(p) => p,
         // if parsing fails ↓
-        None => panic!("Received packet could not have been parsed!\n{:?}",
-                       &buf[..bytes]),
+        None => {
+            println!("Received packet could not have been parsed!\n{:?}",
+                       &buf[..bytes]);
+            return;
+        },
     };
 
     println!("Received packet from {}, with an encrypted payload:\n{:?}",
              sender, recv_packet);
-    // print decrypted contents of the received packet
-    println!("And contents of payload:\n{:?}", recv_packet.get_packet(&sk).unwrap());
+
+    // decrypt payload of the received packet
+    let payload = match recv_packet.get_packet(&sk) {
+        Some(p) => p,
+        None => {
+            println!("Failed to decrypt payload!");
+            return;
+        },
+    };
+    println!("And contents of payload:\n{:?}", payload);
 }
 ```
 
