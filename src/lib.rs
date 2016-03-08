@@ -82,7 +82,8 @@ fn main() {
                        &buf[..bytes]),
     };
 
-    println!("Received packet, with an encrypted payload:\n{:?}", recv_packet);
+    println!("Received packet from {}, with an encrypted payload:\n{:?}",
+             sender, recv_packet);
     // print decrypted contents of the received packet
     println!("And contents of payload:\n{:?}", recv_packet.get_packet(&sk).unwrap());
 }
