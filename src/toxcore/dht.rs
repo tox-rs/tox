@@ -949,3 +949,29 @@ impl Node {
 // TODO: create k-bucket struct(?):
 //       https://en.wikipedia.org/wiki/Kademlia#Routing_tables
 //       https://toktok.github.io/spec.html#packed-node-format-3
+
+
+/// Structure for storing & ~processing pings.
+pub struct PingArray {
+    pings: Vec<u64>,
+}
+
+impl PingArray {
+    /// Create an empty `PingArray`.
+    pub fn new() -> Self {
+        PingArray { pings: vec![] }
+    }
+
+    /// Create a ping array from [`Ping`](./struct.Ping.html).
+    pub fn from_ping(ping: &Ping) -> Self {
+        PingArray { pings: vec![ping.id] }
+    }
+
+    /// Add [`Ping`](./struct.Ping.html) to the array.
+    pub fn push(&mut self, ping: &Ping) {
+        self.pings.push(ping.id);
+    }
+
+    // TODO: check if ping already exists
+}
+// TODO: tests for PingArray

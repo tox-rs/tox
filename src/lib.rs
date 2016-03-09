@@ -126,9 +126,6 @@ extern crate sodiumoxide;
 
 extern crate ip;
 
-#[cfg(test)]
-extern crate rustc_serialize;
-
 
 /// Core Tox module. Provides an API on top of which other modules and
 /// applications may be build.
@@ -140,6 +137,9 @@ pub mod toxcore {
     pub mod network;
 }
 
+
+#[cfg(test)]
+extern crate rustc_serialize;
 #[cfg(test)]
 extern crate quickcheck;
 
