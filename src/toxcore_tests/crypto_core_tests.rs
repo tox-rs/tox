@@ -25,7 +25,7 @@ use std::str::FromStr;
 
 use toxcore::crypto_core::*;
 
-use quickcheck::quickcheck;
+use super::quickcheck::quickcheck;
 
 
 #[test]

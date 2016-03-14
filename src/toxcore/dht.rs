@@ -926,12 +926,13 @@ impl Distance for PublicKey {
 // TODO: perhaps merge functionality with the `PackedNode` ?
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Node {
-    /// Time of last [`Ping`](./struct.Ping.html) request in secods since UNIX
-    /// epoch.
-    pub req: u64,
-    /// Time of last [`Ping`](./struct.Ping.html) response in secods since UNIX
-    /// epoch.
-    pub resp: u64,
+    /// Time when node will reach it's timeout - value consists of `seconds
+    /// since UNIX epoch + timeout`. If value equals or is lower than current
+    /// time since UNIX epoch, node is timed out.
+    ///
+    /// Timeout value should be updated every time a valid packet from given
+    /// node is received.
+    pub timeout: u64,
     /// Ping ID of last sent [`Ping`](./struct.Ping.html) request.
     pub id: u64,
     /// Packed Node that Node contains.
@@ -941,37 +942,16 @@ pub struct Node {
 impl Node {
     /// Create a new `Node`. New node has `req`, `resp` and `id` values set to
     /// `0`.
-    pub fn new(pn: &PackedNode) -> Self {
-        Node { req: 0, resp: 0, id: 0, node: *pn }
+    pub fn new(pn: &PackedNode, timeout: u64) -> Self {
+        Node { timeout: timeout, id: 0, node: *pn }
+    }
+
+    /// Set the ID of last [`Ping`](./struct.Ping.html) request sent.
+    pub fn id(&mut self, id: u64) {
+        self.id = id;
     }
 }
 
 // TODO: create k-bucket struct(?):
 //       https://en.wikipedia.org/wiki/Kademlia#Routing_tables
 //       https://toktok.github.io/spec.html#packed-node-format-3
-
-
-/// Structure for storing & ~processing pings.
-pub struct PingArray {
-    pings: Vec<u64>,
-}
-
-impl PingArray {
-    /// Create an empty `PingArray`.
-    pub fn new() -> Self {
-        PingArray { pings: vec![] }
-    }
-
-    /// Create a ping array from [`Ping`](./struct.Ping.html).
-    pub fn from_ping(ping: &Ping) -> Self {
-        PingArray { pings: vec![ping.id] }
-    }
-
-    /// Add [`Ping`](./struct.Ping.html) to the array.
-    pub fn push(&mut self, ping: &Ping) {
-        self.pings.push(ping.id);
-    }
-
-    // TODO: check if ping already exists
-}
-// TODO: tests for PingArray

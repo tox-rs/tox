@@ -18,7 +18,7 @@
 */
 
 /*!
-Tox API.
+Rust implementation of the [Tox protocol](https://toktok.github.io/spec).
 
 Current API allows one to e.g. find info about DHT nodes from bootstrap
 nodes by sending [`GetNodes`](./toxcore/dht/struct.GetNodes.html) or request
@@ -139,12 +139,10 @@ pub mod toxcore {
 
 
 #[cfg(test)]
-extern crate rustc_serialize;
-#[cfg(test)]
-extern crate quickcheck;
-
-#[cfg(test)]
 mod toxcore_tests {
+    extern crate quickcheck;
+    extern crate rustc_serialize;
+
     mod binary_io_tests;
     mod crypto_core_tests;
     mod dht_tests;

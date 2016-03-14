@@ -19,7 +19,7 @@
 
 //! Tests for `binary_io` module.
 
-use quickcheck::quickcheck;
+use super::quickcheck::quickcheck;
 
 use toxcore::binary_io::*;
 
