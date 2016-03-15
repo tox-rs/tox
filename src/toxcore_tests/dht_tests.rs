@@ -1003,3 +1003,16 @@ fn node_id_test() {
     }
     quickcheck(with_id as fn(Node, u64));
 }
+
+
+// kbucket_index()
+
+#[test]
+fn kbucket_index_test() {
+    let pk1 = PublicKey::from_slice(&[0b10101010; PUBLICKEYBYTES]).unwrap();
+    let pk2 = PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap();
+    let pk3 = PublicKey::from_slice(&[0b00101010; PUBLICKEYBYTES]).unwrap();
+    assert_eq!(None, kbucket_index(&pk1, &pk1));
+    assert_eq!(Some(0), kbucket_index(&pk1, &pk2));
+    assert_eq!(Some(2), kbucket_index(&pk2, &pk3));
+}

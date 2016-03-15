@@ -1068,6 +1068,31 @@ impl Node {
     }
 }
 
+
+/// Calculate the `k-bucket` index of a PK compared to "own" PK.
+///
+/// Falis (returns `None`) if supplied keys are the same.
+pub fn kbucket_index(&PublicKey(ref own_pk): &PublicKey,
+                     &PublicKey(ref other_pk): &PublicKey) -> Option<u8> {
+
+    let mut index = 0;
+
+    for byte in 0..PUBLICKEYBYTES {
+        for bit in 0..8 {
+            let shift = 7 - bit;
+            if (own_pk[byte] >> shift) & 0b1 != (other_pk[byte] >> shift) & 0b1 {
+                return Some(index)
+            } else {
+                index = match index.checked_add(1) {
+                    Some(n) => n,
+                    None => return None,
+                };
+            }
+        }
+    }
+    None  // PKs are equal
+}
+
 // TODO: create k-bucket struct(?):
 //       https://en.wikipedia.org/wiki/Kademlia#Routing_tables
 //       https://toktok.github.io/spec.html#packed-node-format-3
