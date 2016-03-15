@@ -86,7 +86,12 @@ pub enum PacketKind {
 /// Returns `None` if no bytes provided, or first byte doesn't match.
 impl FromBytes<PacketKind> for PacketKind {
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.is_empty() { return None }
+        debug!(target: "PacketKind", "Creating PacketKind from bytes.");
+        trace!(target: "PacketKind", "Bytes: {:?}", bytes);
+        if bytes.is_empty() {
+            debug!("There are 0 bytes!");
+            return None
+        }
 
         match bytes[0] {
             0   => Some(PacketKind::PingReq),
@@ -109,7 +114,10 @@ impl FromBytes<PacketKind> for PacketKind {
             140 => Some(PacketKind::OnionResp3),
             141 => Some(PacketKind::OnionResp2),
             142 => Some(PacketKind::OnionResp1),
-            _   => None,
+            _   => {
+                debug!("Byte can't be parsed as PacketKind!");
+                None
+            },
         }
     }
 }
@@ -134,10 +142,15 @@ pub enum PingType {
 /// doesn't match `PingType` or slice has no elements.
 impl FromBytes<PingType> for PingType {
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        debug!(target: "PingType", "Creating PingType from bytes.");
+        trace!(target: "PingType", "Bytes: {:?}", bytes);
         match PacketKind::from_bytes(bytes) {
             Some(PacketKind::PingReq)  => Some(PingType::Req),
             Some(PacketKind::PingResp) => Some(PingType::Resp),
-            _ => None,
+            _ => {
+                debug!("Creating PingType from bytes failed!");
+                None
+            },
         }
     }
 }
@@ -171,11 +184,14 @@ pub const PING_SIZE: usize = 9;
 impl Ping {
     /// Create new ping request with a randomly generated `id`.
     pub fn new() -> Self {
+        trace!("Creating new Ping.");
         Ping { p_type: PingType::Req, id: random_u64(), }
     }
 
     /// Check whether given `Ping` is a request.
     pub fn is_request(&self) -> bool {
+        trace!(target: "Ping",
+               "Checking whether Ping is a request with Ping: {:?}", self);
         self.p_type == PingType::Req
     }
 
@@ -184,7 +200,10 @@ impl Ping {
     // TODO: make sure that checking whether `Ping` is not a response is needed
     //       here
     pub fn response(&self) -> Option<Self> {
+        debug!(target: "Ping", "Creating a response to ping request.");
+        trace!(target: "Ping", "With Ping: {:?}", self);
         if self.p_type == PingType::Resp {
+            debug!("Ping is not a request, can't create response!");
             return None;
         }
 
@@ -201,11 +220,14 @@ impl Ping {
 /// Serializes [`Ping`](./struct.Ping.html) into bytes.
 impl AsBytes for Ping {
     fn as_bytes(&self) -> Vec<u8> {
+        debug!(target: "Ping", "Serializing Ping into bytes.");
+        trace!(target: "Ping", "With Ping: {:?}", self);
         let mut res = Vec::with_capacity(PING_SIZE);
         // `PingType`
         res.push(self.p_type as u8);
         // And random ping_id as bytes
         res.extend_from_slice(&u64_to_array(self.id));
+        trace!("Serialized Ping: {:?}", &res);
         res
     }
 }
@@ -215,7 +237,14 @@ impl AsBytes for Ping {
 /// `Ping`.
 impl FromBytes<Ping> for Ping {
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() < PING_SIZE { return None; }
+        debug!(target: "Ping", "De-serializing Ping from bytes.");
+        trace!(target: "Ping", "With bytes: {:?}", bytes);
+
+        if bytes.len() < PING_SIZE {
+            debug!("There are less bytes than PING_SIZE!");
+            return None;
+        }
+
         if let Some(ping_type) = PingType::from_bytes(bytes) {
             return Some(Ping {
                 p_type: ping_type,
@@ -223,7 +252,8 @@ impl FromBytes<Ping> for Ping {
                                    bytes[5], bytes[6], bytes[7], bytes[8]]),
             })
         }
-        None  // parsing failed
+        debug!("De-serializing Ping failed!");
+        None
     }
 }
 
@@ -261,13 +291,23 @@ pub enum IpType {
 /// return `None`.
 impl FromBytes<IpType> for IpType {
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.is_empty() { return None }
+        debug!(target: "IpType", "De-serializing IpType from bytes.");
+        trace!(target: "IpType", "With bytes: {:?}", bytes);
+
+        if bytes.is_empty() {
+            debug!("There are 0 bytes!");
+            return None
+        }
+
         match bytes[0] {
             2   => Some(IpType::U4),
             10  => Some(IpType::U6),
             130 => Some(IpType::T4),
             138 => Some(IpType::T6),
-            _   => None,
+            _   => {
+                debug!("Can't de-serialize bytes into IpType!");
+                None
+            },
         }
     }
 }
@@ -276,6 +316,8 @@ impl FromBytes<IpType> for IpType {
 // TODO: move it somewhere else
 impl AsBytes for IpAddr {
     fn as_bytes(&self) -> Vec<u8> {
+        debug!(target: "IpAddr", "Serializing IpAddr to bytes.");
+        trace!(target: "IpAddr", "With IpAddr: {:?}", self);
         match *self {
             IpAddr::V4(a) => a.octets().iter().map(|b| *b).collect(),
             IpAddr::V6(a) => {
@@ -295,7 +337,13 @@ impl AsBytes for IpAddr {
 /// 16 bytes as an `Ipv6Addr`.
 impl FromBytes<Ipv6Addr> for Ipv6Addr {
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() < 16 { return None }
+        debug!(target: "Ipv6Addr", "De-serializing Ipv6Addr from bytes.");
+        trace!(target: "Ipv6Addr", "With bytes: {:?}", bytes);
+
+        if bytes.len() < 16 {
+            debug!("Not enough bytes for Ipv6Addr!");
+            return None
+        }
 
         let (a, b, c, d, e, f, g, h) = {
             let mut v: Vec<u16> = Vec::with_capacity(8);
@@ -358,6 +406,10 @@ impl PackedNode {
     /// `udp` – whether UDP or TCP should be used. UDP is used for DHT nodes,
     /// whereas TCP is used for TCP relays.
     pub fn new(udp: bool, saddr: SocketAddr, pk: &PublicKey) -> Self {
+        debug!(target: "PackedNode", "Creating new PackedNode.");
+        trace!(target: "PackedNode", "With args: udp: {}, saddr: {:?}, PK: {:?}",
+               udp, &saddr, pk);
+
         let v4: bool = match saddr {
             SocketAddr::V4(_) => true,
             SocketAddr::V6(_) => false,
@@ -379,6 +431,8 @@ impl PackedNode {
 
     /// Get an IP address from the `PackedNode`.
     pub fn ip(&self) -> IpAddr {
+        trace!(target: "PackedNode", "Getting IP address from PackedNode.");
+        trace!("With address: {:?}", self);
         match self.saddr {
             SocketAddr::V4(addr) => IpAddr::V4(*addr.ip()),
             SocketAddr::V6(addr) => IpAddr::V6(*addr.ip()),
@@ -393,11 +447,18 @@ impl PackedNode {
     ///
     /// Parses nodes until first error is encountered.
     pub fn from_bytes_multiple(bytes: &[u8]) -> Option<Vec<PackedNode>> {
-        if bytes.len() < PACKED_NODE_IPV4_SIZE { return None }
+        debug!(target: "PackedNode", "De-serializing multiple PackedNode.");
+        trace!(target: "PackedNode", "With bytes: {:?}", bytes);
+
+        if bytes.len() < PACKED_NODE_IPV4_SIZE {
+            debug!("There are less bytes than PACKED_NODE_IPV4_SIZE!");
+            return None
+        }
 
         let mut cur_pos = 0;
-        let mut result = vec![];
+        let mut result = Vec::new();
 
+        // TODO: add `trace!()` logging?
         while let Some(node) = PackedNode::from_bytes(&bytes[cur_pos..]) {
             cur_pos += {
                 match node.ip_type {
@@ -408,13 +469,14 @@ impl PackedNode {
             result.push(node);
         }
 
+        trace!("Result: {:?}", &result);
         if result.is_empty() {
+            debug!("There is no successfully de-serialized PackedNodes!");
             return None
         } else {
             return Some(result)
         }
     }
-
 }
 
 /// Serialize `PackedNode` into bytes.
@@ -425,6 +487,8 @@ impl PackedNode {
 /// IPv4 or IPv6 is being used.
 impl AsBytes for PackedNode {
     fn as_bytes(&self) -> Vec<u8> {
+        debug!(target: "PackedNode", "Serializing PackedNode into bytes.");
+        trace!(target: "PackedNode", "With PackedNode: {:?}", self);
         let mut result: Vec<u8> = Vec::with_capacity(PACKED_NODE_IPV6_SIZE);
 
         result.push(self.ip_type as u8);
@@ -437,6 +501,7 @@ impl AsBytes for PackedNode {
         let PublicKey(ref pk) = self.pk;
         result.extend_from_slice(pk);
 
+        trace!("Result: {:?}", &result);
         result
     }
 }
@@ -455,15 +520,23 @@ impl AsBytes for PackedNode {
 /// address.
 impl FromBytes<PackedNode> for PackedNode {
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        debug!(target: "PackedNode", "De-serializing bytes into PackedNode.");
+        trace!(target: "PackedNode", "With bytes: {:?}", bytes);
+
         // parse bytes as IPv4
         fn as_ipv4(bytes: &[u8]) -> Option<(SocketAddr, PublicKey)> {
+            debug!("Parsing bytes as IPv4.");
+            trace!("Bytes: {:?}", bytes);
             let addr = Ipv4Addr::new(bytes[1], bytes[2], bytes[3], bytes[4]);
             let port = u16::from_be(array_to_u16(&[bytes[5], bytes[6]]));
             let saddr = SocketAddrV4::new(addr, port);
 
             let pk = match PublicKey::from_slice(&bytes[7..PACKED_NODE_IPV4_SIZE]) {
                 Some(pk) => pk,
-                None => return None,
+                None => {
+                    trace!("Not enough bytes to parse as PK after IPv4.");
+                    return None
+                },
             };
 
             Some((SocketAddr::V4(saddr), pk))
@@ -471,7 +544,12 @@ impl FromBytes<PackedNode> for PackedNode {
 
         // parse bytes as IPv4
         fn as_ipv6(bytes: &[u8]) -> Option<(SocketAddr, PublicKey)> {
-            if bytes.len() < PACKED_NODE_IPV6_SIZE { return None }
+            trace!("Parsing bytes as IPv6.");
+            trace!("Bytes: {:?}", bytes);
+            if bytes.len() < PACKED_NODE_IPV6_SIZE {
+                debug!("Less bytes than PACKED_NODE_IPV6_SIZE!");
+                return None
+            }
 
             let addr = match Ipv6Addr::from_bytes(&bytes[1..]) {
                 Some(a) => a,
@@ -482,7 +560,10 @@ impl FromBytes<PackedNode> for PackedNode {
 
             let pk = match PublicKey::from_slice(&bytes[19..PACKED_NODE_IPV6_SIZE]) {
                 Some(p) => p,
-                None    => return None,
+                None    => {
+                    trace!("Not enough bytes to parse as PK after IPv6.");
+                    return None
+                },
             };
 
             Some((SocketAddr::V6(saddr), pk))
@@ -500,7 +581,10 @@ impl FromBytes<PackedNode> for PackedNode {
 
             let (saddr, pk) = match saddr_and_pk {
                 Some(v) => v,
-                None => return None,
+                None => {
+                    debug!("Parsing failed, no saddr & PK.");
+                    return None
+                },
             };
 
             return Some(PackedNode {
@@ -509,7 +593,8 @@ impl FromBytes<PackedNode> for PackedNode {
                 pk: pk,
             });
         }
-        // `if` not triggered, make sure to return `None`
+        // `if` not triggered
+        debug!("Not enough bytes; less than PACKED_NODE_IPV4_SIZE");
         None
     }
 }
@@ -545,6 +630,7 @@ pub const GET_NODES_SIZE: usize = PUBLICKEYBYTES + 8;
 impl GetNodes {
     /// Create new `GetNodes` with given PK.
     pub fn new(their_public_key: &PublicKey) -> Self {
+        trace!(target: "GetNodes", "Creating new GetNodes request.");
         GetNodes { pk: *their_public_key, id: random_u64() }
     }
 
@@ -559,10 +645,13 @@ impl GetNodes {
 /// [`GET_NODES_SIZE`](./constant.GET_NODES_SIZE.html).
 impl AsBytes for GetNodes {
     fn as_bytes(&self) -> Vec<u8> {
+        debug!(target: "GetNodes", "Serializing GetNodes as bytes.");
+        trace!(target: "GetNodes", "With GetNodes: {:?}", self);
         let mut result = Vec::with_capacity(GET_NODES_SIZE);
         let PublicKey(pk_bytes) = self.pk;
         result.extend_from_slice(&pk_bytes);
         result.extend_from_slice(&u64_to_array(self.id));
+        trace!("Resulting bytes: {:?}", &result);
         result
     }
 }
@@ -572,7 +661,14 @@ impl AsBytes for GetNodes {
 /// de-serialization will fail, returning `None`.
 impl FromBytes<GetNodes> for GetNodes {
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() < GET_NODES_SIZE { return None }
+        debug!(target: "GetNodes", "De-serializing bytes into GetNodes.");
+        trace!(target: "GetNodes", "With bytes: {:?}", bytes);
+
+        if bytes.len() < GET_NODES_SIZE {
+            debug!("Amount of bytes is less than GET_NODES_SIZE!");
+            return None
+        }
+
         if let Some(pk) = PublicKey::from_slice(&bytes[..PUBLICKEYBYTES]) {
             // need shorter name for ID bytes
             let b = &bytes[PUBLICKEYBYTES..GET_NODES_SIZE];
@@ -580,7 +676,7 @@ impl FromBytes<GetNodes> for GetNodes {
                                     b[4], b[5], b[6], b[7]]);
             return Some(GetNodes { pk: pk, id: id })
         }
-        // TODO: ↓ logging
+        debug!("Failed to de-serialize bytes into GetNodes!");
         None  // de-serialization failed
     }
 }
@@ -620,7 +716,14 @@ impl SendNodes {
     ///
     /// Created as an answer to `GetNodes` request.
     pub fn from_request(request: &GetNodes, nodes: Vec<PackedNode>) -> Option<Self> {
-        if nodes.is_empty() || nodes.len() > 4 { return None }
+        debug!(target: "SendNodes", "Creating SendNodes from GetNodes.");
+        trace!(target: "SendNodes", "With GetNodes: {:?}", request);
+        trace!("With nodes: {:?}", &nodes);
+
+        if nodes.is_empty() || nodes.len() > 4 {
+            warn!(target: "SendNodes", "Wrong number of nodes supplied!");
+            return None
+        }
 
         Some(SendNodes { nodes: nodes, id: request.id })
     }
@@ -636,12 +739,15 @@ impl SendNodes {
 /// included – `[1, 4]`.
 impl AsBytes for SendNodes {
     fn as_bytes(&self) -> Vec<u8> {
+        debug!(target: "SendNodes", "Serializing SendNodes into bytes.");
+        trace!(target: "SendNodes", "With SendNodes: {:?}", self);
         // first byte is number of nodes
         let mut result: Vec<u8> = vec![self.nodes.len() as u8];
         for node in &*self.nodes {
             result.extend_from_slice(&node.as_bytes());
         }
         result.extend_from_slice(&u64_to_array(self.id));
+        trace!("Resulting bytes: {:?}", &result);
         result
     }
 }
@@ -651,12 +757,22 @@ impl AsBytes for SendNodes {
 /// Returns `None` if bytes can't be parsed into `SendNodes`.
 impl FromBytes<SendNodes> for SendNodes {
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        debug!(target: "SendNodes", "De-serializing bytes into SendNodes.");
+        trace!(target: "SendNodes", "With bytes: {:?}", bytes);
+
         // first byte should say how many `PackedNode`s `SendNodes` has.
         // There has to be at least 1 node, and no more than 4.
-        if bytes[0] < 1 || bytes[0] > 4 { return None }
+        if bytes[0] < 1 || bytes[0] > 4 {
+            warn!(target: "SendNodes", "Wrong number of nodes: {}", bytes[0]);
+            return None
+        }
 
         if let Some(nodes) = PackedNode::from_bytes_multiple(&bytes[1..]) {
-            if nodes.len() > 4 { return None }
+            if nodes.len() != bytes[0] as usize {
+                warn!(target: "SendNodes", "Wrong number of nodes; Expected:
+                      {}; Has: {}", bytes[0], nodes.len());
+                return None
+            }
 
             // since 1st byte is a number of nodes
             let mut nodes_bytes_len = 1;
@@ -673,7 +789,7 @@ impl FromBytes<SendNodes> for SendNodes {
 
             return Some(SendNodes { nodes: nodes, id: array_to_u64(&ping_id) })
         }
-        // TODO: ↓ logging
+        debug!("De-serializing from bytes into SendNodes failed!");
         None  // parsing failed
     }
 }

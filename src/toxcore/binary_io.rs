@@ -35,6 +35,7 @@ pub trait FromBytes<Output> {
 
 /// Safely cast `[u8; 2]` to `u16` using shift+or.
 pub fn array_to_u16(array: &[u8; 2]) -> u16 {
+    trace!("Casting array to u16 from array: {:?}", array);
     let mut result: u16 = 0;
     for byte in 0..array.len() {
         result = result << 8;
@@ -45,6 +46,7 @@ pub fn array_to_u16(array: &[u8; 2]) -> u16 {
 
 /// Safely cast `u16` to `[u8; 2]`.
 pub fn u16_to_array(num: u16) -> [u8; 2] {
+    trace!("Casting u16 to array from u16: {}", num);
     let mut array: [u8; 2] = [0; 2];
     for n in 0..array.len() {
         array[n] = (num >> (8 * n)) as u8;
@@ -55,6 +57,7 @@ pub fn u16_to_array(num: u16) -> [u8; 2] {
 
 /// Safely cast `&[u8; 4]` to `u32`.
 pub fn array_to_u32(array: &[u8; 4]) -> u32 {
+    trace!("Casting array to u32 from array: {:?}", array);
     let mut result: u32 = 0;
     for byte in 0..array.len() {
         result = result << 8;
@@ -66,6 +69,7 @@ pub fn array_to_u32(array: &[u8; 4]) -> u32 {
 
 /// Safely cast `&[u8; 8]` to `u64`.
 pub fn array_to_u64(array: &[u8; 8]) -> u64 {
+    trace!("Casting array to u64 from array: {:?}", array);
     let mut result: u64 = 0;
     for byte in 0..array.len() {
         result = result << 8;
@@ -76,6 +80,7 @@ pub fn array_to_u64(array: &[u8; 8]) -> u64 {
 
 /// Safely cast `u64` to `[u8; 8]`
 pub fn u64_to_array(num: u64) -> [u8; 8] {
+    trace!("Casting u64 to array from u64: {}", num);
     let mut array: [u8; 8] = [0; 8];
     for n in 0..array.len() {
         array[n] = (num >> (8 * n)) as u8;

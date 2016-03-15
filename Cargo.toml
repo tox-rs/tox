@@ -8,6 +8,7 @@ git = "https://github.com/dnaq/sodiumoxide.git"
 
 [dependencies]
 ip = "1.1"
+log = "0.3"
 
 [dev-dependencies]
 quickcheck = "0.2"

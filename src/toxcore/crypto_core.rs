@@ -30,6 +30,7 @@ use toxcore::binary_io::{array_to_u32, array_to_u64};
 
 /// Return a random number.
 pub fn random_u32() -> u32 {
+    trace!("Generating random u32");
     let mut array = [0; 4];
     randombytes_into(&mut array);
     array_to_u32(&array)
@@ -37,6 +38,7 @@ pub fn random_u32() -> u32 {
 
 /// Return a random number.
 pub fn random_u64() -> u64 {
+    trace!("Generating random u64");
     let mut array = [0; 8];
     randombytes_into(&mut array);
     array_to_u64(&array)
