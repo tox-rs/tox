@@ -21,9 +21,9 @@
 
 
 /// Serialization into bytes.
-pub trait AsBytes {
+pub trait ToBytes {
     /// Serialize into bytes.
-    fn as_bytes(&self) -> Vec<u8>;
+    fn to_bytes(&self) -> Vec<u8>;
 }
 
 /// De-serialize from bytes, or return `None` if de-serialization failed.

@@ -218,8 +218,8 @@ impl Ping {
 }
 
 /// Serializes [`Ping`](./struct.Ping.html) into bytes.
-impl AsBytes for Ping {
-    fn as_bytes(&self) -> Vec<u8> {
+impl ToBytes for Ping {
+    fn to_bytes(&self) -> Vec<u8> {
         debug!(target: "Ping", "Serializing Ping into bytes.");
         trace!(target: "Ping", "With Ping: {:?}", self);
         let mut res = Vec::with_capacity(PING_SIZE);
@@ -314,8 +314,8 @@ impl FromBytes<IpType> for IpType {
 
 
 // TODO: move it somewhere else
-impl AsBytes for IpAddr {
-    fn as_bytes(&self) -> Vec<u8> {
+impl ToBytes for IpAddr {
+    fn to_bytes(&self) -> Vec<u8> {
         debug!(target: "IpAddr", "Serializing IpAddr to bytes.");
         trace!(target: "IpAddr", "With IpAddr: {:?}", self);
         match *self {
@@ -485,15 +485,15 @@ impl PackedNode {
 /// (./constant.PACKED_NODE_IPV4_SIZE.html) or [`PACKED_NODE_IPV6_SIZE`]
 /// (./constant.PACKED_NODE_IPV6_SIZE.html) bytes long, depending on whether
 /// IPv4 or IPv6 is being used.
-impl AsBytes for PackedNode {
-    fn as_bytes(&self) -> Vec<u8> {
+impl ToBytes for PackedNode {
+    fn to_bytes(&self) -> Vec<u8> {
         debug!(target: "PackedNode", "Serializing PackedNode into bytes.");
         trace!(target: "PackedNode", "With PackedNode: {:?}", self);
         let mut result: Vec<u8> = Vec::with_capacity(PACKED_NODE_IPV6_SIZE);
 
         result.push(self.ip_type as u8);
 
-        let addr: Vec<u8> = self.ip().as_bytes();
+        let addr: Vec<u8> = self.ip().to_bytes();
         result.extend_from_slice(&addr);
         // port
         result.extend_from_slice(&u16_to_array(self.saddr.port().to_be()));
@@ -643,8 +643,8 @@ impl GetNodes {
 
 /// Serialization of `GetNodes`. Resulting lenght should be
 /// [`GET_NODES_SIZE`](./constant.GET_NODES_SIZE.html).
-impl AsBytes for GetNodes {
-    fn as_bytes(&self) -> Vec<u8> {
+impl ToBytes for GetNodes {
+    fn to_bytes(&self) -> Vec<u8> {
         debug!(target: "GetNodes", "Serializing GetNodes as bytes.");
         trace!(target: "GetNodes", "With GetNodes: {:?}", self);
         let mut result = Vec::with_capacity(GET_NODES_SIZE);
@@ -737,14 +737,14 @@ impl SendNodes {
 
 /// Method assumes that supplied `SendNodes` has correct number of nodes
 /// included – `[1, 4]`.
-impl AsBytes for SendNodes {
-    fn as_bytes(&self) -> Vec<u8> {
+impl ToBytes for SendNodes {
+    fn to_bytes(&self) -> Vec<u8> {
         debug!(target: "SendNodes", "Serializing SendNodes into bytes.");
         trace!(target: "SendNodes", "With SendNodes: {:?}", self);
         // first byte is number of nodes
         let mut result: Vec<u8> = vec![self.nodes.len() as u8];
         for node in &*self.nodes {
-            result.extend_from_slice(&node.as_bytes());
+            result.extend_from_slice(&node.to_bytes());
         }
         result.extend_from_slice(&u64_to_array(self.id));
         trace!("Resulting bytes: {:?}", &result);
@@ -778,7 +778,7 @@ impl FromBytes<SendNodes> for SendNodes {
             let mut nodes_bytes_len = 1;
             // TODO: ↓ most likely can be done more efficiently
             for node in &nodes {
-                nodes_bytes_len += node.as_bytes().len();
+                nodes_bytes_len += node.to_bytes().len();
             }
 
             // need u64 from bytes
@@ -840,12 +840,12 @@ impl DPacketT {
     }
 }
 
-impl AsBytes for DPacketT {
-    fn as_bytes(&self) -> Vec<u8> {
+impl ToBytes for DPacketT {
+    fn to_bytes(&self) -> Vec<u8> {
         match *self {
-            DPacketT::Ping(ref d)      => d.as_bytes(),
-            DPacketT::GetNodes(ref d)  => d.as_bytes(),
-            DPacketT::SendNodes(ref d) => d.as_bytes(),
+            DPacketT::Ping(ref d)      => d.to_bytes(),
+            DPacketT::GetNodes(ref d)  => d.to_bytes(),
+            DPacketT::SendNodes(ref d) => d.to_bytes(),
         }
     }
 }
@@ -884,7 +884,7 @@ impl DhtPacket {
     pub fn new(symmetric_key: &PrecomputedKey, own_public_key: &PublicKey,
                nonce: &Nonce, packet: DPacketT) -> Self {
 
-        let payload = seal_precomputed(&packet.as_bytes(), nonce, symmetric_key);
+        let payload = seal_precomputed(&packet.to_bytes(), nonce, symmetric_key);
 
         DhtPacket {
             packet_type: packet.kind(),
@@ -960,8 +960,8 @@ impl DhtPacket {
 }
 
 /// Serialize `DhtPacket` into bytes.
-impl AsBytes for DhtPacket {
-    fn as_bytes(&self) -> Vec<u8> {
+impl ToBytes for DhtPacket {
+    fn to_bytes(&self) -> Vec<u8> {
         let mut result = Vec::with_capacity(DHT_PACKET_MIN_SIZE);
         result.push(self.packet_type as u8);
 

@@ -58,7 +58,7 @@ fn main() {
                  .as_packet(); // and make Ping usable by DhtPacket
 
     // with Ping packet create DhtPacket, and serialize it to bytes
-    let dhtpacket = DhtPacket::new(&precomp, &pk, &nonce, ping).as_bytes();
+    let dhtpacket = DhtPacket::new(&precomp, &pk, &nonce, ping).to_bytes();
 
     // and since packet is ready, prepare the network part;
     // bind to some UDP socket

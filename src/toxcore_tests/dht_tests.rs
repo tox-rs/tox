@@ -115,16 +115,16 @@ fn ping_as_packet_test() {
     quickcheck(with_ping as fn(Ping));
 }
 
-// Ping::as_bytes()
+// Ping::to_bytes()
 
 #[test]
-fn ping_as_bytes_test() {
+fn ping_to_bytes_test() {
     let p = Ping::new();
-    let pb = p.as_bytes();
+    let pb = p.to_bytes();
     assert_eq!(PING_SIZE, pb.len());
     // new ping is always a request
     assert_eq!(0, pb[0]);
-    let prb = p.response().unwrap().as_bytes();
+    let prb = p.response().unwrap().to_bytes();
     // and response is `1`
     assert_eq!(1, prb[0]);
     // `id` of ping should not change
@@ -188,17 +188,17 @@ fn ip_type_from_bytes_test() {
 }
 
 
-// IpAddr::as_bytes()
+// IpAddr::to_bytes()
 
 // NOTE: sadly, implementing `Arbitrary` for `IpAddr` doesn't appear to be
 // (easily/nicely) dobale, since neither is a part of this crate.
 // https://github.com/rust-lang/rfcs/pull/1023
 
 #[test]
-fn ip_addr_as_bytes_test() {
+fn ip_addr_to_bytes_test() {
     fn with_ipv4(a: u8, b: u8, c: u8, d: u8) {
         let a4 = Ipv4Addr::new(a, b, c, d);
-        let ab = IpAddr::V4(a4).as_bytes();
+        let ab = IpAddr::V4(a4).to_bytes();
         assert_eq!(4, ab.len());
         assert_eq!(a, ab[0]);
         assert_eq!(b, ab[1]);
@@ -211,7 +211,7 @@ fn ip_addr_as_bytes_test() {
         let (a, b, c, d) = u64_as_u16s(n1);
         let (e, f, g, h) = u64_as_u16s(n2);
         let a6 = Ipv6Addr::new(a, b, c, d, e, f, g, h);
-        let ab = IpAddr::V6(a6).as_bytes();
+        let ab = IpAddr::V6(a6).to_bytes();
         assert_eq!(16, ab.len());
         assert_eq!(a, array_to_u16(&[ab[0], ab[1]]));
         assert_eq!(b, array_to_u16(&[ab[2], ab[3]]));
@@ -235,7 +235,7 @@ fn ipv6_addr_from_bytes_test() {
             assert_eq!(None, Ipv6Addr::from_bytes(&b));
         } else {
             let addr = Ipv6Addr::from_bytes(&b).unwrap();
-            assert_eq!(&IpAddr::V6(addr).as_bytes()[..16], &b[..16]);
+            assert_eq!(&IpAddr::V6(addr).to_bytes()[..16], &b[..16]);
         }
     }
     quickcheck(with_bytes as fn(Vec<u8>));
@@ -318,7 +318,7 @@ fn packed_node_from_bytes_multiple_test() {
         }
         let mut bytes = vec![];
         for n in nodes.clone() {
-            bytes.extend_from_slice(&n.as_bytes());
+            bytes.extend_from_slice(&n.to_bytes());
         }
         let nodes2 = PackedNode::from_bytes_multiple(&bytes).unwrap();
 
@@ -329,7 +329,7 @@ fn packed_node_from_bytes_multiple_test() {
 }
 
 
-// PackedNode::as_bytes()
+// PackedNode::to_bytes()
 
 /// Returns all possible variants of `PackedNode` `ip_type`, in order
 /// listed by `IpType` enum.
@@ -344,30 +344,30 @@ fn packed_node_protocol(saddr: SocketAddr, pk: &PublicKey)
 
 #[test]
 // tests for various IPv4 – use quickcheck
-fn packed_node_as_bytes_test_ipv4() {
+fn packed_node_to_bytes_test_ipv4() {
     fn with_random_ip(a: u8, b: u8, c: u8, d: u8) {
         let pk = &PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap();
         let saddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(a, b, c, d), 1));
         let (u, t) = packed_node_protocol(saddr, pk);
         // check whether ip_type variant matches
-        assert!(u.as_bytes()[0] == IpType::U4 as u8);
-        assert!(t.as_bytes()[0] == IpType::T4 as u8);
+        assert!(u.to_bytes()[0] == IpType::U4 as u8);
+        assert!(t.to_bytes()[0] == IpType::T4 as u8);
 
         // check whether IP matches ..
         //  ..with UDP
-        assert!(u.as_bytes()[1] == a);
-        assert!(u.as_bytes()[2] == b);
-        assert!(u.as_bytes()[3] == c);
-        assert!(u.as_bytes()[4] == d);
+        assert!(u.to_bytes()[1] == a);
+        assert!(u.to_bytes()[2] == b);
+        assert!(u.to_bytes()[3] == c);
+        assert!(u.to_bytes()[4] == d);
         //  ..with TCP
-        assert!(t.as_bytes()[1] == a);
-        assert!(t.as_bytes()[2] == b);
-        assert!(t.as_bytes()[3] == c);
-        assert!(t.as_bytes()[4] == d);
+        assert!(t.to_bytes()[1] == a);
+        assert!(t.to_bytes()[2] == b);
+        assert!(t.to_bytes()[3] == c);
+        assert!(t.to_bytes()[4] == d);
 
         // check whether length matches
-        assert!(u.as_bytes().len() == PACKED_NODE_IPV4_SIZE);
-        assert!(t.as_bytes().len() == PACKED_NODE_IPV4_SIZE);
+        assert!(u.to_bytes().len() == PACKED_NODE_IPV4_SIZE);
+        assert!(t.to_bytes().len() == PACKED_NODE_IPV4_SIZE);
     }
     quickcheck(with_random_ip as fn(u8, u8, u8, u8));
 }
@@ -379,7 +379,7 @@ fn packed_node_as_bytes_test_ipv4() {
 //  - this requires a workaround with loops and hops - i.e. supply to the
 //    quickcheck a function that takes 2 `u64` arguments, convert those
 //    numbers to arrays, and use numbers from arrays to do the job
-fn packed_node_as_bytes_test_ipv6() {
+fn packed_node_to_bytes_test_ipv6() {
     fn with_random_ip(num1: u64, num2: u64, flowinfo: u32, scope_id: u32) {
         let pk = &PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap();
 
@@ -391,52 +391,52 @@ fn packed_node_as_bytes_test_ipv6() {
                    /*port*/ 1, flowinfo, scope_id));
         let (u, t) = packed_node_protocol(saddr, pk);
         // check whether ip_type variant matches
-        assert_eq!(u.as_bytes()[0], IpType::U6 as u8);
-        assert_eq!(t.as_bytes()[0], IpType::T6 as u8);
+        assert_eq!(u.to_bytes()[0], IpType::U6 as u8);
+        assert_eq!(t.to_bytes()[0], IpType::T6 as u8);
 
         // check whether IP matches ..
         //  ..with UDP
-        assert_eq!(&u.as_bytes()[1..3], &u16_to_array(a)[..]);
-        assert_eq!(&u.as_bytes()[3..5], &u16_to_array(b)[..]);
-        assert_eq!(&u.as_bytes()[5..7], &u16_to_array(c)[..]);
-        assert_eq!(&u.as_bytes()[7..9], &u16_to_array(d)[..]);
-        assert_eq!(&u.as_bytes()[9..11], &u16_to_array(e)[..]);
-        assert_eq!(&u.as_bytes()[11..13], &u16_to_array(f)[..]);
-        assert_eq!(&u.as_bytes()[13..15], &u16_to_array(g)[..]);
-        assert_eq!(&u.as_bytes()[15..17], &u16_to_array(h)[..]);
+        assert_eq!(&u.to_bytes()[1..3], &u16_to_array(a)[..]);
+        assert_eq!(&u.to_bytes()[3..5], &u16_to_array(b)[..]);
+        assert_eq!(&u.to_bytes()[5..7], &u16_to_array(c)[..]);
+        assert_eq!(&u.to_bytes()[7..9], &u16_to_array(d)[..]);
+        assert_eq!(&u.to_bytes()[9..11], &u16_to_array(e)[..]);
+        assert_eq!(&u.to_bytes()[11..13], &u16_to_array(f)[..]);
+        assert_eq!(&u.to_bytes()[13..15], &u16_to_array(g)[..]);
+        assert_eq!(&u.to_bytes()[15..17], &u16_to_array(h)[..]);
         //  ..with TCP
-        assert_eq!(&t.as_bytes()[1..3], &u16_to_array(a)[..]);
-        assert_eq!(&t.as_bytes()[3..5], &u16_to_array(b)[..]);
-        assert_eq!(&t.as_bytes()[5..7], &u16_to_array(c)[..]);
-        assert_eq!(&t.as_bytes()[7..9], &u16_to_array(d)[..]);
-        assert_eq!(&t.as_bytes()[9..11], &u16_to_array(e)[..]);
-        assert_eq!(&t.as_bytes()[11..13], &u16_to_array(f)[..]);
-        assert_eq!(&t.as_bytes()[13..15], &u16_to_array(g)[..]);
-        assert_eq!(&t.as_bytes()[15..17], &u16_to_array(h)[..]);
+        assert_eq!(&t.to_bytes()[1..3], &u16_to_array(a)[..]);
+        assert_eq!(&t.to_bytes()[3..5], &u16_to_array(b)[..]);
+        assert_eq!(&t.to_bytes()[5..7], &u16_to_array(c)[..]);
+        assert_eq!(&t.to_bytes()[7..9], &u16_to_array(d)[..]);
+        assert_eq!(&t.to_bytes()[9..11], &u16_to_array(e)[..]);
+        assert_eq!(&t.to_bytes()[11..13], &u16_to_array(f)[..]);
+        assert_eq!(&t.to_bytes()[13..15], &u16_to_array(g)[..]);
+        assert_eq!(&t.to_bytes()[15..17], &u16_to_array(h)[..]);
 
         // check whether length matches
-        assert!(u.as_bytes().len() == PACKED_NODE_IPV6_SIZE);
-        assert!(t.as_bytes().len() == PACKED_NODE_IPV6_SIZE);
+        assert!(u.to_bytes().len() == PACKED_NODE_IPV6_SIZE);
+        assert!(t.to_bytes().len() == PACKED_NODE_IPV6_SIZE);
     }
     quickcheck(with_random_ip as fn(u64, u64, u32, u32));
 }
 
 #[test]
 // test serialization of various ports
-fn packed_nodes_as_bytes_test_port() {
+fn packed_nodes_to_bytes_test_port() {
     fn with_port(port: u16) {
         let pk = &PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap();
         let saddr4 = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(1, 1, 1, 1), port));
         let saddr6 = SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::from_str("::0").unwrap(), port, 0, 0));
 
         let (u4, t4) = packed_node_protocol(saddr4, pk);
-        assert_eq!(&u16_to_array(port.to_be())[..], &u4.as_bytes()[5..7]);
-        assert_eq!(&u16_to_array(port.to_be())[..], &t4.as_bytes()[5..7]);
+        assert_eq!(&u16_to_array(port.to_be())[..], &u4.to_bytes()[5..7]);
+        assert_eq!(&u16_to_array(port.to_be())[..], &t4.to_bytes()[5..7]);
 
         // and IPv6
         let (u6, t6) = packed_node_protocol(saddr6, pk);
-        assert_eq!(&u16_to_array(port.to_be())[..], &u6.as_bytes()[17..19]);
-        assert_eq!(&u16_to_array(port.to_be())[..], &t6.as_bytes()[17..19]);
+        assert_eq!(&u16_to_array(port.to_be())[..], &u6.to_bytes()[17..19]);
+        assert_eq!(&u16_to_array(port.to_be())[..], &t6.to_bytes()[17..19]);
 
     }
     quickcheck(with_port as fn (u16));
@@ -447,7 +447,7 @@ fn packed_nodes_as_bytes_test_port() {
 //  - this requires a workaround with loops and hops - i.e. supply to the
 //    quickcheck 4 `u64` arguments, cast to arrays, put elements from arrays
 //    into a single vec and use vec to create PK
-fn packed_nodes_as_bytes_test_pk() {
+fn packed_nodes_to_bytes_test_pk() {
     fn with_pk(a: u64, b: u64, c: u64, d: u64) {
         let saddr4 = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(1, 1, 1, 1), 1));
         let saddr6 = SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::from_str("::0").unwrap(), 1, 0, 0));
@@ -462,12 +462,12 @@ fn packed_nodes_as_bytes_test_pk() {
         let pk = &PublicKey::from_slice(pk_bytes).unwrap();
 
         let (u4, t4) = packed_node_protocol(saddr4, pk);
-        assert_eq!(&u4.as_bytes()[7..], pk_bytes);
-        assert_eq!(&t4.as_bytes()[7..], pk_bytes);
+        assert_eq!(&u4.to_bytes()[7..], pk_bytes);
+        assert_eq!(&t4.to_bytes()[7..], pk_bytes);
 
         let (u6, t6) = packed_node_protocol(saddr6, pk);
-        assert_eq!(&u6.as_bytes()[19..], pk_bytes);
-        assert_eq!(&t6.as_bytes()[19..], pk_bytes);
+        assert_eq!(&u6.to_bytes()[19..], pk_bytes);
+        assert_eq!(&t6.to_bytes()[19..], pk_bytes);
     }
     quickcheck(with_pk as fn(u64, u64, u64, u64));
 }
@@ -478,7 +478,7 @@ fn packed_nodes_as_bytes_test_pk() {
 #[test]
 fn packed_nodes_from_bytes_test() {
     fn fully_random(pn: PackedNode) {
-        assert_eq!(pn, PackedNode::from_bytes(&pn.as_bytes()[..]).unwrap());
+        assert_eq!(pn, PackedNode::from_bytes(&pn.to_bytes()[..]).unwrap());
     }
     quickcheck(fully_random as fn(PackedNode));
 }
@@ -487,7 +487,7 @@ fn packed_nodes_from_bytes_test() {
 // test for fail when length is too small
 fn packed_nodes_from_bytes_test_length_short() {
     fn fully_random(pn: PackedNode) {
-        let pnb = pn.as_bytes();
+        let pnb = pn.to_bytes();
         assert_eq!(None, PackedNode::from_bytes(&pnb[..(pnb.len() - 1)]));
         if let None = IpType::from_bytes(&pnb[1..]) {
             assert_eq!(None, PackedNode::from_bytes(&pnb[1..]));
@@ -501,7 +501,7 @@ fn packed_nodes_from_bytes_test_length_short() {
 fn packed_nodes_from_bytes_test_length_too_long() {
     fn fully_random(pn: PackedNode, r_u8: Vec<u8>) {
         let mut vec = Vec::with_capacity(PACKED_NODE_IPV6_SIZE);
-        vec.extend_from_slice(&pn.as_bytes()[..]);
+        vec.extend_from_slice(&pn.to_bytes()[..]);
         vec.extend_from_slice(&r_u8);
         assert_eq!(pn, PackedNode::from_bytes(&vec[..]).unwrap());
     }
@@ -518,7 +518,7 @@ fn packed_nodes_from_bytes_test_no_iptype() {
         }
         let mut vec = Vec::with_capacity(PACKED_NODE_IPV6_SIZE);
         vec.push(r_u8);
-        vec.extend_from_slice(&pn.as_bytes()[1..]);
+        vec.extend_from_slice(&pn.to_bytes()[1..]);
         assert_eq!(None, PackedNode::from_bytes(&vec[..]));
     }
     quickcheck(fully_random as fn(PackedNode, u8));
@@ -534,7 +534,7 @@ fn packed_nodes_from_bytes_test_wrong_iptype() {
             IpType::T4 => vec.push(IpType::T6 as u8),
             _ => return,
         }
-        vec.extend_from_slice(&pn.as_bytes()[1..]);
+        vec.extend_from_slice(&pn.to_bytes()[1..]);
 
         assert_eq!(None, PackedNode::from_bytes(&vec[..]));
     }
@@ -580,12 +580,12 @@ fn get_nodes_as_packet_test() {
     quickcheck(with_gn as fn(GetNodes));
 }
 
-// GetNodes::as_bytes()
+// GetNodes::to_bytes()
 
 #[test]
-fn get_nodes_as_bytes_test() {
+fn get_nodes_to_bytes_test() {
     fn with_gn(gn: GetNodes) {
-        let g_bytes = gn.as_bytes();
+        let g_bytes = gn.to_bytes();
         let PublicKey(pk_bytes) = gn.pk;
         assert_eq!(&pk_bytes, &g_bytes[..PUBLICKEYBYTES]);
         assert_eq!(&u64_to_array(gn.id), &g_bytes[PUBLICKEYBYTES..]);
@@ -652,10 +652,10 @@ fn send_nodes_as_packet_test() {
     quickcheck(with_sn as fn(SendNodes));
 }
 
-// SendNodes::as_bytes()
+// SendNodes::to_bytes()
 
 #[test]
-fn send_nodes_as_bytes_test() {
+fn send_nodes_to_bytes_test() {
     // there should be at least 1 valid node; there can be up to 4 nodes
     fn with_nodes(req: GetNodes, n1: PackedNode, n2: Option<PackedNode>,
                   n3: Option<PackedNode>, n4: Option<PackedNode>) {
@@ -665,7 +665,7 @@ fn send_nodes_as_bytes_test() {
         if let Some(n) = n3 { nodes.push(n); }
         if let Some(n) = n4 { nodes.push(n); }
         let sn_bytes = SendNodes::from_request(&req, nodes.clone())
-                        .unwrap().as_bytes();
+                        .unwrap().to_bytes();
 
         // number of nodes should match
         assert_eq!(nodes.len(), sn_bytes[0] as usize);
@@ -675,8 +675,8 @@ fn send_nodes_as_bytes_test() {
         // nodes
         let mut len_before = 1;
         for node in 0..nodes.len() {
-            let cur_len = nodes[node].as_bytes().len();
-            assert_eq!(&nodes[node].as_bytes()[..],
+            let cur_len = nodes[node].to_bytes().len();
+            assert_eq!(&nodes[node].to_bytes()[..],
                        &sn_bytes[len_before..(len_before + cur_len)]);
             len_before += cur_len;
         }
@@ -695,7 +695,7 @@ fn send_nodes_from_bytes_test() {
     fn with_nodes(nodes: Vec<PackedNode>, r_u64: u64) {
         let mut bytes = vec![nodes.len() as u8];
         for node in &nodes {
-            bytes.extend_from_slice(&node.as_bytes());
+            bytes.extend_from_slice(&node.to_bytes());
         }
         // and ping id
         bytes.extend_from_slice(&u64_to_array(r_u64));
@@ -762,16 +762,16 @@ fn d_packet_t_ping_resp_test() {
     quickcheck(with_dpt as fn(DPacketT));
 }
 
-// DPacketT::as_bytes()
+// DPacketT::to_bytes()
 
 #[test]
-fn d_packet_t_as_bytes_test() {
+fn d_packet_t_to_bytes_test() {
     fn with_dpacket(dp: DPacketT) {
-        let dbytes = dp.as_bytes();
+        let dbytes = dp.to_bytes();
         match dp {
-            DPacketT::Ping(d)      => assert_eq!(d.as_bytes(), dbytes),
-            DPacketT::GetNodes(d)  => assert_eq!(d.as_bytes(), dbytes),
-            DPacketT::SendNodes(d) => assert_eq!(d.as_bytes(), dbytes),
+            DPacketT::Ping(d)      => assert_eq!(d.to_bytes(), dbytes),
+            DPacketT::GetNodes(d)  => assert_eq!(d.to_bytes(), dbytes),
+            DPacketT::SendNodes(d) => assert_eq!(d.to_bytes(), dbytes),
         }
     }
     quickcheck(with_dpacket as fn(DPacketT));
@@ -893,10 +893,10 @@ fn dht_packet_ping_resp_test() {
     quickcheck(with_dpt as fn(DPacketT));
 }
 
-// DhtPacket::as_bytes()
+// DhtPacket::to_bytes()
 
 #[test]
-fn dht_packet_as_bytes_test() {
+fn dht_packet_to_bytes_test() {
     fn with_dpacket(dpt: DPacketT) {
         // Alice serializes & encrypts packet, Bob decrypts
         let (alice_pk, alice_sk) = gen_keypair();
@@ -905,7 +905,7 @@ fn dht_packet_as_bytes_test() {
         let nonce = gen_nonce();
 
         let packet = DhtPacket::new(&precomputed, &alice_pk, &nonce, dpt.clone())
-                        .as_bytes();
+                        .to_bytes();
 
         // check whether packet type was serialized correctly
         let packet_type = match dpt {
@@ -940,7 +940,7 @@ fn dht_packet_as_bytes_test() {
 #[test]
 fn dht_packet_from_bytes_test() {
     fn with_packet(p: DhtPacket, invalid: Vec<u8>) {
-        let from_bytes = DhtPacket::from_bytes(&p.as_bytes()).unwrap();
+        let from_bytes = DhtPacket::from_bytes(&p.to_bytes()).unwrap();
         assert_eq!(p, from_bytes);
 
         if let None = PacketKind::from_bytes(&invalid) {
