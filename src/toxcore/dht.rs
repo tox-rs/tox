@@ -831,11 +831,14 @@ impl DPacketT {
     /// Returns `None` if `DPacketT` is not a ping request, and thus `Ping`
     /// response could not be created.
     pub fn ping_resp(&self) -> Option<Self> {
+        debug!(target: "Ping", "Creating Ping response from a Ping.");
+        trace!(target: "Ping", "With Ping: {:?}", self);
         if let &DPacketT::Ping(ping) = self {
             if let Some(ping_resp) = ping.response() {
                 return Some(DPacketT::Ping(ping_resp))
             }
         }
+        debug!("Ping was already a response!");
         None
     }
 }
@@ -884,6 +887,11 @@ impl DhtPacket {
     pub fn new(symmetric_key: &PrecomputedKey, own_public_key: &PublicKey,
                nonce: &Nonce, packet: DPacketT) -> Self {
 
+        debug!(target: "DhtPacket", "Creating new DhtPacket.");
+        trace!(target: "DhtPacket", "With args: symmetric_key: <secret>,
+        own_public_key: {:?}, nonce: {:?}, packet: {:?}",
+        own_public_key, nonce, &packet);
+
         let payload = seal_precomputed(&packet.to_bytes(), nonce, symmetric_key);
 
         DhtPacket {
@@ -906,12 +914,19 @@ impl DhtPacket {
     //          Alternatively, another method `get_packetnm()` which would use
     //          symmetric key.
     pub fn get_packet(&self, own_secret_key: &SecretKey) -> Option<DPacketT> {
+        debug!(target: "DhtPacket", "Getting packet data from DhtPacket.");
+        trace!(target: "DhtPacket", "With DhtPacket: {:?}", self);
         let decrypted = match open(&self.payload, &self.nonce, &self.sender_pk,
                             own_secret_key) {
             Ok(d) => d,
             // TODO: ↓ logging
-            Err(_) => return None,
+            Err(_) => {
+                debug!("Decrypting DhtPacket failed!");
+                return None
+            },
         };
+
+        trace!("Decrypted bytes: {:?}", &decrypted);
 
         match self.packet_type {
             PacketKind::PingReq | PacketKind::PingResp => {
@@ -931,7 +946,7 @@ impl DhtPacket {
             },
             _ => {},  // not a DHT packet
         }
-        // TODO: ↓ logging
+        debug!("De-serializing decrypted bytes into a DHT packet failed!");
         None  // parsing failed
     }
 
@@ -943,14 +958,19 @@ impl DhtPacket {
                      symmetric_key: &PrecomputedKey,
                      own_public_key: &PublicKey) -> Option<Self> {
 
+        debug!(target: "DhtPacket", "Creating Ping response from Ping request
+                                     that DHT packet contained.");
+        trace!(target: "DhtPacket", "With args: DhtPacket: {:?}, own_pk: {:?}",
+               self, own_public_key);
+
         let payload = match self.get_packet(secret_key) {
             Some(dpt) => dpt,
-            None => return None,  // TODO: logging?
+            None => return None,
         };
 
         let resp = match payload.ping_resp() {
             Some(pr) => pr,
-            None => return None,  // TODO: logging?
+            None => return None,
         };
 
         let nonce = gen_nonce();
@@ -962,6 +982,8 @@ impl DhtPacket {
 /// Serialize `DhtPacket` into bytes.
 impl ToBytes for DhtPacket {
     fn to_bytes(&self) -> Vec<u8> {
+        debug!(target: "DhtPacket", "Serializing DhtPacket into bytes.");
+        trace!(target: "DhtPacket", "With DhtPacket: {:?}", self);
         let mut result = Vec::with_capacity(DHT_PACKET_MIN_SIZE);
         result.push(self.packet_type as u8);
 
@@ -972,6 +994,7 @@ impl ToBytes for DhtPacket {
         result.extend_from_slice(&nonce);
 
         result.extend_from_slice(&self.payload);
+        trace!("Resulting bytes: {:?}", &result);
         result
     }
 }
@@ -979,29 +1002,50 @@ impl ToBytes for DhtPacket {
 /// De-serialize bytes into `DhtPacket`.
 impl FromBytes<DhtPacket> for DhtPacket {
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() < DHT_PACKET_MIN_SIZE { return None }
+        debug!(target: "DhtPacket", "De-serializing bytes into DhtPacket.");
+        trace!(target: "DhtPacket", "With bytes: {:?}", bytes);
+
+        if bytes.len() < DHT_PACKET_MIN_SIZE {
+            debug!("Failed; less bytes than DHT_PACKET_MIN_SIZE!");
+            return None
+        }
 
         let packet_type = match PacketKind::from_bytes(bytes) {
             Some(b) => {
                 match b {
                     PacketKind::PingReq | PacketKind::PingResp |
                     PacketKind::GetN | PacketKind::SendN => b,
-                    _ => return None,  // not a DHT packet
+                    p => {
+                        debug!("Failed: not a DHT packet!");
+                        trace!("Packet: {:?}", p);
+                        return None  // not a DHT packet
+                    },
                 }
             },
-            None => return None,
+            None => {
+                debug!("Failed: not a recognisable PacketKind!");
+                return None
+            },
         };
 
         const NONCE_POS: usize = 1 + PUBLICKEYBYTES;
         let sender_pk = match PublicKey::from_slice(&bytes[1..NONCE_POS]) {
             Some(pk) => pk,
-            None => return None,
+            None => {
+                debug!("Failed; de-serializing sender's PK!");
+                trace!("With bytes for PK: {:?}", &bytes[1..NONCE_POS]);
+                return None
+            },
         };
 
         const PAYLOAD_POS: usize = NONCE_POS + NONCEBYTES;
         let nonce = match Nonce::from_slice(&bytes[NONCE_POS..PAYLOAD_POS]) {
             Some(n) => n,
-            None => return None,
+            None => {
+                debug!("Failed; de-serializing nonce!");
+                trace!("With bytes for nonce: {:?}", &bytes[NONCE_POS..PAYLOAD_POS]);
+                return None
+            },
         };
 
         Some(DhtPacket {
@@ -1026,6 +1070,8 @@ impl Distance for PublicKey {
     fn distance(&self,
                 &PublicKey(ref pk1): &PublicKey,
                 &PublicKey(ref pk2): &PublicKey) -> Ordering {
+
+        trace!(target: "Distance", "Comparing distance between PKs.");
         let &PublicKey(own) = self;
         for i in 0..PUBLICKEYBYTES {
             if pk1[i] != pk2[i] {
@@ -1075,6 +1121,8 @@ impl Node {
 pub fn kbucket_index(&PublicKey(ref own_pk): &PublicKey,
                      &PublicKey(ref other_pk): &PublicKey) -> Option<u8> {
 
+    debug!(target: "KBucketIndex", "Calculating KBucketIndex for PKs.");
+    trace!(target: "KBucketIndex", "With PK1: {:?}; PK2: {:?}", own_pk, other_pk);
     let mut index = 0;
 
     for byte in 0..PUBLICKEYBYTES {
