@@ -43,9 +43,14 @@ pub fn bind_udp() -> Option<UdpSocket> {
         // TODO: check if `[::]` always works, even on platforms with disabled
         //       IPv6
         match UdpSocket::bind(&format!("[::]:{}", port)[..]) {
-            Ok(s) => return Some(s),
-            Err(_) => {},  // TODO: logging – `log` crate?
+            Ok(s) => {
+                debug!(target: "Port", "Bind to port {} successful.", port);
+                return Some(s)
+            },
+            Err(e) => trace!(target: "Port", "Bind to port {} unsuccessful: {}",
+                             port, e),
         }
     }
+    error!(target: "Port", "Failed to bind to any port in range!");
     None  // loop ended without "early" return – failed to bind
 }
