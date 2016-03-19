@@ -42,6 +42,18 @@ fn u64_as_u16s(num: u64) -> (u16, u16, u16, u16) {
 }
 
 
+/// Get a PK from 4 `u64`s.
+fn nums_to_pk(a: u64, b: u64, c: u64, d: u64) -> PublicKey {
+    let mut pk_bytes: Vec<u8> = Vec::with_capacity(PUBLICKEYBYTES);
+    pk_bytes.extend_from_slice(&u64_to_array(a));
+    pk_bytes.extend_from_slice(&u64_to_array(b));
+    pk_bytes.extend_from_slice(&u64_to_array(c));
+    pk_bytes.extend_from_slice(&u64_to_array(d));
+    let pk_bytes = &pk_bytes[..];
+    PublicKey::from_slice(pk_bytes).expect("Making PK out of bytes failed!")
+}
+
+
 // PingType::from_bytes()
 
 #[test]
@@ -452,20 +464,14 @@ fn packed_nodes_to_bytes_test_pk() {
         let saddr4 = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(1, 1, 1, 1), 1));
         let saddr6 = SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::from_str("::0").unwrap(), 1, 0, 0));
 
-        let mut pk_bytes: Vec<u8> = Vec::with_capacity(PUBLICKEYBYTES);
-        pk_bytes.extend_from_slice(&u64_to_array(a));
-        pk_bytes.extend_from_slice(&u64_to_array(b));
-        pk_bytes.extend_from_slice(&u64_to_array(c));
-        pk_bytes.extend_from_slice(&u64_to_array(d));
-        let pk_bytes = &pk_bytes[..];
+        let pk = nums_to_pk(a, b, c, d);
+        let PublicKey(ref pk_bytes) = pk;
 
-        let pk = &PublicKey::from_slice(pk_bytes).unwrap();
-
-        let (u4, t4) = packed_node_protocol(saddr4, pk);
+        let (u4, t4) = packed_node_protocol(saddr4, &pk);
         assert_eq!(&u4.to_bytes()[7..], pk_bytes);
         assert_eq!(&t4.to_bytes()[7..], pk_bytes);
 
-        let (u6, t6) = packed_node_protocol(saddr6, pk);
+        let (u6, t6) = packed_node_protocol(saddr6, &pk);
         assert_eq!(&u6.to_bytes()[19..], pk_bytes);
         assert_eq!(&t6.to_bytes()[19..], pk_bytes);
     }
@@ -558,12 +564,7 @@ impl Arbitrary for GetNodes {
 #[test]
 fn get_nodes_new_test() {
     fn with_pk(a: u64, b: u64, c: u64, d: u64) {
-        let mut v: Vec<u8> = Vec::with_capacity(PUBLICKEYBYTES);
-        v.extend_from_slice(&u64_to_array(a));
-        v.extend_from_slice(&u64_to_array(b));
-        v.extend_from_slice(&u64_to_array(c));
-        v.extend_from_slice(&u64_to_array(d));
-        let pk = PublicKey::from_slice(&v).unwrap();
+        let pk = nums_to_pk(a, b, c, d);
         let gn = GetNodes::new(&pk);
         assert_eq!(gn.pk, pk);
     }
@@ -1015,4 +1016,16 @@ fn kbucket_index_test() {
     assert_eq!(None, kbucket_index(&pk1, &pk1));
     assert_eq!(Some(0), kbucket_index(&pk1, &pk2));
     assert_eq!(Some(2), kbucket_index(&pk2, &pk3));
+}
+
+
+// Bucket::new()
+
+#[test]
+fn bucket_new_test() {
+    fn with_pk(a: u64, b: u64, c: u64, d: u64) {
+        let pk = nums_to_pk(a, b, c, d);
+        assert_eq!(pk, Bucket::new(&pk).pk);
+    }
+    quickcheck(with_pk as fn(u64, u64, u64, u64));
 }

@@ -1112,6 +1112,11 @@ impl Node {
     pub fn id(&mut self, id: u64) {
         self.id = id;
     }
+
+    /// Get the PK of the node.
+    pub fn pk(&self) -> &PublicKey {
+        &self.node.pk
+    }
 }
 
 
@@ -1140,6 +1145,68 @@ pub fn kbucket_index(&PublicKey(ref own_pk): &PublicKey,
     }
     None  // PKs are equal
 }
+
+/// Structure for holding up to [`BUCKET_SIZE`](./constant.BUCKET_SIZE.html)
+/// nodes.
+///
+/// Nodes in bucket are sorted by closeness to the PK; closes node is the
+/// first, while furthest is last.
+///
+/// Used in [`Kbucket`](./struct.Kbucket.html) for storing nodes close to own
+/// PK; and additionally used to store nodes closest to friends.
+// TODO: rename
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Bucket {
+    /// PK that nodes in the bucket are close to.
+    pub pk: PublicKey,
+    nodes: Vec<Node>,
+}
+
+/// Maximum of nodes that [`Bucket`](./struct.Bucket.html) can hold.
+pub const BUCKET_SIZE: usize = 8;
+
+impl Bucket {
+    /// Create a new `Bucket` to store nodes close to the `pk`.
+    pub fn new(pk: &PublicKey) -> Self {
+        Bucket { pk: *pk, nodes: Vec::with_capacity(BUCKET_SIZE) }
+    }
+
+    /// Try to add node to the bucket.
+    ///
+    /// If bucket doesn't have [`BUCKET_SIZE`](./constant.BUCKET_SIZE.html)
+    /// nodes, node is appended.
+    ///
+    /// If bucket has `BUCKET_SIZE` already, node's closeness is compared to
+    /// nodes already in bucket, and if it's closer than some node, it prepends
+    /// that node, and last node is removed from the list.
+    ///
+    /// Returns `true` is node was added, `false` otherwise.
+    pub fn try_add(&mut self, node: &Node) -> bool {
+        debug!(target: "Bucket", "Trying to add node to bucket.");
+        trace!(target: "Bucket", "With bucket: {:?}; and node: {:?}", self, node);
+
+        if self.nodes.is_empty() {
+            self.nodes.push(*node);
+            debug!("Bucket was empty, node added.");
+            return true
+        }
+
+        for n in 0..self.nodes.len() {
+            if let Ordering::Less = self.pk.distance(node.pk(), self.nodes[n].pk()) {
+                if self.nodes.len() == BUCKET_SIZE {
+                    drop(self.nodes.pop());
+                }
+
+                self.nodes.insert(n, *node);
+                return true
+            }
+        }
+        debug!("Node is too distant to add to bucket.");
+        false
+    }
+    // TODO: test
+}
+
 
 // TODO: create k-bucket struct(?):
 //       https://en.wikipedia.org/wiki/Kademlia#Routing_tables
