@@ -1005,6 +1005,17 @@ fn node_id_test() {
     quickcheck(with_id as fn(Node, u64));
 }
 
+// Nodes::pk()
+
+#[test]
+fn node_pk_test() {
+    fn with_pn(pn: PackedNode, timeout: u64) {
+        let node = Node::new(&pn, timeout);
+        assert_eq!(pn.pk, *node.pk());
+    }
+    quickcheck(with_pn as fn(PackedNode, u64));
+}
+
 
 // kbucket_index()
 
