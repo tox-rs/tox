@@ -1023,22 +1023,24 @@ fn kbucket_index_test() {
 
 #[test]
 fn bucket_new_test() {
-    fn with_pk(a: u64, b: u64, c: u64, d: u64, index: u8) {
+    fn with_pk(a: u64, b: u64, c: u64, d: u64) {
         let pk = &nums_to_pk(a, b, c, d);
-        assert_eq!(pk, Bucket::new(pk, index).pk);
+        let bucket = Bucket::new(pk);
+        assert_eq!(pk, bucket.pk);
     }
-    quickcheck(with_pk as fn(u64, u64, u64, u64, u8));
+    quickcheck(with_pk as fn(u64, u64, u64, u64));
 }
 
 // Bucket::try_add()
 
 #[test]
 fn bucket_try_add_test() {
-    fn with_nodes(n1: Node, n2: Node, n3: Node, n4: Node, n5: Node, n6: Node,
-                  n7: Node, n8: Node) {
+    fn with_nodes(n1: PackedNode, n2: PackedNode, n3: PackedNode,
+                  n4: PackedNode, n5: PackedNode, n6: PackedNode,
+                  n7: PackedNode, n8: PackedNode) {
         let pk_bytes = [0; PUBLICKEYBYTES];
         let pk = PublicKey::from_slice(&pk_bytes).unwrap();
-        let mut node = Bucket::new(&pk, 0);
+        let mut node = Bucket::new(&pk);
         assert_eq!(true, node.try_add(&n1));
         assert_eq!(true, node.try_add(&n2));
         assert_eq!(true, node.try_add(&n3));
@@ -1048,9 +1050,28 @@ fn bucket_try_add_test() {
         assert_eq!(true, node.try_add(&n7));
         assert_eq!(true, node.try_add(&n8));
 
-        assert_eq!(false, node.try_add(&n1));
+        // updating node
+        assert_eq!(true, node.try_add(&n1));
 
         // TODO: check whether adding a closest node will always work
     }
-    quickcheck(with_nodes as fn(Node, Node, Node, Node, Node, Node, Node, Node));
+    quickcheck(with_nodes as fn(PackedNode, PackedNode, PackedNode, PackedNode,
+                PackedNode, PackedNode, PackedNode, PackedNode));
+}
+
+// Bucket::remove()
+// TODO: ↑
+
+
+// Kbucket::new()
+
+#[test]
+fn kbuckets_new_test() {
+    fn with_pk(a: u64, b: u64, c: u64, d: u64, buckets: u8) {
+        let pk = nums_to_pk(a, b, c, d);
+        let kbucket = Kbuckets::new(buckets, &pk);
+        assert_eq!(buckets, kbucket.k);
+        assert_eq!(pk, kbucket.pk);
+    }
+    quickcheck(with_pk as fn(u64, u64, u64, u64, u8));
 }
