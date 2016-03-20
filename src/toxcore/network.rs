@@ -25,9 +25,9 @@
 use std::net::UdpSocket;
 
 
-/// Minimum port wchich Tox will try to bind to.
+/// Minimum port which Tox will try to bind to.
 pub const PORT_MIN: u16 = 33445;
-/// Maximum port wchich Tox will try to bind to.
+/// Maximum port which Tox will try to bind to.
 pub const PORT_MAX: u16 = 33545;
 
 /// Bind to an UDP socket on `0.0.0.0` with a port in range [`PORT_MIN`]
