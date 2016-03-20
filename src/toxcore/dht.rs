@@ -1183,7 +1183,10 @@ impl<'a> Bucket<'a> {
     /// nodes already in bucket, and if it's closer than some node, it prepends
     /// that node, and last node is removed from the list.
     ///
-    /// Returns `true` is node was added, `false` otherwise.
+    /// If the node being added is farther away than the nodes in the bucket,
+    /// it isn't added and `false` is returned.
+    ///
+    /// Returns `true` if node was added, `false` otherwise.
     pub fn try_add(&mut self, node: &Node) -> bool {
         debug!(target: "Bucket", "Trying to add node to bucket.");
         trace!(target: "Bucket", "With bucket: {:?}; and node: {:?}", self, node);
