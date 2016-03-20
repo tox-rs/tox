@@ -357,7 +357,7 @@ impl FromBytes<Ipv6Addr> for Ipv6Addr {
 }
 
 
-/// `Packed Node` format is a way to store the node info in a small yet easy to
+/// `PackedNode` format is a way to store the node info in a small yet easy to
 /// parse format.
 ///
 /// It is used in many places in Tox, e.g. in `DHT Send nodes`.
@@ -1097,7 +1097,7 @@ pub struct Node {
     pub timeout: u64,
     /// Ping ID of last sent [`Ping`](./struct.Ping.html) request.
     pub id: u64,
-    /// Packed Node that Node contains.
+    /// [`PackedNode`](./struct.PackedNode.html) contained by [`Node`](./struct.Node.html).
     pub node: PackedNode,
 }
 
