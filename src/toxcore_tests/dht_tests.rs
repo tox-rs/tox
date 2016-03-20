@@ -73,10 +73,12 @@ fn ping_type_from_bytes_test() {
 
     // just in case
     let p0 = vec![0];
-    assert_eq!(PingType::Req, PingType::from_bytes(&p0).unwrap());
+    assert_eq!(PingType::Req, PingType::from_bytes(&p0)
+                    .expect("Unwrapping PingType::Req failed"));
 
     let p1 = vec![1];
-    assert_eq!(PingType::Resp, PingType::from_bytes(&p1).unwrap());
+    assert_eq!(PingType::Resp, PingType::from_bytes(&p1)
+                    .expect("Unwrapping PingType::Resp failed"));
 }
 
 
@@ -111,7 +113,8 @@ fn ping_is_request_test() {
 #[test]
 fn ping_response_test() {
     let ping_req = Ping::new();
-    let ping_res = ping_req.response().unwrap();
+    let ping_res = ping_req.response()
+                           .expect("Making response to ping request failed");
     assert_eq!(ping_req.id, ping_res.id);
     assert_eq!(false, ping_res.is_request());
     assert_eq!(None, ping_res.response());
@@ -357,9 +360,13 @@ fn packed_node_protocol(saddr: SocketAddr, pk: &PublicKey)
 #[test]
 // tests for various IPv4 – use quickcheck
 fn packed_node_to_bytes_test_ipv4() {
-    fn with_random_ip(a: u8, b: u8, c: u8, d: u8) {
+    fn with_random_saddr(a: u8, b: u8, c: u8, d: u8, port: u16) {
         let pk = &PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap();
-        let saddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(a, b, c, d), 1));
+        let saddr = SocketAddr::V4(
+                     format!("{}.{}.{}.{}:{}", a, b, c, d, port)
+                        .parse()
+                        .expect("Failed to parse as IPv4!"));
+
         let (u, t) = packed_node_protocol(saddr, pk);
         // check whether ip_type variant matches
         assert!(u.to_bytes()[0] == IpType::U4 as u8);
@@ -377,22 +384,21 @@ fn packed_node_to_bytes_test_ipv4() {
         assert!(t.to_bytes()[3] == c);
         assert!(t.to_bytes()[4] == d);
 
+        // check whether port matches
+        assert_eq!(&u16_to_array(port.to_be())[..], &u.to_bytes()[5..7]);
+        assert_eq!(&u16_to_array(port.to_be())[..], &t.to_bytes()[5..7]);
+
         // check whether length matches
         assert!(u.to_bytes().len() == PACKED_NODE_IPV4_SIZE);
         assert!(t.to_bytes().len() == PACKED_NODE_IPV4_SIZE);
     }
-    quickcheck(with_random_ip as fn(u8, u8, u8, u8));
+    quickcheck(with_random_saddr as fn(u8, u8, u8, u8, u16));
 }
 
 #[test]
-// test for various IPv6 – quickckeck currently doesn't seem to have
-// needed functionality, as it would require from quickcheck support for
-// more than 4 function arguments
-//  - this requires a workaround with loops and hops - i.e. supply to the
-//    quickcheck a function that takes 2 `u64` arguments, convert those
-//    numbers to arrays, and use numbers from arrays to do the job
 fn packed_node_to_bytes_test_ipv6() {
-    fn with_random_ip(num1: u64, num2: u64, flowinfo: u32, scope_id: u32) {
+    fn with_random_saddr(num1: u64, num2: u64, flowinfo: u32, scope_id: u32,
+                      port: u16) {
         let pk = &PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap();
 
         let (a, b, c, d) = u64_as_u16s(num1);
@@ -400,7 +406,7 @@ fn packed_node_to_bytes_test_ipv6() {
         let saddr = SocketAddr::V6(
                         SocketAddrV6::new(
                             Ipv6Addr::new(a, b, c, d, e, f, g, h),
-                   /*port*/ 1, flowinfo, scope_id));
+                                          port, flowinfo, scope_id));
         let (u, t) = packed_node_protocol(saddr, pk);
         // check whether ip_type variant matches
         assert_eq!(u.to_bytes()[0], IpType::U6 as u8);
@@ -426,32 +432,15 @@ fn packed_node_to_bytes_test_ipv6() {
         assert_eq!(&t.to_bytes()[13..15], &u16_to_array(g)[..]);
         assert_eq!(&t.to_bytes()[15..17], &u16_to_array(h)[..]);
 
+        // check whether port matches
+        assert_eq!(&u16_to_array(port.to_be())[..], &u.to_bytes()[17..19]);
+        assert_eq!(&u16_to_array(port.to_be())[..], &t.to_bytes()[17..19]);
+
         // check whether length matches
         assert!(u.to_bytes().len() == PACKED_NODE_IPV6_SIZE);
         assert!(t.to_bytes().len() == PACKED_NODE_IPV6_SIZE);
     }
-    quickcheck(with_random_ip as fn(u64, u64, u32, u32));
-}
-
-#[test]
-// test serialization of various ports
-fn packed_nodes_to_bytes_test_port() {
-    fn with_port(port: u16) {
-        let pk = &PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap();
-        let saddr4 = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(1, 1, 1, 1), port));
-        let saddr6 = SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::from_str("::0").unwrap(), port, 0, 0));
-
-        let (u4, t4) = packed_node_protocol(saddr4, pk);
-        assert_eq!(&u16_to_array(port.to_be())[..], &u4.to_bytes()[5..7]);
-        assert_eq!(&u16_to_array(port.to_be())[..], &t4.to_bytes()[5..7]);
-
-        // and IPv6
-        let (u6, t6) = packed_node_protocol(saddr6, pk);
-        assert_eq!(&u16_to_array(port.to_be())[..], &u6.to_bytes()[17..19]);
-        assert_eq!(&u16_to_array(port.to_be())[..], &t6.to_bytes()[17..19]);
-
-    }
-    quickcheck(with_port as fn (u16));
+    quickcheck(with_random_saddr as fn(u64, u64, u32, u32, u16));
 }
 
 #[test]
