@@ -1034,9 +1034,34 @@ fn kbucket_index_test() {
 
 #[test]
 fn bucket_new_test() {
-    fn with_pk(a: u64, b: u64, c: u64, d: u64) {
-        let pk = nums_to_pk(a, b, c, d);
-        assert_eq!(pk, Bucket::new(&pk).pk);
+    fn with_pk(a: u64, b: u64, c: u64, d: u64, index: u8) {
+        let pk = &nums_to_pk(a, b, c, d);
+        assert_eq!(pk, Bucket::new(pk, index).pk);
     }
-    quickcheck(with_pk as fn(u64, u64, u64, u64));
+    quickcheck(with_pk as fn(u64, u64, u64, u64, u8));
+}
+
+// Bucket::try_add()
+
+#[test]
+fn bucket_try_add_test() {
+    fn with_nodes(n1: Node, n2: Node, n3: Node, n4: Node, n5: Node, n6: Node,
+                  n7: Node, n8: Node) {
+        let pk_bytes = [0; PUBLICKEYBYTES];
+        let pk = PublicKey::from_slice(&pk_bytes).unwrap();
+        let mut node = Bucket::new(&pk, 0);
+        assert_eq!(true, node.try_add(&n1));
+        assert_eq!(true, node.try_add(&n2));
+        assert_eq!(true, node.try_add(&n3));
+        assert_eq!(true, node.try_add(&n4));
+        assert_eq!(true, node.try_add(&n5));
+        assert_eq!(true, node.try_add(&n6));
+        assert_eq!(true, node.try_add(&n7));
+        assert_eq!(true, node.try_add(&n8));
+
+        assert_eq!(false, node.try_add(&n1));
+
+        // TODO: check whether adding a closest node will always work
+    }
+    quickcheck(with_nodes as fn(Node, Node, Node, Node, Node, Node, Node, Node));
 }

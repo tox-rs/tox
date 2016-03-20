@@ -1154,21 +1154,24 @@ pub fn kbucket_index(&PublicKey(ref own_pk): &PublicKey,
 ///
 /// Used in [`Kbucket`](./struct.Kbucket.html) for storing nodes close to own
 /// PK; and additionally used to store nodes closest to friends.
-// TODO: rename
+// TODO: rename..?
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Bucket {
+pub struct Bucket<'a> {
     /// PK that nodes in the bucket are close to.
-    pub pk: PublicKey,
+    pub pk: &'a PublicKey,
+    /// Index in the [`Kbucket`](./struct.Kbucket.html).
+    index: u8,
     nodes: Vec<Node>,
 }
 
 /// Maximum of nodes that [`Bucket`](./struct.Bucket.html) can hold.
 pub const BUCKET_SIZE: usize = 8;
 
-impl Bucket {
+impl<'a> Bucket<'a> {
     /// Create a new `Bucket` to store nodes close to the `pk`.
-    pub fn new(pk: &PublicKey) -> Self {
-        Bucket { pk: *pk, nodes: Vec::with_capacity(BUCKET_SIZE) }
+    pub fn new(pk: &'a PublicKey, i: u8) -> Self {
+        trace!("Creating new Bucket; index: {}; PK: {:?}", i, pk);
+        Bucket { pk: pk, index: i, nodes: Vec::with_capacity(BUCKET_SIZE) }
     }
 
     /// Try to add node to the bucket.
@@ -1192,22 +1195,59 @@ impl Bucket {
         }
 
         for n in 0..self.nodes.len() {
-            if let Ordering::Less = self.pk.distance(node.pk(), self.nodes[n].pk()) {
-                if self.nodes.len() == BUCKET_SIZE {
-                    drop(self.nodes.pop());
-                }
+            match self.pk.distance(node.pk(), self.nodes[n].pk()) {
+                Ordering::Less => {
+                    if self.nodes.len() == BUCKET_SIZE {
+                        drop(self.nodes.pop());
+                    }
 
-                self.nodes.insert(n, *node);
-                return true
+                    self.nodes.insert(n, *node);
+                    return true
+                },
+                Ordering::Equal => {
+                    debug!("Failed to add; Node is already in the bucket!");
+                    return false
+                },
+                _ => {},
             }
         }
+        if self.nodes.len() < BUCKET_SIZE {
+            self.nodes.push(*node);
+            return true
+        }
+
         debug!("Node is too distant to add to bucket.");
         false
     }
-    // TODO: test
 }
 
 
-// TODO: create k-bucket struct(?):
-//       https://en.wikipedia.org/wiki/Kademlia#Routing_tables
-//       https://toktok.github.io/spec.html#packed-node-format-3
+/// K-bucket structure to hold up to
+/// [`KBUCKET_MAX_ENTRIES`](./constant.KBUCKET_MAX_ENTRIES.html) *
+/// [`BUCKET_SIZE`](./constant.BUCKET_SIZE.html) nodes close to own PK.
+///
+/// Further reading:
+///
+/// * [Kademilia implementation, on which Tox was based on]
+///   (https://en.wikipedia.org/wiki/Kademlia#Routing_tables)
+/// * [Tox spec](https://en.wikipedia.org/wiki/Kademlia#Routing_tables)
+#[derive(Clone, Debug, Eq, PartialEq)]
+// TODO: rename?
+pub struct Kbucket<'a> {
+    /// Number of buckets held.
+    pub k: u8,
+    pk: PublicKey,
+    list: Vec<Bucket<'a>>,
+}
+
+/// Maximum number of buckets that Kbucket can hold.
+///
+/// Realistically, not even half of that will be ever used.
+// TODO: ↓ perhaps s/usize/u8/ ?
+pub const KBUCKET_MAX_ENTRIES: usize = ::std::u8::MAX as usize;
+
+// TODO: k-bucket methods
+//        * creating new kbucket without any buckets (is it needed?)
+//        * creating new kbucket from nodes, automatically creating buckets
+//          - with a switch to decide whether only 1 bucket should be used
+//            (for friend's close nodes) or many (for own close nodes)
