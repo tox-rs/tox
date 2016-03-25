@@ -1120,7 +1120,10 @@ impl Node {
 }
 
 
-/// Calculate the `k-bucket` index of a PK compared to "own" PK.
+/// Calculate the [`k-bucket`](./struct.Kbuckets.html) index of a PK compared
+/// to "own" PK.
+///
+/// According to the [spec](https://toktok.github.io/spec#bucket-index).
 ///
 /// Falis (returns `None`) if supplied keys are the same.
 pub fn kbucket_index(&PublicKey(ref own_pk): &PublicKey,
@@ -1152,21 +1155,19 @@ pub fn kbucket_index(&PublicKey(ref own_pk): &PublicKey,
 /// Nodes stored in `Bucket` are in [`PackedNode`](./struct.PackedNode.html)
 /// format.
 ///
-/// Used in [`Kbuckets`](./struct.Kbuckets.html) for storing nodes close to own
-/// PK; and additionally used to store nodes closest to friends.
+/// Used in [`Kbuckets`](./struct.Kbuckets.html) for storing nodes close to
+/// given PK; and additionally used to store nodes closest to friends.
+///
+/// Its methods work according to the [spec]
+/// (https://toktok.github.io/spec#updating-k-buckets).
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Bucket<'a> {
-    /// PK that nodes in the bucket are close to.
-    pub pk: &'a PublicKey,
-    nodes: Vec<PackedNode>,
-}
+pub struct Bucket { nodes: Vec<PackedNode> }
 
-
-impl<'a> Bucket<'a> {
+impl Bucket {
     /// Create a new `Bucket` to store nodes close to the `pk`.
-    pub fn new(pk: &'a PublicKey) -> Self {
-        trace!("Creating new Bucket with PK: {:?}", pk);
-        Bucket { pk: pk, nodes: Vec::with_capacity(BUCKET_SIZE) }
+    pub fn new() -> Self {
+        trace!("Creating new Bucket.");
+        Bucket { nodes: Vec::with_capacity(BUCKET_SIZE) }
     }
 
     /// Try to add [`PackedNode`](./struct.PackedNode.html) to the bucket.
@@ -1182,9 +1183,10 @@ impl<'a> Bucket<'a> {
     /// it isn't added and `false` is returned.
     ///
     /// Returns `true` if node was added, `false` otherwise.
-    pub fn try_add(&mut self, pn: &PackedNode) -> bool {
+    pub fn try_add(&mut self, pk: &PublicKey, pn: &PackedNode) -> bool {
         debug!(target: "Bucket", "Trying to add PackedNode.");
-        trace!(target: "Bucket", "With bucket: {:?}; and pn: {:?}", self, pn);
+        trace!(target: "Bucket", "With bucket: {:?}; PK: {:?} and pn: {:?}",
+            self, pk, pn);
 
         if self.nodes.is_empty() {
             self.nodes.push(*pn);
@@ -1193,7 +1195,7 @@ impl<'a> Bucket<'a> {
         }
 
         for n in 0..self.nodes.len() {
-            match self.pk.distance(&pn.pk, &self.nodes[n].pk) {
+            match pk.distance(&pn.pk, &self.nodes[n].pk) {
                 Ordering::Less => {
                     if self.nodes.len() == BUCKET_SIZE {
                         drop(self.nodes.pop());
@@ -1226,6 +1228,7 @@ impl<'a> Bucket<'a> {
     /// `Bucket`.
     ///
     /// If there's no `PackedNode` with given PK, nothing is being done.
+    // TODO: write test
     pub fn remove(&mut self, pubkey: &PublicKey) {
         for n in 0..self.nodes.len() {
             if pubkey == &self.nodes[n].pk {
@@ -1238,9 +1241,6 @@ impl<'a> Bucket<'a> {
 
 
 /// Maximum number of nodes that bucket can hold.
-///
-/// Buckets are to be contained by [`Kbuckets`](./struct.Kbuckets.html) when
-/// used for "own" PK, or uncontained if storing nodes close to friends' PK.
 pub const BUCKET_SIZE: usize = 8;
 
 /// K-buckets structure to hold up to
@@ -1255,14 +1255,14 @@ pub const BUCKET_SIZE: usize = 8;
 // TODO: ↓ put link when PR to spec will be merged
 // * [Tox spec]()
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Kbuckets<'a> {
+pub struct Kbuckets {
+    /// `PublicKey` for which `Kbuckets` holds close nodes.
+    pub pk: PublicKey,
     /// Number of [`Bucket`](./struct.Bucket.html)s held.
     // TODO: check if `k` even needs to be stored, considering that
     //       `buckets.len()` could(?) be used
     pub k: u8,
-    /// `PublicKey` for which `Kbuckets` holds close nodes.
-    pub pk: PublicKey,
-    buckets: Vec<Option<Bucket<'a>>>,
+    buckets: Vec<Option<Bucket>>,
 }
 
 /// Maximum number of [`Bucket`](./struct.Bucket.html)s that [`Kbuckets`]
@@ -1270,17 +1270,59 @@ pub struct Kbuckets<'a> {
 ///
 /// Realistically, not even half of that will be ever used, given how
 /// [index calculation](./fn.kbucket_index.html) works.
-// TODO: link `works` to the spec section about calculating index
 pub const KBUCKETS_MAX_ENTRIES: u8 = ::std::u8::MAX;
 
-impl<'a> Kbuckets<'a> {
+impl Kbuckets {
     /// Create a new `Kbuckets`.
     ///
     /// `k` – number of [`Bucket`](./struct.Bucket.html)s held.
     pub fn new(k: u8, pk: &PublicKey) -> Self {
         trace!(target: "Kbuckets", "Creating new Kbuckets with k: {:?} and PK:
                {:?}", k, pk);
-        Kbuckets { k: k, pk: *pk, buckets: vec![None; k as usize] }
+        Kbuckets { pk: *pk, k: k, buckets: vec![None; k as usize] }
+    }
+
+    /// Add [`PackedNode`](./struct.PackedNode.html) to `Kbuckets`.
+    ///
+    /// Node can be added only if:
+    ///
+    /// * its [`kbucket index`](./fn.kbucket_index.html) is lower or equal to
+    ///   `k` (number of buckets).
+    /// * [`Bucket`](./struct.Bucket.html) to which it is added has free space
+    ///   or added node is closer to the PK than other node in the bucket.
+    ///
+    /// Returns `true` if node was added successfully, `false` otherwise.
+    // TODO: write test
+    pub fn try_add(&mut self, node: &PackedNode) -> bool {
+        debug!(target: "Kbuckets", "Trying to add PackedNode.");
+        trace!(target: "Kbuckets", "With PN: {:?}; and self: {:?}", node, self);
+
+        if let Some(index) = kbucket_index(&self.pk, &node.pk) {
+            if index >= self.k {
+                debug!("Failed, index is bigger than what Kbuckets can hold.");
+                return false
+            }
+
+            let index = index as usize;
+            if let None = self.buckets[index] {
+                self.buckets[index] = Some(Bucket::new());
+            }
+
+            if let Some(ref mut bucket) = self.buckets[index] {
+                return bucket.try_add(&self.pk, node)
+            }
+        }
+        false
+    }
+
+    /// Remove [`PackedNode`](./struct.PackedNode.html) with given PK from the
+    /// `Kbuckets`.
+    pub fn remove(&mut self, pk: &PublicKey) {
+        for i in 0..self.buckets.len() {
+            if let Some(ref mut b) = self.buckets[i] {
+                b.remove(pk);
+            }
+        }
     }
 }
 

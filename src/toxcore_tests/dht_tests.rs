@@ -1019,18 +1019,6 @@ fn kbucket_index_test() {
 }
 
 
-// Bucket::new()
-
-#[test]
-fn bucket_new_test() {
-    fn with_pk(a: u64, b: u64, c: u64, d: u64) {
-        let pk = &nums_to_pk(a, b, c, d);
-        let bucket = Bucket::new(pk);
-        assert_eq!(pk, bucket.pk);
-    }
-    quickcheck(with_pk as fn(u64, u64, u64, u64));
-}
-
 // Bucket::try_add()
 
 #[test]
@@ -1040,18 +1028,18 @@ fn bucket_try_add_test() {
                   n7: PackedNode, n8: PackedNode) {
         let pk_bytes = [0; PUBLICKEYBYTES];
         let pk = PublicKey::from_slice(&pk_bytes).unwrap();
-        let mut node = Bucket::new(&pk);
-        assert_eq!(true, node.try_add(&n1));
-        assert_eq!(true, node.try_add(&n2));
-        assert_eq!(true, node.try_add(&n3));
-        assert_eq!(true, node.try_add(&n4));
-        assert_eq!(true, node.try_add(&n5));
-        assert_eq!(true, node.try_add(&n6));
-        assert_eq!(true, node.try_add(&n7));
-        assert_eq!(true, node.try_add(&n8));
+        let mut node = Bucket::new();
+        assert_eq!(true, node.try_add(&pk, &n1));
+        assert_eq!(true, node.try_add(&pk, &n2));
+        assert_eq!(true, node.try_add(&pk, &n3));
+        assert_eq!(true, node.try_add(&pk, &n4));
+        assert_eq!(true, node.try_add(&pk, &n5));
+        assert_eq!(true, node.try_add(&pk, &n6));
+        assert_eq!(true, node.try_add(&pk, &n7));
+        assert_eq!(true, node.try_add(&pk, &n8));
 
         // updating node
-        assert_eq!(true, node.try_add(&n1));
+        assert_eq!(true, node.try_add(&pk, &n1));
 
         // TODO: check whether adding a closest node will always work
     }
@@ -1063,7 +1051,25 @@ fn bucket_try_add_test() {
 // TODO: ↑
 
 
-// Kbucket::new()
+// Kbuckets::
+
+impl Arbitrary for Kbuckets {
+    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+        let mut pk = [0; PUBLICKEYBYTES];
+        g.fill_bytes(&mut pk);
+        let pk = PublicKey::from_slice(&pk).expect("PK from bytes failed.");
+
+        let mut kbucket = Kbuckets::new(g.gen(), &pk);
+
+        // might want to add some buckets
+        for _ in 0..(g.gen_range(0, KBUCKETS_MAX_ENTRIES as usize * BUCKET_SIZE as usize * 2)) {
+            drop(kbucket.try_add(&Arbitrary::arbitrary(g)));
+        }
+        kbucket
+    }
+}
+
+// Kbuckets::new()
 
 #[test]
 fn kbuckets_new_test() {
@@ -1074,4 +1080,36 @@ fn kbuckets_new_test() {
         assert_eq!(pk, kbucket.pk);
     }
     quickcheck(with_pk as fn(u64, u64, u64, u64, u8));
+}
+
+// Kbuckets::try_add()
+
+#[test]
+fn kbuckets_try_add_test() {
+    fn with_pns(pns: Vec<PackedNode>, k: u8, p1: u64, p2: u64, p3: u64, p4: u64) {
+        let pk = nums_to_pk(p1, p2, p3, p4);
+        let mut kbucket = Kbuckets::new(k, &pk);
+        for node in pns {
+            // result may vary, so discard it
+            // TODO: can be done better?
+            drop(kbucket.try_add(&node));
+        }
+    }
+    quickcheck(with_pns as fn(Vec<PackedNode>, u8, u64, u64, u64, u64));
+}
+
+// Kbuckets::remove()
+
+#[test]
+fn kbuckets_remove_test() {
+    // TODO: test for actually removing something
+    fn with_kbucket(kb: Kbuckets, remove: usize) {
+        let mut kb = kb;
+        for _ in 0..remove {
+            let pk = nums_to_pk(random_u64(), random_u64(), random_u64(),
+                random_u64());
+            kb.remove(&pk);
+        }
+    }
+    quickcheck(with_kbucket as fn(Kbuckets, usize));
 }
