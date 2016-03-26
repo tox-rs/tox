@@ -1237,6 +1237,14 @@ impl Bucket {
             }
         }
     }
+
+    /// Check if `Bucket` is empty.
+    ///
+    /// Returns `true` if there are no nodes in the `Bucket`, `false`
+    /// otherwise.
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
 }
 
 
@@ -1319,8 +1327,13 @@ impl Kbuckets {
     /// `Kbuckets`.
     pub fn remove(&mut self, pk: &PublicKey) {
         for i in 0..self.buckets.len() {
+            let mut empty = false;
             if let Some(ref mut b) = self.buckets[i] {
                 b.remove(pk);
+                empty = b.is_empty();
+            }
+            if empty {
+                self.buckets[i] = None;
             }
         }
     }

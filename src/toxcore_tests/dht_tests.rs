@@ -1050,6 +1050,25 @@ fn bucket_try_add_test() {
 // Bucket::remove()
 // TODO: ↑
 
+// Bucket::is_empty()
+
+#[test]
+fn bucket_is_empty_test() {
+    fn with_pns(pns: Vec<PackedNode>, p1: u64, p2: u64, p3: u64, p4: u64) {
+        let mut bucket = Bucket::new();
+        assert_eq!(true, bucket.is_empty());
+
+        let pk = nums_to_pk(p1, p2, p3, p4);
+        for n in &pns {
+            drop(bucket.try_add(&pk, n));
+        }
+        if !pns.is_empty() {
+            assert_eq!(false, bucket.is_empty());
+        }
+    }
+    quickcheck(with_pns as fn(Vec<PackedNode>, u64, u64, u64, u64));
+}
+
 
 // Kbuckets::
 
