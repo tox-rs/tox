@@ -919,7 +919,6 @@ impl DhtPacket {
         let decrypted = match open(&self.payload, &self.nonce, &self.sender_pk,
                             own_secret_key) {
             Ok(d) => d,
-            // TODO: ↓ logging
             Err(_) => {
                 debug!("Decrypting DhtPacket failed!");
                 return None
@@ -1062,7 +1061,6 @@ impl FromBytes<DhtPacket> for DhtPacket {
 pub trait Distance {
     /// Check whether distance between PK1 and own PK is smaller than distance
     /// between PK2 and own PK.
-    // TODO: perhaps simple bool would suffice?
     fn distance(&self, &PublicKey, &PublicKey) -> Ordering;
 }
 
@@ -1125,7 +1123,7 @@ impl Node {
 ///
 /// According to the [spec](https://toktok.github.io/spec#bucket-index).
 ///
-/// Falis (returns `None`) if supplied keys are the same.
+/// Fails (returns `None`) if supplied keys are the same.
 pub fn kbucket_index(&PublicKey(ref own_pk): &PublicKey,
                      &PublicKey(ref other_pk): &PublicKey) -> Option<u8> {
 
@@ -1214,7 +1212,7 @@ impl Bucket {
             }
         }
         // distance to the PK was bigger than the other keys, but there's still
-        // "free" space in the bucket for a node, so append at end
+        // "free" space in the bucket for a node, so append at the end
         if self.nodes.len() < BUCKET_SIZE {
             self.nodes.push(*pn);
             return true
@@ -1258,10 +1256,7 @@ pub const BUCKET_SIZE: usize = 8;
 /// Nodes in bucket are sorted by closeness to the PK; closest node is the
 /// first, while furthest is last.
 ///
-/// Further reading:
-///
-// TODO: ↓ put link when PR to spec will be merged
-// * [Tox spec]()
+/// Further reading: [Tox spec](https://toktok.github.io/spec#k-buckets).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Kbuckets {
     /// `PublicKey` for which `Kbuckets` holds close nodes.
@@ -1270,6 +1265,8 @@ pub struct Kbuckets {
     // TODO: check if `k` even needs to be stored, considering that
     //       `buckets.len()` could(?) be used
     pub k: u8,
+    // TODO: check if using an option actually brings any benefits, as opposed
+    //       to just keeping empty buckets
     buckets: Vec<Option<Bucket>>,
 }
 
@@ -1300,7 +1297,6 @@ impl Kbuckets {
     ///   or added node is closer to the PK than other node in the bucket.
     ///
     /// Returns `true` if node was added successfully, `false` otherwise.
-    // TODO: write test
     pub fn try_add(&mut self, node: &PackedNode) -> bool {
         debug!(target: "Kbuckets", "Trying to add PackedNode.");
         trace!(target: "Kbuckets", "With PN: {:?}; and self: {:?}", node, self);
@@ -1328,9 +1324,9 @@ impl Kbuckets {
     pub fn remove(&mut self, pk: &PublicKey) {
         for i in 0..self.buckets.len() {
             let mut empty = false;
-            if let Some(ref mut b) = self.buckets[i] {
-                b.remove(pk);
-                empty = b.is_empty();
+            if let Some(ref mut bucket) = self.buckets[i] {
+                bucket.remove(pk);
+                empty = bucket.is_empty();
             }
             if empty {
                 self.buckets[i] = None;
@@ -1342,5 +1338,3 @@ impl Kbuckets {
 // TODO: k-bucket methods
 //        * creating new kbucket without any buckets (is it needed?)
 //        * creating new kbucket from nodes, automatically creating buckets
-//          - with a switch to decide whether only 1 bucket should be used
-//            (for friend's close nodes) or many (for own close nodes)
