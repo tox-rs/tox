@@ -515,7 +515,7 @@ impl ToBytes for PackedNode {
 ///  - PK can't be parsed
 ///
 /// Blindly trusts that provided `IpType` matches - i.e. if there are provided
-/// 51 bytes (which is lenght of `PackedNode` that contains IPv6), and `IpType`
+/// 51 bytes (which is length of `PackedNode` that contains IPv6), and `IpType`
 /// says that it's actually IPv4, bytes will be parsed as if that was an IPv4
 /// address.
 impl FromBytes<PackedNode> for PackedNode {
@@ -641,7 +641,7 @@ impl GetNodes {
     }
 }
 
-/// Serialization of `GetNodes`. Resulting lenght should be
+/// Serialization of `GetNodes`. Resulting length should be
 /// [`GET_NODES_SIZE`](./constant.GET_NODES_SIZE.html).
 impl ToBytes for GetNodes {
     fn to_bytes(&self) -> Vec<u8> {
@@ -902,7 +902,7 @@ impl DhtPacket {
         }
     }
 
-    /// Get packet data. This functino decrypts payload and tries to parse it
+    /// Get packet data. This function decrypts payload and tries to parse it
     /// as packet type.
     ///
     /// Returns `None` in case of faliure.
