@@ -1147,8 +1147,11 @@ pub fn kbucket_index(&PublicKey(ref own_pk): &PublicKey,
     None  // PKs are equal
 }
 
-/// Structure for holding up to [`BUCKET_SIZE`](./constant.BUCKET_SIZE.html)
-/// nodes.
+/// Structure for holding nodes.
+///
+/// Number of nodes it can contain is set during creation. If not set
+/// (aka `None` is supplied), number of nodes defaults to
+/// [`BUCKET_DEFAULT_SIZE`](./constant.BUCKET_DEFAULT_SIZE.html).
 ///
 /// Nodes stored in `Bucket` are in [`PackedNode`](./struct.PackedNode.html)
 /// format.
@@ -1156,24 +1159,43 @@ pub fn kbucket_index(&PublicKey(ref own_pk): &PublicKey,
 /// Used in [`Kbuckets`](./struct.Kbuckets.html) for storing nodes close to
 /// given PK; and additionally used to store nodes closest to friends.
 ///
-/// Its methods work according to the [spec]
-/// (https://toktok.github.io/spec#updating-k-buckets).
+/// [Spec definition](https://toktok.github.io/spec#updating-k-buckets).
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Bucket { nodes: Vec<PackedNode> }
+pub struct Bucket {
+    /// Amount of nodes it can hold.
+    capacity: u8,
+    /// Nodes that bucket has, sorted by distance to PK.
+    pub nodes: Vec<PackedNode>
+}
+
+/// Default number of nodes that bucket can hold.
+pub const BUCKET_DEFAULT_SIZE: usize = 8;
 
 impl Bucket {
     /// Create a new `Bucket` to store nodes close to the `pk`.
-    pub fn new() -> Self {
+    ///
+    /// Can hold up to `num` nodes if number is supplied. If `None` is
+    /// supplied, holds up to [`BUCKET_DEFAULT_SIZE`]
+    /// (./constant.BUCKET_DEFAULT_SIZE.html) nodes.
+    // TODO: ↓ take a closure as an arg to simplify?
+    pub fn new(num: Option<u8>) -> Self {
         trace!("Creating new Bucket.");
-        Bucket { nodes: Vec::with_capacity(BUCKET_SIZE) }
+        if let Some(n) = num {
+            Bucket { capacity: n, nodes: Vec::with_capacity(n as usize) }
+        } else {
+            Bucket {
+                capacity: BUCKET_DEFAULT_SIZE as u8,
+                nodes: Vec::with_capacity(BUCKET_DEFAULT_SIZE)
+            }
+        }
     }
 
     /// Try to add [`PackedNode`](./struct.PackedNode.html) to the bucket.
     ///
-    /// If bucket doesn't have [`BUCKET_SIZE`](./constant.BUCKET_SIZE.html)
-    /// nodes, node is appended.
+    /// If bucket doesn't have [`BUCKET_DEFAULT_SIZE`]
+    /// (./constant.BUCKET_DEFAULT_SIZE.html) nodes, node is appended.
     ///
-    /// If bucket has `BUCKET_SIZE` already, node's closeness is compared to
+    /// If bucket has `capacity` nodes already, node's closeness is compared to
     /// nodes already in bucket, and if it's closer than some node, it prepends
     /// that node, and last node is removed from the list.
     ///
@@ -1195,7 +1217,7 @@ impl Bucket {
         for n in 0..self.nodes.len() {
             match pk.distance(&pn.pk, &self.nodes[n].pk) {
                 Ordering::Less => {
-                    if self.nodes.len() == BUCKET_SIZE {
+                    if self.nodes.len() == self.capacity as usize {
                         drop(self.nodes.pop());
                     }
 
@@ -1213,7 +1235,7 @@ impl Bucket {
         }
         // distance to the PK was bigger than the other keys, but there's still
         // "free" space in the bucket for a node, so append at the end
-        if self.nodes.len() < BUCKET_SIZE {
+        if self.nodes.len() < self.capacity as usize {
             self.nodes.push(*pn);
             return true
         }
@@ -1246,12 +1268,10 @@ impl Bucket {
 }
 
 
-/// Maximum number of nodes that bucket can hold.
-pub const BUCKET_SIZE: usize = 8;
-
 /// K-buckets structure to hold up to
 /// [`KBUCKETS_MAX_ENTRIES`](./constant.KBUCKETS_MAX_ENTRIES.html) *
-/// [`BUCKET_SIZE`](./constant.BUCKET_SIZE.html) nodes close to own PK.
+/// [`BUCKET_DEFAULT_SIZE`](./constant.BUCKET_DEFAULT_SIZE.html) nodes close
+/// to own PK.
 ///
 /// Nodes in bucket are sorted by closeness to the PK; closest node is the
 /// first, while furthest is last.
@@ -1267,7 +1287,7 @@ pub struct Kbuckets {
     pub k: u8,
     // TODO: check if using an option actually brings any benefits, as opposed
     //       to just keeping empty buckets
-    buckets: Vec<Option<Bucket>>,
+    buckets: Vec<Bucket>,
 }
 
 /// Maximum number of [`Bucket`](./struct.Bucket.html)s that [`Kbuckets`]
@@ -1284,7 +1304,11 @@ impl Kbuckets {
     pub fn new(k: u8, pk: &PublicKey) -> Self {
         trace!(target: "Kbuckets", "Creating new Kbuckets with k: {:?} and PK:
                {:?}", k, pk);
-        Kbuckets { pk: *pk, k: k, buckets: vec![None; k as usize] }
+        Kbuckets {
+            pk: *pk,
+            k: k,
+            buckets: vec![Bucket::new(None); k as usize]
+        }
     }
 
     /// Add [`PackedNode`](./struct.PackedNode.html) to `Kbuckets`.
@@ -1306,15 +1330,7 @@ impl Kbuckets {
                 debug!("Failed, index is bigger than what Kbuckets can hold.");
                 return false
             }
-
-            let index = index as usize;
-            if let None = self.buckets[index] {
-                self.buckets[index] = Some(Bucket::new());
-            }
-
-            if let Some(ref mut bucket) = self.buckets[index] {
-                return bucket.try_add(&self.pk, node)
-            }
+            return self.buckets[index as usize].try_add(&self.pk, node)
         }
         false
     }
@@ -1323,15 +1339,26 @@ impl Kbuckets {
     /// `Kbuckets`.
     pub fn remove(&mut self, pk: &PublicKey) {
         for i in 0..self.buckets.len() {
-            let mut empty = false;
-            if let Some(ref mut bucket) = self.buckets[i] {
-                bucket.remove(pk);
-                empty = bucket.is_empty();
-            }
-            if empty {
-                self.buckets[i] = None;
+            self.buckets[i].remove(pk);
+        }
+    }
+
+    /// Get (up to) 4 closest nodes to given PK.
+    ///
+    /// Functionality for [`SendNodes`](./struct.SendNodes.html).
+    ///
+    /// Returns less than 4 nodes only if `Kbuckets` contains less than 4
+    /// nodes.
+    pub fn get_closest(&self, pk: &PublicKey) -> Vec<PackedNode> {
+        // create a new Bucket with associated pk, and add nodes that are close
+        // to the PK
+        let mut bucket = Bucket::new(Some(4));
+        for buc in &*self.buckets {
+            for node in &*buc.nodes {
+                drop(bucket.try_add(&pk, &node));
             }
         }
+        bucket.nodes
     }
 }
 
