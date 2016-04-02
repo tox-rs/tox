@@ -1070,18 +1070,18 @@ fn bucket_is_empty_test() {
 }
 
 
-// Kbuckets::
+// Kbucket::
 
-impl Arbitrary for Kbuckets {
+impl Arbitrary for Kbucket {
     fn arbitrary<G: Gen>(g: &mut G) -> Self {
         let mut pk = [0; PUBLICKEYBYTES];
         g.fill_bytes(&mut pk);
         let pk = PublicKey::from_slice(&pk).expect("PK from bytes failed.");
 
-        let mut kbucket = Kbuckets::new(g.gen(), &pk);
+        let mut kbucket = Kbucket::new(g.gen(), &pk);
 
         // might want to add some buckets
-        for _ in 0..(g.gen_range(0, KBUCKETS_MAX_ENTRIES as usize *
+        for _ in 0..(g.gen_range(0, KBUCKET_MAX_ENTRIES as usize *
                         BUCKET_DEFAULT_SIZE as usize * 2)) {
             drop(kbucket.try_add(&Arbitrary::arbitrary(g)));
         }
@@ -1089,26 +1089,26 @@ impl Arbitrary for Kbuckets {
     }
 }
 
-// Kbuckets::new()
+// Kbucket::new()
 
 #[test]
 fn kbuckets_new_test() {
     fn with_pk(a: u64, b: u64, c: u64, d: u64, buckets: u8) {
         let pk = nums_to_pk(a, b, c, d);
-        let kbucket = Kbuckets::new(buckets, &pk);
+        let kbucket = Kbucket::new(buckets, &pk);
         assert_eq!(buckets, kbucket.k);
         assert_eq!(pk, kbucket.pk);
     }
     quickcheck(with_pk as fn(u64, u64, u64, u64, u8));
 }
 
-// Kbuckets::try_add()
+// Kbucket::try_add()
 
 #[test]
 fn kbuckets_try_add_test() {
     fn with_pns(pns: Vec<PackedNode>, k: u8, p1: u64, p2: u64, p3: u64, p4: u64) {
         let pk = nums_to_pk(p1, p2, p3, p4);
-        let mut kbucket = Kbuckets::new(k, &pk);
+        let mut kbucket = Kbucket::new(k, &pk);
         for node in pns {
             // result may vary, so discard it
             // TODO: can be done better?
@@ -1118,12 +1118,12 @@ fn kbuckets_try_add_test() {
     quickcheck(with_pns as fn(Vec<PackedNode>, u8, u64, u64, u64, u64));
 }
 
-// Kbuckets::remove()
+// Kbucket::remove()
 
 #[test]
 fn kbuckets_remove_test() {
     // TODO: test for actually removing something
-    fn with_kbucket(kb: Kbuckets, remove: usize) {
+    fn with_kbucket(kb: Kbucket, remove: usize) {
         let mut kb = kb;
         for _ in 0..remove {
             let pk = nums_to_pk(random_u64(), random_u64(), random_u64(),
@@ -1131,9 +1131,9 @@ fn kbuckets_remove_test() {
             kb.remove(&pk);
         }
     }
-    quickcheck(with_kbucket as fn(Kbuckets, usize));
+    quickcheck(with_kbucket as fn(Kbucket, usize));
 }
 
 
-// Kbuckets::get_closest()
+// Kbucket::get_closest()
 // TODO: test ↑

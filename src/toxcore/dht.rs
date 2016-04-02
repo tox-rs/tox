@@ -1118,7 +1118,7 @@ impl Node {
 }
 
 
-/// Calculate the [`k-bucket`](./struct.Kbuckets.html) index of a PK compared
+/// Calculate the [`k-bucket`](./struct.Kbucket.html) index of a PK compared
 /// to "own" PK.
 ///
 /// According to the [spec](https://toktok.github.io/spec#bucket-index).
@@ -1156,7 +1156,7 @@ pub fn kbucket_index(&PublicKey(ref own_pk): &PublicKey,
 /// Nodes stored in `Bucket` are in [`PackedNode`](./struct.PackedNode.html)
 /// format.
 ///
-/// Used in [`Kbuckets`](./struct.Kbuckets.html) for storing nodes close to
+/// Used in [`Kbucket`](./struct.Kbucket.html) for storing nodes close to
 /// given PK; and additionally used to store nodes closest to friends.
 ///
 /// [Spec definition](https://toktok.github.io/spec#updating-k-buckets).
@@ -1177,12 +1177,13 @@ impl Bucket {
     /// Can hold up to `num` nodes if number is supplied. If `None` is
     /// supplied, holds up to [`BUCKET_DEFAULT_SIZE`]
     /// (./constant.BUCKET_DEFAULT_SIZE.html) nodes.
-    // TODO: ↓ take a closure as an arg to simplify?
     pub fn new(num: Option<u8>) -> Self {
-        trace!("Creating new Bucket.");
+        trace!(target: "Bucket", "Creating a new Bucket.");
         if let Some(n) = num {
+            trace!("Creating a new Bucket with capacity: {}", n);
             Bucket { capacity: n, nodes: Vec::with_capacity(n as usize) }
         } else {
+            trace!("Creating a new Bucket with default capacity.");
             Bucket {
                 capacity: BUCKET_DEFAULT_SIZE as u8,
                 nodes: Vec::with_capacity(BUCKET_DEFAULT_SIZE)
@@ -1250,12 +1251,14 @@ impl Bucket {
     /// If there's no `PackedNode` with given PK, nothing is being done.
     // TODO: write test
     pub fn remove(&mut self, pubkey: &PublicKey) {
+        trace!(target: "Bucket", "Removing PackedNode with PK: {:?}", pubkey);
         for n in 0..self.nodes.len() {
             if pubkey == &self.nodes[n].pk {
                 drop(self.nodes.remove(n));
                 return
             }
         }
+        trace!("Failed to remove PackedNode with PK: {:?}", pubkey);
     }
 
     /// Check if `Bucket` is empty.
@@ -1269,7 +1272,7 @@ impl Bucket {
 
 
 /// K-buckets structure to hold up to
-/// [`KBUCKETS_MAX_ENTRIES`](./constant.KBUCKETS_MAX_ENTRIES.html) *
+/// [`KBUCKET_MAX_ENTRIES`](./constant.KBUCKET_MAX_ENTRIES.html) *
 /// [`BUCKET_DEFAULT_SIZE`](./constant.BUCKET_DEFAULT_SIZE.html) nodes close
 /// to own PK.
 ///
@@ -1278,8 +1281,8 @@ impl Bucket {
 ///
 /// Further reading: [Tox spec](https://toktok.github.io/spec#k-buckets).
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Kbuckets {
-    /// `PublicKey` for which `Kbuckets` holds close nodes.
+pub struct Kbucket {
+    /// `PublicKey` for which `Kbucket` holds close nodes.
     pub pk: PublicKey,
     /// Number of [`Bucket`](./struct.Bucket.html)s held.
     // TODO: check if `k` even needs to be stored, considering that
@@ -1290,28 +1293,28 @@ pub struct Kbuckets {
     buckets: Vec<Bucket>,
 }
 
-/// Maximum number of [`Bucket`](./struct.Bucket.html)s that [`Kbuckets`]
-/// (./struct.Kbuckets.html) can hold.
+/// Maximum number of [`Bucket`](./struct.Bucket.html)s that [`Kbucket`]
+/// (./struct.Kbucket.html) can hold.
 ///
 /// Realistically, not even half of that will be ever used, given how
 /// [index calculation](./fn.kbucket_index.html) works.
-pub const KBUCKETS_MAX_ENTRIES: u8 = ::std::u8::MAX;
+pub const KBUCKET_MAX_ENTRIES: u8 = ::std::u8::MAX;
 
-impl Kbuckets {
-    /// Create a new `Kbuckets`.
+impl Kbucket {
+    /// Create a new `Kbucket`.
     ///
     /// `k` – number of [`Bucket`](./struct.Bucket.html)s held.
     pub fn new(k: u8, pk: &PublicKey) -> Self {
-        trace!(target: "Kbuckets", "Creating new Kbuckets with k: {:?} and PK:
+        trace!(target: "Kbucket", "Creating new Kbucket with k: {:?} and PK:
                {:?}", k, pk);
-        Kbuckets {
+        Kbucket {
             pk: *pk,
             k: k,
             buckets: vec![Bucket::new(None); k as usize]
         }
     }
 
-    /// Add [`PackedNode`](./struct.PackedNode.html) to `Kbuckets`.
+    /// Add [`PackedNode`](./struct.PackedNode.html) to `Kbucket`.
     ///
     /// Node can be added only if:
     ///
@@ -1322,22 +1325,25 @@ impl Kbuckets {
     ///
     /// Returns `true` if node was added successfully, `false` otherwise.
     pub fn try_add(&mut self, node: &PackedNode) -> bool {
-        debug!(target: "Kbuckets", "Trying to add PackedNode.");
-        trace!(target: "Kbuckets", "With PN: {:?}; and self: {:?}", node, self);
+        debug!(target: "Kbucket", "Trying to add PackedNode.");
+        trace!(target: "Kbucket", "With PN: {:?}; and self: {:?}", node, self);
 
         if let Some(index) = kbucket_index(&self.pk, &node.pk) {
             if index >= self.k {
-                debug!("Failed, index is bigger than what Kbuckets can hold.");
+                debug!("Failed, index is bigger than what Kbucket can hold.");
                 return false
             }
             return self.buckets[index as usize].try_add(&self.pk, node)
         }
+        trace!("Failed to add node: {:?}", node);
         false
     }
 
     /// Remove [`PackedNode`](./struct.PackedNode.html) with given PK from the
-    /// `Kbuckets`.
+    /// `Kbucket`.
     pub fn remove(&mut self, pk: &PublicKey) {
+        trace!(target: "Kbucket", "Removing PK: {:?} from Kbucket: {:?}", pk,
+                self);
         for i in 0..self.buckets.len() {
             self.buckets[i].remove(pk);
         }
@@ -1347,9 +1353,11 @@ impl Kbuckets {
     ///
     /// Functionality for [`SendNodes`](./struct.SendNodes.html).
     ///
-    /// Returns less than 4 nodes only if `Kbuckets` contains less than 4
+    /// Returns less than 4 nodes only if `Kbucket` contains less than 4
     /// nodes.
     pub fn get_closest(&self, pk: &PublicKey) -> Vec<PackedNode> {
+        debug!(target: "Kbucket", "Getting closest nodes.");
+        trace!(target: "Kbucket", "With PK: {:?} and self: {:?}", pk, self);
         // create a new Bucket with associated pk, and add nodes that are close
         // to the PK
         let mut bucket = Bucket::new(Some(4));
@@ -1358,10 +1366,7 @@ impl Kbuckets {
                 drop(bucket.try_add(&pk, &node));
             }
         }
+        trace!("Returning nodes: {:?}", &bucket.nodes);
         bucket.nodes
     }
 }
-
-// TODO: k-bucket methods
-//        * creating new kbucket without any buckets (is it needed?)
-//        * creating new kbucket from nodes, automatically creating buckets
