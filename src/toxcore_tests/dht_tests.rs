@@ -35,8 +35,8 @@ use super::quickcheck::{Arbitrary, Gen, quickcheck};
 /// Safely casts `u64` to 4 `u16`.
 fn u64_as_u16s(num: u64) -> (u16, u16, u16, u16) {
     let mut array: [u16; 4] = [0; 4];
-    for n in 0..array.len() {
-        array[n] = (num >> (16 * n)) as u16;
+    for (pos, item) in array.iter_mut().enumerate() {
+        *item = (num >> (16 * pos)) as u16;
     }
     (array[0], array[1], array[2], array[3])
 }
@@ -59,7 +59,7 @@ fn nums_to_pk(a: u64, b: u64, c: u64, d: u64) -> PublicKey {
 #[test]
 fn ping_type_from_bytes_test() {
     fn random_invalid(bytes: Vec<u8>) {
-        if bytes.len() == 0 {
+        if bytes.is_empty() {
             return;
         } else if bytes[0] == 0 {
             assert_eq!(PingType::Req, PingType::from_bytes(&bytes).unwrap());
@@ -183,7 +183,7 @@ fn ping_from_bytes_test() {
 #[test]
 fn ip_type_from_bytes_test() {
     fn with_bytes(bytes: Vec<u8>) {
-        if bytes.len() == 0 { return }
+        if bytes.is_empty() { return }
         match bytes[0] {
             2   => assert_eq!(IpType::U4, IpType::from_bytes(&bytes).unwrap()),
             10  => assert_eq!(IpType::U6, IpType::from_bytes(&bytes).unwrap()),
@@ -327,8 +327,8 @@ fn packed_node_ip_test() {
 #[test]
 fn packed_node_from_bytes_multiple_test() {
     fn with_nodes(nodes: Vec<PackedNode>) {
-        if nodes.len() == 0 {
-            assert_eq!(None, PackedNode::from_bytes_multiple(&vec![]));
+        if nodes.is_empty() {
+            assert_eq!(None, PackedNode::from_bytes_multiple(&[]));
             return
         }
         let mut bytes = vec![];
@@ -621,7 +621,7 @@ impl Arbitrary for SendNodes {
 #[test]
 fn send_nodes_from_request_test() {
     fn with_request(req: GetNodes, nodes: Vec<PackedNode>) {
-        if nodes.len() > 4 || nodes.len() == 0 {
+        if nodes.len() > 4 || nodes.is_empty() {
             assert_eq!(None, SendNodes::from_request(&req, nodes));
         } else {
             let sn = SendNodes::from_request(&req, nodes.clone()).unwrap();
@@ -664,9 +664,9 @@ fn send_nodes_to_bytes_test() {
         // starts from `1` since first byte of serialized SendNodes is number of
         // nodes
         let mut len_before = 1;
-        for node in 0..nodes.len() {
-            let cur_len = nodes[node].to_bytes().len();
-            assert_eq!(&nodes[node].to_bytes()[..],
+        for node in &nodes {
+            let cur_len = node.to_bytes().len();
+            assert_eq!(&node.to_bytes()[..],
                        &sn_bytes[len_before..(len_before + cur_len)]);
             len_before += cur_len;
         }
@@ -690,7 +690,7 @@ fn send_nodes_from_bytes_test() {
         // and ping id
         bytes.extend_from_slice(&u64_to_array(r_u64));
 
-        if nodes.len() > 4 || nodes.len() == 0 {
+        if nodes.len() > 4 || nodes.is_empty() {
             assert_eq!(None, SendNodes::from_bytes(&bytes));
         } else {
             let nodes2 = SendNodes::from_bytes(&bytes).unwrap();

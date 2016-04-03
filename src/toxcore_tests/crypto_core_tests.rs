@@ -221,7 +221,7 @@ fn increment_nonce_test_0xff_plus_one() {
 #[test]
 fn increment_nonce_test_random() {
     let mut nonce = gen_nonce();
-    let cmp_nonce = nonce.clone();
+    let cmp_nonce = nonce;
     increment_nonce(&mut nonce);
     assert!(nonce != cmp_nonce);
 }

@@ -319,10 +319,10 @@ impl ToBytes for IpAddr {
         debug!(target: "IpAddr", "Serializing IpAddr to bytes.");
         trace!(target: "IpAddr", "With IpAddr: {:?}", self);
         match *self {
-            IpAddr::V4(a) => a.octets().iter().map(|b| *b).collect(),
+            IpAddr::V4(a) => a.octets().iter().cloned().collect(),
             IpAddr::V6(a) => {
                 let mut result: Vec<u8> = vec![];
-                for n in a.segments().iter() {
+                for n in &a.segments() {
                     result.extend_from_slice(&u16_to_array(*n));
                 }
                 result
@@ -345,14 +345,11 @@ impl FromBytes<Ipv6Addr> for Ipv6Addr {
             return None
         }
 
-        let (a, b, c, d, e, f, g, h) = {
-            let mut v: Vec<u16> = Vec::with_capacity(8);
-            for slice in bytes[..16].chunks(2) {
-                v.push(array_to_u16(&[slice[0], slice[1]]));
-            }
-            (v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7])
-        };
-        Some(Ipv6Addr::new(a, b, c, d, e, f, g, h))
+        let mut v = Vec::with_capacity(8);
+        for slice in bytes[..16].chunks(2) {
+            v.push(array_to_u16(&[slice[0], slice[1]]));
+        }
+        Some(Ipv6Addr::new(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]))
     }
 }
 
@@ -472,9 +469,9 @@ impl PackedNode {
         trace!("Result: {:?}", &result);
         if result.is_empty() {
             debug!("There is no successfully de-serialized PackedNodes!");
-            return None
+            None
         } else {
-            return Some(result)
+            Some(result)
         }
     }
 }
@@ -783,8 +780,8 @@ impl FromBytes<SendNodes> for SendNodes {
 
             // need u64 from bytes
             let mut ping_id: [u8; 8] = [0; 8];
-            for pos in 0..ping_id.len() {
-                ping_id[pos] = bytes[nodes_bytes_len + pos];
+            for (pos, item) in ping_id.iter_mut().enumerate() {
+                *item = bytes[nodes_bytes_len + pos];
             }
 
             return Some(SendNodes { nodes: nodes, id: array_to_u64(&ping_id) })
