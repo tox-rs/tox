@@ -37,6 +37,8 @@ before_install:
 script:
   - cargo build --verbose
   - cargo test --verbose
+  - if rustc --version | grep nightly > /dev/null ; then cargo build --features "clippy" ; fi
+  - if rustc --version | grep nightly > /dev/null ; then cargo test --features "clippy" ; fi
   - cargo doc
 
 after_success:

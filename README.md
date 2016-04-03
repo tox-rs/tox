@@ -49,6 +49,20 @@ cargo doc
 ```
 They will be located under `target/doc/`
 
+### With clippy
+To build with support for [clippy](https://github.com/Manishearth/rust-clippy)
+(linting), you need nightly Rust.
+
+To build:
+```
+cargo build --features "clippy"
+```
+
+To build & test:
+```
+cargo test --features "clippy"
+```
+
 
 ## Goals
  - improved toxcore implementation in Rust
