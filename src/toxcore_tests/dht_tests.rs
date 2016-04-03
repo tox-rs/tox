@@ -1092,7 +1092,7 @@ impl Arbitrary for Kbucket {
 // Kbucket::new()
 
 #[test]
-fn kbuckets_new_test() {
+fn kbucket_new_test() {
     fn with_pk(a: u64, b: u64, c: u64, d: u64, buckets: u8) {
         let pk = nums_to_pk(a, b, c, d);
         let kbucket = Kbucket::new(buckets, &pk);
@@ -1105,7 +1105,7 @@ fn kbuckets_new_test() {
 // Kbucket::try_add()
 
 #[test]
-fn kbuckets_try_add_test() {
+fn kbucket_try_add_test() {
     fn with_pns(pns: Vec<PackedNode>, k: u8, p1: u64, p2: u64, p3: u64, p4: u64) {
         let pk = nums_to_pk(p1, p2, p3, p4);
         let mut kbucket = Kbucket::new(k, &pk);
@@ -1121,7 +1121,7 @@ fn kbuckets_try_add_test() {
 // Kbucket::remove()
 
 #[test]
-fn kbuckets_remove_test() {
+fn kbucket_remove_test() {
     // TODO: test for actually removing something
     fn with_kbucket(kb: Kbucket, remove: usize) {
         let mut kb = kb;
@@ -1134,6 +1134,49 @@ fn kbuckets_remove_test() {
     quickcheck(with_kbucket as fn(Kbucket, usize));
 }
 
-
 // Kbucket::get_closest()
-// TODO: test ↑
+
+#[test]
+fn kbucket_get_closest_test() {
+    fn with_kbucket(kb: Kbucket, a: u64, b: u64, c: u64, d: u64) {
+        let pk = nums_to_pk(a, b, c, d);
+        assert!(kb.get_closest(&pk).len() <= 4);
+        assert_eq!(kb.get_closest(&pk), kb.get_closest(&pk));
+    }
+    quickcheck(with_kbucket as fn(Kbucket, u64, u64, u64, u64));
+
+
+    fn with_nodes(n1: PackedNode, n2: PackedNode, n3: PackedNode,
+                    n4: PackedNode, a: u64, b: u64, c: u64, d: u64) {
+
+        let pk = nums_to_pk(a, b, c, d);
+        let mut kbucket = Kbucket::new(::std::u8::MAX, &pk);
+
+        // check whether number of correct nodes that are returned is right
+        let correctness = |should, kbc: &Kbucket| {
+            assert_eq!(kbc.get_closest(&pk), kbc.get_closest(&kbc.pk));
+
+            let got_nodes = kbc.get_closest(&pk);
+            let mut got_correct = 0;
+            for node in got_nodes {
+                if node == n1 || node == n2 || node == n3 || node == n4 {
+                    got_correct += 1;
+                }
+            }
+            assert_eq!(should, got_correct);
+        };
+
+        correctness(0, &kbucket);
+
+        assert_eq!(true, kbucket.try_add(&n1));
+        correctness(1, &kbucket);
+        assert_eq!(true, kbucket.try_add(&n2));
+        correctness(2, &kbucket);
+        assert_eq!(true, kbucket.try_add(&n3));
+        correctness(3, &kbucket);
+        assert_eq!(true, kbucket.try_add(&n4));
+        correctness(4, &kbucket);
+    }
+    quickcheck(with_nodes as fn(PackedNode, PackedNode, PackedNode,
+                    PackedNode, u64, u64, u64, u64));
+}
