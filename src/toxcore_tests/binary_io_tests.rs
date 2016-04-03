@@ -30,8 +30,8 @@ fn u16_to_array_and_back(num: u16) {
 
 fn u32_to_array(num: u32) -> [u8; 4] {
     let mut array: [u8; 4] = [0; 4];
-    for n in 0..array.len() {
-        array[n] = (num >> (8 * n)) as u8;
+    for (pos, item) in array.iter_mut().enumerate() {
+        *item = (num >> (8 * pos)) as u8;
     }
     array
 }

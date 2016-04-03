@@ -37,9 +37,9 @@ pub trait FromBytes<Output> {
 pub fn array_to_u16(array: &[u8; 2]) -> u16 {
     trace!("Casting array to u16 from array: {:?}", array);
     let mut result: u16 = 0;
-    for byte in 0..array.len() {
+    for pos in 0..array.len() {
         result = result << 8;
-        result = result | array[1 - byte] as u16;
+        result = result | array[1 - pos] as u16;
     }
     result
 }
@@ -48,8 +48,8 @@ pub fn array_to_u16(array: &[u8; 2]) -> u16 {
 pub fn u16_to_array(num: u16) -> [u8; 2] {
     trace!("Casting u16 to array from u16: {}", num);
     let mut array: [u8; 2] = [0; 2];
-    for n in 0..array.len() {
-        array[n] = (num >> (8 * n)) as u8;
+    for (pos, item) in array.iter_mut().enumerate() {
+        *item = (num >> (8 * pos)) as u8;
     }
     array
 }
@@ -59,9 +59,9 @@ pub fn u16_to_array(num: u16) -> [u8; 2] {
 pub fn array_to_u32(array: &[u8; 4]) -> u32 {
     trace!("Casting array to u32 from array: {:?}", array);
     let mut result: u32 = 0;
-    for byte in 0..array.len() {
+    for pos in 0..array.len() {
         result = result << 8;
-        result = result | array[3 - byte] as u32;
+        result = result | array[3 - pos] as u32;
     }
     result
 }
@@ -71,9 +71,9 @@ pub fn array_to_u32(array: &[u8; 4]) -> u32 {
 pub fn array_to_u64(array: &[u8; 8]) -> u64 {
     trace!("Casting array to u64 from array: {:?}", array);
     let mut result: u64 = 0;
-    for byte in 0..array.len() {
+    for pos in 0..array.len() {
         result = result << 8;
-        result = result | array[7 - byte] as u64;
+        result = result | array[7 - pos] as u64;
     }
     result
 }
@@ -82,8 +82,8 @@ pub fn array_to_u64(array: &[u8; 8]) -> u64 {
 pub fn u64_to_array(num: u64) -> [u8; 8] {
     trace!("Casting u64 to array from u64: {}", num);
     let mut array: [u8; 8] = [0; 8];
-    for n in 0..array.len() {
-        array[n] = (num >> (8 * n)) as u8;
+    for (pos, item) in array.iter_mut().enumerate() {
+        *item = (num >> (8 * pos)) as u8;
     }
     array
 }
