@@ -9,6 +9,7 @@ git = "https://github.com/dnaq/sodiumoxide.git"
 [dependencies]
 ip = "1.1"
 log = "0.3"
+clippy = { version = "*", optional = true }
 
 [dev-dependencies]
 quickcheck = "0.2"
