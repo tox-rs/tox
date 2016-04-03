@@ -51,10 +51,8 @@ They will be located under `target/doc/`
 
 ### With clippy
 To build with support for [clippy](https://github.com/Manishearth/rust-clippy)
-(linting), you need nightly Rust.
-Currently Rust version with which clippy works is
-`rustc 1.9.0-nightly (c8b8eb1fd 2016-04-01)` or earlier. Clippy `0.0.60` doesn't
-seem to work with `rustc 1.9.0-nightly (5ab11d72c 2016-04-02)`.
+(linting), you need nightly Rust. Usually the latest available version is
+required.
 
 To build:
 ```
