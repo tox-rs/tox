@@ -156,7 +156,12 @@ impl FromBytes<PingType> for PingType {
 }
 
 
-/// Used to request/respond to ping. Use in an encrypted form in DHT packets.
+/// Used to request/respond to ping. Use in an encrypted form.
+///
+/// Used in:
+///
+/// - [`DhtPacket`](./struct.DhtPacket.html)
+/// - [`DhtRequest`](./struct.DhtRequest.html)
 ///
 /// Serialized form:
 ///

@@ -119,24 +119,33 @@ pub fn decrypt_data_symmetric(precomputed_key: &PrecomputedKey,
 
 
 /// Inrement given nonce by 1.
+///
+/// Treats `Nonce` as BE number.
+///
+/// If nonce can't be incremented (all bits are `1`), nonce is zeroed.
+///
+/// *Note that behaviour of this function might change to not increment supplied
+/// nonces, but rather, return an increased nonce.*
+///
+/// Spec: https://toktok.github.io/spec#nonce-2
+// TODO: needs to be tested on BE arch
 #[inline]
-// TODO: since sodiumoxide/sodium don't check for arithmetic overflow, do it
-//
-// overflow doesn't /seem/ to be likely to happen in the first place, given
-// that no nonce should be incremented long enough for it to happen, but still..
-// FIXME: since toxcore increments nonce as big endian num, same has to be done
-//        here: https://toktok.github.io/spec#nonce-2
-//
-//        Alternatively, make toxcore C reference use libsodium function for
-//        incrementing nonces, which is LE – this is marked in toxcore as
-//        `FIXME`.
 pub fn increment_nonce(nonce: &mut Nonce) {
-    nonce.increment_le_inplace();
+    trace!(target: "Nonce", "Incrementing Nonce: {:?}", &nonce);
+    let Nonce(ref mut nonce) = *nonce;
+    for num in nonce.iter_mut().rev() {
+        if *num < ::std::u8::MAX {
+            *num += 1;
+            return
+        } else {
+            // zero if it can't be incremented
+            *num = 0;
+        }
+    }
 }
 
 
 /// Inrement given nonce by number `num`.
-// TODO: since sodiumoxide/sodium don't check for arithmetic overflow, do it
 pub fn increment_nonce_number(mut nonce: &mut Nonce, num: usize) {
     for _ in 0..num {
         increment_nonce(&mut nonce);
