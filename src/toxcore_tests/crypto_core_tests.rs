@@ -221,6 +221,14 @@ fn increment_nonce_test_0xff_plus_one() {
 }
 
 #[test]
+fn increment_nonce_test_0xff_max() {
+    let cmp_nonce = Nonce::from_slice(&[0; NONCEBYTES]).unwrap();
+    let mut nonce = Nonce::from_slice(&[0xff; NONCEBYTES]).unwrap();
+    increment_nonce(&mut nonce);
+    assert_eq!(cmp_nonce, nonce);
+}
+
+#[test]
 fn increment_nonce_test_random() {
     let mut nonce = gen_nonce();
     let cmp_nonce = nonce;
