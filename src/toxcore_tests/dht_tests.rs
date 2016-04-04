@@ -125,7 +125,7 @@ fn ping_response_test() {
 #[test]
 fn ping_as_packet_test() {
     fn with_ping(p: Ping) {
-        assert_eq!(DPacketT::Ping(p), p.as_packet());
+        assert_eq!(DhtPacketT::Ping(p), p.as_packet());
     }
     quickcheck(with_ping as fn(Ping));
 }
@@ -565,7 +565,7 @@ fn get_nodes_new_test() {
 #[test]
 fn get_nodes_as_packet_test() {
     fn with_gn(gn: GetNodes) {
-        assert_eq!(DPacketT::GetNodes(gn), gn.as_packet());
+        assert_eq!(DhtPacketT::GetNodes(gn), gn.as_packet());
     }
     quickcheck(with_gn as fn(GetNodes));
 }
@@ -637,7 +637,7 @@ fn send_nodes_from_request_test() {
 #[test]
 fn send_nodes_as_packet_test() {
     fn with_sn(sn: SendNodes) {
-        assert_eq!(DPacketT::SendNodes(sn.clone()), sn.as_packet());
+        assert_eq!(DhtPacketT::SendNodes(sn.clone()), sn.as_packet());
     }
     quickcheck(with_sn as fn(SendNodes));
 }
@@ -702,29 +702,29 @@ fn send_nodes_from_bytes_test() {
 }
 
 
-// DPacketT::
+// DhtPacketT::
 
-impl Arbitrary for DPacketT {
+impl Arbitrary for DhtPacketT {
     fn arbitrary<G: Gen>(g: &mut G) -> Self {
         let choice = g.gen_range(0, 3);
         match choice {
-            0 => DPacketT::Ping(Arbitrary::arbitrary(g)),
-            1 => DPacketT::GetNodes(Arbitrary::arbitrary(g)),
-            2 => DPacketT::SendNodes(Arbitrary::arbitrary(g)),
-            _ => panic!("Arbitrary for DPacketT – should not have happened!"),
+            0 => DhtPacketT::Ping(Arbitrary::arbitrary(g)),
+            1 => DhtPacketT::GetNodes(Arbitrary::arbitrary(g)),
+            2 => DhtPacketT::SendNodes(Arbitrary::arbitrary(g)),
+            _ => panic!("Arbitrary for DhtPacketT – should not have happened!"),
         }
     }
 }
 
-// DPacketT::kind()
+// DhtPacketT::kind()
 
 #[test]
 fn d_packet_t_as_kind_test() {
-    fn with_dpacket(dpt: DPacketT) {
+    fn with_dht_packet(dpt: DhtPacketT) {
         match dpt {
-            DPacketT::GetNodes(_) => assert_eq!(PacketKind::GetN, dpt.kind()),
-            DPacketT::SendNodes(_) => assert_eq!(PacketKind::SendN, dpt.kind()),
-            DPacketT::Ping(p) => {
+            DhtPacketT::GetNodes(_) => assert_eq!(PacketKind::GetN, dpt.kind()),
+            DhtPacketT::SendNodes(_) => assert_eq!(PacketKind::SendN, dpt.kind()),
+            DhtPacketT::Ping(p) => {
                 if p.is_request() {
                     assert_eq!(PacketKind::PingReq, dpt.kind());
                 } else {
@@ -733,15 +733,15 @@ fn d_packet_t_as_kind_test() {
             },
         }
     }
-    quickcheck(with_dpacket as fn(DPacketT));
+    quickcheck(with_dht_packet as fn(DhtPacketT));
 }
 
-// DPacketT::ping_resp()
+// DhtPacketT::ping_resp()
 
 #[test]
 fn d_packet_t_ping_resp_test() {
-    fn with_dpt(dpt: DPacketT) {
-        if let DPacketT::Ping(p) = dpt {
+    fn with_dpt(dpt: DhtPacketT) {
+        if let DhtPacketT::Ping(p) = dpt {
             if p.is_request() {
                 assert_eq!(PacketKind::PingResp, dpt.ping_resp().unwrap().kind());
                 return;
@@ -749,22 +749,22 @@ fn d_packet_t_ping_resp_test() {
         }
         assert_eq!(None, dpt.ping_resp());
     }
-    quickcheck(with_dpt as fn(DPacketT));
+    quickcheck(with_dpt as fn(DhtPacketT));
 }
 
-// DPacketT::to_bytes()
+// DhtPacketT::to_bytes()
 
 #[test]
 fn d_packet_t_to_bytes_test() {
-    fn with_dpacket(dp: DPacketT) {
+    fn with_dht_packet(dp: DhtPacketT) {
         let dbytes = dp.to_bytes();
         match dp {
-            DPacketT::Ping(d)      => assert_eq!(d.to_bytes(), dbytes),
-            DPacketT::GetNodes(d)  => assert_eq!(d.to_bytes(), dbytes),
-            DPacketT::SendNodes(d) => assert_eq!(d.to_bytes(), dbytes),
+            DhtPacketT::Ping(d)      => assert_eq!(d.to_bytes(), dbytes),
+            DhtPacketT::GetNodes(d)  => assert_eq!(d.to_bytes(), dbytes),
+            DhtPacketT::SendNodes(d) => assert_eq!(d.to_bytes(), dbytes),
         }
     }
-    quickcheck(with_dpacket as fn(DPacketT));
+    quickcheck(with_dht_packet as fn(DhtPacketT));
 }
 
 
@@ -822,7 +822,7 @@ impl Arbitrary for DhtPacket {
         let precomputed = precompute(&r_pk, &sk);
         let nonce = gen_nonce();
 
-        let packet: DPacketT = Arbitrary::arbitrary(g);
+        let packet: DhtPacketT = Arbitrary::arbitrary(g);
 
         DhtPacket::new(&precomputed, &pk, &nonce, packet)
     }
@@ -833,21 +833,21 @@ impl Arbitrary for DhtPacket {
 // TODO: improve test ↓ (perhaps by making other struct fields public?)
 #[test]
 fn dht_packet_new_test() {
-    fn with_dpacket(dpt: DPacketT) {
+    fn with_dht_packet(dpt: DhtPacketT) {
         let (pk, sk) = gen_keypair();
         let precomputed = precompute(&pk, &sk);
         let nonce = gen_nonce();
         let dhtp = DhtPacket::new(&precomputed, &pk, &nonce, dpt);
         assert_eq!(dhtp.sender_pk, pk);
     }
-    quickcheck(with_dpacket as fn(DPacketT));
+    quickcheck(with_dht_packet as fn(DhtPacketT));
 }
 
 // DhtPacket::get_packet()
 
 #[test]
 fn dht_paket_get_packet_test() {
-    fn with_dpackett(dpt: DPacketT) {
+    fn with_dht_packett(dpt: DhtPacketT) {
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, bob_sk) = gen_keypair();
         let precomputed = precompute(&bob_pk, &alice_sk);
@@ -859,14 +859,14 @@ fn dht_paket_get_packet_test() {
         let bob_packet = new_packet.get_packet(&bob_sk).unwrap();
         assert_eq!(dpt, bob_packet);
     }
-    quickcheck(with_dpackett as fn(DPacketT));
+    quickcheck(with_dht_packett as fn(DhtPacketT));
 }
 
 // DhtPacket::ping_resp()
 
 #[test]
 fn dht_packet_ping_resp_test() {
-    fn with_dpt(dpt: DPacketT) {
+    fn with_dpt(dpt: DhtPacketT) {
         let (pk, sk) = gen_keypair();
         let prec = precompute(&pk, &sk);
         let nonce = gen_nonce();
@@ -880,14 +880,14 @@ fn dht_packet_ping_resp_test() {
             assert_eq!(None, response);
         }
     }
-    quickcheck(with_dpt as fn(DPacketT));
+    quickcheck(with_dpt as fn(DhtPacketT));
 }
 
 // DhtPacket::to_bytes()
 
 #[test]
 fn dht_packet_to_bytes_test() {
-    fn with_dpacket(dpt: DPacketT) {
+    fn with_dht_packet(dpt: DhtPacketT) {
         // Alice serializes & encrypts packet, Bob decrypts
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, bob_sk) = gen_keypair();
@@ -899,9 +899,9 @@ fn dht_packet_to_bytes_test() {
 
         // check whether packet type was serialized correctly
         let packet_type = match dpt {
-            DPacketT::Ping(ref ping) => { if ping.is_request() { 0 } else { 1 } },
-            DPacketT::GetNodes(_) => 2,
-            DPacketT::SendNodes(_) => 4,
+            DhtPacketT::Ping(ref ping) => { if ping.is_request() { 0 } else { 1 } },
+            DhtPacketT::GetNodes(_) => 2,
+            DhtPacketT::SendNodes(_) => 4,
         };
         assert_eq!(packet_type, packet[0]);
 
@@ -917,12 +917,15 @@ fn dht_packet_to_bytes_test() {
 
         let decrypted = open(&packet[nonce_end..], &nonce, &alice_pk, &bob_sk).unwrap();
         match dpt {
-            DPacketT::Ping(d) => assert_eq!(d, Ping::from_bytes(&decrypted).unwrap()),
-            DPacketT::GetNodes(d) => assert_eq!(d, GetNodes::from_bytes(&decrypted).unwrap()),
-            DPacketT::SendNodes(d) => assert_eq!(d, SendNodes::from_bytes(&decrypted).unwrap()),
+            DhtPacketT::Ping(d) => {
+                assert_eq!(d, Ping::from_bytes(&decrypted).unwrap()) },
+            DhtPacketT::GetNodes(d) => {
+                assert_eq!(d, GetNodes::from_bytes(&decrypted).unwrap()) },
+            DhtPacketT::SendNodes(d) => {
+                assert_eq!(d, SendNodes::from_bytes(&decrypted).unwrap()) },
         }
     }
-    quickcheck(with_dpacket as fn(DPacketT));
+    quickcheck(with_dht_packet as fn(DhtPacketT));
 }
 
 // DhtPacket::from_bytes()

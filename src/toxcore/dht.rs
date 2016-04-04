@@ -210,10 +210,10 @@ impl Ping {
         Some(Ping { p_type: PingType::Resp, id: self.id })
     }
 
-    /// Encapsulate in `DPacketT` to use in [`DhtPacket`]
+    /// Encapsulate in `DhtPacketT` to use in [`DhtPacket`]
     /// (./struct.DhtPacket.html).
-    pub fn as_packet(&self) -> DPacketT {
-        DPacketT::Ping(*self)
+    pub fn as_packet(&self) -> DhtPacketT {
+        DhtPacketT::Ping(*self)
     }
 }
 
@@ -517,9 +517,6 @@ impl ToBytes for PackedNode {
 /// address.
 impl FromBytes<PackedNode> for PackedNode {
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        debug!(target: "PackedNode", "De-serializing bytes into PackedNode.");
-        trace!(target: "PackedNode", "With bytes: {:?}", bytes);
-
         // parse bytes as IPv4
         fn as_ipv4(bytes: &[u8]) -> Option<(SocketAddr, PublicKey)> {
             debug!("Parsing bytes as IPv4.");
@@ -566,6 +563,9 @@ impl FromBytes<PackedNode> for PackedNode {
             Some((SocketAddr::V6(saddr), pk))
         }
 
+
+        debug!(target: "PackedNode", "De-serializing bytes into PackedNode.");
+        trace!(target: "PackedNode", "With bytes: {:?}", bytes);
 
         if bytes.len() >= PACKED_NODE_IPV4_SIZE {
             let (iptype, saddr_and_pk) = match IpType::from_bytes(bytes) {
@@ -631,10 +631,10 @@ impl GetNodes {
         GetNodes { pk: *their_public_key, id: random_u64() }
     }
 
-    /// Encapsulate in `DPacketT` to use in [`DhtPacket`]
+    /// Encapsulate in `DhtPacketT` to use in [`DhtPacket`]
     /// (./struct.DhtPacket.html).
-    pub fn as_packet(&self) -> DPacketT {
-        DPacketT::GetNodes(*self)
+    pub fn as_packet(&self) -> DhtPacketT {
+        DhtPacketT::GetNodes(*self)
     }
 }
 
@@ -725,10 +725,10 @@ impl SendNodes {
         Some(SendNodes { nodes: nodes, id: request.id })
     }
 
-    /// Encapsulate in `DPacketT` to easily use in [`DhtPacket`]
+    /// Encapsulate in `DhtPacketT` to easily use in [`DhtPacket`]
     /// (./struct.DhtPacket.html).
-    pub fn as_packet(self) -> DPacketT {
-        DPacketT::SendNodes(self)
+    pub fn as_packet(self) -> DhtPacketT {
+        DhtPacketT::SendNodes(self)
     }
 }
 
@@ -791,9 +791,10 @@ impl FromBytes<SendNodes> for SendNodes {
     }
 }
 
-/// Types of DHT packets that can be put in `DHT Packet`.
+/// Types of DHT packets that can be put in [`DhtPacket`]
+/// (./struct.DhtPacket.html).
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum DPacketT {
+pub enum DhtPacketT {
     /// `Ping` packet type.
     Ping(Ping),
     /// `GetNodes` packet type. Used to request nodes.
@@ -804,15 +805,15 @@ pub enum DPacketT {
     SendNodes(SendNodes),
 }
 
-impl DPacketT {
+impl DhtPacketT {
     /// Provide packet type number.
     ///
     /// To use for serialization: `.kind() as u8`.
     pub fn kind(&self) -> PacketKind {
         match *self {
-            DPacketT::GetNodes(_) => PacketKind::GetN,
-            DPacketT::SendNodes(_) => PacketKind::SendN,
-            DPacketT::Ping(p) => {
+            DhtPacketT::GetNodes(_) => PacketKind::GetN,
+            DhtPacketT::SendNodes(_) => PacketKind::SendN,
+            DhtPacketT::Ping(p) => {
                 if p.is_request() {
                     PacketKind::PingReq
                 } else {
@@ -822,17 +823,17 @@ impl DPacketT {
         }
     }
 
-    /// Create [`Ping`](./struct.Ping.html) response if `DPacketT` is a `Ping`
+    /// Create [`Ping`](./struct.Ping.html) response if `DhtPacketT` is a `Ping`
     /// request.
     ///
-    /// Returns `None` if `DPacketT` is not a ping request, and thus `Ping`
+    /// Returns `None` if `DhtPacketT` is not a ping request, and thus `Ping`
     /// response could not be created.
     pub fn ping_resp(&self) -> Option<Self> {
         debug!(target: "Ping", "Creating Ping response from a Ping.");
         trace!(target: "Ping", "With Ping: {:?}", self);
-        if let &DPacketT::Ping(ping) = self {
+        if let &DhtPacketT::Ping(ping) = self {
             if let Some(ping_resp) = ping.response() {
-                return Some(DPacketT::Ping(ping_resp))
+                return Some(DhtPacketT::Ping(ping_resp))
             }
         }
         debug!("Ping was already a response!");
@@ -840,12 +841,12 @@ impl DPacketT {
     }
 }
 
-impl ToBytes for DPacketT {
+impl ToBytes for DhtPacketT {
     fn to_bytes(&self) -> Vec<u8> {
         match *self {
-            DPacketT::Ping(ref d)      => d.to_bytes(),
-            DPacketT::GetNodes(ref d)  => d.to_bytes(),
-            DPacketT::SendNodes(ref d) => d.to_bytes(),
+            DhtPacketT::Ping(ref d)      => d.to_bytes(),
+            DhtPacketT::GetNodes(ref d)  => d.to_bytes(),
+            DhtPacketT::SendNodes(ref d) => d.to_bytes(),
         }
     }
 }
@@ -882,7 +883,7 @@ pub const DHT_PACKET_MIN_SIZE: usize = 1 // packet type, plain
 impl DhtPacket {
     /// Create new `DhtPacket`.
     pub fn new(symmetric_key: &PrecomputedKey, own_public_key: &PublicKey,
-               nonce: &Nonce, packet: DPacketT) -> Self {
+               nonce: &Nonce, packet: DhtPacketT) -> Self {
 
         debug!(target: "DhtPacket", "Creating new DhtPacket.");
         trace!(target: "DhtPacket", "With args: symmetric_key: <secret>,
@@ -910,7 +911,7 @@ impl DhtPacket {
     //
     //          Alternatively, another method `get_packetnm()` which would use
     //          symmetric key.
-    pub fn get_packet(&self, own_secret_key: &SecretKey) -> Option<DPacketT> {
+    pub fn get_packet(&self, own_secret_key: &SecretKey) -> Option<DhtPacketT> {
         debug!(target: "DhtPacket", "Getting packet data from DhtPacket.");
         trace!(target: "DhtPacket", "With DhtPacket: {:?}", self);
         let decrypted = match open(&self.payload, &self.nonce, &self.sender_pk,
@@ -927,17 +928,17 @@ impl DhtPacket {
         match self.packet_type {
             PacketKind::PingReq | PacketKind::PingResp => {
                 if let Some(p) = Ping::from_bytes(&decrypted) {
-                    return Some(DPacketT::Ping(p))
+                    return Some(DhtPacketT::Ping(p))
                 }
             },
             PacketKind::GetN => {
                 if let Some(n) = GetNodes::from_bytes(&decrypted) {
-                    return Some(DPacketT::GetNodes(n))
+                    return Some(DhtPacketT::GetNodes(n))
                 }
             },
             PacketKind::SendN => {
                 if let Some(n) = SendNodes::from_bytes(&decrypted) {
-                    return Some(DPacketT::SendNodes(n))
+                    return Some(DhtPacketT::SendNodes(n))
                 }
             },
             _ => {},  // not a DHT packet
