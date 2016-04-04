@@ -21,7 +21,7 @@ Contributing guidelines: [CONTRIBUTING.md](/CONTRIBUTING.md).
 ## Dependencies
 | **Name** | **Version** |
 |----------|-------------|
-| libsodium | 1.0.8 |
+| libsodium | 1.0.0 |
 
 ## Building
 Fairly simple. You'll need [Rust](http://www.rust-lang.org/) and libsodium.
