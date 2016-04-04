@@ -187,7 +187,7 @@ pub struct Ping {
 pub const PING_SIZE: usize = 9;
 
 impl Ping {
-    /// Create new ping request with a randomly generated `id`.
+    /// Create new ping request with a randomly generated `request id`.
     pub fn new() -> Self {
         trace!("Creating new Ping.");
         Ping { p_type: PingType::Req, id: random_u64(), }

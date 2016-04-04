@@ -14,8 +14,3 @@ git checkout tags/1.0.8
     make -j$(nproc) && \
     make install
 cd ..
-
-
-git clone https://github.com/dnaq/sodiumoxide
-mkdir .cargo
-echo 'paths = ["sodiumoxide/libsodium-sys"]' >> .cargo/config

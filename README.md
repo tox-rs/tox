@@ -24,14 +24,8 @@ Contributing guidelines: [CONTRIBUTING.md](/CONTRIBUTING.md).
 | libsodium | 1.0.0 |
 
 ## Building
-Fairly simple. You'll need [Rust](http://www.rust-lang.org/) and libsodium.
-
-Currently git version of `sodiumoxide` is required. To compile it successfully:
-```bash
-git clone https://github.com/dnaq/sodiumoxide && \
-mkdir .cargo
-echo 'paths = ["sodiumoxide/libsodium-sys"]' >> .cargo/config
-```
+Fairly simple. You'll need [Rust](http://www.rust-lang.org/) and [libsodium]
+(https://github.com/jedisct1/libsodium).
 
 When you'll have deps, build debug version with
 ```bash

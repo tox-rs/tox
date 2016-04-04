@@ -15,7 +15,3 @@ git checkout tags/1.0.8
 sudo checkinstall --install --pkgname libsodium --pkgversion 1.0.8 --nodoc -y
 sudo ldconfig
 cd ..
-
-git clone https://github.com/dnaq/sodiumoxide
-mkdir .cargo
-echo 'paths = ["sodiumoxide/libsodium-sys"]' >> .cargo/config
