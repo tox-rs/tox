@@ -91,14 +91,22 @@ impl Arbitrary for Ping {
     }
 }
 
-// ::new()
+// Ping::new()
 
 #[test]
 fn ping_new_test() {
     let p1 = Ping::new();
     let p2 = Ping::new();
     assert!(p1 != p2);
-    assert!(p1.id != p2.id);
+    assert!(p1.id() != p2.id());
+}
+
+// Ping::id()
+
+#[test]
+fn ping_id_test() {
+    let ping = Ping::new();
+    assert_eq!(ping.id(), ping.id());
 }
 
 // Ping::is_request()
@@ -115,7 +123,7 @@ fn ping_response_test() {
     let ping_req = Ping::new();
     let ping_res = ping_req.response()
                            .expect("Making response to ping request failed");
-    assert_eq!(ping_req.id, ping_res.id);
+    assert_eq!(ping_req.id(), ping_res.id());
     assert_eq!(false, ping_res.is_request());
     assert_eq!(None, ping_res.response());
 }
@@ -138,10 +146,10 @@ fn ping_to_bytes_test() {
     let pb = p.to_bytes();
     assert_eq!(PING_SIZE, pb.len());
     // new ping is always a request
-    assert_eq!(0, pb[0]);
-    let prb = p.response().unwrap().to_bytes();
-    // and response is `1`
-    assert_eq!(1, prb[0]);
+    assert_eq!(PingType::Req as u8, pb[0]);
+
+    let prb = p.response().expect("Failed to respond to Ping").to_bytes();
+    assert_eq!(PingType::Resp as u8, prb[0]);
     // `id` of ping should not change
     assert_eq!(pb[1..], prb[1..]);
 }
@@ -156,7 +164,7 @@ fn ping_from_bytes_test() {
         } else {
             let p = Ping::from_bytes(&bytes).unwrap();
             // `id` should not differ
-            assert_eq!(&u64_to_array(p.id)[..], &bytes[1..9]);
+            assert_eq!(&u64_to_array(p.id())[..], &bytes[1..9]);
 
             if bytes[0] == 0 {
                 assert_eq!(true, p.is_request());
@@ -1022,6 +1030,13 @@ fn kbucket_index_test() {
 }
 
 
+// Bucket::
+
+// Bucket::new()
+// TODO: test ↑ whether buckets created with..
+//          ..same parameters is always identical
+//          ..different parameters is always different
+
 // Bucket::try_add()
 
 #[test]
@@ -1182,4 +1197,60 @@ fn kbucket_get_closest_test() {
     }
     quickcheck(with_nodes as fn(PackedNode, PackedNode, PackedNode,
                     PackedNode, u64, u64, u64, u64));
+}
+
+
+// NatPing::new()
+
+#[test]
+fn nat_ping_new_test() {
+    let p1 = NatPing::new();
+    let p2 = NatPing::new();
+    assert!(p1 != p2);
+    assert!(p1.id() != p2.id());
+}
+
+// NatPing::id()
+
+#[test]
+fn nat_ping_id_test() {
+    let ping = NatPing::new();
+    assert_eq!(ping.id(), ping.id());
+}
+
+// NatPing::is_request()
+
+#[test]
+fn nat_ping_is_request_test() {
+    assert_eq!(true, NatPing::new().is_request());
+}
+
+// NatPing::response()
+
+#[test]
+fn nat_ping_response_test() {
+    let ping_req = Ping::new();
+    let ping_res = ping_req.response()
+                           .expect("Making response to ping request failed");
+    assert_eq!(ping_req.id(), ping_res.id());
+    assert_eq!(false, ping_res.is_request());
+    assert_eq!(None, ping_res.response());
+}
+
+// NatPing::to_bytes()
+
+#[test]
+fn nat_ping_to_bytes_test() {
+    let p = NatPing::new();
+    let pb = p.to_bytes();
+    assert_eq!(NAT_PING_SIZE, pb.len());
+    // check the magic ping type value
+    assert_eq!(0xfe, pb[0]);
+    // new nat ping is always a request
+    assert_eq!(PingType::Req as u8, pb[1]);
+
+    let prb = p.response().expect("Failed to respond to NatPing").to_bytes();
+    assert_eq!(PingType::Resp as u8, prb[1]);
+    // `id` of ping should not change
+    assert_eq!(pb[2..], prb[2..]);
 }

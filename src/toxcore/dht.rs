@@ -169,6 +169,8 @@ impl FromBytes<PingType> for PingType {
 ///
 /// Packet type `0x00` for request, `0x01` for response.
 ///
+/// Response ID must match ID of the request, otherwise ping is invalid.
+///
 /// Length      | Contents
 /// ----------- | --------
 /// `1`         | `u8` packet type
@@ -178,9 +180,7 @@ impl FromBytes<PingType> for PingType {
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Ping {
     p_type: PingType,
-    /// An ID of the request. Response ID must match ID of the request,
-    /// otherwise ping is invalid.
-    pub id: u64,
+    id: u64,
 }
 
 /// Length in bytes of [`Ping`](./struct.Ping.html) when serialized into bytes.
@@ -191,6 +191,11 @@ impl Ping {
     pub fn new() -> Self {
         trace!("Creating new Ping.");
         Ping { p_type: PingType::Req, id: random_u64(), }
+    }
+
+    /// An ID of the request / response.
+    pub fn id(&self) -> u64 {
+        self.id
     }
 
     /// Check whether given `Ping` is a request.
@@ -1373,3 +1378,83 @@ impl Kbucket {
         bucket.nodes
     }
 }
+
+
+/// NAT Ping; used to see if a friend we are not connected to directly is
+/// online and ready to do the hole punching.
+///
+/// Basically a wrapper + customization of [`Ping`](./struct.Ping.html). Added:
+/// `0xfe` prepended in serialized form.
+///
+/// Used by [`DhtRequest`](./struct.DhtRequest.html).
+///
+/// Can be either a:
+///
+///  - request
+///  - response
+///
+/// Serialized form:
+///
+/// Length | Contents
+/// -------|---------
+/// 1 | type (`0xfe`)
+/// 9 | [`Ping`](./struct.Ping.html)
+///
+/// Spec: https://toktok.github.io/#nat-ping-packets
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NatPing(Ping);
+
+/// Length in bytes of [`NatPing`](./struct.NatPing.html) when serialized into
+/// bytes.
+pub const NAT_PING_SIZE: usize = PING_SIZE + 1;
+
+impl NatPing {
+    /// Create new `NatPing` request with a randomly generated `request id`.
+    pub fn new() -> Self {
+        trace!(target: "NatPing", "Creating new Ping.");
+        NatPing(Ping::new())
+    }
+
+    /// Return `NatPing` ID.
+    pub fn id(&self) -> u64 {
+        let NatPing(ping) = *self;
+        ping.id()
+    }
+
+    /// Check whether given `NatPing` is a request.
+    pub fn is_request(&self) -> bool {
+        let NatPing(ping) = *self;
+        ping.is_request()
+    }
+
+    /// Create answer to ping request. Returns `None` if supplied `Ping` is
+    /// already a ping response.
+    #[inline]
+    pub fn response(&self) -> Option<Self> {
+        let NatPing(ping) = *self;
+        if let Some(resp) = ping.response() {
+            Some(NatPing(resp))
+        } else {
+            None
+        }
+    }
+}
+
+/// Serializes [`NatPing`](./struct.NatPing.html) into bytes.
+impl ToBytes for NatPing {
+    fn to_bytes(&self) -> Vec<u8> {
+        debug!(target: "NatPing", "Serializing NatPing into bytes.");
+        let NatPing(ping) = *self;
+        let mut result = Vec::with_capacity(NAT_PING_SIZE);
+
+        // special, "magic" type of NatPing, according to spec:
+        // https://toktok.github.io/#nat-ping-request
+        result.push(0xfe);
+        // and the rest of stuff inherited from `Ping`
+        result.extend_from_slice(ping.to_bytes().as_slice());
+        trace!("Serialized NatPing: {:?}", &result);
+        result
+    }
+}
+
+// TODO: de-serialization of NatPing + test for it
