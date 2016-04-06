@@ -1404,6 +1404,10 @@ impl Kbucket {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NatPing(Ping);
 
+/// [`NatPing](./struct.NatPing.html) type byte;
+/// https://toktok.github.io/#nat-ping-request
+pub const NAT_PING_TYPE: u8 = 0xfe;
+
 /// Length in bytes of [`NatPing`](./struct.NatPing.html) when serialized into
 /// bytes.
 pub const NAT_PING_SIZE: usize = PING_SIZE + 1;
@@ -1449,7 +1453,7 @@ impl ToBytes for NatPing {
 
         // special, "magic" type of NatPing, according to spec:
         // https://toktok.github.io/#nat-ping-request
-        result.push(0xfe);
+        result.push(NAT_PING_TYPE);
         // and the rest of stuff inherited from `Ping`
         result.extend_from_slice(ping.to_bytes().as_slice());
         trace!("Serialized NatPing: {:?}", &result);
@@ -1457,4 +1461,19 @@ impl ToBytes for NatPing {
     }
 }
 
-// TODO: de-serialization of NatPing + test for it
+impl FromBytes<NatPing> for NatPing {
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() < NAT_PING_SIZE {
+            return None
+        }
+
+        if bytes[0] != NAT_PING_TYPE {
+            return None
+        }
+
+        match Ping::from_bytes(&bytes[1..NAT_PING_SIZE]) {
+            Some(p) => Some(NatPing(p)),
+            None    => None,
+        }
+    }
+}

@@ -159,14 +159,16 @@ fn ping_to_bytes_test() {
 #[test]
 fn ping_from_bytes_test() {
     fn with_bytes(bytes: Vec<u8>) {
-        if bytes.len() < PING_SIZE || bytes[0] != 0 && bytes[0] != 1 {
+        if bytes.len() < PING_SIZE ||
+           bytes[0] != PingType::Req as u8 &&
+           bytes[0] != PingType::Resp as u8 {
             assert_eq!(None, Ping::from_bytes(&bytes));
         } else {
             let p = Ping::from_bytes(&bytes).unwrap();
             // `id` should not differ
-            assert_eq!(&u64_to_array(p.id())[..], &bytes[1..9]);
+            assert_eq!(&u64_to_array(p.id())[..], &bytes[1..PING_SIZE]);
 
-            if bytes[0] == 0 {
+            if bytes[0] == PingType::Req as u8 {
                 assert_eq!(true, p.is_request());
             } else {
                 assert_eq!(false, p.is_request());
@@ -176,13 +178,13 @@ fn ping_from_bytes_test() {
     quickcheck(with_bytes as fn(Vec<u8>));
 
     // just in case
-    let mut p_req = vec![0];
-    p_req.extend_from_slice(&u64_to_array(random_u64()));
-    with_bytes(p_req);
+    let mut ping = vec![PingType::Req as u8];
+    ping.extend_from_slice(&u64_to_array(random_u64()));
+    with_bytes(ping.clone());
 
-    let mut p_resp = vec![1];
-    p_resp.extend_from_slice(&u64_to_array(random_u64()));
-    with_bytes(p_resp);
+    // make it a response
+    ping[0] = PingType::Resp as u8;
+    with_bytes(ping);
 }
 
 
@@ -1245,12 +1247,49 @@ fn nat_ping_to_bytes_test() {
     let pb = p.to_bytes();
     assert_eq!(NAT_PING_SIZE, pb.len());
     // check the magic ping type value
-    assert_eq!(0xfe, pb[0]);
+    assert_eq!(NAT_PING_TYPE, pb[0]);
     // new nat ping is always a request
     assert_eq!(PingType::Req as u8, pb[1]);
 
     let prb = p.response().expect("Failed to respond to NatPing").to_bytes();
+    assert_eq!(NAT_PING_TYPE, prb[0]);
     assert_eq!(PingType::Resp as u8, prb[1]);
     // `id` of ping should not change
     assert_eq!(pb[2..], prb[2..]);
+}
+
+// NatPing::from_bytes()
+
+#[test]
+fn nat_ping_from_bytes_test() {
+    fn with_bytes(bytes: Vec<u8>) {
+        if bytes.len() < NAT_PING_SIZE ||
+           bytes[0] != NAT_PING_TYPE ||
+           bytes[1] != PingType::Req as u8 &&
+           bytes[1] != PingType::Resp as u8 {
+
+            assert_eq!(None, NatPing::from_bytes(&bytes));
+        } else {
+            let p = NatPing::from_bytes(&bytes)
+                .expect("De-serialization failed");
+
+            assert_eq!(&u64_to_array(p.id())[..], &bytes[2..NAT_PING_SIZE]);
+
+            if bytes[1] == PingType::Req as u8 {
+                assert_eq!(true, p.is_request());
+            } else {
+                assert_eq!(false, p.is_request());
+            }
+        }
+    }
+    quickcheck(with_bytes as fn(Vec<u8>));
+
+    // just in case
+    let mut ping = vec![NAT_PING_TYPE, PingType::Req as u8];
+    ping.extend_from_slice(&u64_to_array(random_u64()));
+    with_bytes(ping.clone());
+
+    // make it a response
+    ping[1] = PingType::Resp as u8;
+    with_bytes(ping);
 }
