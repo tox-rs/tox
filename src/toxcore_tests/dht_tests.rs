@@ -1202,6 +1202,14 @@ fn kbucket_get_closest_test() {
 }
 
 
+// NatPing::
+
+impl Arbitrary for NatPing {
+    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+        NatPing(Arbitrary::arbitrary(g))
+    }
+}
+
 // NatPing::new()
 
 #[test]
@@ -1292,4 +1300,40 @@ fn nat_ping_from_bytes_test() {
     // make it a response
     ping[1] = PingType::Resp as u8;
     with_bytes(ping);
+}
+
+
+// DhtRequestT::to_bytes()
+
+#[test]
+fn dht_request_t_to_bytes_test() {
+    fn with_ping(ping: NatPing) {
+        assert_eq!(ping.to_bytes(), DhtRequestT::NatPing(ping).to_bytes());
+    }
+    quickcheck(with_ping as fn(NatPing));
+}
+
+
+// DhtRequest::new()
+
+#[test]
+fn dht_request_new_test() {
+    // TODO: once DhtRequest will support more types, expand the test
+    fn with_nat_ping(np: NatPing) {
+        let (alice_pk, alice_sk) = gen_keypair();
+        let (bob_pk, _) = gen_keypair();
+        let nonce = gen_nonce();
+        let drt = DhtRequestT::NatPing(np);
+        let dr = DhtRequest::new(&alice_sk, &alice_pk, &bob_pk, &nonce, drt.clone());
+        let dr2 = DhtRequest::new(&alice_sk, &alice_pk, &bob_pk, &nonce, drt.clone());
+        assert_eq!(dr, dr2);
+        assert_eq!(dr.receiver, bob_pk);
+        assert_eq!(dr.sender, alice_pk);
+
+        let nonce2 = gen_nonce();
+        let dr3 = DhtRequest::new(&alice_sk, &alice_pk, &bob_pk, &nonce2,
+                drt.clone());
+        assert!(dr != dr3);
+    }
+    quickcheck(with_nat_ping as fn(NatPing));
 }

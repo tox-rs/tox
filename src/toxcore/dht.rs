@@ -1091,7 +1091,7 @@ impl Distance for PublicKey {
 
 /// DHT Node and its associated info.
 // TODO: move it up ↑
-// TODO: perhaps merge functionality with the `PackedNode` ?
+// TODO: is it even needed?
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Node {
     /// Time when node will reach it's timeout - value consists of `seconds
@@ -1402,7 +1402,7 @@ impl Kbucket {
 ///
 /// Spec: https://toktok.github.io/#nat-ping-packets
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct NatPing(Ping);
+pub struct NatPing(pub Ping);
 
 /// [`NatPing](./struct.NatPing.html) type byte;
 /// https://toktok.github.io/#nat-ping-request
@@ -1436,11 +1436,7 @@ impl NatPing {
     #[inline]
     pub fn response(&self) -> Option<Self> {
         let NatPing(ping) = *self;
-        if let Some(resp) = ping.response() {
-            Some(NatPing(resp))
-        } else {
-            None
-        }
+        ping.response().and_then(|p| Some(NatPing(p)))
     }
 }
 
@@ -1471,9 +1467,84 @@ impl FromBytes<NatPing> for NatPing {
             return None
         }
 
-        match Ping::from_bytes(&bytes[1..NAT_PING_SIZE]) {
-            Some(p) => Some(NatPing(p)),
-            None    => None,
+        Ping::from_bytes(&bytes[1..NAT_PING_SIZE])
+            .and_then(|p| Some(NatPing(p)))
+    }
+}
+
+
+/// Types of DHT request that can be put in [`DhtRequest`]
+/// (./struct.DhtRequest.html).
+///
+/// *Currently only [`NatPing`](./struct.NatPing.html), in the future also
+/// onion-related stuff.*
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DhtRequestT {
+    /// `NatPing` request type.
+    NatPing(NatPing),
+}
+
+impl ToBytes for DhtRequestT {
+    fn to_bytes(&self) -> Vec<u8> {
+        let DhtRequestT::NatPing(ping) = *self;
+        ping.to_bytes()
+    }
+}
+
+
+/// DHT Request packet structure.
+///
+/// Used to send data via one node to other one to which own instance is not
+/// connected.
+// TODO: rephrase ↑
+///
+/// `<own node> → <connected node> → <not connected node>`
+///
+/// When receiving `DhtRequest` own instance should check whether receiver PK
+/// matches own PK, or PK of a known node.
+///
+/// - if it matches own PK, handle it.
+/// - if it matches PK of a known node, send packet to that node
+///
+/// Serialized structure:
+///
+/// Length | Contents
+/// -------|---------
+/// 1  | `32`
+/// 32 | receiver's DHT public key
+/// 32 | sender's DHT public key
+/// 24 | Nonce
+/// ?  | encrypted data
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DhtRequest {
+    /// `PublicKey` of receiver.
+    pub receiver: PublicKey,
+    /// `PUblicKey` of sender.
+    pub sender: PublicKey,
+    nonce: Nonce,
+    payload: Vec<u8>,
+}
+
+impl DhtRequest {
+    /// Create a new `DhtRequest`.
+    pub fn new(secret_key: &SecretKey, own_public_key: &PublicKey,
+               receiver_public_key: &PublicKey, nonce: &Nonce,
+               packet: DhtRequestT) -> Self {
+
+        debug!(target: "DhtRequest", "Creating new DhtRequest.");
+        trace!(target: "DhtRequest", "With args: summetric_key: <secret>,
+            own_public_key: {:?}, receiver_public_key: {:?} nonce: {:?},
+            packet: {:?}",
+            own_public_key, receiver_public_key, nonce, &packet);
+
+        let payload = seal(&packet.to_bytes(), nonce, receiver_public_key,
+                           secret_key);
+
+        DhtRequest {
+            receiver: *receiver_public_key,
+            sender: *own_public_key,
+            nonce: *nonce,
+            payload: payload,
         }
     }
 }
