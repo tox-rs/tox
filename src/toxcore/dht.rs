@@ -1491,6 +1491,13 @@ impl ToBytes for DhtRequestT {
     }
 }
 
+impl FromBytes<DhtRequestT> for DhtRequestT {
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        NatPing::from_bytes(bytes)
+            .and_then(|p| Some(DhtRequestT::NatPing(p)))
+    }
+}
+
 
 /// DHT Request packet structure.
 ///
@@ -1546,5 +1553,28 @@ impl DhtRequest {
             nonce: *nonce,
             payload: payload,
         }
+    }
+
+    /** Get request data. This function decrypts payload and tries to parse it
+        as request type.
+
+        Returns `None` in case of failure.
+    */
+    pub fn get_request(&self, secret_key: &SecretKey) -> Option<DhtRequestT> {
+        debug!(target: "DhtRequest", "Getting request data from DhtRequest.");
+        trace!(target: "DhtRequest", "With DhtRequest: {:?}", self);
+        let decrypted = match open(&self.payload, &self.nonce, &self.sender,
+                                   secret_key) {
+
+            Ok(d) => d,
+            Err(_) => {
+                debug!("Decrypting DhtRequest failed!");
+                return None
+            },
+        };
+
+        trace!("Decrypted bytes: {:?}", &decrypted);
+
+        DhtRequestT::from_bytes(&decrypted)
     }
 }

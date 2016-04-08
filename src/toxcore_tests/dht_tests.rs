@@ -1313,6 +1313,19 @@ fn dht_request_t_to_bytes_test() {
     quickcheck(with_ping as fn(NatPing));
 }
 
+// DhtRequestT::from_bytes()
+
+#[test]
+fn dht_request_t_from_bytes_test() {
+    fn with_ping(ping: NatPing) {
+        let bytes = DhtRequestT::NatPing(ping).to_bytes();
+        assert_eq!(DhtRequestT::NatPing(ping),
+            DhtRequestT::from_bytes(&bytes)
+                .expect("Failed to de-serialize DhtRequest!"));
+    }
+    quickcheck(with_ping as fn(NatPing));
+}
+
 
 // DhtRequest::new()
 
@@ -1324,16 +1337,18 @@ fn dht_request_new_test() {
         let (bob_pk, _) = gen_keypair();
         let nonce = gen_nonce();
         let drt = DhtRequestT::NatPing(np);
-        let dr = DhtRequest::new(&alice_sk, &alice_pk, &bob_pk, &nonce, drt.clone());
-        let dr2 = DhtRequest::new(&alice_sk, &alice_pk, &bob_pk, &nonce, drt.clone());
+        let dr = DhtRequest::new(&alice_sk, &alice_pk, &bob_pk, &nonce, drt);
+        let dr2 = DhtRequest::new(&alice_sk, &alice_pk, &bob_pk, &nonce, drt);
         assert_eq!(dr, dr2);
         assert_eq!(dr.receiver, bob_pk);
         assert_eq!(dr.sender, alice_pk);
 
         let nonce2 = gen_nonce();
-        let dr3 = DhtRequest::new(&alice_sk, &alice_pk, &bob_pk, &nonce2,
-                drt.clone());
+        let dr3 = DhtRequest::new(&alice_sk, &alice_pk, &bob_pk, &nonce2, drt);
         assert!(dr != dr3);
     }
     quickcheck(with_nat_ping as fn(NatPing));
 }
+
+// DhtRequest::get_request()
+// TODO: test ↑
