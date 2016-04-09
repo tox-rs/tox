@@ -25,9 +25,15 @@
 //! * takes care of the serializing and de-serializing DHT packets
 //! * ..
 
-use ip::*; // ← won't be needed with Rust 1.7, since it finally got stabilized
 use std::cmp::{Ord, Ordering};
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::net::{
+            IpAddr,
+            Ipv4Addr,
+            Ipv6Addr,
+            SocketAddr,
+            SocketAddrV4,
+            SocketAddrV6
+};
 
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;

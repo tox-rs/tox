@@ -3,7 +3,6 @@ name = "tox"
 version = "0.0.1"
 dependencies = [
  "clippy 0.0.63 (registry+https://github.com/rust-lang/crates.io-index)",
- "ip 1.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "quickcheck 0.2.27 (registry+https://github.com/rust-lang/crates.io-index)",
  "rustc-serialize 0.3.19 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -38,11 +37,6 @@ dependencies = [
  "log 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "regex 0.1.63 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
-
-[[package]]
-name = "ip"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "libc"

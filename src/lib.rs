@@ -130,8 +130,6 @@ extern crate log;
 
 extern crate sodiumoxide;
 
-extern crate ip;
-
 
 /** Core Tox module. Provides an API on top of which other modules and
     applications may be build.

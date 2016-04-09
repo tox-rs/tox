@@ -25,10 +25,16 @@ use toxcore::crypto_core::*;
 use toxcore::dht::*;
 
 use std::cmp::Ordering;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::net::{
+            IpAddr,
+            Ipv4Addr,
+            Ipv6Addr,
+            SocketAddr,
+            SocketAddrV4,
+            SocketAddrV6
+};
 use std::str::FromStr;
 
-use ip::IpAddr;
 use super::quickcheck::{Arbitrary, Gen, quickcheck};
 
 
