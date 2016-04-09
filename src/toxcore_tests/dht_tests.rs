@@ -215,9 +215,10 @@ fn ip_type_from_bytes_test() {
 
 // IpAddr::to_bytes()
 
-// NOTE: sadly, implementing `Arbitrary` for `IpAddr` doesn't appear to be
-// (easily/nicely) dobale, since neither is a part of this crate.
-// https://github.com/rust-lang/rfcs/pull/1023
+/* NOTE: sadly, implementing `Arbitrary` for `IpAddr` doesn't appear to be
+   (easily/nicely) dobale, since neither is a part of this crate.
+   https://github.com/rust-lang/rfcs/pull/1023
+*/
 
 #[test]
 fn ip_addr_to_bytes_test() {
@@ -454,10 +455,11 @@ fn packed_node_to_bytes_test_ipv6() {
 }
 
 #[test]
-// test for serialization of random PKs
-//  - this requires a workaround with loops and hops - i.e. supply to the
-//    quickcheck 4 `u64` arguments, cast to arrays, put elements from arrays
-//    into a single vec and use vec to create PK
+/* test for serialization of random PKs
+    - this requires a workaround with loops and hops - i.e. supply to the
+      quickcheck 4 `u64` arguments, cast to arrays, put elements from arrays
+      into a single vec and use vec to create PK
+*/
 fn packed_nodes_to_bytes_test_pk() {
     fn with_pk(a: u64, b: u64, c: u64, d: u64) {
         let saddr4 = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(1, 1, 1, 1), 1));

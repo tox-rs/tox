@@ -45,28 +45,30 @@ pub fn random_u64() -> u64 {
 }
 
 
-/// Check if Tox public key `PUBLICKEYBYTES` is valid. Should be used only for
-/// input validation.
-///
-/// Returns `true` if valid, `false` otherwise.
+/** Check if Tox public key `PUBLICKEYBYTES` is valid. Should be used only for
+    input validation.
+
+    Returns `true` if valid, `false` otherwise.
+*/
 pub fn public_key_valid(&PublicKey(ref pk): &PublicKey) -> bool {
     pk[PUBLICKEYBYTES - 1] <= 127 // Last bit of key is always zero.
 }
 
 
-/// Precomputes the shared key from `their_public_key` and `our_secret_key`.
-///
-/// For fast encrypt/decrypt - this way we can avoid an expensive elliptic
-/// curve scalar multiply for each encrypt/decrypt operation.
-///
-/// Use if communication is not one-time.
-///
-/// `encrypt_precompute` does the shared-key generation once, so that it does
-/// not have to be performed on every encrypt/decrypt.
-///
-/// This a wrapper for the
-/// [`precompute()`](../../../sodiumoxide/crypto/box_/curve25519xsalsa20poly1305/fn.precompute.html)
-/// function from `sodiumoxide` crate.
+/** Precomputes the shared key from `their_public_key` and `our_secret_key`.
+
+    For fast encrypt/decrypt - this way we can avoid an expensive elliptic
+    curve scalar multiply for each encrypt/decrypt operation.
+
+    Use if communication is not one-time.
+
+    `encrypt_precompute` does the shared-key generation once, so that it does
+    not have to be performed on every encrypt/decrypt.
+
+    This a wrapper for the
+    [`precompute()`](../../../sodiumoxide/crypto/box_/curve25519xsalsa20poly1305/fn.precompute.html)
+    function from `sodiumoxide` crate.
+*/
 #[inline]
 pub fn encrypt_precompute(their_public_key: &PublicKey,
                           our_secret_key: &SecretKey) -> PrecomputedKey {
@@ -76,18 +78,19 @@ pub fn encrypt_precompute(their_public_key: &PublicKey,
 //pub use sodiumoxide::crypto::box_::precompute as encrypt_precompute;
 
 
-/// Returns encrypted data from `plain`, with length of `plain + 16` due to
-/// padding.
-///
-/// Encryption is done using precomputed key (from the public key (32 bytes)
-/// of receiver and the secret key of sender) and a 24 byte nonce.
-///
-/// `sodiumoxide` takes care of padding the data, so the resulting encrypted
-/// data has length of `plain + 16`.
-///
-/// A wrapper for the
-/// [`seal_precomputed()`](../../../sodiumoxide/crypto/box_/curve25519xsalsa20poly1305/fn.seal_precomputed.html)
-/// function from `sodiumoxide`.
+/** Returns encrypted data from `plain`, with length of `plain + 16` due to
+    padding.
+
+    Encryption is done using precomputed key (from the public key (32 bytes)
+    of receiver and the secret key of sender) and a 24 byte nonce.
+
+    `sodiumoxide` takes care of padding the data, so the resulting encrypted
+    data has length of `plain + 16`.
+
+    A wrapper for the
+    [`seal_precomputed()`](../../../sodiumoxide/crypto/box_/curve25519xsalsa20poly1305/fn.seal_precomputed.html)
+    function from `sodiumoxide`.
+*/
 #[inline]
 pub fn encrypt_data_symmetric(precomputed_key: &PrecomputedKey,
                               nonce: &Nonce,
@@ -98,18 +101,19 @@ pub fn encrypt_data_symmetric(precomputed_key: &PrecomputedKey,
 //pub use sodiumoxide::crypto::box_::seal_precomputed as encrypt_data_symmetric;
 
 
-/// Returns plain data from `encrypted`, with length of `encrypted - 16` due to
-/// padding, or `()` if data couldn't be decrypted.
-///
-/// Decryption is done using precomputed key (from the secret key of receiver
-/// and the public key of sender) and a 24 byte nonce.
-///
-/// `sodiumoxide` takes care of removing padding from the data, so the
-/// resulting plain data has length of `encrypted - 16`.
-///
-/// This function is a wrapper for the
-/// [`open_precomputed()`](../../../sodiumoxide/crypto/box_/curve25519xsalsa20poly1305/fn.open_precomputed.html)
-/// function from `sodiumoxide`.
+/** Returns plain data from `encrypted`, with length of `encrypted - 16` due to
+    padding, or `()` if data couldn't be decrypted.
+
+    Decryption is done using precomputed key (from the secret key of receiver
+    and the public key of sender) and a 24 byte nonce.
+
+    `sodiumoxide` takes care of removing padding from the data, so the
+    resulting plain data has length of `encrypted - 16`.
+
+    This function is a wrapper for the
+    [`open_precomputed()`](../../../sodiumoxide/crypto/box_/curve25519xsalsa20poly1305/fn.open_precomputed.html)
+    function from `sodiumoxide`.
+*/
 #[inline]
 pub fn decrypt_data_symmetric(precomputed_key: &PrecomputedKey,
                               nonce: &Nonce,
@@ -118,16 +122,17 @@ pub fn decrypt_data_symmetric(precomputed_key: &PrecomputedKey,
 }
 
 
-/// Inrement given nonce by 1.
-///
-/// Treats `Nonce` as BE number.
-///
-/// If nonce can't be incremented (all bits are `1`), nonce is zeroed.
-///
-/// *Note that behaviour of this function might change to not increment supplied
-/// nonces, but rather, return an increased nonce.*
-///
-/// Spec: https://toktok.github.io/spec#nonce-2
+/** Inrement given nonce by 1.
+
+    Treats `Nonce` as BE number.
+
+    If nonce can't be incremented (all bits are `1`), nonce is zeroed.
+
+    *Note that behaviour of this function might change to not increment supplied
+    nonces, but rather, return an increased nonce.*
+
+    Spec: https://toktok.github.io/spec#nonce-2
+*/
 // TODO: needs to be tested on BE arch
 #[inline]
 pub fn increment_nonce(nonce: &mut Nonce) {

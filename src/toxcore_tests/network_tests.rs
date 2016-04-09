@@ -28,11 +28,12 @@ use toxcore::network::*;
 // bind_udp()
 
 #[test]
-// there's no way to reliably test whole range for both success and faliure;
-// at least as long as there's no assumption that there are no other instances
-// running.
-//
-// Thus test only whether binding to at least 50 ports works :/
+/* there's no way to reliably test whole range for both success and faliure;
+   at least as long as there's no assumption that there are no other instances
+   running.
+
+   Thus test only whether binding to at least 50 ports works :/
+*/
 fn bind_udp_test() {
     for _ in 0..50 {
         thread::spawn(move || {

@@ -133,8 +133,9 @@ extern crate sodiumoxide;
 extern crate ip;
 
 
-/// Core Tox module. Provides an API on top of which other modules and
-/// applications may be build.
+/** Core Tox module. Provides an API on top of which other modules and
+    applications may be build.
+*/
 #[warn(missing_docs)]
 pub mod toxcore {
     pub mod binary_io;

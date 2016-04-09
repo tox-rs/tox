@@ -30,14 +30,16 @@ pub const PORT_MIN: u16 = 33445;
 /// Maximum port which Tox will try to bind to.
 pub const PORT_MAX: u16 = 33545;
 
-/// Bind to an UDP socket on `0.0.0.0` with a port in range [`PORT_MIN`]
-/// (./constant.PORT_MIN.html):[`PORT_MAX`](./constant.PORT_MAX.html).
-///
-/// Returns `None` if failed to bind to port within range.
-// TODO: perhaps use closure as an argument with 2 ports provided;
-//        - if no args in closure (`||`), use port range from constants
-//        - if 2 args in closure, validate port range from args and try to use
-//          them to do the binding
+/** Bind to an UDP socket on `0.0.0.0` with a port in range [`PORT_MIN`]
+    (./constant.PORT_MIN.html):[`PORT_MAX`](./constant.PORT_MAX.html).
+
+    Returns `None` if failed to bind to port within range.
+*/
+/* TODO: perhaps use closure as an argument with 2 ports provided;
+          - if no args in closure (`||`), use port range from constants
+          - if 2 args in closure, validate port range from args and try to use
+            them to do the binding
+*/
 pub fn bind_udp() -> Option<UdpSocket> {
     for port in PORT_MIN..(PORT_MAX + 1) {
         // TODO: check if `[::]` always works, even on platforms with disabled

@@ -147,14 +147,15 @@ pub fn encrypt_data_symmetric_test() {
     quickcheck(encrypt_decrypt_msg as fn(String));
 }
 
-// TODO: test for pubkey/skey/nonce being all `0`s, which would produce
-// ciphertext that should be compared to already known result of this
-// computation. This way it would be ensured that cipher algorithm is
-// actually working as it should.
-// There should be also some additional variations of this test, with different
-// pkey/skey/nonce values that would produce known ciphertext.
-//
-// Also, similar test for decrypting.
+/* TODO: test for pubkey/skey/nonce being all `0`s, which would produce
+   ciphertext that should be compared to already known result of this
+   computation. This way it would be ensured that cipher algorithm is
+   actually working as it should.
+   There should be also some additional variations of this test, with different
+   pkey/skey/nonce values that would produce known ciphertext.
+
+   Also, similar test for decrypting.
+*/
 
 
 #[test]
