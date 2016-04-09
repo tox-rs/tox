@@ -1305,6 +1305,14 @@ fn nat_ping_from_bytes_test() {
 }
 
 
+// DhtRequestT::
+
+impl Arbitrary for DhtRequestT {
+    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+        DhtRequestT::NatPing(Arbitrary::arbitrary(g))
+    }
+}
+
 // DhtRequestT::to_bytes()
 
 #[test]
@@ -1334,23 +1342,35 @@ fn dht_request_t_from_bytes_test() {
 #[test]
 fn dht_request_new_test() {
     // TODO: once DhtRequest will support more types, expand the test
-    fn with_nat_ping(np: NatPing) {
+    fn with_req(req: DhtRequestT) {
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _) = gen_keypair();
         let nonce = gen_nonce();
-        let drt = DhtRequestT::NatPing(np);
-        let dr = DhtRequest::new(&alice_sk, &alice_pk, &bob_pk, &nonce, drt);
-        let dr2 = DhtRequest::new(&alice_sk, &alice_pk, &bob_pk, &nonce, drt);
+        let dr = DhtRequest::new(&alice_sk, &alice_pk, &bob_pk, &nonce, req);
+        let dr2 = DhtRequest::new(&alice_sk, &alice_pk, &bob_pk, &nonce, req);
         assert_eq!(dr, dr2);
         assert_eq!(dr.receiver, bob_pk);
         assert_eq!(dr.sender, alice_pk);
 
         let nonce2 = gen_nonce();
-        let dr3 = DhtRequest::new(&alice_sk, &alice_pk, &bob_pk, &nonce2, drt);
+        let dr3 = DhtRequest::new(&alice_sk, &alice_pk, &bob_pk, &nonce2, req);
         assert!(dr != dr3);
     }
-    quickcheck(with_nat_ping as fn(NatPing));
+    quickcheck(with_req as fn(DhtRequestT));
 }
 
 // DhtRequest::get_request()
-// TODO: test ↑
+
+#[test]
+fn dht_request_get_request_test() {
+    fn with_req(req: DhtRequestT) {
+        let (alice_pk, alice_sk) = gen_keypair();
+        let (bob_pk, bob_sk) = gen_keypair();
+        let nonce = gen_nonce();
+        let dreq = DhtRequest::new(&alice_sk, &alice_pk, &bob_pk, &nonce, req);
+
+        let received = dreq.get_request(&bob_sk).expect("Failed to get request");
+        assert_eq!(req, received);
+    }
+    quickcheck(with_req as fn(DhtRequestT));
+}
