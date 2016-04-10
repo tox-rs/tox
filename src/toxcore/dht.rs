@@ -422,7 +422,7 @@ pub const PACKED_NODE_IPV4_SIZE: usize = PUBLICKEYBYTES + 7;
 pub const PACKED_NODE_IPV6_SIZE: usize = PUBLICKEYBYTES + 19;
 
 impl PackedNode {
-    // TODO: ↓ convert into a block comment once rust bug #32845 gets fixed
+    // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
     /// New `PackedNode`.
     ///
     /// `udp` – whether UDP or TCP should be used. UDP is used for DHT nodes,
@@ -461,7 +461,7 @@ impl PackedNode {
         }
     }
 
-    // TODO: ↓ convert into a block comment once rust bug #32845 gets fixed
+    // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
     /// Parse bytes into multiple `PackedNode`s.
     ///
     /// If provided bytes are smaller than [`PACKED_NODE_IPV4_SIZE`]
@@ -729,7 +729,7 @@ impl FromBytes<GetNodes> for GetNodes {
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SendNodes {
-    // TODO: ↓ convert into a block comment once rust bug #32845 gets fixed
+    // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
     /// Nodes sent in response to [`GetNodes`](./struct.GetNodes.html) request.
     ///
     /// There can be only 1 to 4 nodes in `SendNodes`.
@@ -740,7 +740,7 @@ pub struct SendNodes {
 }
 
 impl SendNodes {
-    // TODO: ↓ convert into a block comment once rust bug #32845 gets fixed
+    // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
     /// Create new `SendNodes`. Returns `None` if 0 or more than 4 nodes are
     /// supplied.
     ///
@@ -857,7 +857,7 @@ impl DhtPacketT {
         }
     }
 
-    // TODO: ↓ convert into a block comment once rust bug #32845 gets fixed
+    // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
     /// Create [`Ping`](./struct.Ping.html) response if `DhtPacketT` is a
     /// `Ping` request.
     ///
@@ -936,7 +936,7 @@ impl DhtPacket {
         }
     }
 
-    // TODO: ↓ convert into a block comment once rust bug #32845 gets fixed
+    // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
     /// Add [`PackedNode`](./struct.PackedNode.html) to `Kbucket`.
     /// Get packet data. This function decrypts payload and tries to parse it
     /// as packet type.
@@ -986,7 +986,7 @@ impl DhtPacket {
         None  // parsing failed
     }
 
-    // TODO: ↓ convert into a block comment once rust bug #32845 gets fixed
+    // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
     /// Add [`PackedNode`](./struct.PackedNode.html) to `Kbucket`.
     /// Create DHT Packet with [`Ping`](./struct.Ping.html) response to `Ping`
     /// request that packet contained.
@@ -1125,7 +1125,7 @@ impl Distance for PublicKey {
 // TODO: is it even needed?
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Node {
-    // TODO: ↓ convert into a block comment once rust bug #32845 gets fixed
+    // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
     /// Add [`PackedNode`](./struct.PackedNode.html) to `Kbucket`.
     /// Time when node will reach it's timeout - value consists of `seconds
     /// since UNIX epoch + timeout`. If value equals or is lower than current
@@ -1216,7 +1216,7 @@ pub struct Bucket {
 pub const BUCKET_DEFAULT_SIZE: usize = 8;
 
 impl Bucket {
-    // TODO: ↓ convert into a block comment once rust bug #32845 gets fixed
+    // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
     /// Add [`PackedNode`](./struct.PackedNode.html) to `Kbucket`.
     /// Create a new `Bucket` to store nodes close to the `pk`.
     ///
@@ -1237,7 +1237,7 @@ impl Bucket {
         }
     }
 
-    // TODO: ↓ convert into a block comment once rust bug #32845 gets fixed
+    // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
     /// Add [`PackedNode`](./struct.PackedNode.html) to `Kbucket`.
     /// Try to add [`PackedNode`](./struct.PackedNode.html) to the bucket.
     ///
@@ -1293,7 +1293,7 @@ impl Bucket {
         false
     }
 
-    // TODO: ↓ convert into a block comment once rust bug #32845 gets fixed
+    // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
     /// Add [`PackedNode`](./struct.PackedNode.html) to `Kbucket`.
     /// Remove [`PackedNode`](./struct.PackedNode.html) with given PK from the
     /// `Bucket`.
@@ -1311,7 +1311,7 @@ impl Bucket {
         trace!("Failed to remove PackedNode with PK: {:?}", pubkey);
     }
 
-    // TODO: ↓ convert into a block comment once rust bug #32845 gets fixed
+    // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
     /// Add [`PackedNode`](./struct.PackedNode.html) to `Kbucket`.
     /// Check if `Bucket` is empty.
     ///
@@ -1368,7 +1368,7 @@ impl Kbucket {
         }
     }
 
-    // TODO: ↓ convert into a block comment once rust bug #32845 gets fixed
+    // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
     /// Add [`PackedNode`](./struct.PackedNode.html) to `Kbucket`.
     ///
     /// Node can be added only if:
@@ -1404,7 +1404,7 @@ impl Kbucket {
         }
     }
 
-    // TODO: ↓ convert into a block comment once rust bug #32845 gets fixed
+    // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
     /// Add [`PackedNode`](./struct.PackedNode.html) to `Kbucket`.
     /// Get (up to) 4 closest nodes to given PK.
     ///
