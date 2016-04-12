@@ -426,7 +426,8 @@ impl PackedNode {
     /// New `PackedNode`.
     ///
     /// `udp` – whether UDP or TCP should be used. UDP is used for DHT nodes,
-    /// whereas TCP is used for TCP relays.
+    /// whereas TCP is used for TCP relays. When `true`, UDP is used, otherwise
+    /// TCP is used.
     pub fn new(udp: bool, saddr: SocketAddr, pk: &PublicKey) -> Self {
         debug!(target: "PackedNode", "Creating new PackedNode.");
         trace!(target: "PackedNode", "With args: udp: {}, saddr: {:?}, PK: {:?}",

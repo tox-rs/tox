@@ -1,4 +1,5 @@
 # Tox  [![Build Status](https://travis-ci.org/zetok/tox.svg?branch=master)](https://travis-ci.org/zetok/tox)
+
 This library is an implementation of [toxcore][toxcore] in Rust - P2P,
 distributed, encrypted, easy to use DHT-based network.
 
@@ -24,8 +25,7 @@ Contributing guidelines: [CONTRIBUTING.md](/CONTRIBUTING.md).
 | libsodium | 1.0.0 |
 
 ## Building
-Fairly simple. You'll need [Rust](http://www.rust-lang.org/) and [libsodium]
-(https://github.com/jedisct1/libsodium).
+Fairly simple. You'll need [Rust] and [libsodium].
 
 When you'll have deps, build debug version with
 ```bash
@@ -63,9 +63,29 @@ cargo test --features "clippy"
  - improved toxcore implementation in Rust
  - Rust API
  - "old" C API for compatibility
+    - with help of [rusty-cheddar]?
  - documentation
  - tests
  - more
+
+## Progress
+*Not listed items are on TODO*. If you're interested in them arriving sooner,
+consider helping :wink:
+
+ - [ ] implementing toxcore
+    - [ ] DHT
+        - [x] ping requests & responses
+        - [x] nodes requests & responses
+        - [x] NAT ping requests & responses
+ - [x] Rust API
+   
+   It will be a subject to changes, and most likely parts that are currently
+   public will at later point become hidden. That though depends on the needs.
+ - [x] Documentation
+    - [x] Simply great. Further improvements in progress.
+ - tests
+    - [x] tests cover almost all functionality
+    - [x] tested against [hstox], using [Tox Tester], T.T for short
 
 
 ## License
@@ -73,3 +93,8 @@ cargo test --features "clippy"
 Licensed under GPLv3+. For details, see [COPYING](/COPYING).
 
 [toxcore]: https://github.com/irungentoo/toxcore
+[Rust]: https://www.rust-lang.org/
+[libsodium]: https://github.com/jedisct1/libsodium
+[rusty-cheddar]: https://github.com/Sean1708/rusty-cheddar
+[hstox]: https://github.com/TokTok/hstox
+[Tox Tester]: https://github.com/zetok/tox-protocol-test
