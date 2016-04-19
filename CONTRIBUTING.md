@@ -55,10 +55,9 @@ The **header** is mandatory and the **scope** of the header is optional.
 Any line of the commit message cannot be longer 72 characters! This allows the
 message to be easier to read on GitHub as well as in various git tools.
 
-Note that `gitcop` is used to check if commits in pull request conform to commit
-message format, but since it can't be configured to have an optional
-`(<scope>)`, it will claim that messages without it are wrong, while they're
-perfectly fine.
+Note that [`verify-commit-messages.sh`](/scripts/verify-commit-messages.sh) is
+used to check conformance of commits in the pull request to commit message
+format.
 
 ### Revert
 If the commit reverts a previous commit, it should begin with `revert: `, followed by the header of the reverted commit. In the body it should say: `This reverts commit <hash>.`, where the hash is the SHA of the commit being reverted.

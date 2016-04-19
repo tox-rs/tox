@@ -16,13 +16,15 @@ issue / pull request should be filled on the [reference repository]
 
 Current [API docs](https://zetok.github.io/tox) are a subject to changes.
 
-## Contributing
-Contributing guidelines: [CONTRIBUTING.md](/CONTRIBUTING.md).
+## Contributions
+
+... are welcome :smile:. For details, look at
+[CONTRIBUTING.md](/CONTRIBUTING.md).
 
 ## Dependencies
 | **Name** | **Version** |
 |----------|-------------|
-| libsodium | 1.0.0 |
+| libsodium | >=1.0.0 |
 
 ## Building
 Fairly simple. You'll need [Rust] and [libsodium].
