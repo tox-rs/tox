@@ -140,6 +140,7 @@ pub mod toxcore {
     pub mod crypto_core;
     pub mod dht;
     pub mod network;
+    pub mod packet_kind;
 }
 
 
@@ -152,4 +153,5 @@ mod toxcore_tests {
     mod crypto_core_tests;
     mod dht_tests;
     mod network_tests;
+    mod packet_kind_tests;
 }

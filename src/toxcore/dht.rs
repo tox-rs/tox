@@ -20,10 +20,11 @@
 
 
 // ↓ FIXME expand doc
-//! DHT part of the toxcore.
-//!
-//! * takes care of the serializing and de-serializing DHT packets
-//! * ..
+/*! DHT part of the toxcore.
+
+    * takes care of the serializing and de-serializing DHT packets
+    * ..
+*/
 
 use std::cmp::{Ord, Ordering};
 use std::net::{
@@ -37,98 +38,7 @@ use std::net::{
 
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
-
-
-/** Top-level packet kind names and their associated numbers.
-
-    According to https://toktok.github.io/spec.html#packet-kind.
-*/
-// TODO: move it somewhere else
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum PacketKind {
-    /// [`Ping`](./struct.Ping.html) request number.
-    PingReq       = 0,
-    /// [`Ping`](./struct.Ping.html) response number.
-    PingResp      = 1,
-    /// [`GetNodes`](./struct.GetNodes.html) packet number.
-    GetN          = 2,
-    /// [`SendNodes`](./struct.SendNodes.html) packet number.
-    SendN         = 4,
-    /// Cookie Request.
-    CookieReq     = 24,
-    /// Cookie Response.
-    CookieResp    = 25,
-    /// Crypto Handshake.
-    CryptoHs      = 26,
-    /// Crypto Data (general purpose packet for transporting encrypted data).
-    CryptoData    = 27,
-    /// DHT Request.
-    DhtReq        = 32,
-    /// LAN Discovery.
-    LanDisc       = 33,
-    /// Onion Reuqest 0.
-    OnionReq0     = 128,
-    /// Onion Request 1.
-    OnionReq1     = 129,
-    /// Onion Request 2.
-    OnionReq2     = 130,
-    /// Announce Request.
-    AnnReq        = 131,
-    /// Announce Response.
-    AnnResp       = 132,
-    /// Onion Data Request.
-    OnionDataReq  = 133,
-    /// Onion Data Response.
-    OnionDataResp = 134,
-    /// Onion Response 3.
-    OnionResp3    = 140,
-    /// Onion Response 2.
-    OnionResp2    = 141,
-    /// Onion Response 1.
-    OnionResp1    = 142,
-}
-
-/** Parse first byte from provided `bytes` as `PacketKind`.
-
-    Returns `None` if no bytes provided, or first byte doesn't match.
-*/
-impl FromBytes<PacketKind> for PacketKind {
-    fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        debug!(target: "PacketKind", "Creating PacketKind from bytes.");
-        trace!(target: "PacketKind", "Bytes: {:?}", bytes);
-        if bytes.is_empty() {
-            debug!("There are 0 bytes!");
-            return None
-        }
-
-        match bytes[0] {
-            0   => Some(PacketKind::PingReq),
-            1   => Some(PacketKind::PingResp),
-            2   => Some(PacketKind::GetN),
-            4   => Some(PacketKind::SendN),
-            24  => Some(PacketKind::CookieReq),
-            25  => Some(PacketKind::CookieResp),
-            26  => Some(PacketKind::CryptoHs),
-            27  => Some(PacketKind::CryptoData),
-            32  => Some(PacketKind::DhtReq),
-            33  => Some(PacketKind::LanDisc),
-            128 => Some(PacketKind::OnionReq0),
-            129 => Some(PacketKind::OnionReq1),
-            130 => Some(PacketKind::OnionReq2),
-            131 => Some(PacketKind::AnnReq),
-            132 => Some(PacketKind::AnnResp),
-            133 => Some(PacketKind::OnionDataReq),
-            134 => Some(PacketKind::OnionDataResp),
-            140 => Some(PacketKind::OnionResp3),
-            141 => Some(PacketKind::OnionResp2),
-            142 => Some(PacketKind::OnionResp1),
-            _   => {
-                debug!("Byte can't be parsed as PacketKind!");
-                None
-            },
-        }
-    }
-}
+use toxcore::packet_kind::PacketKind;
 
 
 /** Type of [`Ping`](./struct.Ping.html) packet. Either a request or response.
@@ -139,10 +49,10 @@ impl FromBytes<PacketKind> for PacketKind {
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum PingType {
     /// Request ping response. Wrapper over [`PacketKind::PingReq`]
-    /// (./enum.PacketKind.html).
+    /// (../packet_kind/enum.PacketKind.html).
     Req  = PacketKind::PingReq as isize,
     /// Respond to ping request. Wrapper over [`PacketKind::PingResp`]
-    /// (./enum.PacketKind.html).
+    /// (../packet_kind/enum.PacketKind.html).
     Resp = PacketKind::PingResp as isize,
 }
 
@@ -893,7 +803,7 @@ impl ToBytes for DhtPacketT {
 
     Length      | Contents
     ----------- | --------
-    `1`         | `uint8_t` [`PacketKind`](./enum.PacketKind.html)
+    `1`         | `uint8_t` [`PacketKind`](../packet_kind/enum.PacketKind.html)
     `32`        | Sender DHT Public Key
     `24`        | Random nonce
     variable    | Encrypted payload
