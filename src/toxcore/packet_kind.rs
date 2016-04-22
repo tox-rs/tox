@@ -19,6 +19,10 @@
 
 /*! Data associated with the `PacketKind`. Used by most of other `toxcore`
     modules.
+
+    Used by:
+
+    * [`dht`](../dht/index.html)
 */
 
 use toxcore::binary_io::*;

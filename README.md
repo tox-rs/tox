@@ -10,6 +10,9 @@ IRC channel: [#zetox @ freenode](https://webchat.freenode.net/?channels=zetox)
 [The Tox Reference](https://github.com/TokTok/tox-spec) should be used for
 implementing toxcore in Rust.
 
+Sadly, due to CLA upstream lacks with integrating documentation improvements,
+so for now [fork](https://github.com/zetok/tox-spec) will have to do.
+
 If existing documentation appears to not be complete, or is not clear enough,
 issue / pull request should be filled on the [reference repository]
 (https://github.com/TokTok/tox-spec/issues/new).
