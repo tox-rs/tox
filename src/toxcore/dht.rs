@@ -196,12 +196,12 @@ impl FromBytes<Ping> for Ping {
     * 3 bits – `0`
     * 4th bit – address family
 
-    Values:
-
-    * `2` – UDP IPv4
-    * `10` – UDP IPv6
-    * `130` – TCP IPv4
-    * `138` – TCP IPv6
+    Value | Type
+    ----- | ----
+    `2`   | UDP IPv4
+    `10`  | UDP IPv6
+    `130` | TCP IPv4
+    `138` | TCP IPv6
 
     DHT module *should* use only UDP variants of `IpType`, given that DHT runs
     solely over the UDP.
@@ -296,20 +296,17 @@ impl FromBytes<Ipv6Addr> for Ipv6Addr {
 
     `[packed node 1][packed node 2][...]`
 
-    Packed node format:
+    Serialized Packed node:
 
-    ```text
-                             (39 bytes for IPv4, 51 for IPv6)
-    +-----------------------------------+
-    | ip_type                ( 1 byte ) |
-    |                                   |
-    | IPv4 Address           ( 4 bytes) |
-    |  -OR-                     -OR-    |
-    | IPv6 Address           (16 bytes) |
-    | Port                   ( 2 bytes) |
-    | Node ID                (32 bytes) |
-    +-----------------------------------+
-    ```
+    Length | Content
+    ------ | -------
+    `1`    | [`IpType`](./.enum.IpType.html)
+    `4` or `16` | IPv4 or IPv6 address
+    `2`    | port
+    `32`   | node ID
+
+    Size of serialized `PackedNode` is 39 bytes with IPv4 node info, or 51 with
+    IPv6 node info.
 
     DHT module *should* use only UDP variants of `IpType`, given that DHT runs
     solely on the UDP.
@@ -536,20 +533,17 @@ impl FromBytes<PackedNode> for PackedNode {
 }
 
 
-// TODO: make sure ↓ it's correct
 /** Request to get address of given DHT PK, or nodes that are closest in DHT
     to the given PK.
 
-    Packet type `2`.
+    Packet type [`PacketKind::GetN`](../packet_kind/enum.PacketKind.html).
 
     Serialized form:
 
-    ```text
-    +-----------------------------------+
-    | DHT PUBKEY             (32 bytes) |
-    | ping_id                ( 8 bytes) |
-    +-----------------------------------+
-    ```
+    Length | Content
+    ------ | ------
+    `32`   | DHT Public Key
+    `8`    | ping id
 
     Serialized form should be put in the encrypted part of DHT packet.
 */
@@ -1463,11 +1457,10 @@ impl FromBytes<DhtRequestT> for DhtRequestT {
 
 /** DHT Request packet structure.
 
-    Used to send data via one node to other one to which own instance is not
-    connected.
-   TODO: rephrase ↑
+    Used to send data via one node1 to other node2 via intermediary node when
+    there is no direct connection between nodes 1 and 2.
 
-    `<own node> → <connected node> → <not connected node>`
+    `<own node> → <connected, intermediary node> → <not connected node>`
 
     When receiving `DhtRequest` own instance should check whether receiver PK
     matches own PK, or PK of a known node.
