@@ -141,6 +141,7 @@ pub mod toxcore {
     pub mod dht;
     pub mod network;
     pub mod packet_kind;
+    pub mod hole_punching;
 }
 
 
