@@ -1122,7 +1122,6 @@ pub const BUCKET_DEFAULT_SIZE: usize = 8;
 
 impl Bucket {
     // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
-    /// Add [`PackedNode`](./struct.PackedNode.html) to `Kbucket`.
     /// Create a new `Bucket` to store nodes close to the `pk`.
     ///
     /// Can hold up to `num` nodes if number is supplied. If `None` is
@@ -1143,7 +1142,6 @@ impl Bucket {
     }
 
     // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
-    /// Add [`PackedNode`](./struct.PackedNode.html) to `Kbucket`.
     /// Try to add [`PackedNode`](./struct.PackedNode.html) to the bucket.
     ///
     /// If bucket doesn't have [`BUCKET_DEFAULT_SIZE`]
@@ -1199,7 +1197,6 @@ impl Bucket {
     }
 
     // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
-    /// Add [`PackedNode`](./struct.PackedNode.html) to `Kbucket`.
     /// Remove [`PackedNode`](./struct.PackedNode.html) with given PK from the
     /// `Bucket`.
     ///
@@ -1217,7 +1214,6 @@ impl Bucket {
     }
 
     // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
-    /// Add [`PackedNode`](./struct.PackedNode.html) to `Kbucket`.
     /// Check if `Bucket` is empty.
     ///
     /// Returns `true` if there are no nodes in the `Bucket`, `false`
@@ -1242,10 +1238,12 @@ impl Bucket {
 pub struct Kbucket {
     /// `PublicKey` for which `Kbucket` holds close nodes.
     pub pk: PublicKey,
+
     /// Number of [`Bucket`](./struct.Bucket.html)s held.
     // TODO: check if `k` even needs to be stored, considering that
     //       `buckets.len()` could(?) be used
     pub k: u8,
+
     // TODO: check if using an option actually brings any benefits, as opposed
     //       to just keeping empty buckets
     buckets: Vec<Bucket>,
@@ -1310,7 +1308,6 @@ impl Kbucket {
     }
 
     // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
-    /// Add [`PackedNode`](./struct.PackedNode.html) to `Kbucket`.
     /// Get (up to) 4 closest nodes to given PK.
     ///
     /// Functionality for [`SendNodes`](./struct.SendNodes.html).
