@@ -999,9 +999,29 @@ fn kbucket_index_test() {
 // Bucket::
 
 // Bucket::new()
-// TODO: test ↑ whether buckets created with..
-//          ..same parameters is always identical
-//          ..different parameters is always different
+
+#[test]
+fn bucket_new_test() {
+    fn with_capacity(num: u8) {
+        let default = Bucket::new(None);
+        assert_eq!(BUCKET_DEFAULT_SIZE, default.nodes.capacity());
+        let bucket = Bucket::new(Some(num));
+        assert_eq!(num as usize, bucket.nodes.capacity());
+
+        // check if always the same with same parameters
+        let default2 = Bucket::new(None);
+        assert_eq!(default, default2);
+        let bucket2 = Bucket::new(Some(num));
+        assert_eq!(bucket, bucket2);
+
+        if num as usize != BUCKET_DEFAULT_SIZE  {
+            assert!(default != bucket);
+        } else {
+            assert_eq!(default, bucket);
+        }
+    }
+    quickcheck(with_capacity as fn(u8));
+}
 
 // Bucket::try_add()
 
