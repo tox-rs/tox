@@ -36,7 +36,8 @@ use std::net::{
 };
 use std::str::FromStr;
 
-use super::quickcheck::{Arbitrary, Gen, quickcheck};
+use super::quickcheck::{Arbitrary, Gen, quickcheck, StdGen};
+use super::rand::chacha::ChaChaRng;
 
 
 /// Safely casts `u64` to 4 `u16`.
@@ -1052,7 +1053,34 @@ fn bucket_try_add_test() {
 }
 
 // Bucket::remove()
-// TODO: ↑
+
+#[test]
+fn bucket_remove_test() {
+    fn with_nodes(num: u8, bucket_size: u8, rng_num: usize) {
+        let pk_bytes = [0; PUBLICKEYBYTES];
+        let pk = PublicKey::from_slice(&pk_bytes).unwrap();
+
+        let mut rm_pubkeys: Vec<PublicKey> = Vec::new();
+        let mut bucket = Bucket::new(Some(bucket_size));
+
+        drop(bucket.remove(&pk));  // "removing" non-existent node
+        assert_eq!(true, bucket.is_empty());
+
+        let mut rng = StdGen::new(ChaChaRng::new_unseeded(), rng_num);
+        for _ in 0..num {
+            let node: PackedNode = Arbitrary::arbitrary(&mut rng);
+            rm_pubkeys.push(node.pk);
+            drop(bucket.try_add(&pk, &node));
+        }
+
+        for pubkey in &rm_pubkeys {
+            bucket.remove(pubkey);
+        }
+        assert_eq!(true, bucket.is_empty());
+    }
+    quickcheck(with_nodes as fn(u8, u8, usize))
+}
+
 
 // Bucket::is_empty()
 

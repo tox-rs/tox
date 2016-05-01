@@ -148,6 +148,7 @@ pub mod toxcore {
 #[cfg(test)]
 mod toxcore_tests {
     extern crate quickcheck;
+    extern crate rand;
     extern crate rustc_serialize;
 
     mod binary_io_tests;
