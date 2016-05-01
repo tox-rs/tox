@@ -35,6 +35,7 @@ use std::net::{
             SocketAddrV4,
             SocketAddrV6
 };
+use std::ops::Deref;
 
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
@@ -1373,22 +1374,19 @@ impl NatPing {
 
     /// Return `NatPing` ID.
     pub fn id(&self) -> u64 {
-        let NatPing(ping) = *self;
-        ping.id()
+        Ping::id(self)
     }
 
     /// Check whether given `NatPing` is a request.
     pub fn is_request(&self) -> bool {
-        let NatPing(ping) = *self;
-        ping.is_request()
+        Ping::is_request(self)
     }
 
     /// Create answer to ping request. Returns `None` if supplied `Ping` is
     /// already a ping response.
     #[inline]
     pub fn response(&self) -> Option<Self> {
-        let NatPing(ping) = *self;
-        ping.response().and_then(|p| Some(NatPing(p)))
+        Ping::response(self).and_then(|p: Ping| Some(NatPing(p)))
     }
 }
 
@@ -1396,14 +1394,13 @@ impl NatPing {
 impl ToBytes for NatPing {
     fn to_bytes(&self) -> Vec<u8> {
         debug!(target: "NatPing", "Serializing NatPing into bytes.");
-        let NatPing(ping) = *self;
         let mut result = Vec::with_capacity(NAT_PING_SIZE);
 
         // special, "magic" type of NatPing, according to spec:
         // https://toktok.github.io/#nat-ping-request
         result.push(NAT_PING_TYPE);
         // and the rest of stuff inherited from `Ping`
-        result.extend_from_slice(ping.to_bytes().as_slice());
+        result.extend_from_slice(Ping::to_bytes(self).as_slice());
         trace!("Serialized NatPing: {:?}", &result);
         result
     }
@@ -1421,6 +1418,15 @@ impl FromBytes<NatPing> for NatPing {
 
         Ping::from_bytes(&bytes[1..NAT_PING_SIZE])
             .and_then(|p| Some(NatPing(p)))
+    }
+}
+
+impl Deref for NatPing {
+    type Target = Ping;
+
+    fn deref(&self) -> &Ping {
+        let NatPing(ref ping) = *self;
+        ping
     }
 }
 
