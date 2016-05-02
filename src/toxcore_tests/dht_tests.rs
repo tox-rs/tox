@@ -1314,6 +1314,16 @@ fn nat_ping_from_bytes_test() {
     with_bytes(ping);
 }
 
+// NatPing::deref()
+
+#[test]
+fn nat_ping_deref_test() {
+    fn with_ping(ping: Ping) {
+        assert_eq!(*NatPing(ping), ping);
+    }
+    quickcheck(with_ping as fn(Ping));
+}
+
 
 // DhtRequestT::
 
