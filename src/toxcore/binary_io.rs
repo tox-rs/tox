@@ -87,3 +87,14 @@ pub fn u64_to_array(num: u64) -> [u8; 8] {
     }
     array
 }
+
+
+/** Calculate XOR checksum for 2 [u8; 2].
+
+    Used for calculating checksum of ToxId.
+
+    https://zetok.github.io/tox-spec/#messenger , 7th paragraph.
+*/
+pub fn xor_checksum(lhs: &[u8; 2], rhs: &[u8; 2]) -> [u8; 2] {
+    [lhs[0] ^ rhs[0], lhs[1] ^ rhs[1]]
+}

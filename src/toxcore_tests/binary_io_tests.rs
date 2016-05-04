@@ -110,3 +110,22 @@ fn u64_to_array_test() {
 
     quickcheck(u64_to_array_and_back as fn(u64));
 }
+
+
+// xor_checksum()
+
+#[test]
+fn xor_checksum_test() {
+    assert_eq!([0; 2], xor_checksum(&[0; 2], &[0; 2]));
+    assert_eq!([1; 2], xor_checksum(&[1; 2], &[0; 2]));
+    assert_eq!([0; 2], xor_checksum(&[1; 2], &[1; 2]));
+    assert_eq!([255; 2], xor_checksum(&[255; 2], &[0; 2]));
+    assert_eq!([0; 2], xor_checksum(&[255; 2], &[255; 2]));
+
+    fn with_numbers(a: u8, b: u8, c: u8, d: u8) {
+        let x = xor_checksum(&[a, b], &[c, d]);
+        assert_eq!(x[0], a ^ c);
+        assert_eq!(x[1], b ^ d);
+    }
+    quickcheck(with_numbers as fn(u8, u8, u8, u8));
+}
