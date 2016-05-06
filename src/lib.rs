@@ -142,6 +142,7 @@ pub mod toxcore {
     pub mod hole_punching;
     pub mod network;
     pub mod packet_kind;
+    pub mod toxid;
 }
 
 
@@ -156,4 +157,5 @@ mod toxcore_tests {
     mod dht_tests;
     mod network_tests;
     mod packet_kind_tests;
+    mod toxid_tests;
 }
