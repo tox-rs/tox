@@ -19,6 +19,7 @@
 
 //! `Tox ID` and stuff related to it.
 // FIXME: ↑ improve
+// TODO: ↓ add logging
 
 
 use std::fmt;
@@ -100,6 +101,14 @@ assert_eq!(format!("{}", nospam), format!("{:X}", nospam));
 impl fmt::Display for NoSpam {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:X}", self)
+    }
+}
+
+impl FromBytes<NoSpam> for NoSpam {
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() < NOSPAMBYTES { return None }
+
+        Some(NoSpam([bytes[0], bytes[1], bytes[2], bytes[3]]))
     }
 }
 

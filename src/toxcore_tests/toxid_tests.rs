@@ -19,8 +19,10 @@
 
 //! Tests for `toxid` module.
 
+use super::quickcheck::quickcheck;
 use super::regex::Regex;
 
+use toxcore::binary_io::*;
 use toxcore::toxid::*;
 
 
@@ -58,4 +60,22 @@ fn no_spam_fmt_test() {
     assert_eq!(true, re.is_match(&format!("{}", NoSpam([0, 0, 0, 0]))));
     assert_eq!(true, re.is_match(&format!("{:X}", NoSpam([15, 15, 15, 15]))));
     assert_eq!(true, re.is_match(&format!("{}", NoSpam([15, 15, 15, 15]))));
+}
+
+// NoSpam::from_bytes()
+
+#[test]
+fn no_spam_from_bytes_test() {
+    fn with_bytes(bytes: Vec<u8>) {
+        if bytes.len() < NOSPAMBYTES {
+            assert_eq!(None, NoSpam::from_bytes(&bytes));
+        } else {
+            let nospam = NoSpam::from_bytes(&bytes).expect("Failed to get NoSpam!");
+            assert_eq!(bytes[0], nospam[0]);
+            assert_eq!(bytes[1], nospam[1]);
+            assert_eq!(bytes[2], nospam[2]);
+            assert_eq!(bytes[3], nospam[3]);
+        }
+    }
+    quickcheck(with_bytes as fn(Vec<u8>));
 }
