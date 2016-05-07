@@ -151,6 +151,7 @@ mod toxcore_tests {
     extern crate quickcheck;
     extern crate rand;
     extern crate rustc_serialize;
+    extern crate regex;
 
     mod binary_io_tests;
     mod crypto_core_tests;

@@ -19,7 +19,7 @@
 
 //! Tests for `toxid` module.
 
-use super::quickcheck::quickcheck;
+use super::regex::Regex;
 
 use toxcore::toxid::*;
 
@@ -42,4 +42,20 @@ fn no_spam_deref_test() {
     let nospam = NoSpam::new();
     let NoSpam(ns_bytes) = nospam;
     assert_eq!(*nospam, ns_bytes);
+}
+
+// NoSpam::fmt()
+
+#[test]
+fn no_spam_fmt_test() {
+    // check if formatted NoSpam is always upper-case hexadecimal with matching
+    // length
+    let re = Regex::new("^([0-9A-F]){8}$").expect("Creating regex failed!");
+    let nospam = NoSpam::new();
+    assert_eq!(true, re.is_match(&format!("{:X}", nospam)));
+    assert_eq!(true, re.is_match(&format!("{}", nospam)));
+    assert_eq!(true, re.is_match(&format!("{:X}", NoSpam([0, 0, 0, 0]))));
+    assert_eq!(true, re.is_match(&format!("{}", NoSpam([0, 0, 0, 0]))));
+    assert_eq!(true, re.is_match(&format!("{:X}", NoSpam([15, 15, 15, 15]))));
+    assert_eq!(true, re.is_match(&format!("{}", NoSpam([15, 15, 15, 15]))));
 }

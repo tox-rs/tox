@@ -11,5 +11,6 @@ sodiumoxide = "0.0.10"
 
 [dev-dependencies]
 quickcheck = "0.2"
-rustc-serialize = "0.3"
 rand = "0.3"
+regex = "0.1"
+rustc-serialize = "0.3"

@@ -21,8 +21,10 @@
 // FIXME: ↑ improve
 
 
+use std::fmt;
 use std::ops::Deref;
 
+use super::binary_io::*;
 use super::crypto_core::*;
 
 
@@ -66,5 +68,115 @@ impl Deref for NoSpam {
     fn deref(&self) -> &[u8; NOSPAMBYTES] {
         let NoSpam(ref ns_bytes) = *self;
         ns_bytes
+    }
+}
+
+/** The default formatting of `NoSpam`.
+
+E.g.:
+
+```
+use self::tox::toxcore::toxid::NoSpam;
+
+assert_eq!(format!("{:X}", NoSpam([0, 0, 0, 0])), "00000000");
+assert_eq!(format!("{:X}", NoSpam([255, 255, 255, 255])), "FFFFFFFF");
+```
+*/
+impl fmt::UpperHex for NoSpam {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:02X}{:02X}{:02X}{:02X}", self[0], self[1], self[2], self[3])
+    }
+}
+
+/** `Display` should always be the same as `UpperHex`.
+
+```
+use self::tox::toxcore::toxid::NoSpam;
+
+let nospam = NoSpam::new();
+assert_eq!(format!("{}", nospam), format!("{:X}", nospam));
+```
+*/
+impl fmt::Display for NoSpam {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:X}", self)
+    }
+}
+
+
+/** `Tox ID`.
+
+    Length | Contents
+    ------ | --------
+    32     | long term PublicKey
+    4      | NoSpam
+    2      | Checksum
+*/
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ToxId {
+    /// Long-term `PublicKey`.
+    pub pk: PublicKey,
+    /// `NoSpam`.
+    nospam: NoSpam,
+    checksum: [u8; 2],
+}
+
+/// Number of bytes of serialized [`ToxId`](./struct.ToxId.html).
+pub const TOXIDBYTES: usize = PUBLICKEYBYTES + NOSPAMBYTES + 2;
+
+impl ToxId {
+    /// Checksum of `PublicKey` and `NoSpam`.
+    ///
+    /// E.g.
+    ///
+    /// ```
+    /// use self::tox::toxcore::crypto_core::{
+    ///         gen_keypair,
+    ///         PublicKey,
+    ///         PUBLICKEYBYTES,
+    /// };
+    /// use self::tox::toxcore::toxid::{NoSpam, NOSPAMBYTES, ToxId};
+    ///
+    /// let (pk, _) = gen_keypair();
+    /// let nospam = NoSpam::new();
+    ///
+    /// let _checksum = ToxId::checksum(&pk, &nospam);
+    ///
+    /// assert_eq!(ToxId::checksum(&PublicKey([0; PUBLICKEYBYTES]),
+    ///            &NoSpam([0; NOSPAMBYTES])), [0; 2]);
+    /// assert_eq!(ToxId::checksum(&PublicKey([0xff; PUBLICKEYBYTES]),
+    ///            &NoSpam([0xff; NOSPAMBYTES])), [0; 2]);
+    /// ```
+    pub fn checksum(&PublicKey(ref pk): &PublicKey, nospam: &NoSpam) -> [u8; 2] {
+        let mut bytes = Vec::with_capacity(TOXIDBYTES - 2);
+        bytes.extend_from_slice(pk);
+        bytes.extend_from_slice(nospam.as_ref());
+
+        let mut checksum = [0; 2];
+
+        for pair in bytes.chunks(2) {
+            checksum = xor_checksum(&checksum, &[pair[0], pair[1]]);
+        }
+        checksum
+    }
+
+    /// Create new `ToxId`.
+    ///
+    /// E.g.
+    ///
+    /// ```
+    /// use self::tox::toxcore::crypto_core::gen_keypair;
+    /// use self::tox::toxcore::toxid::ToxId;
+    ///
+    /// let (pk, _) = gen_keypair();
+    /// let _toxid = ToxId::new(pk);
+    /// ```
+    pub fn new(pk: PublicKey) -> Self {
+        let nospam = NoSpam::new();
+        ToxId {
+            pk: pk,
+            nospam: nospam,
+            checksum: ToxId::checksum(&pk, &nospam),
+        }
     }
 }
