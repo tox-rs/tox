@@ -285,7 +285,7 @@ impl Arbitrary for PackedNode {
 
         let mut pk_bytes = [0; PUBLICKEYBYTES];
         g.fill_bytes(&mut pk_bytes);
-        let pk = PublicKey::from_slice(&pk_bytes).unwrap();
+        let pk = PublicKey(pk_bytes);
 
         if ipv4 {
             let addr = Ipv4Addr::new(g.gen(), g.gen(), g.gen(), g.gen());
@@ -307,7 +307,7 @@ impl Arbitrary for PackedNode {
 #[test]
 #[allow(non_snake_case)]
 fn packed_node_new_test_ip_type_UDP_IPv4() {
-    let pk = PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap();
+    let pk = PublicKey([0; PUBLICKEYBYTES]);
     let info = PackedNode::new(true,
                                SocketAddr::V4("0.0.0.0:0".parse().unwrap()),
                                &pk);
@@ -322,7 +322,7 @@ fn packed_node_new_test_ip_type_UDP_IPv4() {
 fn packed_node_ip_test() {
     let ipv4 = PackedNode::new(true,
                                SocketAddr::V4("0.0.0.0:0".parse().unwrap()),
-                               &PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap());
+                               &PublicKey([0; PUBLICKEYBYTES]));
 
     match ipv4.ip() {
         IpAddr::V4(_) => {},
@@ -332,7 +332,7 @@ fn packed_node_ip_test() {
     let ipv6 = PackedNode::new(true,
                                SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::from_str("::0").unwrap(),
                                    0, 0, 0)),
-                               &PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap());
+                               &PublicKey([0; PUBLICKEYBYTES]));
 
     match ipv6.ip() {
         IpAddr::V4(_) => panic!("This should not have happened, since IPv6 was supplied!"),
@@ -380,7 +380,7 @@ fn packed_node_protocol(saddr: SocketAddr, pk: &PublicKey)
 // tests for various IPv4 – use quickcheck
 fn packed_node_to_bytes_test_ipv4() {
     fn with_random_saddr(a: u8, b: u8, c: u8, d: u8, port: u16) {
-        let pk = &PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap();
+        let pk = &PublicKey([0; PUBLICKEYBYTES]);
         let saddr = SocketAddr::V4(
                      format!("{}.{}.{}.{}:{}", a, b, c, d, port)
                         .parse()
@@ -418,7 +418,7 @@ fn packed_node_to_bytes_test_ipv4() {
 fn packed_node_to_bytes_test_ipv6() {
     fn with_random_saddr(num1: u64, num2: u64, flowinfo: u32, scope_id: u32,
                       port: u16) {
-        let pk = &PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap();
+        let pk = &PublicKey([0; PUBLICKEYBYTES]);
 
         let (a, b, c, d) = u64_as_u16s(num1);
         let (e, f, g, h) = u64_as_u16s(num2);
@@ -563,8 +563,7 @@ impl Arbitrary for GetNodes {
     fn arbitrary<G: Gen>(g: &mut G) -> Self {
         let mut a: [u8; PUBLICKEYBYTES] = [0; PUBLICKEYBYTES];
         g.fill_bytes(&mut a);
-        let pk = PublicKey::from_slice(&a).unwrap();
-        GetNodes { pk: pk, id: g.gen() }
+        GetNodes { pk: PublicKey(a), id: g.gen() }
     }
 }
 
@@ -923,11 +922,11 @@ fn dht_packet_from_bytes_test() {
 #[test]
 // TODO: possible to use quickcheck?
 fn public_key_distance_test() {
-    let pk_0 = PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap();
-    let pk_1 = PublicKey::from_slice(&[1; PUBLICKEYBYTES]).unwrap();
-    let pk_2 = PublicKey::from_slice(&[2; PUBLICKEYBYTES]).unwrap();
-    let pk_ff = PublicKey::from_slice(&[0xff; PUBLICKEYBYTES]).unwrap();
-    let pk_fe = PublicKey::from_slice(&[0xfe; PUBLICKEYBYTES]).unwrap();
+    let pk_0 = PublicKey([0; PUBLICKEYBYTES]);
+    let pk_1 = PublicKey([1; PUBLICKEYBYTES]);
+    let pk_2 = PublicKey([2; PUBLICKEYBYTES]);
+    let pk_ff = PublicKey([0xff; PUBLICKEYBYTES]);
+    let pk_fe = PublicKey([0xfe; PUBLICKEYBYTES]);
 
     assert_eq!(Ordering::Less, pk_0.distance(&pk_1, &pk_2));
     assert_eq!(Ordering::Equal, pk_2.distance(&pk_2, &pk_2));
@@ -988,9 +987,9 @@ fn node_pk_test() {
 
 #[test]
 fn kbucket_index_test() {
-    let pk1 = PublicKey::from_slice(&[0b10101010; PUBLICKEYBYTES]).unwrap();
-    let pk2 = PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap();
-    let pk3 = PublicKey::from_slice(&[0b00101010; PUBLICKEYBYTES]).unwrap();
+    let pk1 = PublicKey([0b10101010; PUBLICKEYBYTES]);
+    let pk2 = PublicKey([0; PUBLICKEYBYTES]);
+    let pk3 = PublicKey([0b00101010; PUBLICKEYBYTES]);
     assert_eq!(None, kbucket_index(&pk1, &pk1));
     assert_eq!(Some(0), kbucket_index(&pk1, &pk2));
     assert_eq!(Some(2), kbucket_index(&pk2, &pk3));
@@ -1031,8 +1030,7 @@ fn bucket_try_add_test() {
     fn with_nodes(n1: PackedNode, n2: PackedNode, n3: PackedNode,
                   n4: PackedNode, n5: PackedNode, n6: PackedNode,
                   n7: PackedNode, n8: PackedNode) {
-        let pk_bytes = [0; PUBLICKEYBYTES];
-        let pk = PublicKey::from_slice(&pk_bytes).unwrap();
+        let pk = PublicKey([0; PUBLICKEYBYTES]);
         let mut node = Bucket::new(None);
         assert_eq!(true, node.try_add(&pk, &n1));
         assert_eq!(true, node.try_add(&pk, &n2));
@@ -1057,8 +1055,7 @@ fn bucket_try_add_test() {
 #[test]
 fn bucket_remove_test() {
     fn with_nodes(num: u8, bucket_size: u8, rng_num: usize) {
-        let pk_bytes = [0; PUBLICKEYBYTES];
-        let pk = PublicKey::from_slice(&pk_bytes).unwrap();
+        let pk = PublicKey([0; PUBLICKEYBYTES]);
 
         let mut rm_pubkeys: Vec<PublicKey> = Vec::new();
         let mut bucket = Bucket::new(Some(bucket_size));
@@ -1108,7 +1105,7 @@ impl Arbitrary for Kbucket {
     fn arbitrary<G: Gen>(g: &mut G) -> Self {
         let mut pk = [0; PUBLICKEYBYTES];
         g.fill_bytes(&mut pk);
-        let pk = PublicKey::from_slice(&pk).expect("PK from bytes failed.");
+        let pk = PublicKey([0; PUBLICKEYBYTES]);
 
         let mut kbucket = Kbucket::new(g.gen(), &pk);
 

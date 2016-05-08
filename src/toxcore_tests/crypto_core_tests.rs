@@ -32,8 +32,8 @@ use super::quickcheck::quickcheck;
 // test comparing empty keys
 // testing since it would appear that sodiumoxide doesn't do testing for it
 fn public_key_cmp_test_empty() {
-    let alice_publickey = PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap();
-    let bob_publickey = PublicKey::from_slice(&[0; PUBLICKEYBYTES]).unwrap();
+    let alice_publickey = PublicKey([0; PUBLICKEYBYTES]);
+    let bob_publickey = PublicKey([0; PUBLICKEYBYTES]);
 
     assert_eq!(alice_publickey.eq(&bob_publickey), true);
     assert_eq!(bob_publickey.eq(&alice_publickey), true);
@@ -81,13 +81,13 @@ fn public_key_valid_test() {
     let (pk, _) = gen_keypair();
     assert_eq!(true, public_key_valid(&pk));
 
-    assert_eq!(true, public_key_valid(&(PublicKey::from_slice(&[0b00000000; PUBLICKEYBYTES]).unwrap()))); // 0
-    assert_eq!(true, public_key_valid(&(PublicKey::from_slice(&[0b01111111; PUBLICKEYBYTES]).unwrap()))); // 127
-    assert_eq!(false, public_key_valid(&(PublicKey::from_slice(&[0b10000000; PUBLICKEYBYTES]).unwrap()))); // 128
-    assert_eq!(false, public_key_valid(&(PublicKey::from_slice(&[0b11111111; PUBLICKEYBYTES]).unwrap()))); // 255
+    assert_eq!(true, public_key_valid(&PublicKey([0; PUBLICKEYBYTES]))); // 0
+    assert_eq!(true, public_key_valid(&PublicKey([0b01111111; PUBLICKEYBYTES]))); // 127
+    assert_eq!(false, public_key_valid(&PublicKey([0b10000000; PUBLICKEYBYTES]))); // 128
+    assert_eq!(false, public_key_valid(&PublicKey([0b11111111; PUBLICKEYBYTES]))); // 255
 
     fn pk_from_u8(num: u8) {
-        let pk = PublicKey::from_slice(&[num; PUBLICKEYBYTES]).unwrap();
+        let pk = PublicKey([num; PUBLICKEYBYTES]);
 
         if num < 128 {
             assert_eq!(true, public_key_valid(&pk));
@@ -186,45 +186,45 @@ fn decrypt_data_symmetric_test() {
 
 #[test]
 fn increment_nonce_test_zero_plus_one() {
-    let cmp_nonce = Nonce::from_slice(&[0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 1]).unwrap();
+    let cmp_nonce = Nonce([0, 0, 0, 0, 0, 0, 0, 0,
+                           0, 0, 0, 0, 0, 0, 0, 0,
+                           0, 0, 0, 0, 0, 0, 0, 1]);
 
-    let mut nonce = Nonce::from_slice(&[0; NONCEBYTES]).unwrap();
+    let mut nonce = Nonce([0; NONCEBYTES]);
     increment_nonce(&mut nonce);
     assert_eq!(nonce, cmp_nonce);
 }
 
 #[test]
 fn increment_nonce_test_0xf_plus_one() {
-    let cmp_nonce = Nonce::from_slice(&[0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 0x10]).unwrap();
+    let cmp_nonce = Nonce([0, 0, 0, 0, 0, 0, 0, 0,
+                           0, 0, 0, 0, 0, 0, 0, 0,
+                           0, 0, 0, 0, 0, 0, 0, 0x10]);
 
-    let mut nonce = Nonce::from_slice(&[0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 0xf]).unwrap();
+    let mut nonce = Nonce([0, 0, 0, 0, 0, 0, 0, 0,
+                           0, 0, 0, 0, 0, 0, 0, 0,
+                           0, 0, 0, 0, 0, 0, 0, 0xf]);
     increment_nonce(&mut nonce);
     assert_eq!(nonce, cmp_nonce);
 }
 
 #[test]
 fn increment_nonce_test_0xff_plus_one() {
-    let cmp_nonce = Nonce::from_slice(&[0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 1, 0]).unwrap();
+    let cmp_nonce = Nonce([0, 0, 0, 0, 0, 0, 0, 0,
+                           0, 0, 0, 0, 0, 0, 0, 0,
+                           0, 0, 0, 0, 0, 0, 1, 0]);
 
-    let mut nonce = Nonce::from_slice(&[0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 0xff]).unwrap();
+    let mut nonce = Nonce([0, 0, 0, 0, 0, 0, 0, 0,
+                           0, 0, 0, 0, 0, 0, 0, 0,
+                           0, 0, 0, 0, 0, 0, 0, 0xff]);
     increment_nonce(&mut nonce);
     assert_eq!(nonce, cmp_nonce);
 }
 
 #[test]
 fn increment_nonce_test_0xff_max() {
-    let cmp_nonce = Nonce::from_slice(&[0; NONCEBYTES]).unwrap();
-    let mut nonce = Nonce::from_slice(&[0xff; NONCEBYTES]).unwrap();
+    let cmp_nonce = Nonce([0; NONCEBYTES]);
+    let mut nonce = Nonce([0xff; NONCEBYTES]);
     increment_nonce(&mut nonce);
     assert_eq!(cmp_nonce, nonce);
 }
@@ -241,10 +241,10 @@ fn increment_nonce_test_random() {
 
 #[test]
 fn increment_nonce_number_test_zero_plus_0xff00() {
-    let cmp_nonce = Nonce::from_slice(&[0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0xff, 0]).unwrap();
-    let mut nonce = Nonce::from_slice(&[0; NONCEBYTES]).unwrap();
+    let cmp_nonce = Nonce([0, 0, 0, 0, 0, 0, 0, 0,
+                           0, 0, 0, 0, 0, 0, 0, 0,
+                           0, 0, 0, 0, 0, 0, 0xff, 0]);
+    let mut nonce = Nonce([0; NONCEBYTES]);
 
     increment_nonce_number(&mut nonce, 0xff00);
     assert_eq!(nonce, cmp_nonce);
@@ -252,13 +252,13 @@ fn increment_nonce_number_test_zero_plus_0xff00() {
 
 #[test]
 fn increment_nonce_number_test_0xff0000_plus_0x011000() {
-    let cmp_nonce = Nonce::from_slice(&[0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 1, 0, 0x10, 0]).unwrap();
+    let cmp_nonce = Nonce([0, 0, 0, 0, 0, 0, 0, 0,
+                           0, 0, 0, 0, 0, 0, 0, 0,
+                           0, 0, 0, 0, 1, 0, 0x10, 0]);
 
-    let mut nonce = Nonce::from_slice(&[0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0, 0, 0,
-                                        0, 0, 0, 0, 0, 0xff, 0, 0]).unwrap();
+    let mut nonce = Nonce([0, 0, 0, 0, 0, 0, 0, 0,
+                           0, 0, 0, 0, 0, 0, 0, 0,
+                           0, 0, 0, 0, 0, 0xff, 0, 0]);
 
     increment_nonce_number(&mut nonce, 0x11000);
     assert_eq!(nonce, cmp_nonce);
