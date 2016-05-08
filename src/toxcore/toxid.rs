@@ -185,7 +185,43 @@ impl ToxId {
         ToxId {
             pk: pk,
             nospam: nospam,
-            checksum: ToxId::checksum(&pk, &nospam),
+            checksum: Self::checksum(&pk, &nospam),
         }
+    }
+
+    /// Change `NoSpam`. If provided, change to provided value. If not provided
+    /// (`None`), generate random `NoSpam`.
+    ///
+    /// After `NoSpam` change PublicKey is always the same, but `NoSpam` and
+    /// `checksum` differ:
+    ///
+    /// ```
+    /// use self::tox::toxcore::crypto_core::gen_keypair;
+    /// use self::tox::toxcore::toxid::{NoSpam, ToxId};
+    ///
+    /// let (pk, _) = gen_keypair();
+    /// let toxid = ToxId::new(pk);
+    /// let mut toxid2 = toxid;
+    /// toxid2.new_nospam(None);
+    ///
+    /// assert!(toxid != toxid2);
+    /// assert_eq!(toxid.pk, toxid2.pk);
+    ///
+    /// let mut toxid3 = toxid;
+    ///
+    /// // with same `NoSpam` IDs are identical
+    /// let nospam = NoSpam::new();
+    /// toxid2.new_nospam(Some(nospam));
+    /// toxid3.new_nospam(Some(nospam));
+    /// assert_eq!(toxid2, toxid3);
+    /// ```
+    // TODO: more tests
+    pub fn new_nospam(&mut self, nospam: Option<NoSpam>) {
+        if let Some(nospam) = nospam {
+            self.nospam = nospam;
+        } else {
+            self.nospam = NoSpam::new();
+        }
+        self.checksum = Self::checksum(&self.pk, &self.nospam);
     }
 }
