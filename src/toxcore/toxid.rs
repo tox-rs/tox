@@ -216,6 +216,7 @@ impl ToxId {
     /// assert_eq!(toxid2, toxid3);
     /// ```
     // TODO: more tests
+    // TODO: ↓ split into `new_nospam()` and `set_nospam(NoSpam)` ?
     pub fn new_nospam(&mut self, nospam: Option<NoSpam>) {
         if let Some(nospam) = nospam {
             self.nospam = nospam;
@@ -225,3 +226,75 @@ impl ToxId {
         self.checksum = Self::checksum(&self.pk, &self.nospam);
     }
 }
+
+/** Should always work, provided that there are supplied at least
+[`TOXIDBYTES`](./constant.TOXIDBYTES.html).
+
+Note that `ToxId` might not have a valid [`NoSpam`](./struct.NoSpam.html) from
+provided bytes.
+
+E.g.
+
+```
+use self::tox::toxcore::binary_io::FromBytes;
+use self::tox::toxcore::toxid::{ToxId, TOXIDBYTES};
+
+let bytes = [0; TOXIDBYTES + 10];
+
+assert_eq!(None, ToxId::from_bytes(&bytes[..TOXIDBYTES - 11]));
+let _toxid = ToxId::from_bytes(&bytes).expect("Failed to get ToxId from bytes!");
+```
+*/
+impl FromBytes<ToxId> for ToxId {
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() < TOXIDBYTES { return None }
+
+        let pk = match PublicKey::from_slice(&bytes[..PUBLICKEYBYTES]) {
+            Some(p) => p,
+            None => return None,
+        };
+
+        let nospam = NoSpam([bytes[PUBLICKEYBYTES], bytes[PUBLICKEYBYTES + 1],
+                        bytes[PUBLICKEYBYTES + 2], bytes[PUBLICKEYBYTES + 3]]);
+
+        Some(ToxId {
+            pk: pk,
+            nospam: nospam,
+            checksum: [bytes[TOXIDBYTES - 2], bytes[TOXIDBYTES - 1]],
+        })
+    }
+}
+
+/** E.g.
+
+```
+use self::tox::toxcore::binary_io::ToBytes;
+use self::tox::toxcore::crypto_core::{gen_keypair, PublicKey, PUBLICKEYBYTES};
+use self::tox::toxcore::toxid::{NoSpam, NOSPAMBYTES, ToxId, TOXIDBYTES};
+
+// create a `0` Tox ID
+let mut toxid = ToxId::new(PublicKey([0; PUBLICKEYBYTES]));
+toxid.new_nospam(Some(NoSpam([0; NOSPAMBYTES])));
+let toxid_bytes = toxid.to_bytes();
+assert_eq!([0; TOXIDBYTES].to_vec(), toxid_bytes);
+
+
+// and a random one
+let (pk, _) = gen_keypair();
+let PublicKey(ref pk_bytes) = pk;
+let toxid_bytes = ToxId::new(pk).to_bytes();
+assert_eq!(pk_bytes, &toxid_bytes[..PUBLICKEYBYTES]);
+```
+*/
+impl ToBytes for ToxId {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut result = Vec::with_capacity(TOXIDBYTES);
+        let PublicKey(pk) = self.pk;
+        result.extend_from_slice(&pk);
+        result.extend_from_slice(&*self.nospam);
+        result.extend_from_slice(&self.checksum);
+        result
+    }
+}
+
+// TODO: implement Display & UpperHex

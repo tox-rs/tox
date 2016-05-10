@@ -23,6 +23,7 @@ use super::quickcheck::quickcheck;
 use super::regex::Regex;
 
 use toxcore::binary_io::*;
+use toxcore::crypto_core::*;
 use toxcore::toxid::*;
 
 
@@ -70,11 +71,30 @@ fn no_spam_from_bytes_test() {
         if bytes.len() < NOSPAMBYTES {
             assert_eq!(None, NoSpam::from_bytes(&bytes));
         } else {
-            let nospam = NoSpam::from_bytes(&bytes).expect("Failed to get NoSpam!");
+            let nospam = NoSpam::from_bytes(&bytes)
+                            .expect("Failed to get NoSpam!");
             assert_eq!(bytes[0], nospam[0]);
             assert_eq!(bytes[1], nospam[1]);
             assert_eq!(bytes[2], nospam[2]);
             assert_eq!(bytes[3], nospam[3]);
+        }
+    }
+    quickcheck(with_bytes as fn(Vec<u8>));
+}
+
+
+// ToxId::from_bytes()
+
+#[test]
+fn tox_id_from_bytes_test() {
+    fn with_bytes(bytes: Vec<u8>) {
+        if bytes.len() < TOXIDBYTES {
+            assert_eq!(None, ToxId::from_bytes(&bytes));
+        } else {
+            let toxid = ToxId::from_bytes(&bytes)
+                            .expect("Failed to get ToxId!");
+            let PublicKey(ref pk) = toxid.pk;
+            assert_eq!(pk, &bytes[..PUBLICKEYBYTES]);
         }
     }
     quickcheck(with_bytes as fn(Vec<u8>));
