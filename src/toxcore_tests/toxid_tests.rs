@@ -99,3 +99,19 @@ fn tox_id_from_bytes_test() {
     }
     quickcheck(with_bytes as fn(Vec<u8>));
 }
+
+// ToxId::fmt()
+
+#[test]
+fn tox_id_fmt_test() {
+    // check if formatted ToxId is always upper-case hexadecimal with matching
+    // length
+    let right = Regex::new("^([0-9A-F]){76}$").expect("Creating regex failed!");
+    let wrong = Regex::new("F{76}").expect("Creating 2nd regexp failed!");
+    let (pk, _) = gen_keypair();
+    let toxid = ToxId::new(pk);
+    assert_eq!(true, right.is_match(&format!("{:X}", toxid)));
+    assert_eq!(true, right.is_match(&format!("{}", toxid)));
+    assert_eq!(false, wrong.is_match(&format!("{:X}", toxid)));
+    assert_eq!(false, wrong.is_match(&format!("{}", toxid)));
+}

@@ -297,4 +297,58 @@ impl ToBytes for ToxId {
     }
 }
 
-// TODO: implement Display & UpperHex
+/** The default formatting for `ToxId`.
+
+E.g.
+
+```
+use self::tox::toxcore::crypto_core::{PublicKey, PUBLICKEYBYTES};
+use self::tox::toxcore::toxid::{NoSpam, NOSPAMBYTES, ToxId};
+
+let mut toxid = ToxId::new(PublicKey([0; PUBLICKEYBYTES]));
+toxid.new_nospam(Some(NoSpam([0; NOSPAMBYTES])));
+// 76 `0`s
+assert_eq!(&format!("{:X}", toxid),
+    "0000000000000000000000000000000000000000000000000000000000000000000000000000");
+
+let mut toxid = ToxId::new(PublicKey([255; PUBLICKEYBYTES]));
+toxid.new_nospam(Some(NoSpam([255; NOSPAMBYTES])));
+// 72 `F`s + 4 `0`s
+assert_eq!(&format!("{:X}", toxid),
+    "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF0000");
+```
+*/
+impl fmt::UpperHex for ToxId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut string = String::with_capacity(TOXIDBYTES * 2);
+        let PublicKey(pk_bytes) = self.pk;
+        for byte in pk_bytes.iter() {
+            string.push_str(&format!("{:02X}", byte));
+        }
+        for byte in self.nospam.iter() {
+            string.push_str(&format!("{:02X}", byte));
+        }
+        string.push_str(&format!("{:02X}{:02X}", self.checksum[0],
+                                    self.checksum[1]));
+        write!(f, "{}", string)
+    }
+}
+
+/** Same as `UpperHex`.
+
+E.g.
+
+```
+use self::tox::toxcore::crypto_core::gen_keypair;
+use self::tox::toxcore::toxid::ToxId;
+
+let (pk, _) = gen_keypair();
+let toxid = ToxId::new(pk);
+assert_eq!(format!("{}", toxid), format!("{:X}", toxid));
+```
+*/
+impl fmt::Display for ToxId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:X}", self)
+    }
+}
