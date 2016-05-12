@@ -17,7 +17,10 @@
     along with Tox.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-//! `Tox ID` and stuff related to it.
+/*! `Tox ID` and stuff related to it.
+
+    https://zetok.github.io/tox-spec/#tox-id
+*/
 // FIXME: ↑ improve
 // TODO: ↓ add logging
 
@@ -38,7 +41,7 @@ use super::crypto_core::*;
 
     Additionally, it should be possible to set a custom `NoSpam`.
 
-    https://zetok.github.io/tox-spec/#messenger
+    https://zetok.github.io/tox-spec/#tox-id
 */
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NoSpam(pub [u8; NOSPAMBYTES]);
@@ -120,6 +123,8 @@ impl FromBytes<NoSpam> for NoSpam {
     32     | long term PublicKey
     4      | NoSpam
     2      | Checksum
+
+    https://zetok.github.io/tox-spec/#tox-id
 */
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ToxId {
