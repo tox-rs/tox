@@ -29,7 +29,7 @@ matrix:
 sudo: required
 
 before_install:
-  - if [[ "$TRAVIS_PULL_REQUEST" != "false" ]] && [[ "$TRAVIS_OS_NAME" == "linux" ]]; then bash ./scripts/verify-commit-messages.sh "$TRAVIS_COMMIT_RANGE" ; fi
+  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then bash ./scripts/verify-commit-messages.sh "$TRAVIS_COMMIT_RANGE" ; fi
   - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then bash ./scripts/bootstrap-ubuntu-14-04.sh; fi
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then bash ./scripts/bootstrap-osx.sh; fi
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then export PKG_CONFIG_PATH=$HOME/installed_libsodium/lib/pkgconfig:$PKG_CONFIG_PATH ; fi
