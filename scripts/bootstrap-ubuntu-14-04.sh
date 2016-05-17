@@ -3,7 +3,6 @@
 # used in travis to:
 #  - pull in dependencies for building libsodium
 #  - build required libsodium
-#  - clone sodiumoxide and make cargo use git version
 
 sudo apt-get update -qq
 sudo apt-get install -y build-essential libtool autotools-dev automake checkinstall check git yasm pkg-config

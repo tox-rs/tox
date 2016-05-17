@@ -2,9 +2,6 @@
 
 # used in travis to:
 #  - build libsodium
-#  - clone sodiumoxide and make cargo use git version
-
-# TODO: move this script somewhere else?
 
 git clone https://github.com/jedisct1/libsodium.git
 cd libsodium
