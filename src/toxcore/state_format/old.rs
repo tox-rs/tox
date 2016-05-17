@@ -20,7 +20,9 @@
 //! Old state format. *__Will be deprecated__ when something better will become
 //! available.*
 
-use toxcore::binary_io::FromBytes;
+use toxcore::binary_io::*;
+use toxcore::crypto_core::*;
+use toxcore::toxid::{NoSpam, NOSPAMBYTES};
 
 // TODO: improve docs
 
@@ -48,22 +50,40 @@ assert_eq!(255u8, SectionKind::EOF as u8);
 pub enum SectionKind {
     /// Section for [`NoSpam`](../../toxid/struct.NoSpam.html), public and
     /// secret keys.
+    ///
+    /// https://zetok.github.io/tox-spec/#nospam-and-keys-0x01
     NospamKeys = 0x01,
     /// Section for DHT-related data.
+    ///
+    /// https://zetok.github.io/tox-spec/#dht-0x02
     DHT =        0x02,
     /// Section for friends data.
+    ///
+    /// https://zetok.github.io/tox-spec/#friends-0x03
     Friends =    0x03,
     /// Section for own name.
+    ///
+    /// https://zetok.github.io/tox-spec/#name-0x04
     Name =       0x04,
     /// Section for own status message.
+    ///
+    /// https://zetok.github.io/tox-spec/#status-message-0x05
     StatusMsg =  0x05,
     /// Section for own status.
+    ///
+    /// https://zetok.github.io/tox-spec/#status-0x06
     Status =     0x06,
     /// Section for a list of TCP relays.
+    ///
+    /// https://zetok.github.io/tox-spec/#tcp-relays-0x0a
     TcpRelays =  0x0a,
     /// Section for a list of path nodes for onion routing.
+    ///
+    /// https://zetok.github.io/tox-spec/#path-nodes-0x0b
     PathNodes =  0x0b,
     /// End of file.
+    ///
+    /// https://zetok.github.io/tox-spec/#eof-0xff
     EOF =        0xff,
 }
 
@@ -107,5 +127,76 @@ impl FromBytes<SectionKind> for SectionKind {
             0xff => Some(SectionKind::EOF),
             _ => None,
         }
+    }
+}
+
+
+/** NoSpam and Keys section of the old state format.
+
+https://zetok.github.io/tox-spec/#nospam-and-keys-0x01
+*/
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NospamKeys {
+    /// Own `NoSpam`.
+    pub nospam: NoSpam,
+    /// Own `PublicKey`.
+    pub pk: PublicKey,
+    /// Own `SecretKey`.
+    pub sk: SecretKey,
+}
+
+/// Number of bytes of serialized [`NospamKeys`](./struct.NospamKeys.html).
+pub const NOSPAMKEYSBYTES: usize = NOSPAMBYTES + PUBLICKEYBYTES + SECRETKEYBYTES;
+
+/** Provided that there's at least [`NOSPAMKEYSBYTES`]
+(./constant.NOSPAMKEYSBYTES.html) de-serializing will not fail.
+
+E.g.
+
+```
+use self::tox::toxcore::binary_io::FromBytes;
+use self::tox::toxcore::crypto_core::{
+        PublicKey,
+        PUBLICKEYBYTES,
+        SecretKey,
+        SECRETKEYBYTES,
+};
+use self::tox::toxcore::state_format::old::{NospamKeys, NOSPAMKEYSBYTES};
+use self::tox::toxcore::toxid::{NoSpam, NOSPAMBYTES};
+
+let bytes = [0; NOSPAMKEYSBYTES];
+
+let result = NospamKeys {
+    nospam: NoSpam([0; NOSPAMBYTES]),
+    pk: PublicKey([0; PUBLICKEYBYTES]),
+    sk: SecretKey([0; SECRETKEYBYTES]),
+};
+
+assert_eq!(result, NospamKeys::from_bytes(&bytes)
+                    .expect("Failed to parse NospamKeys!"));
+```
+*/
+// TODO: more tests
+impl FromBytes<NospamKeys> for NospamKeys {
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() < NOSPAMKEYSBYTES { return None }
+
+        let nospam = NoSpam([bytes[0], bytes[1], bytes[2], bytes[3]]);
+
+        let pk = match PublicKey::from_slice(
+                    &bytes[NOSPAMBYTES..PUBLICKEYBYTES + NOSPAMBYTES]) {
+
+            Some(pk) => pk,
+            None => return None,
+        };
+
+        let sk = match SecretKey::from_slice(
+                    &bytes[NOSPAMBYTES + PUBLICKEYBYTES..NOSPAMKEYSBYTES]) {
+
+            Some(sk) => sk,
+            None => return None,
+        };
+
+        Some(NospamKeys { nospam: nospam, pk: pk, sk: sk })
     }
 }

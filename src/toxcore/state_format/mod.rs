@@ -23,10 +23,8 @@
 some point it will be deprecated in favour of something better.*
 
 *After deprecation of the old format there will be a period where it still will
-be supported. While being deprecated, loading data from old format should be
-possible using a library made out of toxcore.*
-
-*This will be done in order to boost backward compatibility.*
+be supported. After deprecation period code for handling old format will be
+moved out of toxcore into a separate library and maintained there.*
 
 https://zetok.github.io/tox-spec/#state-format
 */
