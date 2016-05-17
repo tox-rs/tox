@@ -17,18 +17,24 @@
     along with Tox.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-/*! State format – for saving / loading data across restarts.
+//! Tests for old state format module.
 
-*Currently there's only supported old, custom binary format used by toxcore. At
-some point it will be deprecated in favour of something better.*
+use super::quickcheck::quickcheck;
 
-*After deprecation of the old format there will be a period where it still will
-be supported. While being deprecated, loading data from old format should be
-possible using a library made out of toxcore.*
+use toxcore::binary_io::*;
+use toxcore::state_format::old::*;
 
-*This will be done in order to boost backward compatibility.*
+// SectionKind::from_bytes()
 
-https://zetok.github.io/tox-spec/#state-format
-*/
-
-pub mod old;
+#[test]
+fn section_kind_from_bytes_test() {
+    // test only for failure, since success is tested in docs test
+    fn with_bytes(bytes: Vec<u8>) {
+        if bytes.is_empty() || bytes[0] < 7 || bytes[0] == 10 ||
+           bytes[0] == 11 || bytes[0] == 255 {
+            return
+        }
+        assert_eq!(None, SectionKind::from_bytes(&bytes));
+    }
+    quickcheck(with_bytes as fn(Vec<u8>));
+}

@@ -31,7 +31,7 @@ https://zetok.github.io/tox-spec/#sections
 ## Serialization into bytes
 
 ```
-use self::tox::toxcore::state_format::old_state_format::SectionKind;
+use self::tox::toxcore::state_format::old::SectionKind;
 
 assert_eq!(1u8, SectionKind::NospamKeys as u8);
 assert_eq!(2u8, SectionKind::DHT as u8);
@@ -71,7 +71,7 @@ pub enum SectionKind {
 
 ```
 use self::tox::toxcore::binary_io::FromBytes;
-use self::tox::toxcore::state_format::old_state_format::SectionKind;
+use self::tox::toxcore::state_format::old::SectionKind;
 
 assert_eq!(SectionKind::NospamKeys,
         SectionKind::from_bytes(&[1]).expect("Failed to unwrap NospamKeys!"));
@@ -93,7 +93,6 @@ assert_eq!(SectionKind::EOF,
         SectionKind::from_bytes(&[255]).expect("Failed to unwrap EOF!"));
 ```
 */
-// TODO: test with quickcheck
 impl FromBytes<SectionKind> for SectionKind {
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
         match bytes[0] {

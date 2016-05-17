@@ -159,5 +159,6 @@ mod toxcore_tests {
     mod dht_tests;
     mod network_tests;
     mod packet_kind_tests;
+    mod state_format_old_tests;
     mod toxid_tests;
 }
