@@ -172,6 +172,7 @@ let result = NospamKeys {
     sk: SecretKey([0; SECRETKEYBYTES]),
 };
 
+assert_eq!(None, NospamKeys::from_bytes(&bytes[..NOSPAMKEYSBYTES - 1]));
 assert_eq!(result, NospamKeys::from_bytes(&bytes)
                     .expect("Failed to parse NospamKeys!"));
 ```

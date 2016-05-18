@@ -22,6 +22,8 @@
 use super::quickcheck::quickcheck;
 
 use toxcore::binary_io::*;
+use toxcore::crypto_core::*;
+use toxcore::toxid::*;
 use toxcore::state_format::old::*;
 
 // SectionKind::from_bytes()
@@ -35,6 +37,30 @@ fn section_kind_from_bytes_test() {
             return
         }
         assert_eq!(None, SectionKind::from_bytes(&bytes));
+    }
+    quickcheck(with_bytes as fn(Vec<u8>));
+}
+
+
+// NospamKeys::from_bytes()
+
+#[test]
+fn nospam_keys_from_bytes_test() {
+    fn with_bytes(bytes: Vec<u8>) {
+        if bytes.len() < NOSPAMKEYSBYTES {
+            assert_eq!(None, NospamKeys::from_bytes(&bytes));
+        } else {
+            let nsk: NospamKeys = NospamKeys::from_bytes(&bytes)
+                                .expect("Failed to unwrap NospamKeys!");
+
+            assert_eq!(&bytes[..NOSPAMBYTES], &*nsk.nospam);
+
+            let PublicKey(ref pk) = nsk.pk;
+            assert_eq!(&bytes[NOSPAMBYTES..NOSPAMBYTES + PUBLICKEYBYTES], pk);
+
+            let SecretKey(ref sk) = nsk.sk;
+            assert_eq!(&bytes[NOSPAMBYTES + PUBLICKEYBYTES..NOSPAMKEYSBYTES], sk);
+        }
     }
     quickcheck(with_bytes as fn(Vec<u8>));
 }
