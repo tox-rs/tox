@@ -177,7 +177,6 @@ assert_eq!(result, NospamKeys::from_bytes(&bytes)
                     .expect("Failed to parse NospamKeys!"));
 ```
 */
-// TODO: more tests
 impl FromBytes<NospamKeys> for NospamKeys {
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
         if bytes.len() < NOSPAMKEYSBYTES { return None }
@@ -199,5 +198,70 @@ impl FromBytes<NospamKeys> for NospamKeys {
         };
 
         Some(NospamKeys { nospam: nospam, pk: pk, sk: sk })
+    }
+}
+
+/** E.g.
+
+```
+use self::tox::toxcore::binary_io::{FromBytes, ToBytes};
+use self::tox::toxcore::crypto_core::*;
+use self::tox::toxcore::state_format::old::{NospamKeys, NOSPAMKEYSBYTES};
+use self::tox::toxcore::toxid::{NoSpam, NOSPAMBYTES};
+
+{ // with `0` keys
+    let nk = NospamKeys {
+        nospam: NoSpam([0; NOSPAMBYTES]),
+        pk: PublicKey([0; PUBLICKEYBYTES]),
+        sk: SecretKey([0; SECRETKEYBYTES]),
+    };
+    assert_eq!(nk.to_bytes(), [0; NOSPAMKEYSBYTES].to_vec());
+}
+
+{ // with random
+    let mut to_compare = Vec::with_capacity(NOSPAMKEYSBYTES);
+
+    let mut nospam_bytes = [0; NOSPAMBYTES];
+    randombytes_into(&mut nospam_bytes);
+    to_compare.extend_from_slice(&nospam_bytes);
+
+    let mut pk_bytes = [0; PUBLICKEYBYTES];
+    randombytes_into(&mut pk_bytes);
+    to_compare.extend_from_slice(&pk_bytes);
+
+    let mut sk_bytes = [0; SECRETKEYBYTES];
+    randombytes_into(&mut sk_bytes);
+    to_compare.extend_from_slice(&sk_bytes);
+
+    let nk = NospamKeys {
+        nospam: NoSpam(nospam_bytes),
+        pk: PublicKey(pk_bytes),
+        sk: SecretKey(sk_bytes),
+    };
+
+    assert_eq!(to_compare, nk.to_bytes());
+}
+
+{ // with de-serialized
+    let (pk, sk) = gen_keypair();
+    let nk = NospamKeys {
+        nospam: NoSpam::new(),
+        pk: pk,
+        sk: sk,
+    };
+
+    assert_eq!(nk, NospamKeys::from_bytes(&nk.to_bytes()).unwrap());
+}
+```
+*/
+impl ToBytes for NospamKeys {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut result = Vec::with_capacity(NOSPAMKEYSBYTES);
+        result.extend_from_slice(&*self.nospam);
+        let PublicKey(ref pk) = self.pk;
+        result.extend_from_slice(pk);
+        let SecretKey(ref sk) = self.sk;
+        result.extend_from_slice(sk);
+        result
     }
 }
