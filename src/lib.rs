@@ -162,3 +162,13 @@ mod toxcore_tests {
     mod state_format_old_tests;
     mod toxid_tests;
 }
+
+
+pub mod toxencryptsave {
+    pub mod encryptsave;
+}
+
+#[cfg(test)]
+mod toxencryptsave_tests {
+    mod encryptsave_tests;
+}
