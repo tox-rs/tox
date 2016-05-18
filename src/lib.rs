@@ -121,8 +121,6 @@ fn main() {
 
 */
 
-#![feature(question_mark)]
-
 #![cfg_attr(feature="clippy", feature(plugin))]
 
 #![cfg_attr(feature="clippy", plugin(clippy))]

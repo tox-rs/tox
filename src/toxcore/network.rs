@@ -37,6 +37,7 @@ use sodiumoxide;
 pub const PORT_MIN: u16 = 33445;
 /// Maximum port which Tox will try to bind to.
 pub const PORT_MAX: u16 = 33545;
+/// Maximum size of a UDP packet that tox will handle.
 pub const MAX_UDP_PACKET_SIZE: usize = 2048;
 
 static AT_STARTUP_RAN: Once = ONCE_INIT;
@@ -74,8 +75,10 @@ impl NetworkingCore {
         Added for reverse compatibility with old new_networking calls.
     */
     pub fn new<T: ToSocketAddrs>(addr: T) -> io::Result<NetworkingCore> {
-        let addr = addr.to_socket_addrs()?.next()
-            .ok_or(io::Error::new(ErrorKind::InvalidInput, "No Address"))?;
+        let addr = try!(
+            try!(addr.to_socket_addrs()).next()
+                .ok_or(io::Error::new(ErrorKind::InvalidInput, "No Address"))
+        );
         NetworkingCore::new_ex(addr.ip(), addr.port()..(addr.port() + (PORT_MAX - PORT_MIN)))
     }
 
@@ -94,11 +97,13 @@ impl NetworkingCore {
         let PortRange(port_range) = port_range.into();
 
         if !networking_at_startup() {
-            Err(io::Error::new(ErrorKind::Other, "Startup error."))?
+            return Err(io::Error::new(ErrorKind::Other, "Startup error."));
         }
 
-        let sock = bind_udp(ip, port_range)
-            .ok_or_else(|| io::Error::new(ErrorKind::AddrInUse, "Addr/Port in use."))?;
+        let sock = try!(
+            bind_udp(ip, port_range)
+                .ok_or_else(|| io::Error::new(ErrorKind::AddrInUse, "Addr/Port in use."))
+        );
 
         if let IpAddr::V6(_) = ip {
             // TODO Dual-stack: set only_v6 to false.
@@ -111,8 +116,8 @@ impl NetworkingCore {
         }
 
         // TODO set RCVBUF/SNDBUF/SIGPIPE
-        sock.set_broadcast(true)?;
-        sock.set_nonblocking(true)?;
+        try!(sock.set_broadcast(true));
+        try!(sock.set_nonblocking(true));
 
         Ok(NetworkingCore {
             packethandles: HashMap::new(),
@@ -170,11 +175,6 @@ impl NetworkingCore {
     (./constant.PORT_MIN.html):[`PORT_MAX`](./constant.PORT_MAX.html).
 
     Returns `None` if failed to bind to port within range.
-*/
-/* TODO: perhaps use closure as an argument with 2 ports provided;
-          - if no args in closure (`||`), use port range from constants
-          - if 2 args in closure, validate port range from args and try to use
-            them to do the binding
 */
 pub fn bind_udp(ip: IpAddr, port_range: Range<u16>) -> Option<UdpSocket> {
     for port in port_range {
