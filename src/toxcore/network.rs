@@ -60,6 +60,7 @@ pub struct PacketHandles {
 }
 
 impl PacketHandles {
+    #[inline]
     pub fn handle(&self, addr: SocketAddr, data: &[u8]) {
         (self.function)(self.object.clone(), addr, data);
     }
@@ -73,6 +74,12 @@ pub struct NetworkingCore {
 impl NetworkingCore {
     /** Initialize networking.
         Added for reverse compatibility with old new_networking calls.
+
+        ```
+        use tox::toxcore::network::NetworkingCore;
+
+        NetworkingCore::new("[::]:33445").unwrap();
+        ```
     */
     pub fn new<T: ToSocketAddrs>(addr: T) -> io::Result<NetworkingCore> {
         let addr = try!(
@@ -92,6 +99,12 @@ impl NetworkingCore {
          return NULL if there are problems.
 
         If error is non NULL it is set to 0 if no issues, 1 if socket related error, 2 if other.
+
+        ```
+        use tox::toxcore::network::NetworkingCore;
+
+        NetworkingCore::new_ex("::".parse().unwrap(), 33445..33545).unwrap();
+        ```
     */
     pub fn new_ex<R: Into<PortRange<u16>>>(ip: IpAddr, port_range: R) -> io::Result<NetworkingCore> {
         let PortRange(port_range) = port_range.into();
@@ -125,6 +138,26 @@ impl NetworkingCore {
         })
     }
 
+    /**
+        ```
+        # use std::rc::Rc;
+        # use std::any::Any;
+        # use std::cell::RefCell;
+        # use std::net::SocketAddr;
+        # use tox::toxcore::network::NetworkingCore;
+        # let mut net = NetworkingCore::new("[::]:33445").unwrap();
+        fn callback(num: Rc<RefCell<Any>>, _: SocketAddr, _: &[u8]) -> usize {
+            match num.borrow().downcast_ref::<usize>() {
+                Some(&num) => unimplemented!(),
+                None => 0
+            }
+        }
+
+        net.register(99, callback, Rc::new(RefCell::new(1)) as Rc<RefCell<Any>>);
+
+        // ..
+        ```
+    */
     pub fn register(&mut self, byte: u8, cb: PacketHandlerCallback, object: Rc<RefCell<Any>>) {
         self.packethandles.insert(byte, PacketHandles {
             object: object,
@@ -196,8 +229,15 @@ pub fn bind_udp(ip: IpAddr, port_range: Range<u16>) -> Option<UdpSocket> {
     If one is 0 and the other is non-0, use the non-0 value as only port
     If from > to, swap
 */
+#[derive(Clone, Debug, PartialEq)]
 pub struct PortRange<N>(pub Range<N>);
 
+/// If one is 0 and the other is non-0, use the non-0 value as only port
+///
+/// ```
+/// # use tox::toxcore::network::PortRange;
+/// assert_eq!(PortRange(33445..33446), (33445..).into());
+/// ```
 impl From<RangeFrom<u16>> for PortRange<u16> {
     fn from(range: RangeFrom<u16>) -> PortRange<u16> {
         let RangeFrom { start } = range;
@@ -205,6 +245,12 @@ impl From<RangeFrom<u16>> for PortRange<u16> {
     }
 }
 
+/// If one is 0 and the other is non-0, use the non-0 value as only port
+///
+/// ```
+/// # use tox::toxcore::network::PortRange;
+/// assert_eq!(PortRange(33445..33446), (..33445).into());
+/// ```
 impl From<RangeTo<u16>> for PortRange<u16> {
     fn from(range: RangeTo<u16>) -> PortRange<u16> {
         let RangeTo { end } = range;
@@ -212,12 +258,25 @@ impl From<RangeTo<u16>> for PortRange<u16> {
     }
 }
 
+/// If both from and to are 0, use default port range
+///
+/// ```
+/// # use tox::toxcore::network::PortRange;
+/// assert_eq!(PortRange(33445..33546), (..).into());
+/// ```
 impl From<RangeFull> for PortRange<u16> {
     fn from(_: RangeFull) -> PortRange<u16> {
         PortRange(Range { start: PORT_MIN, end: PORT_MAX + 1 })
     }
 }
 
+/// If from > to, swap
+///
+/// ```
+/// # use tox::toxcore::network::PortRange;
+/// assert_eq!(PortRange(33445..33546), (33445..33546).into());
+/// assert_eq!(PortRange(33445..33546), (33546..33445).into());
+/// ```
 impl From<Range<u16>> for PortRange<u16> {
     fn from(range: Range<u16>) -> PortRange<u16> {
         let Range { start, end } = range;
