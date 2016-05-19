@@ -11,11 +11,11 @@ use sodiumoxide::crypto::box_::{
 use sodiumoxide::crypto::hash::sha256;
 use ::toxcore::crypto_core;
 
-const MAGIC_LENGTH: usize = 8;
-const MAGIC_NUMBER: &'static [u8; MAGIC_LENGTH] = b"toxEsave";
-const SALT_LENGTH: usize = SALTBYTES;
-const KEY_LENGTH: usize = PRECOMPUTEDKEYBYTES;
-const EXTRA_LENGTH: usize = MAGIC_LENGTH + SALT_LENGTH + NONCEBYTES + MACBYTES;
+pub const MAGIC_LENGTH: usize = 8;
+pub const MAGIC_NUMBER: &'static [u8; MAGIC_LENGTH] = b"toxEsave";
+pub const SALT_LENGTH: usize = SALTBYTES;
+pub const KEY_LENGTH: usize = PRECOMPUTEDKEYBYTES;
+pub const EXTRA_LENGTH: usize = MAGIC_LENGTH + SALT_LENGTH + NONCEBYTES + MACBYTES;
 
 
 #[derive(Clone, Debug)]
