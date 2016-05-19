@@ -27,10 +27,12 @@ fn encrypt_test() {
 
     let plaintext = randombytes(16);
     let passphrase = randombytes(16);
-    assert_eq!(pass_decrypt(
-        &pass_encrypt(&plaintext, &passphrase).unwrap(),
-        &passphrase
-    ).unwrap(), plaintext);
+    let ciphertext = pass_encrypt(&plaintext, &passphrase).unwrap();
+    assert!(plaintext != ciphertext);
+    assert_eq!(
+        pass_decrypt(&ciphertext,&passphrase).unwrap(),
+        plaintext
+    );
 }
 
 #[test]
@@ -49,4 +51,12 @@ fn decrypt_test() {
 fn is_encrypted_test() {
     assert!(is_encrypted(include_bytes!("ciphertext")));
     assert!(!is_encrypted(b"Hello world.\n"));
+}
+
+#[test]
+fn get_salt_test() {
+    assert_eq!(
+        get_salt(include_bytes!("ciphertext")).unwrap().0,
+        [208, 154, 232, 3, 210, 251, 220, 103, 10, 139, 111, 145, 165, 238, 157, 170, 62, 76, 91, 231, 46, 254, 215, 174, 12, 195, 128, 5, 171, 229, 237, 60]
+    );
 }
