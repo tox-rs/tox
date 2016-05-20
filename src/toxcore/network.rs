@@ -168,12 +168,17 @@ impl NetworkingCore {
     pub fn poll(&self) {
         let mut data = [0; MAX_UDP_PACKET_SIZE];
 
-        while let Ok((len, addr)) = self.receive_packet(&mut data) {
-            if len < 1 { continue };
+        loop {
+            match self.receive_packet(&mut data) {
+                Ok((size, addr)) => {
+                    if size < 1 { continue };
 
-            match self.packethandles.get(&data[0]) {
-                Some(handler) => handler.handle(addr, &data[..len]),
-                None => warn!("[{:x}] -- Packet has no handler", data[0])
+                    match self.packethandles.get(&data[0]) {
+                        Some(handler) => handler.handle(addr, &data[..size]),
+                        None => warn!("[{:x}] -- Packet has no handler", data[0])
+                    }
+                },
+                _ => continue
             }
         }
     }
