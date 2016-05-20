@@ -28,8 +28,9 @@ use std::cell::RefCell;
 use std::io::{ self, ErrorKind };
 use std::sync::{ Once, ONCE_INIT };
 use std::ops::{ Range, RangeFrom, RangeTo, RangeFull };
-use std::net::{ UdpSocket, SocketAddr, IpAddr, Ipv6Addr, ToSocketAddrs };
+use std::net::{ IpAddr, Ipv6Addr, SocketAddr, ToSocketAddrs };
 use std::collections::HashMap;
+use mio::udp::UdpSocket;
 use sodiumoxide;
 
 
@@ -121,7 +122,7 @@ impl NetworkingCore {
         if let IpAddr::V6(_) = ip {
             // TODO Dual-stack: set only_v6 to false.
 
-            let res = sock.join_multicast_v6(&Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 0x01), 0);
+            let res = sock.join_multicast(&IpAddr::V6(Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 0x01)));
             match res {
                 Ok(_) => debug!("Local multicast group FF02::1 joined successfully"),
                 Err(err) => debug!("Failed to activate local multicast membership. {}", err)
@@ -130,7 +131,6 @@ impl NetworkingCore {
 
         // TODO set RCVBUF/SNDBUF/SIGPIPE
         try!(sock.set_broadcast(true));
-        try!(sock.set_nonblocking(true));
 
         Ok(NetworkingCore {
             packethandles: HashMap::new(),
@@ -170,7 +170,7 @@ impl NetworkingCore {
 
         loop {
             match self.receive_packet(&mut data) {
-                Ok((size, addr)) => {
+                Ok(Some((size, addr))) => {
                     if size < 1 { continue };
 
                     match self.packethandles.get(&data[0]) {
@@ -178,30 +178,36 @@ impl NetworkingCore {
                         None => warn!("[{:x}] -- Packet has no handler", data[0])
                     }
                 },
-                _ => continue
+                Ok(None) => continue,
+                Err(err) => {
+                    warn!("{:?}", err);
+                    break
+                }
             }
         }
     }
 
-    pub fn send_packet(&self, addr: SocketAddr, data: &[u8]) -> io::Result<usize> {
+    pub fn send_packet(&self, addr: SocketAddr, data: &[u8]) -> io::Result<Option<usize>> {
         // XXX need check target ip type?
-        let res = self.sock.send_to(data, addr);
+        let res = self.sock.send_to(data, &addr);
 
         // TODO debug
         match &res {
-            &Ok(size) => debug!("send: [{} -> {}] {:?}", addr, size, data),
+            &Ok(Some(size)) => debug!("send: [{} -> {}] {:?}", addr, size, data),
+            &Ok(None) => debug!("send: [none] {:?}", data),
             &Err(ref err) => debug!("{}", err)
         }
 
         res
     }
 
-    pub fn receive_packet(&self, data: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
+    pub fn receive_packet(&self, data: &mut [u8]) -> io::Result<Option<(usize, SocketAddr)>> {
         let res = self.sock.recv_from(data);
 
         // TODO debug
         match &res {
-            &Ok((size, addr)) => debug!("recv: [{} -> {}] {:?}", addr, size, data),
+            &Ok(Some((size, addr))) => debug!("recv: [{} -> {}] {:?}", addr, size, data),
+            &Ok(None) => debug!("recv: [none] {:?}", data),
             &Err(ref err) => debug!("{}", err)
         }
 
@@ -216,7 +222,11 @@ impl NetworkingCore {
 */
 pub fn bind_udp(ip: IpAddr, port_range: Range<u16>) -> Option<UdpSocket> {
     for port in port_range {
-        match UdpSocket::bind((ip, port)) {
+        match (ip, port).to_socket_addrs().ok()
+            .and_then(|mut addrs| addrs.next())
+            .ok_or_else(|| io::Error::new(ErrorKind::AddrNotAvailable, "Socket Addr Not Available."))
+            .and_then(|addr| UdpSocket::bound(&addr))
+        {
             Ok(s) => {
                 debug!(target: "Port", "Bind to port {} successful.", port);
                 return Some(s)
