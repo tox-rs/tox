@@ -164,9 +164,11 @@ mod toxcore_tests {
 }
 
 
+#[warn(missing_docs)]
 pub mod toxencryptsave {
     pub mod encryptsave;
 }
+
 
 #[cfg(test)]
 mod toxencryptsave_tests {

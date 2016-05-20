@@ -38,7 +38,7 @@ pub const KEY_LENGTH: usize = PRECOMPUTEDKEYBYTES;
 pub const EXTRA_LENGTH: usize = MAGIC_LENGTH + SALT_LENGTH + NONCEBYTES + MACBYTES;
 
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PassKey {
     pub salt: Salt,
     pub key: PrecomputedKey
@@ -70,8 +70,8 @@ impl PassKey {
         })
     }
 
-    pub fn encrypt(&self, data: &[u8]) -> Result<Vec<u8>, Encryption> {
-        if data.is_empty() { return Err(Encryption::Null) };
+    pub fn encrypt(&self, data: &[u8]) -> Result<Vec<u8>, EncryptionError> {
+        if data.is_empty() { return Err(EncryptionError::Null) };
 
         let mut output = Vec::new();
         output.extend_from_slice(MAGIC_NUMBER);
@@ -86,20 +86,20 @@ impl PassKey {
         Ok(output)
     }
 
-    pub fn decrypt(&self, data: &[u8]) -> Result<Vec<u8>, Decryption> {
-        if data.is_empty() { return Err(Decryption::Null) };
-        if data.len() <= EXTRA_LENGTH { return Err(Decryption::InvalidLength) };
-        if !is_encrypted(data) { return Err(Decryption::BadFormat) };
+    pub fn decrypt(&self, data: &[u8]) -> Result<Vec<u8>, DecryptionError> {
+        if data.is_empty() { return Err(DecryptionError::Null) };
+        if data.len() <= EXTRA_LENGTH { return Err(DecryptionError::InvalidLength) };
+        if !is_encrypted(data) { return Err(DecryptionError::BadFormat) };
 
         let nonce = try!(Nonce::from_slice(&data[
             MAGIC_LENGTH+SALT_LENGTH..MAGIC_LENGTH+SALT_LENGTH+NONCEBYTES
-        ]).ok_or(Decryption::BadFormat));
+        ]).ok_or(DecryptionError::BadFormat));
 
         let output = try!(crypto_core::decrypt_data_symmetric(
             &self.key,
             &nonce,
             &data[MAGIC_LENGTH+SALT_LENGTH+NONCEBYTES..]
-        ).or(Err(Decryption::Failed)));
+        ).or(Err(DecryptionError::Failed)));
 
         Ok(output)
     }
@@ -110,11 +110,11 @@ pub fn is_encrypted(data: &[u8]) -> bool {
     data.starts_with(MAGIC_NUMBER)
 }
 
-pub fn pass_encrypt(data: &[u8], passphrase: &[u8]) -> Result<Vec<u8>, Encryption> {
+pub fn pass_encrypt(data: &[u8], passphrase: &[u8]) -> Result<Vec<u8>, EncryptionError> {
     try!(PassKey::new(passphrase)).encrypt(data)
 }
 
-pub fn pass_decrypt(data: &[u8], passphrase: &[u8]) -> Result<Vec<u8>, Decryption> {
+pub fn pass_decrypt(data: &[u8], passphrase: &[u8]) -> Result<Vec<u8>, DecryptionError> {
     let salt = try!(get_salt(data).ok_or(KeyDerivationError::Failed));
     try!(PassKey::with_salt(passphrase, salt)).decrypt(data)
 }
@@ -138,19 +138,19 @@ pub enum KeyDerivationError {
 }
 
 #[derive(Clone, Debug)]
-pub enum Encryption {
+pub enum EncryptionError {
     Null,
     KeyDerivation(KeyDerivationError),
 }
 
-impl From<KeyDerivationError> for Encryption {
-    fn from(err: KeyDerivationError) -> Encryption {
-        Encryption::KeyDerivation(err)
+impl From<KeyDerivationError> for EncryptionError {
+    fn from(err: KeyDerivationError) -> EncryptionError {
+        EncryptionError::KeyDerivation(err)
     }
 }
 
 #[derive(Clone, Debug)]
-pub enum Decryption {
+pub enum DecryptionError {
     Null,
     InvalidLength,
     BadFormat,
@@ -158,8 +158,8 @@ pub enum Decryption {
     Failed
 }
 
-impl From<KeyDerivationError> for Decryption {
-    fn from(err: KeyDerivationError) -> Decryption {
-        Decryption::KeyDerivation(err)
+impl From<KeyDerivationError> for DecryptionError {
+    fn from(err: KeyDerivationError) -> DecryptionError {
+        DecryptionError::KeyDerivation(err)
     }
 }
