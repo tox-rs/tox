@@ -66,6 +66,14 @@ pub fn array_to_u32(array: &[u8; 4]) -> u32 {
     result
 }
 
+/// Safely cast `u32` to `[u8; 4]`.
+pub fn u32_to_array(num: u32) -> [u8; 4] {
+    let mut array: [u8; 4] = [0; 4];
+    for (pos, item) in array.iter_mut().enumerate() {
+        *item = (num >> (8 * pos)) as u8;
+    }
+    array
+}
 
 /// Safely cast `&[u8; 8]` to `u64`.
 pub fn array_to_u64(array: &[u8; 8]) -> u64 {

@@ -22,6 +22,7 @@
 
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
+use toxcore::dht::*;
 use toxcore::toxid::{NoSpam, NOSPAMBYTES};
 
 // TODO: improve docs
@@ -265,3 +266,62 @@ impl ToBytes for NospamKeys {
         result
     }
 }
+
+
+/** DHT section of the old state format.
+
+https://zetok.github.io/tox-spec/#dht-0x02
+
+Serialized format
+*/
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DhtState(pub Vec<PackedNode>);
+
+/// Minimal number of bytes [`DhtState`](./struct.DhtState.html) has.
+///
+/// Assumes that at least all the magic numbers are present.
+const DHT_STATE_SIZE_MIN: usize = 12;
+
+/// Special, magical beginning of DHT section in LE.
+const DHT_MAGICAL: u32 = 0x159000d;
+
+/** Special DHT section type encoded in LE.
+
+    https://zetok.github.io/tox-spec/#dht-sections
+*/
+const DHT_SECTION_TYPE: u16 = 0x04;
+
+/** Yet another magical number in DHT section that needs a check.
+
+https://zetok.github.io/tox-spec/#dht-sections
+*/
+const DHT_2ND_MAGICAL: u16 = 0x11ce;
+
+/** If successful, returns `DhtState` and length of the section in bytes.
+
+    If de-serialization failed, returns `None`.
+*/
+// TODO: better docs; list when can fail
+impl FromBytes<(DhtState, usize)> for (DhtState, usize) {
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        if
+            bytes.len() < DHT_STATE_SIZE_MIN ||
+            // check whether beginning of the section matches DHT magic bytes
+            &u32_to_array(DHT_MAGICAL.to_le()) != &bytes[..4] ||
+            // check DHT section type
+            &u16_to_array(DHT_SECTION_TYPE.to_le()) != &bytes[8..10] ||
+            // check whether yet another magic number matches ;f
+            &u16_to_array(DHT_2ND_MAGICAL.to_le()) != &bytes[10..12]
+        { return None } // can I haz yet another magical number?
+
+        // length of the whole section
+        let section_len = {
+            let nodes = array_to_u32(&[bytes[4], bytes[5], bytes[6], bytes[7]]);
+            u32::from_le(nodes) as usize + DHT_STATE_SIZE_MIN
+        };
+
+        PackedNode::from_bytes_multiple(&bytes[DHT_STATE_SIZE_MIN..section_len])
+            .map(|pns| (DhtState(pns), section_len))
+    }
+}
+// TODO: test ↑

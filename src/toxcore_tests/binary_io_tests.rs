@@ -25,22 +25,15 @@ use toxcore::binary_io::*;
 
 
 fn u16_to_array_and_back(num: u16) {
-    assert!(num == array_to_u16(&u16_to_array(num)));
+    assert_eq!(num, array_to_u16(&u16_to_array(num)));
 }
 
-fn u32_to_array(num: u32) -> [u8; 4] {
-    let mut array: [u8; 4] = [0; 4];
-    for (pos, item) in array.iter_mut().enumerate() {
-        *item = (num >> (8 * pos)) as u8;
-    }
-    array
-}
 fn u32_to_array_and_back(num: u32) {
-    assert!(num == array_to_u32(&u32_to_array(num)));
+    assert_eq!(num, array_to_u32(&u32_to_array(num)));
 }
 
 fn u64_to_array_and_back(num: u64) {
-    assert!(num == array_to_u64(&u64_to_array(num)));
+    assert_eq!(num, array_to_u64(&u64_to_array(num)));
 }
 
 #[test]
@@ -73,6 +66,19 @@ fn array_to_u32_test() {
     assert_eq!(array_to_u32(&[0, 0, 0, 1]), 16777216);
     assert_eq!(array_to_u32(&[0, 0, 0, 0xff]), 4278190080);
     assert_eq!(array_to_u32(&[0xff, 0xff, 0xff, 0xff]), u32::max_value());
+
+    quickcheck(u32_to_array_and_back as fn(u32));
+}
+
+#[test]
+fn u32_to_array_test() {
+    assert_eq!([0, 0, 0, 0], u32_to_array(0));
+    assert_eq!([1, 0, 0, 0], u32_to_array(1));
+    assert_eq!([0, 1, 0, 0], u32_to_array(256));
+    assert_eq!([0, 0, 1, 0], u32_to_array(65536));
+    assert_eq!([0, 0, 0, 1], u32_to_array(16777216));
+    assert_eq!([0, 0, 0, 0xff], u32_to_array(4278190080));
+    assert_eq!([0xff, 0xff, 0xff, 0xff], u32_to_array(u32::max_value()));
 
     quickcheck(u32_to_array_and_back as fn(u32));
 }
