@@ -123,9 +123,7 @@ pub fn get_salt(data: &[u8]) -> Option<Salt> {
     if is_encrypted(data)
         && data.len() >= MAGIC_LENGTH + SALT_LENGTH
     {
-        let mut salt = [0; SALT_LENGTH];
-        salt.clone_from_slice(&data[MAGIC_LENGTH..MAGIC_LENGTH+SALT_LENGTH]);
-        Some(Salt(salt))
+        Salt::from_slice(&data[MAGIC_LENGTH..MAGIC_LENGTH+SALT_LENGTH])
     } else {
         None
     }
