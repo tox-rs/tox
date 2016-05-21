@@ -280,7 +280,7 @@ pub struct DhtState(pub Vec<PackedNode>);
 /// Minimal number of bytes [`DhtState`](./struct.DhtState.html) has.
 ///
 /// Assumes that at least all the magic numbers are present.
-const DHT_STATE_SIZE_MIN: usize = 12;
+pub const DHT_STATE_MIN_SIZE: usize = 12;
 
 /// Special, magical beginning of DHT section in LE.
 const DHT_MAGICAL: u32 = 0x159000d;
@@ -297,15 +297,87 @@ https://zetok.github.io/tox-spec/#dht-sections
 */
 const DHT_2ND_MAGICAL: u16 = 0x11ce;
 
+/** An alias for de-serialization result of [`DhtState`]
+    (./struct.DhtState.html).
+
+### De-serialization docs:
+
+If successful, returns `DhtState` and length of the section in bytes.
+
+**Note that an empty list of nodes can be returned!**
+
+If de-serialization failed, returns `None`.
+
+Fails when:
+
+* number of bytes is less than [`DHT_STATE_MIN_SIZE`]
+  (./constant.DHT_STATE_MIN_SIZE.html)
+* one of 3 magic numbers doesn't match
+* encoded length of section + `DHT_STATE_MIN_SIZE` is bigger than all
+  suppplied bytes
+
+E.g. de-serialization with an empty list:
+
+```
+use self::tox::toxcore::binary_io::*;
+use self::tox::toxcore::dht::*;
+use self::tox::toxcore::state_format::old::*;
+
+let serialized = vec![
+        0x0d, 0x00, 0x59, 0x01,  // the first magic number
+        0, 0, 0, 0,   // length of `PackedNode`s bytes
+        0x04, 0,  // section magic number
+        0xce, 0x11,  // another magic number
+        // here would go `PackedNode`s, but since their length is `0`..
+];
+
+let result = (DhtState(vec![]), DHT_STATE_MIN_SIZE);
+
+assert_eq!(result, ToDhtState::from_bytes(&serialized).unwrap());
+```
+*/
+
+// TODO: ↓ rename
+pub type ToDhtState = (DhtState, usize);
+
 /** If successful, returns `DhtState` and length of the section in bytes.
 
-    If de-serialization failed, returns `None`.
+**Note that an empty list of nodes can be returned!**
+
+If de-serialization failed, returns `None`.
+
+Fails when:
+
+* number of bytes is less than [`DHT_STATE_MIN_SIZE`]
+  (./constant.DHT_STATE_MIN_SIZE.html)
+* one of 3 magic numbers doesn't match
+* encoded length of section + `DHT_STATE_MIN_SIZE` is bigger than all
+  suppplied bytes
+
+E.g. de-serialization with an empty list:
+
+```
+use self::tox::toxcore::binary_io::*;
+use self::tox::toxcore::dht::*;
+use self::tox::toxcore::state_format::old::*;
+
+let serialized = vec![
+        0x0d, 0x00, 0x59, 0x01,  // the first magic number
+        0, 0, 0, 0,   // length of `PackedNode`s bytes
+        0x04, 0,  // section magic number
+        0xce, 0x11,  // another magic number
+        // here would go `PackedNode`s, but since their length is `0`..
+];
+
+let result = (DhtState(vec![]), DHT_STATE_MIN_SIZE);
+
+assert_eq!(result, ToDhtState::from_bytes(&serialized).unwrap());
+```
 */
-// TODO: better docs; list when can fail
-impl FromBytes<(DhtState, usize)> for (DhtState, usize) {
+impl FromBytes<ToDhtState> for ToDhtState {
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
         if
-            bytes.len() < DHT_STATE_SIZE_MIN ||
+            bytes.len() < DHT_STATE_MIN_SIZE ||
             // check whether beginning of the section matches DHT magic bytes
             &u32_to_array(DHT_MAGICAL.to_le()) != &bytes[..4] ||
             // check DHT section type
@@ -317,11 +389,16 @@ impl FromBytes<(DhtState, usize)> for (DhtState, usize) {
         // length of the whole section
         let section_len = {
             let nodes = array_to_u32(&[bytes[4], bytes[5], bytes[6], bytes[7]]);
-            u32::from_le(nodes) as usize + DHT_STATE_SIZE_MIN
+            let whole_len = u32::from_le(nodes) as usize + DHT_STATE_MIN_SIZE;
+            // check if it's bigger, since that would be the only thing that
+            // could cause panic
+            if whole_len > bytes.len() { return None }
+            whole_len
         };
 
-        PackedNode::from_bytes_multiple(&bytes[DHT_STATE_SIZE_MIN..section_len])
-            .map(|pns| (DhtState(pns), section_len))
+        PackedNode::from_bytes_multiple(&bytes[DHT_STATE_MIN_SIZE..section_len])
+            .map_or(Some((DhtState(vec![]), DHT_STATE_MIN_SIZE)),
+                    |pns| Some((DhtState(pns), section_len)))
     }
 }
 // TODO: test ↑
