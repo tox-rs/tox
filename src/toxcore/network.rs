@@ -43,30 +43,36 @@ pub const MAX_UDP_PACKET_SIZE: usize = 2048;
 
 static AT_STARTUP_RAN: Once = ONCE_INIT;
 
+/** Run this before creating sockets.
+
+    return true on success
+    return false on failure
+*/
 fn networking_at_startup() -> bool {
     let mut output = true;
     AT_STARTUP_RAN.call_once(|| output = sodiumoxide::init());
     output
 }
 
-/** Function to receive data, ip and port of sender is put into ip_port.
+/** Function to receive data,
+    SocketAddr of sender is put into addr.
     Packet data is put into data.
-    Packet length is put into length.
 */
-pub type PacketHandlerCallback = fn(Rc<RefCell<Any>>, SocketAddr, &[u8]) -> usize;
+pub type PacketHandlerCallback = fn(Rc<RefCell<Any>>, addr: SocketAddr, data: &[u8]) -> usize;
 
-pub struct PacketHandles {
+struct PacketHandles {
     object: Rc<RefCell<Any>>,
     function: PacketHandlerCallback
 }
 
 impl PacketHandles {
     #[inline]
-    pub fn handle(&self, addr: SocketAddr, data: &[u8]) {
+    fn handle(&self, addr: SocketAddr, data: &[u8]) {
         (self.function)(self.object.clone(), addr, data);
     }
 }
 
+/// Networking Core.
 pub struct NetworkingCore {
     packethandles: HashMap<u8, PacketHandles>,
     sock: UdpSocket
@@ -74,27 +80,11 @@ pub struct NetworkingCore {
 
 impl NetworkingCore {
     /** Initialize networking.
-        Added for reverse compatibility with old new_networking calls.
-
-        ```
-        use tox::toxcore::network::NetworkingCore;
-
-        NetworkingCore::new("[::]:33445").unwrap();
-        ```
-    */
-    pub fn new<T: ToSocketAddrs>(addr: T) -> io::Result<NetworkingCore> {
-        let addr = try!(
-            try!(addr.to_socket_addrs()).next()
-                .ok_or(io::Error::new(ErrorKind::InvalidInput, "No Address"))
-        );
-        NetworkingCore::new_ex(addr.ip(), addr.port()..(addr.port() + (PORT_MAX - PORT_MIN)))
-    }
-
-    // TODO fix docs
-    /** Initialize networking.
         Bind to ip and port.
         ip must be in network order EX: 127.0.0.1 = (7F000001).
         port is in host byte order (this means don't worry about it).
+
+        TODO fix docs
 
          return NetworkingCore object if no problems
          return NULL if there are problems.
@@ -104,10 +94,10 @@ impl NetworkingCore {
         ```
         use tox::toxcore::network::NetworkingCore;
 
-        NetworkingCore::new_ex("::".parse().unwrap(), 33445..33545).unwrap();
+        NetworkingCore::new("::".parse().unwrap(), 33445..33545).unwrap();
         ```
     */
-    pub fn new_ex<R: Into<PortRange<u16>>>(ip: IpAddr, port_range: R) -> io::Result<NetworkingCore> {
+    pub fn new<R: Into<PortRange<u16>>>(ip: IpAddr, port_range: R) -> io::Result<NetworkingCore> {
         let PortRange(port_range) = port_range.into();
 
         if !networking_at_startup() {
@@ -138,14 +128,16 @@ impl NetworkingCore {
         })
     }
 
-    /**
+    /** Function to call when packet beginning with byte is received.
+        TODO docs.
+
         ```
         # use std::rc::Rc;
         # use std::any::Any;
         # use std::cell::RefCell;
         # use std::net::SocketAddr;
         # use tox::toxcore::network::NetworkingCore;
-        # let mut net = NetworkingCore::new("[::]:33445").unwrap();
+        # let mut net = NetworkingCore::new("::".parse().unwrap(), ..).unwrap();
         fn callback(num: Rc<RefCell<Any>>, _: SocketAddr, _: &[u8]) -> usize {
             match num.borrow().downcast_ref::<usize>() {
                 Some(&num) => unimplemented!(),
@@ -153,7 +145,7 @@ impl NetworkingCore {
             }
         }
 
-        net.register(99, callback, Rc::new(RefCell::new(1)) as Rc<RefCell<Any>>);
+        net.register(99, callback, Rc::new(RefCell::new(1usize)) as Rc<RefCell<Any>>);
 
         // ..
         ```
@@ -165,28 +157,23 @@ impl NetworkingCore {
         });
     }
 
+    /// Call this several times a second.
     pub fn poll(&self) {
         let mut data = [0; MAX_UDP_PACKET_SIZE];
 
-        loop {
-            match self.receive_packet(&mut data) {
-                Ok(Some((size, addr))) => {
-                    if size < 1 { continue };
+        while let Ok(res) = self.receive_packet(&mut data) {
+            if let Some((size, addr)) = res {
+                if size < 1 { continue };
 
-                    match self.packethandles.get(&data[0]) {
-                        Some(handler) => handler.handle(addr, &data[..size]),
-                        None => warn!("[{:x}] -- Packet has no handler", data[0])
-                    }
-                },
-                Ok(None) => continue,
-                Err(err) => {
-                    warn!("{:?}", err);
-                    break
+                match self.packethandles.get(&data[0]) {
+                    Some(handler) => handler.handle(addr, &data[..size]),
+                    None => warn!("[{:x}] -- Packet has no handler", data[0])
                 }
             }
         }
     }
 
+    /// Function to send packet(data) to SocketAddr.
     pub fn send_packet(&self, addr: SocketAddr, data: &[u8]) -> io::Result<Option<usize>> {
         // XXX need check target ip type?
         let res = self.sock.send_to(data, &addr);
@@ -201,6 +188,13 @@ impl NetworkingCore {
         res
     }
 
+    /** Function to receive data
+        Returns `Option<(length, addr)>` or `io::Error`.
+
+        SocketAddr of sender is put into addr.
+        Packet data is put into data.
+        Packet length is put into length.
+    */
     pub fn receive_packet(&self, data: &mut [u8]) -> io::Result<Option<(usize, SocketAddr)>> {
         let res = self.sock.recv_from(data);
 
@@ -239,11 +233,7 @@ pub fn bind_udp(ip: IpAddr, port_range: Range<u16>) -> Option<UdpSocket> {
     None  // loop ended without "early" return – failed to bind
 }
 
-/** Correct Port Range.
-    If both from and to are 0, use default port range
-    If one is 0 and the other is non-0, use the non-0 value as only port
-    If from > to, swap
-*/
+/// Correct Port Range.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PortRange<N>(pub Range<N>);
 

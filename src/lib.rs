@@ -82,7 +82,7 @@ fn main() {
     println!("Sent {} bytes of Ping request to the bootstrap node", sent_bytes);
     // since data was sent, now receive response – for that, first prepare
     // buffer to receive data into
-    let mut buf = [0; 2048];  // Tox UDP packet won't be bigger
+    let mut buf = [0; MAX_UDP_PACKET_SIZE];
 
     // and wait for the answer
     let (mut bytes, mut sender);
