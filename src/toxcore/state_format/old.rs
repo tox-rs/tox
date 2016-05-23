@@ -336,7 +336,6 @@ let result = (DhtState(vec![]), DHT_STATE_MIN_SIZE);
 assert_eq!(result, ToDhtState::from_bytes(&serialized).unwrap());
 ```
 */
-
 // TODO: ↓ rename
 pub type ToDhtState = (DhtState, usize);
 
@@ -401,4 +400,3 @@ impl FromBytes<ToDhtState> for ToDhtState {
                     |pns| Some((DhtState(pns), section_len)))
     }
 }
-// TODO: test ↑
