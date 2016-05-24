@@ -259,10 +259,8 @@ impl ToBytes for NospamKeys {
     fn to_bytes(&self) -> Vec<u8> {
         let mut result = Vec::with_capacity(NOSPAMKEYSBYTES);
         result.extend_from_slice(&*self.nospam);
-        let PublicKey(ref pk) = self.pk;
-        result.extend_from_slice(pk);
-        let SecretKey(ref sk) = self.sk;
-        result.extend_from_slice(sk);
+        result.extend_from_slice(&self.pk.0);
+        result.extend_from_slice(&self.sk.0);
         result
     }
 }
@@ -398,5 +396,52 @@ impl FromBytes<ToDhtState> for ToDhtState {
         PackedNode::from_bytes_multiple(&bytes[DHT_STATE_MIN_SIZE..section_len])
             .map_or(Some((DhtState(vec![]), DHT_STATE_MIN_SIZE)),
                     |pns| Some((DhtState(pns), section_len)))
+    }
+}
+
+/** E.g. serialization of an empty list:
+
+```
+use self::tox::toxcore::binary_io::*;
+use self::tox::toxcore::dht::*;
+use self::tox::toxcore::state_format::old::*;
+
+let result = vec![
+        0x0d, 0x00, 0x59, 0x01,  // the first magic number
+        0, 0, 0, 0,   // length of `PackedNode`s bytes
+        0x04, 0,  // section magic number
+        0xce, 0x11,  // another magic number
+        // here would go `PackedNode`s, but since their length is `0`..
+];
+
+assert_eq!(result, DhtState(vec![]).to_bytes());
+```
+*/
+impl ToBytes for DhtState {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut result = Vec::with_capacity(DHT_STATE_MIN_SIZE);
+        result.extend_from_slice(&u32_to_array(DHT_MAGICAL.to_le()));
+
+        let pn_bytes = {
+            let mut bytes = Vec::with_capacity(
+                                    PACKED_NODE_IPV6_SIZE * self.0.len());
+            for pn in &self.0 {
+                bytes.extend_from_slice(&pn.to_bytes());
+            }
+            bytes
+        };
+
+        // add length of serialized `PackedNode`s
+        result.extend_from_slice(&u32_to_array((pn_bytes.len() as u32).to_le()));
+
+        // section magic number
+        result.extend_from_slice(&u16_to_array(DHT_SECTION_TYPE.to_le()));
+
+        // 2nd magic number
+        result.extend_from_slice(&u16_to_array(DHT_2ND_MAGICAL.to_le()));
+
+        // and `PackedNode`s
+        result.extend_from_slice(&pn_bytes);
+        result
     }
 }

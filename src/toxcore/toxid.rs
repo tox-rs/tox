@@ -70,8 +70,7 @@ impl Deref for NoSpam {
     type Target = [u8; NOSPAMBYTES];
 
     fn deref(&self) -> &[u8; NOSPAMBYTES] {
-        let NoSpam(ref ns_bytes) = *self;
-        ns_bytes
+        &self.0
     }
 }
 

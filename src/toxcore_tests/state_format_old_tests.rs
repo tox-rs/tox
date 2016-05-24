@@ -105,3 +105,16 @@ fn dht_state_from_bytes() {
     }
     quickcheck(with_packed_nodes as fn(Vec<PackedNode>));
 }
+
+// DhtState::to_bytes()
+
+#[test]
+fn dht_state_to_bytes_test() {
+    fn with_packed_nodes(pns: Vec<PackedNode>) {
+        let (dstate, _) = ToDhtState::from_bytes(&DhtState(pns.clone())
+                .to_bytes())
+                .expect("Failed to de-serialize DhtState!");
+        assert_eq!(dstate.0, pns);
+    }
+    quickcheck(with_packed_nodes as fn(Vec<PackedNode>));
+}
