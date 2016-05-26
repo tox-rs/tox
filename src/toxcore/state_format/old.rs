@@ -295,48 +295,6 @@ https://zetok.github.io/tox-spec/#dht-sections
 */
 const DHT_2ND_MAGICAL: u16 = 0x11ce;
 
-/** An alias for de-serialization result of [`DhtState`]
-    (./struct.DhtState.html).
-
-### De-serialization docs:
-
-If successful, returns `DhtState` and length of the section in bytes.
-
-**Note that an empty list of nodes can be returned!**
-
-If de-serialization failed, returns `None`.
-
-Fails when:
-
-* number of bytes is less than [`DHT_STATE_MIN_SIZE`]
-  (./constant.DHT_STATE_MIN_SIZE.html)
-* one of 3 magic numbers doesn't match
-* encoded length of section + `DHT_STATE_MIN_SIZE` is bigger than all
-  suppplied bytes
-
-E.g. de-serialization with an empty list:
-
-```
-use self::tox::toxcore::binary_io::*;
-use self::tox::toxcore::dht::*;
-use self::tox::toxcore::state_format::old::*;
-
-let serialized = vec![
-        0x0d, 0x00, 0x59, 0x01,  // the first magic number
-        0, 0, 0, 0,   // length of `PackedNode`s bytes
-        0x04, 0,  // section magic number
-        0xce, 0x11,  // another magic number
-        // here would go `PackedNode`s, but since their length is `0`..
-];
-
-let result = (DhtState(vec![]), DHT_STATE_MIN_SIZE);
-
-assert_eq!(result, ToDhtState::from_bytes(&serialized).unwrap());
-```
-*/
-// TODO: ↓ rename
-pub type ToDhtState = (DhtState, usize);
-
 /** If successful, returns `DhtState` and length of the section in bytes.
 
 **Note that an empty list of nodes can be returned!**
@@ -366,12 +324,10 @@ let serialized = vec![
         // here would go `PackedNode`s, but since their length is `0`..
 ];
 
-let result = (DhtState(vec![]), DHT_STATE_MIN_SIZE);
-
-assert_eq!(result, ToDhtState::from_bytes(&serialized).unwrap());
+assert_eq!(DhtState(vec![]), DhtState::from_bytes(&serialized).unwrap());
 ```
 */
-impl FromBytes<ToDhtState> for ToDhtState {
+impl FromBytes<DhtState> for DhtState {
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
         if
             bytes.len() < DHT_STATE_MIN_SIZE ||
@@ -394,8 +350,7 @@ impl FromBytes<ToDhtState> for ToDhtState {
         };
 
         PackedNode::from_bytes_multiple(&bytes[DHT_STATE_MIN_SIZE..section_len])
-            .map_or(Some((DhtState(vec![]), DHT_STATE_MIN_SIZE)),
-                    |pns| Some((DhtState(pns), section_len)))
+            .map_or(Some(DhtState(vec![])), |pns| Some(DhtState(pns)))
     }
 }
 

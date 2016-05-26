@@ -89,10 +89,9 @@ fn dht_state_from_bytes() {
         serialized.extend_from_slice(&pns_bytes);
 
         { // check if de-serialized result is same as the input
-            let (DhtState(dpns), num_bytes) = ToDhtState::from_bytes(&serialized)
+            let DhtState(dpns) = DhtState::from_bytes(&serialized)
                     .expect("Failed to de-serialize DhtState!");
 
-            assert_eq!(num_bytes, serialized.len());
             assert_eq!(pns, dpns);
         }
 
@@ -100,7 +99,7 @@ fn dht_state_from_bytes() {
         for pos in vec![0, 1, 2, 3, 8, 9, 10, 11] {
             let mut s = serialized.clone();
             if pos == 1 || pos == 9 { s[pos] = 0xff; } else { s[pos] = 0; }
-            assert_eq!(None, ToDhtState::from_bytes(&s));
+            assert_eq!(None, DhtState::from_bytes(&s));
         }
     }
     quickcheck(with_packed_nodes as fn(Vec<PackedNode>));
@@ -111,7 +110,7 @@ fn dht_state_from_bytes() {
 #[test]
 fn dht_state_to_bytes_test() {
     fn with_packed_nodes(pns: Vec<PackedNode>) {
-        let (dstate, _) = ToDhtState::from_bytes(&DhtState(pns.clone())
+        let dstate = DhtState::from_bytes(&DhtState(pns.clone())
                 .to_bytes())
                 .expect("Failed to de-serialize DhtState!");
         assert_eq!(dstate.0, pns);
