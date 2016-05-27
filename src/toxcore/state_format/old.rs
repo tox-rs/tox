@@ -400,3 +400,273 @@ impl ToBytes for DhtState {
         result
     }
 }
+
+
+/** Friend state status. Used by [`FriendState`](./struct.FriendState.html).
+
+https://zetok.github.io/tox-spec/#friends-0x03
+
+```
+use self::tox::toxcore::state_format::old::FriendStatus;
+
+assert_eq!(0u8, FriendStatus::NotFriend as u8);
+assert_eq!(1u8, FriendStatus::Added     as u8);
+assert_eq!(2u8, FriendStatus::FrSent    as u8);
+assert_eq!(3u8, FriendStatus::Confirmed as u8);
+assert_eq!(4u8, FriendStatus::Online    as u8);
+```
+*/
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum FriendStatus {
+    /// Not a friend. (When this can happen and what does it entail?)
+    NotFriend   = 0,
+    /// Friend was added.
+    Added       = 1,
+    /// Friend request was sent to the friend.
+    FrSent      = 2,
+    /// Friend confirmed.
+    /// (Something like toxcore knowing that friend accepted FR?)
+    Confirmed   = 3,
+    /// Friend has come online.
+    Online      = 4,
+}
+
+/** E.g.
+
+```
+use self::tox::toxcore::binary_io::*;
+use self::tox::toxcore::state_format::old::*;
+
+{ // ::NotFriend
+    let bytes = [FriendStatus::NotFriend as u8];
+    assert_eq!(FriendStatus::NotFriend,
+        FriendStatus::from_bytes(&bytes)
+            .expect("Failed to de-serialize FriendStatus::NotFriend!"));
+}
+
+{ // ::Added
+    let bytes = [FriendStatus::Added as u8];
+    assert_eq!(FriendStatus::Added,
+        FriendStatus::from_bytes(&bytes)
+            .expect("Failed to de-serialize FriendStatus::Added!"));
+}
+
+{ // ::FrSent
+    let bytes = [FriendStatus::FrSent as u8];
+    assert_eq!(FriendStatus::FrSent,
+        FriendStatus::from_bytes(&bytes)
+            .expect("Failed to de-serialize FriendStatus::FrSent!"));
+}
+
+{ // ::Confirmed
+    let bytes = [FriendStatus::Confirmed as u8];
+    assert_eq!(FriendStatus::Confirmed,
+        FriendStatus::from_bytes(&bytes)
+            .expect("Failed to de-serialize FriendStatus::Confirmed!"));
+}
+
+{ // ::Online
+    let bytes = [FriendStatus::Online as u8];
+    assert_eq!(FriendStatus::Online,
+        FriendStatus::from_bytes(&bytes)
+            .expect("Failed to de-serialize FriendStatus::Online!"));
+}
+
+// empty
+assert_eq!(None, FriendStatus::from_bytes(&[]));
+
+// wrong
+for i in 5..256 {
+    let bytes = [i as u8];
+    assert_eq!(None, FriendStatus::from_bytes(&bytes));
+}
+```
+*/
+impl FromBytes<FriendStatus> for FriendStatus {
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.is_empty() { return None }
+        match bytes[0] {
+            0 => Some(FriendStatus::NotFriend),
+            1 => Some(FriendStatus::Added),
+            2 => Some(FriendStatus::FrSent),
+            3 => Some(FriendStatus::Confirmed),
+            4 => Some(FriendStatus::Online),
+            _ => None,
+        }
+    }
+}
+
+
+/** User status. Used for both own & friend statuses.
+
+https://zetok.github.io/tox-spec/#userstatus
+
+*/
+// FIXME: *move somewhere else* (messenger?)
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UserStatus {
+    /// User is `Online`.
+    Online = 0,
+    /// User is `Away`.
+    Away   = 1,
+    /// User is `Busy`.
+    Busy   = 2,
+}
+
+/** E.g.
+
+```
+use self::tox::toxcore::binary_io::*;
+use self::tox::toxcore::state_format::old::UserStatus;
+
+{ // ::Online
+    let bytes = [UserStatus::Online as u8];
+    assert_eq!(UserStatus::Online, UserStatus::from_bytes(&bytes)
+                .expect("Failed to de-serialize UserStatus::Online!"));
+}
+
+{ // ::Away
+    let bytes = [UserStatus::Away as u8];
+    assert_eq!(UserStatus::Away, UserStatus::from_bytes(&bytes)
+                .expect("Failed to de-serialize UserStatus::Away!"));
+}
+
+{ // ::Busy
+    let bytes = [UserStatus::Busy as u8];
+    assert_eq!(UserStatus::Busy, UserStatus::from_bytes(&bytes)
+                .expect("Failed to de-serialize UserStatus::Busy!"));
+}
+
+// empty
+assert_eq!(None, UserStatus::from_bytes(&[]));
+
+// invalid
+for i in 3..256 {
+    let bytes = [i as u8];
+    assert_eq!(None, UserStatus::from_bytes(&bytes));
+}
+```
+*/
+impl FromBytes<UserStatus> for UserStatus {
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.is_empty() { return None }
+        match bytes[0] {
+            0 => Some(UserStatus::Online),
+            1 => Some(UserStatus::Away),
+            2 => Some(UserStatus::Busy),
+            _ => None,
+        }
+    }
+}
+
+/** Friend state format for a single friend, compatible with what C toxcore
+does with on `GCC x86{,_x64}` platform.
+
+*feel free to add compatibility to what broken C toxcore does on other
+platforms*
+
+https://zetok.github.io/tox-spec/#friends-0x03
+*/
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FriendState {
+    status: FriendStatus,
+    pk: PublicKey,
+    /// Friend request message that is being sent to friend.
+    fr_msg: String,
+    /// Friend's name.
+    name: String,
+    status_msg: String,
+    user_status: UserStatus,
+    nospam: NoSpam,
+    /// Time when friend was last seen.
+    last_seen: u64,
+}
+
+/// Number of bytes of serialized [`FriendState`](./struct.FriendState.html).
+pub const FRIENDSTATEBYTES: usize = 1      // "Status"
+                                  + PUBLICKEYBYTES
+                                  + 1024   // FR message; TODO: change to const
+                                  + 2      // actual size of FR message
+                                  + 128    // Name; TODO: change to const
+                                  + 2      // actual size of Name
+                                  + 1007   // Status msg; TODO: change to const
+                                  + 2      // actual size of status message
+                                  + 1      // user status
+                                  + 3      // padding
+                                  + NOSPAMBYTES      // only used for sending FR
+                                  + 8;     // last time seen
+
+impl FromBytes<FriendState> for FriendState {
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() < FRIENDSTATEBYTES { return None }
+
+        let status = match FriendStatus::from_bytes(&bytes) {
+            Some(s) => s,
+            None => return None,
+        };
+
+        const PK_POS: usize = 1;
+        let pk = match PublicKey::from_slice(
+                            &bytes[PK_POS..PUBLICKEYBYTES + PK_POS]) {
+            Some(pk) => pk,
+            None => return None,
+        };
+
+        // get string out of bytes in range (start, start+len]
+        // supply start position and *length*
+        let get_string = |start, len: usize| -> Option<String> {
+            let str_len = u16::from_be(array_to_u16(
+                        &[bytes[start+len], bytes[start+len+1]])) as usize;
+            String::from_utf8(bytes[start..start+str_len].to_vec()).ok()
+        };
+
+        const FR_MSG_POS: usize = PK_POS + PUBLICKEYBYTES;
+        const FR_MSG_LEN: usize = 1024;
+        let fr_msg = match get_string(FR_MSG_POS, FR_MSG_LEN) {
+            Some(m) => m,
+            None => return None,
+        };
+
+        const NAME_POS: usize = FR_MSG_POS + FR_MSG_LEN + 2;
+        const NAME_LEN: usize = 128;
+        let name = match get_string(NAME_POS, NAME_LEN) {
+            Some(n) => n,
+            None => return None,
+        };
+
+        const STATUS_MSG_POS: usize = NAME_POS + NAME_LEN + 2;
+        const STATUS_MSG_LEN: usize = 1007;
+        let status_msg = match get_string(STATUS_MSG_POS, STATUS_MSG_LEN) {
+            Some(m) => m,
+            None => return None,
+        };
+
+        const USER_STATUS_POS: usize = STATUS_MSG_POS + STATUS_MSG_LEN + 2;
+        let user_status = match UserStatus::from_bytes(&bytes[USER_STATUS_POS..]) {
+            Some(s) => s,
+            None => return None,
+        };
+
+        const NOSPAM_POS: usize = USER_STATUS_POS + 4; // 1 byte status + padding
+        let nospam = match NoSpam::from_bytes(&bytes[NOSPAM_POS..]) {
+            Some(n) => n,
+            None => return None,
+        };
+
+        const SPOS: usize = NOSPAM_POS + NOSPAMBYTES;
+        let seen = u64::from_le(array_to_u64(&[
+            bytes[SPOS], bytes[SPOS+1], bytes[SPOS+2], bytes[SPOS+3],
+            bytes[SPOS+4], bytes[SPOS+5], bytes[SPOS+6], bytes[SPOS+7]]));
+
+        Some(FriendState {
+            status: status,
+            pk: pk,
+            fr_msg: fr_msg,
+            name: name,
+            status_msg: status_msg,
+            user_status: user_status,
+            nospam: nospam,
+            last_seen: seen,
+        })
+    }
+}
