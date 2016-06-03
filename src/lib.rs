@@ -146,6 +146,13 @@ pub mod toxcore {
     pub mod toxid;
 }
 
+/// Tox encrypt save module.
+// TODO: ↑ expand doc
+#[warn(missing_docs)]
+pub mod toxencryptsave {
+    pub mod encryptsave;
+}
+
 
 #[cfg(test)]
 mod toxcore_tests {
@@ -162,13 +169,6 @@ mod toxcore_tests {
     mod state_format_old_tests;
     mod toxid_tests;
 }
-
-
-#[warn(missing_docs)]
-pub mod toxencryptsave {
-    pub mod encryptsave;
-}
-
 
 #[cfg(test)]
 mod toxencryptsave_tests {

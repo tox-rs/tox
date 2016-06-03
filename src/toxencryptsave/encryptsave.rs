@@ -1,5 +1,6 @@
 /*
     Copyright © 2016 quininer kel <quininer@live.com>
+    Copyright © 2016 Zetok Zalbavar <zexavexxe@gmail.com>
 
     This file is part of Tox.
 
@@ -19,22 +20,35 @@
 
 
 use sodiumoxide::crypto::pwhash::{
-    SALTBYTES, MEMLIMIT_INTERACTIVE, OPSLIMIT_INTERACTIVE,
+    MEMLIMIT_INTERACTIVE, OPSLIMIT_INTERACTIVE,
     Salt, OpsLimit,
     gen_salt, derive_key
 };
+
 use sodiumoxide::crypto::box_::{
     PRECOMPUTEDKEYBYTES, NONCEBYTES, MACBYTES,
     Nonce, PrecomputedKey,
     gen_nonce
 };
+
 use sodiumoxide::crypto::hash::sha256;
 use ::toxcore::crypto_core;
 
+/// Length in bytes of the salt used to encrypt/decrypt data.
+pub use sodiumoxide::crypto::pwhash::SALTBYTES as SALT_LENGTH;
+/// Length in bytes of the key used to encrypt/decrypt data.
+pub use sodiumoxide::crypto::box_::PRECOMPUTEDKEYBYTES as KEY_LENGTH;
+
+
+/// Length (in bytes) of [`MAGIC_NUMBER`](./constant.MAGIC_NUMBER.html).
 pub const MAGIC_LENGTH: usize = 8;
+/** Bytes used to verify whether given data has been encrypted using
+    toxencryptsave.
+
+    Located at the beginning of the encrypted data.
+*/
 pub const MAGIC_NUMBER: &'static [u8; MAGIC_LENGTH] = b"toxEsave";
-pub const SALT_LENGTH: usize = SALTBYTES;
-pub const KEY_LENGTH: usize = PRECOMPUTEDKEYBYTES;
+/// Minimal size in bytes of an encrypted file.
 pub const EXTRA_LENGTH: usize = MAGIC_LENGTH + SALT_LENGTH + NONCEBYTES + MACBYTES;
 
 
@@ -45,6 +59,14 @@ pub struct PassKey {
 }
 
 impl PassKey {
+    /// Create a new `PassKey`.
+    ///
+    /// **Note that `passphrase` memory is not being zeroed after it has been
+    /// used, contrary to what C toxcore does.** Code that provides `passphrase`
+    /// should take care of zeroing that memory.
+    ///
+    /// Can fail for the same reasons as [`PassKey::with_salt()`]
+    /// (./struct.PassKey.html#method.with_salt).
     pub fn new(passphrase: &[u8]) -> Result<PassKey, KeyDerivationError> {
         PassKey::with_salt(passphrase, gen_salt())
     }
