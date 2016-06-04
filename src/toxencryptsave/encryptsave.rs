@@ -26,12 +26,13 @@ use sodiumoxide::crypto::pwhash::{
 };
 
 use sodiumoxide::crypto::box_::{
-    PRECOMPUTEDKEYBYTES, NONCEBYTES, MACBYTES,
+    NONCEBYTES, MACBYTES,
     Nonce, PrecomputedKey,
     gen_nonce
 };
 
 use sodiumoxide::crypto::hash::sha256;
+use sodiumoxide::utils::memzero;
 use ::toxcore::crypto_core;
 
 /// Length in bytes of the salt used to encrypt/decrypt data.
@@ -74,17 +75,21 @@ impl PassKey {
     pub fn with_salt(passphrase: &[u8], salt: Salt) -> Result<PassKey, KeyDerivationError> {
         if passphrase.is_empty() { return Err(KeyDerivationError::Null) };
 
-        let OpsLimit(ops) = OPSLIMIT_INTERACTIVE;
         let sha256::Digest(passhash) = sha256::hash(passphrase);
+        let OpsLimit(ops) = OPSLIMIT_INTERACTIVE;
+        let mut key = [0; KEY_LENGTH];
+
         let maybe_key = PrecomputedKey::from_slice(try!(
             derive_key(
-                &mut [0; KEY_LENGTH],
+                &mut key,
                 &passhash,
                 &salt,
                 OpsLimit(ops * 2),
                 MEMLIMIT_INTERACTIVE
             ).or(Err(KeyDerivationError::Failed))
         ));
+
+        memzero(&mut key);
 
         Ok(PassKey {
             salt: salt,
@@ -96,15 +101,17 @@ impl PassKey {
         if data.is_empty() { return Err(EncryptionError::Null) };
 
         let mut output = Vec::new();
+        let nonce = gen_nonce();
+
         output.extend_from_slice(MAGIC_NUMBER);
         output.extend_from_slice(&self.salt.0);
-        let nonce = gen_nonce();
         output.extend_from_slice(&nonce.0);
         output.append(&mut crypto_core::encrypt_data_symmetric(
             &self.key,
             &nonce,
             data
         ));
+
         Ok(output)
     }
 
