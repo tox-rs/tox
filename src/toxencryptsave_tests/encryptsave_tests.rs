@@ -18,7 +18,7 @@
 */
 
 
-use toxencryptsave::encryptsave::*;
+use toxencryptsave::*;
 
 
 #[test]
