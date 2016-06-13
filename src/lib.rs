@@ -146,6 +146,12 @@ pub mod toxcore {
     pub mod toxid;
 }
 
+/// Tox Encrypt Save (a.k.a. **TES**) module. Can be used to ecrypt / decrypt
+/// data that will be stored on persistent storage.
+// TODO: ↑ expand doc
+#[warn(missing_docs)]
+pub mod toxencryptsave;
+
 
 #[cfg(test)]
 mod toxcore_tests {
@@ -161,4 +167,9 @@ mod toxcore_tests {
     mod packet_kind_tests;
     mod state_format_old_tests;
     mod toxid_tests;
+}
+
+#[cfg(test)]
+mod toxencryptsave_tests {
+    mod encryptsave_tests;
 }
