@@ -341,26 +341,55 @@ fn packed_node_ip_test() {
 }
 
 
-// PackedNode::from_bytes_multiple()
+// PackedNode::parse_bytes_multiple()
 
 #[test]
 fn packed_node_from_bytes_multiple_test() {
     fn with_nodes(nodes: Vec<PackedNode>) {
         if nodes.is_empty() {
-            assert_eq!(None, PackedNode::from_bytes_multiple(&[]));
+            let nodes1 =
+                PackedNode::parse_bytes_multiple(&[])
+                    .ok()
+                    .map(|Parsed(v, _)| v);
+            assert_eq!(Some(vec![]), nodes1);
             return
         }
         let mut bytes = vec![];
         for n in nodes.clone() {
             bytes.extend_from_slice(&n.to_bytes());
         }
-        let nodes2 = PackedNode::from_bytes_multiple(&bytes).unwrap();
+        let Parsed(nodes2, _) = PackedNode::parse_bytes_multiple(&bytes).unwrap();
 
         assert_eq!(nodes.len(), nodes2.len());
         assert_eq!(nodes, nodes2);
     }
     quickcheck(with_nodes as fn(Vec<PackedNode>));
 }
+
+// PackedNode::parse_bytes_multiple_n()
+
+#[test]
+fn packed_node_from_bytes_multiple_n_test() {
+    fn with_nodes(nodes: Vec<PackedNode>) {
+        let mut bytes = vec![];
+        for n in nodes.clone() {
+            bytes.extend_from_slice(&n.to_bytes());
+        }
+        let Parsed(nodes2, _) = PackedNode::parse_bytes_multiple_n(nodes.len(), &bytes).unwrap();
+
+        assert_eq!(nodes.len(), nodes2.len());
+        assert_eq!(nodes, nodes2);
+
+        let nodes_err =
+            PackedNode::parse_bytes_multiple_n(nodes.len() + 1, &bytes)
+                .ok()
+                .map(|Parsed(v, _)| v);
+
+        assert_eq!(None, nodes_err);
+    }
+    quickcheck(with_nodes as fn(Vec<PackedNode>));
+}
+
 
 
 // PackedNode::to_bytes()

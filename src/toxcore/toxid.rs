@@ -107,10 +107,12 @@ impl fmt::Display for NoSpam {
 }
 
 impl FromBytes<NoSpam> for NoSpam {
-    fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() < NOSPAMBYTES { return None }
+    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
+        if bytes.len() < NOSPAMBYTES {
+            return parse_error!("Not enough bytes for NoSpam")
+        }
 
-        Some(NoSpam([bytes[0], bytes[1], bytes[2], bytes[3]]))
+        Ok(Parsed(NoSpam([bytes[0], bytes[1], bytes[2], bytes[3]]), &bytes[4..]))
     }
 }
 
@@ -250,22 +252,24 @@ let _toxid = ToxId::from_bytes(&bytes).expect("Failed to get ToxId from bytes!")
 ```
 */
 impl FromBytes<ToxId> for ToxId {
-    fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() < TOXIDBYTES { return None }
+    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
+        if bytes.len() < TOXIDBYTES {
+            return parse_error!("Not enough bytes for ToxId.")
+        }
 
         let pk = match PublicKey::from_slice(&bytes[..PUBLICKEYBYTES]) {
             Some(p) => p,
-            None => return None,
+            None => return parse_error!("Can't parse PublicKey.")
         };
 
         let nospam = NoSpam([bytes[PUBLICKEYBYTES], bytes[PUBLICKEYBYTES + 1],
                         bytes[PUBLICKEYBYTES + 2], bytes[PUBLICKEYBYTES + 3]]);
 
-        Some(ToxId {
+        Ok(Parsed(ToxId {
             pk: pk,
             nospam: nospam,
             checksum: [bytes[TOXIDBYTES - 2], bytes[TOXIDBYTES - 1]],
-        })
+        }, &bytes[TOXIDBYTES..]))
     }
 }
 

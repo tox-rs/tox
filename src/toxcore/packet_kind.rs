@@ -81,39 +81,39 @@ pub enum PacketKind {
     Returns `None` if no bytes provided, or first byte doesn't match.
 */
 impl FromBytes<PacketKind> for PacketKind {
-    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         debug!(target: "PacketKind", "Creating PacketKind from bytes.");
         trace!(target: "PacketKind", "Bytes: {:?}", bytes);
         if bytes.is_empty() {
-            debug!("There are 0 bytes!");
-            return None
+            return parse_error!("There are 0 bytes!")
         }
 
-        match bytes[0] {
-            0   => Some(PacketKind::PingReq),
-            1   => Some(PacketKind::PingResp),
-            2   => Some(PacketKind::GetN),
-            4   => Some(PacketKind::SendN),
-            24  => Some(PacketKind::CookieReq),
-            25  => Some(PacketKind::CookieResp),
-            26  => Some(PacketKind::CryptoHs),
-            27  => Some(PacketKind::CryptoData),
-            32  => Some(PacketKind::DhtReq),
-            33  => Some(PacketKind::LanDisc),
-            128 => Some(PacketKind::OnionReq0),
-            129 => Some(PacketKind::OnionReq1),
-            130 => Some(PacketKind::OnionReq2),
-            131 => Some(PacketKind::AnnReq),
-            132 => Some(PacketKind::AnnResp),
-            133 => Some(PacketKind::OnionDataReq),
-            134 => Some(PacketKind::OnionDataResp),
-            140 => Some(PacketKind::OnionResp3),
-            141 => Some(PacketKind::OnionResp2),
-            142 => Some(PacketKind::OnionResp1),
+        let result = match bytes[0] {
+            0   => PacketKind::PingReq,
+            1   => PacketKind::PingResp,
+            2   => PacketKind::GetN,
+            4   => PacketKind::SendN,
+            24  => PacketKind::CookieReq,
+            25  => PacketKind::CookieResp,
+            26  => PacketKind::CryptoHs,
+            27  => PacketKind::CryptoData,
+            32  => PacketKind::DhtReq,
+            33  => PacketKind::LanDisc,
+            128 => PacketKind::OnionReq0,
+            129 => PacketKind::OnionReq1,
+            130 => PacketKind::OnionReq2,
+            131 => PacketKind::AnnReq,
+            132 => PacketKind::AnnResp,
+            133 => PacketKind::OnionDataReq,
+            134 => PacketKind::OnionDataResp,
+            140 => PacketKind::OnionResp3,
+            141 => PacketKind::OnionResp2,
+            142 => PacketKind::OnionResp1,
             _   => {
-                debug!("Byte can't be parsed as PacketKind!");
-                None
+                return parse_error!("Byte can't be parsed as PacketKind!")
             },
-        }
+        };
+
+        Ok(Parsed(result, &bytes[1..]))
     }
 }
