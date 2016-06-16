@@ -171,5 +171,8 @@ mod toxcore_tests {
 
 #[cfg(test)]
 mod toxencryptsave_tests {
+    extern crate quickcheck;
+    extern crate rand;
+
     mod encryptsave_tests;
 }

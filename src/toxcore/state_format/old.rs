@@ -670,3 +670,4 @@ impl FromBytes<FriendState> for FriendState {
         })
     }
 }
+// TODO: write tests ↑

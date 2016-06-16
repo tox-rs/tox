@@ -69,7 +69,7 @@ impl PassKey {
     Create a new `PassKey` with a random `Salt`.
 
     **Note that `passphrase` memory is not being zeroed after it has been
-    used** Code that provides `passphrase` should take care of zeroing that
+    used**. Code that provides `passphrase` should take care of zeroing that
     memory.
 
     Can fail for the same reasons as [`PassKey::with_salt()`]
@@ -95,7 +95,7 @@ impl PassKey {
         one.
 
     **Note that `passphrase` memory is not being zeroed after it has been
-    used** Code that provides `passphrase` should take care of zeroing that
+    used**. Code that provides `passphrase` should take care of zeroing that
     memory.
 
     ## Fails when:
@@ -234,12 +234,22 @@ pub fn is_encrypted(data: &[u8]) -> bool {
     data.starts_with(MAGIC_NUMBER)
 }
 
-/// Try to encrypt given **TES** data with provided passphrase.
+/** Try to encrypt given **TES** data with provided passphrase.
+
+    **Note that `passphrase` memory is not being zeroed after it has been
+    used**. Code that provides `passphrase` should take care of zeroing that
+    memory.
+*/
 pub fn pass_encrypt(data: &[u8], passphrase: &[u8]) -> Result<Vec<u8>, EncryptionError> {
     try!(PassKey::new(passphrase)).encrypt(data)
 }
 
-/// Try to encrypt given **TES** data with provided passphrase.
+/** Try to encrypt given **TES** data with provided passphrase.
+
+    **Note that `passphrase` memory is not being zeroed after it has been
+    used**. Code that provides `passphrase` should take care of zeroing that
+    memory.
+*/
 pub fn pass_decrypt(data: &[u8], passphrase: &[u8]) -> Result<Vec<u8>, DecryptionError> {
     let salt = try!(get_salt(data).ok_or(KeyDerivationError::Failed));
     try!(PassKey::with_salt(passphrase, salt)).decrypt(data)

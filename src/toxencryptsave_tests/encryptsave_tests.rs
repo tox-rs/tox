@@ -1,5 +1,6 @@
 /*
     Copyright © 2016 quininer kel <quininer@live.com>
+    Copyright © 2016 Zetok Zalbavar <zexavexxe@gmail.com>
 
     This file is part of Tox.
 
@@ -18,7 +19,86 @@
 */
 
 
+use super::quickcheck::{
+    Arbitrary,
+    Gen,
+    quickcheck,
+    TestResult,
+};
+
+use sodiumoxide::crypto::pwhash::gen_salt;
+
 use toxencryptsave::*;
+
+
+// PassKey::
+
+impl Arbitrary for PassKey {
+    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+        let up_to_range = g.gen_range(2, 1000000);
+        let mut passwd = Vec::with_capacity(up_to_range);
+        for _ in 1..up_to_range {
+            passwd.push(g.gen());
+        }
+        PassKey::new(&passwd).expect("Failed to unwrap PassKey!")
+    }
+}
+
+// PassKey::new()
+
+#[test]
+fn pass_key_new_test() {
+    fn with_pw(passwd: Vec<u8>) -> TestResult {
+        // empty password is already tested in docs test
+        if passwd.is_empty() { return TestResult::discard() }
+
+        let pk = PassKey::new(&passwd).expect("Failed to unwrap PassKey!");
+
+        assert!(pk.salt.0.as_ref() != passwd.as_slice());
+        assert!(pk.salt.0.as_ref() != [0; SALT_LENGTH].as_ref());
+        assert!(pk.key.0.as_ref() != passwd.as_slice());
+        assert!(pk.key.0 != [0; KEY_LENGTH]);
+        TestResult::passed()
+    }
+    quickcheck(with_pw as fn(Vec<u8>) -> TestResult);
+}
+
+// PassKey::with_salt()
+
+#[test]
+fn pass_key_with_salt_test() {
+    fn with_pw(passwd: Vec<u8>) -> TestResult {
+        // test for an empty passphrase is done in docs test
+        if passwd.is_empty() { return TestResult::discard() }
+
+        let salt = gen_salt();
+        let pk = PassKey::with_salt(&passwd, salt.clone())
+                    .expect("Failed to unwrap PassKey!");
+
+        assert_eq!(&pk.salt, &salt);
+        assert!(pk.key.0.as_ref() != passwd.as_slice());
+        assert!(pk.key.0 != [0; KEY_LENGTH]);
+        TestResult::passed()
+    }
+    quickcheck(with_pw as fn(Vec<u8>) -> TestResult);
+}
+
+// PassKey::encrypt()
+
+#[test]
+fn pass_key_encrypt_test() {
+    fn with_data(plain: Vec<u8>, passk: PassKey) -> TestResult {
+        // test for empty data is done in docs test
+        if plain.is_empty() { return TestResult::discard() }
+
+        let encrypted = passk.encrypt(&plain).expect("Encrypting failed!");
+        assert_eq!(plain.len() + EXTRA_LENGTH, encrypted.len());
+        assert!(plain.as_slice() != &encrypted[EXTRA_LENGTH..]);
+        assert_eq!(plain, passk.decrypt(&encrypted).expect("Decrypting failed"));
+        TestResult::passed()
+    }
+    quickcheck(with_data as fn(Vec<u8>, PassKey) -> TestResult);
+}
 
 
 #[test]
