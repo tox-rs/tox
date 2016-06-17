@@ -89,6 +89,17 @@ fn ping_type_from_bytes_test() {
                     .expect("Unwrapping PingType::Resp failed"));
 }
 
+// PingType::parse_bytes()
+
+#[test]
+fn ping_type_parse_bytes_rest_test() {
+    fn random_invalid(bytes: Vec<u8>) {
+        if let Ok(Parsed(_, rest)) = PingType::parse_bytes(&bytes) {
+            assert_eq!(&bytes[1..], rest);
+        }
+    }
+    quickcheck(random_invalid as fn(Vec<u8>));
+}
 
 // Ping::
 
@@ -195,6 +206,18 @@ fn ping_from_bytes_test() {
     with_bytes(ping);
 }
 
+// Ping::parse_bytes()
+
+#[test]
+fn ping_parse_bytes_rest_test() {
+    fn with_bytes(bytes: Vec<u8>) {
+        if let Ok(Parsed(_, rest)) = Ping::parse_bytes(&bytes) {
+            assert_eq!(&bytes[PING_SIZE..], rest);
+        }
+    }
+    quickcheck(with_bytes as fn(Vec<u8>));
+}
+
 
 // IpType::from_bytes()
 
@@ -218,6 +241,18 @@ fn ip_type_from_bytes_test() {
     with_bytes(vec![10]);
     with_bytes(vec![130]);
     with_bytes(vec![138]);
+}
+
+// IpType::parse_bytes()
+
+#[test]
+fn ip_type_parse_bytes_rest_test() {
+    fn with_bytes(bytes: Vec<u8>) {
+        if let Ok(Parsed(_, rest)) = IpType::parse_bytes(&bytes) {
+            assert_eq!(&bytes[1..], rest);
+        }
+    }
+    quickcheck(with_bytes as fn(Vec<u8>));
 }
 
 
@@ -270,6 +305,18 @@ fn ipv6_addr_from_bytes_test() {
         } else {
             let addr = Ipv6Addr::from_bytes(&b).unwrap();
             assert_eq!(&IpAddr::V6(addr).to_bytes()[..16], &b[..16]);
+        }
+    }
+    quickcheck(with_bytes as fn(Vec<u8>));
+}
+
+// Ipv6Addr::parse_bytes()
+
+#[test]
+fn ipv6_addr_parse_bytes_rest_test() {
+    fn with_bytes(b: Vec<u8>) {
+        if let Ok(Parsed(_, rest)) = Ipv6Addr::parse_bytes(&b) {
+            assert_eq!(&b[16..], rest);
         }
     }
     quickcheck(with_bytes as fn(Vec<u8>));
@@ -344,50 +391,90 @@ fn packed_node_ip_test() {
 // PackedNode::parse_bytes_multiple()
 
 #[test]
-fn packed_node_from_bytes_multiple_test() {
-    fn with_nodes(nodes: Vec<PackedNode>) {
-        if nodes.is_empty() {
-            let nodes1 =
-                PackedNode::parse_bytes_multiple(&[])
-                    .ok()
-                    .map(|Parsed(v, _)| v);
-            assert_eq!(Some(vec![]), nodes1);
-            return
-        }
+fn packed_node_parse_bytes_multiple_test() {
+    fn with_nodes(nodes: Vec<PackedNode>, random_rest: Vec<u8>) {
         let mut bytes = vec![];
-        for n in nodes.clone() {
+        for n in &nodes {
             bytes.extend_from_slice(&n.to_bytes());
         }
-        let Parsed(nodes2, _) = PackedNode::parse_bytes_multiple(&bytes).unwrap();
+        let mut expected_rest = vec![];
+        if !random_rest.is_empty() {
+            expected_rest.push(0); // Incorrect IpType
+            expected_rest.extend_from_slice(&random_rest);
+        }
+        bytes.extend_from_slice(&expected_rest);
+
+        let Parsed(nodes2, rest) = PackedNode::parse_bytes_multiple(&bytes).unwrap();
 
         assert_eq!(nodes.len(), nodes2.len());
         assert_eq!(nodes, nodes2);
+        assert_eq!(&expected_rest[..], rest);
     }
-    quickcheck(with_nodes as fn(Vec<PackedNode>));
+    quickcheck(with_nodes as fn(Vec<PackedNode>, Vec<u8>));
 }
 
 // PackedNode::parse_bytes_multiple_n()
 
 #[test]
-fn packed_node_from_bytes_multiple_n_test() {
-    fn with_nodes(nodes: Vec<PackedNode>) {
-        let mut bytes = vec![];
-        for n in nodes.clone() {
-            bytes.extend_from_slice(&n.to_bytes());
+fn packed_node_parse_bytes_multiple_n_test() {
+    fn with_nodes(nodes: Vec<PackedNode>, random_rest: Vec<u8>) {
+        // should parse nodes
+        {
+            let mut bytes = vec![];
+            for n in &nodes {
+                bytes.extend_from_slice(&n.to_bytes());
+            }
+            bytes.extend_from_slice(&random_rest);
+
+            let Parsed(nodes2, rest) =
+                PackedNode::parse_bytes_multiple_n(nodes.len(), &bytes)
+                    .expect("Nodes parsing failed.");
+
+            assert_eq!(nodes.len(), nodes2.len());
+            assert_eq!(nodes, nodes2);
+            assert_eq!(&random_rest[..], rest);
         }
-        let Parsed(nodes2, _) = PackedNode::parse_bytes_multiple_n(nodes.len(), &bytes).unwrap();
 
-        assert_eq!(nodes.len(), nodes2.len());
-        assert_eq!(nodes, nodes2);
+        // should fail if not enough nodes
+        {
+            let mut bytes = vec![];
+            for n in &nodes {
+                bytes.extend_from_slice(&n.to_bytes());
+            }
+            bytes.push(0); // Incorrect IpType
+            bytes.extend_from_slice(&random_rest);
 
-        let nodes_err =
-            PackedNode::parse_bytes_multiple_n(nodes.len() + 1, &bytes)
-                .ok()
-                .map(|Parsed(v, _)| v);
+            let nodes_err =
+                PackedNode::parse_bytes_multiple_n(nodes.len() + 1, &bytes)
+                    .ok()
+                    .map(|Parsed(v, _)| v);
 
-        assert_eq!(None, nodes_err);
+            assert_eq!(None, nodes_err);
+        }
+
+        // should not parse too many nodes
+        if nodes.len() > 0 {
+            let mut bytes = vec![];
+            for n in &nodes {
+                bytes.extend_from_slice(&n.to_bytes());
+            }
+            bytes.extend_from_slice(&random_rest);
+
+            let mut expected_rest = vec![];
+            expected_rest.extend_from_slice(&nodes[nodes.len() - 1].to_bytes());
+            expected_rest.extend_from_slice(&random_rest);
+
+
+            let Parsed(nodes2, rest) =
+                PackedNode::parse_bytes_multiple_n(nodes.len() - 1, &bytes)
+                    .expect("Nodes parsing failed.");
+
+            assert_eq!(nodes.len() - 1, nodes2.len());
+            assert_eq!(&nodes[..nodes.len() - 1], &nodes2[..]);
+            assert_eq!(&expected_rest[..], rest);
+        }
     }
-    quickcheck(with_nodes as fn(Vec<PackedNode>));
+    quickcheck(with_nodes as fn(Vec<PackedNode>, Vec<u8>));
 }
 
 
@@ -585,6 +672,24 @@ fn packed_nodes_from_bytes_test_wrong_iptype() {
     quickcheck(fully_random as fn(PackedNode));
 }
 
+// PackedNode::parse_bytes()
+
+#[test]
+// test for when length is too big - should work, and parse only first bytes
+fn packed_nodes_parse_bytes_test_length_too_long() {
+    fn fully_random(pn: PackedNode, r_u8: Vec<u8>) {
+        let mut vec = Vec::with_capacity(PACKED_NODE_IPV6_SIZE);
+        vec.extend_from_slice(&pn.to_bytes()[..]);
+        vec.extend_from_slice(&r_u8);
+
+        let Parsed(result, rest) = PackedNode::parse_bytes(&vec[..])
+            .expect("PackedNode parsing failure.");
+        assert_eq!(pn, result);
+        assert_eq!(&r_u8[..], rest);
+    }
+    quickcheck(fully_random as fn(PackedNode, Vec<u8>));
+}
+
 
 // GetNodes::
 
@@ -646,6 +751,20 @@ fn get_nodes_from_bytes_test() {
 
             let PublicKey(ref pk) = gn.pk;
             assert_eq!(pk, &bytes[..PUBLICKEYBYTES]);
+        }
+    }
+    quickcheck(with_bytes as fn(Vec<u8>));
+}
+
+// GetNodes::parse_bytes()
+
+#[test]
+fn get_nodes_parse_bytes_rest_test() {
+    fn with_bytes(bytes: Vec<u8>) {
+        if bytes.len() >= GET_NODES_SIZE {
+            let Parsed(_, rest) = GetNodes::parse_bytes(&bytes)
+                .expect("GetNodes parsing failed.");
+            assert_eq!(rest, &bytes[GET_NODES_SIZE..]);
         }
     }
     quickcheck(with_bytes as fn(Vec<u8>));
@@ -747,6 +866,28 @@ fn send_nodes_from_bytes_test() {
         }
     }
     quickcheck(with_nodes as fn(Vec<PackedNode>, u64));
+}
+
+// SendNodes::parse_bytes()
+
+#[test]
+fn send_nodes_parse_bytes_rest_test() {
+    fn with_nodes(nodes: Vec<PackedNode>, r_u64: u64, r_rest: Vec<u8>) {
+        let mut bytes = vec![nodes.len() as u8];
+        for node in &nodes {
+            bytes.extend_from_slice(&node.to_bytes());
+        }
+        // and ping id
+        bytes.extend_from_slice(&u64_to_array(r_u64));
+        bytes.extend_from_slice(&r_rest);
+
+        if nodes.len() <= 4 && !nodes.is_empty() {
+            let Parsed(_, rest) = SendNodes::parse_bytes(&bytes)
+                .expect("SendNodes parsing failed.");
+            assert_eq!(&r_rest[..], rest);
+        }
+    }
+    quickcheck(with_nodes as fn(Vec<PackedNode>, u64, Vec<u8>));
 }
 
 
@@ -935,13 +1076,25 @@ fn dht_packet_to_bytes_test() {
 
 #[test]
 fn dht_packet_from_bytes_test() {
-    fn with_packet(p: DhtPacket, invalid: Vec<u8>) {
+    fn with_packet(p: DhtPacket) {
         let from_bytes = DhtPacket::from_bytes(&p.to_bytes()).unwrap();
         assert_eq!(p, from_bytes);
+    }
+    quickcheck(with_packet as fn(DhtPacket));
+}
 
-        if let None = PacketKind::from_bytes(&invalid) {
-            assert_eq!(None, DhtPacket::from_bytes(&invalid));
-        }
+// DhtPacket::parse_bytes()
+
+#[test]
+fn dht_packet_parse_bytes_rest_test() {
+    fn with_packet(p: DhtPacket, r_rest: Vec<u8>) {
+        let mut bytes = vec![];
+        bytes.extend_from_slice(&p.to_bytes());
+        bytes.extend_from_slice(&r_rest);
+
+        let Parsed(_, rest) = DhtPacket::parse_bytes(&bytes)
+            .expect("DhtPacket parsing failed.");
+        assert!(rest.is_empty()); // all remaining bytes are in payload
     }
     quickcheck(with_packet as fn(DhtPacket, Vec<u8>));
 }
@@ -1340,6 +1493,18 @@ fn nat_ping_from_bytes_test() {
     with_bytes(ping);
 }
 
+// NatPing::parse_bytes()
+
+#[test]
+fn nat_ping_parse_bytes_rest_test() {
+    fn with_bytes(bytes: Vec<u8>) {
+        if let Ok(Parsed(_, rest)) = NatPing::parse_bytes(&bytes) {
+            assert_eq!(&bytes[NAT_PING_SIZE..], rest);
+        }
+    }
+    quickcheck(with_bytes as fn(Vec<u8>));
+}
+
 // NatPing::deref()
 
 #[test]
@@ -1380,6 +1545,23 @@ fn dht_request_t_from_bytes_test() {
                 .expect("Failed to de-serialize DhtRequest!"));
     }
     quickcheck(with_ping as fn(NatPing));
+}
+
+// DhtRequestT::parse_bytes()
+
+#[test]
+fn dht_request_t_parse_bytes_rest_test() {
+    fn with_ping(ping: NatPing, r_rest: Vec<u8>) {
+        let mut bytes = vec![];
+        bytes.extend_from_slice(&DhtRequestT::NatPing(ping).to_bytes());
+        bytes.extend_from_slice(&r_rest);
+
+        let Parsed(result, rest) = DhtRequestT::parse_bytes(&bytes)
+            .expect("Failed to de-serialize DhtRequest!");
+        assert_eq!(DhtRequestT::NatPing(ping), result);
+        assert_eq!(&r_rest[..], rest);
+    }
+    quickcheck(with_ping as fn(NatPing, Vec<u8>));
 }
 
 

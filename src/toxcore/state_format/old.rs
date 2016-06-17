@@ -116,6 +116,10 @@ assert_eq!(SectionKind::EOF,
 */
 impl FromBytes<SectionKind> for SectionKind {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
+        if bytes.is_empty() {
+            return parse_error!("Not enough bytes for SectionKind.")
+        }
+
         let result = match bytes[0] {
             0x01 => SectionKind::NospamKeys,
             0x02 => SectionKind::DHT,
@@ -633,9 +637,11 @@ impl FromBytes<FriendState> for FriendState {
         fn parse_string(bytes: &[u8], len: usize) -> ParseResult<String> {
             let str_len = u16::from_be(array_to_u16(
                         &[bytes[len], bytes[len+1]])) as usize;
-            match String::from_utf8(bytes[..str_len].to_vec()).ok() {
-                Some(str) => Ok(Parsed(str, &bytes[len+2..])),
-                None => parse_error!("Can't parse string from bytes: '{:?}'.", &bytes[..len+2])
+            match String::from_utf8(bytes[..str_len].to_vec()) {
+                Ok(str) => Ok(Parsed(str, &bytes[len+2..])),
+                Err(err) => parse_error!("Can't parse string from bytes: '{:?}'. \
+                                         Original error: {:?}.",
+                                         &bytes[..len+2], err)
             }
         };
 

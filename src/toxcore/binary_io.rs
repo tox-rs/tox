@@ -109,6 +109,7 @@ pub trait FromBytes<Output> {
         Ok(Parsed(result, bytes))
     }
     /// De-serialize from bytes, or return `None` if de-serialization failed.
+    /// Note: it returns Some even if there are remaining bytes left.
     fn from_bytes(bytes: &[u8]) -> Option<Output> {
         match Self::parse_bytes(bytes) {
             Ok(Parsed(value, _)) => Some(value),

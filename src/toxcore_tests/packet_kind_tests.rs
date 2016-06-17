@@ -23,6 +23,8 @@ use toxcore::packet_kind::PacketKind;
 
 use super::quickcheck::quickcheck;
 
+// PacketKind::from_bytes
+
 #[test]
 fn packet_kind_from_bytes_test() {
     fn with_bytes(bytes: Vec<u8>) {
@@ -63,4 +65,16 @@ fn packet_kind_from_bytes_test() {
     with_bytes(vec![2]);
     with_bytes(vec![3]);  // incorrect
     with_bytes(vec![4]);
+}
+
+// PacketKind::parse_bytes
+
+#[test]
+fn packet_kind_parse_bytes_rest_test() {
+    fn with_bytes(bytes: Vec<u8>) {
+        if let Ok(Parsed(_, rest)) = PacketKind::parse_bytes(&bytes) {
+            assert_eq!(&bytes[1..], rest);
+        }
+    }
+    quickcheck(with_bytes as fn(Vec<u8>));
 }

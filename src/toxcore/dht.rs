@@ -554,7 +554,7 @@ impl FromBytes<GetNodes> for GetNodes {
             let b = &bytes[PUBLICKEYBYTES..GET_NODES_SIZE];
             let id = array_to_u64(&[b[0], b[1], b[2], b[3],
                                     b[4], b[5], b[6], b[7]]);
-            Ok(Parsed(GetNodes { pk: pk, id: id }, &bytes[PUBLICKEYBYTES..]))
+            Ok(Parsed(GetNodes { pk: pk, id: id }, &bytes[GET_NODES_SIZE..]))
         } else {
             return parse_error!("Failed to de-serialize bytes into GetNodes!")
         }
@@ -898,7 +898,9 @@ impl FromBytes<DhtPacket> for DhtPacket {
         let sender_pk = match PublicKey::from_slice(&bytes[..PUBLICKEYBYTES]) {
             Some(pk) => pk,
             None => {
-                return parse_error!("Failed; de-serializing sender's PK! With bytes for PK: {:?}", &bytes[..PUBLICKEYBYTES])
+                return parse_error!("Failed; de-serializing sender's PK! \
+                                    With bytes for PK: {:?}",
+                                    &bytes[..PUBLICKEYBYTES])
             },
         };
         let bytes = &bytes[PUBLICKEYBYTES..];
@@ -906,7 +908,9 @@ impl FromBytes<DhtPacket> for DhtPacket {
         let nonce = match Nonce::from_slice(&bytes[..NONCEBYTES]) {
             Some(n) => n,
             None => {
-                return parse_error!("Failed; de-serializing nonce! With bytes for nonce: {:?}", &bytes[..NONCEBYTES])
+                return parse_error!("Failed; de-serializing nonce! \
+                                    With bytes for nonce: {:?}",
+                                    &bytes[..NONCEBYTES])
             },
         };
         let bytes = &bytes[NONCEBYTES..];

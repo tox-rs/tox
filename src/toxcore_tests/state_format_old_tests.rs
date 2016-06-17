@@ -33,11 +33,25 @@ use toxcore::state_format::old::*;
 fn section_kind_from_bytes_test() {
     // test only for failure, since success is tested in docs test
     fn with_bytes(bytes: Vec<u8>) {
-        if bytes.is_empty() || bytes[0] < 7 || bytes[0] == 10 ||
-           bytes[0] == 11 || bytes[0] == 255 {
-            return
+        if !bytes.is_empty() {
+            if bytes[0] < 7 || bytes[0] == 10 ||
+               bytes[0] == 11 || bytes[0] == 255 {
+                return
+            }
         }
         assert_eq!(None, SectionKind::from_bytes(&bytes));
+    }
+    quickcheck(with_bytes as fn(Vec<u8>));
+}
+
+// SectionKind::parse_bytes()
+
+#[test]
+fn section_kind_parse_bytes_rest_test() {
+    fn with_bytes(bytes: Vec<u8>) {
+        if let Ok(Parsed(_, rest)) = SectionKind::parse_bytes(&bytes) {
+            assert_eq!(&bytes[1..], rest);
+        }
     }
     quickcheck(with_bytes as fn(Vec<u8>));
 }
@@ -61,6 +75,18 @@ fn nospam_keys_from_bytes_test() {
 
             let SecretKey(ref sk) = nsk.sk;
             assert_eq!(&bytes[NOSPAMBYTES + PUBLICKEYBYTES..NOSPAMKEYSBYTES], sk);
+        }
+    }
+    quickcheck(with_bytes as fn(Vec<u8>));
+}
+
+// NospamKeys::parse_bytes()
+
+#[test]
+fn nospam_keys_parse_bytes_rest_test() {
+    fn with_bytes(bytes: Vec<u8>) {
+        if let Ok(Parsed(_, rest)) = NospamKeys::parse_bytes(&bytes) {
+            assert_eq!(&bytes[NOSPAMKEYSBYTES..], rest);
         }
     }
     quickcheck(with_bytes as fn(Vec<u8>));
@@ -105,6 +131,37 @@ fn dht_state_from_bytes() {
     quickcheck(with_packed_nodes as fn(Vec<PackedNode>));
 }
 
+// DhtState::parse_bytes()
+
+#[test]
+fn dht_state_parse_bytes_rest_test() {
+    fn with_packed_nodes(pns: Vec<PackedNode>, r_rest: Vec<u8>) {
+        let pns_bytes: Vec<u8> = {
+            let mut bytes = vec![];
+            for pn in &pns {
+                bytes.extend_from_slice(&pn.to_bytes());
+            }
+            bytes
+        };
+        // first magic number
+        let mut serialized = vec![0x0d, 0x00, 0x59, 0x01];
+        // length of `PackedNode`s that are serialized
+        serialized.extend_from_slice(
+                &u32_to_array((pns_bytes.len() as u32).to_le()));
+        // other magic numbers
+        serialized.extend_from_slice(&[0x04, 0, 0xce, 0x11]);
+        serialized.extend_from_slice(&pns_bytes);
+        serialized.extend_from_slice(&r_rest);
+
+        let Parsed(_, rest) =
+            DhtState::parse_bytes(&serialized)
+                .expect("DhtState parsing failure.");
+
+        assert_eq!(&r_rest[..], rest);
+    }
+    quickcheck(with_packed_nodes as fn(Vec<PackedNode>, Vec<u8>));
+}
+
 // DhtState::to_bytes()
 
 #[test]
@@ -117,3 +174,28 @@ fn dht_state_to_bytes_test() {
     }
     quickcheck(with_packed_nodes as fn(Vec<PackedNode>));
 }
+
+// FriendStatus::parse_bytes()
+
+#[test]
+fn friend_status_parse_bytes_rest_test() {
+    fn with_bytes(bytes: Vec<u8>) {
+        if let Ok(Parsed(_, rest)) = FriendStatus::parse_bytes(&bytes) {
+            assert_eq!(&bytes[1..], rest);
+        }
+    }
+    quickcheck(with_bytes as fn(Vec<u8>));
+}
+
+// UserStatus::parse_bytes()
+
+#[test]
+fn user_status_parse_bytes_rest_test() {
+    fn with_bytes(bytes: Vec<u8>) {
+        if let Ok(Parsed(_, rest)) = UserStatus::parse_bytes(&bytes) {
+            assert_eq!(&bytes[1..], rest);
+        }
+    }
+    quickcheck(with_bytes as fn(Vec<u8>));
+}
+
