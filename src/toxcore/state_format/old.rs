@@ -187,7 +187,6 @@ assert_eq!(result, NospamKeys::from_bytes(&bytes)
 impl FromBytes for NospamKeys {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         debug!(target: "NospamKeys", "Creating NospamKeys from bytes.");
-        trace!(target: "NospamKeys", "Bytes: {:?}", bytes);
 
         let Parsed(nospam, bytes) = try!(NoSpam::parse_bytes(bytes));
         let Parsed(pk, bytes) = try!(PublicKey::parse_bytes(bytes));

@@ -181,7 +181,6 @@ impl FromBytes for PublicKey {
 impl FromBytes for SecretKey {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         debug!(target: "SecretKey", "Creating SecretKey from bytes.");
-        trace!(target: "SecretKey", "Bytes: {:?}", bytes);
 
         if bytes.len() < SECRETKEYBYTES {
             return parse_error!("Not enough bytes for SecretKey.");
