@@ -106,7 +106,7 @@ impl fmt::Display for NoSpam {
     }
 }
 
-impl FromBytes<NoSpam> for NoSpam {
+impl FromBytes for NoSpam {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         if bytes.len() < NOSPAMBYTES {
             return parse_error!("Not enough bytes for NoSpam")
@@ -251,7 +251,7 @@ assert_eq!(None, ToxId::from_bytes(&bytes[..TOXIDBYTES - 11]));
 let _toxid = ToxId::from_bytes(&bytes).expect("Failed to get ToxId from bytes!");
 ```
 */
-impl FromBytes<ToxId> for ToxId {
+impl FromBytes for ToxId {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         if bytes.len() < TOXIDBYTES {
             return parse_error!("Not enough bytes for ToxId.")

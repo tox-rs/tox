@@ -114,7 +114,7 @@ assert_eq!(SectionKind::EOF,
         SectionKind::from_bytes(&[255]).expect("Failed to unwrap EOF!"));
 ```
 */
-impl FromBytes<SectionKind> for SectionKind {
+impl FromBytes for SectionKind {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         if bytes.is_empty() {
             return parse_error!("Not enough bytes for SectionKind.")
@@ -184,7 +184,7 @@ assert_eq!(result, NospamKeys::from_bytes(&bytes)
                     .expect("Failed to parse NospamKeys!"));
 ```
 */
-impl FromBytes<NospamKeys> for NospamKeys {
+impl FromBytes for NospamKeys {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         if bytes.len() < NOSPAMKEYSBYTES {
             return parse_error!("Not enough bytes for NospamKeys.")
@@ -335,7 +335,7 @@ let serialized = vec![
 assert_eq!(DhtState(vec![]), DhtState::from_bytes(&serialized).unwrap());
 ```
 */
-impl FromBytes<DhtState> for DhtState {
+impl FromBytes for DhtState {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         if bytes.len() < DHT_STATE_MIN_SIZE ||
            // check whether beginning of the section matches DHT magic bytes
@@ -493,7 +493,7 @@ for i in 5..256 {
 }
 ```
 */
-impl FromBytes<FriendStatus> for FriendStatus {
+impl FromBytes for FriendStatus {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         if bytes.is_empty() {
             return parse_error!("Not enough bytes for FriendStatus.")
@@ -563,7 +563,7 @@ for i in 3..256 {
 }
 ```
 */
-impl FromBytes<UserStatus> for UserStatus {
+impl FromBytes for UserStatus {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         if bytes.is_empty() {
             return parse_error!("Not enough bytes for UserStatus.")
@@ -617,7 +617,7 @@ pub const FRIENDSTATEBYTES: usize = 1      // "Status"
                                   + NOSPAMBYTES      // only used for sending FR
                                   + 8;     // last time seen
 
-impl FromBytes<FriendState> for FriendState {
+impl FromBytes for FriendState {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         if bytes.len() < FRIENDSTATEBYTES {
             return parse_error!("Not enough bytes for FriendState.")
