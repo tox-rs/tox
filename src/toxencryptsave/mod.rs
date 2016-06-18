@@ -234,23 +234,94 @@ pub fn is_encrypted(data: &[u8]) -> bool {
     data.starts_with(MAGIC_NUMBER)
 }
 
-/** Try to encrypt given **TES** data with provided passphrase.
+/**
+Try to encrypt given **TES** data with provided passphrase.
 
-    **Note that `passphrase` memory is not being zeroed after it has been
-    used**. Code that provides `passphrase` should take care of zeroing that
-    memory.
+**Note that `passphrase` memory is not being zeroed after it has been
+used**. Code that provides `passphrase` should take care of zeroing that
+memory.
+
+# Fails when:
+
+  * `data` is empty
+  * `passphrase` is empty
+  * deriving key failed (can happen due to OOM)
+
+E.g.
+
+```
+use self::tox::toxencryptsave::*;
+
+// empty data
+assert_eq!(Err(EncryptionError::Null), pass_encrypt(&[], &[0]));
+
+// empty passphrase
+assert_eq!(Err(EncryptionError::KeyDerivation(KeyDerivationError::Null)),
+           pass_encrypt(&[0], &[]));
+```
 */
 pub fn pass_encrypt(data: &[u8], passphrase: &[u8]) -> Result<Vec<u8>, EncryptionError> {
     try!(PassKey::new(passphrase)).encrypt(data)
 }
 
-/** Try to encrypt given **TES** data with provided passphrase.
+/**
+Try to encrypt given **TES** data with provided passphrase.
 
-    **Note that `passphrase` memory is not being zeroed after it has been
-    used**. Code that provides `passphrase` should take care of zeroing that
-    memory.
+**Note that `passphrase` memory is not being zeroed after it has been
+used**. Code that provides `passphrase` should take care of zeroing that
+memory.
+
+Decrypted data is smaller by [`EXTRA_LENGTH`](./constant.EXTRA_LENGTH.html)
+than encrypted data.
+
+## Fails when:
+
+  * provided `data` is empty
+  * size of provided `data` is less than `EXTRA_LENGTH`
+  * format of provided `data` is wrong
+  * decrypting `data` fails
+    - could be due to OOM or by providing bytes that aren't encrypted after
+      encrypted part
+  * `passphrase` is empty
+
+```
+use self::tox::toxencryptsave::*;
+
+// with an empty data
+assert_eq!(Err(DecryptionError::Null), pass_decrypt(&[], &[0]));
+
+// when there's not enough data to decrypt
+assert_eq!(Err(DecryptionError::InvalidLength), pass_decrypt(MAGIC_NUMBER, &[0]));
+
+let encrypted = pass_encrypt(&[0, 0], &[0]).expect("Failed to pass_encrypt!");
+
+// when passphrase is empty
+assert_eq!(Err(DecryptionError::KeyDerivation(KeyDerivationError::Null)),
+           pass_decrypt(&encrypted, &[]));
+
+// when data format is wrong
+for pos in 0..MAGIC_LENGTH {
+    let mut enc = encrypted.clone();
+    if enc[pos] == 0 { enc[pos] = 1; } else { enc[pos] = 0; }
+    assert_eq!(Err(DecryptionError::BadFormat), pass_decrypt(&enc, &[0]));
+}
+
+{ // there are more or less bytes than the encrypted ones
+    let mut enc = encrypted.clone();
+    enc.push(0);
+    assert_eq!(Err(DecryptionError::Failed), pass_decrypt(&enc, &[0]));
+
+    // less
+    drop((enc.pop(), enc.pop()));
+    assert_eq!(Err(DecryptionError::Failed), pass_decrypt(&enc, &[0]));
+}
+```
 */
 pub fn pass_decrypt(data: &[u8], passphrase: &[u8]) -> Result<Vec<u8>, DecryptionError> {
+    if data.is_empty() { return Err(DecryptionError::Null) }
+    if data.len() <= EXTRA_LENGTH { return Err(DecryptionError::InvalidLength) }
+    if !is_encrypted(data) { return Err(DecryptionError::BadFormat) }
+
     let salt = try!(get_salt(data).ok_or(KeyDerivationError::Failed));
     try!(PassKey::with_salt(passphrase, salt)).decrypt(data)
 }

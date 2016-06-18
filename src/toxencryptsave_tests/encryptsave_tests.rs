@@ -100,19 +100,90 @@ fn pass_key_encrypt_test() {
     quickcheck(with_data as fn(Vec<u8>, PassKey) -> TestResult);
 }
 
+// PassKey::decrypt()
 
 #[test]
-fn encrypt_test() {
-    use sodiumoxide::randombytes::randombytes;
+fn pass_key_decrypt_test() {
+    fn with_data(plain: Vec<u8>, passk: PassKey) -> TestResult {
+        // need some valid data for encryption to test with
+        // + empty encrypted data is tested in docs test
+        if plain.is_empty() { return TestResult::discard() }
 
-    let plaintext = randombytes(16);
-    let passphrase = randombytes(16);
-    let ciphertext = pass_encrypt(&plaintext, &passphrase).unwrap();
-    assert!(plaintext != ciphertext);
-    assert_eq!(
-        pass_decrypt(&ciphertext,&passphrase).unwrap(),
-        plaintext
-    );
+        let encrypted = passk.encrypt(&plain).expect("Encrypting failed!");
+
+        // decrypting should just work™
+        assert_eq!(&plain, &passk.decrypt(&encrypted).expect("Decrypting failed!"));
+
+        // check if fails if one of `MAGIC_NUMBER` bytes is wrong
+        for pos in 0..MAGIC_LENGTH {
+            let mut ec = encrypted.clone();
+            if ec[pos] == 0 { ec[pos] = 1; } else { ec[pos] = 0; }
+            assert_eq!(Err(DecryptionError::BadFormat), passk.decrypt(&ec));
+        }
+
+        // check if fails if a data byte is wrong
+        for pos in EXTRA_LENGTH..encrypted.len() {
+            let mut ec = encrypted.clone();
+            if ec[pos] == 0 { ec[pos] = 1; } else { ec[pos] = 0; }
+            assert_eq!(Err(DecryptionError::Failed), passk.decrypt(&ec));
+        }
+
+        // fails if not enough bytes?
+        for n in 1..EXTRA_LENGTH {
+            assert_eq!(Err(DecryptionError::InvalidLength),
+                    passk.decrypt(&encrypted[..EXTRA_LENGTH - n]));
+        }
+
+        TestResult::passed()
+    }
+    quickcheck(with_data as fn(Vec<u8>, PassKey) -> TestResult);
+}
+
+
+// is_encrypted()
+
+#[test]
+fn is_encrypted_test() {
+    fn with_bytes(bytes: Vec<u8>) {
+        assert_eq!(false, is_encrypted(&bytes));
+    }
+    quickcheck(with_bytes as fn(Vec<u8>));
+
+    with_bytes(b"Hello world.\n".to_vec());
+    assert!(is_encrypted(MAGIC_NUMBER));
+    assert!(is_encrypted(include_bytes!("ciphertext")));
+}
+
+
+// pass_encrypt()
+
+#[test]
+fn pass_encrypt_test() {
+    fn with_data_pass(data: Vec<u8>, pass: Vec<u8>) -> TestResult {
+        // tested for empty data / passphrase in docs test
+        if data.is_empty() || pass.is_empty() {
+            return TestResult::discard()
+        }
+
+        let encrypted = pass_encrypt(&data, &pass)
+            .expect("Failed to unwrap pass_encrypt!");
+        assert!(is_encrypted(&encrypted));
+
+        assert_eq!(data.len() + EXTRA_LENGTH, encrypted.len());
+        assert_eq!(data, pass_decrypt(&encrypted, &pass)
+                            .expect("Failed to pass_decrypt!"));
+
+        TestResult::passed()
+    }
+    quickcheck(with_data_pass as fn(Vec<u8>, Vec<u8>) -> TestResult);
+
+    {
+        use sodiumoxide::randombytes::randombytes;
+
+        let plaintext = randombytes(16);
+        let passphrase = randombytes(16);
+        with_data_pass(plaintext, passphrase);
+    }
 }
 
 #[test]
@@ -125,12 +196,6 @@ fn decrypt_test() {
         pass_decrypt(ciphertext, passphrase).unwrap(),
         plaintext
     );
-}
-
-#[test]
-fn is_encrypted_test() {
-    assert!(is_encrypted(include_bytes!("ciphertext")));
-    assert!(!is_encrypted(b"Hello world.\n"));
 }
 
 #[test]
