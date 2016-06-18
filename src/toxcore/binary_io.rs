@@ -26,10 +26,99 @@ pub trait ToBytes {
     fn to_bytes(&self) -> Vec<u8>;
 }
 
+/// Parsing result. Provides result and remaining input. 
+pub struct Parsed<'a, Output>(
+    /// Result.
+    pub Output,
+    /// Remaining input.
+    pub &'a [u8]
+);
+
+/// Parsing error.
+#[derive(Debug)]
+pub struct ParseError{
+    target: &'static str,
+    message: String,
+    file: &'static str,
+    line: u32
+}
+
+impl ParseError {
+    /// Create new ParseError
+    pub fn new(target: &'static str, message: String,
+           file: &'static str, line: u32) -> ParseError {
+        ParseError{
+            target: target,
+            message: message,
+            file: file,
+            line: line
+        }
+    }
+}
+
+macro_rules! parse_error {
+    (target: $target:expr, $($arg:tt)*) => (
+        Err(ParseError::new(
+                $target,
+                format!($($arg)*),
+                file!(),
+                line!()))
+    );
+    ($($arg:tt)*) => (parse_error!(target: module_path!(), $($arg)*))
+}
+
+/// Result type for parsing methods
+pub type ParseResult<'a, Output> = Result<Parsed<'a, Output>, ParseError>;
+
 /// De-serialize from bytes, or return `None` if de-serialization failed.
 pub trait FromBytes<Output> {
+
+    /// De-serialize from bytes.
+    fn parse_bytes(bytes: &[u8]) -> ParseResult<Output>;
+
+    /// De-serialize exact `times` entities from bytes.
+    fn parse_bytes_multiple_n(times: usize, bytes: &[u8]) -> ParseResult<Vec<Output>> {
+        debug!("De-serializing multiple ({}) outputs.", times);
+        trace!("With bytes: {:?}", bytes);
+
+        let mut bytes = bytes;
+        let mut result = Vec::with_capacity(times);
+
+        for _ in 0..times {
+            let Parsed(value, rest) = try!(Self::parse_bytes(bytes));
+            bytes = rest;
+            result.push(value);
+        }
+
+        Ok(Parsed(result, bytes))
+    }
+
+    /// De-serialize as many entities from bytes as posible.
+    fn parse_bytes_multiple(bytes: &[u8]) -> ParseResult<Vec<Output>> {
+        debug!("De-serializing multiple outputs.");
+        trace!("With bytes: {:?}", bytes);
+
+        let mut bytes = bytes;
+        let mut result = Vec::new();
+
+        while let Ok(Parsed(value, rest)) = Self::parse_bytes(bytes) {
+            bytes = rest;
+            result.push(value);
+        }
+
+        Ok(Parsed(result, bytes))
+    }
     /// De-serialize from bytes, or return `None` if de-serialization failed.
-    fn from_bytes(bytes: &[u8]) -> Option<Output>;
+    /// Note: it returns Some even if there are remaining bytes left.
+    fn from_bytes(bytes: &[u8]) -> Option<Output> {
+        match Self::parse_bytes(bytes) {
+            Ok(Parsed(value, _)) => Some(value),
+            Err(err) => {
+                debug!("Can't parse bytes. Error: {:?}", err);
+                None
+            }
+        }
+    }
 }
 
 

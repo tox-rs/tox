@@ -115,19 +115,25 @@ assert_eq!(SectionKind::EOF,
 ```
 */
 impl FromBytes<SectionKind> for SectionKind {
-    fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        match bytes[0] {
-            0x01 => Some(SectionKind::NospamKeys),
-            0x02 => Some(SectionKind::DHT),
-            0x03 => Some(SectionKind::Friends),
-            0x04 => Some(SectionKind::Name),
-            0x05 => Some(SectionKind::StatusMsg),
-            0x06 => Some(SectionKind::Status),
-            0x0a => Some(SectionKind::TcpRelays),
-            0x0b => Some(SectionKind::PathNodes),
-            0xff => Some(SectionKind::EOF),
-            _ => None,
+    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
+        if bytes.is_empty() {
+            return parse_error!("Not enough bytes for SectionKind.")
         }
+
+        let result = match bytes[0] {
+            0x01 => SectionKind::NospamKeys,
+            0x02 => SectionKind::DHT,
+            0x03 => SectionKind::Friends,
+            0x04 => SectionKind::Name,
+            0x05 => SectionKind::StatusMsg,
+            0x06 => SectionKind::Status,
+            0x0a => SectionKind::TcpRelays,
+            0x0b => SectionKind::PathNodes,
+            0xff => SectionKind::EOF,
+            _ => return parse_error!("Incorrect SectionKind: {:x}.", bytes[0]),
+        };
+
+        Ok(Parsed(result, &bytes[1..]))
     }
 }
 
@@ -179,8 +185,10 @@ assert_eq!(result, NospamKeys::from_bytes(&bytes)
 ```
 */
 impl FromBytes<NospamKeys> for NospamKeys {
-    fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() < NOSPAMKEYSBYTES { return None }
+    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
+        if bytes.len() < NOSPAMKEYSBYTES {
+            return parse_error!("Not enough bytes for NospamKeys.")
+        }
 
         let nospam = NoSpam([bytes[0], bytes[1], bytes[2], bytes[3]]);
 
@@ -188,17 +196,17 @@ impl FromBytes<NospamKeys> for NospamKeys {
                     &bytes[NOSPAMBYTES..PUBLICKEYBYTES + NOSPAMBYTES]) {
 
             Some(pk) => pk,
-            None => return None,
+            None => return parse_error!("Can't parse PublicKey."),
         };
 
         let sk = match SecretKey::from_slice(
                     &bytes[NOSPAMBYTES + PUBLICKEYBYTES..NOSPAMKEYSBYTES]) {
 
             Some(sk) => sk,
-            None => return None,
+            None => return parse_error!("Can't parse SecretKey."),
         };
 
-        Some(NospamKeys { nospam: nospam, pk: pk, sk: sk })
+        Ok(Parsed(NospamKeys { nospam: nospam, pk: pk, sk: sk }, &bytes[NOSPAMKEYSBYTES..]))
     }
 }
 
@@ -328,16 +336,16 @@ assert_eq!(DhtState(vec![]), DhtState::from_bytes(&serialized).unwrap());
 ```
 */
 impl FromBytes<DhtState> for DhtState {
-    fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if
-            bytes.len() < DHT_STATE_MIN_SIZE ||
-            // check whether beginning of the section matches DHT magic bytes
-            &u32_to_array(DHT_MAGICAL.to_le()) != &bytes[..4] ||
-            // check DHT section type
-            &u16_to_array(DHT_SECTION_TYPE.to_le()) != &bytes[8..10] ||
-            // check whether yet another magic number matches ;f
-            &u16_to_array(DHT_2ND_MAGICAL.to_le()) != &bytes[10..12]
-        { return None } // can I haz yet another magical number?
+    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
+        if bytes.len() < DHT_STATE_MIN_SIZE ||
+           // check whether beginning of the section matches DHT magic bytes
+           &u32_to_array(DHT_MAGICAL.to_le()) != &bytes[..4] ||
+           // check DHT section type
+           &u16_to_array(DHT_SECTION_TYPE.to_le()) != &bytes[8..10] ||
+           // check whether yet another magic number matches ;f
+           &u16_to_array(DHT_2ND_MAGICAL.to_le()) != &bytes[10..12] {
+            return parse_error!("Incorect DhtState.")
+        } // can I haz yet another magical number?
 
         // length of the whole section
         let section_len = {
@@ -345,12 +353,15 @@ impl FromBytes<DhtState> for DhtState {
             let whole_len = u32::from_le(nodes) as usize + DHT_STATE_MIN_SIZE;
             // check if it's bigger, since that would be the only thing that
             // could cause panic
-            if whole_len > bytes.len() { return None }
+            if whole_len > bytes.len() {
+                return parse_error!("Not enough bytes for DhtState.")
+            }
             whole_len
         };
 
-        PackedNode::from_bytes_multiple(&bytes[DHT_STATE_MIN_SIZE..section_len])
-            .map_or(Some(DhtState(vec![])), |pns| Some(DhtState(pns)))
+        let nodes_bytes = &bytes[DHT_STATE_MIN_SIZE..section_len];
+        let Parsed(pns, _) = try!(PackedNode::parse_bytes_multiple(nodes_bytes));
+        Ok(Parsed(DhtState(pns), &bytes[section_len..]))
     }
 }
 
@@ -483,16 +494,21 @@ for i in 5..256 {
 ```
 */
 impl FromBytes<FriendStatus> for FriendStatus {
-    fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.is_empty() { return None }
-        match bytes[0] {
-            0 => Some(FriendStatus::NotFriend),
-            1 => Some(FriendStatus::Added),
-            2 => Some(FriendStatus::FrSent),
-            3 => Some(FriendStatus::Confirmed),
-            4 => Some(FriendStatus::Online),
-            _ => None,
+    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
+        if bytes.is_empty() {
+            return parse_error!("Not enough bytes for FriendStatus.")
         }
+
+        let result = match bytes[0] {
+            0 => FriendStatus::NotFriend,
+            1 => FriendStatus::Added,
+            2 => FriendStatus::FrSent,
+            3 => FriendStatus::Confirmed,
+            4 => FriendStatus::Online,
+            _ => return parse_error!("Unknown FriendStatus: {}.", bytes[0]),
+        };
+
+        Ok(Parsed(result, &bytes[1..]))
     }
 }
 
@@ -548,14 +564,19 @@ for i in 3..256 {
 ```
 */
 impl FromBytes<UserStatus> for UserStatus {
-    fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.is_empty() { return None }
-        match bytes[0] {
-            0 => Some(UserStatus::Online),
-            1 => Some(UserStatus::Away),
-            2 => Some(UserStatus::Busy),
-            _ => None,
+    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
+        if bytes.is_empty() {
+            return parse_error!("Not enough bytes for UserStatus.")
         }
+
+        let result = match bytes[0] {
+            0 => UserStatus::Online,
+            1 => UserStatus::Away,
+            2 => UserStatus::Busy,
+            _ => return parse_error!("Unknown UserStatus: {}.", bytes[0])
+        };
+
+        Ok(Parsed(result, &bytes[1..]))
     }
 }
 
@@ -597,68 +618,54 @@ pub const FRIENDSTATEBYTES: usize = 1      // "Status"
                                   + 8;     // last time seen
 
 impl FromBytes<FriendState> for FriendState {
-    fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() < FRIENDSTATEBYTES { return None }
+    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
+        if bytes.len() < FRIENDSTATEBYTES {
+            return parse_error!("Not enough bytes for FriendState.")
+        }
 
-        let status = match FriendStatus::from_bytes(&bytes) {
-            Some(s) => s,
-            None => return None,
-        };
+        let Parsed(status, bytes) = try!(FriendStatus::parse_bytes(bytes));
 
-        const PK_POS: usize = 1;
         let pk = match PublicKey::from_slice(
-                            &bytes[PK_POS..PUBLICKEYBYTES + PK_POS]) {
+                            &bytes[..PUBLICKEYBYTES]) {
             Some(pk) => pk,
-            None => return None,
+            None => return parse_error!("Can't parse PublicKey.")
         };
+        let bytes = &bytes[PUBLICKEYBYTES..];
 
-        // get string out of bytes in range (start, start+len]
-        // supply start position and *length*
-        let get_string = |start, len: usize| -> Option<String> {
+        // parse string out of bytes
+        // supply length
+        fn parse_string(bytes: &[u8], len: usize) -> ParseResult<String> {
             let str_len = u16::from_be(array_to_u16(
-                        &[bytes[start+len], bytes[start+len+1]])) as usize;
-            String::from_utf8(bytes[start..start+str_len].to_vec()).ok()
+                        &[bytes[len], bytes[len+1]])) as usize;
+            match String::from_utf8(bytes[..str_len].to_vec()) {
+                Ok(str) => Ok(Parsed(str, &bytes[len+2..])),
+                Err(err) => parse_error!("Can't parse string from bytes: '{:?}'. \
+                                         Original error: {:?}.",
+                                         &bytes[..len+2], err)
+            }
         };
 
-        const FR_MSG_POS: usize = PK_POS + PUBLICKEYBYTES;
         const FR_MSG_LEN: usize = 1024;
-        let fr_msg = match get_string(FR_MSG_POS, FR_MSG_LEN) {
-            Some(m) => m,
-            None => return None,
-        };
+        let Parsed(fr_msg, bytes) = try!(parse_string(bytes, FR_MSG_LEN));
 
-        const NAME_POS: usize = FR_MSG_POS + FR_MSG_LEN + 2;
         const NAME_LEN: usize = 128;
-        let name = match get_string(NAME_POS, NAME_LEN) {
-            Some(n) => n,
-            None => return None,
-        };
+        let Parsed(name, bytes) = try!(parse_string(bytes, NAME_LEN));
 
-        const STATUS_MSG_POS: usize = NAME_POS + NAME_LEN + 2;
         const STATUS_MSG_LEN: usize = 1007;
-        let status_msg = match get_string(STATUS_MSG_POS, STATUS_MSG_LEN) {
-            Some(m) => m,
-            None => return None,
-        };
+        let Parsed(status_msg, bytes) = try!(parse_string(bytes, STATUS_MSG_LEN));
 
-        const USER_STATUS_POS: usize = STATUS_MSG_POS + STATUS_MSG_LEN + 2;
-        let user_status = match UserStatus::from_bytes(&bytes[USER_STATUS_POS..]) {
-            Some(s) => s,
-            None => return None,
-        };
+        let Parsed(user_status, bytes) = try!(UserStatus::parse_bytes(bytes));
 
-        const NOSPAM_POS: usize = USER_STATUS_POS + 4; // 1 byte status + padding
-        let nospam = match NoSpam::from_bytes(&bytes[NOSPAM_POS..]) {
-            Some(n) => n,
-            None => return None,
-        };
+        let bytes = &bytes[3..]; // padding
+        let Parsed(nospam, bytes) = try!(NoSpam::parse_bytes(&bytes));
 
-        const SPOS: usize = NOSPAM_POS + NOSPAMBYTES;
         let seen = u64::from_le(array_to_u64(&[
-            bytes[SPOS], bytes[SPOS+1], bytes[SPOS+2], bytes[SPOS+3],
-            bytes[SPOS+4], bytes[SPOS+5], bytes[SPOS+6], bytes[SPOS+7]]));
+            bytes[0], bytes[1], bytes[2], bytes[3],
+            bytes[4], bytes[5], bytes[6], bytes[7]]));
 
-        Some(FriendState {
+        let bytes = &bytes[8..];
+
+        Ok(Parsed(FriendState {
             status: status,
             pk: pk,
             fr_msg: fr_msg,
@@ -667,7 +674,7 @@ impl FromBytes<FriendState> for FriendState {
             user_status: user_status,
             nospam: nospam,
             last_seen: seen,
-        })
+        }, bytes))
     }
 }
 // TODO: write tests ↑

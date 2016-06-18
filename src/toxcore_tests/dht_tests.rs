@@ -62,13 +62,21 @@ fn nums_to_pk(a: u64, b: u64, c: u64, d: u64) -> PublicKey {
 }
 
 
+// PingType::
+
+impl Arbitrary for PingType {
+    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+        g.choose(&[PingType::Req, PingType::Resp]).unwrap().clone()
+    }
+}
+
 // PingType::from_bytes()
 
 #[test]
 fn ping_type_from_bytes_test() {
-    fn random_invalid(bytes: Vec<u8>) {
+    fn with_bytes(bytes: Vec<u8>) {
         if bytes.is_empty() {
-            return;
+            assert_eq!(None, PingType::from_bytes(&bytes));
         } else if bytes[0] == 0 {
             assert_eq!(PingType::Req, PingType::from_bytes(&bytes).unwrap());
         } else if bytes[0] == 1 {
@@ -77,18 +85,29 @@ fn ping_type_from_bytes_test() {
             assert_eq!(None, PingType::from_bytes(&bytes));
         }
     }
-    quickcheck(random_invalid as fn(Vec<u8>));
+    quickcheck(with_bytes as fn(Vec<u8>));
 
     // just in case
-    let p0 = vec![0];
-    assert_eq!(PingType::Req, PingType::from_bytes(&p0)
-                    .expect("Unwrapping PingType::Req failed"));
-
-    let p1 = vec![1];
-    assert_eq!(PingType::Resp, PingType::from_bytes(&p1)
-                    .expect("Unwrapping PingType::Resp failed"));
+    with_bytes(vec![]);
+    for i in 0x00 .. 0xff {
+        with_bytes(vec![i]);
+    }
 }
 
+// PingType::parse_bytes()
+
+#[test]
+fn ping_type_parse_bytes_rest_test() {
+    fn random_invalid(pt: PingType, r_rest: Vec<u8>) {
+        let mut bytes = vec![pt as u8];
+        bytes.extend_from_slice(&r_rest);
+
+        let Parsed(_, rest) = PingType::parse_bytes(&bytes)
+            .expect("PingType parsing failed.");
+        assert_eq!(&r_rest[..], rest);
+    }
+    quickcheck(random_invalid as fn(PingType, Vec<u8>));
+}
 
 // Ping::
 
@@ -195,13 +214,41 @@ fn ping_from_bytes_test() {
     with_bytes(ping);
 }
 
+// Ping::parse_bytes()
+
+#[test]
+fn ping_parse_bytes_rest_test() {
+    fn with_bytes(p: Ping, r_rest: Vec<u8>) {
+        let mut bytes = vec![];
+        bytes.extend_from_slice(&p.to_bytes());
+        bytes.extend_from_slice(&r_rest);
+
+        let Parsed(_, rest) = Ping::parse_bytes(&bytes)
+            .expect("Ping parsing failure.");
+        assert_eq!(&r_rest[..], rest);
+    }
+    quickcheck(with_bytes as fn(Ping, Vec<u8>));
+}
+
+// IpType
+
+impl Arbitrary for IpType {
+    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+        g.choose(&[IpType::U4, IpType::U6, IpType::T4, IpType::T6])
+            .unwrap().clone()
+    }
+}
+
 
 // IpType::from_bytes()
 
 #[test]
 fn ip_type_from_bytes_test() {
     fn with_bytes(bytes: Vec<u8>) {
-        if bytes.is_empty() { return }
+        if bytes.is_empty() {
+            assert_eq!(None, IpType::from_bytes(&bytes));
+            return
+        }
         match bytes[0] {
             2   => assert_eq!(IpType::U4, IpType::from_bytes(&bytes).unwrap()),
             10  => assert_eq!(IpType::U6, IpType::from_bytes(&bytes).unwrap()),
@@ -213,20 +260,51 @@ fn ip_type_from_bytes_test() {
     quickcheck(with_bytes as fn(Vec<u8>));
 
     // just in case
-    with_bytes(vec![0]);
-    with_bytes(vec![2]);
-    with_bytes(vec![10]);
-    with_bytes(vec![130]);
-    with_bytes(vec![138]);
+    with_bytes(vec![]);
+    for i in 0x00 .. 0xff {
+        with_bytes(vec![i]);
+    }
 }
 
+// IpType::parse_bytes()
+
+#[test]
+fn ip_type_parse_bytes_rest_test() {
+    fn with_bytes(it: IpType, r_rest: Vec<u8>) {
+        let mut bytes = vec![it as u8];
+        bytes.extend_from_slice(&r_rest);
+
+        let Parsed(_, rest) = IpType::parse_bytes(&bytes)
+            .expect("IpType parsing failure.");
+        assert_eq!(&r_rest[..], rest);
+    }
+    quickcheck(with_bytes as fn(IpType, Vec<u8>));
+}
+
+// IpAddr
+
+#[derive(Clone, Debug)]
+struct IpAddrWrap(IpAddr);
+
+impl Arbitrary for IpAddrWrap {
+    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+        let v4: bool = g.gen();
+
+        if v4 {
+            let res = IpAddr::V4(Ipv4Addr::new(g.gen(), g.gen(),
+                                               g.gen(), g.gen()));
+            IpAddrWrap(res)
+        } else {
+            let res = IpAddr::V6(Ipv6Addr::new(g.gen(), g.gen(),
+                                               g.gen(), g.gen(),
+                                               g.gen(), g.gen(),
+                                               g.gen(), g.gen()));
+            IpAddrWrap(res)
+        }
+    }
+}
 
 // IpAddr::to_bytes()
-
-/* NOTE: sadly, implementing `Arbitrary` for `IpAddr` doesn't appear to be
-   (easily/nicely) dobale, since neither is a part of this crate.
-   https://github.com/rust-lang/rfcs/pull/1023
-*/
 
 #[test]
 fn ip_addr_to_bytes_test() {
@@ -273,6 +351,48 @@ fn ipv6_addr_from_bytes_test() {
         }
     }
     quickcheck(with_bytes as fn(Vec<u8>));
+}
+
+// Ipv4Addr::from_bytes()
+
+#[test]
+fn ipv4_addr_from_bytes_test() {
+    fn with_bytes(b: Vec<u8>) {
+        if b.len() < 4 {
+            assert_eq!(None, Ipv4Addr::from_bytes(&b));
+        } else {
+            let addr = Ipv4Addr::from_bytes(&b).unwrap();
+            assert_eq!(&IpAddr::V4(addr).to_bytes()[..4], &b[..4]);
+        }
+    }
+    quickcheck(with_bytes as fn(Vec<u8>));
+}
+
+// Ipv[4,6]Addr::parse_bytes()
+
+#[test]
+fn ip_addr_parse_bytes_rest_test() {
+    fn with_bytes(IpAddrWrap(ip_addr): IpAddrWrap, r_rest: Vec<u8>) {
+        let mut bytes = vec![];
+        bytes.extend_from_slice(&ip_addr.to_bytes());
+        bytes.extend_from_slice(&r_rest);
+
+        let rest = match ip_addr {
+            IpAddr::V4(_) => {
+                let Parsed(_, rest) = Ipv4Addr::parse_bytes(&bytes)
+                    .expect("Ipv4Addr parsing failure.");
+                rest
+            },
+            IpAddr::V6(_) => {
+                let Parsed(_, rest) = Ipv6Addr::parse_bytes(&bytes)
+                    .expect("Ipv6Addr parsing failure.");
+                rest
+            }
+        };
+
+        assert_eq!(&r_rest[..], rest);
+    }
+    quickcheck(with_bytes as fn(IpAddrWrap, Vec<u8>));
 }
 
 
@@ -341,26 +461,95 @@ fn packed_node_ip_test() {
 }
 
 
-// PackedNode::from_bytes_multiple()
+// PackedNode::parse_bytes_multiple()
 
 #[test]
-fn packed_node_from_bytes_multiple_test() {
-    fn with_nodes(nodes: Vec<PackedNode>) {
-        if nodes.is_empty() {
-            assert_eq!(None, PackedNode::from_bytes_multiple(&[]));
-            return
-        }
+fn packed_node_parse_bytes_multiple_test() {
+    fn with_nodes(nodes: Vec<PackedNode>, random_rest: Vec<u8>) {
         let mut bytes = vec![];
-        for n in nodes.clone() {
+        for n in &nodes {
             bytes.extend_from_slice(&n.to_bytes());
         }
-        let nodes2 = PackedNode::from_bytes_multiple(&bytes).unwrap();
+        let mut expected_rest = vec![];
+        if !random_rest.is_empty() {
+            expected_rest.push(0); // Incorrect IpType
+            expected_rest.extend_from_slice(&random_rest);
+        }
+        bytes.extend_from_slice(&expected_rest);
+
+        let Parsed(nodes2, rest) = PackedNode::parse_bytes_multiple(&bytes).unwrap();
 
         assert_eq!(nodes.len(), nodes2.len());
         assert_eq!(nodes, nodes2);
+        assert_eq!(&expected_rest[..], rest);
     }
-    quickcheck(with_nodes as fn(Vec<PackedNode>));
+    quickcheck(with_nodes as fn(Vec<PackedNode>, Vec<u8>));
 }
+
+// PackedNode::parse_bytes_multiple_n()
+
+#[test]
+fn packed_node_parse_bytes_multiple_n_test() {
+    fn with_nodes(nodes: Vec<PackedNode>, random_rest: Vec<u8>) {
+        // should parse nodes
+        {
+            let mut bytes = vec![];
+            for n in &nodes {
+                bytes.extend_from_slice(&n.to_bytes());
+            }
+            bytes.extend_from_slice(&random_rest);
+
+            let Parsed(nodes2, rest) =
+                PackedNode::parse_bytes_multiple_n(nodes.len(), &bytes)
+                    .expect("Nodes parsing failed.");
+
+            assert_eq!(nodes.len(), nodes2.len());
+            assert_eq!(nodes, nodes2);
+            assert_eq!(&random_rest[..], rest);
+        }
+
+        // should fail if not enough nodes
+        {
+            let mut bytes = vec![];
+            for n in &nodes {
+                bytes.extend_from_slice(&n.to_bytes());
+            }
+            bytes.push(0); // Incorrect IpType
+            bytes.extend_from_slice(&random_rest);
+
+            let nodes_err =
+                PackedNode::parse_bytes_multiple_n(nodes.len() + 1, &bytes)
+                    .ok()
+                    .map(|Parsed(v, _)| v);
+
+            assert_eq!(None, nodes_err);
+        }
+
+        // should not parse too many nodes
+        if nodes.len() > 0 {
+            let mut bytes = vec![];
+            for n in &nodes {
+                bytes.extend_from_slice(&n.to_bytes());
+            }
+            bytes.extend_from_slice(&random_rest);
+
+            let mut expected_rest = vec![];
+            expected_rest.extend_from_slice(&nodes[nodes.len() - 1].to_bytes());
+            expected_rest.extend_from_slice(&random_rest);
+
+
+            let Parsed(nodes2, rest) =
+                PackedNode::parse_bytes_multiple_n(nodes.len() - 1, &bytes)
+                    .expect("Nodes parsing failed.");
+
+            assert_eq!(nodes.len() - 1, nodes2.len());
+            assert_eq!(&nodes[..nodes.len() - 1], &nodes2[..]);
+            assert_eq!(&expected_rest[..], rest);
+        }
+    }
+    quickcheck(with_nodes as fn(Vec<PackedNode>, Vec<u8>));
+}
+
 
 
 // PackedNode::to_bytes()
@@ -556,6 +745,24 @@ fn packed_nodes_from_bytes_test_wrong_iptype() {
     quickcheck(fully_random as fn(PackedNode));
 }
 
+// PackedNode::parse_bytes()
+
+#[test]
+// test for when length is too big - should work, and parse only first bytes
+fn packed_nodes_parse_bytes_test_length_too_long() {
+    fn fully_random(pn: PackedNode, r_u8: Vec<u8>) {
+        let mut vec = Vec::with_capacity(PACKED_NODE_IPV6_SIZE);
+        vec.extend_from_slice(&pn.to_bytes()[..]);
+        vec.extend_from_slice(&r_u8);
+
+        let Parsed(result, rest) = PackedNode::parse_bytes(&vec[..])
+            .expect("PackedNode parsing failure.");
+        assert_eq!(pn, result);
+        assert_eq!(&r_u8[..], rest);
+    }
+    quickcheck(fully_random as fn(PackedNode, Vec<u8>));
+}
+
 
 // GetNodes::
 
@@ -617,6 +824,20 @@ fn get_nodes_from_bytes_test() {
 
             let PublicKey(ref pk) = gn.pk;
             assert_eq!(pk, &bytes[..PUBLICKEYBYTES]);
+        }
+    }
+    quickcheck(with_bytes as fn(Vec<u8>));
+}
+
+// GetNodes::parse_bytes()
+
+#[test]
+fn get_nodes_parse_bytes_rest_test() {
+    fn with_bytes(bytes: Vec<u8>) {
+        if bytes.len() >= GET_NODES_SIZE {
+            let Parsed(_, rest) = GetNodes::parse_bytes(&bytes)
+                .expect("GetNodes parsing failed.");
+            assert_eq!(rest, &bytes[GET_NODES_SIZE..]);
         }
     }
     quickcheck(with_bytes as fn(Vec<u8>));
@@ -718,6 +939,28 @@ fn send_nodes_from_bytes_test() {
         }
     }
     quickcheck(with_nodes as fn(Vec<PackedNode>, u64));
+}
+
+// SendNodes::parse_bytes()
+
+#[test]
+fn send_nodes_parse_bytes_rest_test() {
+    fn with_nodes(nodes: Vec<PackedNode>, r_u64: u64, r_rest: Vec<u8>) {
+        let mut bytes = vec![nodes.len() as u8];
+        for node in &nodes {
+            bytes.extend_from_slice(&node.to_bytes());
+        }
+        // and ping id
+        bytes.extend_from_slice(&u64_to_array(r_u64));
+        bytes.extend_from_slice(&r_rest);
+
+        if nodes.len() <= 4 && !nodes.is_empty() {
+            let Parsed(_, rest) = SendNodes::parse_bytes(&bytes)
+                .expect("SendNodes parsing failed.");
+            assert_eq!(&r_rest[..], rest);
+        }
+    }
+    quickcheck(with_nodes as fn(Vec<PackedNode>, u64, Vec<u8>));
 }
 
 
@@ -906,13 +1149,25 @@ fn dht_packet_to_bytes_test() {
 
 #[test]
 fn dht_packet_from_bytes_test() {
-    fn with_packet(p: DhtPacket, invalid: Vec<u8>) {
+    fn with_packet(p: DhtPacket) {
         let from_bytes = DhtPacket::from_bytes(&p.to_bytes()).unwrap();
         assert_eq!(p, from_bytes);
+    }
+    quickcheck(with_packet as fn(DhtPacket));
+}
 
-        if let None = PacketKind::from_bytes(&invalid) {
-            assert_eq!(None, DhtPacket::from_bytes(&invalid));
-        }
+// DhtPacket::parse_bytes()
+
+#[test]
+fn dht_packet_parse_bytes_rest_test() {
+    fn with_packet(p: DhtPacket, r_rest: Vec<u8>) {
+        let mut bytes = vec![];
+        bytes.extend_from_slice(&p.to_bytes());
+        bytes.extend_from_slice(&r_rest);
+
+        let Parsed(_, rest) = DhtPacket::parse_bytes(&bytes)
+            .expect("DhtPacket parsing failed.");
+        assert!(rest.is_empty()); // all remaining bytes are in payload
     }
     quickcheck(with_packet as fn(DhtPacket, Vec<u8>));
 }
@@ -1311,6 +1566,22 @@ fn nat_ping_from_bytes_test() {
     with_bytes(ping);
 }
 
+// NatPing::parse_bytes()
+
+#[test]
+fn nat_ping_parse_bytes_rest_test() {
+    fn with_bytes(np: NatPing, r_rest: Vec<u8>) {
+        let mut bytes = vec![];
+        bytes.extend_from_slice(&np.to_bytes());
+        bytes.extend_from_slice(&r_rest);
+
+        let Parsed(_, rest) = NatPing::parse_bytes(&bytes)
+            .expect("NatPing parsing failure.");
+        assert_eq!(&r_rest[..], rest);
+    }
+    quickcheck(with_bytes as fn(NatPing, Vec<u8>));
+}
+
 // NatPing::deref()
 
 #[test]
@@ -1351,6 +1622,23 @@ fn dht_request_t_from_bytes_test() {
                 .expect("Failed to de-serialize DhtRequest!"));
     }
     quickcheck(with_ping as fn(NatPing));
+}
+
+// DhtRequestT::parse_bytes()
+
+#[test]
+fn dht_request_t_parse_bytes_rest_test() {
+    fn with_ping(ping: NatPing, r_rest: Vec<u8>) {
+        let mut bytes = vec![];
+        bytes.extend_from_slice(&DhtRequestT::NatPing(ping).to_bytes());
+        bytes.extend_from_slice(&r_rest);
+
+        let Parsed(result, rest) = DhtRequestT::parse_bytes(&bytes)
+            .expect("Failed to de-serialize DhtRequest!");
+        assert_eq!(DhtRequestT::NatPing(ping), result);
+        assert_eq!(&r_rest[..], rest);
+    }
+    quickcheck(with_ping as fn(NatPing, Vec<u8>));
 }
 
 

@@ -82,6 +82,20 @@ fn no_spam_from_bytes_test() {
     quickcheck(with_bytes as fn(Vec<u8>));
 }
 
+// NoSpam::parse_bytes()
+
+#[test]
+fn no_spam_parse_bytes_rest_test() {
+    fn with_bytes(bytes: Vec<u8>) {
+        if bytes.len() >= NOSPAMBYTES {
+            let Parsed(_, rest) = NoSpam::parse_bytes(&bytes)
+                            .expect("Failed to get NoSpam!");
+            assert_eq!(&bytes[NOSPAMBYTES..], rest);
+        }
+    }
+    quickcheck(with_bytes as fn(Vec<u8>));
+}
+
 
 // ToxId::from_bytes()
 
@@ -95,6 +109,20 @@ fn tox_id_from_bytes_test() {
                             .expect("Failed to get ToxId!");
             let PublicKey(ref pk) = toxid.pk;
             assert_eq!(pk, &bytes[..PUBLICKEYBYTES]);
+        }
+    }
+    quickcheck(with_bytes as fn(Vec<u8>));
+}
+
+// ToxId::parse_bytes()
+
+#[test]
+fn tox_id_parse_bytes_rest_test() {
+    fn with_bytes(bytes: Vec<u8>) {
+        if bytes.len() >= TOXIDBYTES {
+            let Parsed(_, rest) = ToxId::parse_bytes(&bytes)
+                            .expect("Failed to get ToxId!");
+            assert_eq!(&bytes[TOXIDBYTES..], rest);
         }
     }
     quickcheck(with_bytes as fn(Vec<u8>));
