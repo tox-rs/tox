@@ -80,7 +80,7 @@ pub enum PacketKind {
 
     Returns `None` if no bytes provided, or first byte doesn't match.
 */
-impl FromBytes<PacketKind> for PacketKind {
+impl FromBytes for PacketKind {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         debug!(target: "PacketKind", "Creating PacketKind from bytes.");
         trace!(target: "PacketKind", "Bytes: {:?}", bytes);

@@ -24,7 +24,7 @@
 pub use sodiumoxide::randombytes::randombytes_into;
 pub use sodiumoxide::crypto::box_::*;
 
-use super::binary_io::{array_to_u32, array_to_u64};
+use super::binary_io::*;
 
 // TODO: check if `#[inline]` is actually useful
 
@@ -154,5 +154,67 @@ pub fn increment_nonce(nonce: &mut Nonce) {
 pub fn increment_nonce_number(mut nonce: &mut Nonce, num: usize) {
     for _ in 0..num {
         increment_nonce(&mut nonce);
+    }
+}
+
+impl FromBytes for PublicKey {
+    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
+        debug!(target: "PublicKey", "Creating PublicKey from bytes.");
+        trace!(target: "PublicKey", "Bytes: {:?}", bytes);
+
+        if bytes.len() < PUBLICKEYBYTES {
+            return parse_error!("Not enough bytes for PublicKey.");
+        }
+        
+        let pk = match PublicKey::from_slice(&bytes[..PUBLICKEYBYTES]) {
+            Some(p) => p,
+            None    =>
+                return parse_error!("Failed; de-serializing PublicKey! \
+                                     With bytes for PublicKey: {:?}",
+                                     &bytes[..PUBLICKEYBYTES])
+        };
+
+        Ok(Parsed(pk, &bytes[PUBLICKEYBYTES..]))
+    }
+}
+
+impl FromBytes for SecretKey {
+    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
+        debug!(target: "SecretKey", "Creating SecretKey from bytes.");
+
+        if bytes.len() < SECRETKEYBYTES {
+            return parse_error!("Not enough bytes for SecretKey.");
+        }
+        
+        let pk = match SecretKey::from_slice(&bytes[..SECRETKEYBYTES]) {
+            Some(p) => p,
+            None    =>
+                return parse_error!("Failed; de-serializing SecretKey! \
+                                     With bytes for SecretKey: {:?}",
+                                     &bytes[..SECRETKEYBYTES])
+        };
+
+        Ok(Parsed(pk, &bytes[SECRETKEYBYTES..]))
+    }
+}
+
+impl FromBytes for Nonce {
+    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
+        debug!(target: "Nonce", "Creating Nonce from bytes.");
+        trace!(target: "Nonce", "Bytes: {:?}", bytes);
+
+        if bytes.len() < NONCEBYTES {
+            return parse_error!("Not enough bytes for Nonce.");
+        }
+        
+        let nonce = match Nonce::from_slice(&bytes[..NONCEBYTES]) {
+            Some(n) => n,
+            None    =>
+                return parse_error!("Failed; de-serializing nonce! \
+                                     With bytes for nonce: {:?}",
+                                     &bytes[..NONCEBYTES])
+        };
+
+        Ok(Parsed(nonce, &bytes[NONCEBYTES..]))
     }
 }

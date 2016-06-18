@@ -114,7 +114,7 @@ assert_eq!(SectionKind::EOF,
         SectionKind::from_bytes(&[255]).expect("Failed to unwrap EOF!"));
 ```
 */
-impl FromBytes<SectionKind> for SectionKind {
+impl FromBytes for SectionKind {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         if bytes.is_empty() {
             return parse_error!("Not enough bytes for SectionKind.")
@@ -184,29 +184,15 @@ assert_eq!(result, NospamKeys::from_bytes(&bytes)
                     .expect("Failed to parse NospamKeys!"));
 ```
 */
-impl FromBytes<NospamKeys> for NospamKeys {
+impl FromBytes for NospamKeys {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
-        if bytes.len() < NOSPAMKEYSBYTES {
-            return parse_error!("Not enough bytes for NospamKeys.")
-        }
+        debug!(target: "NospamKeys", "Creating NospamKeys from bytes.");
 
-        let nospam = NoSpam([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        let Parsed(nospam, bytes) = try!(NoSpam::parse_bytes(bytes));
+        let Parsed(pk, bytes) = try!(PublicKey::parse_bytes(bytes));
+        let Parsed(sk, bytes) = try!(SecretKey::parse_bytes(bytes));
 
-        let pk = match PublicKey::from_slice(
-                    &bytes[NOSPAMBYTES..PUBLICKEYBYTES + NOSPAMBYTES]) {
-
-            Some(pk) => pk,
-            None => return parse_error!("Can't parse PublicKey."),
-        };
-
-        let sk = match SecretKey::from_slice(
-                    &bytes[NOSPAMBYTES + PUBLICKEYBYTES..NOSPAMKEYSBYTES]) {
-
-            Some(sk) => sk,
-            None => return parse_error!("Can't parse SecretKey."),
-        };
-
-        Ok(Parsed(NospamKeys { nospam: nospam, pk: pk, sk: sk }, &bytes[NOSPAMKEYSBYTES..]))
+        Ok(Parsed(NospamKeys { nospam: nospam, pk: pk, sk: sk }, bytes))
     }
 }
 
@@ -335,7 +321,7 @@ let serialized = vec![
 assert_eq!(DhtState(vec![]), DhtState::from_bytes(&serialized).unwrap());
 ```
 */
-impl FromBytes<DhtState> for DhtState {
+impl FromBytes for DhtState {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         if bytes.len() < DHT_STATE_MIN_SIZE ||
            // check whether beginning of the section matches DHT magic bytes
@@ -493,7 +479,7 @@ for i in 5..256 {
 }
 ```
 */
-impl FromBytes<FriendStatus> for FriendStatus {
+impl FromBytes for FriendStatus {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         if bytes.is_empty() {
             return parse_error!("Not enough bytes for FriendStatus.")
@@ -563,7 +549,7 @@ for i in 3..256 {
 }
 ```
 */
-impl FromBytes<UserStatus> for UserStatus {
+impl FromBytes for UserStatus {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         if bytes.is_empty() {
             return parse_error!("Not enough bytes for UserStatus.")
@@ -617,7 +603,7 @@ pub const FRIENDSTATEBYTES: usize = 1      // "Status"
                                   + NOSPAMBYTES      // only used for sending FR
                                   + 8;     // last time seen
 
-impl FromBytes<FriendState> for FriendState {
+impl FromBytes for FriendState {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         if bytes.len() < FRIENDSTATEBYTES {
             return parse_error!("Not enough bytes for FriendState.")
@@ -625,12 +611,7 @@ impl FromBytes<FriendState> for FriendState {
 
         let Parsed(status, bytes) = try!(FriendStatus::parse_bytes(bytes));
 
-        let pk = match PublicKey::from_slice(
-                            &bytes[..PUBLICKEYBYTES]) {
-            Some(pk) => pk,
-            None => return parse_error!("Can't parse PublicKey.")
-        };
-        let bytes = &bytes[PUBLICKEYBYTES..];
+        let Parsed(pk, bytes) = try!(PublicKey::parse_bytes(bytes));
 
         // parse string out of bytes
         // supply length

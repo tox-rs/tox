@@ -106,13 +106,18 @@ impl fmt::Display for NoSpam {
     }
 }
 
-impl FromBytes<NoSpam> for NoSpam {
+impl FromBytes for NoSpam {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
+        debug!(target: "NoSpam", "Creating NoSpam from bytes.");
+        trace!(target: "NoSpam", "Bytes: {:?}", bytes);
+
         if bytes.len() < NOSPAMBYTES {
-            return parse_error!("Not enough bytes for NoSpam")
+            return parse_error!("Not enough bytes for NoSpam.");
         }
 
-        Ok(Parsed(NoSpam([bytes[0], bytes[1], bytes[2], bytes[3]]), &bytes[4..]))
+        let nospam = NoSpam([bytes[0], bytes[1], bytes[2], bytes[3]]);
+
+        Ok(Parsed(nospam, &bytes[NOSPAMBYTES..]))
     }
 }
 
@@ -251,25 +256,28 @@ assert_eq!(None, ToxId::from_bytes(&bytes[..TOXIDBYTES - 11]));
 let _toxid = ToxId::from_bytes(&bytes).expect("Failed to get ToxId from bytes!");
 ```
 */
-impl FromBytes<ToxId> for ToxId {
+impl FromBytes for ToxId {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
-        if bytes.len() < TOXIDBYTES {
-            return parse_error!("Not enough bytes for ToxId.")
+        debug!(target: "ToxId", "Creating ToxId from bytes.");
+        trace!(target: "ToxId", "Bytes: {:?}", bytes);
+
+        fn parse_checksum(bytes: &[u8]) -> ParseResult<[u8; 2]> {
+            if bytes.len() < 2 {
+                return parse_error!("Not enough bytes for ToxId checksum.")
+            }
+
+            Ok(Parsed([bytes[0], bytes[1]], &bytes[2..]))
         }
 
-        let pk = match PublicKey::from_slice(&bytes[..PUBLICKEYBYTES]) {
-            Some(p) => p,
-            None => return parse_error!("Can't parse PublicKey.")
-        };
-
-        let nospam = NoSpam([bytes[PUBLICKEYBYTES], bytes[PUBLICKEYBYTES + 1],
-                        bytes[PUBLICKEYBYTES + 2], bytes[PUBLICKEYBYTES + 3]]);
+        let Parsed(pk, bytes) = try!(PublicKey::parse_bytes(bytes));
+        let Parsed(nospam, bytes) = try!(NoSpam::parse_bytes(bytes));
+        let Parsed(checksum, bytes) = try!(parse_checksum(bytes));
 
         Ok(Parsed(ToxId {
             pk: pk,
             nospam: nospam,
-            checksum: [bytes[TOXIDBYTES - 2], bytes[TOXIDBYTES - 1]],
-        }, &bytes[TOXIDBYTES..]))
+            checksum: checksum,
+        }, bytes))
     }
 }
 

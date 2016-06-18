@@ -61,7 +61,7 @@ pub enum PingType {
     [`PingType`](./enum.PingType.html). Returns `None` if first byte of slice
     doesn't match `PingType` or slice has no elements.
 */
-impl FromBytes<PingType> for PingType {
+impl FromBytes for PingType {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         debug!(target: "PingType", "Creating PingType from bytes.");
         trace!(target: "PingType", "Bytes: {:?}", bytes);
@@ -165,7 +165,7 @@ impl ToBytes for Ping {
     [`PING_SIZE`](./constant.PING_SIZE.html) bytes from supplied slice as
     `Ping`.
 */
-impl FromBytes<Ping> for Ping {
+impl FromBytes for Ping {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         debug!(target: "Ping", "De-serializing Ping from bytes.");
         trace!(target: "Ping", "With bytes: {:?}", bytes);
@@ -217,7 +217,7 @@ pub enum IpType {
 
 /// Match first byte from the provided slice as `IpType`. If no match found,
 /// return `None`.
-impl FromBytes<IpType> for IpType {
+impl FromBytes for IpType {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         debug!(target: "IpType", "De-serializing IpType from bytes.");
         trace!(target: "IpType", "With bytes: {:?}", bytes);
@@ -262,7 +262,7 @@ impl ToBytes for IpAddr {
 // TODO: move it somewhere else
 /// Fail if there are less than 4 bytes supplied, otherwise parses first
 /// 4 bytes as an `Ipv4Addr`.
-impl FromBytes<Ipv4Addr> for Ipv4Addr {
+impl FromBytes for Ipv4Addr {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         debug!(target: "Ipv4Addr", "De-serializing Ipv4Addr from bytes.");
         trace!(target: "Ipv4Addr", "With bytes: {:?}", bytes);
@@ -280,7 +280,7 @@ impl FromBytes<Ipv4Addr> for Ipv4Addr {
 // TODO: move it somewhere else
 /// Fail if there are less than 16 bytes supplied, otherwise parses first
 /// 16 bytes as an `Ipv6Addr`.
-impl FromBytes<Ipv6Addr> for Ipv6Addr {
+impl FromBytes for Ipv6Addr {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         debug!(target: "Ipv6Addr", "De-serializing Ipv6Addr from bytes.");
         trace!(target: "Ipv6Addr", "With bytes: {:?}", bytes);
@@ -423,7 +423,7 @@ impl ToBytes for PackedNode {
     says that it's actually IPv4, bytes will be parsed as if that was an IPv4
     address.
 */
-impl FromBytes<PackedNode> for PackedNode {
+impl FromBytes for PackedNode {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         fn parse_port(bytes: &[u8]) -> ParseResult<u16> {
             if bytes.len() < 2 {
@@ -443,15 +443,7 @@ impl FromBytes<PackedNode> for PackedNode {
             let Parsed(port, bytes) = try!(parse_port(bytes));
             let saddr = SocketAddrV4::new(addr, port);
 
-            if bytes.len() < PUBLICKEYBYTES {
-                return parse_error!("Not enough bytes for PublicKey.")
-            }
-            let pk = match PublicKey::from_slice(&bytes[..PUBLICKEYBYTES]) {
-                Some(pk) => pk,
-                None => {
-                    return parse_error!("Not enough bytes to parse as PK after IPv4.")
-                },
-            };
+            let Parsed(pk, bytes) = try!(PublicKey::parse_bytes(bytes));
 
             let result = PackedNode {
                 ip_type: iptype,
@@ -459,7 +451,7 @@ impl FromBytes<PackedNode> for PackedNode {
                 pk: pk
             };
 
-            Ok(Parsed(result, &bytes[PUBLICKEYBYTES..]))
+            Ok(Parsed(result, bytes))
         }
 
         // parse bytes as IPv6
@@ -471,15 +463,7 @@ impl FromBytes<PackedNode> for PackedNode {
             let Parsed(port, bytes) = try!(parse_port(bytes));
             let saddr = SocketAddrV6::new(addr, port, 0, 0);
 
-            if bytes.len() < PUBLICKEYBYTES {
-                return parse_error!("Not enough bytes for PublicKey.")
-            }
-            let pk = match PublicKey::from_slice(&bytes[..PUBLICKEYBYTES]) {
-                Some(p) => p,
-                None    => {
-                    return parse_error!("Not enough bytes to parse as PK after IPv6.")
-                },
-            };
+            let Parsed(pk, bytes) = try!(PublicKey::parse_bytes(bytes));
 
             let result = PackedNode {
                 ip_type: iptype,
@@ -487,7 +471,7 @@ impl FromBytes<PackedNode> for PackedNode {
                 pk: pk
             };
 
-            Ok(Parsed(result, &bytes[PUBLICKEYBYTES..]))
+            Ok(Parsed(result, bytes))
         }
 
 
@@ -562,24 +546,25 @@ impl ToBytes for GetNodes {
     [`GET_NODES_SIZE`](./constant.GET_NODES_SIZE.html) bytes are provided,
     de-serialization will fail, returning `None`.
 */
-impl FromBytes<GetNodes> for GetNodes {
+impl FromBytes for GetNodes {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         debug!(target: "GetNodes", "De-serializing bytes into GetNodes.");
         trace!(target: "GetNodes", "With bytes: {:?}", bytes);
 
-        if bytes.len() < GET_NODES_SIZE {
-            return parse_error!("Amount of bytes is less than GET_NODES_SIZE!")
-        }
+        fn parse_id(b: &[u8]) -> ParseResult<u64> {
+            if b.len() < 8 {
+                return parse_error!("Not enough bytes to parse GetNodes id.")
+            }
 
-        if let Some(pk) = PublicKey::from_slice(&bytes[..PUBLICKEYBYTES]) {
-            // need shorter name for ID bytes
-            let b = &bytes[PUBLICKEYBYTES..GET_NODES_SIZE];
             let id = array_to_u64(&[b[0], b[1], b[2], b[3],
                                     b[4], b[5], b[6], b[7]]);
-            Ok(Parsed(GetNodes { pk: pk, id: id }, &bytes[GET_NODES_SIZE..]))
-        } else {
-            return parse_error!("Failed to de-serialize bytes into GetNodes!")
+            Ok(Parsed(id, &b[8..]))
         }
+
+        let Parsed(pk, bytes) = try!(PublicKey::parse_bytes(bytes));
+        let Parsed(id, bytes) = try!(parse_id(bytes));
+
+        Ok(Parsed(GetNodes { pk: pk, id: id }, bytes))
     }
 }
 
@@ -661,7 +646,7 @@ impl ToBytes for SendNodes {
 
     Returns `None` if bytes can't be parsed into `SendNodes`.
 */
-impl FromBytes<SendNodes> for SendNodes {
+impl FromBytes for SendNodes {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         debug!(target: "SendNodes", "De-serializing bytes into SendNodes.");
         trace!(target: "SendNodes", "With bytes: {:?}", bytes);
@@ -898,7 +883,7 @@ impl ToBytes for DhtPacket {
 }
 
 /// De-serialize bytes into `DhtPacket`.
-impl FromBytes<DhtPacket> for DhtPacket {
+impl FromBytes for DhtPacket {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         debug!(target: "DhtPacket", "De-serializing bytes into DhtPacket.");
         trace!(target: "DhtPacket", "With bytes: {:?}", bytes);
@@ -917,25 +902,9 @@ impl FromBytes<DhtPacket> for DhtPacket {
             },
         }
 
-        let sender_pk = match PublicKey::from_slice(&bytes[..PUBLICKEYBYTES]) {
-            Some(pk) => pk,
-            None => {
-                return parse_error!("Failed; de-serializing sender's PK! \
-                                    With bytes for PK: {:?}",
-                                    &bytes[..PUBLICKEYBYTES])
-            },
-        };
-        let bytes = &bytes[PUBLICKEYBYTES..];
+        let Parsed(sender_pk, bytes) = try!(PublicKey::parse_bytes(bytes));
 
-        let nonce = match Nonce::from_slice(&bytes[..NONCEBYTES]) {
-            Some(n) => n,
-            None => {
-                return parse_error!("Failed; de-serializing nonce! \
-                                    With bytes for nonce: {:?}",
-                                    &bytes[..NONCEBYTES])
-            },
-        };
-        let bytes = &bytes[NONCEBYTES..];
+        let Parsed(nonce, bytes) = try!(Nonce::parse_bytes(bytes));
 
         Ok(Parsed(DhtPacket {
             packet_type: packet_type,
@@ -1351,7 +1320,7 @@ impl ToBytes for NatPing {
     }
 }
 
-impl FromBytes<NatPing> for NatPing {
+impl FromBytes for NatPing {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         if bytes.len() < NAT_PING_SIZE {
             return parse_error!("Not enough bytes for NatPing.")
@@ -1395,7 +1364,7 @@ impl ToBytes for DhtRequestT {
     }
 }
 
-impl FromBytes<DhtRequestT> for DhtRequestT {
+impl FromBytes for DhtRequestT {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         let Parsed(p, rest) = try!(NatPing::parse_bytes(bytes));
         Ok(Parsed(DhtRequestT::NatPing(p), rest))

@@ -70,14 +70,14 @@ macro_rules! parse_error {
 /// Result type for parsing methods
 pub type ParseResult<'a, Output> = Result<Parsed<'a, Output>, ParseError>;
 
-/// De-serialize from bytes, or return `None` if de-serialization failed.
-pub trait FromBytes<Output> {
+/// Methods for de-serialization from bytes
+pub trait FromBytes: Sized {
 
     /// De-serialize from bytes.
-    fn parse_bytes(bytes: &[u8]) -> ParseResult<Output>;
+    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self>;
 
     /// De-serialize exact `times` entities from bytes.
-    fn parse_bytes_multiple_n(times: usize, bytes: &[u8]) -> ParseResult<Vec<Output>> {
+    fn parse_bytes_multiple_n(times: usize, bytes: &[u8]) -> ParseResult<Vec<Self>> {
         debug!("De-serializing multiple ({}) outputs.", times);
         trace!("With bytes: {:?}", bytes);
 
@@ -94,7 +94,7 @@ pub trait FromBytes<Output> {
     }
 
     /// De-serialize as many entities from bytes as posible.
-    fn parse_bytes_multiple(bytes: &[u8]) -> ParseResult<Vec<Output>> {
+    fn parse_bytes_multiple(bytes: &[u8]) -> ParseResult<Vec<Self>> {
         debug!("De-serializing multiple outputs.");
         trace!("With bytes: {:?}", bytes);
 
@@ -110,7 +110,7 @@ pub trait FromBytes<Output> {
     }
     /// De-serialize from bytes, or return `None` if de-serialization failed.
     /// Note: it returns Some even if there are remaining bytes left.
-    fn from_bytes(bytes: &[u8]) -> Option<Output> {
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
         match Self::parse_bytes(bytes) {
             Ok(Parsed(value, _)) => Some(value),
             Err(err) => {
