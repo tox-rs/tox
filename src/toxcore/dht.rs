@@ -259,9 +259,26 @@ impl ToBytes for IpAddr {
     }
 }
 
+// TODO: move it somewhere else
+/// Fail if there are less than 4 bytes supplied, otherwise parses first
+/// 4 bytes as an `Ipv4Addr`.
+impl FromBytes<Ipv4Addr> for Ipv4Addr {
+    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
+        debug!(target: "Ipv4Addr", "De-serializing Ipv4Addr from bytes.");
+        trace!(target: "Ipv4Addr", "With bytes: {:?}", bytes);
+
+        if bytes.len() < 4 {
+            return parse_error!("Not enough bytes for Ipv4Addr!")
+        }
+
+        Ok(Parsed(Ipv4Addr::new(bytes[0], bytes[1], bytes[2], bytes[3]),
+                                &bytes[4..]))
+    }
+}
+
 
 // TODO: move it somewhere else
-/// Can fail if there are less than 16 bytes supplied, otherwise parses first
+/// Fail if there are less than 16 bytes supplied, otherwise parses first
 /// 16 bytes as an `Ipv6Addr`.
 impl FromBytes<Ipv6Addr> for Ipv6Addr {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
@@ -408,19 +425,28 @@ impl ToBytes for PackedNode {
 */
 impl FromBytes<PackedNode> for PackedNode {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
+        fn parse_port(bytes: &[u8]) -> ParseResult<u16> {
+            if bytes.len() < 2 {
+                return parse_error!("Not enough bytes for port.")
+            }
+
+            let port = u16::from_be(array_to_u16(&[bytes[0], bytes[1]]));
+            Ok(Parsed(port, &bytes[2..]))
+        }
+
         // parse bytes as IPv4
         fn as_ipv4(iptype: IpType, bytes: &[u8]) -> ParseResult<PackedNode> {
             debug!("Parsing bytes as IPv4.");
             trace!("Bytes: {:?}", bytes);
-            if bytes.len() < PACKED_NODE_IPV4_SIZE {
-                return parse_error!("Less bytes than PACKED_NODE_IPV4_SIZE!")
-            }
 
-            let addr = Ipv4Addr::new(bytes[1], bytes[2], bytes[3], bytes[4]);
-            let port = u16::from_be(array_to_u16(&[bytes[5], bytes[6]]));
+            let Parsed(addr, bytes) = try!(Ipv4Addr::parse_bytes(bytes));
+            let Parsed(port, bytes) = try!(parse_port(bytes));
             let saddr = SocketAddrV4::new(addr, port);
 
-            let pk = match PublicKey::from_slice(&bytes[7..PACKED_NODE_IPV4_SIZE]) {
+            if bytes.len() < PUBLICKEYBYTES {
+                return parse_error!("Not enough bytes for PublicKey.")
+            }
+            let pk = match PublicKey::from_slice(&bytes[..PUBLICKEYBYTES]) {
                 Some(pk) => pk,
                 None => {
                     return parse_error!("Not enough bytes to parse as PK after IPv4.")
@@ -433,22 +459,22 @@ impl FromBytes<PackedNode> for PackedNode {
                 pk: pk
             };
 
-            Ok(Parsed(result, &bytes[PACKED_NODE_IPV4_SIZE..]))
+            Ok(Parsed(result, &bytes[PUBLICKEYBYTES..]))
         }
 
         // parse bytes as IPv6
         fn as_ipv6(iptype: IpType, bytes: &[u8]) -> ParseResult<PackedNode> {
             trace!("Parsing bytes as IPv6.");
             trace!("Bytes: {:?}", bytes);
-            if bytes.len() < PACKED_NODE_IPV6_SIZE {
-                return parse_error!("Less bytes than PACKED_NODE_IPV6_SIZE!")
-            }
 
-            let Parsed(addr, _) = try!(Ipv6Addr::parse_bytes(&bytes[1..]));
-            let port = u16::from_be(array_to_u16(&[bytes[17], bytes[18]]));
+            let Parsed(addr, bytes) = try!(Ipv6Addr::parse_bytes(&bytes));
+            let Parsed(port, bytes) = try!(parse_port(bytes));
             let saddr = SocketAddrV6::new(addr, port, 0, 0);
 
-            let pk = match PublicKey::from_slice(&bytes[19..PACKED_NODE_IPV6_SIZE]) {
+            if bytes.len() < PUBLICKEYBYTES {
+                return parse_error!("Not enough bytes for PublicKey.")
+            }
+            let pk = match PublicKey::from_slice(&bytes[..PUBLICKEYBYTES]) {
                 Some(p) => p,
                 None    => {
                     return parse_error!("Not enough bytes to parse as PK after IPv6.")
@@ -461,22 +487,18 @@ impl FromBytes<PackedNode> for PackedNode {
                 pk: pk
             };
 
-            Ok(Parsed(result, &bytes[PACKED_NODE_IPV6_SIZE..]))
+            Ok(Parsed(result, &bytes[PUBLICKEYBYTES..]))
         }
 
 
         debug!(target: "PackedNode", "De-serializing bytes into PackedNode.");
         trace!(target: "PackedNode", "With bytes: {:?}", bytes);
 
-        if bytes.len() < PACKED_NODE_IPV4_SIZE {
-            return parse_error!("Not enough bytes; less than PACKED_NODE_IPV4_SIZE")
-        }
-
         match try!(IpType::parse_bytes(bytes)) {
-            Parsed(IpType::U4, _) => as_ipv4(IpType::U4, bytes),
-            Parsed(IpType::T4, _) => as_ipv4(IpType::T4, bytes),
-            Parsed(IpType::U6, _) => as_ipv6(IpType::U6, bytes),
-            Parsed(IpType::T6, _) => as_ipv6(IpType::T6, bytes),
+            Parsed(IpType::U4, rest) => as_ipv4(IpType::U4, rest),
+            Parsed(IpType::T4, rest) => as_ipv4(IpType::T4, rest),
+            Parsed(IpType::U6, rest) => as_ipv6(IpType::U6, rest),
+            Parsed(IpType::T6, rest) => as_ipv6(IpType::T6, rest),
         }
     }
 }

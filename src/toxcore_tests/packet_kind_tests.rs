@@ -21,7 +21,35 @@
 use toxcore::binary_io::*;
 use toxcore::packet_kind::PacketKind;
 
-use super::quickcheck::quickcheck;
+use super::quickcheck::{Arbitrary, Gen, quickcheck};
+
+// PacketKind::
+
+impl Arbitrary for PacketKind {
+    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+        g.choose(&[PacketKind::PingReq,
+                   PacketKind::PingResp,
+                   PacketKind::GetN,
+                   PacketKind::SendN,
+                   PacketKind::CookieReq,
+                   PacketKind::CookieResp,
+                   PacketKind::CryptoHs,
+                   PacketKind::CryptoData,
+                   PacketKind::DhtReq,
+                   PacketKind::LanDisc,
+                   PacketKind::OnionReq0,
+                   PacketKind::OnionReq1,
+                   PacketKind::OnionReq2,
+                   PacketKind::AnnReq,
+                   PacketKind::AnnResp,
+                   PacketKind::OnionDataReq,
+                   PacketKind::OnionDataResp,
+                   PacketKind::OnionResp3,
+                   PacketKind::OnionResp2,
+                   PacketKind::OnionResp1])
+            .unwrap().clone()
+    }
+}
 
 // PacketKind::from_bytes
 
@@ -52,7 +80,7 @@ fn packet_kind_from_bytes_test() {
             0x86 => assert_eq!(PacketKind::OnionDataResp, PacketKind::from_bytes(&bytes).unwrap()),
             0x8c => assert_eq!(PacketKind::OnionResp3, PacketKind::from_bytes(&bytes).unwrap()),
             0x8d => assert_eq!(PacketKind::OnionResp2, PacketKind::from_bytes(&bytes).unwrap()),
-            0x8e => assert_eq!(PacketKind::OnionResp2, PacketKind::from_bytes(&bytes).unwrap()),
+            0x8e => assert_eq!(PacketKind::OnionResp1, PacketKind::from_bytes(&bytes).unwrap()),
             _ => assert_eq!(None, PacketKind::from_bytes(&bytes)),
         }
     }
@@ -60,21 +88,22 @@ fn packet_kind_from_bytes_test() {
 
     // just in case
     with_bytes(vec![]);
-    with_bytes(vec![0]);
-    with_bytes(vec![1]);
-    with_bytes(vec![2]);
-    with_bytes(vec![3]);  // incorrect
-    with_bytes(vec![4]);
+    for i in 0x00 .. 0xff {
+        with_bytes(vec![i]);
+    }
 }
 
-// PacketKind::parse_bytes
+// PacketKind::parse_bytes()
 
 #[test]
-fn packet_kind_parse_bytes_rest_test() {
-    fn with_bytes(bytes: Vec<u8>) {
-        if let Ok(Parsed(_, rest)) = PacketKind::parse_bytes(&bytes) {
-            assert_eq!(&bytes[1..], rest);
-        }
+fn user_status_parse_bytes_rest_test() {
+    fn with_bytes(sk: PacketKind, r_rest: Vec<u8>) {
+        let mut bytes = vec![sk as u8];
+        bytes.extend_from_slice(&r_rest);
+
+        let Parsed(_, rest) = PacketKind::parse_bytes(&bytes)
+            .expect("PacketKind parsing failure.");
+        assert_eq!(&r_rest[..], rest);
     }
-    quickcheck(with_bytes as fn(Vec<u8>));
+    quickcheck(with_bytes as fn(PacketKind, Vec<u8>));
 }

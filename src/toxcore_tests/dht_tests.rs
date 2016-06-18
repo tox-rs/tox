@@ -62,13 +62,21 @@ fn nums_to_pk(a: u64, b: u64, c: u64, d: u64) -> PublicKey {
 }
 
 
+// PingType::
+
+impl Arbitrary for PingType {
+    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+        g.choose(&[PingType::Req, PingType::Resp]).unwrap().clone()
+    }
+}
+
 // PingType::from_bytes()
 
 #[test]
 fn ping_type_from_bytes_test() {
-    fn random_invalid(bytes: Vec<u8>) {
+    fn with_bytes(bytes: Vec<u8>) {
         if bytes.is_empty() {
-            return;
+            assert_eq!(None, PingType::from_bytes(&bytes));
         } else if bytes[0] == 0 {
             assert_eq!(PingType::Req, PingType::from_bytes(&bytes).unwrap());
         } else if bytes[0] == 1 {
@@ -77,28 +85,28 @@ fn ping_type_from_bytes_test() {
             assert_eq!(None, PingType::from_bytes(&bytes));
         }
     }
-    quickcheck(random_invalid as fn(Vec<u8>));
+    quickcheck(with_bytes as fn(Vec<u8>));
 
     // just in case
-    let p0 = vec![0];
-    assert_eq!(PingType::Req, PingType::from_bytes(&p0)
-                    .expect("Unwrapping PingType::Req failed"));
-
-    let p1 = vec![1];
-    assert_eq!(PingType::Resp, PingType::from_bytes(&p1)
-                    .expect("Unwrapping PingType::Resp failed"));
+    with_bytes(vec![]);
+    for i in 0x00 .. 0xff {
+        with_bytes(vec![i]);
+    }
 }
 
 // PingType::parse_bytes()
 
 #[test]
 fn ping_type_parse_bytes_rest_test() {
-    fn random_invalid(bytes: Vec<u8>) {
-        if let Ok(Parsed(_, rest)) = PingType::parse_bytes(&bytes) {
-            assert_eq!(&bytes[1..], rest);
-        }
+    fn random_invalid(pt: PingType, r_rest: Vec<u8>) {
+        let mut bytes = vec![pt as u8];
+        bytes.extend_from_slice(&r_rest);
+
+        let Parsed(_, rest) = PingType::parse_bytes(&bytes)
+            .expect("PingType parsing failed.");
+        assert_eq!(&r_rest[..], rest);
     }
-    quickcheck(random_invalid as fn(Vec<u8>));
+    quickcheck(random_invalid as fn(PingType, Vec<u8>));
 }
 
 // Ping::
@@ -210,12 +218,25 @@ fn ping_from_bytes_test() {
 
 #[test]
 fn ping_parse_bytes_rest_test() {
-    fn with_bytes(bytes: Vec<u8>) {
-        if let Ok(Parsed(_, rest)) = Ping::parse_bytes(&bytes) {
-            assert_eq!(&bytes[PING_SIZE..], rest);
-        }
+    fn with_bytes(p: Ping, r_rest: Vec<u8>) {
+        let mut bytes = vec![];
+        bytes.extend_from_slice(&p.to_bytes());
+        bytes.extend_from_slice(&r_rest);
+
+        let Parsed(_, rest) = Ping::parse_bytes(&bytes)
+            .expect("Ping parsing failure.");
+        assert_eq!(&r_rest[..], rest);
     }
-    quickcheck(with_bytes as fn(Vec<u8>));
+    quickcheck(with_bytes as fn(Ping, Vec<u8>));
+}
+
+// IpType
+
+impl Arbitrary for IpType {
+    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+        g.choose(&[IpType::U4, IpType::U6, IpType::T4, IpType::T6])
+            .unwrap().clone()
+    }
 }
 
 
@@ -224,7 +245,10 @@ fn ping_parse_bytes_rest_test() {
 #[test]
 fn ip_type_from_bytes_test() {
     fn with_bytes(bytes: Vec<u8>) {
-        if bytes.is_empty() { return }
+        if bytes.is_empty() {
+            assert_eq!(None, IpType::from_bytes(&bytes));
+            return
+        }
         match bytes[0] {
             2   => assert_eq!(IpType::U4, IpType::from_bytes(&bytes).unwrap()),
             10  => assert_eq!(IpType::U6, IpType::from_bytes(&bytes).unwrap()),
@@ -236,32 +260,51 @@ fn ip_type_from_bytes_test() {
     quickcheck(with_bytes as fn(Vec<u8>));
 
     // just in case
-    with_bytes(vec![0]);
-    with_bytes(vec![2]);
-    with_bytes(vec![10]);
-    with_bytes(vec![130]);
-    with_bytes(vec![138]);
+    with_bytes(vec![]);
+    for i in 0x00 .. 0xff {
+        with_bytes(vec![i]);
+    }
 }
 
 // IpType::parse_bytes()
 
 #[test]
 fn ip_type_parse_bytes_rest_test() {
-    fn with_bytes(bytes: Vec<u8>) {
-        if let Ok(Parsed(_, rest)) = IpType::parse_bytes(&bytes) {
-            assert_eq!(&bytes[1..], rest);
-        }
+    fn with_bytes(it: IpType, r_rest: Vec<u8>) {
+        let mut bytes = vec![it as u8];
+        bytes.extend_from_slice(&r_rest);
+
+        let Parsed(_, rest) = IpType::parse_bytes(&bytes)
+            .expect("IpType parsing failure.");
+        assert_eq!(&r_rest[..], rest);
     }
-    quickcheck(with_bytes as fn(Vec<u8>));
+    quickcheck(with_bytes as fn(IpType, Vec<u8>));
 }
 
+// IpAddr
+
+#[derive(Clone, Debug)]
+struct IpAddrWrap(IpAddr);
+
+impl Arbitrary for IpAddrWrap {
+    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+        let v4: bool = g.gen();
+
+        if v4 {
+            let res = IpAddr::V4(Ipv4Addr::new(g.gen(), g.gen(),
+                                               g.gen(), g.gen()));
+            IpAddrWrap(res)
+        } else {
+            let res = IpAddr::V6(Ipv6Addr::new(g.gen(), g.gen(),
+                                               g.gen(), g.gen(),
+                                               g.gen(), g.gen(),
+                                               g.gen(), g.gen()));
+            IpAddrWrap(res)
+        }
+    }
+}
 
 // IpAddr::to_bytes()
-
-/* NOTE: sadly, implementing `Arbitrary` for `IpAddr` doesn't appear to be
-   (easily/nicely) dobale, since neither is a part of this crate.
-   https://github.com/rust-lang/rfcs/pull/1023
-*/
 
 #[test]
 fn ip_addr_to_bytes_test() {
@@ -310,16 +353,46 @@ fn ipv6_addr_from_bytes_test() {
     quickcheck(with_bytes as fn(Vec<u8>));
 }
 
-// Ipv6Addr::parse_bytes()
+// Ipv4Addr::from_bytes()
 
 #[test]
-fn ipv6_addr_parse_bytes_rest_test() {
+fn ipv4_addr_from_bytes_test() {
     fn with_bytes(b: Vec<u8>) {
-        if let Ok(Parsed(_, rest)) = Ipv6Addr::parse_bytes(&b) {
-            assert_eq!(&b[16..], rest);
+        if b.len() < 4 {
+            assert_eq!(None, Ipv4Addr::from_bytes(&b));
+        } else {
+            let addr = Ipv4Addr::from_bytes(&b).unwrap();
+            assert_eq!(&IpAddr::V4(addr).to_bytes()[..4], &b[..4]);
         }
     }
     quickcheck(with_bytes as fn(Vec<u8>));
+}
+
+// Ipv[4,6]Addr::parse_bytes()
+
+#[test]
+fn ip_addr_parse_bytes_rest_test() {
+    fn with_bytes(IpAddrWrap(ip_addr): IpAddrWrap, r_rest: Vec<u8>) {
+        let mut bytes = vec![];
+        bytes.extend_from_slice(&ip_addr.to_bytes());
+        bytes.extend_from_slice(&r_rest);
+
+        let rest = match ip_addr {
+            IpAddr::V4(_) => {
+                let Parsed(_, rest) = Ipv4Addr::parse_bytes(&bytes)
+                    .expect("Ipv4Addr parsing failure.");
+                rest
+            },
+            IpAddr::V6(_) => {
+                let Parsed(_, rest) = Ipv6Addr::parse_bytes(&bytes)
+                    .expect("Ipv6Addr parsing failure.");
+                rest
+            }
+        };
+
+        assert_eq!(&r_rest[..], rest);
+    }
+    quickcheck(with_bytes as fn(IpAddrWrap, Vec<u8>));
 }
 
 
@@ -1497,12 +1570,16 @@ fn nat_ping_from_bytes_test() {
 
 #[test]
 fn nat_ping_parse_bytes_rest_test() {
-    fn with_bytes(bytes: Vec<u8>) {
-        if let Ok(Parsed(_, rest)) = NatPing::parse_bytes(&bytes) {
-            assert_eq!(&bytes[NAT_PING_SIZE..], rest);
-        }
+    fn with_bytes(np: NatPing, r_rest: Vec<u8>) {
+        let mut bytes = vec![];
+        bytes.extend_from_slice(&np.to_bytes());
+        bytes.extend_from_slice(&r_rest);
+
+        let Parsed(_, rest) = NatPing::parse_bytes(&bytes)
+            .expect("NatPing parsing failure.");
+        assert_eq!(&r_rest[..], rest);
     }
-    quickcheck(with_bytes as fn(Vec<u8>));
+    quickcheck(with_bytes as fn(NatPing, Vec<u8>));
 }
 
 // NatPing::deref()

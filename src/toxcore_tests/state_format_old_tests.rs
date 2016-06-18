@@ -19,13 +19,30 @@
 
 //! Tests for old state format module.
 
-use super::quickcheck::quickcheck;
+use super::quickcheck::{Arbitrary, Gen, TestResult, quickcheck};
 
 use toxcore::binary_io::*;
 use toxcore::dht::*;
 use toxcore::crypto_core::*;
 use toxcore::toxid::*;
 use toxcore::state_format::old::*;
+
+// SectionKind::
+
+impl Arbitrary for SectionKind {
+    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+        g.choose(&[SectionKind::NospamKeys,
+                   SectionKind::DHT,
+                   SectionKind::Friends,
+                   SectionKind::Name,
+                   SectionKind::StatusMsg,
+                   SectionKind::Status,
+                   SectionKind::TcpRelays,
+                   SectionKind::PathNodes,
+                   SectionKind::EOF])
+            .unwrap().clone()
+    }
+}
 
 // SectionKind::from_bytes()
 
@@ -48,12 +65,15 @@ fn section_kind_from_bytes_test() {
 
 #[test]
 fn section_kind_parse_bytes_rest_test() {
-    fn with_bytes(bytes: Vec<u8>) {
-        if let Ok(Parsed(_, rest)) = SectionKind::parse_bytes(&bytes) {
-            assert_eq!(&bytes[1..], rest);
-        }
+    fn with_bytes(sk: SectionKind, r_rest: Vec<u8>) {
+        let mut bytes = vec![sk as u8];
+        bytes.extend_from_slice(&r_rest);
+
+        let Parsed(_, rest) = SectionKind::parse_bytes(&bytes)
+            .expect("SectionKind parsing failure.");
+        assert_eq!(&r_rest[..], rest);
     }
-    quickcheck(with_bytes as fn(Vec<u8>));
+    quickcheck(with_bytes as fn(SectionKind, Vec<u8>));
 }
 
 
@@ -84,12 +104,16 @@ fn nospam_keys_from_bytes_test() {
 
 #[test]
 fn nospam_keys_parse_bytes_rest_test() {
-    fn with_bytes(bytes: Vec<u8>) {
+    // FIXME usee NospamKeys::to_bytes after implementation
+    fn with_bytes(bytes: Vec<u8>) -> TestResult {
         if let Ok(Parsed(_, rest)) = NospamKeys::parse_bytes(&bytes) {
             assert_eq!(&bytes[NOSPAMKEYSBYTES..], rest);
+            TestResult::passed()
+        } else {
+            TestResult::discard()
         }
     }
-    quickcheck(with_bytes as fn(Vec<u8>));
+    quickcheck(with_bytes as fn(Vec<u8>) -> TestResult);
 }
 
 
@@ -175,27 +199,58 @@ fn dht_state_to_bytes_test() {
     quickcheck(with_packed_nodes as fn(Vec<PackedNode>));
 }
 
+// FriendStatus::
+
+impl Arbitrary for FriendStatus {
+    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+        g.choose(&[FriendStatus::NotFriend,
+                   FriendStatus::Added,
+                   FriendStatus::FrSent,
+                   FriendStatus::Confirmed,
+                   FriendStatus::Online])
+            .unwrap().clone()
+    }
+}
+
 // FriendStatus::parse_bytes()
 
 #[test]
 fn friend_status_parse_bytes_rest_test() {
-    fn with_bytes(bytes: Vec<u8>) {
-        if let Ok(Parsed(_, rest)) = FriendStatus::parse_bytes(&bytes) {
-            assert_eq!(&bytes[1..], rest);
-        }
+    fn with_bytes(sk: FriendStatus, r_rest: Vec<u8>) {
+        let mut bytes = vec![sk as u8];
+        bytes.extend_from_slice(&r_rest);
+
+        let Parsed(_, rest) = FriendStatus::parse_bytes(&bytes)
+            .expect("FriendStatus parsing failure.");
+        assert_eq!(&r_rest[..], rest);
     }
-    quickcheck(with_bytes as fn(Vec<u8>));
+    quickcheck(with_bytes as fn(FriendStatus, Vec<u8>));
+}
+
+// UserStatus::
+
+impl Arbitrary for UserStatus {
+    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+        g.choose(&[UserStatus::Online,
+                   UserStatus::Away,
+                   UserStatus::Busy])
+            .unwrap().clone()
+    }
 }
 
 // UserStatus::parse_bytes()
 
 #[test]
 fn user_status_parse_bytes_rest_test() {
-    fn with_bytes(bytes: Vec<u8>) {
-        if let Ok(Parsed(_, rest)) = UserStatus::parse_bytes(&bytes) {
-            assert_eq!(&bytes[1..], rest);
-        }
+    fn with_bytes(sk: UserStatus, r_rest: Vec<u8>) {
+        let mut bytes = vec![sk as u8];
+        bytes.extend_from_slice(&r_rest);
+
+        let Parsed(_, rest) = UserStatus::parse_bytes(&bytes)
+            .expect("UserStatus parsing failure.");
+        assert_eq!(&r_rest[..], rest);
     }
-    quickcheck(with_bytes as fn(Vec<u8>));
+    quickcheck(with_bytes as fn(UserStatus, Vec<u8>));
 }
+
 
