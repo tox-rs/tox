@@ -443,15 +443,7 @@ impl FromBytes for PackedNode {
             let Parsed(port, bytes) = try!(parse_port(bytes));
             let saddr = SocketAddrV4::new(addr, port);
 
-            if bytes.len() < PUBLICKEYBYTES {
-                return parse_error!("Not enough bytes for PublicKey.")
-            }
-            let pk = match PublicKey::from_slice(&bytes[..PUBLICKEYBYTES]) {
-                Some(pk) => pk,
-                None => {
-                    return parse_error!("Not enough bytes to parse as PK after IPv4.")
-                },
-            };
+            let Parsed(pk, bytes) = try!(PublicKey::parse_bytes(bytes));
 
             let result = PackedNode {
                 ip_type: iptype,
@@ -459,7 +451,7 @@ impl FromBytes for PackedNode {
                 pk: pk
             };
 
-            Ok(Parsed(result, &bytes[PUBLICKEYBYTES..]))
+            Ok(Parsed(result, bytes))
         }
 
         // parse bytes as IPv6
@@ -471,15 +463,7 @@ impl FromBytes for PackedNode {
             let Parsed(port, bytes) = try!(parse_port(bytes));
             let saddr = SocketAddrV6::new(addr, port, 0, 0);
 
-            if bytes.len() < PUBLICKEYBYTES {
-                return parse_error!("Not enough bytes for PublicKey.")
-            }
-            let pk = match PublicKey::from_slice(&bytes[..PUBLICKEYBYTES]) {
-                Some(p) => p,
-                None    => {
-                    return parse_error!("Not enough bytes to parse as PK after IPv6.")
-                },
-            };
+            let Parsed(pk, bytes) = try!(PublicKey::parse_bytes(bytes));
 
             let result = PackedNode {
                 ip_type: iptype,
@@ -487,7 +471,7 @@ impl FromBytes for PackedNode {
                 pk: pk
             };
 
-            Ok(Parsed(result, &bytes[PUBLICKEYBYTES..]))
+            Ok(Parsed(result, bytes))
         }
 
 
@@ -567,19 +551,20 @@ impl FromBytes for GetNodes {
         debug!(target: "GetNodes", "De-serializing bytes into GetNodes.");
         trace!(target: "GetNodes", "With bytes: {:?}", bytes);
 
-        if bytes.len() < GET_NODES_SIZE {
-            return parse_error!("Amount of bytes is less than GET_NODES_SIZE!")
-        }
+        fn parse_id(b: &[u8]) -> ParseResult<u64> {
+            if b.len() < 8 {
+                return parse_error!("Not enough bytes to parse GetNodes id.")
+            }
 
-        if let Some(pk) = PublicKey::from_slice(&bytes[..PUBLICKEYBYTES]) {
-            // need shorter name for ID bytes
-            let b = &bytes[PUBLICKEYBYTES..GET_NODES_SIZE];
             let id = array_to_u64(&[b[0], b[1], b[2], b[3],
                                     b[4], b[5], b[6], b[7]]);
-            Ok(Parsed(GetNodes { pk: pk, id: id }, &bytes[GET_NODES_SIZE..]))
-        } else {
-            return parse_error!("Failed to de-serialize bytes into GetNodes!")
+            Ok(Parsed(id, &b[8..]))
         }
+
+        let Parsed(pk, bytes) = try!(PublicKey::parse_bytes(bytes));
+        let Parsed(id, bytes) = try!(parse_id(bytes));
+
+        Ok(Parsed(GetNodes { pk: pk, id: id }, bytes))
     }
 }
 
@@ -917,25 +902,9 @@ impl FromBytes for DhtPacket {
             },
         }
 
-        let sender_pk = match PublicKey::from_slice(&bytes[..PUBLICKEYBYTES]) {
-            Some(pk) => pk,
-            None => {
-                return parse_error!("Failed; de-serializing sender's PK! \
-                                    With bytes for PK: {:?}",
-                                    &bytes[..PUBLICKEYBYTES])
-            },
-        };
-        let bytes = &bytes[PUBLICKEYBYTES..];
+        let Parsed(sender_pk, bytes) = try!(PublicKey::parse_bytes(bytes));
 
-        let nonce = match Nonce::from_slice(&bytes[..NONCEBYTES]) {
-            Some(n) => n,
-            None => {
-                return parse_error!("Failed; de-serializing nonce! \
-                                    With bytes for nonce: {:?}",
-                                    &bytes[..NONCEBYTES])
-            },
-        };
-        let bytes = &bytes[NONCEBYTES..];
+        let Parsed(nonce, bytes) = try!(Nonce::parse_bytes(bytes));
 
         Ok(Parsed(DhtPacket {
             packet_type: packet_type,

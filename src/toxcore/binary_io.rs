@@ -70,7 +70,7 @@ macro_rules! parse_error {
 /// Result type for parsing methods
 pub type ParseResult<'a, Output> = Result<Parsed<'a, Output>, ParseError>;
 
-/// De-serialize from bytes, or return `None` if de-serialization failed.
+/// Methods for de-serialization from bytes
 pub trait FromBytes: Sized {
 
     /// De-serialize from bytes.

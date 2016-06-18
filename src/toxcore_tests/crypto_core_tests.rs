@@ -24,9 +24,9 @@
 use std::str::FromStr;
 
 use toxcore::crypto_core::*;
+use toxcore::binary_io::*;
 
 use super::quickcheck::quickcheck;
-
 
 #[test]
 // test comparing empty keys
@@ -262,4 +262,73 @@ fn increment_nonce_number_test_0xff0000_plus_0x011000() {
 
     increment_nonce_number(&mut nonce, 0x11000);
     assert_eq!(nonce, cmp_nonce);
+}
+
+// PublicKey::parse_bytes
+
+#[test]
+fn public_key_parse_bytes_test() {
+    fn with_bytes(bytes: Vec<u8>) {
+        if bytes.len() < PUBLICKEYBYTES {
+            let _ = PublicKey::parse_bytes(&bytes)
+                .err()
+                .expect("PublicKey::parse_bytes should fail on short input.");
+            return
+        }
+
+        let Parsed(PublicKey(pk_bytes), rest) =
+            PublicKey::parse_bytes(&bytes)
+                .expect("PublicKey::parse_bytes should parse any long enough input.");
+
+        assert_eq!(pk_bytes, &bytes[..PUBLICKEYBYTES]);
+        assert_eq!(rest, &bytes[PUBLICKEYBYTES..]);
+    }
+
+    quickcheck(with_bytes as fn(Vec<u8>));
+}
+
+// SecretKey::parse_bytes
+
+#[test]
+fn secret_key_parse_bytes_test() {
+    fn with_bytes(bytes: Vec<u8>) {
+        if bytes.len() < SECRETKEYBYTES {
+            let _ = SecretKey::parse_bytes(&bytes)
+                .err()
+                .expect("SecretKey::parse_bytes should fail on short input.");
+            return
+        }
+
+        let Parsed(SecretKey(sk_bytes), rest) =
+            SecretKey::parse_bytes(&bytes)
+                .expect("SecretKey::parse_bytes should parse any long enough input.");
+
+        assert_eq!(sk_bytes, &bytes[..SECRETKEYBYTES]);
+        assert_eq!(rest, &bytes[SECRETKEYBYTES..]);
+    }
+
+    quickcheck(with_bytes as fn(Vec<u8>));
+}
+
+// Nonce::parse_bytes
+
+#[test]
+fn nonce_parse_bytes_test() {
+    fn with_bytes(bytes: Vec<u8>) {
+        if bytes.len() < NONCEBYTES {
+            let _ = Nonce::parse_bytes(&bytes)
+                .err()
+                .expect("Nonce::parse_bytes should fail on short input.");
+            return
+        }
+
+        let Parsed(Nonce(sk_bytes), rest) =
+            Nonce::parse_bytes(&bytes)
+                .expect("Nonce::parse_bytes should parse any long enough input.");
+
+        assert_eq!(sk_bytes, &bytes[..NONCEBYTES]);
+        assert_eq!(rest, &bytes[NONCEBYTES..]);
+    }
+
+    quickcheck(with_bytes as fn(Vec<u8>));
 }

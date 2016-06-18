@@ -186,27 +186,14 @@ assert_eq!(result, NospamKeys::from_bytes(&bytes)
 */
 impl FromBytes for NospamKeys {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
-        if bytes.len() < NOSPAMKEYSBYTES {
-            return parse_error!("Not enough bytes for NospamKeys.")
-        }
+        debug!(target: "NospamKeys", "Creating NospamKeys from bytes.");
+        trace!(target: "NospamKeys", "Bytes: {:?}", bytes);
 
-        let nospam = NoSpam([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        let Parsed(nospam, bytes) = try!(NoSpam::parse_bytes(bytes));
+        let Parsed(pk, bytes) = try!(PublicKey::parse_bytes(bytes));
+        let Parsed(sk, bytes) = try!(SecretKey::parse_bytes(bytes));
 
-        let pk = match PublicKey::from_slice(
-                    &bytes[NOSPAMBYTES..PUBLICKEYBYTES + NOSPAMBYTES]) {
-
-            Some(pk) => pk,
-            None => return parse_error!("Can't parse PublicKey."),
-        };
-
-        let sk = match SecretKey::from_slice(
-                    &bytes[NOSPAMBYTES + PUBLICKEYBYTES..NOSPAMKEYSBYTES]) {
-
-            Some(sk) => sk,
-            None => return parse_error!("Can't parse SecretKey."),
-        };
-
-        Ok(Parsed(NospamKeys { nospam: nospam, pk: pk, sk: sk }, &bytes[NOSPAMKEYSBYTES..]))
+        Ok(Parsed(NospamKeys { nospam: nospam, pk: pk, sk: sk }, bytes))
     }
 }
 
@@ -625,12 +612,7 @@ impl FromBytes for FriendState {
 
         let Parsed(status, bytes) = try!(FriendStatus::parse_bytes(bytes));
 
-        let pk = match PublicKey::from_slice(
-                            &bytes[..PUBLICKEYBYTES]) {
-            Some(pk) => pk,
-            None => return parse_error!("Can't parse PublicKey.")
-        };
-        let bytes = &bytes[PUBLICKEYBYTES..];
+        let Parsed(pk, bytes) = try!(PublicKey::parse_bytes(bytes));
 
         // parse string out of bytes
         // supply length
