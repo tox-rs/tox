@@ -173,6 +173,10 @@ fn pass_encrypt_test() {
         assert_eq!(data, pass_decrypt(&encrypted, &pass)
                             .expect("Failed to pass_decrypt!"));
 
+        let encrypted2 = pass_encrypt(&data, &pass)
+            .expect("Failed to unwrap pass_encrypt 2!");
+        assert!(encrypted != encrypted2);
+
         TestResult::passed()
     }
     quickcheck(with_data_pass as fn(Vec<u8>, Vec<u8>) -> TestResult);
@@ -186,8 +190,11 @@ fn pass_encrypt_test() {
     }
 }
 
+
+// pass_decrypt()
+
 #[test]
-fn decrypt_test() {
+fn pass_decrypt_test() {
     let passphrase = b"encryptsave";
     let plaintext = b"Hello world.\n";
     let ciphertext = include_bytes!("ciphertext");
@@ -200,6 +207,29 @@ fn decrypt_test() {
 
 #[test]
 fn get_salt_test() {
+    fn with_bytes(bytes: Vec<u8>) {
+        let mut res = Vec::with_capacity(MAGIC_LENGTH + bytes.len());
+        res.extend_from_slice(MAGIC_NUMBER);
+        res.extend_from_slice(&bytes);
+
+        if bytes.len() < SALT_LENGTH {
+            assert_eq!(None, get_salt(&res));
+            return
+        }
+
+        // check if will work with any bytes
+        assert_eq!(&bytes[..SALT_LENGTH], get_salt(&res)
+            .expect("Failed to get Salt!").0);
+
+        // check if will fail with any malformed magic byte
+        for pos in 0..MAGIC_LENGTH {
+            let mut v = res.clone();
+            if v[pos] == 0 { v[pos] = 1; } else { v[pos] = 0; }
+            assert_eq!(None, get_salt(&v));
+        }
+    }
+    quickcheck(with_bytes as fn(Vec<u8>));
+
     assert_eq!(
         get_salt(include_bytes!("ciphertext")).unwrap().0,
         [208, 154, 232, 3, 210, 251, 220, 103, 10, 139, 111, 145, 165, 238, 157, 170, 62, 76, 91, 231, 46, 254, 215, 174, 12, 195, 128, 5, 171, 229, 237, 60]

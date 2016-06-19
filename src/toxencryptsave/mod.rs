@@ -394,7 +394,8 @@ pub enum DecryptionError {
     Can happen when:
 
      * data is invalid
-       - note that it can happen due to bitrot
+       - note that it can happen due to bitrot – i.e. even a single byte
+         getting corrupted can render data ~impossible to decrypt
      * not all encrypted bytes were provided
      * some bytes that aren't encrypted were provided after encrypted bytes
     */
