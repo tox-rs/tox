@@ -16,8 +16,7 @@ notifications:
   irc:
     channels: "chat.freenode.net#zetox"
     template:
-      - "%{repository}#%{build_number} (%{branch} - %{commit} : %{author}): %{message}"
-      - "Change view: %{compare_url}"
+      - "%{repository}#%{build_number} (%{branch} - %{commit} : %{author}): %{message} || Change view: %{compare_url}"
     on_success: change
     skip_join: true
 
