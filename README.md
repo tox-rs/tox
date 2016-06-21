@@ -68,7 +68,6 @@ cargo test --features "clippy"
  - improved toxcore implementation in Rust
  - Rust API
  - "old" C API for compatibility
-    - with help of [rusty-cheddar]?
  - documentation
  - tests
  - more
@@ -82,13 +81,16 @@ consider helping :wink:
         - [x] ping requests & responses
         - [x] nodes requests & responses
         - [x] NAT ping requests & responses
+    - [x] toxencryptsave (aka TES)
+ - [ ] C API – [CAPI]
+    - [x] toxencryptsave
  - [x] Rust API
    
    It will be a subject to changes, and most likely parts that are currently
    public will at later point become hidden. That though depends on the needs.
  - [x] Documentation
     - [x] Simply great. Further improvements in progress.
- - tests
+ - [x] tests
     - [x] tests cover almost all functionality
     - [x] tested against [hstox], using [Tox Tester], T.T for short
 
@@ -97,9 +99,9 @@ consider helping :wink:
 
 Licensed under GPLv3+. For details, see [COPYING](/COPYING).
 
-[toxcore]: https://github.com/irungentoo/toxcore
-[Rust]: https://www.rust-lang.org/
-[libsodium]: https://github.com/jedisct1/libsodium
-[rusty-cheddar]: https://github.com/Sean1708/rusty-cheddar
+[CAPI]: https://github.com/quininer/tox-capi
 [hstox]: https://github.com/TokTok/hstox
+[libsodium]: https://github.com/jedisct1/libsodium
+[Rust]: https://www.rust-lang.org/
 [Tox Tester]: https://github.com/zetok/tox-protocol-test
+[toxcore]: https://github.com/irungentoo/toxcore
