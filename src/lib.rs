@@ -61,7 +61,7 @@ fn main() {
     let dhtpacket = DhtPacket::new(&precomp, &pk, &nonce, ping).to_bytes();
 
     // and since packet is ready, prepare the network part;
-    // bind to some UDP socket
+    // bind to given address and port in given range
     let socket = match bind_udp("::".parse().unwrap(), 33445..33546) {
         Some(s) => s,
         None => {

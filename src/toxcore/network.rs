@@ -26,12 +26,12 @@ use std::any::Any;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::io::{ self, ErrorKind };
-use std::sync::{ Once, ONCE_INIT };
 use std::ops::{ Range, RangeFrom, RangeTo, RangeFull };
 use std::net::{ IpAddr, Ipv6Addr, SocketAddr, ToSocketAddrs };
 use std::collections::HashMap;
 use mio::udp::UdpSocket;
-use sodiumoxide;
+
+use super::crypto_core::crypto_init;
 
 
 /// Minimum port which Tox will try to bind to.
@@ -41,18 +41,6 @@ pub const PORT_MAX: u16 = 33545;
 /// Maximum size of a UDP packet that tox will handle.
 pub const MAX_UDP_PACKET_SIZE: usize = 2048;
 
-static AT_STARTUP_RAN: Once = ONCE_INIT;
-
-/** Run this before creating sockets.
-
-    return true on success
-    return false on failure
-*/
-fn networking_at_startup() -> bool {
-    let mut output = true;
-    AT_STARTUP_RAN.call_once(|| output = sodiumoxide::init());
-    output
-}
 
 /** Function to receive data,
     SocketAddr of sender is put into addr.
@@ -100,7 +88,7 @@ impl NetworkingCore {
     pub fn new<R: Into<PortRange<u16>>>(ip: IpAddr, port_range: R) -> io::Result<NetworkingCore> {
         let PortRange(port_range) = port_range.into();
 
-        if !networking_at_startup() {
+        if !crypto_init() {
             return Err(io::Error::new(ErrorKind::Other, "Startup error."));
         }
 

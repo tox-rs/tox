@@ -24,9 +24,35 @@
 pub use sodiumoxide::randombytes::randombytes_into;
 pub use sodiumoxide::crypto::box_::*;
 
-use super::binary_io::{array_to_u32, array_to_u64};
+use std::sync::{Once, ONCE_INIT};
+
+use super::binary_io::*;
 
 // TODO: check if `#[inline]` is actually useful
+
+
+static CRYPTO_INIT: Once = ONCE_INIT;
+
+/** Run before using crypto.
+
+Runs [`sodiumoxide::init()`](../../../sodiumoxide/fn.init.html).
+
+Returns `true` on success, `false` otherwise.
+
+E.g.
+
+```
+use ::tox::toxcore::crypto_core::crypto_init;
+
+assert_eq!(true, crypto_init());
+```
+*/
+pub fn crypto_init() -> bool {
+    let mut result = false;
+    CRYPTO_INIT.call_once(|| result = ::sodiumoxide::init());
+    result
+}
+
 
 /// Return a random number.
 pub fn random_u32() -> u32 {
