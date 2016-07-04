@@ -31,7 +31,8 @@ use super::binary_io::*;
 // TODO: check if `#[inline]` is actually useful
 
 
-static CRYPTO_INIT: Once = ONCE_INIT;
+static CRYPTO_INIT_ONCE: Once = ONCE_INIT;
+static mut CRYPTO_INIT: bool = false;
 
 /** Run before using crypto.
 
@@ -45,12 +46,18 @@ E.g.
 use ::tox::toxcore::crypto_core::crypto_init;
 
 assert_eq!(true, crypto_init());
+// second call should yield same result
+assert_eq!(true, crypto_init());
 ```
 */
 pub fn crypto_init() -> bool {
-    let mut result = false;
-    CRYPTO_INIT.call_once(|| result = ::sodiumoxide::init());
-    result
+    // NOTE: `init()` could be run more than once, but not in parallel, and
+    //       `CRYPTO_INIT` *can't* be modified while it may be read by
+    //       something else.
+    unsafe {
+        CRYPTO_INIT_ONCE.call_once(|| CRYPTO_INIT = ::sodiumoxide::init());
+        CRYPTO_INIT
+    }
 }
 
 

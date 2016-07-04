@@ -42,17 +42,22 @@ pub const PORT_MAX: u16 = 33545;
 pub const MAX_UDP_PACKET_SIZE: usize = 2048;
 
 
-/** Function to receive data,
-    SocketAddr of sender is put into addr.
-    Packet data is put into data.
+/**
+Type for functions that handle packets.
+
+  - `addr` – sender address
+  - `data` – packet data
 */
+// TODO: move out of `network`
 pub type PacketHandlerCallback = fn(Rc<RefCell<Any>>, addr: SocketAddr, data: &[u8]) -> usize;
 
+// TODO: move out of `network`
 struct PacketHandles {
     object: Rc<RefCell<Any>>,
     function: PacketHandlerCallback
 }
 
+// TODO: move out of `network`
 impl PacketHandles {
     #[inline]
     fn handle(&self, addr: SocketAddr, data: &[u8]) {
@@ -88,6 +93,8 @@ impl NetworkingCore {
     pub fn new<R: Into<PortRange<u16>>>(ip: IpAddr, port_range: R) -> io::Result<NetworkingCore> {
         let PortRange(port_range) = port_range.into();
 
+        // TODO: network shouldn't fails due to crypto, remove this from network
+        //       and put in more fitting place
         if !crypto_init() {
             return Err(io::Error::new(ErrorKind::Other, "Startup error."));
         }

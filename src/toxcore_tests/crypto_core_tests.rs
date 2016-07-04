@@ -22,11 +22,37 @@
 //! Tests for `crypto_core` module.
 
 use std::str::FromStr;
+use std::thread;
 
 use toxcore::crypto_core::*;
 use toxcore::binary_io::*;
 
 use super::quickcheck::quickcheck;
+
+
+// crypto_init()
+
+#[test]
+// test whether crypto init behaves well when one tries to run it in parallel.
+// Its code should **not** be ran in parallel.
+fn crypto_init_test() {
+    fn with_threads(num: u8) {
+        // up to 2^10 threads should do
+        for _ in 0..4 {
+            thread::spawn(move || {
+                for _ in 0..num {
+                    thread::spawn(move || {
+                        assert_eq!(true, crypto_init());
+                        // second run, value should be the same
+                        assert_eq!(true, crypto_init());
+                    });
+                }
+            });
+        }
+    }
+    quickcheck(with_threads as fn(u8));
+}
+
 
 #[test]
 // test comparing empty keys
