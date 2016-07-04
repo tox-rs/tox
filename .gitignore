@@ -1,4 +1,12 @@
+# Rust
 target/
 .cargo/
 
+# vim
 *.swp
+
+# git
+*.orig
+
+# other
+*.patch

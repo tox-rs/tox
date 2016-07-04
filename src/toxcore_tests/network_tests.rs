@@ -37,7 +37,7 @@ use toxcore::network::*;
 fn bind_udp_test() {
     for _ in 0..50 {
         thread::spawn(move || {
-            let socket = bind_udp();
+            let socket = bind_udp("::".parse().unwrap(), 33445..33546);
             match socket {
                 Some(_) => {},
                 None => panic!("This should have worked; bind_udp()"),

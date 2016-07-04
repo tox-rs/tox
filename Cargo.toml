@@ -8,6 +8,7 @@ authors = ["Zetok Zalbavar <zetok@openmailbox.org>"]
 clippy = { version = "*", optional = true }
 log = "0.3"
 sodiumoxide = "0.0.10"
+mio = { git = "https://github.com/hjr3/mio.git", branch = "remove-ipaddr" }
 
 [dev-dependencies]
 quickcheck = "0.2"

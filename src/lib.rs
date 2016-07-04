@@ -61,8 +61,8 @@ fn main() {
     let dhtpacket = DhtPacket::new(&precomp, &pk, &nonce, ping).to_bytes();
 
     // and since packet is ready, prepare the network part;
-    // bind to some UDP socket
-    let socket = match bind_udp() {
+    // bind to given address and port in given range
+    let socket = match bind_udp("::".parse().unwrap(), 33445..33546) {
         Some(s) => s,
         None => {
             println!("Failed to bind to socket, exiting.");
@@ -71,8 +71,8 @@ fn main() {
     };
 
     // send DhtPacket via socket to the node (Imppy's)
-    let sent_bytes = match socket.send_to(&dhtpacket, "178.62.250.138:33445") {
-        Ok(bytes) => bytes,
+    let sent_bytes = match socket.send_to(&dhtpacket, &"178.62.250.138:33445".parse().unwrap()) {
+        Ok(maybe_bytes) => maybe_bytes.unwrap_or(0),
         Err(e) => {
             println!("Failed to send bytes: {}", e);
             return;
@@ -82,16 +82,24 @@ fn main() {
     println!("Sent {} bytes of Ping request to the bootstrap node", sent_bytes);
     // since data was sent, now receive response – for that, first prepare
     // buffer to receive data into
-    let mut buf = [0; 2048];  // Tox UDP packet won't be bigger
+    let mut buf = [0; MAX_UDP_PACKET_SIZE];
 
     // and wait for the answer
-    let (bytes, sender) = match socket.recv_from(&mut buf) {
-        Ok(d) => d,
-        Err(e) => {
-            println!("Failed to receive data from socket: {}", e);
-            return;
-        },
-    };
+    let (mut bytes, mut sender);
+    loop {
+        match socket.recv_from(&mut buf) {
+            Ok(Some((b, s))) => {
+                bytes = b;
+                sender = s;
+                break;
+            },
+            Ok(None) => continue,
+            Err(e) => {
+                println!("Failed to receive data from socket: {}", e);
+                return;
+            }
+        }
+    }
 
     // try to de-serialize received bytes as `DhtPacket`
     let recv_packet = match DhtPacket::from_bytes(&buf[..bytes]) {
@@ -127,7 +135,7 @@ fn main() {
 
 #[macro_use]
 extern crate log;
-
+extern crate mio;
 extern crate sodiumoxide;
 
 
