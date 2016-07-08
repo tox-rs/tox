@@ -21,6 +21,9 @@
 // ↓ FIXME expand doc
 //! Networking part of the toxcore.
 
+// TODO: separate stuff managing DHT from network
+//       proper implementation of DHT should expose an interface that network
+//       implements
 
 use std::any::Any;
 use std::rc::Rc;
@@ -72,24 +75,20 @@ pub struct NetworkingCore {
 }
 
 impl NetworkingCore {
-    /** Initialize networking.
-        Bind to ip and port.
-        ip must be in network order EX: 127.0.0.1 = (7F000001).
-        port is in host byte order (this means don't worry about it).
-
-        TODO fix docs
-
-         return NetworkingCore object if no problems
-         return NULL if there are problems.
-
-        If error is non NULL it is set to 0 if no issues, 1 if socket related error, 2 if other.
-
-        ```
-        use tox::toxcore::network::NetworkingCore;
-
-        NetworkingCore::new("::".parse().unwrap(), 33445..33545).unwrap();
-        ```
-    */
+    // TODO: convert docs to block style once rust gets fixed
+    /// Initialize networking by binding to specified socket IP, and a port in
+    /// supplied range.
+    ///
+    /// # Fails when
+    ///
+    ///   - binding to IP address and every port in supplied range fails
+    ///   - setting broadcast on socket fails
+    ///
+    /// ```
+    /// use tox::toxcore::network::NetworkingCore;
+    ///
+    /// NetworkingCore::new("::".parse().unwrap(), 33445..33545).unwrap();
+    /// ```
     pub fn new<R: Into<PortRange<u16>>>(ip: IpAddr, port_range: R) -> io::Result<NetworkingCore> {
         let PortRange(port_range) = port_range.into();
 
@@ -123,28 +122,28 @@ impl NetworkingCore {
         })
     }
 
-    /** Function to call when packet beginning with byte is received.
-        TODO docs.
-
-        ```
-        # use std::rc::Rc;
-        # use std::any::Any;
-        # use std::cell::RefCell;
-        # use std::net::SocketAddr;
-        # use tox::toxcore::network::NetworkingCore;
-        # let mut net = NetworkingCore::new("::".parse().unwrap(), ..).unwrap();
-        fn callback(num: Rc<RefCell<Any>>, _: SocketAddr, _: &[u8]) -> usize {
-            match num.borrow().downcast_ref::<usize>() {
-                Some(&num) => unimplemented!(),
-                None => 0
-            }
-        }
-
-        net.register(99, callback, Rc::new(RefCell::new(1usize)) as Rc<RefCell<Any>>);
-
-        // ..
-        ```
-    */
+    // TODO: convert docs to block style once rust gets fixed
+    /// Function to call when packet beginning with byte is received.
+    ///
+    /// ```
+    /// # use std::rc::Rc;
+    /// # use std::any::Any;
+    /// # use std::cell::RefCell;
+    /// # use std::net::SocketAddr;
+    /// # use tox::toxcore::network::NetworkingCore;
+    /// # let mut net = NetworkingCore::new("::".parse().unwrap(), ..).unwrap();
+    /// fn callback(num: Rc<RefCell<Any>>, _: SocketAddr, _: &[u8]) -> usize {
+    ///     match num.borrow().downcast_ref::<usize>() {
+    ///         Some(&num) => unimplemented!(),
+    ///         None => 0
+    ///     }
+    /// }
+    ///
+    /// net.register(99, callback, Rc::new(RefCell::new(1usize)) as Rc<RefCell<Any>>);
+    ///
+    /// // ..
+    /// ```
+    // FIXME: docs
     pub fn register(&mut self, byte: u8, cb: PacketHandlerCallback, object: Rc<RefCell<Any>>) {
         self.packethandles.insert(byte, PacketHandles {
             object: object,
@@ -153,6 +152,7 @@ impl NetworkingCore {
     }
 
     /// Call this several times a second.
+    // TODO: polling isn't really optimal, move away from it
     pub fn poll(&self) {
         let mut data = [0; MAX_UDP_PACKET_SIZE];
 
@@ -168,7 +168,8 @@ impl NetworkingCore {
         }
     }
 
-    /// Function to send packet(data) to SocketAddr.
+    /// Function to send packet (`data`) to SocketAddr.
+    // FIXME: should be just a Result
     pub fn send_packet(&self, addr: SocketAddr, data: &[u8]) -> io::Result<Option<usize>> {
         // XXX need check target ip type?
         let res = self.sock.send_to(data, &addr);
@@ -183,17 +184,19 @@ impl NetworkingCore {
         res
     }
 
-    /** Function to receive data
-        Returns `Option<(length, addr)>` or `io::Error`.
-
-        SocketAddr of sender is put into addr.
-        Packet data is put into data.
-        Packet length is put into length.
-    */
+    // TODO: convert docs to block style once rust gets fixed
+    /// Receive packet data into `&mut data`.
+    ///
+    /// Returns `Option<(length, addr)>` or `io::Error`.
+    ///
+    /// If successfull, `(received bytes length, sender socket addr)` are
+    /// returned.
+    // FIXME: should be just a Result
     pub fn receive_packet(&self, data: &mut [u8]) -> io::Result<Option<(usize, SocketAddr)>> {
         let res = self.sock.recv_from(data);
 
         // TODO debug
+        // TODO: should be `trace!` instead?
         match &res {
             &Ok(Some((size, addr))) => debug!("recv: [{} -> {}] {:?}", addr, size, data),
             &Ok(None) => debug!("recv: [none] {:?}", data),
@@ -270,7 +273,7 @@ impl From<RangeFull> for PortRange<u16> {
     }
 }
 
-/// If from > to, swap
+/// If `from > to`, values are swapped.
 ///
 /// ```
 /// # use tox::toxcore::network::PortRange;
