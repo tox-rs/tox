@@ -66,7 +66,7 @@ fn nums_to_pk(a: u64, b: u64, c: u64, d: u64) -> PublicKey {
 
 impl Arbitrary for PingType {
     fn arbitrary<G: Gen>(g: &mut G) -> Self {
-        g.choose(&[PingType::Req, PingType::Resp]).unwrap().clone()
+        *g.choose(&[PingType::Req, PingType::Resp]).unwrap()
     }
 }
 
@@ -234,8 +234,8 @@ fn ping_parse_bytes_rest_test() {
 
 impl Arbitrary for IpType {
     fn arbitrary<G: Gen>(g: &mut G) -> Self {
-        g.choose(&[IpType::U4, IpType::U6, IpType::T4, IpType::T6])
-            .unwrap().clone()
+        *g.choose(&[IpType::U4, IpType::U6, IpType::T4, IpType::T6])
+            .unwrap()
     }
 }
 
@@ -398,7 +398,7 @@ fn ip_addr_parse_bytes_rest_test() {
 
 // PackedNode::
 
-/// Valid, random PackedNode.
+/// Valid, random `PackedNode`.
 impl Arbitrary for PackedNode {
     fn arbitrary<G: Gen>(g: &mut G) -> Self {
         let ipv4: bool = g.gen();
@@ -526,7 +526,7 @@ fn packed_node_parse_bytes_multiple_n_test() {
         }
 
         // should not parse too many nodes
-        if nodes.len() > 0 {
+        if !nodes.is_empty() {
             let mut bytes = vec![];
             for n in &nodes {
                 bytes.extend_from_slice(&n.to_bytes());

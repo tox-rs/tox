@@ -68,7 +68,7 @@ impl FromBytes for PingType {
         match try!(PacketKind::parse_bytes(bytes)) {
             Parsed(PacketKind::PingReq, rest)  => Ok(Parsed(PingType::Req, rest)),
             Parsed(PacketKind::PingResp, rest) => Ok(Parsed(PingType::Resp, rest)),
-            Parsed(value, _) => return parse_error!("Unexpected PacketKind '{:?}'", value)
+            Parsed(value, _) => parse_error!("Unexpected PacketKind '{:?}'", value)
         }
     }
 }

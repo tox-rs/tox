@@ -175,10 +175,10 @@ impl NetworkingCore {
         let res = self.sock.send_to(data, &addr);
 
         // TODO debug
-        match &res {
-            &Ok(Some(size)) => debug!("send: [{} -> {}] {:?}", addr, size, data),
-            &Ok(None) => debug!("send: [none] {:?}", data),
-            &Err(ref err) => debug!("{}", err)
+        match res {
+            Ok(Some(size)) => debug!("send: [{} -> {}] {:?}", addr, size, data),
+            Ok(None) => debug!("send: [none] {:?}", data),
+            Err(ref err) => debug!("{}", err)
         }
 
         res
@@ -197,10 +197,10 @@ impl NetworkingCore {
 
         // TODO debug
         // TODO: should be `trace!` instead?
-        match &res {
-            &Ok(Some((size, addr))) => debug!("recv: [{} -> {}] {:?}", addr, size, data),
-            &Ok(None) => debug!("recv: [none] {:?}", data),
-            &Err(ref err) => debug!("{}", err)
+        match res {
+            Ok(Some((size, addr))) => debug!("recv: [{} -> {}] {:?}", addr, size, data),
+            Ok(None) => debug!("recv: [none] {:?}", data),
+            Err(ref err) => debug!("{}", err)
         }
 
         res

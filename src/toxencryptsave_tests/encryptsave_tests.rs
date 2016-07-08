@@ -72,7 +72,7 @@ fn pass_key_with_salt_test() {
         if passwd.is_empty() { return TestResult::discard() }
 
         let salt = gen_salt();
-        let pk = PassKey::with_salt(&passwd, salt.clone())
+        let pk = PassKey::with_salt(&passwd, salt)
                     .expect("Failed to unwrap PassKey!");
 
         assert_eq!(&pk.salt, &salt);

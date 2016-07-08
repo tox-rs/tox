@@ -126,8 +126,8 @@ impl FromBytes for NoSpam {
 
     Length | Contents
     ------ | --------
-    32     | long term PublicKey
-    4      | NoSpam
+    32     | long term `PublicKey`
+    4      | `NoSpam`
     2      | Checksum
 
     https://zetok.github.io/tox-spec/#tox-id
@@ -337,8 +337,8 @@ assert_eq!(&format!("{:X}", toxid),
 impl fmt::UpperHex for ToxId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut string = String::with_capacity(TOXIDBYTES * 2);
-        let PublicKey(pk_bytes) = self.pk;
-        for byte in pk_bytes.iter() {
+        let PublicKey(ref pk_bytes) = self.pk;
+        for byte in pk_bytes {
             string.push_str(&format!("{:02X}", byte));
         }
         for byte in self.nospam.iter() {

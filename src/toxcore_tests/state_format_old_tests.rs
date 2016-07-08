@@ -31,7 +31,7 @@ use toxcore::state_format::old::*;
 
 impl Arbitrary for SectionKind {
     fn arbitrary<G: Gen>(g: &mut G) -> Self {
-        g.choose(&[SectionKind::NospamKeys,
+        *g.choose(&[SectionKind::NospamKeys,
                    SectionKind::DHT,
                    SectionKind::Friends,
                    SectionKind::Name,
@@ -40,7 +40,7 @@ impl Arbitrary for SectionKind {
                    SectionKind::TcpRelays,
                    SectionKind::PathNodes,
                    SectionKind::EOF])
-            .unwrap().clone()
+            .unwrap()
     }
 }
 
@@ -146,9 +146,9 @@ fn dht_state_from_bytes() {
         }
 
         // check if fails to de-serialize with wrong magic number
-        for pos in vec![0, 1, 2, 3, 8, 9, 10, 11] {
+        for pos in [0, 1, 2, 3, 8, 9, 10, 11].into_iter() {
             let mut s = serialized.clone();
-            if pos == 1 || pos == 9 { s[pos] = 0xff; } else { s[pos] = 0; }
+            if *pos == 1 || *pos == 9 { s[*pos] = 0xff; } else { s[*pos] = 0; }
             assert_eq!(None, DhtState::from_bytes(&s));
         }
     }
@@ -231,10 +231,10 @@ fn friend_status_parse_bytes_rest_test() {
 
 impl Arbitrary for UserStatus {
     fn arbitrary<G: Gen>(g: &mut G) -> Self {
-        g.choose(&[UserStatus::Online,
+        *g.choose(&[UserStatus::Online,
                    UserStatus::Away,
                    UserStatus::Busy])
-            .unwrap().clone()
+            .unwrap()
     }
 }
 

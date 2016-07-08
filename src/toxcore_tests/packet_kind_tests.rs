@@ -27,7 +27,7 @@ use super::quickcheck::{Arbitrary, Gen, quickcheck};
 
 impl Arbitrary for PacketKind {
     fn arbitrary<G: Gen>(g: &mut G) -> Self {
-        g.choose(&[PacketKind::PingReq,
+        *g.choose(&[PacketKind::PingReq,
                    PacketKind::PingResp,
                    PacketKind::GetN,
                    PacketKind::SendN,
@@ -47,7 +47,7 @@ impl Arbitrary for PacketKind {
                    PacketKind::OnionResp3,
                    PacketKind::OnionResp2,
                    PacketKind::OnionResp1])
-            .unwrap().clone()
+            .unwrap()
     }
 }
 
