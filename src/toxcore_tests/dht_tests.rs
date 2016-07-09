@@ -533,12 +533,8 @@ fn packed_node_parse_bytes_multiple_n_test() {
             bytes.push(0); // Incorrect IpType
             bytes.extend_from_slice(&random_rest);
 
-            let nodes_err =
-                PackedNode::parse_bytes_multiple_n(nodes.len() + 1, &bytes)
-                    .ok()
-                    .map(|Parsed(v, _)| v);
-
-            assert_eq!(None, nodes_err);
+            assert!(PackedNode::parse_bytes_multiple_n(nodes.len() + 1, &bytes)
+                    .ok().is_none());
         }
 
         // should not parse too many nodes
