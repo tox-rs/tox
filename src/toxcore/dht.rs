@@ -425,6 +425,8 @@ impl ToBytes for PackedNode {
 */
 impl FromBytes for PackedNode {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
+        // TODO: move somewhere else, since it's likely that it will be needed
+        //       in more places?
         fn parse_port(bytes: &[u8]) -> ParseResult<u16> {
             if bytes.len() < 2 {
                 return parse_error!("Not enough bytes for port.")

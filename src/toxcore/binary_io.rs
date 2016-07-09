@@ -27,6 +27,7 @@ pub trait ToBytes {
 }
 
 /// Parsing result. Provides result and remaining input. 
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Parsed<'a, Output>(
     /// Result.
     pub Output,
@@ -35,7 +36,7 @@ pub struct Parsed<'a, Output>(
 );
 
 /// Parsing error.
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParseError{
     target: &'static str,
     message: String,

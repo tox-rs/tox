@@ -461,6 +461,24 @@ fn packed_node_ip_test() {
 }
 
 
+// PackedNode::parse_bytes()
+
+#[test]
+// check if always fails when there's not enough bytes for port
+fn packed_node_parse_bytes_test_port() {
+    fn with_pn(pn: PackedNode) {
+        let bytes = &pn.to_bytes()[..];
+        let bytes = &bytes[..bytes.len() - PUBLICKEYBYTES];
+        let err_1 = PackedNode::parse_bytes(&bytes[..bytes.len() - 1]);
+        let err_2 = PackedNode::parse_bytes(&bytes[..bytes.len() - 2]);
+        let err_msg = "Not enough bytes for port.";
+        assert!(format!("{:?}", err_1.unwrap_err()).contains(&err_msg));
+        assert!(format!("{:?}", err_2.unwrap_err()).contains(&err_msg));
+    }
+    quickcheck(with_pn as fn(PackedNode));
+}
+
+
 // PackedNode::parse_bytes_multiple()
 
 #[test]
@@ -491,8 +509,7 @@ fn packed_node_parse_bytes_multiple_test() {
 #[test]
 fn packed_node_parse_bytes_multiple_n_test() {
     fn with_nodes(nodes: Vec<PackedNode>, random_rest: Vec<u8>) {
-        // should parse nodes
-        {
+        { // should parse nodes
             let mut bytes = vec![];
             for n in &nodes {
                 bytes.extend_from_slice(&n.to_bytes());
@@ -508,8 +525,7 @@ fn packed_node_parse_bytes_multiple_n_test() {
             assert_eq!(&random_rest[..], rest);
         }
 
-        // should fail if not enough nodes
-        {
+        { // should fail if not enough nodes
             let mut bytes = vec![];
             for n in &nodes {
                 bytes.extend_from_slice(&n.to_bytes());
