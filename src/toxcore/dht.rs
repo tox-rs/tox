@@ -1239,7 +1239,7 @@ impl Kbucket {
         let mut bucket = Bucket::new(Some(4));
         for buc in &*self.buckets {
             for node in &*buc.nodes {
-                drop(bucket.try_add(&pk, &node));
+                drop(bucket.try_add(pk, node));
             }
         }
         trace!("Returning nodes: {:?}", &bucket.nodes);
