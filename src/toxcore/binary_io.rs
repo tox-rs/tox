@@ -128,8 +128,8 @@ pub fn array_to_u16(array: &[u8; 2]) -> u16 {
     trace!("Casting array to u16 from array: {:?}", array);
     let mut result: u16 = 0;
     for pos in 0..array.len() {
-        result = result << 8;
-        result = result | array[1 - pos] as u16;
+        result <<= 8;
+        result |= array[1 - pos] as u16;
     }
     result
 }
@@ -150,8 +150,8 @@ pub fn array_to_u32(array: &[u8; 4]) -> u32 {
     trace!("Casting array to u32 from array: {:?}", array);
     let mut result: u32 = 0;
     for pos in 0..array.len() {
-        result = result << 8;
-        result = result | array[3 - pos] as u32;
+        result <<= 8;
+        result |= array[3 - pos] as u32;
     }
     result
 }
@@ -170,8 +170,8 @@ pub fn array_to_u64(array: &[u8; 8]) -> u64 {
     trace!("Casting array to u64 from array: {:?}", array);
     let mut result: u64 = 0;
     for pos in 0..array.len() {
-        result = result << 8;
-        result = result | array[7 - pos] as u64;
+        result <<= 8;
+        result |= array[7 - pos] as u64;
     }
     result
 }

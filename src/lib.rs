@@ -129,9 +129,14 @@ fn main() {
 
 */
 
-#![cfg_attr(feature="clippy", feature(plugin))]
+#![cfg_attr(feature = "clippy", feature(plugin))]
 
-#![cfg_attr(feature="clippy", plugin(clippy))]
+#![cfg_attr(feature = "clippy", plugin(clippy))]
+
+// Turn off clippy warnings that gives false positives
+#![cfg_attr(feature = "clippy", allow(doc_markdown))]
+#![cfg_attr(feature = "clippy", allow(useless_format))]
+#![cfg_attr(feature = "clippy", allow(new_without_default, new_without_default_derive))]
 
 #[macro_use]
 extern crate log;
