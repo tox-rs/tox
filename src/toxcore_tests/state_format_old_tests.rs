@@ -241,7 +241,7 @@ impl Arbitrary for UserStatus {
 // UserStatus::parse_bytes()
 
 #[test]
-fn user_status_parse_bytes_rest_test() {
+fn user_status_parse_bytes_test_rest() {
     fn with_bytes(sk: UserStatus, r_rest: Vec<u8>) {
         let mut bytes = vec![sk as u8];
         bytes.extend_from_slice(&r_rest);
@@ -252,5 +252,3 @@ fn user_status_parse_bytes_rest_test() {
     }
     quickcheck(with_bytes as fn(UserStatus, Vec<u8>));
 }
-
-

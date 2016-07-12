@@ -168,8 +168,8 @@ pub mod toxencryptsave;
 
 
 #[cfg(test)]
-mod toxcore_tests {
-    extern crate quickcheck;
+pub mod toxcore_tests {
+    pub extern crate quickcheck;
     extern crate rand;
     extern crate rustc_serialize;
     extern crate regex;
@@ -179,7 +179,7 @@ mod toxcore_tests {
     mod dht_tests;
     mod network_tests;
     mod packet_kind_tests;
-    mod state_format_old_tests;
+    pub mod state_format_old_tests;
     mod toxid_tests;
 }
 

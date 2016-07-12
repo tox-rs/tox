@@ -25,6 +25,27 @@ use toxcore::crypto_core::*;
 use toxcore::dht::*;
 use toxcore::toxid::{NoSpam, NOSPAMBYTES};
 
+
+#[cfg(test)]
+use ::toxcore_tests::quickcheck::{Arbitrary, Gen, quickcheck};
+
+
+
+/// Length in bytes of request message.
+// FIXME: move somewhere else
+// TODO: rename
+const REQUEST_MSG_LEN: usize = 1024;
+
+/// Length in bytes of name.
+// FIXME: move somewhere else
+const NAME_LEN: usize = 128;
+
+/// Length in bytes of friend's status message.
+// FIXME: move somewhere else
+const STATUS_MSG_LEN: usize = 1007;
+
+
+
 // TODO: improve docs
 
 /** Sections of the old state format.
@@ -469,13 +490,20 @@ use self::tox::toxcore::state_format::old::*;
             .expect("Failed to de-serialize FriendStatus::Online!"));
 }
 
-// empty
-assert_eq!(None, FriendStatus::from_bytes(&[]));
+{ // empty
+    assert_eq!(None, FriendStatus::from_bytes(&[]));
+    let debug = format!("{:?}", FriendStatus::parse_bytes(&[]).unwrap_err());
+    let err_msg = "Not enough bytes for FriendStatus.";
+    assert!(debug.contains(err_msg));
+}
 
 // wrong
 for i in 5..256 {
     let bytes = [i as u8];
     assert_eq!(None, FriendStatus::from_bytes(&bytes));
+    let debug = format!("{:?}", FriendStatus::parse_bytes(&bytes).unwrap_err());
+    let err_msg = format!("Unknown FriendStatus: {}", i);
+    assert!(debug.contains(&err_msg));
 }
 ```
 */
@@ -539,13 +567,20 @@ use self::tox::toxcore::state_format::old::UserStatus;
                 .expect("Failed to de-serialize UserStatus::Busy!"));
 }
 
-// empty
-assert_eq!(None, UserStatus::from_bytes(&[]));
+{ // empty
+    assert_eq!(None, UserStatus::from_bytes(&[]));
+    let debug = format!("{:?}", UserStatus::parse_bytes(&[]).unwrap_err());
+    let err_msg = "Not enough bytes for UserStatus.";
+    assert!(debug.contains(err_msg));
+}
 
 // invalid
 for i in 3..256 {
     let bytes = [i as u8];
     assert_eq!(None, UserStatus::from_bytes(&bytes));
+    let debug = format!("{:?}", UserStatus::parse_bytes(&bytes).unwrap_err());
+    let err_msg = format!("Unknown UserStatus: {}.", i);
+    assert!(debug.contains(&err_msg));
 }
 ```
 */
@@ -569,6 +604,10 @@ impl FromBytes for UserStatus {
 /** Friend state format for a single friend, compatible with what C toxcore
 does with on `GCC x86{,_x64}` platform.
 
+Data that is supposed to be strings (friend request message, friend name,
+friend status message) might, or might not even be a valid UTF-8. **Anything
+using that data should validate whether it's actually correct UTF-8!**
+
 *feel free to add compatibility to what broken C toxcore does on other
 platforms*
 
@@ -579,10 +618,10 @@ pub struct FriendState {
     status: FriendStatus,
     pk: PublicKey,
     /// Friend request message that is being sent to friend.
-    fr_msg: String,
+    fr_msg: Vec<u8>,
     /// Friend's name.
-    name: String,
-    status_msg: String,
+    name: Vec<u8>,
+    status_msg: Vec<u8>,
     user_status: UserStatus,
     nospam: NoSpam,
     /// Time when friend was last seen.
@@ -592,16 +631,16 @@ pub struct FriendState {
 /// Number of bytes of serialized [`FriendState`](./struct.FriendState.html).
 pub const FRIENDSTATEBYTES: usize = 1      // "Status"
                                   + PUBLICKEYBYTES
-                                  + 1024   // FR message; TODO: change to const
-                                  + 2      // actual size of FR message
-                                  + 128    // Name; TODO: change to const
-                                  + 2      // actual size of Name
-                                  + 1007   // Status msg; TODO: change to const
-                                  + 2      // actual size of status message
-                                  + 1      // user status
-                                  + 3      // padding
-                                  + NOSPAMBYTES      // only used for sending FR
-                                  + 8;     // last time seen
+/* Friend request message      */ + REQUEST_MSG_LEN
+/* actual size of FR message   */ + 2
+/* Name;                       */ + NAME_LEN
+/* actual size of Name         */ + 2
+/* Status msg;                 */ + STATUS_MSG_LEN
+/* actual size of status msg   */ + 2
+/* UserStatus                  */ + 1
+/* padding                     */ + 3
+/* only used for sending FR    */ + NOSPAMBYTES
+/* last time seen              */ + 8;
 
 impl FromBytes for FriendState {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
@@ -613,27 +652,23 @@ impl FromBytes for FriendState {
 
         let Parsed(pk, bytes) = try!(PublicKey::parse_bytes(bytes));
 
-        // parse string out of bytes
         // supply length
-        fn parse_string(bytes: &[u8], len: usize) -> ParseResult<String> {
+        fn get_bytes(bytes: &[u8], len: usize) -> ParseResult<Vec<u8>> {
             let str_len = u16::from_be(array_to_u16(
                         &[bytes[len], bytes[len+1]])) as usize;
-            match String::from_utf8(bytes[..str_len].to_vec()) {
-                Ok(str) => Ok(Parsed(str, &bytes[len+2..])),
-                Err(err) => parse_error!("Can't parse string from bytes: '{:?}'. \
-                                         Original error: {:?}.",
-                                         &bytes[..len+2], err)
+            if str_len > len {
+                return parse_error!("Value demands {} bytes when it is \
+                    supposed to take {}!", str_len, len)
             }
+
+            Ok(Parsed(bytes[..str_len].to_vec(), &bytes[len+2..]))
         };
 
-        const FR_MSG_LEN: usize = 1024;
-        let Parsed(fr_msg, bytes) = try!(parse_string(bytes, FR_MSG_LEN));
+        let Parsed(fr_msg, bytes) = try!(get_bytes(bytes, REQUEST_MSG_LEN));
 
-        const NAME_LEN: usize = 128;
-        let Parsed(name, bytes) = try!(parse_string(bytes, NAME_LEN));
+        let Parsed(name, bytes) = try!(get_bytes(bytes, NAME_LEN));
 
-        const STATUS_MSG_LEN: usize = 1007;
-        let Parsed(status_msg, bytes) = try!(parse_string(bytes, STATUS_MSG_LEN));
+        let Parsed(status_msg, bytes) = try!(get_bytes(bytes, STATUS_MSG_LEN));
 
         let Parsed(user_status, bytes) = try!(UserStatus::parse_bytes(bytes));
 
@@ -659,3 +694,187 @@ impl FromBytes for FriendState {
     }
 }
 // TODO: write tests ↑
+
+
+impl ToBytes for FriendState {
+    fn to_bytes(&self) -> Vec<u8> {
+        // extend vec with all contents of slice and padd with `0`s up to `len`
+        // assume that Vec isn't too big for fr_msg
+        fn ext_vec(vec: &mut Vec<u8>, slice: &[u8], len: usize) {
+            vec.extend_from_slice(slice);
+            for _ in 0..(len - slice.len()) {
+                vec.push(0);
+            }
+        }
+
+        let len_to_u16be = |len| u16_to_array((len as u16).to_be());
+
+        let mut result = Vec::with_capacity(FRIENDSTATEBYTES);
+
+        // friend status
+        result.push(self.status as u8);
+
+        // pk
+        result.extend_from_slice(&self.pk.0);
+
+        // friend request msg and its length
+        ext_vec(&mut result, &self.fr_msg, REQUEST_MSG_LEN);
+        result.extend_from_slice(&len_to_u16be(self.fr_msg.len()));
+
+        // name and its length
+        ext_vec(&mut result, &self.name, NAME_LEN);
+        result.extend_from_slice(&len_to_u16be(self.name.len()));
+
+        // status msg and its length
+        ext_vec(&mut result, &self.status_msg, STATUS_MSG_LEN);
+        result.extend_from_slice(&len_to_u16be(self.status_msg.len()));
+
+        // UserStatus
+        result.push(self.user_status as u8);
+
+        // padding
+        for _ in 0..3 {
+            result.push(0);
+        }
+
+        // NoSpam
+        result.extend_from_slice(&self.nospam.0);
+
+        // last seen
+        result.extend_from_slice(&u64_to_array(self.last_seen.to_le()));
+
+        result
+    }
+}
+
+
+#[cfg(test)]
+impl Arbitrary for FriendState {
+    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+        // friend's PublicKey
+        let mut pk_bytes = [0; PUBLICKEYBYTES];
+        g.fill_bytes(&mut pk_bytes);
+        let pk = PublicKey(pk_bytes);
+
+        // friend message and its length
+        let mut fr_msg = [0; REQUEST_MSG_LEN];
+        let fr_msg_len = g.gen_range(0, REQUEST_MSG_LEN);
+        g.fill_bytes(&mut fr_msg[..fr_msg_len]);
+        let fr_msg = fr_msg[..fr_msg_len].to_vec();
+
+        // friend name and its length
+        let mut fname = [0; NAME_LEN];
+        let fname_len = g.gen_range(0, NAME_LEN);
+        g.fill_bytes(&mut fname[..fname_len]);
+        let fname = fname[..fname_len].to_vec();
+
+        // status message and its length
+        let mut status_msg = [0; STATUS_MSG_LEN];
+        let status_msg_len = g.gen_range(0, STATUS_MSG_LEN);
+        g.fill_bytes(&mut status_msg[..status_msg_len]);
+        let status_msg = status_msg[..status_msg_len].to_vec();
+
+        let mut ns_bytes = [0; NOSPAMBYTES];
+        g.fill_bytes(&mut ns_bytes);
+        let nospam = NoSpam(ns_bytes);
+
+        FriendState {
+            status: Arbitrary::arbitrary(g),
+            pk: pk,
+            fr_msg: fr_msg,
+            name: fname,
+            status_msg: status_msg,
+            user_status: Arbitrary::arbitrary(g),
+            nospam: nospam,
+            last_seen: Arbitrary::arbitrary(g),
+        }
+    }
+}
+
+
+// FriendState::parse_bytes()
+
+#[test]
+// TODO: deduplicate the code
+fn friend_state_parse_bytes_test() {
+    // TODO: see if it won't be better off as a generic function, macro, or
+    //       something, used by more tests
+    fn assert_error(bytes: &[u8], error: &str) {
+        let e = format!("{:?}", FriendState::parse_bytes(bytes).unwrap_err());
+        assert!(e.contains(error));
+    }
+
+    // serialized and deserialized remain the same
+    fn assert_success(bytes: &[u8], friend_state: &FriendState) {
+        let Parsed(ref p, _) = FriendState::parse_bytes(bytes)
+            .expect("Failed to unwrap FriendState!");
+        assert_eq!(friend_state, p);
+    }
+
+    fn with_fs(fs: FriendState) {
+        let fs_bytes = fs.to_bytes();
+        assert_success(&fs_bytes, &fs);
+
+        for b in 0..(FRIENDSTATEBYTES - 1) {
+            assert_error(&fs_bytes[..b], "Not enough bytes for FriendState.");
+        }
+
+        { // FriendStatus
+            let mut bytes = fs_bytes.clone();
+            for b in 5..256 {
+                bytes[0] = b as u8;
+                assert_error(&bytes, &format!("Unknown FriendStatus: {}", b));
+            }
+        }
+
+        const FR_MSG_LEN_POS: usize = 1 + PUBLICKEYBYTES + REQUEST_MSG_LEN;
+        { // friend request message lenght check
+            let mut bytes = fs_bytes.clone();
+            for i in (REQUEST_MSG_LEN+1)..2500 { // too slow with bigger ranges
+                let invalid = u16_to_array((i as u16).to_be());
+                for pos in 0..2 {
+                    bytes[FR_MSG_LEN_POS+pos] = invalid[pos];
+                }
+                assert_error(&bytes, &format!("Value demands {} bytes \
+                    when it is supposed to take {}!", i, REQUEST_MSG_LEN));
+            }
+        }
+
+        const NAME_LEN_POS: usize = FR_MSG_LEN_POS + NAME_LEN + 2;
+        { // friend name lenght check
+            let mut bytes = fs_bytes.clone();
+            for i in (NAME_LEN+1)..2500 { // too slow with bigger ranges
+                let invalid = u16_to_array((i as u16).to_be());
+                for pos in 0..2 {
+                    bytes[NAME_LEN_POS+pos] = invalid[pos];
+                }
+                assert_error(&bytes, &format!("Value demands {} bytes \
+                    when it is supposed to take {}!", i, NAME_LEN));
+            }
+        }
+
+        const STATUS_MSG_LEN_POS: usize = NAME_LEN_POS + STATUS_MSG_LEN + 2;
+        { // friend name lenght check
+            let mut bytes = fs_bytes.clone();
+            for i in (STATUS_MSG_LEN+1)..2500 { // too slow with bigger ranges
+                let invalid = u16_to_array((i as u16).to_be());
+                for pos in 0..2 {
+                    bytes[STATUS_MSG_LEN_POS+pos] = invalid[pos];
+                }
+                assert_error(&bytes, &format!("Value demands {} bytes \
+                    when it is supposed to take {}!", i, STATUS_MSG_LEN));
+            }
+        }
+
+        // TODO: test for:
+        //
+        // user status
+        //
+        // padding
+        //
+        // nospam
+        //
+        // last time seen
+    }
+    quickcheck(with_fs as fn(FriendState));
+}

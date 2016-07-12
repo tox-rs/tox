@@ -290,7 +290,8 @@ fn increment_nonce_number_test_0xff0000_plus_0x011000() {
     assert_eq!(nonce, cmp_nonce);
 }
 
-// PublicKey::parse_bytes
+
+// PublicKey::parse_bytes()
 
 #[test]
 fn public_key_parse_bytes_test() {
@@ -313,7 +314,8 @@ fn public_key_parse_bytes_test() {
     quickcheck(with_bytes as fn(Vec<u8>));
 }
 
-// SecretKey::parse_bytes
+
+// SecretKey::parse_bytes()
 
 #[test]
 fn secret_key_parse_bytes_test() {
