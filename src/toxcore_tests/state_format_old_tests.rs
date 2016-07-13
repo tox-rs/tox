@@ -203,12 +203,12 @@ fn dht_state_to_bytes_test() {
 
 impl Arbitrary for FriendStatus {
     fn arbitrary<G: Gen>(g: &mut G) -> Self {
-        g.choose(&[FriendStatus::NotFriend,
+        *g.choose(&[FriendStatus::NotFriend,
                    FriendStatus::Added,
                    FriendStatus::FrSent,
                    FriendStatus::Confirmed,
                    FriendStatus::Online])
-            .unwrap().clone()
+            .unwrap()
     }
 }
 

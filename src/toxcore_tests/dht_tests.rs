@@ -889,7 +889,7 @@ fn send_nodes_from_request_test() {
 #[test]
 fn send_nodes_as_packet_test() {
     fn with_sn(sn: SendNodes) {
-        assert_eq!(DhtPacketT::SendNodes(sn.clone()), sn.as_packet());
+        assert_eq!(DhtPacketT::SendNodes(sn.clone()), sn.into_packet());
     }
     quickcheck(with_sn as fn(SendNodes));
 }

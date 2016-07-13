@@ -622,7 +622,7 @@ impl SendNodes {
 
     /// Encapsulate in `DhtPacketT` to easily use in [`DhtPacket`]
     /// (./struct.DhtPacket.html).
-    pub fn as_packet(self) -> DhtPacketT {
+    pub fn into_packet(self) -> DhtPacketT {
         DhtPacketT::SendNodes(self)
     }
 }
