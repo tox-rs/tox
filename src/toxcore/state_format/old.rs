@@ -866,11 +866,45 @@ fn friend_state_parse_bytes_test() {
             }
         }
 
+
+        const USTATUS_POS: usize = STATUS_MSG_LEN_POS + 2;
+        { // user status
+            fn has_status(bytes: &[u8], status: UserStatus) {
+                let Parsed(fs, _) = FriendState::parse_bytes(bytes).unwrap();
+                assert_eq!(fs.user_status, status);
+            }
+
+            let mut bytes = fs_bytes.clone();
+
+            for i in 0..256 {
+                bytes[USTATUS_POS] = i;
+
+                match i {
+                    0 => has_status(&bytes, UserStatus::Online),
+                    1 => has_status(&bytes, UserStatus::Away),
+                    2 => has_status(&bytes, UserStatus::Busy),
+                    n => assert_error(&bytes,
+                            &format!("Unknown UserStatus: {}.", n)),
+                }
+            }
+        }
+
+        const PADDING_POS: usize = USTATUS_POS + 1;
+        { // padding; should be always ignored when parsing
+            let mut bytes = fs_bytes.clone();
+            for n in 0..256 {
+                for i in 0..256 {
+                    for h in 0..256 {
+                        bytes[PADDING_POS]   = n;
+                        bytes[PADDING_POS+1] = i;
+                        bytes[PADDING_POS+2] = h;
+                        assert_success(&bytes, &fs);
+                    }
+                }
+            }
+        }
+
         // TODO: test for:
-        //
-        // user status
-        //
-        // padding
         //
         // nospam
         //
