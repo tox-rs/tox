@@ -4,7 +4,7 @@ version = "0.0.1"
 dependencies = [
  "clippy 0.0.79 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "mio 0.5.0 (git+https://github.com/hjr3/mio.git?branch=remove-ipaddr)",
+ "mio 0.5.0 (git+https://github.com/carllerche/mio?branch=dev)",
  "quickcheck 0.2.27 (registry+https://github.com/rust-lang/crates.io-index)",
  "rand 0.3.14 (registry+https://github.com/rust-lang/crates.io-index)",
  "regex 0.1.73 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -110,7 +110,7 @@ dependencies = [
 [[package]]
 name = "mio"
 version = "0.5.0"
-source = "git+https://github.com/hjr3/mio.git?branch=remove-ipaddr#4c21519589b005cc541e93b874a07eb8b55582e1"
+source = "git+https://github.com/carllerche/mio?branch=dev#bf5de4d51ee00f140c4fcbd73b4d53717a3ac9e3"
 dependencies = [
  "bytes 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.13 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -118,8 +118,7 @@ dependencies = [
  "miow 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "net2 0.2.25 (registry+https://github.com/rust-lang/crates.io-index)",
  "nix 0.5.0-pre (git+https://github.com/carllerche/nix-rust?rev=c4257f8a76)",
- "slab 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
- "time 0.1.35 (registry+https://github.com/rust-lang/crates.io-index)",
+ "slab 0.2.0 (git+https://github.com/carllerche/slab?rev=5476efcafb)",
  "winapi 0.2.7 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -220,8 +219,8 @@ dependencies = [
 
 [[package]]
 name = "slab"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+version = "0.2.0"
+source = "git+https://github.com/carllerche/slab?rev=5476efcafb#5476efcafbc5ef4d7315b1bea3f756d8a1fe975e"
 
 [[package]]
 name = "sodiumoxide"
@@ -248,16 +247,6 @@ version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "thread-id 2.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
-name = "time"
-version = "0.1.35"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-dependencies = [
- "kernel32-sys 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "libc 0.2.13 (registry+https://github.com/rust-lang/crates.io-index)",
- "winapi 0.2.7 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
