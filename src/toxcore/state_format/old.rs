@@ -36,9 +36,9 @@ use ::toxcore_tests::quickcheck::{Arbitrary, Gen, quickcheck};
 // TODO: rename
 const REQUEST_MSG_LEN: usize = 1024;
 
-/// Length in bytes of name.
+/// Length in bytes of name. Will be moved elsewhere.
 // FIXME: move somewhere else
-const NAME_LEN: usize = 128;
+pub const NAME_LEN: usize = 128;
 
 /// Length in bytes of friend's status message.
 // FIXME: move somewhere else
@@ -620,7 +620,7 @@ pub struct FriendState {
     /// Friend request message that is being sent to friend.
     fr_msg: Vec<u8>,
     /// Friend's name.
-    name: Vec<u8>,
+    name: Name,
     status_msg: Vec<u8>,
     user_status: UserStatus,
     nospam: NoSpam,
@@ -666,7 +666,8 @@ impl FromBytes for FriendState {
 
         let Parsed(fr_msg, bytes) = try!(get_bytes(bytes, REQUEST_MSG_LEN));
 
-        let Parsed(name, bytes) = try!(get_bytes(bytes, NAME_LEN));
+        let Parsed(name_bytes, bytes) = try!(get_bytes(bytes, NAME_LEN));
+        let name = Name(name_bytes);
 
         let Parsed(status_msg, bytes) = try!(get_bytes(bytes, STATUS_MSG_LEN));
 
@@ -722,8 +723,8 @@ impl ToBytes for FriendState {
         result.extend_from_slice(&len_to_u16be(self.fr_msg.len()));
 
         // name and its length
-        ext_vec(&mut result, &self.name, NAME_LEN);
-        result.extend_from_slice(&len_to_u16be(self.name.len()));
+        ext_vec(&mut result, &self.name.0, NAME_LEN);
+        result.extend_from_slice(&len_to_u16be(self.name.0.len()));
 
         // status msg and its length
         ext_vec(&mut result, &self.status_msg, STATUS_MSG_LEN);
@@ -747,7 +748,6 @@ impl ToBytes for FriendState {
     }
 }
 
-
 #[cfg(test)]
 impl Arbitrary for FriendState {
     fn arbitrary<G: Gen>(g: &mut G) -> Self {
@@ -766,7 +766,7 @@ impl Arbitrary for FriendState {
         let mut fname = [0; NAME_LEN];
         let fname_len = g.gen_range(0, NAME_LEN);
         g.fill_bytes(&mut fname[..fname_len]);
-        let fname = fname[..fname_len].to_vec();
+        let fname = Name(fname[..fname_len].to_vec());
 
         // status message and its length
         let mut status_msg = [0; STATUS_MSG_LEN];
@@ -791,6 +791,26 @@ impl Arbitrary for FriendState {
     }
 }
 
+/** Own name, up to [`NAME_LEN`](./constant.NAME_LEN.html) bytes long.
+*/
+// TODO: move elsewhere from this module
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Name(pub Vec<u8>);
+
+/** Produces up to [`NAME_LEN`](./constant.NAME_LEN.html) bytes long `Name`.
+    Can't fail.
+*/
+impl FromBytes for Name {
+    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
+        if bytes.len() < NAME_LEN {
+            Ok(Parsed(Name(bytes.to_vec()), &bytes[bytes.len()..]))
+        } else {
+            Ok(Parsed(Name(bytes[..NAME_LEN].to_vec()), &bytes[..NAME_LEN]))
+        }
+    }
+}
+
+
 
 // FriendState::parse_bytes()
 
@@ -811,6 +831,8 @@ fn friend_state_parse_bytes_test() {
         assert_eq!(friend_state, p);
     }
 
+    // actually don't allow, just supress useless warnings
+    #[allow(overflowing_literals)]
     fn with_fs(fs: FriendState) {
         let fs_bytes = fs.to_bytes();
         assert_success(&fs_bytes, &fs);

@@ -252,3 +252,22 @@ fn user_status_parse_bytes_test_rest() {
     }
     quickcheck(with_bytes as fn(UserStatus, Vec<u8>));
 }
+
+
+// Name::parse_bytes()
+
+#[test]
+fn name_parse_bytes_test() {
+    fn with_bytes(bytes: Vec<u8>) {
+        let Parsed(name, remaining_bytes) = Name::parse_bytes(&bytes)
+            .expect("Name::parse_bytes can't fail!");
+        if bytes.len() > NAME_LEN {
+            assert_eq!(name.0.as_slice(), &bytes[..NAME_LEN]);
+            assert_eq!(&bytes[NAME_LEN..], remaining_bytes);
+        } else {
+            assert_eq!(&name.0, &bytes);
+            assert_eq!(0, remaining_bytes.len());
+        }
+    }
+    quickcheck(with_bytes as fn(Vec<u8>));
+}
