@@ -36,14 +36,6 @@ use ::toxcore_tests::quickcheck::{Arbitrary, Gen, quickcheck};
 // TODO: rename
 const REQUEST_MSG_LEN: usize = 1024;
 
-/// Length in bytes of name. Will be moved elsewhere.
-// FIXME: move somewhere else
-pub const NAME_LEN: usize = 128;
-
-/// Length in bytes of friend's status message.
-// FIXME: move somewhere else
-const STATUS_MSG_LEN: usize = 1007;
-
 
 
 // TODO: improve docs
@@ -621,7 +613,7 @@ pub struct FriendState {
     fr_msg: Vec<u8>,
     /// Friend's name.
     name: Name,
-    status_msg: Vec<u8>,
+    status_msg: StatusMsg,
     user_status: UserStatus,
     nospam: NoSpam,
     /// Time when friend was last seen.
@@ -653,6 +645,7 @@ impl FromBytes for FriendState {
         let Parsed(pk, bytes) = try!(PublicKey::parse_bytes(bytes));
 
         // supply length
+        // TODO: refactor?
         fn get_bytes(bytes: &[u8], len: usize) -> ParseResult<Vec<u8>> {
             let str_len = u16::from_be(array_to_u16(
                         &[bytes[len], bytes[len+1]])) as usize;
@@ -666,10 +659,13 @@ impl FromBytes for FriendState {
 
         let Parsed(fr_msg, bytes) = try!(get_bytes(bytes, REQUEST_MSG_LEN));
 
+        // TODO: refactor?
         let Parsed(name_bytes, bytes) = try!(get_bytes(bytes, NAME_LEN));
         let name = Name(name_bytes);
 
-        let Parsed(status_msg, bytes) = try!(get_bytes(bytes, STATUS_MSG_LEN));
+        // TODO: refactor?
+        let Parsed(status_msg_bytes, bytes) = try!(get_bytes(bytes, STATUS_MSG_LEN));
+        let status_msg = StatusMsg(status_msg_bytes);
 
         let Parsed(user_status, bytes) = try!(UserStatus::parse_bytes(bytes));
 
@@ -695,7 +691,6 @@ impl FromBytes for FriendState {
     }
 }
 // TODO: write tests ↑
-
 
 impl ToBytes for FriendState {
     fn to_bytes(&self) -> Vec<u8> {
@@ -727,8 +722,8 @@ impl ToBytes for FriendState {
         result.extend_from_slice(&len_to_u16be(self.name.0.len()));
 
         // status msg and its length
-        ext_vec(&mut result, &self.status_msg, STATUS_MSG_LEN);
-        result.extend_from_slice(&len_to_u16be(self.status_msg.len()));
+        ext_vec(&mut result, &self.status_msg.0, STATUS_MSG_LEN);
+        result.extend_from_slice(&len_to_u16be(self.status_msg.0.len()));
 
         // UserStatus
         result.push(self.user_status as u8);
@@ -772,7 +767,7 @@ impl Arbitrary for FriendState {
         let mut status_msg = [0; STATUS_MSG_LEN];
         let status_msg_len = g.gen_range(0, STATUS_MSG_LEN);
         g.fill_bytes(&mut status_msg[..status_msg_len]);
-        let status_msg = status_msg[..status_msg_len].to_vec();
+        let status_msg = StatusMsg(status_msg[..status_msg_len].to_vec());
 
         let mut ns_bytes = [0; NOSPAMBYTES];
         g.fill_bytes(&mut ns_bytes);
@@ -791,11 +786,47 @@ impl Arbitrary for FriendState {
     }
 }
 
+
+// TODO: refactor `Name` and `StatusMsg` to implementation via via macro,
+//       in a similar way to how sodiumoxide does implementation via macros
+
 /** Own name, up to [`NAME_LEN`](./constant.NAME_LEN.html) bytes long.
 */
 // TODO: move elsewhere from this module
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Name(pub Vec<u8>);
+
+/// Length in bytes of name. ***Will be moved elsewhere.***
+// FIXME: move somewhere else
+pub const NAME_LEN: usize = 128;
+
+impl Name {
+    /// Create new `Name` from bytes in a slice. If there are more bytes than
+    /// [`NAME_LEN`](./constant.NAME_LEN.html), use only `NAME_LEN` bytes.
+    ///
+    /// E.g.:
+    ///
+    /// ```
+    /// use self::tox::toxcore::state_format::old::*;
+    ///
+    /// for n in 0..(NAME_LEN + 1) {
+    ///     let bytes = vec![0; n];
+    ///     assert_eq!(bytes, Name::new(&bytes).0);
+    /// }
+    ///
+    /// for n in (NAME_LEN + 1)..(NAME_LEN + 20) {
+    ///     let bytes = vec![0; n];
+    ///     assert_eq!(&bytes[..NAME_LEN], Name::new(&bytes).0.as_slice());
+    /// }
+    /// ```
+    pub fn new(bytes: &[u8]) -> Self {
+        if bytes.len() < NAME_LEN {
+            Name(bytes.to_vec())
+        } else {
+            Name(bytes[..NAME_LEN].to_vec())
+        }
+    }
+}
 
 /** Produces up to [`NAME_LEN`](./constant.NAME_LEN.html) bytes long `Name`.
     Can't fail.
@@ -803,9 +834,64 @@ pub struct Name(pub Vec<u8>);
 impl FromBytes for Name {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         if bytes.len() < NAME_LEN {
-            Ok(Parsed(Name(bytes.to_vec()), &bytes[bytes.len()..]))
+            Ok(Parsed(Name::new(bytes), &bytes[bytes.len()..]))
         } else {
-            Ok(Parsed(Name(bytes[..NAME_LEN].to_vec()), &bytes[..NAME_LEN]))
+            Ok(Parsed(Name::new(bytes), &bytes[NAME_LEN..]))
+        }
+    }
+}
+
+
+/** Status message, up to [`STATUS_MSG_LEN`](./constant.STATUS_MSG_LEN.html)
+bytes. ***Note: will be renamed & moved***.
+*/
+// TODO: rename(?) & move from this module
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StatusMsg(pub Vec<u8>);
+
+/// Length in bytes of friend's status message.
+// FIXME: move somewhere else
+pub const STATUS_MSG_LEN: usize = 1007;
+
+impl StatusMsg {
+    /// Create new `StatusMsg` from bytes in a slice. If there are more bytes
+    /// than [`STATUS_MSG_LEN`](./constant.STATUS_MSG_LEN.html), use only
+    /// `STATUS_MSG_LEN` bytes.
+    ///
+    /// E.g.:
+    ///
+    /// ```
+    /// use self::tox::toxcore::state_format::old::*;
+    ///
+    /// for n in 0..(STATUS_MSG_LEN + 1) {
+    ///     let bytes = vec![0; n];
+    ///     assert_eq!(bytes, StatusMsg::new(&bytes).0);
+    /// }
+    ///
+    /// for n in (STATUS_MSG_LEN + 1)..(STATUS_MSG_LEN + 20) {
+    ///     let bytes = vec![0; n];
+    ///     assert_eq!(&bytes[..STATUS_MSG_LEN],
+    ///             StatusMsg::new(&bytes).0.as_slice());
+    /// }
+    /// ```
+    pub fn new(bytes: &[u8]) -> Self {
+        if bytes.len() < STATUS_MSG_LEN {
+            StatusMsg(bytes.to_vec())
+        } else {
+            StatusMsg(bytes[..STATUS_MSG_LEN].to_vec())
+        }
+    }
+}
+
+/** Produces up to [`STATUS_MSG_LEN`](./constant.STATUS_MSG_LEN.html) bytes
+long `StatusMsg`. Can't fail.
+*/
+impl FromBytes for StatusMsg {
+    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
+        if bytes.len() < STATUS_MSG_LEN {
+            Ok(Parsed(StatusMsg::new(bytes), &bytes[bytes.len()..]))
+        } else {
+            Ok(Parsed(StatusMsg::new(bytes), &bytes[STATUS_MSG_LEN..]))
         }
     }
 }

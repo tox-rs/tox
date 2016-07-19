@@ -257,17 +257,78 @@ fn user_status_parse_bytes_test_rest() {
 // Name::parse_bytes()
 
 #[test]
+// TODO: make test more generic, so that both `Name` and `StatusMsg` could use
+//       it
 fn name_parse_bytes_test() {
-    fn with_bytes(bytes: Vec<u8>) {
-        let Parsed(name, remaining_bytes) = Name::parse_bytes(&bytes)
-            .expect("Name::parse_bytes can't fail!");
-        if bytes.len() > NAME_LEN {
-            assert_eq!(name.0.as_slice(), &bytes[..NAME_LEN]);
-            assert_eq!(&bytes[NAME_LEN..], remaining_bytes);
-        } else {
-            assert_eq!(&name.0, &bytes);
-            assert_eq!(0, remaining_bytes.len());
+    fn with_bytes(b: Vec<u8>) -> TestResult {
+        // empty case is tested, and if quickcheck provides it test will break
+        if b.is_empty() { return TestResult::discard() }
+
+        let mut bytes = b.clone();
+        if bytes.len() < NAME_LEN {
+            // as many times as needed to be > NAME_LEN
+            for _ in 0..((NAME_LEN/bytes.len())+1) {
+                bytes.extend_from_slice(&b);
+            }
         }
+
+        for n in 0..bytes.len() {
+            let bytes = &bytes[..n];
+            let Parsed(name, remaining_bytes) = Name::parse_bytes(bytes)
+                .expect("Name::parse_bytes can't fail!");
+
+            if n <= NAME_LEN {
+                assert_eq!(name.0.as_slice(), bytes);
+                // TODO: remove `as &[u8]` when Rust RFC 803 gets fully
+                //       implemented on ~stable - 1
+                //       https://github.com/rust-lang/rust/issues/23416
+                assert_eq!(&[] as &[u8], remaining_bytes); // empty
+            } else if n > NAME_LEN {
+                assert_eq!(name.0.as_slice(), &bytes[..NAME_LEN]);
+                assert_eq!(&bytes[NAME_LEN..], remaining_bytes);
+            }
+        }
+        TestResult::passed()
     }
-    quickcheck(with_bytes as fn(Vec<u8>));
+    quickcheck(with_bytes as fn(Vec<u8>) -> TestResult);
+}
+
+
+// StatusMsg::parse_bytes()
+
+#[test]
+// TODO: make test more generic, so that both `Name` and `StatusMsg` could use
+//       it
+fn status_message_parse_bytes_test() {
+    fn with_bytes(b: Vec<u8>) -> TestResult {
+        // empty case is tested, and if quickcheck provides it test will break
+        if b.is_empty() { return TestResult::discard() }
+
+        let mut bytes = b.clone();
+        if bytes.len() < STATUS_MSG_LEN {
+            // as many times as needed to be > STATUS_MSG_LEN
+            for _ in 0..((STATUS_MSG_LEN/bytes.len())+1) {
+                bytes.extend_from_slice(&b);
+            }
+        }
+
+        for n in 0..bytes.len() {
+            let bytes = &bytes[..n];
+            let Parsed(name, remaining_bytes) = StatusMsg::parse_bytes(bytes)
+                .expect("StatusMsg::parse_bytes can't fail!");
+
+            if n <= STATUS_MSG_LEN {
+                assert_eq!(name.0.as_slice(), bytes);
+                // TODO: remove `as &[u8]` when Rust RFC 803 gets fully
+                //       implemented on ~stable - 1
+                //       https://github.com/rust-lang/rust/issues/23416
+                assert_eq!(&[] as &[u8], remaining_bytes); // empty
+            } else if n > STATUS_MSG_LEN {
+                assert_eq!(name.0.as_slice(), &bytes[..STATUS_MSG_LEN]);
+                assert_eq!(&bytes[STATUS_MSG_LEN..], remaining_bytes);
+            }
+        }
+        TestResult::passed()
+    }
+    quickcheck(with_bytes as fn(Vec<u8>) -> TestResult);
 }
