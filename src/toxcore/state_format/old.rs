@@ -897,6 +897,38 @@ impl FromBytes for StatusMsg {
 }
 
 
+macro_rules! nodes_list {
+    ($name: ident) => (
+        /** Contains list in `PackedNode` format.
+        */
+        #[derive(Clone, Debug, Eq, PartialEq)]
+        pub struct $name(pub Vec<PackedNode>);
+
+        impl FromBytes for $name {
+            fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
+                let Parsed(value, rest) =
+                    try!(PackedNode::parse_bytes_multiple(&bytes));
+                Ok(Parsed($name(value), rest))
+            }
+        }
+
+        impl ToBytes for $name {
+            fn to_bytes(&self) -> Vec<u8> {
+                let mut result = Vec::with_capacity(
+                            PACKED_NODE_IPV6_SIZE * self.0.len());
+                for node in &self.0 {
+                    result.append(&mut node.to_bytes());
+                }
+                result
+            }
+        }
+    )
+}
+
+nodes_list!(TcpRelays);
+nodes_list!(PathNodes);
+
+
 
 // FriendState::parse_bytes()
 
