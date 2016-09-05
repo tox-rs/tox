@@ -10,3 +10,6 @@ target/
 
 # other
 *.patch
+
+# some scripts
+.*.sh

@@ -89,6 +89,11 @@ fn pass_key_with_salt_test() {
 fn pass_key_encrypt_test() {
     fn with_data(plain: Vec<u8>, passk: PassKey) -> TestResult {
         // test for empty data is done in docs test
+        // TODO: test can fail with small amounts of data – change it to
+        //       require bigger minimal amount of data, and note in the
+        //       encryption docs that encrypted data is guaranteed to differ
+        //       from plaintext only for amounts of data bigger than just a few
+        //       bytes
         if plain.is_empty() { return TestResult::discard() }
 
         let encrypted = passk.encrypt(&plain).expect("Encrypting failed!");

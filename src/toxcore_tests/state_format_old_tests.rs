@@ -44,29 +44,57 @@ impl Arbitrary for SectionKind {
     }
 }
 
-// SectionKind::from_bytes()
+// SectionKind::parse_bytes()
 
 #[test]
-fn section_kind_from_bytes_test() {
+fn section_kind_parse_bytes_test() {
     // test only for failure, since success is tested in docs test
-    fn with_bytes(bytes: Vec<u8>) {
-        if !bytes.is_empty() {
-            if bytes[0] < 7 || bytes[0] == 10 ||
-               bytes[0] == 11 || bytes[0] == 255 {
-                return
-            }
+    fn with_bytes(bytes: Vec<u8>) -> TestResult {
+        fn assert_kind(b: &[u8], k: SectionKind) {
+            let Parsed(kind, _) = SectionKind::parse_bytes(&b)
+                .expect(&format!("Failed to parse as {:?}!", k));
+            assert_eq!(k, kind);
         }
-        assert_eq!(None, SectionKind::from_bytes(&bytes));
-    }
-    quickcheck(with_bytes as fn(Vec<u8>));
-}
 
-// SectionKind::parse_bytes()
+        if bytes.len() < 2 {
+            return TestResult::discard()
+        }
+
+        match (bytes[0], bytes[1]) {
+            (1, 0) => assert_kind(&bytes, SectionKind::NospamKeys),
+            (2, 0) => assert_kind(&bytes, SectionKind::DHT),
+            (3, 0) => assert_kind(&bytes, SectionKind::Friends),
+            (4, 0) => assert_kind(&bytes, SectionKind::Name),
+            (5, 0) => assert_kind(&bytes, SectionKind::StatusMsg),
+            (6, 0) => assert_kind(&bytes, SectionKind::Status),
+            (10, 0) => assert_kind(&bytes, SectionKind::TcpRelays),
+            (11, 0) => assert_kind(&bytes, SectionKind::PathNodes),
+            (255, 0) => assert_kind(&bytes, SectionKind::EOF),
+            (_, _) => assert_eq!(None, SectionKind::from_bytes(&bytes)),
+        }
+        TestResult::passed()
+    }
+    quickcheck(with_bytes as fn(Vec<u8>) -> TestResult);
+
+    // correct
+    with_bytes(vec![1, 0]);
+    with_bytes(vec![2, 0]);
+    with_bytes(vec![3, 0]);
+    with_bytes(vec![4, 0]);
+    with_bytes(vec![5, 0]);
+    with_bytes(vec![6, 0]);
+    with_bytes(vec![10, 0]);
+    with_bytes(vec![11, 0]);
+    with_bytes(vec![255, 0]);
+
+}
 
 #[test]
 fn section_kind_parse_bytes_rest_test() {
     fn with_bytes(sk: SectionKind, r_rest: Vec<u8>) {
-        let mut bytes = vec![sk as u8];
+        let sk = u16_to_array((sk as u16).to_le());
+        let mut bytes = Vec::with_capacity(r_rest.len() + 2);
+        bytes.extend_from_slice(&sk);
         bytes.extend_from_slice(&r_rest);
 
         let Parsed(_, rest) = SectionKind::parse_bytes(&bytes)
@@ -74,6 +102,15 @@ fn section_kind_parse_bytes_rest_test() {
         assert_eq!(&r_rest[..], rest);
     }
     quickcheck(with_bytes as fn(SectionKind, Vec<u8>));
+}
+
+// SectionKind::to_bytes()
+#[test]
+fn section_kind_to_bytes_test() {
+    fn with_kind(sk: SectionKind) {
+        assert_eq!(Some(sk), SectionKind::from_bytes(&sk.to_bytes()));
+    }
+    quickcheck(with_kind as fn(SectionKind));
 }
 
 

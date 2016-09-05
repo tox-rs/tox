@@ -27,8 +27,7 @@ use toxcore::toxid::{NoSpam, NOSPAMBYTES};
 
 
 #[cfg(test)]
-use ::toxcore_tests::quickcheck::{Arbitrary, Gen, quickcheck};
-
+use ::toxcore_tests::quickcheck::{Arbitrary, Gen, quickcheck, TestResult};
 
 
 /// Length in bytes of request message.
@@ -43,21 +42,6 @@ const REQUEST_MSG_LEN: usize = 1024;
 /** Sections of the old state format.
 
 https://zetok.github.io/tox-spec/#sections
-
-## Serialization into bytes
-
-```
-use self::tox::toxcore::state_format::old::SectionKind;
-
-assert_eq!(1u8, SectionKind::NospamKeys as u8);
-assert_eq!(2u8, SectionKind::DHT as u8);
-assert_eq!(3u8, SectionKind::Friends as u8);
-assert_eq!(4u8, SectionKind::Name as u8);
-assert_eq!(5u8, SectionKind::StatusMsg as u8);
-assert_eq!(6u8, SectionKind::Status as u8);
-assert_eq!(10u8, SectionKind::TcpRelays as u8);
-assert_eq!(11u8, SectionKind::PathNodes as u8);
-assert_eq!(255u8, SectionKind::EOF as u8);
 ```
 */
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -101,39 +85,14 @@ pub enum SectionKind {
     EOF =        0xff,
 }
 
-/** E.g.
-
-```
-use self::tox::toxcore::binary_io::FromBytes;
-use self::tox::toxcore::state_format::old::SectionKind;
-
-assert_eq!(SectionKind::NospamKeys,
-        SectionKind::from_bytes(&[1]).expect("Failed to unwrap NospamKeys!"));
-assert_eq!(SectionKind::DHT,
-        SectionKind::from_bytes(&[2]).expect("Failed to unwrap DHT!"));
-assert_eq!(SectionKind::Friends,
-        SectionKind::from_bytes(&[3]).expect("Failed to unwrap Friends!"));
-assert_eq!(SectionKind::Name,
-        SectionKind::from_bytes(&[4]).expect("Failed to unwrap Name!"));
-assert_eq!(SectionKind::StatusMsg,
-        SectionKind::from_bytes(&[5]).expect("Failed to unwrap StatusMsg!"));
-assert_eq!(SectionKind::Status,
-        SectionKind::from_bytes(&[6]).expect("Failed to unwrap Status!"));
-assert_eq!(SectionKind::TcpRelays,
-        SectionKind::from_bytes(&[10]).expect("Failed to unwrap TcpRelays!"));
-assert_eq!(SectionKind::PathNodes,
-        SectionKind::from_bytes(&[11]).expect("Failed to unwrap PathNodes!"));
-assert_eq!(SectionKind::EOF,
-        SectionKind::from_bytes(&[255]).expect("Failed to unwrap EOF!"));
-```
-*/
 impl FromBytes for SectionKind {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
-        if bytes.is_empty() {
+        if bytes.len() < 2 {
             return parse_error!("Not enough bytes for SectionKind.")
         }
 
-        let result = match bytes[0] {
+        let num = array_to_u16(&[bytes[0], bytes[1]]).to_le();
+        let result = match num {
             0x01 => SectionKind::NospamKeys,
             0x02 => SectionKind::DHT,
             0x03 => SectionKind::Friends,
@@ -143,12 +102,36 @@ impl FromBytes for SectionKind {
             0x0a => SectionKind::TcpRelays,
             0x0b => SectionKind::PathNodes,
             0xff => SectionKind::EOF,
-            _ => return parse_error!("Incorrect SectionKind: {:x}.", bytes[0]),
+            _ => return parse_error!("Incorrect SectionKind: {:x}.", num),
         };
 
-        Ok(Parsed(result, &bytes[1..]))
+        Ok(Parsed(result, &bytes[2..]))
     }
 }
+
+/** Serialization into bytes
+
+```
+use self::tox::toxcore::binary_io::ToBytes;
+use self::tox::toxcore::state_format::old::SectionKind;
+
+assert_eq!(vec![1u8, 0],   SectionKind::NospamKeys .to_bytes());
+assert_eq!(vec![2u8, 0],   SectionKind::DHT        .to_bytes());
+assert_eq!(vec![3u8, 0],   SectionKind::Friends    .to_bytes());
+assert_eq!(vec![4u8, 0],   SectionKind::Name       .to_bytes());
+assert_eq!(vec![5u8, 0],   SectionKind::StatusMsg  .to_bytes());
+assert_eq!(vec![6u8, 0],   SectionKind::Status     .to_bytes());
+assert_eq!(vec![10u8, 0],  SectionKind::TcpRelays  .to_bytes());
+assert_eq!(vec![11u8, 0],  SectionKind::PathNodes  .to_bytes());
+assert_eq!(vec![255u8, 0], SectionKind::EOF        .to_bytes());
+```
+*/
+impl ToBytes for SectionKind {
+    fn to_bytes(&self) -> Vec<u8> {
+        u16_to_array((*self as u16).to_le()).to_vec()
+    }
+}
+
 
 
 /** NoSpam and Keys section of the old state format.
@@ -899,8 +882,7 @@ impl FromBytes for StatusMsg {
 
 macro_rules! nodes_list {
     ($name: ident) => (
-        /** Contains list in `PackedNode` format.
-        */
+        /// Contains list in `PackedNode` format.
         #[derive(Clone, Debug, Eq, PartialEq)]
         pub struct $name(pub Vec<PackedNode>);
 
@@ -929,17 +911,63 @@ nodes_list!(TcpRelays);
 nodes_list!(PathNodes);
 
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct Section {
+    kind: SectionKind,
+    data: Vec<u8>,
+}
+
+/// Minimal length of an empty section. Any section that is not empty should
+/// be bigger.
+const SECTION_MIN_LEN: usize = 8;
+
+/// According to https://zetok.github.io/tox-spec/#sections
+/// **Use only with `{to,from}_le()`.**
+const SECTION_MAGIC: u16 = 0x01ce;
+
+impl FromBytes for Section {
+    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
+        if bytes.len() < SECTION_MIN_LEN {
+            return parse_error!("Parsing failed: Not enough bytes for Section!")
+        }
+
+        let data_len = {
+            let num = u32::from_le(array_to_u32(
+                &[bytes[0], bytes[1], bytes[2], bytes[3]])) as usize;
+            if num > (bytes.len() - SECTION_MIN_LEN) {
+                return parse_error!("Parsing failed: there are not enough \
+                bytes in section to parse!")
+            }
+            num
+        };
+        let left = &bytes[4..SECTION_MIN_LEN+data_len];
+
+        let Parsed(kind, left) = try!(SectionKind::parse_bytes(left));
+
+        if &u16_to_array(SECTION_MAGIC.to_le()) != &left[..2] {
+            return parse_error!("Parsing failed: SECTION_MAGIC doesn't match!")
+        }
+        let left = &left[2..];
+
+        Ok(Parsed(Section {
+            kind: kind,
+            data: left.to_vec()
+            },
+            &bytes[SECTION_MIN_LEN + left.len()..]))
+    }
+}
+
+
+
+
 
 // FriendState::parse_bytes()
 
 #[test]
-// TODO: deduplicate the code
+#[cfg(test)] // ← https://github.com/rust-lang/rust/issues/16688
 fn friend_state_parse_bytes_test() {
-    // TODO: see if it won't be better off as a generic function, macro, or
-    //       something, used by more tests
     fn assert_error(bytes: &[u8], error: &str) {
-        let e = format!("{:?}", FriendState::parse_bytes(bytes).unwrap_err());
-        assert!(e.contains(error));
+        contains_err!(FriendState::parse_bytes, bytes, error);
     }
 
     // serialized and deserialized remain the same
@@ -1051,4 +1079,92 @@ fn friend_state_parse_bytes_test() {
         // last time seen
     }
     quickcheck(with_fs as fn(FriendState));
+}
+
+
+// Section::
+
+// Section::parse_bytes()
+
+#[test]
+#[cfg(test)]
+fn section_parse_bytes_test() {
+    fn rand_b_sect(kind: SectionKind, bytes: &[u8]) -> Vec<u8> {
+        let mut b_sect = Vec::with_capacity(bytes.len() + SECTION_MIN_LEN);
+        b_sect.extend_from_slice(&u32_to_array((bytes.len() as u32).to_le()));
+        b_sect.extend_from_slice(&u16_to_array((kind as u16).to_le()));
+        b_sect.extend_from_slice(&u16_to_array(SECTION_MAGIC.to_le()));
+        b_sect.extend_from_slice(bytes);
+        b_sect
+    }
+
+    fn with_bytes(bytes: Vec<u8>, kind: SectionKind) {
+        let b_sect = rand_b_sect(kind, &bytes);
+
+        { // working case
+            let Parsed(section, left) = Section::parse_bytes(&b_sect)
+                .expect("Failed to parse Section bytes!");
+
+            assert_eq!(0, left.len());
+            assert_eq!(section.kind, kind);
+            assert_eq!(&section.data, &bytes);
+        }
+
+        { // wrong SectionKind
+            fn wrong_skind(bytes: &[u8]) {
+                contains_err!(Section::parse_bytes, bytes,
+                              "Incorrect SectionKind: ");
+            }
+
+            let mut b_sect = b_sect.clone();
+            for num in 7..10 {
+                b_sect[4] = num;
+                wrong_skind(&b_sect);
+            }
+            for num in 12..255 {
+                b_sect[4] = num;
+                wrong_skind(&b_sect);
+            }
+
+            b_sect[4] = 1; // right
+            b_sect[5] = 1; // wrong
+            wrong_skind(&b_sect);
+        }
+
+        // too short
+        for l in 0..SECTION_MIN_LEN {
+            contains_err!(Section::parse_bytes,
+                          &b_sect[..l],
+                          "Parsing failed: Not enough bytes for Section!");
+        }
+
+        // wrong len
+        for l in SECTION_MIN_LEN..(b_sect.len() - 1) {
+            contains_err!(Section::parse_bytes,
+                          &b_sect[..l],
+                          "Parsing failed: there are not enough bytes in \
+                          section to parse!");
+        }
+    }
+    quickcheck(with_bytes as fn(Vec<u8>, SectionKind));
+
+    fn with_magic(bytes: Vec<u8>, kind: SectionKind, magic: Vec<u8>)
+        -> TestResult
+    {
+        if magic.len() < 2 ||
+           u16::from_le(array_to_u16(&[magic[0], magic[1]])) == SECTION_MAGIC {
+                return TestResult::discard()
+        }
+
+        let tmp_b_sect = rand_b_sect(kind, &bytes);
+        let mut b_sect = Vec::with_capacity(tmp_b_sect.len());
+        b_sect.extend_from_slice(&tmp_b_sect[..SECTION_MIN_LEN - 2]);
+        b_sect.extend_from_slice(&magic[..2]);
+        b_sect.extend_from_slice(&tmp_b_sect[SECTION_MIN_LEN..]);
+        contains_err!(Section::parse_bytes,
+                      &b_sect,
+                      "Parsing failed: SECTION_MAGIC doesn\\'t match!");
+        TestResult::passed()
+    }
+    quickcheck(with_magic as fn(Vec<u8>, SectionKind, Vec<u8>) -> TestResult);
 }

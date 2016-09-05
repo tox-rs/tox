@@ -144,6 +144,30 @@ extern crate mio;
 extern crate sodiumoxide;
 
 
+#[macro_use]
+#[cfg(test)]
+pub mod toxcore_tests {
+    pub extern crate quickcheck;
+    extern crate rand;
+    extern crate rustc_serialize;
+    extern crate regex;
+
+    // Helper functions, etc. for testing, no actual tests
+    #[warn(missing_docs)]
+    #[macro_use]
+    pub mod test;
+
+    // tests
+    mod binary_io_tests;
+    mod crypto_core_tests;
+    mod dht_tests;
+    mod network_tests;
+    mod packet_kind_tests;
+    mod state_format_old_tests;
+    mod toxid_tests;
+}
+
+
 /** Core Tox module. Provides an API on top of which other modules and
     applications may be build.
 */
@@ -166,22 +190,6 @@ pub mod toxcore {
 #[warn(missing_docs)]
 pub mod toxencryptsave;
 
-
-#[cfg(test)]
-pub mod toxcore_tests {
-    pub extern crate quickcheck;
-    extern crate rand;
-    extern crate rustc_serialize;
-    extern crate regex;
-
-    mod binary_io_tests;
-    mod crypto_core_tests;
-    mod dht_tests;
-    mod network_tests;
-    mod packet_kind_tests;
-    pub mod state_format_old_tests;
-    mod toxid_tests;
-}
 
 #[cfg(test)]
 mod toxencryptsave_tests {
