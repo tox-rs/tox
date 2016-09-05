@@ -37,28 +37,53 @@ matrix:
 sudo: required
 
 before_script:
-  - |
+  - >
       pip install 'travis-cargo<0.2' --user &&
       export PATH=$HOME/.local/bin:$PATH
 
 before_install:
-  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then bash ./scripts/verify-commit-messages.sh "$TRAVIS_COMMIT_RANGE" ; fi
-  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then bash ./scripts/bootstrap-ubuntu-14-04.sh; fi
-  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then bash ./scripts/bootstrap-osx.sh; fi
-  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then export PKG_CONFIG_PATH=$HOME/installed_libsodium/lib/pkgconfig:$PKG_CONFIG_PATH ; fi
-  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then export LD_LIBRARY_PATH=$HOME/installed_libsodium/lib:$LD_LIBRARY_PATH ; fi
+  - |
+    if [[ "$TRAVIS_OS_NAME" == "linux" ]]
+    then
+        ./scripts/verify-commit-messages.sh "$TRAVIS_COMMIT_RANGE" \
+        && ./scripts/bootstrap-ubuntu-14-04.sh
+    fi
+  - |
+    if [[ "$TRAVIS_OS_NAME" == "osx" ]]
+    then
+        ./scripts/bootstrap-osx.sh
+        export PKG_CONFIG_PATH=$HOME/installed_libsodium/lib/pkgconfig:$PKG_CONFIG_PATH
+        export LD_LIBRARY_PATH=$HOME/installed_libsodium/lib:$LD_LIBRARY_PATH
+    fi
 
 script:
   - cargo build --verbose
   - cargo test --verbose
-  - if rustc --version | grep nightly > /dev/null ; then cargo build --features "clippy" ; fi
-  - if rustc --version | grep nightly > /dev/null ; then cargo test --features "clippy" ; fi
+  - |
+    if rustc --version | grep -q nightly
+    then
+        cargo build --features "clippy" \
+        && cargo test --features "clippy"
+    fi
   - cargo doc
 
 after_success:
-  - test $TRAVIS_PULL_REQUEST == "false" && (test $TRAVIS_BRANCH == "travis" || test $TRAVIS_BRANCH == "master" ) && bash ./scripts/deploy-gh-pages.sh
+  - >
+    test $TRAVIS_PULL_REQUEST == "false"
+    && (test $TRAVIS_BRANCH == "travis"
+    || test $TRAVIS_BRANCH == "master" )
+    && bash ./scripts/deploy-gh-pages.sh
   # measure code coverage and upload to coveralls.io (the verify
   # argument mitigates kcov crashes due to malformed debuginfo, at the
   # cost of some speed <https://github.com/huonw/travis-cargo/issues/12>)
-  - travis-cargo coveralls --no-sudo --verify
-  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then ./kcov/build/src/kcov --verify --coveralls-id=$TRAVIS_JOB_ID --exclude-pattern=/.cargo target/kcov target/debug/tox-*; fi
+  - |
+    if [[ "$TRAVIS_OS_NAME" == "linux" ]] \
+        && (! rustc --version | grep -q -E 'beta|nightly')
+    then
+        travis-cargo coveralls --no-sudo --verify # (can) fails
+        ./kcov/build/src/kcov \
+            --verify \
+            --coveralls-id=$TRAVIS_JOB_ID \
+            --exclude-pattern=/.cargo target/kcov \
+            target/debug/tox-*
+    fi
