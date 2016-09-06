@@ -37,20 +37,18 @@ use super::quickcheck::quickcheck;
 // Its code should **not** be ran in parallel.
 fn crypto_init_test() {
     fn with_threads(num: u8) {
-        // up to 2^10 threads should do
-        for _ in 0..4 {
-            thread::spawn(move || {
-                for _ in 0..num {
-                    thread::spawn(move || {
-                        assert_eq!(true, crypto_init());
-                        // second run, value should be the same
-                        assert_eq!(true, crypto_init());
-                    });
-                }
-            });
-        }
+        thread::spawn(move || {
+            for _ in 0..num {
+                thread::spawn(move || {
+                    assert_eq!(true, crypto_init());
+                    // second run, value should be the same
+                    assert_eq!(true, crypto_init());
+                });
+            }
+        });
     }
     quickcheck(with_threads as fn(u8));
+    with_threads(255);
 }
 
 
