@@ -904,6 +904,9 @@ macro_rules! nodes_list {
                 result
             }
         }
+
+        #[cfg(test)]
+        impl_arb_for_pn!($name);
     )
 }
 
@@ -911,6 +914,10 @@ nodes_list!(TcpRelays);
 nodes_list!(PathNodes);
 
 
+/** Sections of state format.
+
+https://zetok.github.io/tox-spec/#sections
+*/
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct Section {
     kind: SectionKind,
@@ -956,6 +963,43 @@ impl FromBytes for Section {
             &bytes[SECTION_MIN_LEN + left.len()..]))
     }
 }
+
+// NOTE: the "serialization" here is not an actual serialized format, some
+//       section kinds need appending `0` if they're not long enough;
+//       appending is done in `StateFormat`
+//
+impl ToBytes for Section {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut res = Vec::with_capacity(SECTION_MIN_LEN + self.data.len());
+        res.extend_from_slice(&u32_to_array((self.data.len() as u32).to_le()));
+        res.append(&mut self.kind.to_bytes());
+        res.extend_from_slice(&u16_to_array(SECTION_MAGIC.to_le()));
+        res.extend_from_slice(&self.data);
+        res
+    }
+}
+
+#[cfg(test)]
+impl Arbitrary for Section {
+    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+        let kind: SectionKind = Arbitrary::arbitrary(g);
+        let data = match kind {
+            SectionKind::NospamKeys => NospamKeys::arbitrary(g).to_bytes(),
+            SectionKind::DHT => DhtState::arbitrary(g).to_bytes(),
+            SectionKind::Friends => FriendState::arbitrary(g).to_bytes(),
+            SectionKind::Name => Name::arbitrary(g).0,
+            SectionKind::StatusMsg => StatusMsg::arbitrary(g).0,
+            SectionKind::Status => vec![UserStatus::arbitrary(g) as u8],
+            SectionKind::TcpRelays => TcpRelays::arbitrary(g).to_bytes(),
+            SectionKind::PathNodes => PathNodes::arbitrary(g).to_bytes(),
+            SectionKind::EOF => vec![],
+        };
+        Section { kind: kind, data: data }
+    }
+}
+
+//pub struct StateFormat {
+
 
 
 
@@ -1167,4 +1211,18 @@ fn section_parse_bytes_test() {
         TestResult::passed()
     }
     quickcheck(with_magic as fn(Vec<u8>, SectionKind, Vec<u8>) -> TestResult);
+}
+
+// Section::to_bytes()
+
+#[test]
+fn section_to_bytes_test() {
+    fn with_section(sect: Section) {
+        let sect_b = sect.to_bytes();
+        let Parsed(s, rest) = Section::parse_bytes(&sect_b)
+            .expect("Failed parsing!");
+        assert_eq!(&s, &sect);
+        assert_eq!(&[] as &[u8], &rest[..]);
+    }
+    quickcheck(with_section as fn(Section));
 }

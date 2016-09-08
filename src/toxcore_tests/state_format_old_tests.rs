@@ -114,6 +114,24 @@ fn section_kind_to_bytes_test() {
 }
 
 
+// NospamKeys::
+
+impl Arbitrary for NospamKeys {
+    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+        let mut ns = [0; NOSPAMBYTES];
+        let mut pk = [0; PUBLICKEYBYTES];
+        let mut sk = [0; SECRETKEYBYTES];
+        g.fill_bytes(&mut ns);
+        g.fill_bytes(&mut pk);
+        g.fill_bytes(&mut sk);
+        NospamKeys {
+            nospam: NoSpam(ns),
+            pk: PublicKey(pk),
+            sk: SecretKey(sk),
+        }
+    }
+}
+
 // NospamKeys::from_bytes()
 
 #[test]
@@ -153,6 +171,10 @@ fn nospam_keys_parse_bytes_rest_test() {
     quickcheck(with_bytes as fn(Vec<u8>) -> TestResult);
 }
 
+
+// DhtState::
+
+impl_arb_for_pn!(DhtState);
 
 // DhtState::from_bytes()
 
@@ -291,6 +313,11 @@ fn user_status_parse_bytes_test_rest() {
 }
 
 
+
+// Name::
+
+impl_arb_for_bytes!(Name, NAME_LEN);
+
 // Name::parse_bytes()
 
 #[test]
@@ -330,6 +357,10 @@ fn name_parse_bytes_test() {
     quickcheck(with_bytes as fn(Vec<u8>) -> TestResult);
 }
 
+
+// StatusMsg::
+
+impl_arb_for_bytes!(StatusMsg, STATUS_MSG_LEN);
 
 // StatusMsg::parse_bytes()
 

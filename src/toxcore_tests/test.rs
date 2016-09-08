@@ -17,7 +17,9 @@
     along with Tox.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+
 //! File with testing helpers. **Use only in tests!**
+
 
 /// Assert that function with given data fails with given error.
 macro_rules! contains_err {
@@ -26,6 +28,67 @@ macro_rules! contains_err {
             let e = format!("{:?}", $func($data).unwrap_err());
             assert!(e.contains($error),
                     format!("e: {}", e));
+        }
+    )
+}
+
+
+/** Implement `Arbitrary` trait for given struct with bytes.
+
+E.g.
+
+```
+#[cfg(test)]
+use ::toxcore_tests::quickcheck::Arbitrary;
+
+struct Name(Vec<u8>);
+
+#[cfg(test)]
+impl_arb_for_bytes!(Name, 100);
+```
+*/
+// TODO: ↑ check if it actually works
+macro_rules! impl_arb_for_bytes {
+    ($name: ident, $len: expr) => (
+        impl Arbitrary for $name {
+            fn arbitrary<G: Gen>(g: &mut G) -> Self {
+                let n = g.gen_range(0, $len + 1);
+                let mut bytes = vec![0; n];
+                g.fill_bytes(&mut bytes[..n]);
+                $name(bytes)
+            }
+        }
+    )
+}
+
+
+/** Implement `Arbitrary` trait for given struct containing only `PackedNodes`.
+
+E.g.
+
+```
+#[cfg(test)]
+use ::toxcore_tests::quickcheck::Arbitrary;
+use ::toxcore::dht::*;
+
+struct Nodes(Vec<PackedNode>);
+
+#[cfg(test)]
+impl_arb_for_pn!(Nodes);
+```
+*/
+// TODO: ↑ check if it actually works
+macro_rules! impl_arb_for_pn {
+    ($name: ident) => (
+        impl Arbitrary for $name {
+            fn arbitrary<G: Gen>(g: &mut G) -> Self {
+                let n = g.gen_range(0, 500); // more doesn't seem realistic
+                let mut nodes = Vec::with_capacity(n);
+                for _ in 0..n {
+                    nodes.push(PackedNode::arbitrary(g));
+                }
+                $name(nodes)
+            }
         }
     )
 }

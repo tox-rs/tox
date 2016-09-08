@@ -30,7 +30,7 @@ Current [API docs](https://zetok.github.io/tox) are a subject to changes.
 | libsodium | >=1.0.0 |
 
 ## Building
-Fairly simple. You'll need [Rust] >= 1.9 and [libsodium].
+Fairly simple. You'll need [Rust] >= 1.11 and [libsodium].
 
 When you'll have deps, build debug version with
 ```bash
