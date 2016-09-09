@@ -30,7 +30,7 @@ use toxcore::binary_io::*;
 
 /** Top-level packet kind names and their associated numbers.
 
-    According to https://toktok.github.io/spec.html#packet-kind.
+    According to https://zetok.github.io/tox-spec.html#packet-kind.
 */
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PacketKind {

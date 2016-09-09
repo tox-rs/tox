@@ -164,7 +164,7 @@ pub fn decrypt_data_symmetric(precomputed_key: &PrecomputedKey,
     *Note that behaviour of this function might change to not increment supplied
     nonces, but rather, return an increased nonce.*
 
-    Spec: https://toktok.github.io/spec#nonce-2
+    Spec: https://zetok.github.io/tox-spec#nonce-2
 */
 // TODO: needs to be tested on BE arch
 #[inline]

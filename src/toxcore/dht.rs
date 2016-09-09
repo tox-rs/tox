@@ -985,7 +985,7 @@ impl Node {
 /** Calculate the [`k-bucket`](./struct.Kbucket.html) index of a PK compared
     to "own" PK.
 
-    According to the [spec](https://toktok.github.io/spec#bucket-index).
+    According to the [spec](https://zetok.github.io/tox-spec#bucket-index).
 
     Fails (returns `None`) if supplied keys are the same.
 */
@@ -1024,7 +1024,7 @@ pub fn kbucket_index(&PublicKey(ref own_pk): &PublicKey,
     Used in [`Kbucket`](./struct.Kbucket.html) for storing nodes close to
     given PK; and additionally used to store nodes closest to friends.
 
-    [Spec definition](https://toktok.github.io/spec#updating-k-buckets).
+    [Spec definition](https://zetok.github.io/tox-spec#updating-k-buckets).
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Bucket {
@@ -1149,7 +1149,7 @@ impl Bucket {
     Nodes in bucket are sorted by closeness to the PK; closest node is the
     first, while furthest is last.
 
-    Further reading: [Tox spec](https://toktok.github.io/spec#k-buckets).
+    Further reading: [Tox spec](https://zetok.github.io/tox-spec#k-buckets).
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Kbucket {
@@ -1268,13 +1268,13 @@ impl Kbucket {
     1 | type (`0xfe`)
     9 | [`Ping`](./struct.Ping.html)
 
-    Spec: https://toktok.github.io/#nat-ping-packets
+    Spec: https://zetok.github.io/tox-spec/#nat-ping-packets
 */
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NatPing(pub Ping);
 
 /// [`NatPing](./struct.NatPing.html) type byte;
-/// https://toktok.github.io/#nat-ping-request
+/// https://zetok.github.io/tox-spec/#nat-ping-request
 pub const NAT_PING_TYPE: u8 = 0xfe;
 
 /// Length in bytes of [`NatPing`](./struct.NatPing.html) when serialized into
@@ -1313,7 +1313,7 @@ impl ToBytes for NatPing {
         let mut result = Vec::with_capacity(NAT_PING_SIZE);
 
         // special, "magic" type of NatPing, according to spec:
-        // https://toktok.github.io/#nat-ping-request
+        // https://zetok.github.io/tox-spec/#nat-ping-request
         result.push(NAT_PING_TYPE);
         // and the rest of stuff inherited from `Ping`
         result.extend_from_slice(Ping::to_bytes(self).as_slice());

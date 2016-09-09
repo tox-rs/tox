@@ -18,7 +18,9 @@
 */
 
 /*!
-Rust implementation of the [Tox protocol](https://toktok.github.io/spec).
+Rust implementation of the [Tox protocol](https://zetok.github.io/tox-spec).
+
+Repo: https://github.com/zetok/tox
 
 Current API allows one to e.g. find info about DHT nodes from bootstrap
 nodes by sending [`GetNodes`](./toxcore/dht/struct.GetNodes.html) or request
