@@ -17,8 +17,8 @@
     along with Tox.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-//! Old state format. *__Will be deprecated__ when something better will become
-//! available.*
+//! Old **Tox State Format (TSF)**. *__Will be deprecated__ when something
+//! better will become available.*
 
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
@@ -826,7 +826,7 @@ impl FromBytes for Name {
 
 
 /** Status message, up to [`STATUS_MSG_LEN`](./constant.STATUS_MSG_LEN.html)
-bytes. ***Note: will be renamed & moved***.
+bytes. ***Note: will be moved (and renamed?)***.
 */
 // TODO: rename(?) & move from this module
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -998,9 +998,57 @@ impl Arbitrary for Section {
     }
 }
 
-//pub struct StateFormat {
 
+/** Tox State Format sections. Use to read/write `.tox` save files.
 
+https://zetok.github.io/tox-spec/#state-format
+*/
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StateFormat(Vec<Section>);
+
+/// State Format magic bytes. Read/write as LittleEndian.
+const STATE_FORMAT_MAGIC: u32 = 0x15ed1b1f;
+
+/// Minimal length of State Format.
+const STATE_FORMAT_MIN_LEN: usize = 8 + SECTION_MIN_LEN;
+
+impl StateFormat {
+    /// Get a section data of given type.
+    pub fn get_section_bytes(&self, t: SectionKind) -> Option<Vec<u8>> {
+        let mut bytes = vec![];
+        for s in &self.0 {
+            if s.kind == t {
+                bytes.extend_from_slice(&s.data);
+            }
+        }
+        if bytes.is_empty() { return None }
+        Some(bytes)
+    }
+}
+
+impl FromBytes for StateFormat {
+    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
+        if bytes.len() < STATE_FORMAT_MIN_LEN {
+            return parse_error!("Not enough bytes even for shortest section!")
+        }
+
+        // should start with 4 `0` bytes
+        if &bytes[..4] != &[0; 4] {
+            return parse_error!("Not a TSF: doesn't start with 4 `0` bytes!")
+        }
+        let bytes = &bytes[4..];
+
+        // match magic bytes
+        if &bytes[..4] != &u32_to_array(STATE_FORMAT_MAGIC.to_le()) {
+            return parse_error!("Not a TSF: doesn't have magic bytes!")
+        }
+        let bytes = &bytes[4..];
+
+        let Parsed(sects, bytes) = try!(Section::parse_bytes_multiple(bytes));
+
+        Ok(Parsed(StateFormat(sects), bytes))
+    }
+}
 
 
 
