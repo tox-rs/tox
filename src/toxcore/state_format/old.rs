@@ -1015,14 +1015,7 @@ const STATE_FORMAT_MIN_LEN: usize = 8 + SECTION_MIN_LEN;
 impl StateFormat {
     /// Get a section data of given type.
     pub fn get_section_bytes(&self, t: SectionKind) -> Option<Vec<u8>> {
-        let mut bytes = vec![];
-        for s in &self.0 {
-            if s.kind == t {
-                bytes.extend_from_slice(&s.data);
-            }
-        }
-        if bytes.is_empty() { return None }
-        Some(bytes)
+        self.0.iter().filter(|s| s.kind == t).next().map(|s| s.data.clone())
     }
 }
 
@@ -1044,9 +1037,8 @@ impl FromBytes for StateFormat {
         }
         let bytes = &bytes[4..];
 
-        let Parsed(sects, bytes) = try!(Section::parse_bytes_multiple(bytes));
-
-        Ok(Parsed(StateFormat(sects), bytes))
+        Section::parse_bytes_multiple(bytes)
+            .map(|Parsed(s, b)| Parsed(StateFormat(s), b))
     }
 }
 
