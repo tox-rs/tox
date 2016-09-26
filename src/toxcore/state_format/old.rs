@@ -36,52 +36,58 @@ use ::toxcore_tests::quickcheck::{Arbitrary, Gen, quickcheck, TestResult};
 const REQUEST_MSG_LEN: usize = 1024;
 
 
-
 // TODO: improve docs
 
 /** Sections of the old state format.
 
 https://zetok.github.io/tox-spec/#sections
-```
 */
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SectionKind {
-    /// Section for [`NoSpam`](../../toxid/struct.NoSpam.html), public and
-    /// secret keys.
-    ///
-    /// https://zetok.github.io/tox-spec/#nospam-and-keys-0x01
+    /** Section for [`NoSpam`](../../toxid/struct.NoSpam.html), public and
+    secret keys.
+
+    https://zetok.github.io/tox-spec/#nospam-and-keys-0x01
+    */
     NospamKeys = 0x01,
-    /// Section for DHT-related data.
-    ///
-    /// https://zetok.github.io/tox-spec/#dht-0x02
+    /** Section for DHT-related data – [`DhtState`](./struct.DhtState.html).
+
+    https://zetok.github.io/tox-spec/#dht-0x02
+    */
     DHT =        0x02,
-    /// Section for friends data.
-    ///
-    /// https://zetok.github.io/tox-spec/#friends-0x03
+    /** Section for friends data. Contains list of [`FriendState`]
+    (./struct.FriendState.html).
+
+    https://zetok.github.io/tox-spec/#friends-0x03
+    */
     Friends =    0x03,
-    /// Section for own name.
-    ///
-    /// https://zetok.github.io/tox-spec/#name-0x04
+    /** Section for own [`Name`](./struct.Name.html).
+
+    https://zetok.github.io/tox-spec/#name-0x04
+    */
     Name =       0x04,
-    /// Section for own status message.
-    ///
-    /// https://zetok.github.io/tox-spec/#status-message-0x05
+    /** Section for own [`StatusMsg`](./struct.StatusMsg.html).
+
+    https://zetok.github.io/tox-spec/#status-message-0x05
+    */
     StatusMsg =  0x05,
-    /// Section for own status.
-    ///
-    /// https://zetok.github.io/tox-spec/#status-0x06
+    /** Section for own [`UserStatus`](./enum.UserStatus.html).
+
+    https://zetok.github.io/tox-spec/#status-0x06
+    */
     Status =     0x06,
-    /// Section for a list of TCP relays.
-    ///
-    /// https://zetok.github.io/tox-spec/#tcp-relays-0x0a
+    /** Section for a list of [`TcpRelays`](./struct.TcpRelays.html).
+
+    https://zetok.github.io/tox-spec/#tcp-relays-0x0a
+    */
     TcpRelays =  0x0a,
-    /// Section for a list of path nodes for onion routing.
-    ///
-    /// https://zetok.github.io/tox-spec/#path-nodes-0x0b
+    /** Section for a list of [`PathNodes`](./struct.PathNodes.html) for onion
+    routing.
+
+    https://zetok.github.io/tox-spec/#path-nodes-0x0b
+    */
     PathNodes =  0x0b,
-    /// End of file.
-    ///
-    /// https://zetok.github.io/tox-spec/#eof-0xff
+    /// End of file. https://zetok.github.io/tox-spec/#eof-0xff
     EOF =        0xff,
 }
 
@@ -271,6 +277,7 @@ pub struct DhtState(pub Vec<PackedNode>);
 pub const DHT_STATE_MIN_SIZE: usize = 12;
 
 /// Special, magical beginning of DHT section in LE.
+// TODO: change to &'static [u8]
 const DHT_MAGICAL: u32 = 0x159000d;
 
 /** Special DHT section type encoded in LE.
@@ -914,28 +921,70 @@ nodes_list!(TcpRelays);
 nodes_list!(PathNodes);
 
 
-/** Sections of state format.
-
-https://zetok.github.io/tox-spec/#sections
-*/
+/// Data for `Section`. Might, or might not contain valid data.
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct Section {
+struct SectionData {
     kind: SectionKind,
     data: Vec<u8>,
 }
 
-/// Minimal length of an empty section. Any section that is not empty should
-/// be bigger.
+/// Minimal length in bytes of an empty section. Any section that is not empty
+/// should be bigger.
 const SECTION_MIN_LEN: usize = 8;
 
 /// According to https://zetok.github.io/tox-spec/#sections
 /// **Use only with `{to,from}_le()`.**
 const SECTION_MAGIC: u16 = 0x01ce;
 
-impl FromBytes for Section {
+impl SectionData {
+    /** Try to parse `SectionData`'s bytes into [`Section`]
+    (./enum.Section.html).
+
+    Fails if `SectionData` doesn't contain valid data.
+    */
+    // TODO: test
+    fn into_section(&self) -> Option<Section> {
+        match self.kind {
+            SectionKind::NospamKeys => NospamKeys::from_bytes(&self.data)
+                .map(|s| Section::NospamKeys(s)),
+            SectionKind::DHT => DhtState::from_bytes(&self.data)
+                .map(|s| Section::DHT(s)),
+            SectionKind::Friends => FriendState::from_bytes_multiple(&self.data)
+                .map(|s| Section::Friends(s)),
+            SectionKind::Name => Name::from_bytes(&self.data)
+                .map(|s| Section::Name(s)),
+            SectionKind::StatusMsg => StatusMsg::from_bytes(&self.data)
+                .map(|s| Section::StatusMsg(s)),
+            SectionKind::Status => UserStatus::from_bytes(&self.data)
+                .map(|s| Section::Status(s)),
+            SectionKind::TcpRelays => TcpRelays::from_bytes(&self.data)
+                .map(|s| Section::TcpRelays(s)),
+            SectionKind::PathNodes => PathNodes::from_bytes(&self.data)
+                .map(|s| Section::PathNodes(s)),
+            SectionKind::EOF => Some(Section::EOF),
+        }
+    }
+
+    /** Try to parse `SectionData`'s bytes into multiple [`Section`s]
+    (./enum.Section.html).
+
+    Fails if `SectionData` doesn't contain valid data.
+    */
+    fn into_state_format(s: &Vec<SectionData>) -> Option<Vec<Section>> {
+        Some(s.iter()
+            .map(|sd| sd.into_section())
+            .filter(|s| s.is_some())
+            .map(|s| s.expect("IS Some(_)"))
+            .collect())
+    }
+}
+
+
+impl FromBytes for SectionData {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         if bytes.len() < SECTION_MIN_LEN {
-            return parse_error!("Parsing failed: Not enough bytes for Section!")
+            return parse_error!("Parsing failed: Not enough bytes for \
+            SectionData!")
         }
 
         let data_len = {
@@ -956,7 +1005,7 @@ impl FromBytes for Section {
         }
         let left = &left[2..];
 
-        Ok(Parsed(Section {
+        Ok(Parsed(SectionData {
             kind: kind,
             data: left.to_vec()
             },
@@ -964,11 +1013,11 @@ impl FromBytes for Section {
     }
 }
 
+
 // NOTE: the "serialization" here is not an actual serialized format, some
-//       section kinds need appending `0` if they're not long enough;
-//       appending is done in `StateFormat`
-//
-impl ToBytes for Section {
+//       section kinds need(?) appending `0` if they're not long enough;
+// TODO: actually check that ↑
+impl ToBytes for SectionData {
     fn to_bytes(&self) -> Vec<u8> {
         let mut res = Vec::with_capacity(SECTION_MIN_LEN + self.data.len());
         res.extend_from_slice(&u32_to_array((self.data.len() as u32).to_le()));
@@ -980,7 +1029,7 @@ impl ToBytes for Section {
 }
 
 #[cfg(test)]
-impl Arbitrary for Section {
+impl Arbitrary for SectionData {
     fn arbitrary<G: Gen>(g: &mut G) -> Self {
         let kind: SectionKind = Arbitrary::arbitrary(g);
         let data = match kind {
@@ -994,8 +1043,63 @@ impl Arbitrary for Section {
             SectionKind::PathNodes => PathNodes::arbitrary(g).to_bytes(),
             SectionKind::EOF => vec![],
         };
-        Section { kind: kind, data: data }
+        SectionData { kind: kind, data: data }
     }
+}
+
+
+/** Sections of state format.
+
+https://zetok.github.io/tox-spec/#sections
+*/
+#[derive(Clone, Debug, Eq, PartialEq)]
+// TODO: deduplicate with `SectionKind` ?
+pub enum Section {
+    /** Section for [`NoSpam`](../../toxid/struct.NoSpam.html), public and
+    secret keys.
+
+    https://zetok.github.io/tox-spec/#nospam-and-keys-0x01
+    */
+    NospamKeys(NospamKeys),
+    /** Section for DHT-related data – [`DhtState`](./struct.DhtState.html).
+
+    https://zetok.github.io/tox-spec/#dht-0x02
+    */
+    DHT(DhtState),
+    /** Section for friends data. Contains list of [`FriendState`]
+    (./struct.FriendState.html).
+
+    https://zetok.github.io/tox-spec/#friends-0x03
+    */
+    Friends(Vec<FriendState>),
+    /** Section for own [`StatusMsg`](./struct.StatusMsg.html).
+
+    https://zetok.github.io/tox-spec/#status-message-0x05
+    */
+    Name(Name),
+    /** Section for own [`StatusMsg`](./struct.StatusMsg.html).
+
+    https://zetok.github.io/tox-spec/#status-message-0x05
+    */
+    StatusMsg(StatusMsg),
+    /** Section for own [`UserStatus`](./enum.UserStatus.html).
+
+    https://zetok.github.io/tox-spec/#status-0x06
+    */
+    Status(UserStatus),
+    /** Section for a list of [`TcpRelays`](./struct.TcpRelays.html).
+
+    https://zetok.github.io/tox-spec/#tcp-relays-0x0a
+    */
+    TcpRelays(TcpRelays),
+    /** Section for a list of [`PathNodes`](./struct.PathNodes.html) for onion
+    routing.
+
+    https://zetok.github.io/tox-spec/#path-nodes-0x0b
+    */
+    PathNodes(PathNodes),
+    /// End of file. https://zetok.github.io/tox-spec/#eof-0xff
+    EOF,
 }
 
 
@@ -1004,18 +1108,44 @@ impl Arbitrary for Section {
 https://zetok.github.io/tox-spec/#state-format
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct StateFormat(Vec<Section>);
+// TODO: change to use `Section`s
+pub struct StateFormat(Vec<SectionData>);
 
 /// State Format magic bytes. Read/write as LittleEndian.
-const STATE_FORMAT_MAGIC: u32 = 0x15ed1b1f;
+const STATE_FORMAT_MAGIC: &'static [u8; 4] = &[0x1f, 0x1b, 0xed, 0x15];
+
+/// Length of `StateFormat` header.
+const STATE_FORMAT_HEAD_LEN: usize = 8;
 
 /// Minimal length of State Format.
-const STATE_FORMAT_MIN_LEN: usize = 8 + SECTION_MIN_LEN;
+const STATE_FORMAT_MIN_LEN: usize = STATE_FORMAT_HEAD_LEN + SECTION_MIN_LEN;
+
 
 impl StateFormat {
     /// Get a section data of given type.
+    // TODO: change to get actual `Section` rather than `SectionData`
     pub fn get_section_bytes(&self, t: SectionKind) -> Option<Vec<u8>> {
         self.0.iter().filter(|s| s.kind == t).next().map(|s| s.data.clone())
+    }
+
+    /** Checks if given bytes have `StateFormat` header, i.e. whether the first
+        8 bytes match.
+    */
+    pub fn is_state(bytes: &[u8]) -> bool {
+        if bytes.len() < STATE_FORMAT_HEAD_LEN {
+            return false
+        }
+        // should start with 4 `0` bytes
+        if &bytes[..4] != &[0; 4] {
+            return false
+        }
+        let bytes = &bytes[4..];
+
+        // match magic bytes
+        if &bytes[..4] != STATE_FORMAT_MAGIC {
+            return false
+        }
+        true
     }
 }
 
@@ -1025,19 +1155,13 @@ impl FromBytes for StateFormat {
             return parse_error!("Not enough bytes even for shortest section!")
         }
 
-        // should start with 4 `0` bytes
-        if &bytes[..4] != &[0; 4] {
-            return parse_error!("Not a TSF: doesn't start with 4 `0` bytes!")
+        if !StateFormat::is_state(bytes) {
+            return parse_error!("Not a StateFormat!")
         }
-        let bytes = &bytes[4..];
+        let bytes = &bytes[STATE_FORMAT_HEAD_LEN..];
 
-        // match magic bytes
-        if &bytes[..4] != &u32_to_array(STATE_FORMAT_MAGIC.to_le()) {
-            return parse_error!("Not a TSF: doesn't have magic bytes!")
-        }
-        let bytes = &bytes[4..];
-
-        Section::parse_bytes_multiple(bytes)
+        // TOOD: move under `Section` ?
+        SectionData::parse_bytes_multiple(bytes)
             .map(|Parsed(s, b)| Parsed(StateFormat(s), b))
     }
 }
@@ -1166,13 +1290,13 @@ fn friend_state_parse_bytes_test() {
 }
 
 
-// Section::
+// SectionData::
 
-// Section::parse_bytes()
+// SectionData::parse_bytes()
 
 #[test]
 #[cfg(test)]
-fn section_parse_bytes_test() {
+fn section_data_parse_bytes_test() {
     fn rand_b_sect(kind: SectionKind, bytes: &[u8]) -> Vec<u8> {
         let mut b_sect = Vec::with_capacity(bytes.len() + SECTION_MIN_LEN);
         b_sect.extend_from_slice(&u32_to_array((bytes.len() as u32).to_le()));
@@ -1186,8 +1310,8 @@ fn section_parse_bytes_test() {
         let b_sect = rand_b_sect(kind, &bytes);
 
         { // working case
-            let Parsed(section, left) = Section::parse_bytes(&b_sect)
-                .expect("Failed to parse Section bytes!");
+            let Parsed(section, left) = SectionData::parse_bytes(&b_sect)
+                .expect("Failed to parse SectionData bytes!");
 
             assert_eq!(0, left.len());
             assert_eq!(section.kind, kind);
@@ -1196,7 +1320,7 @@ fn section_parse_bytes_test() {
 
         { // wrong SectionKind
             fn wrong_skind(bytes: &[u8]) {
-                contains_err!(Section::parse_bytes, bytes,
+                contains_err!(SectionData::parse_bytes, bytes,
                               "Incorrect SectionKind: ");
             }
 
@@ -1217,14 +1341,14 @@ fn section_parse_bytes_test() {
 
         // too short
         for l in 0..SECTION_MIN_LEN {
-            contains_err!(Section::parse_bytes,
+            contains_err!(SectionData::parse_bytes,
                           &b_sect[..l],
-                          "Parsing failed: Not enough bytes for Section!");
+                          "Parsing failed: Not enough bytes for SectionData!");
         }
 
         // wrong len
         for l in SECTION_MIN_LEN..(b_sect.len() - 1) {
-            contains_err!(Section::parse_bytes,
+            contains_err!(SectionData::parse_bytes,
                           &b_sect[..l],
                           "Parsing failed: there are not enough bytes in \
                           section to parse!");
@@ -1245,7 +1369,7 @@ fn section_parse_bytes_test() {
         b_sect.extend_from_slice(&tmp_b_sect[..SECTION_MIN_LEN - 2]);
         b_sect.extend_from_slice(&magic[..2]);
         b_sect.extend_from_slice(&tmp_b_sect[SECTION_MIN_LEN..]);
-        contains_err!(Section::parse_bytes,
+        contains_err!(SectionData::parse_bytes,
                       &b_sect,
                       "Parsing failed: SECTION_MAGIC doesn\\'t match!");
         TestResult::passed()
@@ -1253,16 +1377,37 @@ fn section_parse_bytes_test() {
     quickcheck(with_magic as fn(Vec<u8>, SectionKind, Vec<u8>) -> TestResult);
 }
 
-// Section::to_bytes()
+// SectionData::to_bytes()
 
 #[test]
-fn section_to_bytes_test() {
-    fn with_section(sect: Section) {
+fn section_data_to_bytes_test() {
+    fn with_section(sect: SectionData) {
         let sect_b = sect.to_bytes();
-        let Parsed(s, rest) = Section::parse_bytes(&sect_b)
+        let Parsed(s, rest) = SectionData::parse_bytes(&sect_b)
             .expect("Failed parsing!");
         assert_eq!(&s, &sect);
         assert_eq!(&[] as &[u8], &rest[..]);
     }
-    quickcheck(with_section as fn(Section));
+    quickcheck(with_section as fn(SectionData));
+}
+
+
+// StateFormat::is_state()
+
+#[test]
+fn state_format_is_state_test() {
+    let sf_bytes = vec![0, 0, 0, 0,
+                        0x1f, 0x1b, 0xed, 0x15];
+
+    assert_eq!(true, StateFormat::is_state(&sf_bytes));
+
+    fn with_bytes(b: Vec<u8>) -> TestResult {
+        if b.len() < STATE_FORMAT_MIN_LEN { return TestResult::discard() }
+        for n in 0..(STATE_FORMAT_MIN_LEN - 1) {
+            assert_eq!(false, StateFormat::is_state(&b[..n]));
+        }
+        assert_eq!(false, StateFormat::is_state(&b));
+        TestResult::passed()
+    }
+    quickcheck(with_bytes as fn(Vec<u8>) -> TestResult);
 }

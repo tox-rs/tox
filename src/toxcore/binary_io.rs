@@ -26,7 +26,7 @@ pub trait ToBytes {
     fn to_bytes(&self) -> Vec<u8>;
 }
 
-/// Parsing result. Provides result and remaining input. 
+/// Parsing result. Provides result and remaining input.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Parsed<'a, Output>(
     /// Result.
@@ -72,6 +72,8 @@ macro_rules! parse_error {
 pub type ParseResult<'a, Output> = Result<Parsed<'a, Output>, ParseError>;
 
 /// Methods for de-serialization from bytes
+// TODO: remove Option<T> types in favour of reworking `ParseResult` into a
+//       real™ `Result` that could be just `ok()`d
 pub trait FromBytes: Sized {
 
     /// De-serialize from bytes.
@@ -110,7 +112,7 @@ pub trait FromBytes: Sized {
         Ok(Parsed(result, bytes))
     }
     /// De-serialize from bytes, or return `None` if de-serialization failed.
-    /// Note: it returns Some even if there are remaining bytes left.
+    /// Note: `Some` is returned even if there are remaining bytes left.
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
         match Self::parse_bytes(bytes) {
             Ok(Parsed(value, _)) => Some(value),
@@ -120,8 +122,25 @@ pub trait FromBytes: Sized {
             }
         }
     }
+    /** De-serialize from bytes as many items as possible, or return `None`
+    if not even one item can be de-serialized.
+
+    Note: `Some` is returned even if there are remaining bytes left.
+    */
+    // TODO: test
+    fn from_bytes_multiple(bytes: &[u8]) -> Option<Vec<Self>> {
+        match Self::parse_bytes_multiple(bytes) {
+            Ok(Parsed(d, _)) => Some(d),
+            Err(err) => {
+                debug!("Can't parse bytes. Error: {:?}", err);
+                None
+            }
+        }
+    }
 }
 
+
+// TODO: refactor ↓ using macros?
 
 /// Safely cast `[u8; 2]` to `u16` using shift+or.
 pub fn array_to_u16(array: &[u8; 2]) -> u16 {
