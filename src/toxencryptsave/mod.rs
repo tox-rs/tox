@@ -19,6 +19,30 @@
 */
 
 
+/*!
+E.g.
+
+```
+use tox::toxencryptsave::*;
+
+let plaintext = b"pls no encrypt";
+let password = b"123456";
+
+// to encrypt data
+let encrypted = pass_encrypt(plaintext, password)
+    .expect("Failed to encrypt >.<\"");
+
+// confirm that the data is encrypted
+assert!(plaintext != encrypted.as_slice());
+assert_eq!(true, is_encrypted(&encrypted));
+
+// decrypted is same as plaintext
+assert_eq!(plaintext,
+           pass_decrypt(&encrypted, password).unwrap().as_slice());
+```
+*/
+
+
 use sodiumoxide::crypto::pwhash::{
     MEMLIMIT_INTERACTIVE, OPSLIMIT_INTERACTIVE,
     Salt, OpsLimit,
@@ -235,7 +259,7 @@ pub fn is_encrypted(data: &[u8]) -> bool {
 }
 
 /**
-Try to encrypt given **TES** data with provided passphrase.
+Try to encrypt given data with provided passphrase.
 
 **Note that `passphrase` memory is not being zeroed after it has been
 used**. Code that provides `passphrase` should take care of zeroing that
@@ -265,7 +289,7 @@ pub fn pass_encrypt(data: &[u8], passphrase: &[u8]) -> Result<Vec<u8>, Encryptio
 }
 
 /**
-Try to encrypt given **TES** data with provided passphrase.
+Try to decrypt given **TES** data with provided passphrase.
 
 **Note that `passphrase` memory is not being zeroed after it has been
 used**. Code that provides `passphrase` should take care of zeroing that
