@@ -25,8 +25,8 @@
 // TODO: ↓ add logging
 
 
+use std::default::Default;
 use std::fmt;
-use std::ops::Deref;
 
 use super::binary_io::*;
 use super::crypto_core::*;
@@ -66,11 +66,9 @@ impl NoSpam {
     }
 }
 
-impl Deref for NoSpam {
-    type Target = [u8; NOSPAMBYTES];
-
-    fn deref(&self) -> &[u8; NOSPAMBYTES] {
-        &self.0
+impl Default for NoSpam {
+    fn default() -> Self {
+        NoSpam::new()
     }
 }
 
@@ -87,7 +85,8 @@ assert_eq!(format!("{:X}", NoSpam([255, 255, 255, 255])), "FFFFFFFF");
 */
 impl fmt::UpperHex for NoSpam {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:02X}{:02X}{:02X}{:02X}", self[0], self[1], self[2], self[3])
+        write!(f, "{:02X}{:02X}{:02X}{:02X}",
+               self.0[0], self.0[1], self.0[2], self.0[3])
     }
 }
 
@@ -170,7 +169,7 @@ impl ToxId {
     pub fn checksum(&PublicKey(ref pk): &PublicKey, nospam: &NoSpam) -> [u8; 2] {
         let mut bytes = Vec::with_capacity(TOXIDBYTES - 2);
         bytes.extend_from_slice(pk);
-        bytes.extend_from_slice(nospam.as_ref());
+        bytes.extend_from_slice(nospam.0.as_ref());
 
         let mut checksum = [0; 2];
 
@@ -307,7 +306,7 @@ impl ToBytes for ToxId {
         let mut result = Vec::with_capacity(TOXIDBYTES);
         let PublicKey(pk) = self.pk;
         result.extend_from_slice(&pk);
-        result.extend_from_slice(&*self.nospam);
+        result.extend_from_slice(&self.nospam.0);
         result.extend_from_slice(&self.checksum);
         result
     }
@@ -341,7 +340,7 @@ impl fmt::UpperHex for ToxId {
         for byte in pk_bytes {
             string.push_str(&format!("{:02X}", byte));
         }
-        for byte in self.nospam.iter() {
+        for byte in self.nospam.0.iter() {
             string.push_str(&format!("{:02X}", byte));
         }
         string.push_str(&format!("{:02X}{:02X}", self.checksum[0],

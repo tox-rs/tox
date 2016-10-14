@@ -143,7 +143,7 @@ fn nospam_keys_from_bytes_test() {
             let nsk: NospamKeys = NospamKeys::from_bytes(&bytes)
                                 .expect("Failed to unwrap NospamKeys!");
 
-            assert_eq!(&bytes[..NOSPAMBYTES], &*nsk.nospam);
+            assert_eq!(&bytes[..NOSPAMBYTES], &nsk.nospam.0);
 
             let PublicKey(ref pk) = nsk.pk;
             assert_eq!(&bytes[NOSPAMBYTES..NOSPAMBYTES + PUBLICKEYBYTES], pk);
@@ -400,34 +400,3 @@ fn status_message_parse_bytes_test() {
     }
     quickcheck(with_bytes as fn(Vec<u8>) -> TestResult);
 }
-
-
-// nodes_list!()
-
-macro_rules! nodes_list_test {
-    ($sname: ident, $fname: ident) => (
-        #[test]
-        // TODO: test also for failures? should be covered by other test, but..
-        fn $fname() {
-            fn with_pns(pns: Vec<PackedNode>) {
-                let mut bytes = Vec::new();
-                for pn in &pns {
-                    bytes.append(&mut pn.to_bytes());
-                }
-                {
-                    let Parsed(p, r_bytes) = $sname::parse_bytes(&bytes)
-                        .expect("Parsing can't fail.");
-
-                    assert_eq!(p.0, pns);
-                    assert_eq!(&[] as &[u8], r_bytes);
-                }
-
-                assert_eq!($sname(pns).to_bytes(), bytes);
-            }
-            quickcheck(with_pns as fn(Vec<PackedNode>));
-        }
-    )
-}
-
-nodes_list_test!(TcpRelays, tcp_relays_test);
-nodes_list_test!(PathNodes, path_nodes_test);

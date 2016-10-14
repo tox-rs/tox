@@ -79,7 +79,10 @@ pub trait FromBytes: Sized {
     /// De-serialize from bytes.
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self>;
 
-    /// De-serialize exact `times` entities from bytes.
+    /** De-serialize exact `times` entities from bytes.
+
+    Note that even if `Vec<_>` is returned, it still can be empty.
+    */
     fn parse_bytes_multiple_n(times: usize, bytes: &[u8]) -> ParseResult<Vec<Self>> {
         debug!("De-serializing multiple ({}) outputs.", times);
         trace!("With bytes: {:?}", bytes);
@@ -96,7 +99,10 @@ pub trait FromBytes: Sized {
         Ok(Parsed(result, bytes))
     }
 
-    /// De-serialize as many entities from bytes as posible.
+    /** De-serialize as many entities from bytes as posible.
+
+    Note that even if `Vec<_>` is returned, it still can be empty.
+    */
     fn parse_bytes_multiple(bytes: &[u8]) -> ParseResult<Vec<Self>> {
         debug!("De-serializing multiple outputs.");
         trace!("With bytes: {:?}", bytes);
@@ -125,7 +131,10 @@ pub trait FromBytes: Sized {
     /** De-serialize from bytes as many items as possible, or return `None`
     if not even one item can be de-serialized.
 
-    Note: `Some` is returned even if there are remaining bytes left.
+    Note:
+
+    * Even if `Vec<_>` is returned, it still can be empty.
+    * `Some` is returned even if there are remaining bytes left.
     */
     // TODO: test
     fn from_bytes_multiple(bytes: &[u8]) -> Option<Vec<Self>> {

@@ -27,24 +27,28 @@ use toxcore::crypto_core::*;
 use toxcore::toxid::*;
 
 
+// NoSpam::
+
+#[cfg(test)]
+fn no_spam_no_empty(ns: &NoSpam) {
+    // shouldn't be empty, unless your PRNG is crappy
+    assert!(ns.0 != [0; NOSPAMBYTES])
+}
+
 // NoSpam::new()
 
 #[test]
 fn no_spam_new_test() {
-    // check if NoSpam is the same if created from bytes
-    let nospam = NoSpam::new();
-    let NoSpam(ns_bytes) = nospam;
-    let nospam2 = NoSpam(ns_bytes);
-    assert_eq!(nospam, nospam2);
+    let ns = NoSpam::new();
+    no_spam_no_empty(&ns);
 }
 
-// NoSpam::deref()
+// NoSpam::default()
 
 #[test]
-fn no_spam_deref_test() {
-    let nospam = NoSpam::new();
-    let NoSpam(ns_bytes) = nospam;
-    assert_eq!(*nospam, ns_bytes);
+fn no_spam_default_test() {
+    let ns = NoSpam::default();
+    no_spam_no_empty(&ns);
 }
 
 // NoSpam::fmt()
@@ -73,10 +77,10 @@ fn no_spam_from_bytes_test() {
         } else {
             let nospam = NoSpam::from_bytes(&bytes)
                             .expect("Failed to get NoSpam!");
-            assert_eq!(bytes[0], nospam[0]);
-            assert_eq!(bytes[1], nospam[1]);
-            assert_eq!(bytes[2], nospam[2]);
-            assert_eq!(bytes[3], nospam[3]);
+            assert_eq!(bytes[0], nospam.0[0]);
+            assert_eq!(bytes[1], nospam.0[1]);
+            assert_eq!(bytes[2], nospam.0[2]);
+            assert_eq!(bytes[3], nospam.0[3]);
         }
     }
     quickcheck(with_bytes as fn(Vec<u8>));
