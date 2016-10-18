@@ -128,24 +128,6 @@ pub trait FromBytes: Sized {
             }
         }
     }
-    /** De-serialize from bytes as many items as possible, or return `None`
-    if not even one item can be de-serialized.
-
-    Note:
-
-    * Even if `Vec<_>` is returned, it still can be empty.
-    * `Some` is returned even if there are remaining bytes left.
-    */
-    // TODO: test
-    fn from_bytes_multiple(bytes: &[u8]) -> Option<Vec<Self>> {
-        match Self::parse_bytes_multiple(bytes) {
-            Ok(Parsed(d, _)) => Some(d),
-            Err(err) => {
-                debug!("Can't parse bytes. Error: {:?}", err);
-                None
-            }
-        }
-    }
 }
 
 

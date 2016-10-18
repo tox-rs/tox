@@ -32,6 +32,7 @@ use toxcore::toxid::{NoSpam, NOSPAMBYTES};
 use ::toxcore_tests::quickcheck::{Arbitrary, Gen, quickcheck, TestResult};
 
 
+
 /// Length in bytes of request message.
 // FIXME: move somewhere else
 // TODO: rename
@@ -57,8 +58,8 @@ pub enum SectionKind {
     https://zetok.github.io/tox-spec/#dht-0x02
     */
     DHT =        0x02,
-    /** Section for friends data. Contains list of [`FriendState`]
-    (./struct.FriendState.html).
+    /** Section for friends data. Contains list of [`Friends`]
+    (./struct.Friends.html).
 
     https://zetok.github.io/tox-spec/#friends-0x03
     */
@@ -559,6 +560,7 @@ assert_eq!(UserStatus::Online, UserStatus::default());
 ```
 */
 // FIXME: *move somewhere else* (messenger?)
+// TODO: rename to `Status` ?
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UserStatus {
     /// User is `Online`.
@@ -637,6 +639,22 @@ impl FromBytes for UserStatus {
         };
 
         Ok(Parsed(result, &bytes[1..]))
+    }
+}
+
+/** E.g.
+
+```
+# use tox::toxcore::state_format::old::UserStatus;
+# use tox::toxcore::binary_io::ToBytes;
+assert_eq!(&[0u8], UserStatus::Online .to_bytes().as_slice());
+assert_eq!(&[1u8], UserStatus::Away   .to_bytes().as_slice());
+assert_eq!(&[2u8], UserStatus::Busy   .to_bytes().as_slice());
+```
+*/
+impl ToBytes for UserStatus {
+    fn to_bytes(&self) -> Vec<u8> {
+        vec![*self as u8]
     }
 }
 
@@ -834,6 +852,54 @@ impl Arbitrary for FriendState {
 }
 
 
+// TODO: replace every `Vec<FriendState>` with `Friends`
+/** Wrapper struct for `Vec<FriendState>` to ease working with friend lists.
+*/
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct Friends(pub Vec<FriendState>);
+
+impl FromBytes for Friends {
+    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
+        FriendState::parse_bytes_multiple(bytes)
+            .map(|Parsed(fs, b)| Parsed(Friends(fs), b))
+    }
+}
+
+impl ToBytes for Friends {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut res = Vec::with_capacity(FRIENDSTATEBYTES * self.0.len());
+        for f in &self.0 {
+            res.append(&mut f.to_bytes());
+        }
+        res
+    }
+}
+
+#[cfg(test)]
+impl Arbitrary for Friends {
+    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+        Friends(Arbitrary::arbitrary(g))
+    }
+}
+
+
+macro_rules! impl_to_bytes_for_bytes_struct {
+    ($name:ty, $tname:ident) => (
+        impl ToBytes for $name {
+            fn to_bytes(&self) -> Vec<u8> {
+                self.0.clone()
+            }
+        }
+
+        #[test]
+        fn $tname() {
+            fn tf(s: $name) {
+                assert_eq!(s.0, s.to_bytes());
+            }
+            quickcheck(tf as fn($name));
+        }
+    )
+}
 
 // TODO: refactor `Name` and `StatusMsg` to implementation via via macro,
 //       in a similar way to how sodiumoxide does implementation via macros
@@ -888,6 +954,8 @@ impl FromBytes for Name {
         }
     }
 }
+
+impl_to_bytes_for_bytes_struct!(Name, name_to_bytes_test);
 
 
 /** Status message, up to [`STATUS_MSG_LEN`](./constant.STATUS_MSG_LEN.html)
@@ -944,6 +1012,7 @@ impl FromBytes for StatusMsg {
     }
 }
 
+impl_to_bytes_for_bytes_struct!(StatusMsg, status_msg_to_bytes_test);
 
 macro_rules! nodes_list {
     ($name: ident, $tname: ident) => (
@@ -1021,19 +1090,20 @@ const SECTION_MIN_LEN: usize = 8;
 const SECTION_MAGIC: u16 = 0x01ce;
 
 impl SectionData {
+
     /** Try to parse `SectionData`'s bytes into [`Section`]
     (./enum.Section.html).
 
     Fails if `SectionData` doesn't contain valid data.
     */
-    // TODO: test
+    // TODO: test failures?
     fn into_section(&self) -> Option<Section> {
         match self.kind {
             SectionKind::NospamKeys => NospamKeys::from_bytes(&self.data)
                 .map(|s| Section::NospamKeys(s)),
             SectionKind::DHT => DhtState::from_bytes(&self.data)
                 .map(|s| Section::DHT(s)),
-            SectionKind::Friends => FriendState::from_bytes_multiple(&self.data)
+            SectionKind::Friends => Friends::from_bytes(&self.data)
                 .map(|s| Section::Friends(s)),
             SectionKind::Name => Name::from_bytes(&self.data)
                 .map(|s| Section::Name(s)),
@@ -1056,8 +1126,8 @@ impl SectionData {
 
     Can return empty `Vec<_>`.
     */
-    // TODO: test
-    fn into_section_multiple(s: &Vec<SectionData>) -> Vec<Section> {
+    // TODO: move under `Section` ?
+    fn into_sect_mult(s: &Vec<SectionData>) -> Vec<Section> {
         // TODO: don't return an empty Vec ?
         s.iter()
             .map(|sd| sd.into_section())
@@ -1123,7 +1193,7 @@ impl Arbitrary for SectionData {
         let data = match kind {
             SectionKind::NospamKeys => NospamKeys::arbitrary(g).to_bytes(),
             SectionKind::DHT => DhtState::arbitrary(g).to_bytes(),
-            SectionKind::Friends => FriendState::arbitrary(g).to_bytes(),
+            SectionKind::Friends => Friends::arbitrary(g).to_bytes(),
             SectionKind::Name => Name::arbitrary(g).0,
             SectionKind::StatusMsg => StatusMsg::arbitrary(g).0,
             SectionKind::Status => vec![UserStatus::arbitrary(g) as u8],
@@ -1154,12 +1224,12 @@ pub enum Section {
     https://zetok.github.io/tox-spec/#dht-0x02
     */
     DHT(DhtState),
-    /** Section for friends data. Contains list of [`FriendState`]
-    (./struct.FriendState.html).
+    /** Section for friends data. Contains list of [`Friends`]
+    (./struct.Friends.html).
 
     https://zetok.github.io/tox-spec/#friends-0x03
     */
-    Friends(Vec<FriendState>),
+    Friends(Friends),
     /** Section for own [`StatusMsg`](./struct.StatusMsg.html).
 
     https://zetok.github.io/tox-spec/#status-message-0x05
@@ -1191,7 +1261,7 @@ pub enum Section {
 }
 
 
-/** Tox State sections. Use to read/write `.tox` save files.
+/** Tox State sections. Use to manage `.tox` save files.
 
 https://zetok.github.io/tox-spec/#state-format
 */
@@ -1201,7 +1271,7 @@ pub struct State {
     // Sections are listed in the order they are {de-,}serialised.
     nospamkeys: NospamKeys,
     dhtstate: DhtState,
-    friends: Vec<FriendState>,
+    friends: Friends,
     name: Name,
     status_msg: StatusMsg,
     status: UserStatus,
@@ -1220,14 +1290,8 @@ const STATE_HEAD_LEN: usize = 8;
 const STATE_MIN_LEN: usize = STATE_HEAD_LEN + SECTION_MIN_LEN;
 
 
+// TODO: refactor the whole thing
 impl State {
-    /// Get a section data of given type.
-    // TODO: change to get actual `Section` rather than `SectionData`
-    fn get_section_bytes(sds: &Vec<SectionData>, t: SectionKind)
-                             -> Option<Vec<u8>>
-    {
-        sds.iter().filter(|s| s.kind == t).next().map(|s| s.data.clone())
-    }
 
     /** Checks if given bytes have `State` header, i.e. whether the first
     8 bytes match.
@@ -1237,9 +1301,8 @@ impl State {
 
     Returns `true` if there's matching header, `false` otherwise.
     */
-    // TODO: move out of State impl ?
     pub fn is_state(bytes: &[u8]) -> bool {
-        if bytes.len() < STATE_HEAD_LEN {
+        if bytes.len() < STATE_MIN_LEN {
             return false
         }
         // should start with 4 `0` bytes
@@ -1253,6 +1316,53 @@ impl State {
             return false
         }
         true
+    }
+
+    /** Fails (returns `None`) only if there is no `NospamKeys` in supplied
+    sections. If some other section than `NospamKeys` has invalid data,
+    `Default` value is used.
+    */
+    // TODO: test
+    fn from_sects(sects: &Vec<Section>) -> Option<Self> {
+        // if no section matches `NospamKeys` return early
+        if !sects.iter()
+            .any(|s| match *s { Section::NospamKeys(_) => true, _ => false })
+        {
+            return None
+        }
+
+        // get the section, or `Default` if section doesn't exist
+        macro_rules! state_section {
+            ($pname: path) => (
+                sects.iter()
+                    .filter_map(|s| match *s {
+                        $pname(ref s) => Some(s.clone()),
+                        _ => None,
+                    })
+                    .next()
+                    .unwrap_or_default()
+            )
+        }
+
+        // return `Some(_)` only if there are valid `NospamKeys`
+        sects.iter()
+            .filter_map(|s| match *s {
+                Section::NospamKeys(ref nspks) => Some(nspks.clone()),
+                _ => None,
+            })
+            .next()
+            .map(|nspks|
+                State {
+                    nospamkeys: nspks,
+                    dhtstate: state_section!(Section::DHT),
+                    friends: state_section!(Section::Friends),
+                    name: state_section!(Section::Name),
+                    status_msg: state_section!(Section::StatusMsg),
+                    status: state_section!(Section::Status),
+                    tcp_relays: state_section!(Section::TcpRelays),
+                    path_nodes: state_section!(Section::PathNodes),
+                }
+            )
     }
 }
 
@@ -1274,6 +1384,23 @@ impl State {
 //    }
 //}
 
+// TODO: test
+impl FromBytes for State {
+    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
+        if !State::is_state(bytes) {
+            return parse_error!("Not a State!")
+        }
+        let bytes = &bytes[STATE_HEAD_LEN..];
+
+        let (sections, bytes) = try!(SectionData::parse_bytes_multiple(bytes)
+            .map(|Parsed(ref sd, b)| (SectionData::into_sect_mult(sd), b)));
+
+        match Self::from_sects(&sections) {
+            Some(s) => Ok(Parsed(s, bytes)),
+            None => parse_error!("Failed to parse data, no valid sections!"),
+        }
+    }
+}
 
 
 
@@ -1402,17 +1529,90 @@ fn friend_state_parse_bytes_test() {
 
 // SectionData::into_section()
 
+// check for each type
+macro_rules! section_data_with_kind_into {
+    ($($kind:ident, $tname:ident),+) => (
+        $(
+            #[test]
+            fn $tname() {
+                fn tf(sd: SectionData) -> TestResult {
+                    if sd.kind != SectionKind::$kind {
+                        return TestResult::discard()
+                    }
+                    assert!(sd.into_section().is_some());
+                    TestResult::passed()
+                }
+                quickcheck(tf as fn(SectionData) -> TestResult);
+            }
+        )+
+    )
+}
+section_data_with_kind_into!(
+    NospamKeys, section_data_into_sect_test_nospamkeys,
+    DHT,        section_data_into_sect_test_dht,
+    Friends,    section_data_into_sect_test_friends,
+    Name,       section_data_into_sect_test_name,
+    StatusMsg,  section_data_into_sect_test_status_msg,
+    Status,     section_data_into_sect_test_status,
+    TcpRelays,  section_data_into_sect_test_tcp_relays,
+    PathNodes,  section_data_into_sect_test_path_nodes,
+    EOF,        section_data_into_sect_test_eof
+);
+
 #[test]
 fn section_data_into_section_test_random() {
     fn with_section(sd: SectionData) {
         assert!(sd.into_section().is_some());
     }
     quickcheck(with_section as fn(SectionData));
-
-    // TODO: add test(s) for each of invalid data
 }
 
+// SectionData::into_sect_mult()
 
+macro_rules! section_data_into_sect_mult_into {
+    ($($sect:ty, $kind:ident, $tname:ident),+) => (
+        $(
+            #[test]
+            fn $tname() {
+                fn with_sects(s: Vec<$sect>) {
+                    let sds  = s.iter()
+                        .map(|se| SectionData {
+                            kind: SectionKind::$kind,
+                            data: se.to_bytes()
+                        })
+                        .collect();
+                    let sections = SectionData::into_sect_mult(&sds);
+                    assert_eq!(s.len(), sections.len());
+                    if !s.is_empty() {
+                        assert!(sections.iter().all(|se| match *se {
+                            Section::$kind(_) => true,
+                            _ => false,
+                        }));
+                    }
+                }
+                quickcheck(with_sects as fn(Vec<$sect>));
+            }
+        )+
+    )
+}
+section_data_into_sect_mult_into!(
+    NospamKeys, NospamKeys, section_data_into_sect_mult_test_nospamkeys,
+    DhtState, DHT, section_data_into_sect_mult_test_dht,
+    Friends, Friends, section_data_into_sect_mult_test_friends,
+    Name, Name, section_data_into_sect_mult_test_name,
+    StatusMsg, StatusMsg, section_data_into_sect_mult_test_status_msg,
+    UserStatus, Status, section_data_into_sect_mult_test_status,
+    TcpRelays, TcpRelays, section_data_into_sect_mult_test_path_nodes,
+    TcpRelays, TcpRelays, section_data_into_sect_mult_test_tcp_relays
+);
+
+#[test]
+fn section_data_into_sect_mult_test_random() {
+    fn random_sds(sds: Vec<SectionData>) {
+        assert_eq!(sds.len(), SectionData::into_sect_mult(&sds).len());
+    }
+    quickcheck(random_sds as fn(Vec<SectionData>));
+}
 
 // SectionData::parse_bytes()
 
@@ -1514,12 +1714,20 @@ fn section_data_to_bytes_test() {
 }
 
 
+// State::
+
 // State::is_state()
 
 #[test]
 fn state_is_state_test() {
+    assert_eq!(false, State::is_state(&[]));
+
     let sf_bytes = vec![0, 0, 0, 0,
-                        0x1f, 0x1b, 0xed, 0x15];
+                        0x1f, 0x1b, 0xed, 0x15,
+                        // ↑ section header
+                        // ↓ this would be section data
+                        0, 0, 0, 0,
+                        0, 0 ,0 ,0];
 
     assert_eq!(true, State::is_state(&sf_bytes));
 

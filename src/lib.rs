@@ -129,6 +129,7 @@ extern crate mio;
 extern crate sodiumoxide;
 
 
+// TODO: refactor macros
 #[macro_use]
 #[cfg(test)]
 pub mod toxcore_tests {

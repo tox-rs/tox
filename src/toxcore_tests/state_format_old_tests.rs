@@ -286,6 +286,50 @@ fn friend_status_parse_bytes_rest_test() {
     quickcheck(with_bytes as fn(FriendStatus, Vec<u8>));
 }
 
+
+// Friends::
+
+// Friends::parse_bytes()
+#[test]
+fn friends_parse_bytes_test() {
+    fn with_friend_state(fs: Vec<FriendState>, randb: Vec<u8>) {
+        let mut bytes = Vec::new();
+        for fr in &fs {
+            bytes.append(&mut fr.to_bytes());
+        }
+
+        { // just the needed bytes, no more, no less
+            let Parsed(friends, b) = Friends::parse_bytes(&bytes).expect("");
+            assert_eq!(&fs, &friends.0);
+            assert_eq!(&[] as &[u8], b); // empty
+        }
+
+        { // with random bytes appended
+            let mut bytes = bytes.clone();
+            bytes.extend_from_slice(&randb);
+            let Parsed(friends, b) = Friends::parse_bytes(&bytes).expect("");
+            assert_eq!(&fs, &friends.0);
+            assert_eq!(randb.as_slice(), b);
+        }
+    }
+    quickcheck(with_friend_state as fn(Vec<FriendState>, Vec<u8>));
+}
+
+// Friends::to_bytes()
+
+#[test]
+fn friends_to_bytes_test() {
+    fn with_friends(fs: Vec<FriendState>) {
+        let mut bytes = Vec::new();
+        for f in &fs {
+            bytes.append(&mut f.to_bytes());
+        }
+        assert_eq!(bytes, Friends(fs).to_bytes());
+    }
+    quickcheck(with_friends as fn(Vec<FriendState>));
+}
+
+
 // UserStatus::
 
 impl Arbitrary for UserStatus {
