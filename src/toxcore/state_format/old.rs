@@ -160,7 +160,9 @@ pub struct NospamKeys {
 /// Number of bytes of serialized [`NospamKeys`](./struct.NospamKeys.html).
 pub const NOSPAMKEYSBYTES: usize = NOSPAMBYTES + PUBLICKEYBYTES + SECRETKEYBYTES;
 
-/** E.g.
+/** The `Default` implementation generates random `NospamKeys`.
+
+E.g.
 
 ```
 # use std::default::Default;
