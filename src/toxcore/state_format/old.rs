@@ -1597,6 +1597,7 @@ macro_rules! section_data_into_sect_mult_into {
         )+
     )
 }
+// NOTE: ↓ this takes 5 min of CPU time on a 4GHz AMD Piledriver(!)
 section_data_into_sect_mult_into!(
     NospamKeys, NospamKeys, section_data_into_sect_mult_test_nospamkeys,
     DhtState, DHT, section_data_into_sect_mult_test_dht,
@@ -1722,16 +1723,32 @@ fn section_data_to_bytes_test() {
 
 #[test]
 fn state_is_state_test() {
-    assert_eq!(false, State::is_state(&[]));
+    // test parsing right and wrong bytes
+    fn with_num(num: u8) -> TestResult {
+        // right bytes
+        let sf_bytes = vec![0, 0, 0, 0,
+                            0x1f, 0x1b, 0xed, 0x15,
+                            // ↑ section header
+                            // ↓ this would be section data
+                            0, 0, 0, 0,
+                            0, 0 ,0 ,0];
+        assert_eq!(true, State::is_state(&sf_bytes));
 
-    let sf_bytes = vec![0, 0, 0, 0,
-                        0x1f, 0x1b, 0xed, 0x15,
-                        // ↑ section header
-                        // ↓ this would be section data
-                        0, 0, 0, 0,
-                        0, 0 ,0 ,0];
+        // wrong, mismatching magic
+        for pos in 4..8 {
+            let mut bytes = sf_bytes.clone();
+            match (pos, num) {
+                (4, 0x1f) | (5, 0x1b) | (6, 0xed) | (7, 0x15) =>
+                    return TestResult::discard(),
+                _ => {},
+            }
 
-    assert_eq!(true, State::is_state(&sf_bytes));
+            bytes[pos] = num;
+            assert_eq!(false, State::is_state(&bytes));
+        }
+        TestResult::passed()
+    }
+    quickcheck(with_num as fn(u8) -> TestResult);
 
     fn with_bytes(b: Vec<u8>) -> TestResult {
         if b.len() < STATE_MIN_LEN { return TestResult::discard() }
@@ -1742,4 +1759,7 @@ fn state_is_state_test() {
         TestResult::passed()
     }
     quickcheck(with_bytes as fn(Vec<u8>) -> TestResult);
+
+    // empty bytes case
+    assert_eq!(false, State::is_state(&[]));
 }
