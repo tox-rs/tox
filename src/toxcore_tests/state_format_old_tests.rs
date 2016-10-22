@@ -357,7 +357,51 @@ impl Arbitrary for UserStatus {
     }
 }
 
+// UserStatus::default()
+
+#[test]
+fn user_status_default_test() {
+    assert_eq!(UserStatus::Online, UserStatus::default());
+}
+
 // UserStatus::parse_bytes()
+
+#[test]
+fn user_status_parse_bytes_test() {
+    { // ::Online
+        let bytes = [UserStatus::Online as u8];
+        assert_eq!(UserStatus::Online, UserStatus::from_bytes(&bytes)
+                   .expect("Failed to de-serialize UserStatus::Online!"));
+    }
+
+    { // ::Away
+        let bytes = [UserStatus::Away as u8];
+        assert_eq!(UserStatus::Away, UserStatus::from_bytes(&bytes)
+                   .expect("Failed to de-serialize UserStatus::Away!"));
+    }
+
+    { // ::Busy
+        let bytes = [UserStatus::Busy as u8];
+        assert_eq!(UserStatus::Busy, UserStatus::from_bytes(&bytes)
+                   .expect("Failed to de-serialize UserStatus::Busy!"));
+    }
+
+    { // empty
+        assert_eq!(None, UserStatus::from_bytes(&[]));
+        let debug = format!("{:?}", UserStatus::parse_bytes(&[]).unwrap_err());
+        let err_msg = "Not enough bytes for UserStatus.";
+        assert!(debug.contains(err_msg));
+    }
+
+    // invalid
+    for i in 3..256 {
+        let bytes = [i as u8];
+        assert_eq!(None, UserStatus::from_bytes(&bytes));
+        let debug = format!("{:?}", UserStatus::parse_bytes(&bytes).unwrap_err());
+        let err_msg = format!("Unknown UserStatus: {}.", i);
+        assert!(debug.contains(&err_msg));
+    }
+}
 
 #[test]
 fn user_status_parse_bytes_test_rest() {
@@ -372,6 +416,14 @@ fn user_status_parse_bytes_test_rest() {
     quickcheck(with_bytes as fn(UserStatus, Vec<u8>));
 }
 
+// UserStatus::to_bytes()
+
+#[test]
+fn user_status_to_bytes_test() {
+    assert_eq!(&[0u8], UserStatus::Online .to_bytes().as_slice());
+    assert_eq!(&[1u8], UserStatus::Away   .to_bytes().as_slice());
+    assert_eq!(&[2u8], UserStatus::Busy   .to_bytes().as_slice());
+}
 
 
 // Name::

@@ -553,60 +553,13 @@ pub enum UserStatus {
     Busy   = 2,
 }
 
-/** Returns `UserStatus::Online`.
-
-```
-# use self::tox::toxcore::state_format::old::UserStatus;
-assert_eq!(UserStatus::Online, UserStatus::default());
-```
-*/
+/// Returns `UserStatus::Online`.
 impl Default for UserStatus {
     fn default() -> Self {
         UserStatus::Online
     }
 }
 
-/** E.g.
-
-```
-use self::tox::toxcore::binary_io::*;
-use self::tox::toxcore::state_format::old::UserStatus;
-
-{ // ::Online
-    let bytes = [UserStatus::Online as u8];
-    assert_eq!(UserStatus::Online, UserStatus::from_bytes(&bytes)
-                .expect("Failed to de-serialize UserStatus::Online!"));
-}
-
-{ // ::Away
-    let bytes = [UserStatus::Away as u8];
-    assert_eq!(UserStatus::Away, UserStatus::from_bytes(&bytes)
-                .expect("Failed to de-serialize UserStatus::Away!"));
-}
-
-{ // ::Busy
-    let bytes = [UserStatus::Busy as u8];
-    assert_eq!(UserStatus::Busy, UserStatus::from_bytes(&bytes)
-                .expect("Failed to de-serialize UserStatus::Busy!"));
-}
-
-{ // empty
-    assert_eq!(None, UserStatus::from_bytes(&[]));
-    let debug = format!("{:?}", UserStatus::parse_bytes(&[]).unwrap_err());
-    let err_msg = "Not enough bytes for UserStatus.";
-    assert!(debug.contains(err_msg));
-}
-
-// invalid
-for i in 3..256 {
-    let bytes = [i as u8];
-    assert_eq!(None, UserStatus::from_bytes(&bytes));
-    let debug = format!("{:?}", UserStatus::parse_bytes(&bytes).unwrap_err());
-    let err_msg = format!("Unknown UserStatus: {}.", i);
-    assert!(debug.contains(&err_msg));
-}
-```
-*/
 impl FromBytes for UserStatus {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         if bytes.is_empty() {
@@ -624,16 +577,6 @@ impl FromBytes for UserStatus {
     }
 }
 
-/** E.g.
-
-```
-# use tox::toxcore::state_format::old::UserStatus;
-# use tox::toxcore::binary_io::ToBytes;
-assert_eq!(&[0u8], UserStatus::Online .to_bytes().as_slice());
-assert_eq!(&[1u8], UserStatus::Away   .to_bytes().as_slice());
-assert_eq!(&[2u8], UserStatus::Busy   .to_bytes().as_slice());
-```
-*/
 impl ToBytes for UserStatus {
     fn to_bytes(&self) -> Vec<u8> {
         vec![*self as u8]
