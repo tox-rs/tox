@@ -132,6 +132,22 @@ impl Arbitrary for NospamKeys {
     }
 }
 
+// NospamKeys::default()
+
+#[test]
+fn nospam_keys_default_test() {
+    let nsk1 = NospamKeys::default();
+
+    // is not filled with `0`s
+    assert!(nsk1.nospam.0 != [0u8; NOSPAMBYTES]);
+    assert!(nsk1.pk.0 != [0u8; PUBLICKEYBYTES]);
+    assert!(nsk1.sk.0 != [0u8; SECRETKEYBYTES]);
+
+    // different each time it's generated
+    let nsk2 = NospamKeys::default();
+    assert!(nsk1 != nsk2);
+}
+
 // NospamKeys::from_bytes()
 
 #[test]

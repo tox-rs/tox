@@ -160,27 +160,7 @@ pub struct NospamKeys {
 /// Number of bytes of serialized [`NospamKeys`](./struct.NospamKeys.html).
 pub const NOSPAMKEYSBYTES: usize = NOSPAMBYTES + PUBLICKEYBYTES + SECRETKEYBYTES;
 
-/** The `Default` implementation generates random `NospamKeys`.
-
-E.g.
-
-```
-# use std::default::Default;
-# use tox::toxcore::crypto_core::{PUBLICKEYBYTES, SECRETKEYBYTES};
-# use tox::toxcore::state_format::old::*;
-# use tox::toxcore::toxid::NOSPAMBYTES;
-let nsk1 = NospamKeys::default();
-
-// is not filled with `0`s
-assert!(nsk1.nospam.0 != [0u8; NOSPAMBYTES]);
-assert!(nsk1.pk.0 != [0u8; PUBLICKEYBYTES]);
-assert!(nsk1.sk.0 != [0u8; SECRETKEYBYTES]);
-
-// different each time it's generated
-let nsk2 = NospamKeys::default();
-assert!(nsk1 != nsk2);
-```
-*/
+/// The `Default` implementation generates random `NospamKeys`.
 impl Default for NospamKeys {
     fn default() -> Self {
         let nospam = NoSpam::default();
