@@ -31,16 +31,17 @@ use toxcore::state_format::old::*;
 
 impl Arbitrary for SectionKind {
     fn arbitrary<G: Gen>(g: &mut G) -> Self {
-        *g.choose(&[SectionKind::NospamKeys,
-                   SectionKind::DHT,
-                   SectionKind::Friends,
-                   SectionKind::Name,
-                   SectionKind::StatusMsg,
-                   SectionKind::Status,
-                   SectionKind::TcpRelays,
-                   SectionKind::PathNodes,
-                   SectionKind::EOF])
-            .unwrap()
+        *g.choose(&[
+            SectionKind::NospamKeys,
+            SectionKind::DHT,
+            SectionKind::Friends,
+            SectionKind::Name,
+            SectionKind::StatusMsg,
+            SectionKind::Status,
+            SectionKind::TcpRelays,
+            SectionKind::PathNodes,
+            SectionKind::EOF
+        ]).unwrap()
     }
 }
 
@@ -278,12 +279,13 @@ fn dht_state_to_bytes_test() {
 
 impl Arbitrary for FriendStatus {
     fn arbitrary<G: Gen>(g: &mut G) -> Self {
-        *g.choose(&[FriendStatus::NotFriend,
-                   FriendStatus::Added,
-                   FriendStatus::FrSent,
-                   FriendStatus::Confirmed,
-                   FriendStatus::Online])
-            .unwrap()
+        *g.choose(&[
+            FriendStatus::NotFriend,
+            FriendStatus::Added,
+            FriendStatus::FrSent,
+            FriendStatus::Confirmed,
+            FriendStatus::Online
+        ]).unwrap()
     }
 }
 
@@ -350,10 +352,11 @@ fn friends_to_bytes_test() {
 
 impl Arbitrary for UserStatus {
     fn arbitrary<G: Gen>(g: &mut G) -> Self {
-        *g.choose(&[UserStatus::Online,
-                   UserStatus::Away,
-                   UserStatus::Busy])
-            .unwrap()
+        *g.choose(&[
+            UserStatus::Online,
+            UserStatus::Away,
+            UserStatus::Busy
+        ]).unwrap()
     }
 }
 

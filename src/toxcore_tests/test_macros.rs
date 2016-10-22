@@ -18,7 +18,7 @@
 */
 
 
-//! File with testing helpers. **Use only in tests!**
+//! File with testing macros. **Use only in tests!**
 
 
 /// Assert that function with given data fails with given error.
@@ -62,7 +62,7 @@ macro_rules! impl_arb_for_bytes {
 }
 
 
-/** Implement `Arbitrary` trait for given struct containing only `PackedNodes`.
+/** Implement `Arbitrary` for given struct containing only `PackedNodes`.
 
 E.g.
 
@@ -79,15 +79,10 @@ impl_arb_for_pn!(Nodes);
 */
 // TODO: ↑ check if it actually works
 macro_rules! impl_arb_for_pn {
-    ($name: ident) => (
+    ($name:ident) => (
         impl Arbitrary for $name {
             fn arbitrary<G: Gen>(g: &mut G) -> Self {
-                let n = g.gen_range(0, 500); // more doesn't seem realistic
-                let mut nodes = Vec::with_capacity(n);
-                for _ in 0..n {
-                    nodes.push(PackedNode::arbitrary(g));
-                }
-                $name(nodes)
+                $name(Arbitrary::arbitrary(g))
             }
         }
     )

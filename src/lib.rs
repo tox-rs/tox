@@ -138,10 +138,10 @@ pub mod toxcore_tests {
     extern crate rustc_serialize;
     extern crate regex;
 
-    // Helper functions, etc. for testing, no actual tests
+    // Helper macros for testing, no tests
     #[warn(missing_docs)]
     #[macro_use]
-    pub mod test;
+    pub mod test_macros;
 
     // tests
     mod binary_io_tests;
