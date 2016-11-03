@@ -47,7 +47,7 @@ struct Name(Vec<u8>);
 impl_arb_for_bytes!(Name, 100);
 ```
 */
-// TODO: ↑ check if it actually works
+// FIXME: ↑ make it a real test, since doctest doesn't work
 macro_rules! impl_arb_for_bytes {
     ($name: ident, $len: expr) => (
         impl Arbitrary for $name {
@@ -67,17 +67,15 @@ macro_rules! impl_arb_for_bytes {
 E.g.
 
 ```
-#[cfg(test)]
 use ::toxcore_tests::quickcheck::Arbitrary;
 use ::toxcore::dht::*;
 
 struct Nodes(Vec<PackedNode>);
 
-#[cfg(test)]
 impl_arb_for_pn!(Nodes);
 ```
 */
-// TODO: ↑ check if it actually works
+// FIXME: ↑ make it a real test, since doctest doesn't work
 macro_rules! impl_arb_for_pn {
     ($name:ident) => (
         impl Arbitrary for $name {

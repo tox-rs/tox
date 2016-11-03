@@ -940,7 +940,7 @@ impl FromBytes for StatusMsg {
 impl_to_bytes_for_bytes_struct!(StatusMsg, status_msg_to_bytes_test);
 
 macro_rules! nodes_list {
-    ($name: ident, $tname: ident) => (
+    ($($name:ident, $tname:ident),+) => ($(
         /// Contains list in `PackedNode` format.
         #[derive(Clone, Debug, Default, Eq, PartialEq)]
         pub struct $name(pub Vec<PackedNode>);
@@ -991,11 +991,11 @@ macro_rules! nodes_list {
             // Default impl test
             assert_eq!(&[] as &[PackedNode], $name::default().0.as_slice());
         }
-    )
+    )+)
 }
 
-nodes_list!(TcpRelays, tcp_relays_test);
-nodes_list!(PathNodes, path_nodes_test);
+nodes_list!(TcpRelays, tcp_relays_test,
+            PathNodes, path_nodes_test);
 
 
 /// Data for `Section`. Might, or might not contain valid data.
@@ -1291,24 +1291,6 @@ impl State {
     }
 }
 
-//// TODO: test
-//impl FromBytes for State {
-//    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
-//        if bytes.len() < STATE_MIN_LEN {
-//            return parse_error!("Not enough bytes even for shortest section!")
-//        }
-//
-//        if !State::is_state(bytes) {
-//            return parse_error!("Not a State!")
-//        }
-//        let bytes = &bytes[STATE_HEAD_LEN..];
-//
-//        // TOOD: move under `Section` ?
-//        SectionData::parse_bytes_multiple(bytes)
-//            .map(|Parsed(s, b)| Parsed(State(s), b))
-//    }
-//}
-
 // TODO: test
 impl FromBytes for State {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
@@ -1345,8 +1327,6 @@ fn friend_state_parse_bytes_test() {
         assert_eq!(friend_state, p);
     }
 
-    // actually don't allow, just supress useless warnings
-    #[allow(overflowing_literals)]
     fn with_fs(fs: FriendState) {
         let fs_bytes = fs.to_bytes();
         assert_success(&fs_bytes, &fs);
@@ -1357,8 +1337,10 @@ fn friend_state_parse_bytes_test() {
 
         { // FriendStatus
             let mut bytes = fs_bytes.clone();
-            for b in 5..256 {
-                bytes[0] = b as u8;
+            // TODO: change to inclusive range (`...`) once gets stabilised
+            //       rust #28237
+            for b in 5..u8::max_value() {
+                bytes[0] = b;
                 assert_error(&bytes, &format!("Unknown FriendStatus: {}", b));
             }
         }
@@ -1412,7 +1394,9 @@ fn friend_state_parse_bytes_test() {
 
             let mut bytes = fs_bytes.clone();
 
-            for i in 0..256 {
+            // TODO: change to inclusive range (`...`) once gets stabilised
+            //       rust #28237
+            for i in 0..u8::max_value() {
                 bytes[USTATUS_POS] = i;
 
                 match i {
@@ -1428,15 +1412,13 @@ fn friend_state_parse_bytes_test() {
         const PADDING_POS: usize = USTATUS_POS + 1;
         { // padding; should be always ignored when parsing
             let mut bytes = fs_bytes.clone();
-            for n in 0..256 {
-                for i in 0..256 {
-                    for h in 0..256 {
-                        bytes[PADDING_POS]   = n;
-                        bytes[PADDING_POS+1] = i;
-                        bytes[PADDING_POS+2] = h;
-                        assert_success(&bytes, &fs);
-                    }
-                }
+            // TODO: change to inclusive range (`...`) once gets stabilised
+            //       rust #28237
+            for i in 0..u8::max_value() {
+                bytes[PADDING_POS]   = i;
+                bytes[PADDING_POS+1] = i;
+                bytes[PADDING_POS+2] = i;
+                assert_success(&bytes, &fs);
             }
         }
 
@@ -1456,21 +1438,19 @@ fn friend_state_parse_bytes_test() {
 
 // check for each type
 macro_rules! section_data_with_kind_into {
-    ($($kind:ident, $tname:ident),+) => (
-        $(
-            #[test]
-            fn $tname() {
-                fn tf(sd: SectionData) -> TestResult {
-                    if sd.kind != SectionKind::$kind {
-                        return TestResult::discard()
-                    }
-                    assert!(sd.into_section().is_some());
-                    TestResult::passed()
+    ($($kind:ident, $tname:ident),+) => ($(
+        #[test]
+        fn $tname() {
+            fn tf(sd: SectionData) -> TestResult {
+                if sd.kind != SectionKind::$kind {
+                    return TestResult::discard()
                 }
-                quickcheck(tf as fn(SectionData) -> TestResult);
+                assert!(sd.into_section().is_some());
+                TestResult::passed()
             }
-        )+
-    )
+            quickcheck(tf as fn(SectionData) -> TestResult);
+        }
+    )+)
 }
 section_data_with_kind_into!(
     NospamKeys, section_data_into_sect_test_nospamkeys,
@@ -1495,35 +1475,35 @@ fn section_data_into_section_test_random() {
 // SectionData::into_sect_mult()
 
 macro_rules! section_data_into_sect_mult_into {
-    ($($sect:ty, $kind:ident, $tname:ident),+) => (
-        $(
-            #[test]
-            fn $tname() {
-                fn with_sects(s: Vec<$sect>) {
-                    let sds  = s.iter()
-                        .map(|se| SectionData {
-                            kind: SectionKind::$kind,
-                            data: se.to_bytes()
-                        })
-                        .collect();
-                    let sections = SectionData::into_sect_mult(&sds);
-                    assert_eq!(s.len(), sections.len());
-                    if !s.is_empty() {
-                        assert!(sections.iter().all(|se| match *se {
-                            Section::$kind(_) => true,
-                            _ => false,
-                        }));
-                    }
+    ($($sect:ty, $kind:ident, $tname:ident),+) => ($(
+        #[test]
+        fn $tname() {
+            fn with_sects(s: Vec<$sect>) {
+                let sds  = s.iter()
+                    .map(|se| SectionData {
+                        kind: SectionKind::$kind,
+                        data: se.to_bytes()
+                    })
+                    .collect();
+                let sections = SectionData::into_sect_mult(&sds);
+                assert_eq!(s.len(), sections.len());
+                if !s.is_empty() {
+                    assert!(sections.iter().all(|se| match *se {
+                        Section::$kind(_) => true,
+                        _ => false,
+                    }));
                 }
-                quickcheck(with_sects as fn(Vec<$sect>));
             }
-        )+
-    )
+            quickcheck(with_sects as fn(Vec<$sect>));
+        }
+    )+)
 }
 // NOTE: ↓ this takes 5 min of CPU time on a 4GHz AMD Piledriver(!)
 section_data_into_sect_mult_into!(
     NospamKeys, NospamKeys, section_data_into_sect_mult_test_nospamkeys,
     DhtState, DHT, section_data_into_sect_mult_test_dht,
+    // ↓ takes longest, since it requires generating Vec<Friend> and then
+    //   parsing that
     Friends, Friends, section_data_into_sect_mult_test_friends,
     Name, Name, section_data_into_sect_mult_test_name,
     StatusMsg, StatusMsg, section_data_into_sect_mult_test_status_msg,

@@ -21,6 +21,8 @@
 // ↓ FIXME expand doc
 //! Networking part of the toxcore.
 
+// TODO: rewrite using tokio-core
+
 // TODO: separate stuff managing DHT from network
 //       proper implementation of DHT should expose an interface that network
 //       implements

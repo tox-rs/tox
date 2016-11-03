@@ -515,3 +515,6 @@ fn status_message_parse_bytes_test() {
     }
     quickcheck(with_bytes as fn(Vec<u8>) -> TestResult);
 }
+
+// State::parse_bytes()
+

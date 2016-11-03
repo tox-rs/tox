@@ -80,9 +80,12 @@ after_success:
         && (! rustc --version | grep -q -E 'beta|nightly')
     then
         travis-cargo coveralls --no-sudo --verify # (can) fails
+        # NOTE: due to kcov being too shitty, it's not possible to gather
+        # coverage data from integration tests
         ./kcov/build/src/kcov \
             --verify \
             --coveralls-id=$TRAVIS_JOB_ID \
-            --exclude-pattern=/.cargo target/kcov \
-            target/debug/tox-*
+            --exclude-pattern=/.cargo \
+            target/kcov \
+            target/debug/deps/tox-*
     fi
