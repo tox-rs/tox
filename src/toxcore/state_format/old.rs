@@ -606,7 +606,7 @@ pub struct FriendState {
     status_msg: StatusMsg,
     user_status: UserStatus,
     nospam: NoSpam,
-    /// Time when friend was last seen.
+    /// Time when friend was last seen online.
     last_seen: u64,
 }
 
