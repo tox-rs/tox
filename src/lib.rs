@@ -22,6 +22,8 @@ Rust implementation of the [Tox protocol](https://zetok.github.io/tox-spec).
 
 Repo: https://github.com/zetok/tox
 
+C API: https://github.com/ze-tox/tox-capi
+
 Current API allows one to e.g. find info about DHT nodes from bootstrap
 nodes by sending [`GetNodes`](./toxcore/dht/struct.GetNodes.html) or request
 [`Ping`](./toxcore/dht/struct.Ping.html) response.

@@ -57,6 +57,7 @@ pub enum SectionKind {
 
     https://zetok.github.io/tox-spec/#dht-0x02
     */
+    // TODO: rename to DhtState
     DHT =        0x02,
     /** Section for friends data. Contains list of [`Friends`]
     (./struct.Friends.html).
@@ -78,6 +79,7 @@ pub enum SectionKind {
 
     https://zetok.github.io/tox-spec/#status-0x06
     */
+    // TODO: rename to UserStatus
     Status =     0x06,
     /** Section for a list of [`TcpRelays`](./struct.TcpRelays.html).
 
@@ -142,6 +144,36 @@ impl ToBytes for SectionKind {
 }
 
 
+/// Implement returning matching SectionKind for sections.
+trait SectionKindMatch {
+    /// Returns matching `SectionKind`.
+    fn kind() -> SectionKind;
+}
+
+macro_rules! section_kind_for_section {
+    ($($skind:ident, $sect:ident, $tname:ident),+) => ($(
+        impl SectionKindMatch for $sect {
+            fn kind() -> SectionKind { SectionKind::$skind }
+        }
+
+        #[test]
+        fn $tname() {
+            assert_eq!(SectionKind::$skind, $sect::kind());
+        }
+    )+)
+}
+section_kind_for_section!(
+    NospamKeys, NospamKeys, nospam_keys_kind_test,
+    DHT, DhtState, dht_state_kind_test,
+    Friends, Friends, friends_kind_test,
+    Name, Name, name_kind_test,
+    StatusMsg, StatusMsg, status_msg_kind_test,
+    Status, UserStatus, user_status_kind_test,
+    TcpRelays, TcpRelays, tcp_relays_kind_test,
+    PathNodes, PathNodes, path_nodes_kind_test,
+    EOF, Eof, eof_kind_test
+);
+
 
 /** NoSpam and Keys section of the old state format.
 
@@ -159,6 +191,7 @@ pub struct NospamKeys {
 
 /// Number of bytes of serialized [`NospamKeys`](./struct.NospamKeys.html).
 pub const NOSPAMKEYSBYTES: usize = NOSPAMBYTES + PUBLICKEYBYTES + SECRETKEYBYTES;
+
 
 /// The `Default` implementation generates random `NospamKeys`.
 impl Default for NospamKeys {
@@ -818,10 +851,10 @@ macro_rules! impl_to_bytes_for_bytes_struct {
 
         #[test]
         fn $tname() {
-            fn tf(s: $name) {
+            fn test_fn(s: $name) {
                 assert_eq!(s.0, s.to_bytes());
             }
-            quickcheck(tf as fn($name));
+            quickcheck(test_fn as fn($name));
         }
     )
 }
@@ -998,6 +1031,16 @@ nodes_list!(TcpRelays, tcp_relays_test,
             PathNodes, path_nodes_test);
 
 
+/// End of the state format data.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct Eof;
+
+impl ToBytes for Eof {
+    fn to_bytes(&self) -> Vec<u8> {
+        Vec::new()
+    }
+}
+
 /// Data for `Section`. Might, or might not contain valid data.
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct SectionData {
@@ -1011,7 +1054,7 @@ const SECTION_MIN_LEN: usize = 8;
 
 /// According to https://zetok.github.io/tox-spec/#sections
 /// **Use only with `{to,from}_le()`.**
-// TODO: change to &'static [u8]
+// TODO: change to &'static [u8] [206, 1]
 const SECTION_MAGIC: u16 = 0x01ce;
 
 impl SectionData {
@@ -1097,20 +1140,6 @@ impl FromBytes for SectionData {
 }
 
 
-// NOTE: the "serialization" here is not an actual serialized format, some
-//       section kinds need(?) appending `0` if they're not long enough;
-// TODO: actually check that ↑
-impl ToBytes for SectionData {
-    fn to_bytes(&self) -> Vec<u8> {
-        let mut res = Vec::with_capacity(SECTION_MIN_LEN + self.data.len());
-        res.extend_from_slice(&u32_to_array((self.data.len() as u32).to_le()));
-        res.append(&mut self.kind.to_bytes());
-        res.extend_from_slice(&u16_to_array(SECTION_MAGIC.to_le()));
-        res.extend_from_slice(&self.data);
-        res
-    }
-}
-
 #[cfg(test)]
 impl Arbitrary for SectionData {
     fn arbitrary<G: Gen>(g: &mut G) -> Self {
@@ -1193,7 +1222,7 @@ https://zetok.github.io/tox-spec/#state-format
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 // TODO: change to use `Section`s
 pub struct State {
-    // Sections are listed in the order they are {de-,}serialised.
+    // Sections are listed in order from the spec.
     nospamkeys: NospamKeys,
     dhtstate: DhtState,
     friends: Friends,
@@ -1202,7 +1231,7 @@ pub struct State {
     status: UserStatus,
     tcp_relays: TcpRelays,
     path_nodes: PathNodes,
-    // EOF
+    eof: Eof,
 }
 
 /// State Format magic bytes. Read/write as LittleEndian.
@@ -1256,6 +1285,8 @@ impl State {
             return None
         }
 
+        // TODO: ↓ refactor once Eof gets implemented
+
         // get the section, or `Default` if section doesn't exist
         macro_rules! state_section {
             ($pname: path) => (
@@ -1286,6 +1317,7 @@ impl State {
                     status: state_section!(Section::Status),
                     tcp_relays: state_section!(Section::TcpRelays),
                     path_nodes: state_section!(Section::PathNodes),
+                    eof: Eof,
                 }
             )
     }
@@ -1306,6 +1338,49 @@ impl FromBytes for State {
             Some(s) => Ok(Parsed(s, bytes)),
             None => parse_error!("Failed to parse data, no valid sections!"),
         }
+    }
+}
+
+impl ToBytes for State {
+    // unoptimized
+    fn to_bytes(&self) -> Vec<u8> {
+        // should be run for each State's section
+        fn to_s_bytes<S: ToBytes + SectionKindMatch>(sect: &S) -> Vec<u8> {
+            let bytes = sect.to_bytes();
+            let mut res = Vec::with_capacity(SECTION_MIN_LEN + bytes.len());
+            // length of the section goes first
+            res.extend_from_slice(&u32_to_array((bytes.len() as u32).to_le()));
+            // knowing what's the section is useful
+            res.append(&mut S::kind().to_bytes());
+            // lets make it *magical*
+            res.extend_from_slice(&u16_to_array(SECTION_MAGIC.to_le()));
+            res.extend_from_slice(&bytes);
+            res
+        }
+
+        let mut res = Vec::new();
+        // state header
+        res.extend_from_slice(&[0; 4]);
+        res.extend_from_slice(STATE_MAGIC);
+
+        macro_rules! append_to_res {
+            ($($sect:ident),+) => ($(
+                res.append(&mut to_s_bytes(&self.$sect));
+            )+)
+        }
+        // Right STR8 C Order:
+        // 1. NospamKeys
+        // 2. Friends
+        // 3. Name
+        // 4. StatusMsg
+        // 5. Status
+        // 6. DhtState ← /obviously/ 2nd section kind fits here
+        // 7. TcpRelays
+        // 8. PathNodes
+        // 9. EOF
+        append_to_res!(nospamkeys, friends, name, status_msg, status,
+                       dhtstate, tcp_relays, path_nodes, eof);
+        res
     }
 }
 
@@ -1603,20 +1678,6 @@ fn section_data_parse_bytes_test() {
         TestResult::passed()
     }
     quickcheck(with_magic as fn(Vec<u8>, SectionKind, Vec<u8>) -> TestResult);
-}
-
-// SectionData::to_bytes()
-
-#[test]
-fn section_data_to_bytes_test() {
-    fn with_section(sect: SectionData) {
-        let sect_b = sect.to_bytes();
-        let Parsed(s, rest) = SectionData::parse_bytes(&sect_b)
-            .expect("Failed parsing!");
-        assert_eq!(&s, &sect);
-        assert_eq!(&[] as &[u8], &rest[..]);
-    }
-    quickcheck(with_section as fn(SectionData));
 }
 
 
