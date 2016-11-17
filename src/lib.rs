@@ -79,7 +79,7 @@ fn main() {
     let mut buf = [0; MAX_UDP_PACKET_SIZE];
 
     // and wait for the answer
-    let (mut bytes, mut sender);
+    let (bytes, sender);
     loop {
         match socket.recv_from(&mut buf) {
             Ok(Some((b, s))) => {
@@ -128,6 +128,8 @@ fn main() {
 #[macro_use]
 extern crate log;
 extern crate mio;
+// for Zero trait
+extern crate num_traits;
 extern crate sodiumoxide;
 
 

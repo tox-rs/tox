@@ -19,7 +19,8 @@
 
 //! Tests for `binary_io` module.
 
-use super::quickcheck::quickcheck;
+use num_traits::identities::Zero;
+use super::quickcheck::{quickcheck, TestResult};
 
 use toxcore::binary_io::*;
 
@@ -35,6 +36,49 @@ fn u32_to_array_and_back(num: u32) {
 fn u64_to_array_and_back(num: u64) {
     assert_eq!(num, array_to_u64(&u64_to_array(num)));
 }
+
+
+// append_zeros()
+
+macro_rules! test_append_zeros_for {
+    ($($num:ty, $tname_f:ident, $tname_p:ident),+) => ($(
+        #[test]
+        #[should_panic]
+        fn $tname_f() {
+            fn with_bytes(bytes: Vec<$num>, len: usize) -> TestResult {
+                if bytes.len() > len {
+                    // this should nicely panic
+                    append_zeros(&mut bytes.clone(), len);
+                }
+                TestResult::discard()
+            }
+            quickcheck(with_bytes as fn(Vec<$num>, usize) -> TestResult);
+        }
+
+        #[test]
+        fn $tname_p() {
+            fn with_bytes(bytes: Vec<$num>, len: usize) -> TestResult {
+                if bytes.len() > len {
+                    return TestResult::discard()
+                }
+
+                let mut bc = bytes.clone();
+                append_zeros(&mut bc, len);
+                assert_eq!(bytes[..], bc[..bytes.len()]);
+                assert_eq!(&vec![Zero::zero(); len - bytes.len()] as &[$num],
+                           &bc[bytes.len()..]);
+                TestResult::passed()
+            }
+            quickcheck(with_bytes as fn(Vec<$num>, usize) -> TestResult);
+        }
+    )+)
+}
+test_append_zeros_for!(
+    u8, append_zeros_test_u8_fail, append_zeros_test_u8_pass,
+    u16, append_zeros_test_u16_fail, append_zeros_test_u16_pass,
+    u32, append_zeros_test_u32_fail, append_zeros_test_u32_pass,
+    u64, append_zeros_test_u64_fail, append_zeros_test_u64_pass
+);
 
 #[test]
 fn array_to_u16_test() {

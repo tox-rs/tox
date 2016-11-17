@@ -19,6 +19,7 @@
 
 //! Functions for binary IO.
 
+use num_traits::identities::Zero;
 
 /// Serialization into bytes.
 pub trait ToBytes {
@@ -128,6 +129,14 @@ pub trait FromBytes: Sized {
             }
         }
     }
+}
+
+
+/// Append `0`s to given bytes up to `len`. Panics if `len` is smaller than
+/// padded `Vec`.
+pub fn append_zeros<T: Clone + Zero>(v: &mut Vec<T>, len: usize) {
+    let l = v.len();
+    v.append(&mut vec![T::zero(); len - l]);
 }
 
 

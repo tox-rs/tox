@@ -7,6 +7,7 @@ authors = ["Zetok Zalbavar <zetok@openmailbox.org>"]
 [dependencies]
 clippy = { version = "*", optional = true }
 log = "0.3"
+num-traits = "0.1"
 sodiumoxide = "0.0.12"
 mio = { git = "https://github.com/carllerche/mio", rev = "bf5de4d51ee00f140c4fcbd73b4d53717a3ac9e3" }
 

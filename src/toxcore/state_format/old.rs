@@ -647,13 +647,15 @@ pub struct FriendState {
 pub const FRIENDSTATEBYTES: usize = 1      // "Status"
                                   + PUBLICKEYBYTES
 /* Friend request message      */ + REQUEST_MSG_LEN
+/* padding1                    */ + 1
 /* actual size of FR message   */ + 2
 /* Name;                       */ + NAME_LEN
 /* actual size of Name         */ + 2
 /* Status msg;                 */ + STATUS_MSG_LEN
+/* padding2                    */ + 1
 /* actual size of status msg   */ + 2
 /* UserStatus                  */ + 1
-/* padding                     */ + 3
+/* padding3                    */ + 3
 /* only used for sending FR    */ + NOSPAMBYTES
 /* last time seen              */ + 8;
 
@@ -667,27 +669,32 @@ impl FromBytes for FriendState {
 
         let Parsed(pk, bytes) = try!(PublicKey::parse_bytes(bytes));
 
-        // supply length
+        // supply length and number of bytes that need to be padded
+        // if no padding needed, supply `0`
         // TODO: refactor?
-        fn get_bytes(bytes: &[u8], len: usize) -> ParseResult<Vec<u8>> {
+        fn get_bytes(bytes: &[u8], len: usize, pad: usize)
+            -> ParseResult<Vec<u8>>
+        {
             let str_len = u16::from_be(array_to_u16(
-                        &[bytes[len], bytes[len+1]])) as usize;
+                        &[bytes[len+pad], bytes[len+pad+1]])) as usize;
             if str_len > len {
                 return parse_error!("Value demands {} bytes when it is \
                     supposed to take {}!", str_len, len)
             }
 
-            Ok(Parsed(bytes[..str_len].to_vec(), &bytes[len+2..]))
+            Ok(Parsed(bytes[..str_len].to_vec(), &bytes[len+pad+2..]))
         };
 
-        let Parsed(fr_msg, bytes) = try!(get_bytes(bytes, REQUEST_MSG_LEN));
+        let Parsed(fr_msg, bytes) = try!(get_bytes(bytes, REQUEST_MSG_LEN, 1));
 
         // TODO: refactor?
-        let Parsed(name_bytes, bytes) = try!(get_bytes(bytes, NAME_LEN));
+        let Parsed(name_bytes, bytes) = try!(get_bytes(bytes, NAME_LEN, 0));
         let name = Name(name_bytes);
 
         // TODO: refactor?
-        let Parsed(status_msg_bytes, bytes) = try!(get_bytes(bytes, STATUS_MSG_LEN));
+        let Parsed(status_msg_bytes, bytes) = try!(
+            get_bytes(bytes, STATUS_MSG_LEN, 1)
+        );
         let status_msg = StatusMsg(status_msg_bytes);
 
         let Parsed(user_status, bytes) = try!(UserStatus::parse_bytes(bytes));
@@ -717,13 +724,12 @@ impl FromBytes for FriendState {
 
 impl ToBytes for FriendState {
     fn to_bytes(&self) -> Vec<u8> {
-        // extend vec with all contents of slice and padd with `0`s up to `len`
+        // extend vec with all contents of slice and pad with `0`s up to `len`
         // assume that Vec isn't too big for fr_msg
         fn ext_vec(vec: &mut Vec<u8>, slice: &[u8], len: usize) {
-            vec.extend_from_slice(slice);
-            for _ in 0..(len - slice.len()) {
-                vec.push(0);
-            }
+            let mut to_add = slice.to_vec();
+            append_zeros(&mut to_add, len);
+            vec.append(&mut to_add);
         }
 
         let len_to_u16be = |len| u16_to_array((len as u16).to_be());
@@ -736,25 +742,29 @@ impl ToBytes for FriendState {
         // pk
         result.extend_from_slice(&self.pk.0);
 
-        // friend request msg and its length
+        // friend request msg..
         ext_vec(&mut result, &self.fr_msg, REQUEST_MSG_LEN);
+        // padding
+        result.push(0);
+        // .. and its length
         result.extend_from_slice(&len_to_u16be(self.fr_msg.len()));
 
         // name and its length
         ext_vec(&mut result, &self.name.0, NAME_LEN);
         result.extend_from_slice(&len_to_u16be(self.name.0.len()));
 
-        // status msg and its length
+        // status msg ..
         ext_vec(&mut result, &self.status_msg.0, STATUS_MSG_LEN);
+        // padding
+        result.push(0);
+        // .. and its length
         result.extend_from_slice(&len_to_u16be(self.status_msg.0.len()));
 
         // UserStatus
         result.push(self.user_status as u8);
 
         // padding
-        for _ in 0..3 {
-            result.push(0);
-        }
+        append_zeros(&mut result, FRIENDSTATEBYTES - 12);
 
         // NoSpam
         result.extend_from_slice(&self.nospam.0);
@@ -1414,13 +1424,14 @@ fn friend_state_parse_bytes_test() {
             let mut bytes = fs_bytes.clone();
             // TODO: change to inclusive range (`...`) once gets stabilised
             //       rust #28237
-            for b in 5..u8::max_value() {
+            for b in 5.. {
                 bytes[0] = b;
                 assert_error(&bytes, &format!("Unknown FriendStatus: {}", b));
+                if b == u8::max_value() { break; }
             }
         }
 
-        const FR_MSG_LEN_POS: usize = 1 + PUBLICKEYBYTES + REQUEST_MSG_LEN;
+        const FR_MSG_LEN_POS: usize = 1 + PUBLICKEYBYTES + REQUEST_MSG_LEN + 1;
         { // friend request message lenght check
             let mut bytes = fs_bytes.clone();
             for i in (REQUEST_MSG_LEN+1)..2500 { // too slow with bigger ranges
@@ -1446,7 +1457,8 @@ fn friend_state_parse_bytes_test() {
             }
         }
 
-        const STATUS_MSG_LEN_POS: usize = NAME_LEN_POS + STATUS_MSG_LEN + 2;
+        // padding + bytes containing length
+        const STATUS_MSG_LEN_POS: usize = NAME_LEN_POS + STATUS_MSG_LEN + 3;
         { // friend name lenght check
             let mut bytes = fs_bytes.clone();
             for i in (STATUS_MSG_LEN+1)..2500 { // too slow with bigger ranges
