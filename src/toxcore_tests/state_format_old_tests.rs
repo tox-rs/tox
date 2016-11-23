@@ -516,5 +516,16 @@ fn status_message_parse_bytes_test() {
     quickcheck(with_bytes as fn(Vec<u8>) -> TestResult);
 }
 
-// State::parse_bytes()
 
+// State::
+
+// State::to_bytes()
+#[test]
+fn state_to_bytes_test() {
+    fn with_state(state: State) {
+        assert_eq!(state,
+                   State::from_bytes(&state.to_bytes())
+                       .expect("Failed to parse State bytes!"));
+    }
+    quickcheck(with_state as fn(State));
+}

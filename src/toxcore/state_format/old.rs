@@ -1051,6 +1051,11 @@ impl ToBytes for Eof {
     }
 }
 
+#[cfg(test)]
+impl Arbitrary for Eof {
+    fn arbitrary<G: Gen>(_g: &mut G) -> Self { Eof }
+}
+
 /// Data for `Section`. Might, or might not contain valid data.
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct SectionData {
@@ -1063,9 +1068,7 @@ struct SectionData {
 const SECTION_MIN_LEN: usize = 8;
 
 /// According to https://zetok.github.io/tox-spec/#sections
-/// **Use only with `{to,from}_le()`.**
-// TODO: change to &'static [u8] [206, 1]
-const SECTION_MAGIC: u16 = 0x01ce;
+const SECTION_MAGIC: &'static [u8; 2] = &[206, 1];
 
 impl SectionData {
 
@@ -1136,16 +1139,18 @@ impl FromBytes for SectionData {
 
         let Parsed(kind, left) = try!(SectionKind::parse_bytes(left));
 
-        if &u16_to_array(SECTION_MAGIC.to_le()) != &left[..2] {
+        if SECTION_MAGIC != &left[..2] {
             return parse_error!("Parsing failed: SECTION_MAGIC doesn't match!")
         }
         let left = &left[2..];
 
-        Ok(Parsed(SectionData {
-            kind: kind,
-            data: left.to_vec()
+        Ok(Parsed(
+            SectionData {
+                kind: kind,
+                data: left.to_vec()
             },
-            &bytes[SECTION_MIN_LEN + left.len()..]))
+            &bytes[SECTION_MIN_LEN + left.len()..]
+        ))
     }
 }
 
@@ -1244,7 +1249,7 @@ pub struct State {
     eof: Eof,
 }
 
-/// State Format magic bytes. Read/write as LittleEndian.
+/// State Format magic bytes.
 const STATE_MAGIC: &'static [u8; 4] = &[0x1f, 0x1b, 0xed, 0x15];
 
 /// Length of `State` header.
@@ -1361,9 +1366,9 @@ impl ToBytes for State {
             // length of the section goes first
             res.extend_from_slice(&u32_to_array((bytes.len() as u32).to_le()));
             // knowing what's the section is useful
-            res.append(&mut S::kind().to_bytes());
+            res.extend_from_slice(&S::kind().to_bytes());
             // lets make it *magical*
-            res.extend_from_slice(&u16_to_array(SECTION_MAGIC.to_le()));
+            res.extend_from_slice(SECTION_MAGIC);
             res.extend_from_slice(&bytes);
             res
         }
@@ -1375,7 +1380,7 @@ impl ToBytes for State {
 
         macro_rules! append_to_res {
             ($($sect:ident),+) => ($(
-                res.append(&mut to_s_bytes(&self.$sect));
+                res.extend_from_slice(&to_s_bytes(&self.$sect));
             )+)
         }
         // Right STR8 C Order:
@@ -1394,6 +1399,21 @@ impl ToBytes for State {
     }
 }
 
+
+#[cfg(test)]
+impl Arbitrary for State {
+    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+        macro_rules! arb_state_section {
+            ($($section:ident),+) => (
+                State {
+                    $($section: Arbitrary::arbitrary(g),)+
+                }
+            )
+        }
+        arb_state_section!(nospamkeys, friends, name, status_msg, status,
+                           dhtstate, tcp_relays, path_nodes, eof)
+    }
+}
 
 
 // FriendState::parse_bytes()
@@ -1616,7 +1636,7 @@ fn section_data_parse_bytes_test() {
         let mut b_sect = Vec::with_capacity(bytes.len() + SECTION_MIN_LEN);
         b_sect.extend_from_slice(&u32_to_array((bytes.len() as u32).to_le()));
         b_sect.extend_from_slice(&u16_to_array((kind as u16).to_le()));
-        b_sect.extend_from_slice(&u16_to_array(SECTION_MAGIC.to_le()));
+        b_sect.extend_from_slice(SECTION_MAGIC);
         b_sect.extend_from_slice(bytes);
         b_sect
     }
@@ -1674,8 +1694,7 @@ fn section_data_parse_bytes_test() {
     fn with_magic(bytes: Vec<u8>, kind: SectionKind, magic: Vec<u8>)
         -> TestResult
     {
-        if magic.len() < 2 ||
-           u16::from_le(array_to_u16(&[magic[0], magic[1]])) == SECTION_MAGIC {
+        if magic.len() < 2 || &[magic[0], magic[1]] == SECTION_MAGIC {
                 return TestResult::discard()
         }
 
@@ -1738,4 +1757,44 @@ fn state_is_state_test() {
 
     // empty bytes case
     assert_eq!(false, State::is_state(&[]));
+}
+
+// State::parse_bytes()
+
+#[test]
+fn state_parse_bytes_test_magic() {
+    fn with_state(state: State, rand_bytes: Vec<u8>) -> TestResult {
+        if rand_bytes.len() < STATE_HEAD_LEN {
+            return TestResult::discard()
+        }
+
+        let state_bytes = state.to_bytes();
+        assert!(State::is_state(&state_bytes));
+
+        let mut invalid_bytes = Vec::with_capacity(state_bytes.len());
+        invalid_bytes.extend_from_slice(&rand_bytes[..STATE_HEAD_LEN]);
+        invalid_bytes.extend_from_slice(&state_bytes[STATE_HEAD_LEN..]);
+        contains_err!(State::parse_bytes, &invalid_bytes, "Not a State!");
+        TestResult::passed()
+    }
+    quickcheck(with_state as fn(State, Vec<u8>) -> TestResult);
+}
+
+#[test]
+fn state_parse_bytes_test_section_detect() {
+    fn with_state(state: State, rand_byte: u8) -> TestResult {
+        if rand_byte == SECTION_MAGIC[0] {
+            return TestResult::discard()
+        }
+
+        let bytes: Vec<u8> = state.to_bytes().iter_mut()
+            .map(|b| { if *b == SECTION_MAGIC[0] { *b = rand_byte; } *b })
+            .collect();
+
+        contains_err!(State::parse_bytes, &bytes,
+                      "Failed to parse data, no valid sections!");
+
+        TestResult::passed()
+    }
+    quickcheck(with_state as fn(State, u8) -> TestResult);
 }
