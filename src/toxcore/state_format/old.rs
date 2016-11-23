@@ -1444,10 +1444,9 @@ fn friend_state_parse_bytes_test() {
             let mut bytes = fs_bytes.clone();
             // TODO: change to inclusive range (`...`) once gets stabilised
             //       rust #28237
-            for b in 5.. {
+            for b in 5..u8::max_value() {
                 bytes[0] = b;
                 assert_error(&bytes, &format!("Unknown FriendStatus: {}", b));
-                if b == u8::max_value() { break; }
             }
         }
 
@@ -1664,7 +1663,9 @@ fn section_data_parse_bytes_test() {
                 b_sect[4] = num;
                 wrong_skind(&b_sect);
             }
-            for num in 12..255 {
+            // TODO: change to inclusive range (`...`) once gets stabilised
+            //       rust #28237
+            for num in 12..u8::max_value() {
                 b_sect[4] = num;
                 wrong_skind(&b_sect);
             }
