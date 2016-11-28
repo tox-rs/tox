@@ -1078,24 +1078,24 @@ impl SectionData {
     Fails if `SectionData` doesn't contain valid data.
     */
     // TODO: test failures?
-    fn into_section(&self) -> Option<Section> {
+    fn as_section(&self) -> Option<Section> {
         match self.kind {
             SectionKind::NospamKeys => NospamKeys::from_bytes(&self.data)
-                .map(|s| Section::NospamKeys(s)),
+                .map(Section::NospamKeys),
             SectionKind::DHT => DhtState::from_bytes(&self.data)
-                .map(|s| Section::DHT(s)),
+                .map(Section::DHT),
             SectionKind::Friends => Friends::from_bytes(&self.data)
-                .map(|s| Section::Friends(s)),
+                .map(Section::Friends),
             SectionKind::Name => Name::from_bytes(&self.data)
-                .map(|s| Section::Name(s)),
+                .map(Section::Name),
             SectionKind::StatusMsg => StatusMsg::from_bytes(&self.data)
-                .map(|s| Section::StatusMsg(s)),
+                .map(Section::StatusMsg),
             SectionKind::Status => UserStatus::from_bytes(&self.data)
-                .map(|s| Section::Status(s)),
+                .map(Section::Status),
             SectionKind::TcpRelays => TcpRelays::from_bytes(&self.data)
-                .map(|s| Section::TcpRelays(s)),
+                .map(Section::TcpRelays),
             SectionKind::PathNodes => PathNodes::from_bytes(&self.data)
-                .map(|s| Section::PathNodes(s)),
+                .map(Section::PathNodes),
             SectionKind::EOF => Some(Section::EOF),
         }
     }
@@ -1108,10 +1108,10 @@ impl SectionData {
     Can return empty `Vec<_>`.
     */
     // TODO: move under `Section` ?
-    fn into_sect_mult(s: &Vec<SectionData>) -> Vec<Section> {
+    fn into_sect_mult(s: &[SectionData]) -> Vec<Section> {
         // TODO: don't return an empty Vec ?
         s.iter()
-            .map(|sd| sd.into_section())
+            .map(|sd| sd.as_section())
             .filter(|s| s.is_some())
             .map(|s| s.expect("IS Some(_)"))
             .collect()
@@ -1292,7 +1292,7 @@ impl State {
     `Default` value is used.
     */
     // TODO: test
-    fn from_sects(sects: &Vec<Section>) -> Option<Self> {
+    fn from_sects(sects: &[Section]) -> Option<Self> {
         // if no section matches `NospamKeys` return early
         if !sects.iter()
             .any(|s| match *s { Section::NospamKeys(_) => true, _ => false })
@@ -1551,7 +1551,7 @@ macro_rules! section_data_with_kind_into {
                 if sd.kind != SectionKind::$kind {
                     return TestResult::discard()
                 }
-                assert!(sd.into_section().is_some());
+                assert!(sd.as_section().is_some());
                 TestResult::passed()
             }
             quickcheck(tf as fn(SectionData) -> TestResult);
@@ -1573,7 +1573,7 @@ section_data_with_kind_into!(
 #[test]
 fn section_data_into_section_test_random() {
     fn with_section(sd: SectionData) {
-        assert!(sd.into_section().is_some());
+        assert!(sd.as_section().is_some());
     }
     quickcheck(with_section as fn(SectionData));
 }
@@ -1585,7 +1585,7 @@ macro_rules! section_data_into_sect_mult_into {
         #[test]
         fn $tname() {
             fn with_sects(s: Vec<$sect>) {
-                let sds  = s.iter()
+                let sds: Vec<SectionData> = s.iter()
                     .map(|se| SectionData {
                         kind: SectionKind::$kind,
                         data: se.to_bytes()
