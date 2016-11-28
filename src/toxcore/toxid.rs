@@ -340,7 +340,7 @@ impl fmt::UpperHex for ToxId {
         for byte in pk_bytes {
             string.push_str(&format!("{:02X}", byte));
         }
-        for byte in self.nospam.0.iter() {
+        for byte in &self.nospam.0 {
             string.push_str(&format!("{:02X}", byte));
         }
         string.push_str(&format!("{:02X}{:02X}", self.checksum[0],

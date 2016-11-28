@@ -713,7 +713,7 @@ impl DhtPacketT {
     pub fn ping_resp(&self) -> Option<Self> {
         debug!(target: "Ping", "Creating Ping response from a Ping.");
         trace!(target: "Ping", "With Ping: {:?}", self);
-        if let &DhtPacketT::Ping(ping) = self {
+        if let DhtPacketT::Ping(ping) = *self {
             if let Some(ping_resp) = ping.response() {
                 return Some(DhtPacketT::Ping(ping_resp))
             }
