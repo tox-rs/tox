@@ -85,3 +85,17 @@ macro_rules! impl_arb_for_pn {
         }
     )
 }
+
+/** PublicKey from bytes. Returns `TestResult::discard()` if there are not
+enough bytes.
+*/
+macro_rules! quick_pk_from_bytes {
+    ($input:ident, $out:ident) => (
+        if $input.len() < PUBLICKEYBYTES {
+            return TestResult::discard()
+        }
+
+        let $out = PublicKey::from_slice(&$input[..PUBLICKEYBYTES])
+            .expect("Failed to make PK from slice");
+    )
+}

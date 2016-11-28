@@ -307,6 +307,25 @@ fn friend_status_parse_bytes_rest_test() {
 
 // Friends::
 
+// Friends::add_friend()
+
+#[test]
+fn friends_add_friend_test() {
+    fn with_friends(friends: Friends, fs: FriendState) {
+        let init_len = friends.0.len();
+        let mut friends = friends;
+        assert_eq!(true, friends.add_friend(fs.clone()));
+        assert_eq!(init_len + 1, friends.0.len());
+        let mut f2 = friends.clone();
+        // adding for the second time should result in no changes
+        assert_eq!(false, f2.add_friend(fs.clone()));
+        assert_eq!(friends, f2);
+        // and in the end added friend should be at the end
+        assert_eq!(fs, friends.0.pop().expect("There is friend"));
+    }
+    quickcheck(with_friends as fn(Friends, FriendState));
+}
+
 // Friends::parse_bytes()
 #[test]
 fn friends_parse_bytes_test() {

@@ -643,6 +643,26 @@ pub struct FriendState {
     last_seen: u64,
 }
 
+impl FriendState {
+    /** Add a new friend via `PublicKey`.
+
+    State assumes that friend request was sent and accepted.
+    */
+    pub fn new_from_pk(pk: &PublicKey) -> Self {
+        FriendState {
+            status: FriendStatus::Added,
+            pk: *pk,
+            fr_msg: Vec::new(),
+            name: Name::default(),
+            status_msg: StatusMsg::default(),
+            user_status: UserStatus::default(),
+            nospam: NoSpam([0; NOSPAMBYTES]),
+            last_seen: 0,
+        }
+    }
+}
+
+
 /// Number of bytes of serialized [`FriendState`](./struct.FriendState.html).
 pub const FRIENDSTATEBYTES: usize = 1      // "Status"
                                   + PUBLICKEYBYTES
@@ -826,6 +846,28 @@ impl Arbitrary for FriendState {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Friends(pub Vec<FriendState>);
 
+impl Friends {
+
+    /// `true` if there is a friend with given `PublicKey`, `false` otherwise.
+    pub fn is_friend(&self, pk: &PublicKey) -> bool {
+        self.0.iter().any(|fs| fs.pk == *pk)
+    }
+
+    /** Add [`FriendState`](./struct.FriendState.html) to the list of friends.
+
+    If the friend was already in `Friends`, `false` is returned, `true`
+    otherwise.
+    */
+    pub fn add_friend(&mut self, fs: FriendState) -> bool {
+        if self.is_friend(&fs.pk) {
+            return false
+        }
+
+        self.0.push(fs);
+        true
+    }
+}
+
 impl FromBytes for Friends {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         FriendState::parse_bytes_multiple(bytes)
@@ -837,7 +879,7 @@ impl ToBytes for Friends {
     fn to_bytes(&self) -> Vec<u8> {
         let mut res = Vec::with_capacity(FRIENDSTATEBYTES * self.0.len());
         for f in &self.0 {
-            res.append(&mut f.to_bytes());
+            res.extend_from_slice(&f.to_bytes());
         }
         res
     }
@@ -883,24 +925,25 @@ pub struct Name(pub Vec<u8>);
 pub const NAME_LEN: usize = 128;
 
 impl Name {
-    /// Create new `Name` from bytes in a slice. If there are more bytes than
-    /// [`NAME_LEN`](./constant.NAME_LEN.html), use only `NAME_LEN` bytes.
-    ///
-    /// E.g.:
-    ///
-    /// ```
-    /// use self::tox::toxcore::state_format::old::*;
-    ///
-    /// for n in 0..(NAME_LEN + 1) {
-    ///     let bytes = vec![0; n];
-    ///     assert_eq!(bytes, Name::new(&bytes).0);
-    /// }
-    ///
-    /// for n in (NAME_LEN + 1)..(NAME_LEN + 20) {
-    ///     let bytes = vec![0; n];
-    ///     assert_eq!(&bytes[..NAME_LEN], Name::new(&bytes).0.as_slice());
-    /// }
-    /// ```
+    /** Create new `Name` from bytes in a slice. If there are more bytes than
+    [`NAME_LEN`](./constant.NAME_LEN.html), use only `NAME_LEN` bytes.
+
+    E.g.:
+
+    ```
+    use self::tox::toxcore::state_format::old::*;
+
+    for n in 0..(NAME_LEN + 1) {
+        let bytes = vec![0; n];
+        assert_eq!(bytes, Name::new(&bytes).0);
+    }
+
+    for n in (NAME_LEN + 1)..(NAME_LEN + 20) {
+        let bytes = vec![0; n];
+        assert_eq!(&bytes[..NAME_LEN], Name::new(&bytes).0.as_slice());
+    }
+    ```
+    */
     pub fn new(bytes: &[u8]) -> Self {
         if bytes.len() < NAME_LEN {
             Name(bytes.to_vec())
@@ -938,26 +981,27 @@ pub struct StatusMsg(pub Vec<u8>);
 pub const STATUS_MSG_LEN: usize = 1007;
 
 impl StatusMsg {
-    /// Create new `StatusMsg` from bytes in a slice. If there are more bytes
-    /// than [`STATUS_MSG_LEN`](./constant.STATUS_MSG_LEN.html), use only
-    /// `STATUS_MSG_LEN` bytes.
-    ///
-    /// E.g.:
-    ///
-    /// ```
-    /// use self::tox::toxcore::state_format::old::*;
-    ///
-    /// for n in 0..(STATUS_MSG_LEN + 1) {
-    ///     let bytes = vec![0; n];
-    ///     assert_eq!(bytes, StatusMsg::new(&bytes).0);
-    /// }
-    ///
-    /// for n in (STATUS_MSG_LEN + 1)..(STATUS_MSG_LEN + 20) {
-    ///     let bytes = vec![0; n];
-    ///     assert_eq!(&bytes[..STATUS_MSG_LEN],
-    ///             StatusMsg::new(&bytes).0.as_slice());
-    /// }
-    /// ```
+    /** Create new `StatusMsg` from bytes in a slice. If there are more bytes
+    than [`STATUS_MSG_LEN`](./constant.STATUS_MSG_LEN.html), use only
+    `STATUS_MSG_LEN` bytes.
+
+    E.g.:
+
+    ```
+    use self::tox::toxcore::state_format::old::*;
+
+    for n in 0..(STATUS_MSG_LEN + 1) {
+        let bytes = vec![0; n];
+        assert_eq!(bytes, StatusMsg::new(&bytes).0);
+    }
+
+    for n in (STATUS_MSG_LEN + 1)..(STATUS_MSG_LEN + 20) {
+        let bytes = vec![0; n];
+        assert_eq!(&bytes[..STATUS_MSG_LEN],
+                StatusMsg::new(&bytes).0.as_slice());
+    }
+    ```
+    */
     pub fn new(bytes: &[u8]) -> Self {
         if bytes.len() < STATUS_MSG_LEN {
             StatusMsg(bytes.to_vec())
@@ -1262,6 +1306,28 @@ const STATE_MIN_LEN: usize = STATE_HEAD_LEN + SECTION_MIN_LEN;
 // TODO: refactor the whole thing
 impl State {
 
+    /** Add friend with `PublicKey` without sending a friend request.
+
+    Returns `true` if friend was added, `false` otherwise.
+
+    **Subject to change**.
+    */
+    // TODO: move elsewhere
+    pub fn add_friend_norequest(&mut self, pk: &PublicKey) -> bool {
+        self.friends.add_friend(FriendState::new_from_pk(pk))
+    }
+
+    /** Check if given `PublicKey` is an exact match to the `State` PK.
+
+    When checking if given Tox ID is our own, check only PK part, as it is
+    the only usable unchanging part.
+
+    Returns `true` if there's an exact match, `false` otherwise.
+    */
+    pub fn is_own_pk(&self, pk: &PublicKey) -> bool {
+        self.nospamkeys.pk == *pk
+    }
+
     /** Checks if given bytes have `State` header, i.e. whether the first
     8 bytes match.
 
@@ -1338,7 +1404,6 @@ impl State {
     }
 }
 
-// TODO: test
 impl FromBytes for State {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         if !State::is_state(bytes) {
@@ -1415,6 +1480,37 @@ impl Arbitrary for State {
     }
 }
 
+
+
+// FriendState::
+
+// FriendState::new_from_pk()
+
+#[test]
+fn friend_state_new_from_pk_test() {
+    fn with_pkbytes(bytes: Vec<u8>) -> TestResult {
+        if bytes.len() < PUBLICKEYBYTES {
+            return TestResult::discard()
+        }
+
+        let pk = PublicKey::from_slice(&bytes[..PUBLICKEYBYTES])
+            .expect("PK failed");
+
+        let fs = FriendState::new_from_pk(&pk);
+
+        assert_eq!(FriendStatus::Added, fs.status);
+        assert_eq!(pk, fs.pk);
+        assert!(fs.fr_msg.is_empty());
+        assert!(fs.name.0.is_empty());
+        assert!(fs.status_msg.0.is_empty());
+        assert_eq!(UserStatus::Online, fs.user_status);
+        assert_eq!(NoSpam([0; NOSPAMBYTES]), fs.nospam);
+        assert_eq!(0, fs.last_seen);
+
+        TestResult::passed()
+    }
+    quickcheck(with_pkbytes as fn(Vec<u8>) -> TestResult);
+}
 
 // FriendState::parse_bytes()
 
@@ -1538,6 +1634,31 @@ fn friend_state_parse_bytes_test() {
 }
 
 
+// Friends::
+
+// Friends::is_friend()
+
+#[test]
+fn friends_is_friend_test() {
+    fn with_friends(friends: Friends, fstate: FriendState) -> TestResult {
+        // can fail if quickcheck produces `Friends` that includes generated
+        // friend
+        assert_eq!(false, friends.is_friend(&fstate.pk));
+
+        let mut friends = friends.clone();
+        let pk = fstate.pk;
+        friends.0.push(fstate);
+        assert_eq!(true, friends.is_friend(&pk));
+        TestResult::passed()
+    }
+    quickcheck(with_friends as fn(Friends, FriendState) -> TestResult);
+
+    // empty
+    let pk = PublicKey([0; PUBLICKEYBYTES]);
+    assert_eq!(false, Friends(Vec::new()).is_friend(&pk));
+}
+
+
 // SectionData::
 
 // SectionData::into_section()
@@ -1629,7 +1750,7 @@ fn section_data_into_sect_mult_test_random() {
 // SectionData::parse_bytes()
 
 #[test]
-#[cfg(test)]
+#[cfg(test)] // ← https://github.com/rust-lang/rust/issues/16688
 fn section_data_parse_bytes_test() {
     fn rand_b_sect(kind: SectionKind, bytes: &[u8]) -> Vec<u8> {
         let mut b_sect = Vec::with_capacity(bytes.len() + SECTION_MIN_LEN);
@@ -1714,6 +1835,45 @@ fn section_data_parse_bytes_test() {
 
 
 // State::
+
+// State::add_friend_norequest()
+
+#[test]
+#[cfg(test)] // ← https://github.com/rust-lang/rust/issues/16688
+fn state_add_friend_norequest_test() {
+    fn with_pk(state: State, pkbytes: Vec<u8>) -> TestResult {
+        quick_pk_from_bytes!(pkbytes, pk);
+
+        let mut new_state = state.clone();
+
+        assert!(new_state.add_friend_norequest(&pk));
+        assert_eq!(false, new_state.add_friend_norequest(&pk));
+        assert!(state != new_state);
+        assert_eq!(state.friends.0.len() + 1, new_state.friends.0.len());
+
+        let popped = new_state.friends.0.pop().expect("Friend");
+        assert_eq!(state, new_state);
+        assert_eq!(popped, FriendState::new_from_pk(&pk));
+
+        TestResult::passed()
+    }
+    quickcheck(with_pk as fn(State, Vec<u8>) -> TestResult);
+}
+
+// State::is_own_pk()
+
+#[test]
+#[cfg(test)] // ← https://github.com/rust-lang/rust/issues/16688
+fn state_is_own_pk_test() {
+    fn with_pk(state: State, bytes: Vec<u8>) -> TestResult {
+        quick_pk_from_bytes!(bytes, rand_pk);
+
+        assert!(state.is_own_pk(&state.nospamkeys.pk));
+        assert_eq!(false, state.is_own_pk(&rand_pk));
+        TestResult::passed()
+    }
+    quickcheck(with_pk as fn(State, Vec<u8>) -> TestResult);
+}
 
 // State::is_state()
 

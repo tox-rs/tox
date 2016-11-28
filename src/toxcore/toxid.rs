@@ -66,6 +66,9 @@ impl NoSpam {
     }
 }
 
+/** Always returns a random `NoSpam`. Equivalent to the [`NoSpam::new()`]
+(#method.new).
+*/
 impl Default for NoSpam {
     fn default() -> Self {
         NoSpam::new()
