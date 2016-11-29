@@ -32,6 +32,7 @@ use toxcore::toxid::{NoSpam, NOSPAMBYTES};
 use ::toxcore_tests::quickcheck::{Arbitrary, Gen, quickcheck, TestResult};
 
 
+// TODO: add logging where it's missing
 
 /// Length in bytes of request message.
 // FIXME: move somewhere else
