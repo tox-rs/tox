@@ -50,15 +50,16 @@ pub struct NoSpam(pub [u8; NOSPAMBYTES]);
 pub const NOSPAMBYTES: usize = 4;
 
 impl NoSpam {
-    /// Create new `NoSpam` with random bytes.
-    ///
-    /// Two `new()` `NoSpam`s will always be different:
-    ///
-    /// ```
-    /// use self::tox::toxcore::toxid::NoSpam;
-    ///
-    /// assert!(NoSpam::new() != NoSpam::new());
-    /// ```
+    /** Create new `NoSpam` with random bytes.
+
+    Two `new()` `NoSpam`s will always be different:
+
+    ```
+    use self::tox::toxcore::toxid::NoSpam;
+
+    assert!(NoSpam::new() != NoSpam::new());
+    ```
+    */
     pub fn new() -> Self {
         let mut nospam = [0; NOSPAMBYTES];
         randombytes_into(&mut nospam);
@@ -126,13 +127,13 @@ impl FromBytes for NoSpam {
 
 /** `Tox ID`.
 
-    Length | Contents
-    ------ | --------
-    32     | long term `PublicKey`
-    4      | `NoSpam`
-    2      | Checksum
+Length | Contents
+------ | --------
+32     | long term `PublicKey`
+4      | `NoSpam`
+2      | Checksum
 
-    https://zetok.github.io/tox-spec/#tox-id
+https://zetok.github.io/tox-spec/#tox-id
 */
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ToxId {
@@ -147,28 +148,31 @@ pub struct ToxId {
 pub const TOXIDBYTES: usize = PUBLICKEYBYTES + NOSPAMBYTES + 2;
 
 impl ToxId {
-    /// Checksum of `PublicKey` and `NoSpam`.
-    ///
-    /// E.g.
-    ///
-    /// ```
-    /// use self::tox::toxcore::crypto_core::{
-    ///         gen_keypair,
-    ///         PublicKey,
-    ///         PUBLICKEYBYTES,
-    /// };
-    /// use self::tox::toxcore::toxid::{NoSpam, NOSPAMBYTES, ToxId};
-    ///
-    /// let (pk, _) = gen_keypair();
-    /// let nospam = NoSpam::new();
-    ///
-    /// let _checksum = ToxId::checksum(&pk, &nospam);
-    ///
-    /// assert_eq!(ToxId::checksum(&PublicKey([0; PUBLICKEYBYTES]),
-    ///            &NoSpam([0; NOSPAMBYTES])), [0; 2]);
-    /// assert_eq!(ToxId::checksum(&PublicKey([0xff; PUBLICKEYBYTES]),
-    ///            &NoSpam([0xff; NOSPAMBYTES])), [0; 2]);
-    /// ```
+    /** Checksum of `PublicKey` and `NoSpam`.
+
+    https://zetok.github.io/tox-spec/#tox-id , 4th paragraph.
+
+    E.g.
+
+    ```
+    use self::tox::toxcore::crypto_core::{
+            gen_keypair,
+            PublicKey,
+            PUBLICKEYBYTES,
+    };
+    use self::tox::toxcore::toxid::{NoSpam, NOSPAMBYTES, ToxId};
+
+    let (pk, _) = gen_keypair();
+    let nospam = NoSpam::new();
+
+    let _checksum = ToxId::checksum(&pk, &nospam);
+
+    assert_eq!(ToxId::checksum(&PublicKey([0; PUBLICKEYBYTES]),
+               &NoSpam([0; NOSPAMBYTES])), [0; 2]);
+    assert_eq!(ToxId::checksum(&PublicKey([0xff; PUBLICKEYBYTES]),
+               &NoSpam([0xff; NOSPAMBYTES])), [0; 2]);
+    ```
+    */
     pub fn checksum(&PublicKey(ref pk): &PublicKey, nospam: &NoSpam) -> [u8; 2] {
         let mut bytes = Vec::with_capacity(TOXIDBYTES - 2);
         bytes.extend_from_slice(pk);
@@ -182,17 +186,18 @@ impl ToxId {
         checksum
     }
 
-    /// Create new `ToxId`.
-    ///
-    /// E.g.
-    ///
-    /// ```
-    /// use self::tox::toxcore::crypto_core::gen_keypair;
-    /// use self::tox::toxcore::toxid::ToxId;
-    ///
-    /// let (pk, _) = gen_keypair();
-    /// let _toxid = ToxId::new(pk);
-    /// ```
+    /** Create new `ToxId`.
+
+    E.g.
+
+    ```
+    use self::tox::toxcore::crypto_core::gen_keypair;
+    use self::tox::toxcore::toxid::ToxId;
+
+    let (pk, _) = gen_keypair();
+    let _toxid = ToxId::new(pk);
+    ```
+    */
     pub fn new(pk: PublicKey) -> Self {
         let nospam = NoSpam::new();
         ToxId {
@@ -202,32 +207,33 @@ impl ToxId {
         }
     }
 
-    /// Change `NoSpam`. If provided, change to provided value. If not provided
-    /// (`None`), generate random `NoSpam`.
-    ///
-    /// After `NoSpam` change PublicKey is always the same, but `NoSpam` and
-    /// `checksum` differ:
-    ///
-    /// ```
-    /// use self::tox::toxcore::crypto_core::gen_keypair;
-    /// use self::tox::toxcore::toxid::{NoSpam, ToxId};
-    ///
-    /// let (pk, _) = gen_keypair();
-    /// let toxid = ToxId::new(pk);
-    /// let mut toxid2 = toxid;
-    /// toxid2.new_nospam(None);
-    ///
-    /// assert!(toxid != toxid2);
-    /// assert_eq!(toxid.pk, toxid2.pk);
-    ///
-    /// let mut toxid3 = toxid;
-    ///
-    /// // with same `NoSpam` IDs are identical
-    /// let nospam = NoSpam::new();
-    /// toxid2.new_nospam(Some(nospam));
-    /// toxid3.new_nospam(Some(nospam));
-    /// assert_eq!(toxid2, toxid3);
-    /// ```
+    /** Change `NoSpam`. If provided, change to provided value. If not provided
+    (`None`), generate random `NoSpam`.
+
+    After `NoSpam` change PublicKey is always the same, but `NoSpam` and
+    `checksum` differ:
+
+    ```
+    use self::tox::toxcore::crypto_core::gen_keypair;
+    use self::tox::toxcore::toxid::{NoSpam, ToxId};
+
+    let (pk, _) = gen_keypair();
+    let toxid = ToxId::new(pk);
+    let mut toxid2 = toxid;
+    toxid2.new_nospam(None);
+
+    assert!(toxid != toxid2);
+    assert_eq!(toxid.pk, toxid2.pk);
+
+    let mut toxid3 = toxid;
+
+    // with same `NoSpam` IDs are identical
+    let nospam = NoSpam::new();
+    toxid2.new_nospam(Some(nospam));
+    toxid3.new_nospam(Some(nospam));
+    assert_eq!(toxid2, toxid3);
+    ```
+    */
     // TODO: more tests
     // TODO: ↓ split into `new_nospam()` and `set_nospam(NoSpam)` ?
     pub fn new_nospam(&mut self, nospam: Option<NoSpam>) {

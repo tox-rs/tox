@@ -351,7 +351,7 @@ const DHT_2ND_MAGICAL: u16 = 0x11ce;
 
 /** If successful, returns `DhtState` and length of the section in bytes.
 
-**Note that an empty list of nodes can be returned!**
+> **Note:** An empty list of nodes can be returned!
 
 If de-serialization failed, returns `None`.
 
@@ -971,7 +971,9 @@ impl_to_bytes_for_bytes_struct!(Name, name_to_bytes_test);
 
 
 /** Status message, up to [`STATUS_MSG_LEN`](./constant.STATUS_MSG_LEN.html)
-bytes. ***Note: will be moved (and renamed?)***.
+bytes.
+
+> ***Note: will be moved (and renamed?)***.
 */
 // TODO: rename(?) & move from this module
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -1332,8 +1334,8 @@ impl State {
     /** Checks if given bytes have `State` header, i.e. whether the first
     8 bytes match.
 
-    Note that even if data has `State` header, it still can fail to be
-    parsed as such.
+    > **Note:** Even if data has `State` header, it still can fail to
+    >           de-serialize when even a part of the data is invalid.
 
     Returns `true` if there's matching header, `false` otherwise.
     */

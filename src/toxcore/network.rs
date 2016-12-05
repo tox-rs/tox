@@ -39,11 +39,12 @@ use mio::udp::UdpSocket;
 use super::crypto_core::crypto_init;
 
 
-/// Minimum port which Tox will try to bind to.
+/// Minimum default port which Tox will try to bind to.
 pub const PORT_MIN: u16 = 33445;
-/// Maximum port which Tox will try to bind to.
+/// Maximum default port which Tox will try to bind to.
 pub const PORT_MAX: u16 = 33545;
 /// Maximum size of a UDP packet that tox will handle.
+// TODO: check if it's still the biggest packet size
 pub const MAX_UDP_PACKET_SIZE: usize = 2048;
 
 
@@ -52,16 +53,16 @@ pub const MAX_UDP_PACKET_SIZE: usize = 2048;
 - `addr` – sender address
 - `data` – packet data
 */
-// TODO: move out of `network`
+// TODO: move out of `network` ?
 pub type PacketHandlerCallback = fn(Rc<RefCell<Any>>, addr: SocketAddr, data: &[u8]) -> usize;
 
-// TODO: move out of `network`
+// TODO: move out of `network` ?
 struct PacketHandles {
     object: Rc<RefCell<Any>>,
     function: PacketHandlerCallback
 }
 
-// TODO: move out of `network`
+// TODO: move out of `network` ?
 impl PacketHandles {
     #[inline]
     fn handle(&self, addr: SocketAddr, data: &[u8]) {
@@ -140,8 +141,6 @@ impl NetworkingCore {
     }
 
     net.register(99, callback, Rc::new(RefCell::new(1usize)) as Rc<RefCell<Any>>);
-
-    // ..
     ```
     */
     // FIXME: docs
