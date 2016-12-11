@@ -34,14 +34,14 @@ use super::crypto_core::*;
 
 /** `NoSpam` used in [`ToxId`](./struct.ToxId.html).
 
-    Number is used to make sure that there is no friend requests from peers
-    that know out long term PK, but don't actually know Tox ID.
+Number is used to make sure that there is no friend requests from peers
+that know out long term PK, but don't actually know Tox ID.
 
-    The preferred way of creating `NoSpam` is to generate a random one.
+The preferred way of creating `NoSpam` is to generate a random one.
 
-    Additionally, it should be possible to set a custom `NoSpam`.
+Additionally, it should be possible to set a custom `NoSpam`.
 
-    https://zetok.github.io/tox-spec/#tox-id
+https://zetok.github.io/tox-spec/#tox-id
 */
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NoSpam(pub [u8; NOSPAMBYTES]);

@@ -75,7 +75,7 @@ fn pass_key_with_salt_test() {
         let pk = PassKey::with_salt(&passwd, salt)
                     .expect("Failed to unwrap PassKey!");
 
-        assert_eq!(&pk.salt, &salt);
+        assert_eq!(&*pk.salt, &salt);
         assert!(pk.key.0.as_ref() != passwd.as_slice());
         assert!(pk.key.0 != [0; KEY_LENGTH]);
         TestResult::passed()

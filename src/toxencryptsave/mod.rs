@@ -82,10 +82,12 @@ pub const EXTRA_LENGTH: usize = MAGIC_LENGTH + SALT_LENGTH + NONCEBYTES + MACBYT
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PassKey {
+    // allocate stuff on heap to make sure that sensitive data is not moved
+    // around on stack
     /// Salt is saved along with encrypted data and used to decrypt it.
-    pub salt: Salt,
+    pub salt: Box<Salt>,
     /// Key used to encrypt/decrypt data. **DO NOT SAVE**.
-    pub key: PrecomputedKey
+    pub key: Box<PrecomputedKey>
 }
 
 impl PassKey {
@@ -162,8 +164,8 @@ impl PassKey {
         memzero(&mut key);
 
         Ok(PassKey {
-            salt: salt,
-            key: try!(maybe_key.ok_or(KeyDerivationError::Failed))
+            salt: Box::new(salt),
+            key: Box::new(try!(maybe_key.ok_or(KeyDerivationError::Failed)))
         })
     }
 
