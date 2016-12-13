@@ -26,8 +26,6 @@ use super::quickcheck::{
     TestResult,
 };
 
-use sodiumoxide::crypto::pwhash::gen_salt;
-
 use toxencryptsave::*;
 
 
@@ -42,45 +40,6 @@ impl Arbitrary for PassKey {
         }
         PassKey::new(&passwd).expect("Failed to unwrap PassKey!")
     }
-}
-
-// PassKey::new()
-
-#[test]
-fn pass_key_new_test() {
-    fn with_pw(passwd: Vec<u8>) -> TestResult {
-        // empty password is already tested in docs test
-        if passwd.is_empty() { return TestResult::discard() }
-
-        let pk = PassKey::new(&passwd).expect("Failed to unwrap PassKey!");
-
-        assert!(pk.salt.0.as_ref() != passwd.as_slice());
-        assert!(pk.salt.0.as_ref() != [0; SALT_LENGTH].as_ref());
-        assert!(pk.key.0.as_ref() != passwd.as_slice());
-        assert!(pk.key.0 != [0; KEY_LENGTH]);
-        TestResult::passed()
-    }
-    quickcheck(with_pw as fn(Vec<u8>) -> TestResult);
-}
-
-// PassKey::with_salt()
-
-#[test]
-fn pass_key_with_salt_test() {
-    fn with_pw(passwd: Vec<u8>) -> TestResult {
-        // test for an empty passphrase is done in docs test
-        if passwd.is_empty() { return TestResult::discard() }
-
-        let salt = gen_salt();
-        let pk = PassKey::with_salt(&passwd, salt)
-                    .expect("Failed to unwrap PassKey!");
-
-        assert_eq!(&*pk.salt, &salt);
-        assert!(pk.key.0.as_ref() != passwd.as_slice());
-        assert!(pk.key.0 != [0; KEY_LENGTH]);
-        TestResult::passed()
-    }
-    quickcheck(with_pw as fn(Vec<u8>) -> TestResult);
 }
 
 // PassKey::encrypt()

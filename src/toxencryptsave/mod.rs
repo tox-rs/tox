@@ -57,12 +57,16 @@ use sodiumoxide::crypto::box_::{
 
 use sodiumoxide::crypto::hash::sha256;
 use sodiumoxide::utils::memzero;
-use ::toxcore::crypto_core;
 
 /// Length in bytes of the salt used to encrypt/decrypt data.
 pub use sodiumoxide::crypto::pwhash::SALTBYTES as SALT_LENGTH;
 /// Length in bytes of the key used to encrypt/decrypt data.
 pub use sodiumoxide::crypto::box_::PRECOMPUTEDKEYBYTES as KEY_LENGTH;
+
+use ::toxcore::crypto_core;
+
+#[cfg(test)]
+use ::toxcore_tests::quickcheck::{quickcheck, TestResult};
 
 
 /// Length (in bytes) of [`MAGIC_NUMBER`](./constant.MAGIC_NUMBER.html).
@@ -85,9 +89,9 @@ pub struct PassKey {
     // allocate stuff on heap to make sure that sensitive data is not moved
     // around on stack
     /// Salt is saved along with encrypted data and used to decrypt it.
-    pub salt: Box<Salt>,
+    salt: Box<Salt>,
     /// Key used to encrypt/decrypt data. **DO NOT SAVE**.
-    pub key: Box<PrecomputedKey>
+    key: Box<PrecomputedKey>
 }
 
 impl PassKey {
@@ -432,4 +436,47 @@ impl From<KeyDerivationError> for DecryptionError {
     fn from(err: KeyDerivationError) -> DecryptionError {
         DecryptionError::KeyDerivation(err)
     }
+}
+
+
+
+// PassKey::
+
+// PassKey::new()
+
+#[test]
+fn pass_key_new_test() {
+    fn with_pw(passwd: Vec<u8>) -> TestResult {
+        // empty password is already tested in docs test
+        if passwd.is_empty() { return TestResult::discard() }
+
+        let pk = PassKey::new(&passwd).expect("Failed to unwrap PassKey!");
+
+        assert!(pk.salt.0.as_ref() != passwd.as_slice());
+        assert!(pk.salt.0.as_ref() != [0; SALT_LENGTH].as_ref());
+        assert!(pk.key.0.as_ref() != passwd.as_slice());
+        assert!(pk.key.0 != [0; KEY_LENGTH]);
+        TestResult::passed()
+    }
+    quickcheck(with_pw as fn(Vec<u8>) -> TestResult);
+}
+
+// PassKey::with_salt()
+
+#[test]
+fn pass_key_with_salt_test() {
+    fn with_pw(passwd: Vec<u8>) -> TestResult {
+        // test for an empty passphrase is done in docs test
+        if passwd.is_empty() { return TestResult::discard() }
+
+        let salt = gen_salt();
+        let pk = PassKey::with_salt(&passwd, salt)
+                    .expect("Failed to unwrap PassKey!");
+
+        assert_eq!(&*pk.salt, &salt);
+        assert!(pk.key.0.as_ref() != passwd.as_slice());
+        assert!(pk.key.0 != [0; KEY_LENGTH]);
+        TestResult::passed()
+    }
+    quickcheck(with_pw as fn(Vec<u8>) -> TestResult);
 }
