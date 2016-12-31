@@ -28,12 +28,12 @@
 
 use std::cmp::{Ord, Ordering};
 use std::net::{
-            IpAddr,
-            Ipv4Addr,
-            Ipv6Addr,
-            SocketAddr,
-            SocketAddrV4,
-            SocketAddrV6
+    IpAddr,
+    Ipv4Addr,
+    Ipv6Addr,
+    SocketAddr,
+    SocketAddrV4,
+    SocketAddrV6
 };
 use std::ops::Deref;
 
@@ -58,8 +58,8 @@ pub enum PingType {
 }
 
 /** Uses the first byte from the provided slice to de-serialize
-    [`PingType`](./enum.PingType.html). Returns `None` if first byte of slice
-    doesn't match `PingType` or slice has no elements.
+[`PingType`](./enum.PingType.html). Returns `None` if first byte of slice
+doesn't match `PingType` or slice has no elements.
 */
 impl FromBytes for PingType {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
@@ -76,25 +76,25 @@ impl FromBytes for PingType {
 
 /** Used to request/respond to ping. Use in an encrypted form.
 
-    Used in:
+Used in:
 
-    - [`DhtPacket`](./struct.DhtPacket.html)
-    - [`DhtRequest`](./struct.DhtRequest.html)
+- [`DhtPacket`](./struct.DhtPacket.html)
+- [`DhtRequest`](./struct.DhtRequest.html)
 
-    Serialized form:
+Serialized form:
 
-    Ping Packet (Request and response)
+Ping Packet (Request and response)
 
-    Packet type `0x00` for request, `0x01` for response.
+Packet type `0x00` for request, `0x01` for response.
 
-    Response ID must match ID of the request, otherwise ping is invalid.
+Response ID must match ID of the request, otherwise ping is invalid.
 
-    Length      | Contents
-    ----------- | --------
-    `1`         | `u8` packet type
-    `8`         | Ping ID
+Length      | Contents
+----------- | --------
+`1`         | `u8` packet type
+`8`         | Ping ID
 
-    Serialized form should be put in the encrypted part of DHT packet.
+Serialized form should be put in the encrypted part of DHT packet.
 */
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Ping {
@@ -162,8 +162,8 @@ impl ToBytes for Ping {
 }
 
 /** De-seralize [`Ping`](./struct.Ping.html) from bytes. Tries to parse first
-    [`PING_SIZE`](./constant.PING_SIZE.html) bytes from supplied slice as
-    `Ping`.
+[`PING_SIZE`](./constant.PING_SIZE.html) bytes from supplied slice as
+`Ping`.
 */
 impl FromBytes for Ping {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
@@ -175,7 +175,7 @@ impl FromBytes for Ping {
         }
 
         let Parsed(ping_type, bytes) = try!(PingType::parse_bytes(bytes));
-        
+
         Ok(Parsed(Ping {
             p_type: ping_type,
             id: array_to_u64(&[bytes[0], bytes[1], bytes[2], bytes[3],
@@ -187,21 +187,21 @@ impl FromBytes for Ping {
 
 /** Used by [`PackedNode`](./struct.PackedNode.html).
 
-    * 1st bit – protocol
-    * 3 bits – `0`
-    * 4th bit – address family
+* 1st bit – protocol
+* 3 bits – `0`
+* 4th bit – address family
 
-    Value | Type
-    ----- | ----
-    `2`   | UDP IPv4
-    `10`  | UDP IPv6
-    `130` | TCP IPv4
-    `138` | TCP IPv6
+Value | Type
+----- | ----
+`2`   | UDP IPv4
+`10`  | UDP IPv6
+`130` | TCP IPv4
+`138` | TCP IPv6
 
-    DHT module *should* use only UDP variants of `IpType`, given that DHT runs
-    solely over the UDP.
+DHT module *should* use only UDP variants of `IpType`, given that DHT runs
+solely over the UDP.
 
-    TCP variants are to be used for sending/receiving info about TCP relays.
+TCP variants are to be used for sending/receiving info about TCP relays.
 */
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum IpType {
@@ -299,28 +299,28 @@ impl FromBytes for Ipv6Addr {
 
 
 /** `PackedNode` format is a way to store the node info in a small yet easy to
-    parse format.
+parse format.
 
-    It is used in many places in Tox, e.g. in `DHT Send nodes`.
+It is used in many places in Tox, e.g. in `DHT Send nodes`.
 
-    To store more than one node, simply append another on to the previous one:
+To store more than one node, simply append another on to the previous one:
 
-    `[packed node 1][packed node 2][...]`
+`[packed node 1][packed node 2][...]`
 
-    Serialized Packed node:
+Serialized Packed node:
 
-    Length | Content
-    ------ | -------
-    `1`    | [`IpType`](./.enum.IpType.html)
-    `4` or `16` | IPv4 or IPv6 address
-    `2`    | port
-    `32`   | node ID
+Length | Content
+------ | -------
+`1`    | [`IpType`](./.enum.IpType.html)
+`4` or `16` | IPv4 or IPv6 address
+`2`    | port
+`32`   | node ID
 
-    Size of serialized `PackedNode` is 39 bytes with IPv4 node info, or 51 with
-    IPv6 node info.
+Size of serialized `PackedNode` is 39 bytes with IPv4 node info, or 51 with
+IPv6 node info.
 
-    DHT module *should* use only UDP variants of `IpType`, given that DHT runs
-    solely on the UDP.
+DHT module *should* use only UDP variants of `IpType`, given that DHT runs
+solely on the UDP.
 */
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct PackedNode {
@@ -340,12 +340,12 @@ pub const PACKED_NODE_IPV4_SIZE: usize = PUBLICKEYBYTES + 7;
 pub const PACKED_NODE_IPV6_SIZE: usize = PUBLICKEYBYTES + 19;
 
 impl PackedNode {
-    // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
-    /// New `PackedNode`.
-    ///
-    /// `udp` – whether UDP or TCP should be used. UDP is used for DHT nodes,
-    /// whereas TCP is used for TCP relays. When `true`, UDP is used, otherwise
-    /// TCP is used.
+    /** New `PackedNode`.
+
+    `udp` – whether UDP or TCP should be used. UDP is used for DHT nodes,
+    whereas TCP is used for TCP relays. When `true`, UDP is used, otherwise
+    TCP is used.
+    */
     pub fn new(udp: bool, saddr: SocketAddr, pk: &PublicKey) -> Self {
         debug!(target: "PackedNode", "Creating new PackedNode.");
         trace!(target: "PackedNode", "With args: udp: {}, saddr: {:?}, PK: {:?}",
@@ -384,10 +384,10 @@ impl PackedNode {
 
 /** Serialize `PackedNode` into bytes.
 
-    Can be either [`PACKED_NODE_IPV4_SIZE`]
-    (./constant.PACKED_NODE_IPV4_SIZE.html) or [`PACKED_NODE_IPV6_SIZE`]
-    (./constant.PACKED_NODE_IPV6_SIZE.html) bytes long, depending on whether
-    IPv4 or IPv6 is being used.
+Can be either [`PACKED_NODE_IPV4_SIZE`]
+(./constant.PACKED_NODE_IPV4_SIZE.html) or [`PACKED_NODE_IPV6_SIZE`]
+(./constant.PACKED_NODE_IPV6_SIZE.html) bytes long, depending on whether
+IPv4 or IPv6 is being used.
 */
 impl ToBytes for PackedNode {
     fn to_bytes(&self) -> Vec<u8> {
@@ -411,17 +411,17 @@ impl ToBytes for PackedNode {
 }
 
 /** Deserialize bytes into `PackedNode`. Returns `None` if deseralizing
-    failed.
+failed.
 
-    Can fail if:
+Can fail if:
 
-     - length is too short for given [`IpType`](./enum.IpType.html)
-     - PK can't be parsed
+ - length is too short for given [`IpType`](./enum.IpType.html)
+ - PK can't be parsed
 
-    Blindly trusts that provided `IpType` matches - i.e. if there are provided
-    51 bytes (which is length of `PackedNode` that contains IPv6), and `IpType`
-    says that it's actually IPv4, bytes will be parsed as if that was an IPv4
-    address.
+Blindly trusts that provided `IpType` matches - i.e. if there are provided
+51 bytes (which is length of `PackedNode` that contains IPv6), and `IpType`
+says that it's actually IPv4, bytes will be parsed as if that was an IPv4
+address.
 */
 impl FromBytes for PackedNode {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
@@ -491,18 +491,18 @@ impl FromBytes for PackedNode {
 
 
 /** Request to get address of given DHT PK, or nodes that are closest in DHT
-    to the given PK.
+to the given PK.
 
-    Packet type [`PacketKind::GetN`](../packet_kind/enum.PacketKind.html).
+Packet type [`PacketKind::GetN`](../packet_kind/enum.PacketKind.html).
 
-    Serialized form:
+Serialized form:
 
-    Length | Content
-    ------ | ------
-    `32`   | DHT Public Key
-    `8`    | ping id
+Length | Content
+------ | ------
+`32`   | DHT Public Key
+`8`    | ping id
 
-    Serialized form should be put in the encrypted part of DHT packet.
+Serialized form should be put in the encrypted part of DHT packet.
 */
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct GetNodes {
@@ -545,8 +545,8 @@ impl ToBytes for GetNodes {
 }
 
 /** De-serialization of bytes into `GetNodes`. If less than
-    [`GET_NODES_SIZE`](./constant.GET_NODES_SIZE.html) bytes are provided,
-    de-serialization will fail, returning `None`.
+[`GET_NODES_SIZE`](./constant.GET_NODES_SIZE.html) bytes are provided,
+de-serialization will fail, returning `None`.
 */
 impl FromBytes for GetNodes {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
@@ -572,29 +572,29 @@ impl FromBytes for GetNodes {
 
 
 /** Response to [`GetNodes`](./struct.GetNodes.html) request, containing up to
-    `4` nodes closest to the requested node.
+`4` nodes closest to the requested node.
 
-    Packet type `0x04`.
+Packet type `0x04`.
 
-    Serialized form:
+Serialized form:
 
-    Length      | Contents
-    ----------- | --------
-    `1`         | Number of packed nodes (maximum 4)
-    `[39, 204]` | Nodes in packed format
-    `8`         | Ping ID
+Length      | Contents
+----------- | --------
+`1`         | Number of packed nodes (maximum 4)
+`[39, 204]` | Nodes in packed format
+`8`         | Ping ID
 
-    An IPv4 node is 39 bytes, an IPv6 node is 51 bytes, so the maximum size is
-    `51 * 4 = 204` bytes.
+An IPv4 node is 39 bytes, an IPv6 node is 51 bytes, so the maximum size is
+`51 * 4 = 204` bytes.
 
-    Serialized form should be put in the encrypted part of DHT packet.
+Serialized form should be put in the encrypted part of DHT packet.
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SendNodes {
-    // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
-    /// Nodes sent in response to [`GetNodes`](./struct.GetNodes.html) request.
-    ///
-    /// There can be only 1 to 4 nodes in `SendNodes`.
+    /** Nodes sent in response to [`GetNodes`](./struct.GetNodes.html) request.
+
+    There can be only 1 to 4 nodes in `SendNodes`.
+    */
     pub nodes: Vec<PackedNode>,
     /// Ping id that was received in [`GetNodes`](./struct.GetNodes.html)
     /// request.
@@ -602,11 +602,11 @@ pub struct SendNodes {
 }
 
 impl SendNodes {
-    // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
-    /// Create new `SendNodes`. Returns `None` if 0 or more than 4 nodes are
-    /// supplied.
-    ///
-    /// Created as an answer to `GetNodes` request.
+    /** Create new `SendNodes`. Returns `None` if 0 or more than 4 nodes are
+    supplied.
+
+    Created as an answer to `GetNodes` request.
+    */
     pub fn from_request(request: &GetNodes, nodes: Vec<PackedNode>) -> Option<Self> {
         debug!(target: "SendNodes", "Creating SendNodes from GetNodes.");
         trace!(target: "SendNodes", "With GetNodes: {:?}", request);
@@ -704,12 +704,12 @@ impl DhtPacketT {
         }
     }
 
-    // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
-    /// Create [`Ping`](./struct.Ping.html) response if `DhtPacketT` is a
-    /// `Ping` request.
-    ///
-    /// Returns `None` if `DhtPacketT` is not a ping request, and thus `Ping`
-    /// response could not be created.
+    /** Create [`Ping`](./struct.Ping.html) response if `DhtPacketT` is a
+    `Ping` request.
+
+    Returns `None` if `DhtPacketT` is not a ping request, and thus `Ping`
+    response could not be created.
+    */
     pub fn ping_resp(&self) -> Option<Self> {
         debug!(target: "Ping", "Creating Ping response from a Ping.");
         trace!(target: "Ping", "With Ping: {:?}", self);
@@ -735,16 +735,16 @@ impl ToBytes for DhtPacketT {
 
 
 /** Standard DHT packet that encapsulates in the encrypted payload
-    [`DhtPacketT`](./enum.DhtPacketT.html).
+[`DhtPacketT`](./enum.DhtPacketT.html).
 
-    Length      | Contents
-    ----------- | --------
-    `1`         | `uint8_t` [`PacketKind`](../packet_kind/enum.PacketKind.html)
-    `32`        | Sender DHT Public Key
-    `24`        | Random nonce
-    variable    | Encrypted payload
+Length      | Contents
+----------- | --------
+`1`         | `uint8_t` [`PacketKind`](../packet_kind/enum.PacketKind.html)
+`32`        | Sender DHT Public Key
+`24`        | Random nonce
+variable    | Encrypted payload
 
-    `PacketKind` values for `DhtPacket` can be only `<= 4`.
+`PacketKind` values for `DhtPacket` can be only `<= 4`.
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DhtPacket {
@@ -783,12 +783,12 @@ impl DhtPacket {
         }
     }
 
-    // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
-    /// Add [`PackedNode`](./struct.PackedNode.html) to `Kbucket`.
-    /// Get packet data. This function decrypts payload and tries to parse it
-    /// as packet type.
-    ///
-    /// Returns `None` in case of faliure.
+    /** Add [`PackedNode`](./struct.PackedNode.html) to `Kbucket`.
+    Get packet data. This function decrypts payload and tries to parse it
+    as packet type.
+
+    Returns `None` in case of faliure.
+    */
     /* TODO: perhaps switch to using precomputed symmetric key?
               - given that computing shared key is apparently the most
                 costly operation when it comes to crypto, using precomputed
@@ -833,12 +833,12 @@ impl DhtPacket {
         None  // parsing failed
     }
 
-    // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
-    /// Add [`PackedNode`](./struct.PackedNode.html) to `Kbucket`.
-    /// Create DHT Packet with [`Ping`](./struct.Ping.html) response to `Ping`
-    /// request that packet contained.
-    ///
-    /// Nonce for the response is automatically generated.
+    /** Add [`PackedNode`](./struct.PackedNode.html) to `Kbucket`.
+    Create DHT Packet with [`Ping`](./struct.Ping.html) response to `Ping`
+    request that packet contained.
+
+    Nonce for the response is automatically generated.
+    */
     pub fn ping_resp(&self, secret_key: &SecretKey,
                      symmetric_key: &PrecomputedKey,
                      own_public_key: &PublicKey) -> Option<Self> {
@@ -947,14 +947,14 @@ impl Distance for PublicKey {
 // TODO: is it even needed?
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Node {
-    // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
-    /// Add [`PackedNode`](./struct.PackedNode.html) to `Kbucket`.
-    /// Time when node will reach it's timeout - value consists of `seconds
-    /// since UNIX epoch + timeout`. If value equals or is lower than current
-    /// time since UNIX epoch, node is timed out.
-    ///
-    /// Timeout value should be updated every time a valid packet from given
-    /// node is received.
+    /** Add [`PackedNode`](./struct.PackedNode.html) to `Kbucket`.
+    Time when node will reach it's timeout - value consists of `seconds
+    since UNIX epoch + timeout`. If value equals or is lower than current
+    time since UNIX epoch, node is timed out.
+
+    Timeout value should be updated every time a valid packet from given
+    node is received.
+    */
     pub timeout: u64,
     /// Ping ID of last sent [`Ping`](./struct.Ping.html) request.
     pub id: u64,
@@ -983,11 +983,11 @@ impl Node {
 
 
 /** Calculate the [`k-bucket`](./struct.Kbucket.html) index of a PK compared
-    to "own" PK.
+to "own" PK.
 
-    According to the [spec](https://zetok.github.io/tox-spec#bucket-index).
+According to the [spec](https://zetok.github.io/tox-spec#bucket-index).
 
-    Fails (returns `None`) if supplied keys are the same.
+Fails (returns `None`) if supplied keys are the same.
 */
 pub fn kbucket_index(&PublicKey(ref own_pk): &PublicKey,
                      &PublicKey(ref other_pk): &PublicKey) -> Option<u8> {
@@ -1014,17 +1014,17 @@ pub fn kbucket_index(&PublicKey(ref own_pk): &PublicKey,
 
 /** Structure for holding nodes.
 
-    Number of nodes it can contain is set during creation. If not set
-    (aka `None` is supplied), number of nodes defaults to
-    [`BUCKET_DEFAULT_SIZE`](./constant.BUCKET_DEFAULT_SIZE.html).
+Number of nodes it can contain is set during creation. If not set (aka `None`
+is supplied), number of nodes defaults to [`BUCKET_DEFAULT_SIZE`]
+(./constant.BUCKET_DEFAULT_SIZE.html).
 
-    Nodes stored in `Bucket` are in [`PackedNode`](./struct.PackedNode.html)
-    format.
+Nodes stored in `Bucket` are in [`PackedNode`](./struct.PackedNode.html)
+format.
 
-    Used in [`Kbucket`](./struct.Kbucket.html) for storing nodes close to
-    given PK; and additionally used to store nodes closest to friends.
+Used in [`Kbucket`](./struct.Kbucket.html) for storing nodes close to given
+PK; and additionally used to store nodes closest to friends.
 
-    [Spec definition](https://zetok.github.io/tox-spec#updating-k-buckets).
+[Spec definition](https://zetok.github.io/tox-spec#updating-k-buckets).
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Bucket {
@@ -1038,12 +1038,12 @@ pub struct Bucket {
 pub const BUCKET_DEFAULT_SIZE: usize = 8;
 
 impl Bucket {
-    // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
-    /// Create a new `Bucket` to store nodes close to the `pk`.
-    ///
-    /// Can hold up to `num` nodes if number is supplied. If `None` is
-    /// supplied, holds up to [`BUCKET_DEFAULT_SIZE`]
-    /// (./constant.BUCKET_DEFAULT_SIZE.html) nodes.
+    /** Create a new `Bucket` to store nodes close to the `pk`.
+
+    Can hold up to `num` nodes if number is supplied. If `None` is
+    supplied, holds up to [`BUCKET_DEFAULT_SIZE`]
+    (./constant.BUCKET_DEFAULT_SIZE.html) nodes.
+    */
     pub fn new(num: Option<u8>) -> Self {
         trace!(target: "Bucket", "Creating a new Bucket.");
         if let Some(n) = num {
@@ -1058,20 +1058,20 @@ impl Bucket {
         }
     }
 
-    // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
-    /// Try to add [`PackedNode`](./struct.PackedNode.html) to the bucket.
-    ///
-    /// If bucket doesn't have [`BUCKET_DEFAULT_SIZE`]
-    /// (./constant.BUCKET_DEFAULT_SIZE.html) nodes, node is appended.
-    ///
-    /// If bucket has `capacity` nodes already, node's closeness is compared to
-    /// nodes already in bucket, and if it's closer than some node, it prepends
-    /// that node, and last node is removed from the list.
-    ///
-    /// If the node being added is farther away than the nodes in the bucket,
-    /// it isn't added and `false` is returned.
-    ///
-    /// Returns `true` if node was added, `false` otherwise.
+    /** Try to add [`PackedNode`](./struct.PackedNode.html) to the bucket.
+
+    If bucket doesn't have [`BUCKET_DEFAULT_SIZE`]
+    (./constant.BUCKET_DEFAULT_SIZE.html) nodes, node is appended.
+
+    If bucket has `capacity` nodes already, node's closeness is compared to
+    nodes already in bucket, and if it's closer than some node, it prepends
+    that node, and last node is removed from the list.
+
+    If the node being added is farther away than the nodes in the bucket,
+    it isn't added and `false` is returned.
+
+    Returns `true` if node was added, `false` otherwise.
+    */
     pub fn try_add(&mut self, pk: &PublicKey, pn: &PackedNode) -> bool {
         debug!(target: "Bucket", "Trying to add PackedNode.");
         trace!(target: "Bucket", "With bucket: {:?}; PK: {:?} and pn: {:?}",
@@ -1113,11 +1113,11 @@ impl Bucket {
         false
     }
 
-    // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
-    /// Remove [`PackedNode`](./struct.PackedNode.html) with given PK from the
-    /// `Bucket`.
-    ///
-    /// If there's no `PackedNode` with given PK, nothing is being done.
+    /** Remove [`PackedNode`](./struct.PackedNode.html) with given PK from the
+    `Bucket`.
+
+    If there's no `PackedNode` with given PK, nothing is being done.
+    */
     // TODO: write test
     pub fn remove(&mut self, pubkey: &PublicKey) {
         trace!(target: "Bucket", "Removing PackedNode with PK: {:?}", pubkey);
@@ -1130,11 +1130,11 @@ impl Bucket {
         trace!("Failed to remove PackedNode with PK: {:?}", pubkey);
     }
 
-    // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
-    /// Check if `Bucket` is empty.
-    ///
-    /// Returns `true` if there are no nodes in the `Bucket`, `false`
-    /// otherwise.
+    /** Check if `Bucket` is empty.
+
+    Returns `true` if there are no nodes in the `Bucket`, `false`
+    otherwise.
+    */
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }
@@ -1142,14 +1142,14 @@ impl Bucket {
 
 
 /** K-buckets structure to hold up to
-    [`KBUCKET_MAX_ENTRIES`](./constant.KBUCKET_MAX_ENTRIES.html) *
-    [`BUCKET_DEFAULT_SIZE`](./constant.BUCKET_DEFAULT_SIZE.html) nodes close
-    to own PK.
+[`KBUCKET_MAX_ENTRIES`](./constant.KBUCKET_MAX_ENTRIES.html) *
+[`BUCKET_DEFAULT_SIZE`](./constant.BUCKET_DEFAULT_SIZE.html) nodes close to
+own PK.
 
-    Nodes in bucket are sorted by closeness to the PK; closest node is the
-    first, while furthest is last.
+Nodes in bucket are sorted by closeness to the PK; closest node is the first,
+while furthest is last.
 
-    Further reading: [Tox spec](https://zetok.github.io/tox-spec#k-buckets).
+Further reading: [Tox spec](https://zetok.github.io/tox-spec#k-buckets).
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Kbucket {
@@ -1160,17 +1160,14 @@ pub struct Kbucket {
     // TODO: check if `k` even needs to be stored, considering that
     //       `buckets.len()` could(?) be used
     pub k: u8,
-
-    // TODO: check if using an option actually brings any benefits, as opposed
-    //       to just keeping empty buckets
     buckets: Vec<Bucket>,
 }
 
 /** Maximum number of [`Bucket`](./struct.Bucket.html)s that [`Kbucket`]
-    (./struct.Kbucket.html) can hold.
+(./struct.Kbucket.html) can hold.
 
-    Realistically, not even half of that will be ever used, given how
-    [index calculation](./fn.kbucket_index.html) works.
+Realistically, not even half of that will be ever used, given how
+[index calculation](./fn.kbucket_index.html) works.
 */
 pub const KBUCKET_MAX_ENTRIES: u8 = ::std::u8::MAX;
 
@@ -1188,17 +1185,17 @@ impl Kbucket {
         }
     }
 
-    // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
-    /// Add [`PackedNode`](./struct.PackedNode.html) to `Kbucket`.
-    ///
-    /// Node can be added only if:
-    ///
-    /// * its [`kbucket index`](./fn.kbucket_index.html) is lower or equal to
-    ///   `k` (number of buckets).
-    /// * [`Bucket`](./struct.Bucket.html) to which it is added has free space
-    ///   or added node is closer to the PK than other node in the bucket.
-    ///
-    /// Returns `true` if node was added successfully, `false` otherwise.
+    /** Add [`PackedNode`](./struct.PackedNode.html) to `Kbucket`.
+
+    Node can be added only if:
+
+    * its [`kbucket index`](./fn.kbucket_index.html) is lower or equal to
+      `k` (number of buckets).
+    * [`Bucket`](./struct.Bucket.html) to which it is added has free space
+      or added node is closer to the PK than other node in the bucket.
+
+    Returns `true` if node was added successfully, `false` otherwise.
+    */
     pub fn try_add(&mut self, node: &PackedNode) -> bool {
         debug!(target: "Kbucket", "Trying to add PackedNode.");
         trace!(target: "Kbucket", "With PN: {:?}; and self: {:?}", node, self);
@@ -1224,13 +1221,13 @@ impl Kbucket {
         }
     }
 
-    // TODO: ↓ convert into a block comment once rust bug #12834 gets fixed
-    /// Get (up to) 4 closest nodes to given PK.
-    ///
-    /// Functionality for [`SendNodes`](./struct.SendNodes.html).
-    ///
-    /// Returns less than 4 nodes only if `Kbucket` contains less than 4
-    /// nodes.
+    /** Get (up to) 4 closest nodes to given PK.
+
+    Functionality for [`SendNodes`](./struct.SendNodes.html).
+
+    Returns less than 4 nodes only if `Kbucket` contains less than 4
+    nodes.
+    */
     pub fn get_closest(&self, pk: &PublicKey) -> Vec<PackedNode> {
         debug!(target: "Kbucket", "Getting closest nodes.");
         trace!(target: "Kbucket", "With PK: {:?} and self: {:?}", pk, self);
@@ -1249,26 +1246,26 @@ impl Kbucket {
 
 
 /** NAT Ping; used to see if a friend we are not connected to directly is
-    online and ready to do the hole punching.
+online and ready to do the hole punching.
 
-    Basically a wrapper + customization of [`Ping`](./struct.Ping.html). Added:
-    `0xfe` prepended in serialized form.
+Basically a wrapper + customization of [`Ping`](./struct.Ping.html). Added:
+`0xfe` prepended in serialized form.
 
-    Used by [`DhtRequest`](./struct.DhtRequest.html).
+Used by [`DhtRequest`](./struct.DhtRequest.html).
 
-    Can be either a:
+Can be either a:
 
-     - request
-     - response
+ - request
+ - response
 
-    Serialized form:
+Serialized form:
 
-    Length | Contents
-    -------|---------
-    1 | type (`0xfe`)
-    9 | [`Ping`](./struct.Ping.html)
+Length | Contents
+-------|---------
+1      | type (`0xfe`)
+9      | [`Ping`](./struct.Ping.html)
 
-    Spec: https://zetok.github.io/tox-spec/#nat-ping-packets
+Spec: https://zetok.github.io/tox-spec/#nat-ping-packets
 */
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NatPing(pub Ping);
@@ -1348,10 +1345,10 @@ impl Deref for NatPing {
 
 
 /** Types of DHT request that can be put in [`DhtRequest`]
-    (./struct.DhtRequest.html).
+(./struct.DhtRequest.html).
 
-    *Currently only [`NatPing`](./struct.NatPing.html), in the future also
-    onion-related stuff.*
+*Currently only [`NatPing`](./struct.NatPing.html), in the future also
+onion-related stuff.*
 */
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DhtRequestT {
@@ -1376,26 +1373,26 @@ impl FromBytes for DhtRequestT {
 
 /** DHT Request packet structure.
 
-    Used to send data via one node1 to other node2 via intermediary node when
-    there is no direct connection between nodes 1 and 2.
+Used to send data via one node1 to other node2 via intermediary node when
+there is no direct connection between nodes 1 and 2.
 
-    `<own node> → <connected, intermediary node> → <not connected node>`
+`<own node> → <connected, intermediary node> → <not connected node>`
 
-    When receiving `DhtRequest` own instance should check whether receiver PK
-    matches own PK, or PK of a known node.
+When receiving `DhtRequest` own instance should check whether receiver PK
+matches own PK, or PK of a known node.
 
-    - if it matches own PK, handle it.
-    - if it matches PK of a known node, send packet to that node
+- if it matches own PK, handle it.
+- if it matches PK of a known node, send packet to that node
 
-    Serialized structure:
+Serialized structure:
 
-    Length | Contents
-    -------|---------
-    1  | `32`
-    32 | receiver's DHT public key
-    32 | sender's DHT public key
-    24 | Nonce
-    ?  | encrypted data
+Length | Contents
+-------|---------
+1  | `32`
+32 | receiver's DHT public key
+32 | sender's DHT public key
+24 | Nonce
+?  | encrypted data
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DhtRequest {
@@ -1431,9 +1428,9 @@ impl DhtRequest {
     }
 
     /** Get request data. This function decrypts payload and tries to parse it
-        as request type.
+    as request type.
 
-        Returns `None` in case of failure.
+    Returns `None` in case of failure.
     */
     pub fn get_request(&self, secret_key: &SecretKey) -> Option<DhtRequestT> {
         debug!(target: "DhtRequest", "Getting request data from DhtRequest.");
