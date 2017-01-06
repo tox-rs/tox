@@ -36,6 +36,7 @@ use std::net::{
     SocketAddrV6
 };
 use std::ops::Deref;
+use byteorder::{ByteOrder, BigEndian, LittleEndian, WriteBytesExt};
 
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
@@ -155,7 +156,7 @@ impl ToBytes for Ping {
         // `PingType`
         res.push(self.p_type as u8);
         // And random ping_id as bytes
-        res.extend_from_slice(&u64_to_array(self.id));
+        res.write_u64::<LittleEndian>(self.id).ok();
         trace!("Serialized Ping: {:?}", &res);
         res
     }
@@ -178,8 +179,7 @@ impl FromBytes for Ping {
 
         Ok(Parsed(Ping {
             p_type: ping_type,
-            id: array_to_u64(&[bytes[0], bytes[1], bytes[2], bytes[3],
-                               bytes[4], bytes[5], bytes[6], bytes[7]]),
+            id: LittleEndian::read_u64(bytes),
         }, &bytes[8..]))
     }
 }
@@ -251,7 +251,7 @@ impl ToBytes for IpAddr {
             IpAddr::V6(a) => {
                 let mut result: Vec<u8> = vec![];
                 for n in &a.segments() {
-                    result.extend_from_slice(&u16_to_array(*n));
+                    result.write_u16::<LittleEndian>(*n).ok();
                 }
                 result
             },
@@ -291,7 +291,7 @@ impl FromBytes for Ipv6Addr {
 
         let mut v = Vec::with_capacity(8);
         for slice in bytes[..16].chunks(2) {
-            v.push(array_to_u16(&[slice[0], slice[1]]));
+            v.push(LittleEndian::read_u16(slice));
         }
         Ok(Parsed(Ipv6Addr::new(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]), &bytes[16..]))
     }
@@ -400,7 +400,7 @@ impl ToBytes for PackedNode {
         let addr: Vec<u8> = self.ip().to_bytes();
         result.extend_from_slice(&addr);
         // port
-        result.extend_from_slice(&u16_to_array(self.saddr.port().to_be()));
+        result.write_u16::<BigEndian>(self.saddr.port()).ok();
 
         let PublicKey(ref pk) = self.pk;
         result.extend_from_slice(pk);
@@ -432,7 +432,7 @@ impl FromBytes for PackedNode {
                 return parse_error!("Not enough bytes for port.")
             }
 
-            let port = u16::from_be(array_to_u16(&[bytes[0], bytes[1]]));
+            let port = BigEndian::read_u16(bytes);
             Ok(Parsed(port, &bytes[2..]))
         }
 
@@ -538,7 +538,7 @@ impl ToBytes for GetNodes {
         let mut result = Vec::with_capacity(GET_NODES_SIZE);
         let PublicKey(pk_bytes) = self.pk;
         result.extend_from_slice(&pk_bytes);
-        result.extend_from_slice(&u64_to_array(self.id));
+        result.write_u64::<LittleEndian>(self.id).ok();
         trace!("Resulting bytes: {:?}", &result);
         result
     }
@@ -558,8 +558,7 @@ impl FromBytes for GetNodes {
                 return parse_error!("Not enough bytes to parse GetNodes id.")
             }
 
-            let id = array_to_u64(&[b[0], b[1], b[2], b[3],
-                                    b[4], b[5], b[6], b[7]]);
+            let id = LittleEndian::read_u64(b);
             Ok(Parsed(id, &b[8..]))
         }
 
@@ -638,7 +637,7 @@ impl ToBytes for SendNodes {
         for node in &*self.nodes {
             result.extend_from_slice(&node.to_bytes());
         }
-        result.extend_from_slice(&u64_to_array(self.id));
+        result.write_u64::<LittleEndian>(self.id).ok();
         trace!("Resulting bytes: {:?}", &result);
         result
     }
@@ -662,13 +661,8 @@ impl FromBytes for SendNodes {
         }
 
         let Parsed(nodes, rest) = try!(PackedNode::parse_bytes_multiple_n(nodes_number, &bytes[1..]));
-        // need u64 from bytes
-        let mut ping_id: [u8; 8] = [0; 8];
-        for (pos, item) in ping_id.iter_mut().enumerate() {
-            *item = rest[pos];
-        }
 
-        Ok(Parsed(SendNodes { nodes: nodes, id: array_to_u64(&ping_id) }, &rest[8..]))
+        Ok(Parsed(SendNodes { nodes: nodes, id: LittleEndian::read_u64(rest) }, &rest[8..]))
     }
 }
 

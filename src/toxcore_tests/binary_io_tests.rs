@@ -25,19 +25,6 @@ use super::quickcheck::{quickcheck, TestResult};
 use toxcore::binary_io::*;
 
 
-fn u16_to_array_and_back(num: u16) {
-    assert_eq!(num, array_to_u16(&u16_to_array(num)));
-}
-
-fn u32_to_array_and_back(num: u32) {
-    assert_eq!(num, array_to_u32(&u32_to_array(num)));
-}
-
-fn u64_to_array_and_back(num: u64) {
-    assert_eq!(num, array_to_u64(&u64_to_array(num)));
-}
-
-
 // append_zeros()
 
 macro_rules! test_append_zeros_for {
@@ -79,88 +66,6 @@ test_append_zeros_for!(
     u32, append_zeros_test_u32_fail, append_zeros_test_u32_pass,
     u64, append_zeros_test_u64_fail, append_zeros_test_u64_pass
 );
-
-#[test]
-fn array_to_u16_test() {
-    assert_eq!(array_to_u16(&[0, 0]), 0);
-    assert_eq!(array_to_u16(&[1, 0]), 1);
-    assert_eq!(array_to_u16(&[0, 1]), 256);
-    assert_eq!(array_to_u16(&[1, 1]), 257);
-    assert_eq!(array_to_u16(&[255, 255]), 65535);
-
-    quickcheck(u16_to_array_and_back as fn(u16));
-}
-
-#[test]
-fn u16_to_array_test() {
-    assert_eq!([0, 0], u16_to_array(0));
-    assert_eq!([1, 0], u16_to_array(1));
-    assert_eq!([0, 1], u16_to_array(256));
-    assert_eq!([255, 255], u16_to_array(65535));
-
-    quickcheck(u16_to_array_and_back as fn(u16));
-}
-
-#[test]
-fn array_to_u32_test() {
-    assert_eq!(array_to_u32(&[0, 0, 0, 0]), 0);
-    assert_eq!(array_to_u32(&[1, 0, 0, 0]), 1);
-    assert_eq!(array_to_u32(&[0, 1, 0, 0]), 256);
-    assert_eq!(array_to_u32(&[0, 0, 1, 0]), 65536);
-    assert_eq!(array_to_u32(&[0, 0, 0, 1]), 16777216);
-    assert_eq!(array_to_u32(&[0, 0, 0, 0xff]), 4278190080);
-    assert_eq!(array_to_u32(&[0xff, 0xff, 0xff, 0xff]), u32::max_value());
-
-    quickcheck(u32_to_array_and_back as fn(u32));
-}
-
-#[test]
-fn u32_to_array_test() {
-    assert_eq!([0, 0, 0, 0], u32_to_array(0));
-    assert_eq!([1, 0, 0, 0], u32_to_array(1));
-    assert_eq!([0, 1, 0, 0], u32_to_array(256));
-    assert_eq!([0, 0, 1, 0], u32_to_array(65536));
-    assert_eq!([0, 0, 0, 1], u32_to_array(16777216));
-    assert_eq!([0, 0, 0, 0xff], u32_to_array(4278190080));
-    assert_eq!([0xff, 0xff, 0xff, 0xff], u32_to_array(u32::max_value()));
-
-    quickcheck(u32_to_array_and_back as fn(u32));
-}
-
-#[test]
-fn array_to_u64_test() {
-    assert_eq!(array_to_u64(&[0, 0, 0, 0, 0, 0, 0, 0]), 0);
-    assert_eq!(array_to_u64(&[1, 0, 0, 0, 0, 0, 0, 0]), 1);
-    assert_eq!(array_to_u64(&[0, 1, 0, 0, 0, 0, 0, 0]), 256);
-    assert_eq!(array_to_u64(&[0, 0, 1, 0, 0, 0, 0, 0]), 65536);
-    assert_eq!(array_to_u64(&[0, 0, 0, 1, 0, 0, 0, 0]), 16777216);
-    assert_eq!(array_to_u64(&[0, 0, 0, 0, 1, 0, 0, 0]), 4294967296);
-    assert_eq!(array_to_u64(&[0, 0, 0, 0, 0, 1, 0, 0]), 1099511627776);
-    assert_eq!(array_to_u64(&[0, 0, 0, 0, 0, 0, 1, 0]), 281474976710656);
-    assert_eq!(array_to_u64(&[0, 0, 0, 0, 0, 0, 0, 1]), 72057594037927936);
-    assert_eq!(array_to_u64(&[0, 0, 0, 0, 0, 0, 0, 0xff]), 18374686479671623680);
-    assert_eq!(array_to_u64(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]), u64::max_value());
-
-    quickcheck(u64_to_array_and_back as fn(u64));
-}
-
-#[test]
-fn u64_to_array_test() {
-    assert_eq!([0, 0, 0, 0, 0, 0, 0, 0], u64_to_array(0));
-    assert_eq!([1, 0, 0, 0, 0, 0, 0, 0], u64_to_array(1));
-    assert_eq!([0, 1, 0, 0, 0, 0, 0, 0], u64_to_array(256));
-    assert_eq!([0, 0, 1, 0, 0, 0, 0, 0], u64_to_array(65536));
-    assert_eq!([0, 0, 0, 1, 0, 0, 0, 0], u64_to_array(16777216));
-    assert_eq!([0, 0, 0, 0, 1, 0, 0, 0], u64_to_array(4294967296));
-    assert_eq!([0, 0, 0, 0, 0, 1, 0, 0], u64_to_array(1099511627776));
-    assert_eq!([0, 0, 0, 0, 0, 0, 1, 0], u64_to_array(281474976710656));
-    assert_eq!([0, 0, 0, 0, 0, 0, 0, 1], u64_to_array(72057594037927936));
-    assert_eq!([0, 0, 0, 0, 0, 0, 0, 0xff], u64_to_array(18374686479671623680));
-    assert_eq!([0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff], u64_to_array(u64::max_value()));
-
-    quickcheck(u64_to_array_and_back as fn(u64));
-}
-
 
 // xor_checksum()
 

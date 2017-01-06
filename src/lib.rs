@@ -131,6 +131,7 @@ extern crate mio;
 // for Zero trait
 extern crate num_traits;
 extern crate sodiumoxide;
+extern crate byteorder;
 
 
 // TODO: refactor macros
