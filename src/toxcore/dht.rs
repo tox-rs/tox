@@ -36,7 +36,7 @@ use std::net::{
     SocketAddrV6
 };
 use std::ops::Deref;
-use byteorder::{ByteOrder, BigEndian, LittleEndian, WriteBytesExt};
+use byteorder::{ByteOrder, BigEndian, LittleEndian, NativeEndian, WriteBytesExt};
 
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
@@ -156,7 +156,7 @@ impl ToBytes for Ping {
         // `PingType`
         res.push(self.p_type as u8);
         // And random ping_id as bytes
-        res.write_u64::<LittleEndian>(self.id).ok();
+        res.write_u64::<NativeEndian>(self.id).ok();
         trace!("Serialized Ping: {:?}", &res);
         res
     }
@@ -179,7 +179,7 @@ impl FromBytes for Ping {
 
         Ok(Parsed(Ping {
             p_type: ping_type,
-            id: LittleEndian::read_u64(bytes),
+            id: NativeEndian::read_u64(bytes),
         }, &bytes[8..]))
     }
 }
@@ -538,7 +538,7 @@ impl ToBytes for GetNodes {
         let mut result = Vec::with_capacity(GET_NODES_SIZE);
         let PublicKey(pk_bytes) = self.pk;
         result.extend_from_slice(&pk_bytes);
-        result.write_u64::<LittleEndian>(self.id).ok();
+        result.write_u64::<NativeEndian>(self.id).ok();
         trace!("Resulting bytes: {:?}", &result);
         result
     }
@@ -558,7 +558,7 @@ impl FromBytes for GetNodes {
                 return parse_error!("Not enough bytes to parse GetNodes id.")
             }
 
-            let id = LittleEndian::read_u64(b);
+            let id = NativeEndian::read_u64(b);
             Ok(Parsed(id, &b[8..]))
         }
 
@@ -637,7 +637,7 @@ impl ToBytes for SendNodes {
         for node in &*self.nodes {
             result.extend_from_slice(&node.to_bytes());
         }
-        result.write_u64::<LittleEndian>(self.id).ok();
+        result.write_u64::<NativeEndian>(self.id).ok();
         trace!("Resulting bytes: {:?}", &result);
         result
     }
@@ -662,7 +662,7 @@ impl FromBytes for SendNodes {
 
         let Parsed(nodes, rest) = try!(PackedNode::parse_bytes_multiple_n(nodes_number, &bytes[1..]));
 
-        Ok(Parsed(SendNodes { nodes: nodes, id: LittleEndian::read_u64(rest) }, &rest[8..]))
+        Ok(Parsed(SendNodes { nodes: nodes, id: NativeEndian::read_u64(rest) }, &rest[8..]))
     }
 }
 

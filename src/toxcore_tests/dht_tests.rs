@@ -35,7 +35,7 @@ use std::net::{
             SocketAddrV6
 };
 use std::str::FromStr;
-use byteorder::{ByteOrder, BigEndian, LittleEndian, WriteBytesExt};
+use byteorder::{ByteOrder, BigEndian, LittleEndian, NativeEndian, WriteBytesExt};
 
 use super::quickcheck::{Arbitrary, Gen, quickcheck, StdGen};
 use super::rand::chacha::ChaChaRng;
@@ -54,10 +54,10 @@ fn u64_as_u16s(num: u64) -> (u16, u16, u16, u16) {
 /// Get a PK from 4 `u64`s.
 fn nums_to_pk(a: u64, b: u64, c: u64, d: u64) -> PublicKey {
     let mut pk_bytes: Vec<u8> = Vec::with_capacity(PUBLICKEYBYTES);
-    pk_bytes.write_u64::<LittleEndian>(a).ok();
-    pk_bytes.write_u64::<LittleEndian>(b).ok();
-    pk_bytes.write_u64::<LittleEndian>(c).ok();
-    pk_bytes.write_u64::<LittleEndian>(d).ok();
+    pk_bytes.write_u64::<NativeEndian>(a).ok();
+    pk_bytes.write_u64::<NativeEndian>(b).ok();
+    pk_bytes.write_u64::<NativeEndian>(c).ok();
+    pk_bytes.write_u64::<NativeEndian>(d).ok();
     let pk_bytes = &pk_bytes[..];
     PublicKey::from_slice(pk_bytes).expect("Making PK out of bytes failed!")
 }
@@ -194,7 +194,7 @@ fn ping_from_bytes_test() {
         } else {
             let p = Ping::from_bytes(&bytes).unwrap();
             // `id` should not differ
-            assert_eq!(p.id(), LittleEndian::read_u64(&bytes[1..PING_SIZE]));
+            assert_eq!(p.id(), NativeEndian::read_u64(&bytes[1..PING_SIZE]));
 
             if bytes[0] == PingType::Req as u8 {
                 assert_eq!(true, p.is_request());
@@ -207,7 +207,7 @@ fn ping_from_bytes_test() {
 
     // just in case
     let mut ping = vec![PingType::Req as u8];
-    ping.write_u64::<LittleEndian>(random_u64()).ok();
+    ping.write_u64::<NativeEndian>(random_u64()).ok();
     with_bytes(ping.clone());
 
     // make it a response
@@ -817,7 +817,7 @@ fn get_nodes_to_bytes_test() {
         let g_bytes = gn.to_bytes();
         let PublicKey(pk_bytes) = gn.pk;
         assert_eq!(&pk_bytes, &g_bytes[..PUBLICKEYBYTES]);
-        assert_eq!(gn.id, LittleEndian::read_u64(&g_bytes[PUBLICKEYBYTES..]));
+        assert_eq!(gn.id, NativeEndian::read_u64(&g_bytes[PUBLICKEYBYTES..]));
     }
     quickcheck(with_gn as fn(GetNodes));
 }
@@ -832,7 +832,7 @@ fn get_nodes_from_bytes_test() {
         } else {
             let gn = GetNodes::from_bytes(&bytes).unwrap();
             // ping_id as bytes should match "original" bytes
-            assert_eq!(LittleEndian::read_u64(&bytes[PUBLICKEYBYTES..GET_NODES_SIZE]), gn.id);
+            assert_eq!(NativeEndian::read_u64(&bytes[PUBLICKEYBYTES..GET_NODES_SIZE]), gn.id);
 
             let PublicKey(ref pk) = gn.pk;
             assert_eq!(pk, &bytes[..PUBLICKEYBYTES]);
@@ -923,7 +923,7 @@ fn send_nodes_to_bytes_test() {
             len_before += cur_len;
         }
         // ping id should be the same as in request
-        assert_eq!(req.id, LittleEndian::read_u64(&sn_bytes[len_before..]));
+        assert_eq!(req.id, NativeEndian::read_u64(&sn_bytes[len_before..]));
     }
     quickcheck(with_nodes as fn(GetNodes, PackedNode, Option<PackedNode>,
                                 Option<PackedNode>, Option<PackedNode>));
@@ -940,7 +940,7 @@ fn send_nodes_from_bytes_test() {
             bytes.extend_from_slice(&node.to_bytes());
         }
         // and ping id
-        bytes.write_u64::<LittleEndian>(r_u64).ok();
+        bytes.write_u64::<NativeEndian>(r_u64).ok();
 
         if nodes.len() > 4 || nodes.is_empty() {
             assert_eq!(None, SendNodes::from_bytes(&bytes));
@@ -963,7 +963,7 @@ fn send_nodes_parse_bytes_rest_test() {
             bytes.extend_from_slice(&node.to_bytes());
         }
         // and ping id
-        bytes.write_u64::<LittleEndian>(r_u64).ok();
+        bytes.write_u64::<NativeEndian>(r_u64).ok();
         bytes.extend_from_slice(&r_rest);
 
         if nodes.len() <= 4 && !nodes.is_empty() {
@@ -1557,7 +1557,7 @@ fn nat_ping_from_bytes_test() {
             let p = NatPing::from_bytes(&bytes)
                 .expect("De-serialization failed");
 
-            assert_eq!(p.id(), LittleEndian::read_u64(&bytes[2..NAT_PING_SIZE]));
+            assert_eq!(p.id(), NativeEndian::read_u64(&bytes[2..NAT_PING_SIZE]));
 
             if bytes[1] == PingType::Req as u8 {
                 assert_eq!(true, p.is_request());
@@ -1570,7 +1570,7 @@ fn nat_ping_from_bytes_test() {
 
     // just in case
     let mut ping = vec![NAT_PING_TYPE, PingType::Req as u8];
-    ping.write_u64::<LittleEndian>(random_u64()).ok();
+    ping.write_u64::<NativeEndian>(random_u64()).ok();
     with_bytes(ping.clone());
 
     // make it a response
