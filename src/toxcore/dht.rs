@@ -156,7 +156,8 @@ impl ToBytes for Ping {
         // `PingType`
         res.push(self.p_type as u8);
         // And random ping_id as bytes
-        res.write_u64::<NativeEndian>(self.id).ok();
+        res.write_u64::<NativeEndian>(self.id)
+            .expect("Failed to write Ping id!");
         trace!("Serialized Ping: {:?}", &res);
         res
     }
@@ -251,7 +252,8 @@ impl ToBytes for IpAddr {
             IpAddr::V6(a) => {
                 let mut result: Vec<u8> = vec![];
                 for n in &a.segments() {
-                    result.write_u16::<LittleEndian>(*n).ok();
+                    result.write_u16::<LittleEndian>(*n)
+                        .expect("Failed to write Ipv6Addr segments!");
                 }
                 result
             },
@@ -400,7 +402,8 @@ impl ToBytes for PackedNode {
         let addr: Vec<u8> = self.ip().to_bytes();
         result.extend_from_slice(&addr);
         // port
-        result.write_u16::<BigEndian>(self.saddr.port()).ok();
+        result.write_u16::<BigEndian>(self.saddr.port())
+            .expect("Failed to write PackedNode port!");
 
         let PublicKey(ref pk) = self.pk;
         result.extend_from_slice(pk);
@@ -538,7 +541,8 @@ impl ToBytes for GetNodes {
         let mut result = Vec::with_capacity(GET_NODES_SIZE);
         let PublicKey(pk_bytes) = self.pk;
         result.extend_from_slice(&pk_bytes);
-        result.write_u64::<NativeEndian>(self.id).ok();
+        result.write_u64::<NativeEndian>(self.id)
+            .expect("Failed to write GetNodes id!");
         trace!("Resulting bytes: {:?}", &result);
         result
     }
@@ -637,7 +641,8 @@ impl ToBytes for SendNodes {
         for node in &*self.nodes {
             result.extend_from_slice(&node.to_bytes());
         }
-        result.write_u64::<NativeEndian>(self.id).ok();
+        result.write_u64::<NativeEndian>(self.id)
+            .expect("Failed to write SendNodes id!");
         trace!("Resulting bytes: {:?}", &result);
         result
     }

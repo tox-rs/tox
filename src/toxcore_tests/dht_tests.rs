@@ -54,10 +54,14 @@ fn u64_as_u16s(num: u64) -> (u16, u16, u16, u16) {
 /// Get a PK from 4 `u64`s.
 fn nums_to_pk(a: u64, b: u64, c: u64, d: u64) -> PublicKey {
     let mut pk_bytes: Vec<u8> = Vec::with_capacity(PUBLICKEYBYTES);
-    pk_bytes.write_u64::<NativeEndian>(a).ok();
-    pk_bytes.write_u64::<NativeEndian>(b).ok();
-    pk_bytes.write_u64::<NativeEndian>(c).ok();
-    pk_bytes.write_u64::<NativeEndian>(d).ok();
+    pk_bytes.write_u64::<NativeEndian>(a)
+        .expect("Failed to write private key bytes!");
+    pk_bytes.write_u64::<NativeEndian>(b)
+        .expect("Failed to write private key bytes!");
+    pk_bytes.write_u64::<NativeEndian>(c)
+        .expect("Failed to write private key bytes!");
+    pk_bytes.write_u64::<NativeEndian>(d)
+        .expect("Failed to write private key bytes!");
     let pk_bytes = &pk_bytes[..];
     PublicKey::from_slice(pk_bytes).expect("Making PK out of bytes failed!")
 }
@@ -207,7 +211,8 @@ fn ping_from_bytes_test() {
 
     // just in case
     let mut ping = vec![PingType::Req as u8];
-    ping.write_u64::<NativeEndian>(random_u64()).ok();
+    ping.write_u64::<NativeEndian>(random_u64())
+        .expect("Failed to write Ping id!");
     with_bytes(ping.clone());
 
     // make it a response
@@ -940,7 +945,8 @@ fn send_nodes_from_bytes_test() {
             bytes.extend_from_slice(&node.to_bytes());
         }
         // and ping id
-        bytes.write_u64::<NativeEndian>(r_u64).ok();
+        bytes.write_u64::<NativeEndian>(r_u64)
+            .expect("Failed to write Ping id!");
 
         if nodes.len() > 4 || nodes.is_empty() {
             assert_eq!(None, SendNodes::from_bytes(&bytes));
@@ -963,7 +969,8 @@ fn send_nodes_parse_bytes_rest_test() {
             bytes.extend_from_slice(&node.to_bytes());
         }
         // and ping id
-        bytes.write_u64::<NativeEndian>(r_u64).ok();
+        bytes.write_u64::<NativeEndian>(r_u64)
+            .expect("Failed to write Ping id!");
         bytes.extend_from_slice(&r_rest);
 
         if nodes.len() <= 4 && !nodes.is_empty() {
@@ -1570,7 +1577,8 @@ fn nat_ping_from_bytes_test() {
 
     // just in case
     let mut ping = vec![NAT_PING_TYPE, PingType::Req as u8];
-    ping.write_u64::<NativeEndian>(random_u64()).ok();
+    ping.write_u64::<NativeEndian>(random_u64())
+        .expect("Failed to write Ping id!");
     with_bytes(ping.clone());
 
     // make it a response

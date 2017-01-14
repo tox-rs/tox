@@ -96,7 +96,8 @@ fn section_kind_parse_bytes_test() {
 fn section_kind_parse_bytes_rest_test() {
     fn with_bytes(sk: SectionKind, r_rest: Vec<u8>) {
         let mut bytes = Vec::with_capacity(r_rest.len() + 2);
-        bytes.write_u16::<LittleEndian>(sk as u16).ok();
+        bytes.write_u16::<LittleEndian>(sk as u16)
+            .expect("Failed to write SectionKind!");
         bytes.extend_from_slice(&r_rest);
 
         let Parsed(_, rest) = SectionKind::parse_bytes(&bytes)
@@ -209,7 +210,8 @@ fn dht_state_from_bytes() {
         // first magic number
         let mut serialized = vec![0x0d, 0x00, 0x59, 0x01];
         // length of `PackedNode`s that are serialized
-        serialized.write_u32::<LittleEndian>(pns_bytes.len() as u32).ok();
+        serialized.write_u32::<LittleEndian>(pns_bytes.len() as u32)
+            .expect("Failed to write PackedNode's length!");
         // other magic numbers
         serialized.extend_from_slice(&[0x04, 0, 0xce, 0x11]);
         serialized.extend_from_slice(&pns_bytes);
@@ -246,7 +248,8 @@ fn dht_state_parse_bytes_rest_test() {
         // first magic number
         let mut serialized = vec![0x0d, 0x00, 0x59, 0x01];
         // length of `PackedNode`s that are serialized
-        serialized.write_u32::<LittleEndian>(pns_bytes.len() as u32).ok();
+        serialized.write_u32::<LittleEndian>(pns_bytes.len() as u32)
+            .expect("Failed to write PackedNode's length!");
         // other magic numbers
         serialized.extend_from_slice(&[0x04, 0, 0xce, 0x11]);
         serialized.extend_from_slice(&pns_bytes);

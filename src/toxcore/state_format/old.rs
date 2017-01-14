@@ -142,7 +142,8 @@ assert_eq!(vec![255u8, 0], SectionKind::EOF        .to_bytes());
 impl ToBytes for SectionKind {
     fn to_bytes(&self) -> Vec<u8> {
         let mut result = Vec::with_capacity(2);
-        result.write_u16::<LittleEndian>(*self as u16).ok();
+        result.write_u16::<LittleEndian>(*self as u16)
+            .expect("Failed to write SectionKind!");
         result
     }
 }
@@ -435,7 +436,8 @@ assert_eq!(result, DhtState(vec![]).to_bytes());
 impl ToBytes for DhtState {
     fn to_bytes(&self) -> Vec<u8> {
         let mut result = Vec::with_capacity(DHT_STATE_MIN_SIZE);
-        result.write_u32::<LittleEndian>(DHT_MAGICAL).ok();
+        result.write_u32::<LittleEndian>(DHT_MAGICAL)
+            .expect("Failed to write DhtState DHT_MAGICAL!");;
 
         let pn_bytes = {
             let mut bytes = Vec::with_capacity(
@@ -447,13 +449,16 @@ impl ToBytes for DhtState {
         };
 
         // add length of serialized `PackedNode`s
-        result.write_u32::<LittleEndian>(pn_bytes.len() as u32).ok();
+        result.write_u32::<LittleEndian>(pn_bytes.len() as u32)
+            .expect("Failed to write DhtState PackedNode length!");
 
         // section magic number
-        result.write_u16::<LittleEndian>(DHT_SECTION_TYPE).ok();
+        result.write_u16::<LittleEndian>(DHT_SECTION_TYPE)
+            .expect("Failed to write DhtState DHT_SECTION_TYPE!");
 
         // 2nd magic number
-        result.write_u16::<LittleEndian>(DHT_2ND_MAGICAL).ok();
+        result.write_u16::<LittleEndian>(DHT_2ND_MAGICAL)
+            .expect("Failed to write DhtState DHT_2ND_MAGICAL!");
 
         // and `PackedNode`s
         result.extend_from_slice(&pn_bytes);
@@ -766,18 +771,21 @@ impl ToBytes for FriendState {
         // padding
         result.push(0);
         // .. and its length
-        result.write_u16::<BigEndian>(self.fr_msg.len() as u16).ok();
+        result.write_u16::<BigEndian>(self.fr_msg.len() as u16)
+            .expect("Failed to write FriendState message length!");
 
         // name and its length
         ext_vec(&mut result, &self.name.0, NAME_LEN);
-        result.write_u16::<BigEndian>(self.name.0.len() as u16).ok();
+        result.write_u16::<BigEndian>(self.name.0.len() as u16)
+            .expect("Failed to write FriendState name length!");
 
         // status msg ..
         ext_vec(&mut result, &self.status_msg.0, STATUS_MSG_LEN);
         // padding
         result.push(0);
         // .. and its length
-        result.write_u16::<BigEndian>(self.status_msg.0.len() as u16).ok();
+        result.write_u16::<BigEndian>(self.status_msg.0.len() as u16)
+            .expect("Failed to write FriendState padding length!");
 
         // UserStatus
         result.push(self.user_status as u8);
@@ -789,7 +797,8 @@ impl ToBytes for FriendState {
         result.extend_from_slice(&self.nospam.0);
 
         // last seen
-        result.write_u64::<LittleEndian>(self.last_seen).ok();
+        result.write_u64::<LittleEndian>(self.last_seen)
+            .expect("Failed to write FriendState last seen!");
 
         result
     }
@@ -1429,7 +1438,8 @@ impl ToBytes for State {
             let bytes = sect.to_bytes();
             let mut res = Vec::with_capacity(SECTION_MIN_LEN + bytes.len());
             // length of the section goes first
-            res.write_u32::<LittleEndian>(bytes.len() as u32).ok();
+            res.write_u32::<LittleEndian>(bytes.len() as u32)
+                .expect("Failed to write State length!");
             // knowing what's the section is useful
             res.extend_from_slice(&S::kind().to_bytes());
             // lets make it *magical*
@@ -1745,8 +1755,10 @@ fn section_data_into_sect_mult_test_random() {
 fn section_data_parse_bytes_test() {
     fn rand_b_sect(kind: SectionKind, bytes: &[u8]) -> Vec<u8> {
         let mut b_sect = Vec::with_capacity(bytes.len() + SECTION_MIN_LEN);
-        b_sect.write_u32::<LittleEndian>(bytes.len() as u32).ok();
-        b_sect.write_u16::<LittleEndian>(kind as u16).ok();
+        b_sect.write_u32::<LittleEndian>(bytes.len() as u32)
+            .expect("Failed to write Section length!");
+        b_sect.write_u16::<LittleEndian>(kind as u16)
+            .expect("Failed to write Section kind!");
         b_sect.extend_from_slice(SECTION_MAGIC);
         b_sect.extend_from_slice(bytes);
         b_sect
