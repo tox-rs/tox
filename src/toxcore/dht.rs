@@ -252,7 +252,7 @@ impl ToBytes for IpAddr {
             IpAddr::V6(a) => {
                 let mut result: Vec<u8> = vec![];
                 for n in &a.segments() {
-                    result.write_u16::<LittleEndian>(*n)
+                    result.write_u16::<LittleEndian>(*n) // TODO: check if LittleEndian is correct here
                         .expect("Failed to write Ipv6Addr segments!");
                 }
                 result
