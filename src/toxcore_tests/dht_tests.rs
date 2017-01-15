@@ -35,6 +35,7 @@ use std::net::{
             SocketAddrV6
 };
 use std::str::FromStr;
+use byteorder::{ByteOrder, BigEndian, LittleEndian, NativeEndian, WriteBytesExt};
 
 use super::quickcheck::{Arbitrary, Gen, quickcheck, StdGen};
 use super::rand::chacha::ChaChaRng;
@@ -53,10 +54,14 @@ fn u64_as_u16s(num: u64) -> (u16, u16, u16, u16) {
 /// Get a PK from 4 `u64`s.
 fn nums_to_pk(a: u64, b: u64, c: u64, d: u64) -> PublicKey {
     let mut pk_bytes: Vec<u8> = Vec::with_capacity(PUBLICKEYBYTES);
-    pk_bytes.extend_from_slice(&u64_to_array(a));
-    pk_bytes.extend_from_slice(&u64_to_array(b));
-    pk_bytes.extend_from_slice(&u64_to_array(c));
-    pk_bytes.extend_from_slice(&u64_to_array(d));
+    pk_bytes.write_u64::<NativeEndian>(a)
+        .expect("Failed to write private key bytes!");
+    pk_bytes.write_u64::<NativeEndian>(b)
+        .expect("Failed to write private key bytes!");
+    pk_bytes.write_u64::<NativeEndian>(c)
+        .expect("Failed to write private key bytes!");
+    pk_bytes.write_u64::<NativeEndian>(d)
+        .expect("Failed to write private key bytes!");
     let pk_bytes = &pk_bytes[..];
     PublicKey::from_slice(pk_bytes).expect("Making PK out of bytes failed!")
 }
@@ -193,7 +198,7 @@ fn ping_from_bytes_test() {
         } else {
             let p = Ping::from_bytes(&bytes).unwrap();
             // `id` should not differ
-            assert_eq!(&u64_to_array(p.id())[..], &bytes[1..PING_SIZE]);
+            assert_eq!(p.id(), NativeEndian::read_u64(&bytes[1..PING_SIZE]));
 
             if bytes[0] == PingType::Req as u8 {
                 assert_eq!(true, p.is_request());
@@ -206,7 +211,8 @@ fn ping_from_bytes_test() {
 
     // just in case
     let mut ping = vec![PingType::Req as u8];
-    ping.extend_from_slice(&u64_to_array(random_u64()));
+    ping.write_u64::<NativeEndian>(random_u64())
+        .expect("Failed to write Ping id!");
     with_bytes(ping.clone());
 
     // make it a response
@@ -325,14 +331,14 @@ fn ip_addr_to_bytes_test() {
         let a6 = Ipv6Addr::new(a, b, c, d, e, f, g, h);
         let ab = IpAddr::V6(a6).to_bytes();
         assert_eq!(16, ab.len());
-        assert_eq!(a, array_to_u16(&[ab[0], ab[1]]));
-        assert_eq!(b, array_to_u16(&[ab[2], ab[3]]));
-        assert_eq!(c, array_to_u16(&[ab[4], ab[5]]));
-        assert_eq!(d, array_to_u16(&[ab[6], ab[7]]));
-        assert_eq!(e, array_to_u16(&[ab[8], ab[9]]));
-        assert_eq!(f, array_to_u16(&[ab[10], ab[11]]));
-        assert_eq!(g, array_to_u16(&[ab[12], ab[13]]));
-        assert_eq!(h, array_to_u16(&[ab[14], ab[15]]));
+        assert_eq!(a, LittleEndian::read_u16(&ab[0..2]));
+        assert_eq!(b, LittleEndian::read_u16(&ab[2..4]));
+        assert_eq!(c, LittleEndian::read_u16(&ab[4..6]));
+        assert_eq!(d, LittleEndian::read_u16(&ab[6..8]));
+        assert_eq!(e, LittleEndian::read_u16(&ab[8..10]));
+        assert_eq!(f, LittleEndian::read_u16(&ab[10..12]));
+        assert_eq!(g, LittleEndian::read_u16(&ab[12..14]));
+        assert_eq!(h, LittleEndian::read_u16(&ab[14..16]));
     }
     quickcheck(with_ipv6 as fn(u64, u64));
 }
@@ -605,8 +611,8 @@ fn packed_node_to_bytes_test_ipv4() {
         assert!(t.to_bytes()[4] == d);
 
         // check whether port matches
-        assert_eq!(&u16_to_array(port.to_be())[..], &u.to_bytes()[5..7]);
-        assert_eq!(&u16_to_array(port.to_be())[..], &t.to_bytes()[5..7]);
+        assert_eq!(port, BigEndian::read_u16(&u.to_bytes()[5..7]));
+        assert_eq!(port, BigEndian::read_u16(&t.to_bytes()[5..7]));
 
         // check whether length matches
         assert!(u.to_bytes().len() == PACKED_NODE_IPV4_SIZE);
@@ -634,27 +640,27 @@ fn packed_node_to_bytes_test_ipv6() {
 
         // check whether IP matches ..
         //  ..with UDP
-        assert_eq!(&u.to_bytes()[1..3], &u16_to_array(a)[..]);
-        assert_eq!(&u.to_bytes()[3..5], &u16_to_array(b)[..]);
-        assert_eq!(&u.to_bytes()[5..7], &u16_to_array(c)[..]);
-        assert_eq!(&u.to_bytes()[7..9], &u16_to_array(d)[..]);
-        assert_eq!(&u.to_bytes()[9..11], &u16_to_array(e)[..]);
-        assert_eq!(&u.to_bytes()[11..13], &u16_to_array(f)[..]);
-        assert_eq!(&u.to_bytes()[13..15], &u16_to_array(g)[..]);
-        assert_eq!(&u.to_bytes()[15..17], &u16_to_array(h)[..]);
+        assert_eq!(LittleEndian::read_u16(&u.to_bytes()[1..3]), a);
+        assert_eq!(LittleEndian::read_u16(&u.to_bytes()[3..5]), b);
+        assert_eq!(LittleEndian::read_u16(&u.to_bytes()[5..7]), c);
+        assert_eq!(LittleEndian::read_u16(&u.to_bytes()[7..9]), d);
+        assert_eq!(LittleEndian::read_u16(&u.to_bytes()[9..11]), e);
+        assert_eq!(LittleEndian::read_u16(&u.to_bytes()[11..13]), f);
+        assert_eq!(LittleEndian::read_u16(&u.to_bytes()[13..15]), g);
+        assert_eq!(LittleEndian::read_u16(&u.to_bytes()[15..17]), h);
         //  ..with TCP
-        assert_eq!(&t.to_bytes()[1..3], &u16_to_array(a)[..]);
-        assert_eq!(&t.to_bytes()[3..5], &u16_to_array(b)[..]);
-        assert_eq!(&t.to_bytes()[5..7], &u16_to_array(c)[..]);
-        assert_eq!(&t.to_bytes()[7..9], &u16_to_array(d)[..]);
-        assert_eq!(&t.to_bytes()[9..11], &u16_to_array(e)[..]);
-        assert_eq!(&t.to_bytes()[11..13], &u16_to_array(f)[..]);
-        assert_eq!(&t.to_bytes()[13..15], &u16_to_array(g)[..]);
-        assert_eq!(&t.to_bytes()[15..17], &u16_to_array(h)[..]);
+        assert_eq!(LittleEndian::read_u16(&t.to_bytes()[1..3]), a);
+        assert_eq!(LittleEndian::read_u16(&t.to_bytes()[3..5]), b);
+        assert_eq!(LittleEndian::read_u16(&t.to_bytes()[5..7]), c);
+        assert_eq!(LittleEndian::read_u16(&t.to_bytes()[7..9]), d);
+        assert_eq!(LittleEndian::read_u16(&t.to_bytes()[9..11]), e);
+        assert_eq!(LittleEndian::read_u16(&t.to_bytes()[11..13]), f);
+        assert_eq!(LittleEndian::read_u16(&t.to_bytes()[13..15]), g);
+        assert_eq!(LittleEndian::read_u16(&t.to_bytes()[15..17]), h);
 
         // check whether port matches
-        assert_eq!(&u16_to_array(port.to_be())[..], &u.to_bytes()[17..19]);
-        assert_eq!(&u16_to_array(port.to_be())[..], &t.to_bytes()[17..19]);
+        assert_eq!(port, BigEndian::read_u16(&u.to_bytes()[17..19]));
+        assert_eq!(port, BigEndian::read_u16(&t.to_bytes()[17..19]));
 
         // check whether length matches
         assert!(u.to_bytes().len() == PACKED_NODE_IPV6_SIZE);
@@ -816,7 +822,7 @@ fn get_nodes_to_bytes_test() {
         let g_bytes = gn.to_bytes();
         let PublicKey(pk_bytes) = gn.pk;
         assert_eq!(&pk_bytes, &g_bytes[..PUBLICKEYBYTES]);
-        assert_eq!(&u64_to_array(gn.id), &g_bytes[PUBLICKEYBYTES..]);
+        assert_eq!(gn.id, NativeEndian::read_u64(&g_bytes[PUBLICKEYBYTES..]));
     }
     quickcheck(with_gn as fn(GetNodes));
 }
@@ -831,8 +837,7 @@ fn get_nodes_from_bytes_test() {
         } else {
             let gn = GetNodes::from_bytes(&bytes).unwrap();
             // ping_id as bytes should match "original" bytes
-            assert_eq!(&bytes[PUBLICKEYBYTES..GET_NODES_SIZE],
-                       &u64_to_array(gn.id));
+            assert_eq!(NativeEndian::read_u64(&bytes[PUBLICKEYBYTES..GET_NODES_SIZE]), gn.id);
 
             let PublicKey(ref pk) = gn.pk;
             assert_eq!(pk, &bytes[..PUBLICKEYBYTES]);
@@ -923,7 +928,7 @@ fn send_nodes_to_bytes_test() {
             len_before += cur_len;
         }
         // ping id should be the same as in request
-        assert_eq!(&u64_to_array(req.id), &sn_bytes[len_before..]);
+        assert_eq!(req.id, NativeEndian::read_u64(&sn_bytes[len_before..]));
     }
     quickcheck(with_nodes as fn(GetNodes, PackedNode, Option<PackedNode>,
                                 Option<PackedNode>, Option<PackedNode>));
@@ -940,7 +945,8 @@ fn send_nodes_from_bytes_test() {
             bytes.extend_from_slice(&node.to_bytes());
         }
         // and ping id
-        bytes.extend_from_slice(&u64_to_array(r_u64));
+        bytes.write_u64::<NativeEndian>(r_u64)
+            .expect("Failed to write Ping id!");
 
         if nodes.len() > 4 || nodes.is_empty() {
             assert_eq!(None, SendNodes::from_bytes(&bytes));
@@ -963,7 +969,8 @@ fn send_nodes_parse_bytes_rest_test() {
             bytes.extend_from_slice(&node.to_bytes());
         }
         // and ping id
-        bytes.extend_from_slice(&u64_to_array(r_u64));
+        bytes.write_u64::<NativeEndian>(r_u64)
+            .expect("Failed to write Ping id!");
         bytes.extend_from_slice(&r_rest);
 
         if nodes.len() <= 4 && !nodes.is_empty() {
@@ -1557,7 +1564,7 @@ fn nat_ping_from_bytes_test() {
             let p = NatPing::from_bytes(&bytes)
                 .expect("De-serialization failed");
 
-            assert_eq!(&u64_to_array(p.id())[..], &bytes[2..NAT_PING_SIZE]);
+            assert_eq!(p.id(), NativeEndian::read_u64(&bytes[2..NAT_PING_SIZE]));
 
             if bytes[1] == PingType::Req as u8 {
                 assert_eq!(true, p.is_request());
@@ -1570,7 +1577,8 @@ fn nat_ping_from_bytes_test() {
 
     // just in case
     let mut ping = vec![NAT_PING_TYPE, PingType::Req as u8];
-    ping.extend_from_slice(&u64_to_array(random_u64()));
+    ping.write_u64::<NativeEndian>(random_u64())
+        .expect("Failed to write Ping id!");
     with_bytes(ping.clone());
 
     // make it a response

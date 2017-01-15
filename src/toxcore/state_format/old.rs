@@ -21,6 +21,7 @@
 //! better will become available.*
 
 use std::default::Default;
+use byteorder::{ByteOrder, BigEndian, LittleEndian, WriteBytesExt};
 
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
@@ -103,7 +104,7 @@ impl FromBytes for SectionKind {
             return parse_error!("Not enough bytes for SectionKind.")
         }
 
-        let num = array_to_u16(&[bytes[0], bytes[1]]).to_le();
+        let num = LittleEndian::read_u16(bytes);
         let result = match num {
             0x01 => SectionKind::NospamKeys,
             0x02 => SectionKind::DHT,
@@ -140,7 +141,10 @@ assert_eq!(vec![255u8, 0], SectionKind::EOF        .to_bytes());
 */
 impl ToBytes for SectionKind {
     fn to_bytes(&self) -> Vec<u8> {
-        u16_to_array((*self as u16).to_le()).to_vec()
+        let mut result = Vec::with_capacity(2);
+        result.write_u16::<LittleEndian>(*self as u16)
+            .expect("Failed to write SectionKind!");
+        result
     }
 }
 
@@ -385,18 +389,18 @@ impl FromBytes for DhtState {
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
         if bytes.len() < DHT_STATE_MIN_SIZE ||
            // check whether beginning of the section matches DHT magic bytes
-           &u32_to_array(DHT_MAGICAL.to_le()) != &bytes[..4] ||
+           LittleEndian::read_u32(bytes) != DHT_MAGICAL ||
            // check DHT section type
-           &u16_to_array(DHT_SECTION_TYPE.to_le()) != &bytes[8..10] ||
-           // check whether yet another magic number matches ;f
-           &u16_to_array(DHT_2ND_MAGICAL.to_le()) != &bytes[10..12] {
+           LittleEndian::read_u16(&bytes[8..10]) != DHT_SECTION_TYPE ||
+           // check whether yet another magic number matches
+           LittleEndian::read_u16(&bytes[10..12]) != DHT_2ND_MAGICAL {
             return parse_error!("Incorect DhtState.")
         } // can I haz yet another magical number?
 
         // length of the whole section
         let section_len = {
-            let nodes = array_to_u32(&[bytes[4], bytes[5], bytes[6], bytes[7]]);
-            let whole_len = u32::from_le(nodes) as usize + DHT_STATE_MIN_SIZE;
+            let nodes = LittleEndian::read_u32(&bytes[4..]);
+            let whole_len = nodes as usize + DHT_STATE_MIN_SIZE;
             // check if it's bigger, since that would be the only thing that
             // could cause panic
             if whole_len > bytes.len() {
@@ -432,7 +436,8 @@ assert_eq!(result, DhtState(vec![]).to_bytes());
 impl ToBytes for DhtState {
     fn to_bytes(&self) -> Vec<u8> {
         let mut result = Vec::with_capacity(DHT_STATE_MIN_SIZE);
-        result.extend_from_slice(&u32_to_array(DHT_MAGICAL.to_le()));
+        result.write_u32::<LittleEndian>(DHT_MAGICAL)
+            .expect("Failed to write DhtState DHT_MAGICAL!");;
 
         let pn_bytes = {
             let mut bytes = Vec::with_capacity(
@@ -444,13 +449,16 @@ impl ToBytes for DhtState {
         };
 
         // add length of serialized `PackedNode`s
-        result.extend_from_slice(&u32_to_array((pn_bytes.len() as u32).to_le()));
+        result.write_u32::<LittleEndian>(pn_bytes.len() as u32)
+            .expect("Failed to write DhtState PackedNode length!");
 
         // section magic number
-        result.extend_from_slice(&u16_to_array(DHT_SECTION_TYPE.to_le()));
+        result.write_u16::<LittleEndian>(DHT_SECTION_TYPE)
+            .expect("Failed to write DhtState DHT_SECTION_TYPE!");
 
         // 2nd magic number
-        result.extend_from_slice(&u16_to_array(DHT_2ND_MAGICAL.to_le()));
+        result.write_u16::<LittleEndian>(DHT_2ND_MAGICAL)
+            .expect("Failed to write DhtState DHT_2ND_MAGICAL!");
 
         // and `PackedNode`s
         result.extend_from_slice(&pn_bytes);
@@ -696,8 +704,7 @@ impl FromBytes for FriendState {
         fn get_bytes(bytes: &[u8], len: usize, pad: usize)
             -> ParseResult<Vec<u8>>
         {
-            let str_len = u16::from_be(array_to_u16(
-                        &[bytes[len+pad], bytes[len+pad+1]])) as usize;
+            let str_len = BigEndian::read_u16(&bytes[len+pad..len+pad+2]) as usize;
             if str_len > len {
                 return parse_error!("Value demands {} bytes when it is \
                     supposed to take {}!", str_len, len)
@@ -723,9 +730,7 @@ impl FromBytes for FriendState {
         let bytes = &bytes[3..]; // padding
         let Parsed(nospam, bytes) = try!(NoSpam::parse_bytes(&bytes));
 
-        let seen = u64::from_le(array_to_u64(&[
-            bytes[0], bytes[1], bytes[2], bytes[3],
-            bytes[4], bytes[5], bytes[6], bytes[7]]));
+        let seen = LittleEndian::read_u64(bytes);
 
         let bytes = &bytes[8..];
 
@@ -753,8 +758,6 @@ impl ToBytes for FriendState {
             vec.append(&mut to_add);
         }
 
-        let len_to_u16be = |len| u16_to_array((len as u16).to_be());
-
         let mut result = Vec::with_capacity(FRIENDSTATEBYTES);
 
         // friend status
@@ -768,18 +771,21 @@ impl ToBytes for FriendState {
         // padding
         result.push(0);
         // .. and its length
-        result.extend_from_slice(&len_to_u16be(self.fr_msg.len()));
+        result.write_u16::<BigEndian>(self.fr_msg.len() as u16)
+            .expect("Failed to write FriendState message length!");
 
         // name and its length
         ext_vec(&mut result, &self.name.0, NAME_LEN);
-        result.extend_from_slice(&len_to_u16be(self.name.0.len()));
+        result.write_u16::<BigEndian>(self.name.0.len() as u16)
+            .expect("Failed to write FriendState name length!");
 
         // status msg ..
         ext_vec(&mut result, &self.status_msg.0, STATUS_MSG_LEN);
         // padding
         result.push(0);
         // .. and its length
-        result.extend_from_slice(&len_to_u16be(self.status_msg.0.len()));
+        result.write_u16::<BigEndian>(self.status_msg.0.len() as u16)
+            .expect("Failed to write FriendState padding length!");
 
         // UserStatus
         result.push(self.user_status as u8);
@@ -791,7 +797,8 @@ impl ToBytes for FriendState {
         result.extend_from_slice(&self.nospam.0);
 
         // last seen
-        result.extend_from_slice(&u64_to_array(self.last_seen.to_le()));
+        result.write_u64::<LittleEndian>(self.last_seen)
+            .expect("Failed to write FriendState last seen!");
 
         result
     }
@@ -1174,8 +1181,7 @@ impl FromBytes for SectionData {
         }
 
         let data_len = {
-            let num = u32::from_le(array_to_u32(
-                &[bytes[0], bytes[1], bytes[2], bytes[3]])) as usize;
+            let num = LittleEndian::read_u32(bytes) as usize;
             if num > (bytes.len() - SECTION_MIN_LEN) {
                 return parse_error!("Parsing failed: there are not enough \
                 bytes in section to parse!")
@@ -1432,7 +1438,8 @@ impl ToBytes for State {
             let bytes = sect.to_bytes();
             let mut res = Vec::with_capacity(SECTION_MIN_LEN + bytes.len());
             // length of the section goes first
-            res.extend_from_slice(&u32_to_array((bytes.len() as u32).to_le()));
+            res.write_u32::<LittleEndian>(bytes.len() as u32)
+                .expect("Failed to write State length!");
             // knowing what's the section is useful
             res.extend_from_slice(&S::kind().to_bytes());
             // lets make it *magical*
@@ -1553,10 +1560,7 @@ fn friend_state_parse_bytes_test() {
         { // friend request message lenght check
             let mut bytes = fs_bytes.clone();
             for i in (REQUEST_MSG_LEN+1)..2500 { // too slow with bigger ranges
-                let invalid = u16_to_array((i as u16).to_be());
-                for pos in 0..2 {
-                    bytes[FR_MSG_LEN_POS+pos] = invalid[pos];
-                }
+                BigEndian::write_u16(&mut bytes[FR_MSG_LEN_POS..], i as u16);
                 assert_error(&bytes, &format!("Value demands {} bytes \
                     when it is supposed to take {}!", i, REQUEST_MSG_LEN));
             }
@@ -1566,10 +1570,7 @@ fn friend_state_parse_bytes_test() {
         { // friend name lenght check
             let mut bytes = fs_bytes.clone();
             for i in (NAME_LEN+1)..2500 { // too slow with bigger ranges
-                let invalid = u16_to_array((i as u16).to_be());
-                for pos in 0..2 {
-                    bytes[NAME_LEN_POS+pos] = invalid[pos];
-                }
+                BigEndian::write_u16(&mut bytes[NAME_LEN_POS..], i as u16);
                 assert_error(&bytes, &format!("Value demands {} bytes \
                     when it is supposed to take {}!", i, NAME_LEN));
             }
@@ -1580,10 +1581,7 @@ fn friend_state_parse_bytes_test() {
         { // friend name lenght check
             let mut bytes = fs_bytes.clone();
             for i in (STATUS_MSG_LEN+1)..2500 { // too slow with bigger ranges
-                let invalid = u16_to_array((i as u16).to_be());
-                for pos in 0..2 {
-                    bytes[STATUS_MSG_LEN_POS+pos] = invalid[pos];
-                }
+                BigEndian::write_u16(&mut bytes[STATUS_MSG_LEN_POS..], i as u16);
                 assert_error(&bytes, &format!("Value demands {} bytes \
                     when it is supposed to take {}!", i, STATUS_MSG_LEN));
             }
@@ -1757,8 +1755,10 @@ fn section_data_into_sect_mult_test_random() {
 fn section_data_parse_bytes_test() {
     fn rand_b_sect(kind: SectionKind, bytes: &[u8]) -> Vec<u8> {
         let mut b_sect = Vec::with_capacity(bytes.len() + SECTION_MIN_LEN);
-        b_sect.extend_from_slice(&u32_to_array((bytes.len() as u32).to_le()));
-        b_sect.extend_from_slice(&u16_to_array((kind as u16).to_le()));
+        b_sect.write_u32::<LittleEndian>(bytes.len() as u32)
+            .expect("Failed to write Section length!");
+        b_sect.write_u16::<LittleEndian>(kind as u16)
+            .expect("Failed to write Section kind!");
         b_sect.extend_from_slice(SECTION_MAGIC);
         b_sect.extend_from_slice(bytes);
         b_sect
