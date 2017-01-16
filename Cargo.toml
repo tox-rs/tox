@@ -8,12 +8,12 @@ authors = ["Zetok Zalbavar <zetok@openmailbox.org>"]
 clippy = { version = "*", optional = true }
 log = "0.3"
 num-traits = "0.1"
-sodiumoxide = "0.0.12"
+sodiumoxide = "0.0.13"
 mio = { git = "https://github.com/carllerche/mio", rev = "bf5de4d51ee00f140c4fcbd73b4d53717a3ac9e3" }
 byteorder = "1"
 
 [dev-dependencies]
-quickcheck = "0.3"
+quickcheck = "0.4"
 rand = "0.3"
-regex = "0.1"
+regex = "0.2"
 rustc-serialize = "0.3"
