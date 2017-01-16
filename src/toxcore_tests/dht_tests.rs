@@ -417,13 +417,13 @@ impl Arbitrary for PackedNode {
             let addr = Ipv4Addr::new(g.gen(), g.gen(), g.gen(), g.gen());
             let saddr = SocketAddrV4::new(addr, g.gen());
 
-            return PackedNode::new(g.gen(), SocketAddr::V4(saddr), &pk);
+            PackedNode::new(g.gen(), SocketAddr::V4(saddr), &pk)
         } else {
             let addr = Ipv6Addr::new(g.gen(), g.gen(), g.gen(), g.gen(),
                                      g.gen(), g.gen(), g.gen(), g.gen());
             let saddr = SocketAddrV6::new(addr, g.gen(), 0, 0);
 
-            return PackedNode::new(g.gen(), SocketAddr::V6(saddr), &pk);
+            PackedNode::new(g.gen(), SocketAddr::V6(saddr), &pk)
         }
     }
 }
@@ -711,7 +711,7 @@ fn packed_nodes_from_bytes_test_length_short() {
     fn fully_random(pn: PackedNode) {
         let pnb = pn.to_bytes();
         assert_eq!(None, PackedNode::from_bytes(&pnb[..(pnb.len() - 1)]));
-        if let None = IpType::from_bytes(&pnb[1..]) {
+        if IpType::from_bytes(&pnb[1..]).is_none() {
             assert_eq!(None, PackedNode::from_bytes(&pnb[1..]));
         }
     }

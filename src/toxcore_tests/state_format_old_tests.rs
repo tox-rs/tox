@@ -54,7 +54,7 @@ fn section_kind_parse_bytes_test() {
     // test only for failure, since success is tested in docs test
     fn with_bytes(bytes: Vec<u8>) -> TestResult {
         fn assert_kind(b: &[u8], k: SectionKind) {
-            let Parsed(kind, _) = SectionKind::parse_bytes(&b)
+            let Parsed(kind, _) = SectionKind::parse_bytes(b)
                 .expect(&format!("Failed to parse as {:?}!", k));
             assert_eq!(k, kind);
         }
