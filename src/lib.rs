@@ -36,6 +36,7 @@ extern crate rustc_serialize;
 use rustc_serialize::hex::FromHex;
 
 extern crate tox;
+use std::io::ErrorKind;
 use tox::toxcore::binary_io::*;
 use tox::toxcore::crypto_core::*;
 use tox::toxcore::dht::*;
@@ -43,7 +44,7 @@ use tox::toxcore::network::*;
 
 fn main() {
     // get PK bytes from some "random" bootstrap node (Impyy's)
-    let bootstrap_pk_bytes = FromHex::from_hex("788236D34978D1D5BD822F0A5BEBD2C53C64CC31CD3149350EE27D4D9A2F9B6B").unwrap();
+    let bootstrap_pk_bytes = FromHex::from_hex("6FC41E2BD381D37E9748FC0E0328CE086AF9598BECC8FEB7DDF2E440475F300E").unwrap();
     // create PK from bytes
     let bootstrap_pk = PublicKey::from_slice(&bootstrap_pk_bytes).unwrap();
 
@@ -70,8 +71,8 @@ fn main() {
         .expect("Failed to bind to socket!");
 
     // send DhtPacket via socket to the node (Imppy's)
-    let sent_bytes = socket.send_to(&dhtpacket, &"178.62.250.138:33445".parse().unwrap())
-        .expect("Failed to send bytes!").unwrap();
+    let sent_bytes = socket.send_to(&dhtpacket, &"51.15.37.145:33445".parse().unwrap())
+        .expect("Failed to send bytes!");
 
     println!("Sent {} bytes of Ping request to the bootstrap node", sent_bytes);
     // since data was sent, now receive response – for that, first prepare
@@ -82,12 +83,12 @@ fn main() {
     let (bytes, sender);
     loop {
         match socket.recv_from(&mut buf) {
-            Ok(Some((b, s))) => {
+            Ok((b, s)) => {
                 bytes = b;
                 sender = s;
                 break;
             },
-            Ok(None) => continue,
+            Err(ref e) if e.kind() == ErrorKind::WouldBlock => continue,
             Err(e) => {
                 panic!("Failed to receive data from socket: {}", e);
             }
