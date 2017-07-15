@@ -24,8 +24,8 @@
 use std::str::FromStr;
 use std::thread;
 
-use toxcore::crypto_core::*;
 use toxcore::binary_io::*;
+use toxcore::crypto_core::*;
 
 use quickcheck::quickcheck;
 
@@ -303,13 +303,11 @@ fn increment_nonce_number_test_0xff0000_plus_0x011000() {
 fn public_key_parse_bytes_test() {
     fn with_bytes(bytes: Vec<u8>) {
         if bytes.len() < PUBLICKEYBYTES {
-            let _ = PublicKey::parse_bytes(&bytes)
-                .err()
-                .expect("PublicKey::parse_bytes should fail on short input.");
+            assert!(PublicKey::parse_bytes(&bytes).is_incomplete());
             return
         }
 
-        let Parsed(PublicKey(pk_bytes), rest) =
+        let (rest, PublicKey(pk_bytes)) =
             PublicKey::parse_bytes(&bytes)
                 .expect("PublicKey::parse_bytes should parse any long enough input.");
 
@@ -327,13 +325,11 @@ fn public_key_parse_bytes_test() {
 fn secret_key_parse_bytes_test() {
     fn with_bytes(bytes: Vec<u8>) {
         if bytes.len() < SECRETKEYBYTES {
-            let _ = SecretKey::parse_bytes(&bytes)
-                .err()
-                .expect("SecretKey::parse_bytes should fail on short input.");
+            assert!(SecretKey::parse_bytes(&bytes).is_incomplete());
             return
         }
 
-        let Parsed(SecretKey(sk_bytes), rest) =
+        let (rest, SecretKey(sk_bytes)) =
             SecretKey::parse_bytes(&bytes)
                 .expect("SecretKey::parse_bytes should parse any long enough input.");
 
@@ -350,13 +346,11 @@ fn secret_key_parse_bytes_test() {
 fn nonce_parse_bytes_test() {
     fn with_bytes(bytes: Vec<u8>) {
         if bytes.len() < NONCEBYTES {
-            let _ = Nonce::parse_bytes(&bytes)
-                .err()
-                .expect("Nonce::parse_bytes should fail on short input.");
+            assert!(Nonce::parse_bytes(&bytes).is_incomplete());
             return
         }
 
-        let Parsed(Nonce(sk_bytes), rest) =
+        let (rest, Nonce(sk_bytes)) =
             Nonce::parse_bytes(&bytes)
                 .expect("Nonce::parse_bytes should parse any long enough input.");
 

@@ -101,7 +101,7 @@ fn user_status_parse_bytes_rest_test() {
         let mut bytes = vec![sk as u8];
         bytes.extend_from_slice(&r_rest);
 
-        let Parsed(_, rest) = PacketKind::parse_bytes(&bytes)
+        let (rest, _) = PacketKind::parse_bytes(&bytes)
             .expect("PacketKind parsing failure.");
         assert_eq!(&r_rest[..], rest);
     }

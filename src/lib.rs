@@ -125,6 +125,8 @@ extern crate byteorder;
 extern crate futures;
 #[macro_use]
 extern crate log;
+#[macro_use]
+extern crate nom;
 // for Zero trait
 extern crate num_traits;
 extern crate sodiumoxide;

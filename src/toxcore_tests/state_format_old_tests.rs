@@ -20,6 +20,7 @@
 //! Tests for old state format module.
 
 use byteorder::{LittleEndian, WriteBytesExt};
+use nom::IResult;
 
 use quickcheck::{Arbitrary, Gen, TestResult, quickcheck};
 
@@ -54,7 +55,7 @@ fn section_kind_parse_bytes_test() {
     // test only for failure, since success is tested in docs test
     fn with_bytes(bytes: Vec<u8>) -> TestResult {
         fn assert_kind(b: &[u8], k: SectionKind) {
-            let Parsed(kind, _) = SectionKind::parse_bytes(b)
+            let (_, kind) = SectionKind::parse_bytes(b)
                 .expect(&format!("Failed to parse as {:?}!", k));
             assert_eq!(k, kind);
         }
@@ -100,7 +101,7 @@ fn section_kind_parse_bytes_rest_test() {
             .expect("Failed to write SectionKind!");
         bytes.extend_from_slice(&r_rest);
 
-        let Parsed(_, rest) = SectionKind::parse_bytes(&bytes)
+        let (rest, _) = SectionKind::parse_bytes(&bytes)
             .expect("SectionKind parsing failure.");
         assert_eq!(&r_rest[..], rest);
     }
@@ -180,7 +181,7 @@ fn nospam_keys_from_bytes_test() {
 fn nospam_keys_parse_bytes_rest_test() {
     // FIXME usee NospamKeys::to_bytes after implementation
     fn with_bytes(bytes: Vec<u8>) -> TestResult {
-        if let Ok(Parsed(_, rest)) = NospamKeys::parse_bytes(&bytes) {
+        if let IResult::Done(rest, _) = NospamKeys::parse_bytes(&bytes) {
             assert_eq!(&bytes[NOSPAMKEYSBYTES..], rest);
             TestResult::passed()
         } else {
@@ -255,7 +256,7 @@ fn dht_state_parse_bytes_rest_test() {
         serialized.extend_from_slice(&pns_bytes);
         serialized.extend_from_slice(&r_rest);
 
-        let Parsed(_, rest) =
+        let (rest, _) =
             DhtState::parse_bytes(&serialized)
                 .expect("DhtState parsing failure.");
 
@@ -299,7 +300,7 @@ fn friend_status_parse_bytes_rest_test() {
         let mut bytes = vec![sk as u8];
         bytes.extend_from_slice(&r_rest);
 
-        let Parsed(_, rest) = FriendStatus::parse_bytes(&bytes)
+        let (rest, _) = FriendStatus::parse_bytes(&bytes)
             .expect("FriendStatus parsing failure.");
         assert_eq!(&r_rest[..], rest);
     }
@@ -331,27 +332,18 @@ fn friends_add_friend_test() {
 // Friends::parse_bytes()
 #[test]
 fn friends_parse_bytes_test() {
-    fn with_friend_state(fs: Vec<FriendState>, randb: Vec<u8>) {
+    fn with_friend_state(fs: Vec<FriendState>) {
         let mut bytes = Vec::new();
         for fr in &fs {
             bytes.append(&mut fr.to_bytes());
         }
 
-        { // just the needed bytes, no more, no less
-            let Parsed(friends, b) = Friends::parse_bytes(&bytes).expect("");
-            assert_eq!(&fs, &friends.0);
-            assert_eq!(&[] as &[u8], b); // empty
-        }
-
-        { // with random bytes appended
-            let mut bytes = bytes.clone();
-            bytes.extend_from_slice(&randb);
-            let Parsed(friends, b) = Friends::parse_bytes(&bytes).expect("");
-            assert_eq!(&fs, &friends.0);
-            assert_eq!(randb.as_slice(), b);
-        }
+        // just the needed bytes, no more, no less
+        let (b, friends) = Friends::parse_bytes(&bytes).expect("");
+        assert_eq!(&fs, &friends.0);
+        assert_eq!(&[] as &[u8], b); // empty
     }
-    quickcheck(with_friend_state as fn(Vec<FriendState>, Vec<u8>));
+    quickcheck(with_friend_state as fn(Vec<FriendState>));
 }
 
 // Friends::to_bytes()
@@ -412,18 +404,14 @@ fn user_status_parse_bytes_test() {
 
     { // empty
         assert_eq!(None, UserStatus::from_bytes(&[]));
-        let debug = format!("{:?}", UserStatus::parse_bytes(&[]).unwrap_err());
-        let err_msg = "Not enough bytes for UserStatus.";
-        assert!(debug.contains(err_msg));
+        assert!(UserStatus::parse_bytes(&[]).is_incomplete());
     }
 
     // invalid
     for i in 3..256 {
         let bytes = [i as u8];
         assert_eq!(None, UserStatus::from_bytes(&bytes));
-        let debug = format!("{:?}", UserStatus::parse_bytes(&bytes).unwrap_err());
-        let err_msg = format!("Unknown UserStatus: {}.", i);
-        assert!(debug.contains(&err_msg));
+        assert!(UserStatus::parse_bytes(&bytes).is_err());
     }
 }
 
@@ -433,7 +421,7 @@ fn user_status_parse_bytes_test_rest() {
         let mut bytes = vec![sk as u8];
         bytes.extend_from_slice(&r_rest);
 
-        let Parsed(_, rest) = UserStatus::parse_bytes(&bytes)
+        let (rest, _) = UserStatus::parse_bytes(&bytes)
             .expect("UserStatus parsing failure.");
         assert_eq!(&r_rest[..], rest);
     }
@@ -474,7 +462,7 @@ fn name_parse_bytes_test() {
 
         for n in 0..bytes.len() {
             let bytes = &bytes[..n];
-            let Parsed(name, remaining_bytes) = Name::parse_bytes(bytes)
+            let (remaining_bytes, name) = Name::parse_bytes(bytes)
                 .expect("Name::parse_bytes can't fail!");
 
             if n <= NAME_LEN {
@@ -518,7 +506,7 @@ fn status_message_parse_bytes_test() {
 
         for n in 0..bytes.len() {
             let bytes = &bytes[..n];
-            let Parsed(name, remaining_bytes) = StatusMsg::parse_bytes(bytes)
+            let (remaining_bytes, name) = StatusMsg::parse_bytes(bytes)
                 .expect("StatusMsg::parse_bytes can't fail!");
 
             if n <= STATUS_MSG_LEN {

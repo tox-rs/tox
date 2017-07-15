@@ -26,7 +26,6 @@ use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 use toxcore::toxid::*;
 
-
 // NoSpam::
 
 #[cfg(test)]
@@ -92,7 +91,7 @@ fn no_spam_from_bytes_test() {
 fn no_spam_parse_bytes_rest_test() {
     fn with_bytes(bytes: Vec<u8>) {
         if bytes.len() >= NOSPAMBYTES {
-            let Parsed(_, rest) = NoSpam::parse_bytes(&bytes)
+            let (rest, _) = NoSpam::parse_bytes(&bytes)
                             .expect("Failed to get NoSpam!");
             assert_eq!(&bytes[NOSPAMBYTES..], rest);
         }
@@ -159,7 +158,7 @@ fn tox_id_from_bytes_test() {
 fn tox_id_parse_bytes_rest_test() {
     fn with_bytes(bytes: Vec<u8>) {
         if bytes.len() >= TOXIDBYTES {
-            let Parsed(_, rest) = ToxId::parse_bytes(&bytes)
+            let (rest, _) = ToxId::parse_bytes(&bytes)
                             .expect("Failed to get ToxId!");
             assert_eq!(&bytes[TOXIDBYTES..], rest);
         }

@@ -185,46 +185,8 @@ pub fn increment_nonce_number(mut nonce: &mut Nonce, num: usize) {
     }
 }
 
-impl FromBytes for PublicKey {
-    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
-        debug!(target: "PublicKey", "Creating PublicKey from bytes.");
-        trace!(target: "PublicKey", "Bytes: {:?}", bytes);
+from_bytes!(PublicKey, map_opt!(take!(PUBLICKEYBYTES), PublicKey::from_slice));
 
-        if bytes.len() < PUBLICKEYBYTES {
-            return parse_error!("Not enough bytes for PublicKey.");
-        }
+from_bytes!(SecretKey, map_opt!(take!(SECRETKEYBYTES), SecretKey::from_slice));
 
-        let pk = PublicKey::from_slice(&bytes[..PUBLICKEYBYTES]).unwrap();
-
-        Ok(Parsed(pk, &bytes[PUBLICKEYBYTES..]))
-    }
-}
-
-impl FromBytes for SecretKey {
-    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
-        debug!(target: "SecretKey", "Creating SecretKey from bytes.");
-
-        if bytes.len() < SECRETKEYBYTES {
-            return parse_error!("Not enough bytes for SecretKey.");
-        }
-
-        let pk = SecretKey::from_slice(&bytes[..SECRETKEYBYTES]).unwrap();
-
-        Ok(Parsed(pk, &bytes[SECRETKEYBYTES..]))
-    }
-}
-
-impl FromBytes for Nonce {
-    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
-        debug!(target: "Nonce", "Creating Nonce from bytes.");
-        trace!(target: "Nonce", "Bytes: {:?}", bytes);
-
-        if bytes.len() < NONCEBYTES {
-            return parse_error!("Not enough bytes for Nonce.");
-        }
-
-        let nonce = Nonce::from_slice(&bytes[..NONCEBYTES]).unwrap();
-
-        Ok(Parsed(nonce, &bytes[NONCEBYTES..]))
-    }
-}
+from_bytes!(Nonce, map_opt!(take!(NONCEBYTES), Nonce::from_slice));

@@ -32,8 +32,7 @@ the resulting bytes are in fact due to original being appended with `0`s.
 #[test]
 fn test_state_format_to_and_from_bytes() {
     let bytes = include_bytes!("state-format-old-data/profile-with-contacts.tox");
-    assert!(State::is_state(bytes));
-    let profile_b = State::from_bytes(bytes).expect("Works.").to_bytes();
+    let profile_b = State::from_bytes(bytes).unwrap().to_bytes();
     assert_eq!(&bytes[..profile_b.len()], profile_b.as_slice());
     // c-toxcore appends `0`s after EOF because reasons
     for b in &bytes[profile_b.len()..] {

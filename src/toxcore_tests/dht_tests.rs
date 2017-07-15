@@ -189,7 +189,7 @@ macro_rules! tests_for_pings {
                 bytes.extend_from_slice(&p.to_bytes());
                 bytes.extend_from_slice(&r_rest);
 
-                let Parsed(_, rest) = $p::parse_bytes(&bytes).unwrap();
+                let (rest, _) = $p::parse_bytes(&bytes).unwrap();
                 assert_eq!(&r_rest[..], rest);
             }
             quickcheck(with_bytes as fn($p, Vec<u8>));
@@ -253,7 +253,7 @@ fn ip_type_parse_bytes_rest_test() {
         let mut bytes = vec![it as u8];
         bytes.extend_from_slice(&r_rest);
 
-        let Parsed(_, rest) = IpType::parse_bytes(&bytes)
+        let (rest, _) = IpType::parse_bytes(&bytes)
             .expect("IpType parsing failure.");
         assert_eq!(&r_rest[..], rest);
     }
@@ -358,11 +358,11 @@ fn ip_addr_parse_bytes_rest_test() {
 
         let rest = match ip_addr {
             IpAddr::V4(_) => {
-                let Parsed(_, rest) = Ipv4Addr::parse_bytes(&bytes).unwrap();
+                let (rest, _) = Ipv4Addr::parse_bytes(&bytes).unwrap();
                 rest
             },
             IpAddr::V6(_) => {
-                let Parsed(_, rest) = Ipv6Addr::parse_bytes(&bytes).unwrap();
+                let (rest, _) = Ipv6Addr::parse_bytes(&bytes).unwrap();
                 rest
             }
         };
@@ -471,11 +471,8 @@ fn packed_node_parse_bytes_test_port() {
     fn with_pn(pn: PackedNode) {
         let bytes = &pn.to_bytes()[..];
         let bytes = &bytes[..bytes.len() - PUBLICKEYBYTES];
-        let err_1 = PackedNode::parse_bytes(&bytes[..bytes.len() - 1]);
-        let err_2 = PackedNode::parse_bytes(&bytes[..bytes.len() - 2]);
-        let err_msg = "Not enough bytes for port.";
-        assert!(format!("{:?}", err_1.unwrap_err()).contains(&err_msg));
-        assert!(format!("{:?}", err_2.unwrap_err()).contains(&err_msg));
+        assert!(PackedNode::parse_bytes(&bytes[..bytes.len() - 1]).is_incomplete());
+        assert!(PackedNode::parse_bytes(&bytes[..bytes.len() - 2]).is_incomplete());
     }
     quickcheck(with_pn as fn(PackedNode));
 }
@@ -497,7 +494,7 @@ fn packed_node_parse_bytes_multiple_test() {
         }
         bytes.extend_from_slice(&expected_rest);
 
-        let Parsed(nodes2, rest) = PackedNode::parse_bytes_multiple(&bytes).unwrap();
+        let (rest, nodes2) = PackedNode::parse_bytes_multiple(&bytes).unwrap();
 
         assert_eq!(nodes.len(), nodes2.len());
         assert_eq!(nodes, nodes2);
@@ -519,8 +516,8 @@ fn packed_node_parse_bytes_multiple_n_test() {
             }
             bytes.extend_from_slice(&random_rest);
 
-            let Parsed(nodes2, rest) =
-                PackedNode::parse_bytes_multiple_n(nodes.len(), &bytes)
+            let (rest, nodes2) =
+                PackedNode::parse_bytes_multiple_n(&bytes, nodes.len())
                     .unwrap();
 
             assert_eq!(nodes.len(), nodes2.len());
@@ -537,8 +534,7 @@ fn packed_node_parse_bytes_multiple_n_test() {
             bytes.push(0); // Incorrect IpType
             bytes.extend_from_slice(&random_rest);
 
-            assert!(PackedNode::parse_bytes_multiple_n(nodes.len() + 1, &bytes)
-                    .ok().is_none());
+            assert!(PackedNode::parse_bytes_multiple_n(&bytes, nodes.len() + 1).is_err());
         }
 
         // should not parse too many nodes
@@ -554,8 +550,8 @@ fn packed_node_parse_bytes_multiple_n_test() {
             expected_rest.extend_from_slice(&random_rest);
 
 
-            let Parsed(nodes2, rest) =
-                PackedNode::parse_bytes_multiple_n(nodes.len() - 1, &bytes)
+            let (rest, nodes2) =
+                PackedNode::parse_bytes_multiple_n(&bytes, nodes.len() - 1)
                     .expect("Nodes parsing failed.");
 
             assert_eq!(nodes.len() - 1, nodes2.len());
@@ -771,7 +767,7 @@ fn packed_nodes_parse_bytes_test_length_too_long() {
         vec.extend_from_slice(&pn.to_bytes()[..]);
         vec.extend_from_slice(&r_u8);
 
-        let Parsed(result, rest) = PackedNode::parse_bytes(&vec[..])
+        let (rest, result) = PackedNode::parse_bytes(&vec[..])
             .expect("PackedNode parsing failure.");
         assert_eq!(pn, result);
         assert_eq!(&r_u8[..], rest);
@@ -870,7 +866,7 @@ fn get_nodes_from_bytes_test() {
 fn get_nodes_parse_bytes_rest_test() {
     fn with_bytes(bytes: Vec<u8>) {
         if bytes.len() >= GET_NODES_SIZE {
-            let Parsed(_, rest) = GetNodes::parse_bytes(&bytes)
+            let (rest, _) = GetNodes::parse_bytes(&bytes)
                 .expect("GetNodes parsing failed.");
             assert_eq!(rest, &bytes[GET_NODES_SIZE..]);
         }
@@ -988,7 +984,7 @@ fn send_nodes_parse_bytes_rest_test() {
         bytes.extend_from_slice(&r_rest);
 
         if nodes.len() <= 4 && !nodes.is_empty() {
-            let Parsed(_, rest) = SendNodes::parse_bytes(&bytes)
+            let (rest, _) = SendNodes::parse_bytes(&bytes)
                 .unwrap();
             assert_eq!(&r_rest[..], rest);
         }
@@ -1161,7 +1157,7 @@ fn dht_packet_parse_bytes_rest_test() {
         bytes.extend_from_slice(&p.to_bytes());
         bytes.extend_from_slice(&r_rest);
 
-        let Parsed(_, rest) = DhtPacket::parse_bytes(&bytes)
+        let (rest, _) = DhtPacket::parse_bytes(&bytes)
             .expect("DhtPacket parsing failed.");
         assert!(rest.is_empty()); // all remaining bytes are in payload
     }
@@ -1636,7 +1632,7 @@ macro_rules! impls_tests_for_nat_pings {
                 bytes.extend_from_slice(&np.to_bytes());
                 bytes.extend_from_slice(&r_rest);
 
-                let Parsed(_, rest) = $np::parse_bytes(&bytes)
+                let (rest, _) = $np::parse_bytes(&bytes)
                     .unwrap();
                 assert_eq!(&r_rest[..], rest);
             }
