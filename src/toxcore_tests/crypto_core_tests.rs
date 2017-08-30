@@ -47,8 +47,15 @@ fn crypto_init_test() {
             }
         });
     }
-    quickcheck(with_threads as fn(u8));
-    with_threads(255);
+
+    // apparently hundreds of threads can cause OOM on appveyor
+    #[cfg(not(target_os = "windows"))]
+    {
+        quickcheck(with_threads as fn(u8));
+        with_threads(255);
+    }
+    #[cfg(target_os = "windows")]
+    with_threads(32);
 }
 
 
