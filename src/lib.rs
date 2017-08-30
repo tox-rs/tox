@@ -70,8 +70,14 @@ fn main() {
     let socket = bind_udp("::".parse().unwrap(), 33445..33546)
         .expect("Failed to bind to socket!");
 
-    // send DhtPacket via socket to the node (Imppy's)
-    let sent_bytes = socket.send_to(&dhtpacket, &"51.15.37.145:33445".parse().unwrap())
+    // special action required for windows, otherwise it would fail
+    // with error 10035
+    // connect to the node (Imppy's)
+    socket.connect("51.15.37.145:33445".parse().unwrap())
+        .expect("Failed to set socket's destination");
+
+    // send DhtPacket via socket
+    let sent_bytes = socket.send(&dhtpacket)
         .expect("Failed to send bytes!");
 
     println!("Sent {} bytes of Ping request to the bootstrap node", sent_bytes);
