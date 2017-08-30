@@ -15,6 +15,9 @@ addons:
 os:
   - linux
 
+env:
+  - RUST_BACKTRACE=1
+
 branches:
   except:
     - test
