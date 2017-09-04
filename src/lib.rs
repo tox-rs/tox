@@ -30,7 +30,7 @@ nodes by sending [`GetNodes`](./toxcore/dht/struct.GetNodes.html) or request
 
 To request a ping response:
 
-```
+```norun – fix after migrating to tokio-core
 // to get bytes from PK in hex and to make PK from them
 extern crate rustc_serialize;
 use rustc_serialize::hex::FromHex;
@@ -70,8 +70,6 @@ fn main() {
     let socket = bind_udp("::".parse().unwrap(), 33445..33546)
         .expect("Failed to bind to socket!");
 
-    // special action required for windows, otherwise it would fail
-    // with error 10035
     // connect to the node (Imppy's)
     socket.connect("51.15.37.145:33445".parse().unwrap())
         .expect("Failed to set socket's destination");
@@ -134,11 +132,11 @@ fn main() {
 
 #[macro_use]
 extern crate log;
-extern crate mio;
 // for Zero trait
 extern crate num_traits;
 extern crate sodiumoxide;
 extern crate byteorder;
+extern crate tokio_core;
 
 
 // TODO: refactor macros

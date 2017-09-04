@@ -1,5 +1,5 @@
 /*
-    Copyright © 2016 Zetok Zalbavar <zexavexxe@gmail.com>
+    Copyright © 2016-2017 Zetok Zalbavar <zexavexxe@gmail.com>
 
     This file is part of Tox.
 
@@ -21,8 +21,6 @@
 // ↓ FIXME expand doc
 //! Networking part of the toxcore.
 
-// TODO: rewrite using tokio-core
-
 // TODO: separate stuff managing DHT from network
 //       proper implementation of DHT should expose an interface that network
 //       implements
@@ -34,7 +32,9 @@ use std::io::{ self, ErrorKind };
 use std::ops::{ Range, RangeFrom, RangeTo, RangeFull };
 use std::net::{ IpAddr, Ipv6Addr, SocketAddr, ToSocketAddrs };
 use std::collections::HashMap;
-use mio::net::UdpSocket;
+
+use tokio_core::net::UdpSocket;
+use tokio_core::reactor::Handle;
 
 use super::crypto_core::crypto_init;
 
@@ -84,24 +84,21 @@ impl NetworkingCore {
 
       - binding to IP address and every port in supplied range fails
       - setting broadcast on socket fails
-
-    ```
-    use tox::toxcore::network::NetworkingCore;
-
-    NetworkingCore::new("::".parse().unwrap(), 33445..33545).unwrap();
-    ```
     */
-    pub fn new<R: Into<PortRange<u16>>>(ip: IpAddr, port_range: R) -> io::Result<NetworkingCore> {
+    pub fn new<R>(ip: IpAddr, port_range: R, handle: &Handle) -> io::Result<NetworkingCore>
+        where R: Into<PortRange<u16>>
+    {
         let PortRange(port_range) = port_range.into();
 
         // TODO: network shouldn't fail due to crypto, remove this from network
         //       and put in more fitting place
         if !crypto_init() {
-            return Err(io::Error::new(ErrorKind::Other, "Startup error."));
+            return Err(io::Error::new(ErrorKind::Other,
+                        "Crypto initialization failed."));
         }
 
         let sock = try!(
-            bind_udp(ip, port_range)
+            bind_udp(ip, port_range, handle)
                 .ok_or_else(|| io::Error::new(ErrorKind::AddrInUse, "Addr/Port in use."))
         );
 
@@ -125,23 +122,6 @@ impl NetworkingCore {
     }
 
     /** Function to call when packet beginning with byte is received.
-
-    ```
-    # use std::rc::Rc;
-    # use std::any::Any;
-    # use std::cell::RefCell;
-    # use std::net::SocketAddr;
-    # use tox::toxcore::network::NetworkingCore;
-    # let mut net = NetworkingCore::new("::".parse().unwrap(), ..).unwrap();
-    fn callback(num: Rc<RefCell<Any>>, _: SocketAddr, _: &[u8]) -> usize {
-        match num.borrow().downcast_ref::<usize>() {
-            Some(&num) => unimplemented!(),
-            None => 0
-        }
-    }
-
-    net.register(99, callback, Rc::new(RefCell::new(1usize)) as Rc<RefCell<Any>>);
-    ```
     */
     // FIXME: docs
     pub fn register(&mut self, byte: u8, cb: PacketHandlerCallback, object: Rc<RefCell<Any>>) {
@@ -207,12 +187,14 @@ impl NetworkingCore {
 
 Returns `None` if failed to bind to port within range.
 */
-pub fn bind_udp(ip: IpAddr, port_range: Range<u16>) -> Option<UdpSocket> {
+pub fn bind_udp(ip: IpAddr, port_range: Range<u16>, handle: &Handle)
+    -> Option<UdpSocket>
+{
     for port in port_range {
         match (ip, port).to_socket_addrs().ok()
             .and_then(|mut addrs| addrs.next())
             .ok_or_else(|| io::Error::new(ErrorKind::AddrNotAvailable, "Socket Addr Not Available."))
-            .and_then(|addr| UdpSocket::bind(&addr))
+            .and_then(|addr| UdpSocket::bind(&addr, handle))
         {
             Ok(s) => {
                 debug!(target: "Port", "Bind to port {} successful.", port);

@@ -6,11 +6,12 @@ authors = ["Zetok Zalbavar <zetok@openmailbox.org>"]
 
 [dependencies]
 clippy = { version = "*", optional = true }
+byteorder = "1"
+futures = "0.1"
 log = "0.3"
 num-traits = "0.1"
 sodiumoxide = "0.0.15"
-mio = "0.6"
-byteorder = "1"
+tokio-core = "0.1"
 
 [dev-dependencies]
 quickcheck = "0.4"

@@ -1,5 +1,5 @@
 /*
-    Copyright © 2016 Zetok Zalbavar <zexavexxe@gmail.com>
+    Copyright © 2016-2017 Zetok Zalbavar <zexavexxe@gmail.com>
 
     This file is part of Tox.
 
@@ -20,10 +20,46 @@
 //! Tests for network module.
 
 
+use tokio_core::reactor::Core;
+
 use std::thread;
 use std::time::Duration;
 
 use toxcore::network::*;
+
+// NetworkingCore::
+
+// NetworkingCore::new()
+
+#[test]
+fn networking_core_new_test() {
+    let core = Core::new().unwrap();
+    let handle = core.handle();
+    NetworkingCore::new("::".parse().unwrap(), 33445..33545, &handle).unwrap();
+}
+
+
+// NetworkingCore::new()
+
+#[test]
+fn networking_core_register_test() {
+    use std::rc::Rc;
+    use std::any::Any;
+    use std::cell::RefCell;
+    use std::net::SocketAddr;
+
+    let core = Core::new().unwrap();
+    let handle = core.handle();
+    let mut net = NetworkingCore::new("::".parse().unwrap(), .., &handle).unwrap();
+    fn callback(num: Rc<RefCell<Any>>, _: SocketAddr, _: &[u8]) -> usize {
+        match num.borrow().downcast_ref::<usize>() {
+            Some(_) => unimplemented!(),
+            None => 0
+        }
+    }
+
+    net.register(99, callback, Rc::new(RefCell::new(1usize)) as Rc<RefCell<Any>>);
+}
 
 // bind_udp()
 
@@ -37,7 +73,9 @@ use toxcore::network::*;
 fn bind_udp_test() {
     for _ in 0..50 {
         thread::spawn(move || {
-            let socket = bind_udp("::".parse().unwrap(), 33445..33546);
+            let core = Core::new().unwrap();
+            let handle = core.handle();
+            let socket = bind_udp("::".parse().unwrap(), 33445..33546, &handle);
             match socket {
                 Some(_) => {},
                 None => panic!("This should have worked; bind_udp()"),
