@@ -6,6 +6,10 @@ platform: Any CPU
 clone_depth: 1
 clone_folder: C:\projects\tox
 
+branches:
+  except:
+    - test
+
 environment:
   matrix:
     - channel: stable
