@@ -1,4 +1,4 @@
-# Tox  [![Build Status](https://travis-ci.org/zetok/tox.svg?branch=master)](https://travis-ci.org/zetok/tox) [![Coverage Status](https://coveralls.io/repos/github/zetok/tox/badge.svg?branch=master)](https://coveralls.io/github/zetok/tox?branch=master)
+# Tox  [![Travis Build Status](https://travis-ci.org/zetok/tox.svg?branch=master)](https://travis-ci.org/zetok/tox) [![Appveyor Build status](https://ci.appveyor.com/api/projects/status/0s9t39m8uexyva0a/branch/master?svg=true)](https://ci.appveyor.com/project/zetok/tox) [![Coverage Status](https://coveralls.io/repos/github/zetok/tox/badge.svg?branch=master)](https://coveralls.io/github/zetok/tox?branch=master)
 
 This library is an implementation of [toxcore][toxcore] in Rust - P2P,
 distributed, encrypted, easy to use DHT-based network.
