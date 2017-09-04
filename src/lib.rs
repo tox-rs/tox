@@ -30,19 +30,25 @@ nodes by sending [`GetNodes`](./toxcore/dht/struct.GetNodes.html) or request
 
 To request a ping response:
 
-```norun – fix after migrating to tokio-core
+```
+// for networking
+extern crate tokio_core;
+use tokio_core::reactor::Core;
+
 // to get bytes from PK in hex and to make PK from them
 extern crate rustc_serialize;
 use rustc_serialize::hex::FromHex;
 
 extern crate tox;
-use std::io::ErrorKind;
 use tox::toxcore::binary_io::*;
 use tox::toxcore::crypto_core::*;
 use tox::toxcore::dht::*;
 use tox::toxcore::network::*;
+use tox::toxcore::packet_kind::PacketKind;
 
 fn main() {
+    let mut reactor = Core::new().unwrap();
+    let handle = reactor.handle();
     // get PK bytes from some "random" bootstrap node (Impyy's)
     let bootstrap_pk_bytes = FromHex::from_hex("6FC41E2BD381D37E9748FC0E0328CE086AF9598BECC8FEB7DDF2E440475F300E").unwrap();
     // create PK from bytes
@@ -67,54 +73,39 @@ fn main() {
 
     // and since packet is ready, prepare the network part;
     // bind to given address and port in given range
-    let socket = bind_udp("::".parse().unwrap(), 33445..33546)
+    // `0.0.0.0` is used instead of `::` to appease windows' rage
+    let socket = bind_udp("0.0.0.0".parse().unwrap(), 33445..33546, &handle)
         .expect("Failed to bind to socket!");
 
-    // connect to the node (Imppy's)
-    socket.connect("51.15.37.145:33445".parse().unwrap())
-        .expect("Failed to set socket's destination");
-
-    // send DhtPacket via socket
-    let sent_bytes = socket.send(&dhtpacket)
+    // send DhtPacket via socket to the node (Imppy's)
+    let sent_bytes = socket.send_dgram(&dhtpacket,
+                 "51.15.37.145:33445".parse().unwrap());
+    let (socket, _) = reactor.run(sent_bytes)
         .expect("Failed to send bytes!");
 
-    println!("Sent {} bytes of Ping request to the bootstrap node", sent_bytes);
     // since data was sent, now receive response – for that, first prepare
     // buffer to receive data into
     let mut buf = [0; MAX_UDP_PACKET_SIZE];
 
     // and wait for the answer
-    let (bytes, sender);
-    loop {
-        match socket.recv_from(&mut buf) {
-            Ok((b, s)) => {
-                bytes = b;
-                sender = s;
-                break;
-            },
-            Err(ref e) if e.kind() == ErrorKind::WouldBlock => continue,
-            Err(e) => {
-                panic!("Failed to receive data from socket: {}", e);
-            }
-        }
-    }
+    let future_data = socket.recv_dgram(&mut buf[..]);
 
-    // try to de-serialize received bytes as `DhtPacket`
-    let recv_packet = match DhtPacket::from_bytes(&buf[..bytes]) {
+    let (_socket, buf, n_bytes, _sender) = reactor.run(future_data)
+        .expect("Failed to receive data");
+
+    // try to deserialize received bytes as `DhtPacket`
+    let recv_packet = match DhtPacket::from_bytes(&buf[..n_bytes]) {
         Some(p) => p,
         // if parsing fails ↓
-        None => {
-            panic!("Received packet could not have been parsed!\n{:?}",
-                       &buf[..bytes]);
-        },
+        None => panic!("Received packet could not have been parsed!\n{:?}",
+                        &buf[..n_bytes]),
     };
-
-    println!("Received packet from {}, with an encrypted payload:\n{:?}",
-             sender, recv_packet);
 
     // decrypt payload of the received packet
     let payload = recv_packet.get_packet(&sk)
         .expect("Failed to decrypt payload!");
+
+    assert_eq!(PacketKind::PingResp, payload.kind());
     println!("And contents of payload:\n{:?}", payload);
 }
 ```
@@ -130,12 +121,12 @@ fn main() {
 #![cfg_attr(feature = "clippy", allow(useless_format))]
 #![cfg_attr(feature = "clippy", allow(new_without_default, new_without_default_derive))]
 
+extern crate byteorder;
 #[macro_use]
 extern crate log;
 // for Zero trait
 extern crate num_traits;
 extern crate sodiumoxide;
-extern crate byteorder;
 extern crate tokio_core;
 
 
