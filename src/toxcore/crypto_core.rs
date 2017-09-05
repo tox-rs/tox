@@ -55,10 +55,11 @@ pub fn crypto_init() -> bool {
     // NOTE: `init()` could be run more than once, but not in parallel, and
     //       `CRYPTO_INIT` *can't* be modified while it may be read by
     //       something else.
-    unsafe {
-        CRYPTO_INIT_ONCE.call_once(|| CRYPTO_INIT = ::sodiumoxide::init());
-        CRYPTO_INIT
-    }
+    CRYPTO_INIT_ONCE.call_once(|| {
+        let initialized = ::sodiumoxide::init();
+        unsafe { CRYPTO_INIT = initialized; }
+    });
+    unsafe { CRYPTO_INIT }
 }
 
 
