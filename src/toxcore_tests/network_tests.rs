@@ -35,7 +35,8 @@ use toxcore::network::*;
 fn networking_core_new_test() {
     let core = Core::new().unwrap();
     let handle = core.handle();
-    NetworkingCore::new("::".parse().unwrap(), 33445..33545, &handle).unwrap();
+    NetworkingCore::new("::".parse().unwrap(), PORT_MIN..PORT_MAX, &handle)
+        .unwrap();
 }
 
 

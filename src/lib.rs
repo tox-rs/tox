@@ -122,6 +122,7 @@ fn main() {
 #![cfg_attr(feature = "clippy", allow(new_without_default, new_without_default_derive))]
 
 extern crate byteorder;
+extern crate futures;
 #[macro_use]
 extern crate log;
 // for Zero trait
@@ -164,6 +165,7 @@ pub mod toxcore {
     pub mod binary_io;
     pub mod crypto_core;
     pub mod dht;
+    pub mod dht_node;
     pub mod hole_punching;
     pub mod network;
     pub mod packet_kind;

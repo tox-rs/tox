@@ -142,6 +142,7 @@ impl Ping {
 
     /// Encapsulate in `DhtPacketT` to use in [`DhtPacket`]
     /// (./struct.DhtPacket.html).
+    // TODO: rename, since it's confusing with DhtPacket
     pub fn as_packet(&self) -> DhtPacketT {
         DhtPacketT::Ping(*self)
     }
@@ -527,6 +528,7 @@ impl GetNodes {
 
     /// Encapsulate in `DhtPacketT` to use in [`DhtPacket`]
     /// (./struct.DhtPacket.html).
+    // TODO: rename, since it's confusing with DhtPacket
     pub fn as_packet(&self) -> DhtPacketT {
         DhtPacketT::GetNodes(*self)
     }
@@ -625,6 +627,7 @@ impl SendNodes {
 
     /// Encapsulate in `DhtPacketT` to easily use in [`DhtPacket`]
     /// (./struct.DhtPacket.html).
+    // TODO: rename, since it's confusing with DhtPacket
     pub fn into_packet(self) -> DhtPacketT {
         DhtPacketT::SendNodes(self)
     }
@@ -744,6 +747,8 @@ Length      | Contents
 variable    | Encrypted payload
 
 `PacketKind` values for `DhtPacket` can be only `<= 4`.
+
+https://zetok.github.io/tox-spec/#dht-packet
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DhtPacket {
@@ -764,8 +769,10 @@ pub const DHT_PACKET_MIN_SIZE: usize = 1 // packet type, plain
 
 impl DhtPacket {
     /// Create new `DhtPacket`.
-    pub fn new(symmetric_key: &PrecomputedKey, own_public_key: &PublicKey,
-               nonce: &Nonce, packet: DhtPacketT) -> Self {
+    pub fn new(symmetric_key: &PrecomputedKey,
+               own_public_key: &PublicKey,
+               nonce: &Nonce,
+               packet: DhtPacketT) -> Self {
 
         debug!(target: "DhtPacket", "Creating new DhtPacket.");
         trace!(target: "DhtPacket", "With args: symmetric_key: <secret>,
@@ -796,6 +803,7 @@ impl DhtPacket {
                 Alternatively, another method `get_packetnm()` which would use
                 symmetric key.
     */
+    // TODO: rename to `get_payload` ?
     pub fn get_packet(&self, own_secret_key: &SecretKey) -> Option<DhtPacketT> {
         debug!(target: "DhtPacket", "Getting packet data from DhtPacket.");
         trace!(target: "DhtPacket", "With DhtPacket: {:?}", self);
@@ -838,7 +846,8 @@ impl DhtPacket {
 
     Nonce for the response is automatically generated.
     */
-    pub fn ping_resp(&self, secret_key: &SecretKey,
+    pub fn ping_resp(&self,
+                     secret_key: &SecretKey,
                      symmetric_key: &PrecomputedKey,
                      own_public_key: &PublicKey) -> Option<Self> {
 
@@ -1392,6 +1401,8 @@ Length | Contents
 32 | sender's DHT public key
 24 | Nonce
 ?  | encrypted data
+
+https://zetok.github.io/tox-spec/#dht-request-packets
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DhtRequest {
@@ -1405,8 +1416,10 @@ pub struct DhtRequest {
 
 impl DhtRequest {
     /// Create a new `DhtRequest`.
-    pub fn new(secret_key: &SecretKey, own_public_key: &PublicKey,
-               receiver_public_key: &PublicKey, nonce: &Nonce,
+    pub fn new(secret_key: &SecretKey,
+               own_public_key: &PublicKey,
+               receiver_public_key: &PublicKey,
+               nonce: &Nonce,
                packet: DhtRequestT) -> Self {
 
         debug!(target: "DhtRequest", "Creating new DhtRequest.");

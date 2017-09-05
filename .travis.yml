@@ -16,7 +16,8 @@ os:
   - linux
 
 env:
-  - RUST_BACKTRACE=1
+  global:
+    - RUST_BACKTRACE=1
 
 branches:
   except:
