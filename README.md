@@ -5,6 +5,8 @@ distributed, encrypted, easy to use DHT-based network.
 
 IRC channel: [#zetox @ freenode](https://webchat.freenode.net/?channels=zetox)
 
+Gitter: [![Gitter](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/zetoxcore/tox?utm_source=badge)
+
 ## Documentation
 
 [The Tox Reference](https://zetok.github.io/tox-spec) should be used for
