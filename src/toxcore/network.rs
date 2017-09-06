@@ -208,7 +208,9 @@ pub fn bind_udp(ip: IpAddr, port_range: Range<u16>, handle: &Handle)
     None  // loop ended without "early" return – failed to bind
 }
 
-/// Correct Port Range.
+/** Port Range, default is
+[`PORT_MIN`](./constant.PORT_MIN.html)..[`PORT_MAX`](./constant.PORT_MAX.html).
+*/
 #[derive(Clone, Debug, PartialEq)]
 pub struct PortRange<N>(pub Range<N>);
 

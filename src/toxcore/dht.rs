@@ -1165,10 +1165,10 @@ pub struct Kbucket {
     pub pk: PublicKey,
 
     /// Number of [`Bucket`](./struct.Bucket.html)s held.
-    // TODO: check if `k` even needs to be stored, considering that
+    // TODO: check if `n` even needs to be stored, considering that
     //       `buckets.len()` could(?) be used
-    pub k: u8,
-    buckets: Vec<Bucket>,
+    pub n: u8,
+    buckets: Vec<Box<Bucket>>,
 }
 
 /** Maximum number of [`Bucket`](./struct.Bucket.html)s that [`Kbucket`]
@@ -1179,17 +1179,22 @@ Realistically, not even half of that will be ever used, given how
 */
 pub const KBUCKET_MAX_ENTRIES: u8 = ::std::u8::MAX;
 
+/** Default number of [`Bucket`](./struct.Bucket.html)s that [`Kbucket`]
+(./struct.Kbucket.html) holds.
+*/
+pub const KBUCKET_BUCKETS: u8 = 128;
+
 impl Kbucket {
     /// Create a new `Kbucket`.
     ///
-    /// `k` – number of [`Bucket`](./struct.Bucket.html)s held.
-    pub fn new(k: u8, pk: &PublicKey) -> Self {
+    /// `n` – number of [`Bucket`](./struct.Bucket.html)s held.
+    pub fn new(n: u8, pk: &PublicKey) -> Self {
         trace!(target: "Kbucket", "Creating new Kbucket with k: {:?} and PK:
-               {:?}", k, pk);
+               {:?}", n, pk);
         Kbucket {
             pk: *pk,
-            k: k,
-            buckets: vec![Bucket::new(None); k as usize]
+            n: n,
+            buckets: vec![Box::new(Bucket::new(None)); n as usize]
         }
     }
 
@@ -1198,7 +1203,7 @@ impl Kbucket {
     Node can be added only if:
 
     * its [`kbucket index`](./fn.kbucket_index.html) is lower or equal to
-      `k` (number of buckets).
+      `n` (number of buckets).
     * [`Bucket`](./struct.Bucket.html) to which it is added has free space
       or added node is closer to the PK than other node in the bucket.
 
@@ -1209,7 +1214,7 @@ impl Kbucket {
         trace!(target: "Kbucket", "With PN: {:?}; and self: {:?}", node, self);
 
         if let Some(index) = kbucket_index(&self.pk, &node.pk) {
-            if index >= self.k {
+            if index >= self.n {
                 debug!("Failed, index is bigger than what Kbucket can hold.");
                 return false
             }
@@ -1224,6 +1229,7 @@ impl Kbucket {
     pub fn remove(&mut self, pk: &PublicKey) {
         trace!(target: "Kbucket", "Removing PK: {:?} from Kbucket: {:?}", pk,
                 self);
+        // TODO: optimize using `kbucket_index()` ?
         for i in 0..self.buckets.len() {
             self.buckets[i].remove(pk);
         }

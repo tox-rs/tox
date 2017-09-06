@@ -39,6 +39,8 @@ use toxcore::dht::*;
 pub struct DhtNode {
     dht_secret_key: Box<SecretKey>,
     dht_public_key: Box<PublicKey>,
+    /// contains nodes close to own DHT PK
+    kbucket: Box<Kbucket>,
     // TODO: move it somewhere "down" (or elsewhere) in implementation?
     reactor: Box<Core>,
 
@@ -62,14 +64,25 @@ impl DhtNode {
 
         let (pk, sk) = gen_keypair();
         let reactor = Core::new()?;
+        let kbucket = Kbucket::new(KBUCKET_BUCKETS, &pk);
 
         debug!("Created new DhtNode instance");
 
         Ok(DhtNode {
             dht_secret_key: Box::new(sk),
             dht_public_key: Box::new(pk),
+            kbucket: Box::new(kbucket),
             reactor: Box::new(reactor),
         })
+    }
+
+
+    /** Try to add nodes to [Kbucket](../dht/struct.Kbucket.html).
+
+    Wrapper around Kbucket's method.
+    */
+    pub fn try_add(&mut self, node: &PackedNode) -> bool {
+        self.kbucket.try_add(node)
     }
 
     /** Request nodes from a peer. Peer might or might not even reply.
@@ -94,6 +107,40 @@ impl DhtNode {
         Ok(udpsocket)
     }
 
+    /** Send nodes close to requested PK.
+
+    Can fail if Kbucket is empty.
+    */
+    pub fn send_nodes(&mut self,
+                      socket: UdpSocket,
+                      peer: &PackedNode,
+                      request: &GetNodes) -> io::Result<UdpSocket>
+    {
+        let close_nodes = self.kbucket.get_closest(&peer.pk);
+        if close_nodes.is_empty() {
+            return Err(io::Error::new(ErrorKind::Other, "no nodes in kbucket"))
+        }
+
+        let to_send = match SendNodes::from_request(request, close_nodes)
+            .map(|s| s.into_packet())
+        {
+
+            Some(s) => s,
+            None => return Err(io::Error::new(ErrorKind::Other,
+                        "failed to create SendNodes response")),
+        };
+
+        let shared_secret = &encrypt_precompute(&peer.pk, &self.dht_secret_key);
+        let nonce = &gen_nonce();
+        let dht_packet = DhtPacket::new(shared_secret,
+                                        &self.dht_public_key,
+                                        nonce,
+                                        to_send).to_bytes();
+
+        let future_send = socket.send_dgram(dht_packet, peer.saddr);
+        let (udpsocket, _) = self.reactor.as_mut().run(future_send)?;
+        Ok(udpsocket)
+    }
 
 }
 
@@ -106,7 +153,6 @@ mod test {
     use futures::future::Future;
     use tokio_core::reactor::Timeout;
 
-    use std::io;
     use std::time::Duration;
 
     use toxcore::binary_io::*;
@@ -115,6 +161,8 @@ mod test {
     use toxcore::packet_kind::PacketKind;
     use toxcore::dht_node::DhtNode;
 
+    use toxcore_tests::quickcheck::{quickcheck, TestResult};
+
     /// Bind to this IpAddr.
     // TODO: rename
     //const SOCKETADDR: IpAddr = IpAddr::V6(Ipv6Addr::new(0,0,0,0,0,0,0,0));
@@ -122,50 +170,85 @@ mod test {
     //       appveyor / travis
     const SOCKET_ADDR: &'static str = "127.0.0.1";
 
+    /// Provide:
+    ///   - mut DhtNode $name
+    ///   - socket $name_socket
+    macro_rules! node_socket {
+        ($($name:ident, $name_socket:ident),+) => ($(
+            let mut $name = DhtNode::new().unwrap();
+            let $name_socket = bind_udp(SOCKET_ADDR.parse().unwrap(),
+                                        // make port range sufficiently big
+                                        2048..65000,
+                                        &$name.reactor.handle())
+                .expect("failed to bind to socket");
+        )+)
+    }
+
+    /// Add timeout to the future, and panic upon timing out.
+    ///
+    /// If not specified, default timeout = 5s.
+    macro_rules! add_timeout {
+        ($f:expr, $handle:expr) => (
+            add_timeout!($f, $handle, 5)
+        );
+
+        ($f:expr, $handle:expr, $seconds:expr) => (
+            $f.map(Ok)
+              .select(
+                Timeout::new(Duration::from_secs($seconds), $handle)
+                    .unwrap()
+                    .map(Err))
+              .then(|res| {
+                  match res {
+                      Ok((Err(()), _received)) =>
+                              panic!("timed out"),
+                      Err((e, _other)) => panic!("{}", e),
+                      Ok((f, _timeout)) => f,
+                  }
+              })
+        );
+    }
+
+
+
     #[test]
     fn dht_node_new() {
         let _ = DhtNode::new().unwrap();
     }
 
+    #[test]
+    fn dht_node_try_add_to_empty() {
+        fn with_nodes(pns: Vec<PackedNode>) {
+            let mut dhtn = DhtNode::new().unwrap();
+            let mut kbuc = Kbucket::new(KBUCKET_BUCKETS, &dhtn.dht_public_key);
+
+            for pn in &pns {
+                assert_eq!(dhtn.try_add(pn), kbuc.try_add(pn));
+                assert_eq!(kbuc, *dhtn.kbucket);
+            }
+        }
+        quickcheck(with_nodes as fn(Vec<PackedNode>));
+    }
+
 
     #[test]
     fn dht_node_request_nodes() {
-        let mut server = DhtNode::new().unwrap();
-        let server_socket = bind_udp(SOCKET_ADDR.parse().unwrap(),
-                                    PORT_MIN..PORT_MAX,
-                                    &server.reactor.handle())
-            .unwrap();
-        let server_node = PackedNode::new(
-            true,
+        node_socket!(server, server_socket,
+                     client, client_socket);
+
+        let server_node = PackedNode::new(true,
             server_socket.local_addr().unwrap(),
             &server.dht_public_key);
 
-        let mut client = DhtNode::new().unwrap();
-        let client_socket = bind_udp(SOCKET_ADDR.parse().unwrap(),
-                                    PORT_MIN..PORT_MAX,
-                                    &client.reactor.handle())
-            .unwrap();
+        let mut recv_buf = [0; MAX_UDP_PACKET_SIZE];
 
         let _client_socket = client.request_nodes(client_socket, &server_node);
 
-        let mut recv_buf = [0; MAX_UDP_PACKET_SIZE];
-        let timeout = Timeout::new(Duration::from_secs(10),
-            &server.reactor.handle()).unwrap();
-        let future_recv = server_socket.recv_dgram(&mut recv_buf[..])
-            .map(Ok)
-            .select(timeout.map(Err))
-            .then(|res| {
-                match res {
-                    Ok((Err(()), _received)) =>
-                        Err(io::Error::new(io::ErrorKind::TimedOut,
-                            "timed out waiting for receive")),
-                    Err((e, _other)) => Err(e),
-                    Ok((r, _timeout)) => Ok(r),
-                }
-            });
+        let future_recv = server_socket.recv_dgram(&mut recv_buf[..]);
+        let future_recv = add_timeout!(future_recv, &server.reactor.handle());
 
         let received = server.reactor.as_mut().run(future_recv).unwrap();
-        let (_server_socket, recv_buf, size, _saddr) = received.unwrap();
+        let (_server_socket, recv_buf, size, _saddr) = received;
         assert!(size != 0);
 
         let recv_packet = DhtPacket::from_bytes(&recv_buf[..size]).unwrap();
@@ -180,4 +263,54 @@ mod test {
 
         assert_eq!(pk, *client.dht_public_key);
     }
+
+    #[test]
+    fn dht_node_send_nodes() {
+        fn with_nodes(pns: Vec<PackedNode>, gn: GetNodes) -> TestResult {
+            if pns.is_empty() { return TestResult::discard() }
+
+            node_socket!(server, server_socket,
+                        client, client_socket);
+
+            let client_node = PackedNode::new(true,
+                client_socket.local_addr()
+                    .expect("failed to get saddr"),
+                &client.dht_public_key);
+
+            for pn in &pns {
+                drop(server.try_add(pn));
+            }
+
+            drop(server.send_nodes(server_socket, &client_node, &gn)
+                .expect("Failed to send nodes"));
+
+            let mut recv_buf = [0; MAX_UDP_PACKET_SIZE];
+
+            let future_recv = client_socket.recv_dgram(&mut recv_buf[..]);
+            let future_recv = add_timeout!(future_recv, &client.reactor.handle());
+
+            let received = client.reactor.as_mut().run(future_recv).unwrap();
+            let (_client_socket, recv_buf, size, _saddr) = received;
+            assert!(size != 0);
+
+            let recv_packet = DhtPacket::from_bytes(&recv_buf[..size])
+                .expect("failed to parse as DhtPacket");
+            let payload = recv_packet.get_packet(&client.dht_secret_key)
+                .expect("Failed to decrypt payload");
+            assert_eq!(PacketKind::SendN, payload.kind());
+
+            let sn = match payload {
+                DhtPacketT::SendNodes(s) => s,
+                _ => panic!("Not a SendNodes packet"),
+            };
+
+            assert!(!sn.nodes.is_empty());
+            assert_eq!(sn.id, gn.id);
+            TestResult::passed()
+        }
+        quickcheck(with_nodes as fn(Vec<PackedNode>, GetNodes) -> TestResult);
+    }
+
+
+
 }

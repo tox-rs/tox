@@ -1399,7 +1399,7 @@ fn kbucket_new_test() {
     fn with_pk(a: u64, b: u64, c: u64, d: u64, buckets: u8) {
         let pk = nums_to_pk(a, b, c, d);
         let kbucket = Kbucket::new(buckets, &pk);
-        assert_eq!(buckets, kbucket.k);
+        assert_eq!(buckets, kbucket.n);
         assert_eq!(pk, kbucket.pk);
     }
     quickcheck(with_pk as fn(u64, u64, u64, u64, u8));
@@ -1409,9 +1409,9 @@ fn kbucket_new_test() {
 
 #[test]
 fn kbucket_try_add_test() {
-    fn with_pns(pns: Vec<PackedNode>, k: u8, p1: u64, p2: u64, p3: u64, p4: u64) {
+    fn with_pns(pns: Vec<PackedNode>, n: u8, p1: u64, p2: u64, p3: u64, p4: u64) {
         let pk = nums_to_pk(p1, p2, p3, p4);
-        let mut kbucket = Kbucket::new(k, &pk);
+        let mut kbucket = Kbucket::new(n, &pk);
         for node in pns {
             // result may vary, so discard it
             // TODO: can be done better?
