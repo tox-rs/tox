@@ -305,11 +305,11 @@ solely on the UDP.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct PackedNode {
     /// IP type, includes also info about protocol used.
-    pub ip_type: IpType,
+    ip_type: IpType,
     /// Socket addr of node.
-    pub saddr: SocketAddr,
+    saddr: SocketAddr,
     /// Public Key of the node.
-    pub pk: PublicKey,
+    pk: PublicKey,
 }
 
 /// Size in bytes of serialized [`PackedNode`](./struct.PackedNode.html) with
@@ -350,6 +350,13 @@ impl PackedNode {
         }
     }
 
+    /// Get an IP type from the `PackedNode`.
+    pub fn ip_type(&self) -> IpType {
+        trace!(target: "PackedNode", "Getting IP type from PackedNode.");
+        trace!("With address: {:?}", self);
+        self.ip_type
+    }
+
     /// Get an IP address from the `PackedNode`.
     pub fn ip(&self) -> IpAddr {
         trace!(target: "PackedNode", "Getting IP address from PackedNode.");
@@ -358,6 +365,20 @@ impl PackedNode {
             SocketAddr::V4(addr) => IpAddr::V4(*addr.ip()),
             SocketAddr::V6(addr) => IpAddr::V6(*addr.ip()),
         }
+    }
+
+    /// Get a Socket address from the `PackedNode`.
+    pub fn socket_addr(&self) -> SocketAddr {
+        trace!(target: "PackedNode", "Getting Socket address from PackedNode.");
+        trace!("With address: {:?}", self);
+        self.saddr
+    }
+
+    /// Get an IP address from the `PackedNode`.
+    pub fn pk(&self) -> &PublicKey {
+        trace!(target: "PackedNode", "Getting PK from PackedNode.");
+        trace!("With address: {:?}", self);
+        &self.pk
     }
 
 }

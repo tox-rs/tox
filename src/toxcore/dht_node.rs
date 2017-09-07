@@ -95,14 +95,14 @@ impl DhtNode {
     {
         // request for nodes that are close to our own DHT PK
         let getn_req = &GetNodes::new(&self.dht_public_key);
-        let shared_secret = &encrypt_precompute(&peer.pk, &self.dht_secret_key);
+        let shared_secret = &encrypt_precompute(peer.pk(), &self.dht_secret_key);
         let nonce = &gen_nonce();
         let dht_packet = DhtPacket::new(shared_secret,
                                         &self.dht_public_key,
                                         nonce,
                                         getn_req).to_bytes();
 
-        let future_send = socket.send_dgram(dht_packet, peer.saddr);
+        let future_send = socket.send_dgram(dht_packet, peer.socket_addr());
         let (udpsocket, _) = self.reactor.as_mut().run(future_send)?;
         Ok(udpsocket)
     }
@@ -116,7 +116,7 @@ impl DhtNode {
                       peer: &PackedNode,
                       request: &GetNodes) -> io::Result<UdpSocket>
     {
-        let close_nodes = self.kbucket.get_closest(&peer.pk);
+        let close_nodes = self.kbucket.get_closest(peer.pk());
         if close_nodes.is_empty() {
             return Err(io::Error::new(ErrorKind::Other, "no nodes in kbucket"))
         }
@@ -129,14 +129,14 @@ impl DhtNode {
                         "failed to create SendNodes response")),
         };
 
-        let shared_secret = &encrypt_precompute(&peer.pk, &self.dht_secret_key);
+        let shared_secret = &encrypt_precompute(peer.pk(), &self.dht_secret_key);
         let nonce = &gen_nonce();
         let dht_packet = DhtPacket::new(shared_secret,
                                         &self.dht_public_key,
                                         nonce,
                                         &to_send).to_bytes();
 
-        let future_send = socket.send_dgram(dht_packet, peer.saddr);
+        let future_send = socket.send_dgram(dht_packet, peer.socket_addr());
         let (udpsocket, _) = self.reactor.as_mut().run(future_send)?;
         Ok(udpsocket)
     }
