@@ -25,7 +25,7 @@ Current [API docs](https://zetok.github.io/tox) are a subject to changes.
 ## Dependencies
 | **Name** | **Version** |
 |----------|-------------|
-| libsodium | >=1.0.0 |
+| libsodium | >=1.0.4 |
 
 ## Building
 Fairly simple. You'll need [Rust] >= 1.16.0 and [libsodium].
