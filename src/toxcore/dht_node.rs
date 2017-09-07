@@ -94,7 +94,7 @@ impl DhtNode {
         -> io::Result<UdpSocket>
     {
         // request for nodes that are close to our own DHT PK
-        let getn_req = GetNodes::new(&self.dht_public_key).as_packet();
+        let getn_req = &GetNodes::new(&self.dht_public_key);
         let shared_secret = &encrypt_precompute(&peer.pk, &self.dht_secret_key);
         let nonce = &gen_nonce();
         let dht_packet = DhtPacket::new(shared_secret,
@@ -122,7 +122,6 @@ impl DhtNode {
         }
 
         let to_send = match SendNodes::from_request(request, close_nodes)
-            .map(|s| s.into_packet())
         {
 
             Some(s) => s,
@@ -135,7 +134,7 @@ impl DhtNode {
         let dht_packet = DhtPacket::new(shared_secret,
                                         &self.dht_public_key,
                                         nonce,
-                                        to_send).to_bytes();
+                                        &to_send).to_bytes();
 
         let future_send = socket.send_dgram(dht_packet, peer.saddr);
         let (udpsocket, _) = self.reactor.as_mut().run(future_send)?;
@@ -158,7 +157,6 @@ mod test {
     use toxcore::binary_io::*;
     use toxcore::dht::*;
     use toxcore::network::*;
-    use toxcore::packet_kind::PacketKind;
     use toxcore::dht_node::DhtNode;
 
     use toxcore_tests::quickcheck::{quickcheck, TestResult};
@@ -252,16 +250,11 @@ mod test {
         assert!(size != 0);
 
         let recv_packet = DhtPacket::from_bytes(&recv_buf[..size]).unwrap();
-        let payload = recv_packet.get_packet(&server.dht_secret_key)
+        let payload: GetNodes = recv_packet
+            .get_packet(&server.dht_secret_key)
             .expect("Failed to decrypt payload");
-        assert_eq!(PacketKind::GetN, payload.kind());
 
-        let pk = match payload {
-            DhtPacketT::GetNodes(g) => g.pk,
-            _ => panic!("Not a GetNodes packet"),
-        };
-
-        assert_eq!(pk, *client.dht_public_key);
+        assert_eq!(payload.pk, *client.dht_public_key);
     }
 
     #[test]
@@ -295,17 +288,12 @@ mod test {
 
             let recv_packet = DhtPacket::from_bytes(&recv_buf[..size])
                 .expect("failed to parse as DhtPacket");
-            let payload = recv_packet.get_packet(&client.dht_secret_key)
+            let payload: SendNodes = recv_packet
+                .get_packet(&client.dht_secret_key)
                 .expect("Failed to decrypt payload");
-            assert_eq!(PacketKind::SendN, payload.kind());
 
-            let sn = match payload {
-                DhtPacketT::SendNodes(s) => s,
-                _ => panic!("Not a SendNodes packet"),
-            };
-
-            assert!(!sn.nodes.is_empty());
-            assert_eq!(sn.id, gn.id);
+            assert!(!payload.nodes.is_empty());
+            assert_eq!(payload.id, gn.id);
             TestResult::passed()
         }
         quickcheck(with_nodes as fn(Vec<PackedNode>, GetNodes) -> TestResult);

@@ -27,6 +27,7 @@
 */
 
 use std::cmp::{Ord, Ordering};
+use std::fmt::Debug;
 use std::net::{
     IpAddr,
     Ipv4Addr,
@@ -98,6 +99,7 @@ Length      | Contents
 Serialized form should be put in the encrypted part of DHT packet.
 */
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+// TODO: split into PingReq and PingResp
 pub struct Ping {
     p_type: PingType,
     id: u64,
@@ -139,12 +141,15 @@ impl Ping {
 
         Some(Ping { p_type: PingType::Resp, id: self.id })
     }
+}
 
-    /// Encapsulate in `DhtPacketT` to use in [`DhtPacket`]
-    /// (./struct.DhtPacket.html).
-    // TODO: rename, since it's confusing with DhtPacket
-    pub fn as_packet(&self) -> DhtPacketT {
-        DhtPacketT::Ping(*self)
+impl DhtPacketT for Ping {
+    fn kind(&self) -> PacketKind {
+        if self.is_request() {
+            PacketKind::PingReq
+        } else {
+            PacketKind::PingResp
+        }
     }
 }
 
@@ -525,12 +530,11 @@ impl GetNodes {
         trace!(target: "GetNodes", "Creating new GetNodes request.");
         GetNodes { pk: *their_public_key, id: random_u64() }
     }
+}
 
-    /// Encapsulate in `DhtPacketT` to use in [`DhtPacket`]
-    /// (./struct.DhtPacket.html).
-    // TODO: rename, since it's confusing with DhtPacket
-    pub fn as_packet(&self) -> DhtPacketT {
-        DhtPacketT::GetNodes(*self)
+impl DhtPacketT for GetNodes {
+    fn kind(&self) -> PacketKind {
+        PacketKind::GetN
     }
 }
 
@@ -624,12 +628,11 @@ impl SendNodes {
 
         Some(SendNodes { nodes: nodes, id: request.id })
     }
+}
 
-    /// Encapsulate in `DhtPacketT` to easily use in [`DhtPacket`]
-    /// (./struct.DhtPacket.html).
-    // TODO: rename, since it's confusing with DhtPacket
-    pub fn into_packet(self) -> DhtPacketT {
-        DhtPacketT::SendNodes(self)
+impl DhtPacketT for SendNodes {
+    fn kind(&self) -> PacketKind {
+        PacketKind::SendN
     }
 }
 
@@ -674,64 +677,23 @@ impl FromBytes for SendNodes {
     }
 }
 
-/// Types of DHT packets that can be put in [`DhtPacket`]
+/// Trait for types of DHT packets that can be put in [`DhtPacket`]
 /// (./struct.DhtPacket.html).
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum DhtPacketT {
-    /// `Ping` packet type.
-    Ping(Ping),
-    /// `GetNodes` packet type. Used to request nodes.
-    // TODO: rename to `GetN()` ? – consistency with PacketKind
-    GetNodes(GetNodes),
-    /// `SendNodes` response to `GetNodes` request.
-    // TODO: rename to `SendN()` ? – consistency with PacketKind
-    SendNodes(SendNodes),
-}
-
-impl DhtPacketT {
+pub trait DhtPacketT: ToBytes + FromBytes + Eq + PartialEq + Debug {
     /// Provide packet type number.
     ///
     /// To use for serialization: `.kind() as u8`.
-    pub fn kind(&self) -> PacketKind {
-        match *self {
-            DhtPacketT::GetNodes(_) => PacketKind::GetN,
-            DhtPacketT::SendNodes(_) => PacketKind::SendN,
-            DhtPacketT::Ping(p) => {
-                if p.is_request() {
-                    PacketKind::PingReq
-                } else {
-                    PacketKind::PingResp
-                }
-            },
-        }
-    }
+    fn kind(&self) -> PacketKind;
 
-    /** Create [`Ping`](./struct.Ping.html) response if `DhtPacketT` is a
-    `Ping` request.
-
-    Returns `None` if `DhtPacketT` is not a ping request, and thus `Ping`
-    response could not be created.
-    */
-    pub fn ping_resp(&self) -> Option<Self> {
-        debug!(target: "Ping", "Creating Ping response from a Ping.");
-        trace!(target: "Ping", "With Ping: {:?}", self);
-        if let DhtPacketT::Ping(ping) = *self {
-            if let Some(ping_resp) = ping.response() {
-                return Some(DhtPacketT::Ping(ping_resp))
-            }
-        }
-        debug!("Ping was already a response!");
-        None
-    }
-}
-
-impl ToBytes for DhtPacketT {
-    fn to_bytes(&self) -> Vec<u8> {
-        match *self {
-            DhtPacketT::Ping(ref d)      => d.to_bytes(),
-            DhtPacketT::GetNodes(ref d)  => d.to_bytes(),
-            DhtPacketT::SendNodes(ref d) => d.to_bytes(),
-        }
+    /// Create a payload for [`DhtPacket`](./struct.DhtPacket.html) from
+    /// `self`.
+    // TODO: better name?
+    fn into_dht_packet_payload(
+        &self,
+        symmetric_key: &PrecomputedKey,
+        nonce: &Nonce) -> Vec<u8>
+    {
+        seal_precomputed(&self.to_bytes(), nonce, symmetric_key)
     }
 }
 
@@ -759,7 +721,7 @@ pub struct DhtPacket {
     payload: Vec<u8>,
 }
 
-// TODO: max dht packet size?
+// TODO: max dht_packet size?
 /// Minimal size of [`DhtPacket`](./struct.DhtPacket.html) in bytes.
 pub const DHT_PACKET_MIN_SIZE: usize = 1 // packet type, plain
                                      + PUBLICKEYBYTES
@@ -768,32 +730,47 @@ pub const DHT_PACKET_MIN_SIZE: usize = 1 // packet type, plain
                                      + PING_SIZE; // smallest payload
 
 impl DhtPacket {
-    /// Create new `DhtPacket`.
-    pub fn new(symmetric_key: &PrecomputedKey,
+    /// Create new `DhtPacket` with `bytes`.
+    pub fn new<P>(symmetric_key: &PrecomputedKey,
                own_public_key: &PublicKey,
                nonce: &Nonce,
-               packet: DhtPacketT) -> Self {
-
+               dp: &P) -> Self
+        where P: DhtPacketT
+    {
         debug!(target: "DhtPacket", "Creating new DhtPacket.");
         trace!(target: "DhtPacket", "With args: symmetric_key: <secret>,
         own_public_key: {:?}, nonce: {:?}, packet: {:?}",
-        own_public_key, nonce, &packet);
+        own_public_key, nonce, &dp);
 
-        let payload = seal_precomputed(&packet.to_bytes(), nonce, symmetric_key);
+        let payload = dp.into_dht_packet_payload(symmetric_key, nonce);
 
         DhtPacket {
-            packet_type: packet.kind(),
+            packet_type: dp.kind(),
             sender_pk: *own_public_key,
             nonce: *nonce,
             payload: payload,
         }
     }
 
-    /** Add [`PackedNode`](./struct.PackedNode.html) to `Kbucket`.
+    /** Get [`PacketKind`](../packet_kind/enum.PacketKind.html) that
+    `DhtPacket`'s payload is supposed to contain.
+    */
+    // TODO: write test(?)
+    pub fn kind(&self) -> PacketKind {
+        self.packet_type
+    }
+
+    /**
     Get packet data. This function decrypts payload and tries to parse it
     as packet type.
 
-    Returns `None` in case of faliure.
+    To get info about it's packet type use
+    [`.kind()`](./struct.DhtPacket.html#method.kind).
+
+    Returns `None` in case of faliure:
+
+     - fails to decrypt
+     - fails to parse as given packet type
     */
     /* TODO: perhaps switch to using precomputed symmetric key?
               - given that computing shared key is apparently the most
@@ -804,7 +781,9 @@ impl DhtPacket {
                 symmetric key.
     */
     // TODO: rename to `get_payload` ?
-    pub fn get_packet(&self, own_secret_key: &SecretKey) -> Option<DhtPacketT> {
+    pub fn get_packet<P>(&self, own_secret_key: &SecretKey) -> Option<P>
+        where P: DhtPacketT
+    {
         debug!(target: "DhtPacket", "Getting packet data from DhtPacket.");
         trace!(target: "DhtPacket", "With DhtPacket: {:?}", self);
         let decrypted = match open(&self.payload, &self.nonce, &self.sender_pk,
@@ -818,29 +797,10 @@ impl DhtPacket {
 
         trace!("Decrypted bytes: {:?}", &decrypted);
 
-        match self.packet_type {
-            PacketKind::PingReq | PacketKind::PingResp => {
-                if let Some(p) = Ping::from_bytes(&decrypted) {
-                    return Some(DhtPacketT::Ping(p))
-                }
-            },
-            PacketKind::GetN => {
-                if let Some(n) = GetNodes::from_bytes(&decrypted) {
-                    return Some(DhtPacketT::GetNodes(n))
-                }
-            },
-            PacketKind::SendN => {
-                if let Some(n) = SendNodes::from_bytes(&decrypted) {
-                    return Some(DhtPacketT::SendNodes(n))
-                }
-            },
-            _ => {},  // not a DHT packet
-        }
-        debug!("De-serializing decrypted bytes into a DHT packet failed!");
-        None  // parsing failed
+        P::from_bytes(&decrypted)
     }
 
-    /** Add [`PackedNode`](./struct.PackedNode.html) to `Kbucket`.
+    /**
     Create DHT Packet with [`Ping`](./struct.Ping.html) response to `Ping`
     request that packet contained.
 
@@ -856,19 +816,23 @@ impl DhtPacket {
         trace!(target: "DhtPacket", "With args: DhtPacket: {:?}, own_pk: {:?}",
                self, own_public_key);
 
-        let payload = match self.get_packet(secret_key) {
+        if self.kind() != PacketKind::PingReq {
+            return None
+        }
+
+        let payload: Ping = match self.get_packet(secret_key) {
             Some(dpt) => dpt,
             None => return None,
         };
 
-        let resp = match payload.ping_resp() {
+        let resp = match payload.response() {
             Some(pr) => pr,
             None => return None,
         };
 
         let nonce = gen_nonce();
 
-        Some(DhtPacket::new(symmetric_key, own_public_key, &nonce, resp))
+        Some(DhtPacket::new(symmetric_key, own_public_key, &nonce, &resp))
     }
 }
 

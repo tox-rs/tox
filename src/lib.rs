@@ -65,8 +65,7 @@ fn main() {
     let nonce = gen_nonce();
 
     // now create Ping request
-    let ping = Ping::new()
-                 .as_packet(); // and make Ping usable by DhtPacket
+    let ping = &Ping::new();
 
     // with Ping packet create DhtPacket, and serialize it to bytes
     let dhtpacket = DhtPacket::new(&precomp, &pk, &nonce, ping).to_bytes();
@@ -102,7 +101,7 @@ fn main() {
     };
 
     // decrypt payload of the received packet
-    let payload = recv_packet.get_packet(&sk)
+    let payload: Ping = recv_packet.get_packet(&sk)
         .expect("Failed to decrypt payload!");
 
     assert_eq!(PacketKind::PingResp, payload.kind());
