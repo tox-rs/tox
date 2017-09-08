@@ -172,18 +172,11 @@ pub fn decrypt_data_symmetric(precomputed_key: &PrecomputedKey,
 #[inline]
 pub fn increment_nonce(nonce: &mut Nonce) {
     trace!(target: "Nonce", "Incrementing Nonce: {:?}", &nonce);
-    let Nonce(ref mut nonce) = *nonce;
-    for num in nonce.iter_mut().rev() {
-        if *num < ::std::u8::MAX {
-            *num += 1;
-            return
-        } else {
-            // zero if it can't be incremented
-            *num = 0;
-        }
-    }
+    let Nonce(ref mut bytes) = *nonce;
+    bytes.reverse(); // treat nonce as LE number
+    ::sodiumoxide::utils::increment_le(bytes);
+    bytes.reverse(); // treat nonce as BE number again
 }
-
 
 /// Inrement given nonce by number `num`.
 pub fn increment_nonce_number(mut nonce: &mut Nonce, num: usize) {
