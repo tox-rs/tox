@@ -403,11 +403,44 @@ impl Arbitrary for PackedNode {
 #[allow(non_snake_case)]
 fn packed_node_new_test_ip_type_UDP_IPv4() {
     let pk = PublicKey([0; PUBLICKEYBYTES]);
-    let info = PackedNode::new(true,
-                               SocketAddr::V4("0.0.0.0:0".parse().unwrap()),
-                               &pk);
-    assert_eq!(IpType::U4, info.ip_type);
-    assert_eq!(pk, info.pk);
+    let addr = SocketAddr::V4("0.0.0.0:1".parse().unwrap());
+    let info = PackedNode::new(true, addr, &pk);
+    assert_eq!(IpType::U4, info.ip_type());
+    assert_eq!(&pk, info.pk());
+    assert_eq!(addr, info.socket_addr());
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn packed_node_new_test_ip_type_TCP_IPv4() {
+    let pk = PublicKey([0; PUBLICKEYBYTES]);
+    let addr = SocketAddr::V4("0.0.0.0:2".parse().unwrap());
+    let info = PackedNode::new(false, addr, &pk);
+    assert_eq!(IpType::T4, info.ip_type());
+    assert_eq!(&pk, info.pk());
+    assert_eq!(addr, info.socket_addr());
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn packed_node_new_test_ip_type_UDP_IPv6() {
+    let pk = PublicKey([0; PUBLICKEYBYTES]);
+    let addr = SocketAddr::V6("[::]:3".parse().unwrap());
+    let info = PackedNode::new(true, addr, &pk);
+    assert_eq!(IpType::U6, info.ip_type());
+    assert_eq!(&pk, info.pk());
+    assert_eq!(addr, info.socket_addr());
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn packed_node_new_test_ip_type_TCP_IPv6() {
+    let pk = PublicKey([0; PUBLICKEYBYTES]);
+    let addr = SocketAddr::V6("[::]:4".parse().unwrap());
+    let info = PackedNode::new(false, addr, &pk);
+    assert_eq!(IpType::T6, info.ip_type());
+    assert_eq!(&pk, info.pk());
+    assert_eq!(addr, info.socket_addr());
 }
 
 
@@ -720,7 +753,7 @@ fn packed_nodes_from_bytes_test_no_iptype() {
 fn packed_nodes_from_bytes_test_wrong_iptype() {
     fn fully_random(pn: PackedNode) {
         let mut vec = Vec::with_capacity(PACKED_NODE_IPV6_SIZE);
-        match pn.ip_type {
+        match pn.ip_type() {
             IpType::U4 => vec.push(IpType::U6 as u8),
             IpType::T4 => vec.push(IpType::T6 as u8),
             _ => return,
@@ -1175,7 +1208,7 @@ fn node_id_test() {
 fn node_pk_test() {
     fn with_pn(pn: PackedNode, timeout: u64) {
         let node = Node::new(&pn, timeout);
-        assert_eq!(pn.pk, *node.pk());
+        assert_eq!(pn.pk(), node.pk());
     }
     quickcheck(with_pn as fn(PackedNode, u64));
 }
@@ -1264,7 +1297,7 @@ fn bucket_remove_test() {
         let mut rng = StdGen::new(ChaChaRng::new_unseeded(), rng_num);
         for _ in 0..num {
             let node: PackedNode = Arbitrary::arbitrary(&mut rng);
-            rm_pubkeys.push(node.pk);
+            rm_pubkeys.push(*node.pk());
             drop(bucket.try_add(&pk, &node));
         }
 
