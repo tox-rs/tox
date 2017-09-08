@@ -67,178 +67,143 @@ fn nums_to_pk(a: u64, b: u64, c: u64, d: u64) -> PublicKey {
 }
 
 
-// PingType::
 
-impl Arbitrary for PingType {
-    fn arbitrary<G: Gen>(g: &mut G) -> Self {
-        *g.choose(&[PingType::Req, PingType::Resp]).unwrap()
+// PingReq::
+
+impl Arbitrary for PingReq {
+    fn arbitrary<G: Gen>(_g: &mut G) -> Self {
+        PingReq::new()
     }
 }
 
-// PingType::from_bytes()
+// PingReq::new()
 
 #[test]
-fn ping_type_from_bytes_test() {
-    fn with_bytes(bytes: Vec<u8>) {
-        if bytes.is_empty() {
-            assert_eq!(None, PingType::from_bytes(&bytes));
-        } else if bytes[0] == 0 {
-            assert_eq!(PingType::Req, PingType::from_bytes(&bytes).unwrap());
-        } else if bytes[0] == 1 {
-            assert_eq!(PingType::Resp, PingType::from_bytes(&bytes).unwrap());
-        } else {
-            assert_eq!(None, PingType::from_bytes(&bytes));
-        }
-    }
-    quickcheck(with_bytes as fn(Vec<u8>));
-
-    // just in case
-    with_bytes(vec![]);
-    for i in 0x00 .. 0xff {
-        with_bytes(vec![i]);
-    }
-}
-
-// PingType::parse_bytes()
-
-#[test]
-fn ping_type_parse_bytes_rest_test() {
-    fn random_invalid(pt: PingType, r_rest: Vec<u8>) {
-        let mut bytes = vec![pt as u8];
-        bytes.extend_from_slice(&r_rest);
-
-        let Parsed(_, rest) = PingType::parse_bytes(&bytes)
-            .expect("PingType parsing failed.");
-        assert_eq!(&r_rest[..], rest);
-    }
-    quickcheck(random_invalid as fn(PingType, Vec<u8>));
-}
-
-// Ping::
-
-impl Arbitrary for Ping {
-    fn arbitrary<G: Gen>(g: &mut G) -> Self {
-        let request: bool = g.gen();
-        if request { Ping::new() } else { Ping::new().response().unwrap() }
-    }
-}
-
-// Ping::new()
-
-#[test]
-fn ping_new_test() {
-    let p1 = Ping::new();
-    let p2 = Ping::new();
+fn ping_req_new_test() {
+    let p1 = PingReq::new();
+    let p2 = PingReq::new();
     assert!(p1 != p2);
     assert!(p1.id() != p2.id());
 }
 
-// Ping::id()
+// PingReq::id()
 
 #[test]
-fn ping_id_test() {
-    let ping = Ping::new();
+fn ping_req_id_test() {
+    let ping = PingReq::new();
     assert_eq!(ping.id(), ping.id());
 }
 
-// Ping::is_request()
 
-#[test]
-fn ping_is_request_test() {
-    assert_eq!(true, Ping::new().is_request());
-}
 
-// Ping::response()
+// PingResp::
 
-#[test]
-fn ping_response_test() {
-    let ping_req = Ping::new();
-    let ping_res = ping_req.response()
-                           .expect("Making response to ping request failed");
-    assert_eq!(ping_req.id(), ping_res.id());
-    assert_eq!(false, ping_res.is_request());
-    assert_eq!(None, ping_res.response());
-}
-
-// Ping::kind()
-
-#[test]
-fn ping_kind_test() {
-    fn with_ping(p: Ping) {
-        if p.is_request() {
-            assert_eq!(PacketKind::PingReq, p.kind());
-        } else {
-            assert_eq!(PacketKind::PingResp, p.kind());
-        }
+impl Arbitrary for PingResp {
+    fn arbitrary<G: Gen>(_g: &mut G) -> Self {
+        PingReq::new().into()
     }
-    quickcheck(with_ping as fn(Ping));
 }
 
-// Ping::to_bytes()
+// PingResp::id()
 
 #[test]
-fn ping_to_bytes_test() {
-    let p = Ping::new();
-    let pb = p.to_bytes();
-    assert_eq!(PING_SIZE, pb.len());
-    // new ping is always a request
-    assert_eq!(PingType::Req as u8, pb[0]);
-
-    let prb = p.response().expect("Failed to respond to Ping").to_bytes();
-    assert_eq!(PingType::Resp as u8, prb[0]);
-    // `id` of ping should not change
-    assert_eq!(pb[1..], prb[1..]);
+fn ping_resp_id_test() {
+    fn with_ping_req(p: PingReq) {
+        assert_eq!(p.id(), PingResp::from(p).id());
+    }
+    quickcheck(with_ping_req as fn(PingReq));
 }
 
-// Ping::from_bytes()
+// PingResp::to_bytes()
 
 #[test]
-fn ping_from_bytes_test() {
-    fn with_bytes(bytes: Vec<u8>) {
-        if bytes.len() < PING_SIZE ||
-           bytes[0] != PingType::Req as u8 &&
-           bytes[0] != PingType::Resp as u8 {
-            assert_eq!(None, Ping::from_bytes(&bytes));
-        } else {
-            let p = Ping::from_bytes(&bytes).unwrap();
-            // `id` should not differ
-            assert_eq!(p.id(), NativeEndian::read_u64(&bytes[1..PING_SIZE]));
+fn ping_resp_to_bytes_test_cmp_ping_req() {
+    fn with_ping_req(p: PingReq) {
+        let pqb = p.to_bytes();
+        let prb = PingResp::from(p).to_bytes();
+        assert!(pqb[0] != prb[0]);
+        assert_eq!(pqb[1..], prb[1..]);
+    }
+    quickcheck(with_ping_req as fn(PingReq));
+}
 
-            if bytes[0] == PingType::Req as u8 {
-                assert_eq!(true, p.is_request());
-            } else {
-                assert_eq!(false, p.is_request());
+
+macro_rules! tests_for_pings {
+    ($($p:ident $k_t:ident $b_t:ident $f_t:ident $p_t:ident)+) => ($(
+        // ::kind()
+
+        #[test]
+        fn $k_t() {
+            fn with_ping(p: $p) {
+                assert_eq!(PacketKind::$p, p.kind())
             }
+            quickcheck(with_ping as fn($p));
         }
-    }
-    quickcheck(with_bytes as fn(Vec<u8>));
 
-    // just in case
-    let mut ping = vec![PingType::Req as u8];
-    ping.write_u64::<NativeEndian>(random_u64())
-        .expect("Failed to write Ping id!");
-    with_bytes(ping.clone());
+        // ::to_bytes()
 
-    // make it a response
-    ping[0] = PingType::Resp as u8;
-    with_bytes(ping);
+        #[test]
+        fn $b_t() {
+            fn with_ping(p: $p) {
+                let pb = p.to_bytes();
+                assert_eq!(PING_SIZE, pb.len());
+                assert_eq!(PacketKind::$p as u8, pb[0]);
+            }
+            quickcheck(with_ping as fn($p));
+        }
+
+        // ::from_bytes()
+
+        #[test]
+        fn $f_t() {
+            fn with_bytes(bytes: Vec<u8>) {
+                if bytes.len() < PING_SIZE ||
+                   bytes[0] != PacketKind::$p as u8 {
+                    assert_eq!(None, $p::from_bytes(&bytes));
+                } else {
+                    let p = $p::from_bytes(&bytes).unwrap();
+                    // `id` should not differ
+                    assert_eq!(p.id(), NativeEndian::read_u64(&bytes[1..PING_SIZE]));
+                }
+            }
+            quickcheck(with_bytes as fn(Vec<u8>));
+        
+            // just in case
+            let mut ping = vec![PacketKind::$p as u8];
+            ping.write_u64::<NativeEndian>(random_u64())
+                .expect("Failed to write Ping id!");
+            with_bytes(ping);
+        }
+
+        // ::parse_bytes()
+
+        #[test]
+        fn $p_t() {
+            fn with_bytes(p: $p, r_rest: Vec<u8>) {
+                let mut bytes = Vec::with_capacity(PING_SIZE + r_rest.len());
+                bytes.extend_from_slice(&p.to_bytes());
+                bytes.extend_from_slice(&r_rest);
+        
+                let Parsed(_, rest) = $p::parse_bytes(&bytes)
+                    .expect("Ping parsing failure.");
+                assert_eq!(&r_rest[..], rest);
+            }
+            quickcheck(with_bytes as fn($p, Vec<u8>));
+        }
+    )+)
 }
+tests_for_pings!(PingReq
+                    ping_req_kind_test
+                    ping_req_to_bytes_test
+                    ping_req_from_bytes_test
+                    ping_req_parse_test
+                PingResp
+                    ping_resp_kind_test
+                    ping_resp_to_bytes_test
+                    ping_resp_from_bytes_test
+                    ping_resp_parse_test
+);
 
-// Ping::parse_bytes()
-
-#[test]
-fn ping_parse_bytes_rest_test() {
-    fn with_bytes(p: Ping, r_rest: Vec<u8>) {
-        let mut bytes = vec![];
-        bytes.extend_from_slice(&p.to_bytes());
-        bytes.extend_from_slice(&r_rest);
-
-        let Parsed(_, rest) = Ping::parse_bytes(&bytes)
-            .expect("Ping parsing failure.");
-        assert_eq!(&r_rest[..], rest);
-    }
-    quickcheck(with_bytes as fn(Ping, Vec<u8>));
-}
 
 // IpType
 
@@ -997,14 +962,15 @@ impl Arbitrary for DhtPacket {
         let precomputed = precompute(&r_pk, &sk);
         let nonce = gen_nonce();
 
-        let choice = g.gen_range(0, 3);
+        let choice = g.gen_range(0, 4);
         match choice {
             0 =>
-                DhtPacket::new(&precomputed, &pk, &nonce, &Ping::arbitrary(g)),
-            // TODO: add PingResp once Ping is split
+                DhtPacket::new(&precomputed, &pk, &nonce, &PingReq::arbitrary(g)),
             1 =>
-                DhtPacket::new(&precomputed, &pk, &nonce, &GetNodes::arbitrary(g)),
+                DhtPacket::new(&precomputed, &pk, &nonce, &PingResp::arbitrary(g)),
             2 =>
+                DhtPacket::new(&precomputed, &pk, &nonce, &GetNodes::arbitrary(g)),
+            3 =>
                 DhtPacket::new(&precomputed, &pk, &nonce, &SendNodes::arbitrary(g)),
             _ => panic!("Arbitrary for DhtPacketT – should not have happened!"),
         }
@@ -1025,8 +991,8 @@ fn dht_packet_new_test() {
         let dhtp = DhtPacket::new(&precomputed, &pk, &nonce, &dpt);
         assert_eq!(dhtp.sender_pk, pk);
     }
-    quickcheck(with_dht_packet as fn(Ping));
-    // TODO: add PingResp once Ping is split
+    quickcheck(with_dht_packet as fn(PingReq));
+    quickcheck(with_dht_packet as fn(PingResp));
     quickcheck(with_dht_packet as fn(GetNodes));
     quickcheck(with_dht_packet as fn(SendNodes));
 }
@@ -1051,8 +1017,8 @@ fn dht_paket_get_packet_test() {
         let bob_packet = new_packet.get_packet(&bob_sk).unwrap();
         assert_eq!(dpt, bob_packet);
     }
-    quickcheck(with_dht_packet as fn(Ping));
-    // TODO: add PingResp once Ping is split
+    quickcheck(with_dht_packet as fn(PingReq));
+    quickcheck(with_dht_packet as fn(PingResp));
     quickcheck(with_dht_packet as fn(GetNodes));
     quickcheck(with_dht_packet as fn(SendNodes));
 }
@@ -1077,8 +1043,8 @@ fn dht_packet_ping_resp_test() {
             assert_eq!(None, response);
         }
     }
-    quickcheck(with_dpt as fn(Ping));
-    // TODO: add PingResp once Ping is split
+    quickcheck(with_dpt as fn(PingReq));
+    quickcheck(with_dpt as fn(PingResp));
     quickcheck(with_dpt as fn(GetNodes));
     quickcheck(with_dpt as fn(SendNodes));
 }
@@ -1116,8 +1082,8 @@ fn dht_packet_to_bytes_test() {
         let decrypted = open(&packet[nonce_end..], &nonce, &alice_pk, &bob_sk).unwrap();
         assert_eq!(dpt, P::from_bytes(&decrypted).unwrap());
     }
-    quickcheck(with_dht_packet as fn(Ping));
-    // TODO: add PingResp once Ping is split
+    quickcheck(with_dht_packet as fn(PingReq));
+    quickcheck(with_dht_packet as fn(PingResp));
     quickcheck(with_dht_packet as fn(GetNodes));
     quickcheck(with_dht_packet as fn(SendNodes));
 }
@@ -1443,181 +1409,141 @@ fn kbucket_get_closest_test() {
 }
 
 
-// NatPing::
+// NatPingReq::
 
-impl Arbitrary for NatPing {
-    fn arbitrary<G: Gen>(g: &mut G) -> Self {
-        NatPing(Arbitrary::arbitrary(g))
-    }
-}
-
-// NatPing::new()
+// NatPingReq::new()
 
 #[test]
-fn nat_ping_new_test() {
-    let p1 = NatPing::new();
-    let p2 = NatPing::new();
+fn nat_ping_req_new_test() {
+    let p1 = NatPingReq::new();
+    let p2 = NatPingReq::new();
     assert!(p1 != p2);
     assert!(p1.id() != p2.id());
 }
 
-// NatPing::id()
+// NatPingReq::id()
 
 #[test]
-fn nat_ping_id_test() {
-    let ping = NatPing::new();
+fn nat_ping_req_id_test() {
+    let ping = NatPingReq::new();
     assert_eq!(ping.id(), ping.id());
 }
 
-// NatPing::is_request()
+
+
+// NatPingResp::
+
+// NatPingResp::id()
 
 #[test]
-fn nat_ping_is_request_test() {
-    assert_eq!(true, NatPing::new().is_request());
+fn nat_ping_resp_id_test() {
+    fn with_np(np: NatPingReq) {
+        assert_eq!(np.id(), NatPingResp::from(np).id());
+    }
+    quickcheck(with_np as fn(NatPingReq));
 }
 
-// NatPing::response()
+// NatPingResp::to_bytes()
 
 #[test]
-fn nat_ping_response_test() {
-    let ping_req = Ping::new();
-    let ping_res = ping_req.response()
-                           .expect("Making response to ping request failed");
-    assert_eq!(ping_req.id(), ping_res.id());
-    assert_eq!(false, ping_res.is_request());
-    assert_eq!(None, ping_res.response());
+fn nat_ping_resp_to_bytes_test_cmp_to_req() {
+    fn with_np(p: NatPingReq) {
+        let pqb = p.to_bytes();
+        let prb = NatPingResp::from(p).to_bytes();
+        assert_eq!(pqb[0], prb[0]);
+        assert!(pqb[1] != prb[1]);
+        // `id` of the ping should not change
+        assert_eq!(pqb[2..], prb[2..]);
+    }
+    quickcheck(with_np as fn(NatPingReq));
 }
 
-// NatPing::to_bytes()
-
-#[test]
-fn nat_ping_to_bytes_test() {
-    let p = NatPing::new();
-    let pb = p.to_bytes();
-    assert_eq!(NAT_PING_SIZE, pb.len());
-    // check the magic ping type value
-    assert_eq!(NAT_PING_TYPE, pb[0]);
-    // new nat ping is always a request
-    assert_eq!(PingType::Req as u8, pb[1]);
-
-    let prb = p.response().expect("Failed to respond to NatPing").to_bytes();
-    assert_eq!(NAT_PING_TYPE, prb[0]);
-    assert_eq!(PingType::Resp as u8, prb[1]);
-    // `id` of ping should not change
-    assert_eq!(pb[2..], prb[2..]);
-}
-
-// NatPing::from_bytes()
-
-#[test]
-fn nat_ping_from_bytes_test() {
-    fn with_bytes(bytes: Vec<u8>) {
-        if bytes.len() < NAT_PING_SIZE ||
-           bytes[0] != NAT_PING_TYPE ||
-           bytes[1] != PingType::Req as u8 &&
-           bytes[1] != PingType::Resp as u8 {
-
-            assert_eq!(None, NatPing::from_bytes(&bytes));
-        } else {
-            let p = NatPing::from_bytes(&bytes)
-                .expect("De-serialization failed");
-
-            assert_eq!(p.id(), NativeEndian::read_u64(&bytes[2..NAT_PING_SIZE]));
-
-            if bytes[1] == PingType::Req as u8 {
-                assert_eq!(true, p.is_request());
-            } else {
-                assert_eq!(false, p.is_request());
+macro_rules! impls_tests_for_nat_pings {
+    ($($np:ident($p:ident) $b_t:ident $f_t:ident $p_t:ident $d_t:ident)+) => ($(
+        impl Arbitrary for $np {
+            fn arbitrary<G: Gen>(g: &mut G) -> Self {
+                $np(Arbitrary::arbitrary(g))
             }
         }
-    }
-    quickcheck(with_bytes as fn(Vec<u8>));
 
-    // just in case
-    let mut ping = vec![NAT_PING_TYPE, PingType::Req as u8];
-    ping.write_u64::<NativeEndian>(random_u64())
-        .expect("Failed to write Ping id!");
-    with_bytes(ping.clone());
+        #[test]
+        fn $b_t() {
+            fn with_np(p: $np) {
+                let pb = p.to_bytes();
+                assert_eq!(NAT_PING_SIZE, pb.len());
+                // check the magic ping type value
+                assert_eq!(NAT_PING_TYPE, pb[0]);
+                assert_eq!(p.kind() as u8, pb[1]);
+            }
+            quickcheck(with_np as fn($np));
+        }
 
-    // make it a response
-    ping[1] = PingType::Resp as u8;
-    with_bytes(ping);
+        // ::from_bytes()
+
+        #[test]
+        fn $f_t() {
+            fn with_bytes(bytes: Vec<u8>) {
+                if bytes.len() < NAT_PING_SIZE ||
+                   bytes[0] != NAT_PING_TYPE ||
+                   bytes[1] != PacketKind::$p as u8
+                {
+                    assert_eq!(None, $np::from_bytes(&bytes));
+                } else {
+                    let p = $np::from_bytes(&bytes)
+                        .expect("De-serialization failed");
+        
+                    assert_eq!(p.id(), NativeEndian::read_u64(&bytes[2..NAT_PING_SIZE]));
+                }
+            }
+            quickcheck(with_bytes as fn(Vec<u8>));
+        
+            // just in case
+            let mut ping = vec![NAT_PING_TYPE, PacketKind::$p as u8];
+            ping.write_u64::<NativeEndian>(random_u64())
+                .expect("Failed to write Ping id!");
+            with_bytes(ping);
+        }
+
+        // ::parse_bytes()
+
+        #[test]
+        fn $p_t() {
+            fn with_bytes(np: $np, r_rest: Vec<u8>) {
+                let mut bytes = vec![];
+                bytes.extend_from_slice(&np.to_bytes());
+                bytes.extend_from_slice(&r_rest);
+        
+                let Parsed(_, rest) = $np::parse_bytes(&bytes)
+                    .expect("Parsing failure.");
+                assert_eq!(&r_rest[..], rest);
+            }
+            quickcheck(with_bytes as fn($np, Vec<u8>));
+        }
+
+        // ::deref()
+
+        #[test]
+        fn $d_t() {
+            fn with_ping(ping: $p) {
+                assert_eq!(*$np(ping), ping);
+            }
+            quickcheck(with_ping as fn($p));
+        }
+    )+)
 }
+impls_tests_for_nat_pings!(
+    NatPingReq(PingReq)
+        nat_ping_req_to_bytes_test
+        nat_ping_req_from_bytes_test
+        nat_ping_req_parse_bytes_test
+        nat_ping_req_deref_test
+    NatPingResp(PingResp)
+        nat_ping_resp_to_bytes_test
+        nat_ping_resp_from_bytes_test
+        nat_ping_resp_parse_bytes_test
+        nat_ping_resp_deref_test
+);
 
-// NatPing::parse_bytes()
-
-#[test]
-fn nat_ping_parse_bytes_rest_test() {
-    fn with_bytes(np: NatPing, r_rest: Vec<u8>) {
-        let mut bytes = vec![];
-        bytes.extend_from_slice(&np.to_bytes());
-        bytes.extend_from_slice(&r_rest);
-
-        let Parsed(_, rest) = NatPing::parse_bytes(&bytes)
-            .expect("NatPing parsing failure.");
-        assert_eq!(&r_rest[..], rest);
-    }
-    quickcheck(with_bytes as fn(NatPing, Vec<u8>));
-}
-
-// NatPing::deref()
-
-#[test]
-fn nat_ping_deref_test() {
-    fn with_ping(ping: Ping) {
-        assert_eq!(*NatPing(ping), ping);
-    }
-    quickcheck(with_ping as fn(Ping));
-}
-
-
-// DhtRequestT::
-
-impl Arbitrary for DhtRequestT {
-    fn arbitrary<G: Gen>(g: &mut G) -> Self {
-        DhtRequestT::NatPing(Arbitrary::arbitrary(g))
-    }
-}
-
-// DhtRequestT::to_bytes()
-
-#[test]
-fn dht_request_t_to_bytes_test() {
-    fn with_ping(ping: NatPing) {
-        assert_eq!(ping.to_bytes(), DhtRequestT::NatPing(ping).to_bytes());
-    }
-    quickcheck(with_ping as fn(NatPing));
-}
-
-// DhtRequestT::from_bytes()
-
-#[test]
-fn dht_request_t_from_bytes_test() {
-    fn with_ping(ping: NatPing) {
-        let bytes = DhtRequestT::NatPing(ping).to_bytes();
-        assert_eq!(DhtRequestT::NatPing(ping),
-            DhtRequestT::from_bytes(&bytes)
-                .expect("Failed to de-serialize DhtRequest!"));
-    }
-    quickcheck(with_ping as fn(NatPing));
-}
-
-// DhtRequestT::parse_bytes()
-
-#[test]
-fn dht_request_t_parse_bytes_rest_test() {
-    fn with_ping(ping: NatPing, r_rest: Vec<u8>) {
-        let mut bytes = vec![];
-        bytes.extend_from_slice(&DhtRequestT::NatPing(ping).to_bytes());
-        bytes.extend_from_slice(&r_rest);
-
-        let Parsed(result, rest) = DhtRequestT::parse_bytes(&bytes)
-            .expect("Failed to de-serialize DhtRequest!");
-        assert_eq!(DhtRequestT::NatPing(ping), result);
-        assert_eq!(&r_rest[..], rest);
-    }
-    quickcheck(with_ping as fn(NatPing, Vec<u8>));
-}
 
 
 // DhtRequest::new()
@@ -1625,35 +1551,41 @@ fn dht_request_t_parse_bytes_rest_test() {
 #[test]
 fn dht_request_new_test() {
     // TODO: once DhtRequest will support more types, expand the test
-    fn with_req(req: DhtRequestT) {
+    fn with_req<R>(req: R)
+        where R: DhtRequestT
+    {
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _) = gen_keypair();
         let nonce = gen_nonce();
-        let dr = DhtRequest::new(&alice_sk, &alice_pk, &bob_pk, &nonce, req);
-        let dr2 = DhtRequest::new(&alice_sk, &alice_pk, &bob_pk, &nonce, req);
+        let dr = DhtRequest::new(&alice_sk, &alice_pk, &bob_pk, &nonce, &req);
+        let dr2 = DhtRequest::new(&alice_sk, &alice_pk, &bob_pk, &nonce, &req);
         assert_eq!(dr, dr2);
         assert_eq!(dr.receiver, bob_pk);
         assert_eq!(dr.sender, alice_pk);
 
         let nonce2 = gen_nonce();
-        let dr3 = DhtRequest::new(&alice_sk, &alice_pk, &bob_pk, &nonce2, req);
+        let dr3 = DhtRequest::new(&alice_sk, &alice_pk, &bob_pk, &nonce2, &req);
         assert!(dr != dr3);
     }
-    quickcheck(with_req as fn(DhtRequestT));
+    quickcheck(with_req as fn(NatPingReq));
+    quickcheck(with_req as fn(NatPingResp));
 }
 
 // DhtRequest::get_request()
 
 #[test]
 fn dht_request_get_request_test() {
-    fn with_req(req: DhtRequestT) {
+    fn with_req<R>(req: R)
+        where R: DhtRequestT
+    {
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, bob_sk) = gen_keypair();
         let nonce = gen_nonce();
-        let dreq = DhtRequest::new(&alice_sk, &alice_pk, &bob_pk, &nonce, req);
+        let dreq = DhtRequest::new(&alice_sk, &alice_pk, &bob_pk, &nonce, &req);
 
         let received = dreq.get_request(&bob_sk).expect("Failed to get request");
         assert_eq!(req, received);
     }
-    quickcheck(with_req as fn(DhtRequestT));
+    quickcheck(with_req as fn(NatPingReq));
+    quickcheck(with_req as fn(NatPingResp));
 }

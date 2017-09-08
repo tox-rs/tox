@@ -27,6 +27,7 @@
 */
 
 use std::cmp::{Ord, Ordering};
+use std::convert::From;
 use std::fmt::Debug;
 use std::net::{
     IpAddr,
@@ -44,152 +45,123 @@ use toxcore::crypto_core::*;
 use toxcore::packet_kind::PacketKind;
 
 
-/** Type of [`Ping`](./struct.Ping.html) packet. Either a request or response.
 
-    * `0` – if ping is a request;
-    * `1` – if ping is a response.
-*/
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum PingType {
-    /// Request ping response. Wrapper over [`PacketKind::PingReq`]
-    /// (../packet_kind/enum.PacketKind.html).
-    Req  = PacketKind::PingReq as isize,
-    /// Respond to ping request. Wrapper over [`PacketKind::PingResp`]
-    /// (../packet_kind/enum.PacketKind.html).
-    Resp = PacketKind::PingResp as isize,
-}
-
-/** Uses the first byte from the provided slice to de-serialize
-[`PingType`](./enum.PingType.html). Returns `None` if first byte of slice
-doesn't match `PingType` or slice has no elements.
-*/
-impl FromBytes for PingType {
-    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
-        debug!(target: "PingType", "Creating PingType from bytes.");
-        trace!(target: "PingType", "Bytes: {:?}", bytes);
-        match try!(PacketKind::parse_bytes(bytes)) {
-            Parsed(PacketKind::PingReq, rest)  => Ok(Parsed(PingType::Req, rest)),
-            Parsed(PacketKind::PingResp, rest) => Ok(Parsed(PingType::Resp, rest)),
-            Parsed(value, _) => parse_error!("Unexpected PacketKind '{:?}'", value)
-        }
-    }
-}
-
-
-/** Used to request/respond to ping. Use in an encrypted form.
-
-Used in:
-
-- [`DhtPacket`](./struct.DhtPacket.html)
-- [`DhtRequest`](./struct.DhtRequest.html)
-
-Serialized form:
-
-Ping Packet (Request and response)
-
-Packet type `0x00` for request, `0x01` for response.
-
-Response ID must match ID of the request, otherwise ping is invalid.
-
-Length      | Contents
------------ | --------
-`1`         | `u8` packet type
-`8`         | Ping ID
-
-Serialized form should be put in the encrypted part of DHT packet.
-*/
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-// TODO: split into PingReq and PingResp
-pub struct Ping {
-    p_type: PingType,
-    id: u64,
-}
-
-/// Length in bytes of [`Ping`](./struct.Ping.html) when serialized into bytes.
+/// Length in bytes of [`PingReq`](./struct.PingReq.html) and
+/// [`PingResp`](./struct.PingResp.html) when serialized into bytes.
 pub const PING_SIZE: usize = 9;
 
-impl Ping {
+
+macro_rules! impls_for_pings {
+    ($($n:ident),+) => ($(
+        /**
+        Used to request/respond to ping. Use in an encrypted form.
+
+        Used in:
+
+        - [`DhtPacket`](./struct.DhtPacket.html)
+        - [`DhtRequest`](./struct.DhtRequest.html)
+
+        Serialized form:
+
+        Ping Packet (request and response)
+
+        Packet type `0x00` for request and `0x01` for response.
+
+        Response ID must match ID of the request, otherwise ping is invalid.
+
+        Length      | Contents
+        ----------- | --------
+        `1`         | `u8` packet type
+        `8`         | Ping ID
+
+        Serialized form should be put in the encrypted part of DHT packet.
+
+        # Creating new
+
+        [`PingResp`](./struct.PingResp.html) can only be created as a response
+        to [`PingReq`](./struct.PingReq.html).
+        */
+        #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+        pub struct $n {
+            id: u64,
+        }
+
+        impl $n {
+            /// An ID of the request / response.
+            pub fn id(&self) -> u64 {
+                self.id
+            }
+        }
+
+        impl DhtPacketT for $n {
+            fn kind(&self) -> PacketKind {
+                PacketKind::$n
+            }
+        }
+
+        /** De-seralize from bytes. Tries to parse first
+        [`PING_SIZE`](./constant.PING_SIZE.html) bytes from supplied slice
+        as `Ping`.
+        */
+        impl FromBytes for $n {
+            fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
+                let pname = stringify!($n);
+                debug!(target: pname,
+                    "De-serializing {} from bytes.", pname);
+                trace!(target: pname, "With bytes: {:?}", bytes);
+
+                if bytes.len() < PING_SIZE {
+                    return parse_error!("There are less bytes than PING_SIZE!")
+                }
+
+                let Parsed(packet_t, bytes) = PacketKind::parse_bytes(bytes)?;
+                if packet_t != PacketKind::$n {
+                    return parse_error!("Not a {}!", pname)
+                }
+
+                Ok(Parsed($n {
+                    id: NativeEndian::read_u64(bytes),
+                }, &bytes[8..]))
+            }
+        }
+
+        /// Serialize to bytes.
+        impl ToBytes for $n {
+            fn to_bytes(&self) -> Vec<u8> {
+                let pname = stringify!($n);
+                debug!(target: pname, "Serializing {} into bytes.", pname);
+                trace!(target: pname, "With {}: {:?}", pname, self);
+                let mut res = Vec::with_capacity(PING_SIZE);
+                // `PingType`
+                res.push(self.kind() as u8);
+                // And random ping_id as bytes
+                res.write_u64::<NativeEndian>(self.id)
+                    .expect("Failed to write Ping id!");
+                trace!("Serialized Ping: {:?}", &res);
+                res
+            }
+        }
+    )+)
+    // TODO: add To/From impls for both(↔)?
+}
+impls_for_pings!(PingReq, PingResp);
+
+impl PingReq {
     /// Create new ping request with a randomly generated `request id`.
     pub fn new() -> Self {
         trace!("Creating new Ping.");
-        Ping { p_type: PingType::Req, id: random_u64(), }
-    }
-
-    /// An ID of the request / response.
-    pub fn id(&self) -> u64 {
-        self.id
-    }
-
-    /// Check whether given `Ping` is a request.
-    pub fn is_request(&self) -> bool {
-        trace!(target: "Ping",
-               "Checking whether Ping is a request with Ping: {:?}", self);
-        self.p_type == PingType::Req
-    }
-
-    /// Create answer to ping request. Returns `None` if supplied `Ping` is
-    /// already a ping response.
-    // TODO: make sure that checking whether `Ping` is not a response is needed
-    //       here
-    pub fn response(&self) -> Option<Self> {
-        debug!(target: "Ping", "Creating a response to ping request.");
-        trace!(target: "Ping", "With Ping: {:?}", self);
-        if self.p_type == PingType::Resp {
-            debug!("Ping is not a request, can't create response!");
-            return None;
-        }
-
-        Some(Ping { p_type: PingType::Resp, id: self.id })
+        PingReq { id: random_u64() }
     }
 }
 
-impl DhtPacketT for Ping {
-    fn kind(&self) -> PacketKind {
-        if self.is_request() {
-            PacketKind::PingReq
-        } else {
-            PacketKind::PingResp
-        }
+impl From<PingReq> for PingResp {
+    fn from(p: PingReq) -> Self {
+        PingResp { id: p.id }
     }
 }
 
-/// Serializes [`Ping`](./struct.Ping.html) into bytes.
-impl ToBytes for Ping {
-    fn to_bytes(&self) -> Vec<u8> {
-        debug!(target: "Ping", "Serializing Ping into bytes.");
-        trace!(target: "Ping", "With Ping: {:?}", self);
-        let mut res = Vec::with_capacity(PING_SIZE);
-        // `PingType`
-        res.push(self.p_type as u8);
-        // And random ping_id as bytes
-        res.write_u64::<NativeEndian>(self.id)
-            .expect("Failed to write Ping id!");
-        trace!("Serialized Ping: {:?}", &res);
-        res
-    }
-}
 
-/** De-seralize [`Ping`](./struct.Ping.html) from bytes. Tries to parse first
-[`PING_SIZE`](./constant.PING_SIZE.html) bytes from supplied slice as
-`Ping`.
-*/
-impl FromBytes for Ping {
-    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
-        debug!(target: "Ping", "De-serializing Ping from bytes.");
-        trace!(target: "Ping", "With bytes: {:?}", bytes);
 
-        if bytes.len() < PING_SIZE {
-            return parse_error!("There are less bytes than PING_SIZE!")
-        }
-
-        let Parsed(ping_type, bytes) = try!(PingType::parse_bytes(bytes));
-
-        Ok(Parsed(Ping {
-            p_type: ping_type,
-            id: NativeEndian::read_u64(bytes),
-        }, &bytes[8..]))
-    }
-}
 
 
 /** Used by [`PackedNode`](./struct.PackedNode.html).
@@ -699,7 +671,7 @@ pub trait DhtPacketT: ToBytes + FromBytes + Eq + PartialEq + Debug {
 
 
 /** Standard DHT packet that encapsulates in the encrypted payload
-[`DhtPacketT`](./enum.DhtPacketT.html).
+[`DhtPacketT`](./trait.DhtPacketT.html).
 
 Length      | Contents
 ----------- | --------
@@ -769,8 +741,8 @@ impl DhtPacket {
 
     Returns `None` in case of faliure:
 
-     - fails to decrypt
-     - fails to parse as given packet type
+    - fails to decrypt
+    - fails to parse as given packet type
     */
     /* TODO: perhaps switch to using precomputed symmetric key?
               - given that computing shared key is apparently the most
@@ -820,16 +792,12 @@ impl DhtPacket {
             return None
         }
 
-        let payload: Ping = match self.get_packet(secret_key) {
+        let payload: PingReq = match self.get_packet(secret_key) {
             Some(dpt) => dpt,
             None => return None,
         };
 
-        let resp = match payload.response() {
-            Some(pr) => pr,
-            None => return None,
-        };
-
+        let resp = PingResp::from(payload);
         let nonce = gen_nonce();
 
         Some(DhtPacket::new(symmetric_key, own_public_key, &nonce, &resp))
@@ -1223,130 +1191,138 @@ impl Kbucket {
 }
 
 
-/** NAT Ping; used to see if a friend we are not connected to directly is
-online and ready to do the hole punching.
+/** `NatPing` type byte for [`NatPingReq`] and [`NatPingResp`].
 
-Basically a wrapper + customization of [`Ping`](./struct.Ping.html). Added:
-`0xfe` prepended in serialized form.
+https://zetok.github.io/tox-spec/#nat-ping-request
 
-Used by [`DhtRequest`](./struct.DhtRequest.html).
-
-Can be either a:
-
- - request
- - response
-
-Serialized form:
-
-Length | Contents
--------|---------
-1      | type (`0xfe`)
-9      | [`Ping`](./struct.Ping.html)
-
-Spec: https://zetok.github.io/tox-spec/#nat-ping-packets
+[`NatPingReq`]: ./struct.PingReq.html
+[`NatPingResp`]: ./struct.PingResp.html
 */
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct NatPing(pub Ping);
-
-/// [`NatPing](./struct.NatPing.html) type byte;
-/// https://zetok.github.io/tox-spec/#nat-ping-request
 pub const NAT_PING_TYPE: u8 = 0xfe;
 
-/// Length in bytes of [`NatPing`](./struct.NatPing.html) when serialized into
-/// bytes.
+/** Length in bytes of NatPings when serialized into bytes.
+
+NatPings:
+
+ - [`NatPingReq`](./struct.PingReq.html)
+ - [`NatPingResp`](./struct.PingResp.html)
+*/
 pub const NAT_PING_SIZE: usize = PING_SIZE + 1;
 
-impl NatPing {
-    /// Create new `NatPing` request with a randomly generated `request id`.
+macro_rules! impls_for_nat_pings {
+    ($($np:ident($p:ident)),+) => ($(
+        /** NAT Ping; used to see if a friend we are not connected to directly
+        is online and ready to do the hole punching.
+
+        Basically a wrapper + customization of DHT [`PingReq`]/[`PingResp`].
+
+        Added:
+        `0xfe` prepended in serialized form.
+
+        Used by [`DhtRequest`](./struct.DhtRequest.html).
+
+        Serialized form:
+
+        Length | Contents
+        -------|---------
+        1      | type (`0xfe`)
+        9      | [`PingReq`]/[`PingResp`]
+
+        Spec: https://zetok.github.io/tox-spec/#nat-ping-packets
+
+        [`PingReq`]: ./struct.PingReq.html
+        [`PingResp`]: ./struct.PingResp.html
+        */
+        #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+        pub struct $np(pub $p);
+
+        impl $np {
+            /// Return ID of the ping.
+            pub fn id(&self) -> u64 {
+                $p::id(self)
+            }
+        }
+
+        impl DhtRequestT for $np {}
+
+        impl FromBytes for $np {
+            fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
+                let name = stringify!($np);
+                if bytes.len() < NAT_PING_SIZE {
+                    return parse_error!("Not enough bytes for {}.", name)
+                }
+
+                if bytes[0] != NAT_PING_TYPE {
+                    return parse_error!("Not a {}.", name)
+                }
+
+                let Parsed(p, rest) = $p::parse_bytes(&bytes[1..])?;
+                Ok(Parsed($np(p), rest))
+            }
+        }
+
+        /// Serializes into bytes.
+        impl ToBytes for $np {
+            fn to_bytes(&self) -> Vec<u8> {
+                debug!(target: "NatPing", "Serializing NatPing into bytes.");
+                let mut result = Vec::with_capacity(NAT_PING_SIZE);
+
+                // special, "magic" type of NatPing, according to spec:
+                // https://zetok.github.io/tox-spec/#nat-ping-request
+                result.push(NAT_PING_TYPE);
+                // and the rest of stuff inherited from `Ping`
+                result.extend_from_slice($p::to_bytes(self).as_slice());
+                trace!("Serialized {}: {:?}", stringify!($np), &result);
+                result
+            }
+        }
+
+        impl Deref for $np {
+            type Target = $p;
+
+            fn deref(&self) -> &$p {
+                let $np(ref ping) = *self;
+                ping
+            }
+        }
+    )+)
+}
+impls_for_nat_pings!(NatPingReq(PingReq), NatPingResp(PingResp));
+
+impl From<NatPingReq> for NatPingResp {
+    fn from(p: NatPingReq) -> Self {
+        NatPingResp(PingResp::from(p.0))
+    }
+}
+
+impl NatPingReq {
+    /// Create new `NatPingReq` request with a randomly generated `request id`.
     pub fn new() -> Self {
-        trace!(target: "NatPing", "Creating new Ping.");
-        NatPing(Ping::new())
-    }
-
-    /// Return `NatPing` ID.
-    pub fn id(&self) -> u64 {
-        Ping::id(self)
-    }
-
-    /// Check whether given `NatPing` is a request.
-    pub fn is_request(&self) -> bool {
-        Ping::is_request(self)
-    }
-
-    /// Create answer to ping request. Returns `None` if supplied `Ping` is
-    /// already a ping response.
-    #[inline]
-    pub fn response(&self) -> Option<Self> {
-        Ping::response(self).and_then(|p: Ping| Some(NatPing(p)))
-    }
-}
-
-/// Serializes [`NatPing`](./struct.NatPing.html) into bytes.
-impl ToBytes for NatPing {
-    fn to_bytes(&self) -> Vec<u8> {
-        debug!(target: "NatPing", "Serializing NatPing into bytes.");
-        let mut result = Vec::with_capacity(NAT_PING_SIZE);
-
-        // special, "magic" type of NatPing, according to spec:
-        // https://zetok.github.io/tox-spec/#nat-ping-request
-        result.push(NAT_PING_TYPE);
-        // and the rest of stuff inherited from `Ping`
-        result.extend_from_slice(Ping::to_bytes(self).as_slice());
-        trace!("Serialized NatPing: {:?}", &result);
-        result
-    }
-}
-
-impl FromBytes for NatPing {
-    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
-        if bytes.len() < NAT_PING_SIZE {
-            return parse_error!("Not enough bytes for NatPing.")
-        }
-
-        if bytes[0] != NAT_PING_TYPE {
-            return parse_error!("Not a NatPing.")
-        }
-
-        let Parsed(p, rest) = try!(Ping::parse_bytes(&bytes[1..]));
-        Ok(Parsed(NatPing(p), rest))
-    }
-}
-
-impl Deref for NatPing {
-    type Target = Ping;
-
-    fn deref(&self) -> &Ping {
-        let NatPing(ref ping) = *self;
-        ping
+        trace!(target: "NatPingReq", "Creating new Ping.");
+        NatPingReq(PingReq::new())
     }
 }
 
 
-/** Types of DHT request that can be put in [`DhtRequest`]
+/** Trait for types of DHT requests that can be put in [`DhtRequest`]
 (./struct.DhtRequest.html).
 
-*Currently only [`NatPing`](./struct.NatPing.html), in the future also
-onion-related stuff.*
+*Currently only NatPings, in the future also onion-related stuff.* See
+[Implementors](./trait.DhtRequestT.html#implementors).
 */
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DhtRequestT {
-    /// `NatPing` request type.
-    NatPing(NatPing),
-}
-
-impl ToBytes for DhtRequestT {
-    fn to_bytes(&self) -> Vec<u8> {
-        let DhtRequestT::NatPing(ping) = *self;
-        ping.to_bytes()
+pub trait DhtRequestT: FromBytes + ToBytes + Eq + PartialEq + Debug {
+    /// Create DHT request payload to use by `DhtRequest`.
+    fn to_dht_request_payload(&self,
+                             sender_secret_key: &SecretKey,
+                             receiver_public_key: &PublicKey,
+                             nonce: &Nonce)
+        -> Vec<u8>
+    {
+        seal(&self.to_bytes(), nonce, receiver_public_key, sender_secret_key)
     }
 }
 
-impl FromBytes for DhtRequestT {
-    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
-        let Parsed(p, rest) = try!(NatPing::parse_bytes(bytes));
-        Ok(Parsed(DhtRequestT::NatPing(p), rest))
-    }
-}
+
 
 
 /** DHT Request packet structure.
@@ -1386,20 +1362,23 @@ pub struct DhtRequest {
 
 impl DhtRequest {
     /// Create a new `DhtRequest`.
-    pub fn new(secret_key: &SecretKey,
-               own_public_key: &PublicKey,
-               receiver_public_key: &PublicKey,
-               nonce: &Nonce,
-               packet: DhtRequestT) -> Self {
+    pub fn new<P>(secret_key: &SecretKey,
+                own_public_key: &PublicKey,
+                receiver_public_key: &PublicKey,
+                nonce: &Nonce,
+                drt: &P) -> Self
+        where P: DhtRequestT
+    {
 
         debug!(target: "DhtRequest", "Creating new DhtRequest.");
         trace!(target: "DhtRequest", "With args: summetric_key: <secret>,
             own_public_key: {:?}, receiver_public_key: {:?} nonce: {:?},
             packet: {:?}",
-            own_public_key, receiver_public_key, nonce, &packet);
+            own_public_key, receiver_public_key, nonce, drt);
 
-        let payload = seal(&packet.to_bytes(), nonce, receiver_public_key,
-                           secret_key);
+        let payload = drt.to_dht_request_payload(secret_key,
+                                                receiver_public_key,
+                                                nonce);
 
         DhtRequest {
             receiver: *receiver_public_key,
@@ -1414,7 +1393,9 @@ impl DhtRequest {
 
     Returns `None` in case of failure.
     */
-    pub fn get_request(&self, secret_key: &SecretKey) -> Option<DhtRequestT> {
+    pub fn get_request<P>(&self, secret_key: &SecretKey) -> Option<P>
+        where P: DhtRequestT
+    {
         debug!(target: "DhtRequest", "Getting request data from DhtRequest.");
         trace!(target: "DhtRequest", "With DhtRequest: {:?}", self);
         let decrypted = match open(&self.payload, &self.nonce, &self.sender,
@@ -1429,6 +1410,6 @@ impl DhtRequest {
 
         trace!("Decrypted bytes: {:?}", &decrypted);
 
-        DhtRequestT::from_bytes(&decrypted)
+        P::from_bytes(&decrypted)
     }
 }
