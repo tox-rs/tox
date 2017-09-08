@@ -1161,12 +1161,9 @@ Further reading: [Tox spec](https://zetok.github.io/tox-spec#k-buckets).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Kbucket {
     /// `PublicKey` for which `Kbucket` holds close nodes.
-    pub pk: PublicKey,
+    pk: PublicKey,
 
-    /// Number of [`Bucket`](./struct.Bucket.html)s held.
-    // TODO: check if `n` even needs to be stored, considering that
-    //       `buckets.len()` could(?) be used
-    pub n: u8,
+    /// List of [`Bucket`](./struct.Bucket.html)s.
     buckets: Vec<Box<Bucket>>,
 }
 
@@ -1192,9 +1189,19 @@ impl Kbucket {
                {:?}", n, pk);
         Kbucket {
             pk: *pk,
-            n: n,
             buckets: vec![Box::new(Bucket::new(None)); n as usize]
         }
+    }
+
+    /// Number of [`Bucket`](./struct.Bucket.html)s held.
+    pub fn size(&self) -> u8 {
+        self.buckets.len() as u8
+    }
+
+    /// Get the PK of the Kbucket. Used in tests only
+    #[cfg(test)]
+    pub fn pk(&self) -> PublicKey {
+        self.pk
     }
 
     /** Try to find [`PackedNode`](./struct.PackedNode.html) in the kbucket
@@ -1217,12 +1224,28 @@ impl Kbucket {
         None
     }
 
+
+    /** Return the possible internal index of [`Bucket`](./struct.Bucket.html)
+        where the key could be inserted/removed.
+
+    Returns `Some(index)` if [`kbucket index`](./fn.kbucket_index.html) is defined
+    and it is lower than the number of buckets.
+
+    Returns `None` otherwise.
+    */
+    fn bucket_index(&self, pubkey: &PublicKey) -> Option<usize> {
+        match kbucket_index(&self.pk, pubkey) {
+            Some(index) if index < self.size() => Some(index as usize),
+            _ => None
+        }
+    }
+
     /** Add [`PackedNode`](./struct.PackedNode.html) to `Kbucket`.
 
     Node can be added only if:
 
-    * its [`kbucket index`](./fn.kbucket_index.html) is lower or equal to
-      `n` (number of buckets).
+    * its [`kbucket index`](./fn.kbucket_index.html) is lower than the
+      number of buckets.
     * [`Bucket`](./struct.Bucket.html) to which it is added has free space
       or added node is closer to the PK than other node in the bucket.
 
@@ -1232,15 +1255,13 @@ impl Kbucket {
         debug!(target: "Kbucket", "Trying to add PackedNode.");
         trace!(target: "Kbucket", "With PN: {:?}; and self: {:?}", node, self);
 
-        if let Some(index) = kbucket_index(&self.pk, &node.pk) {
-            if index >= self.n {
-                debug!("Failed, index is bigger than what Kbucket can hold.");
-                return false
+        match self.bucket_index(node.pk()) {
+            Some(index) => self.buckets[index].try_add(&self.pk, node),
+            None => {
+                trace!("Failed to add node: {:?}", node);
+                false
             }
-            return self.buckets[index as usize].try_add(&self.pk, node)
         }
-        trace!("Failed to add node: {:?}", node);
-        false
     }
 
     /// Remove [`PackedNode`](./struct.PackedNode.html) with given PK from the
@@ -1248,9 +1269,10 @@ impl Kbucket {
     pub fn remove(&mut self, node_pk: &PublicKey) {
         trace!(target: "Kbucket", "Removing PK: {:?} from Kbucket: {:?}", node_pk,
                 self);
-        // TODO: optimize using `kbucket_index()` ?
-        for i in 0..self.buckets.len() {
-            self.buckets[i].remove(&self.pk, node_pk);
+
+        match self.bucket_index(node_pk) {
+            Some(index) => self.buckets[index].remove(&self.pk, node_pk),
+            None => trace!("Failed to remove PK: {:?}", node_pk)
         }
     }
 

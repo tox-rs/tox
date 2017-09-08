@@ -1391,10 +1391,26 @@ fn kbucket_new_test() {
     fn with_pk(a: u64, b: u64, c: u64, d: u64, buckets: u8) {
         let pk = nums_to_pk(a, b, c, d);
         let kbucket = Kbucket::new(buckets, &pk);
-        assert_eq!(buckets, kbucket.n);
-        assert_eq!(pk, kbucket.pk);
+        assert_eq!(buckets, kbucket.size());
+        assert_eq!(pk, kbucket.pk());
     }
     quickcheck(with_pk as fn(u64, u64, u64, u64, u8));
+}
+
+// Kbucket::size()
+
+#[test]
+fn kbucket_size_test() {
+    let pk = PublicKey([0; PUBLICKEYBYTES]);
+
+    let k0 = Kbucket::new(0, &pk);
+    assert_eq!(0, k0.size());
+
+    let k1 = Kbucket::new(1, &pk);
+    assert_eq!(1, k1.size());
+
+    let k255 = Kbucket::new(255, &pk);
+    assert_eq!(255, k255.size());
 }
 
 // Kbucket::try_add()
@@ -1467,7 +1483,7 @@ fn kbucket_get_closest_test() {
 
         // check whether number of correct nodes that are returned is right
         let correctness = |should, kbc: &Kbucket| {
-            assert_eq!(kbc.get_closest(&pk), kbc.get_closest(&kbc.pk));
+            assert_eq!(kbc.get_closest(&pk), kbc.get_closest(&kbc.pk()));
 
             let got_nodes = kbc.get_closest(&pk);
             let mut got_correct = 0;
