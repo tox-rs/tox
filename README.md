@@ -10,10 +10,10 @@ Gitter: [![Gitter](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/
 ## Documentation
 
 [The Tox Reference](https://zetok.github.io/tox-spec) should be used for
-implementing toxcore in Rust.
+implementing toxcore in Rust. [Reference source repository].
 
 If existing documentation appears to not be complete, or is not clear enough,
-issue / pull request should be filled on the [reference repository].
+issue / pull request should be filled on the reference repository.
 
 Current [API docs](https://zetok.github.io/tox) are a subject to changes.
 
@@ -100,7 +100,7 @@ Licensed under GPLv3+. For details, see [COPYING](/COPYING).
 [CAPI]: https://github.com/quininer/tox-capi
 [hstox]: https://github.com/TokTok/hstox
 [libsodium]: https://github.com/jedisct1/libsodium
-[reference repository]: https://github.com/zetok/tox-spec/issues/new
+[Reference source repository]: https://github.com/zetok/tox-spec
 [Rust]: https://www.rust-lang.org/
 [Tox Tester]: https://github.com/zetok/tox-protocol-test
 [toxcore]: https://github.com/irungentoo/toxcore
