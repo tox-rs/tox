@@ -1019,6 +1019,24 @@ impl Bucket {
         }
     }
 
+    /** Try to find [`PackedNode`](./struct.PackedNode.html) in the bucket
+    by PK. Used in tests to check whether a `PackedNode` was added or
+    removed.
+
+    This method uses linear search as the simplest one.
+
+    Returns Some(index) if it was found.
+    Returns None if there is no a `PackedNode` with the given PK.
+    */
+    pub fn find(&mut self, pk: &PublicKey) -> Option<usize> {
+        for n in 0..self.nodes.len() {
+            if pk == &self.nodes[n].pk {
+                return Some(n)
+            }
+        }
+        None
+    }
+
     /** Try to add [`PackedNode`](./struct.PackedNode.html) to the bucket.
 
     If bucket doesn't have [`BUCKET_DEFAULT_SIZE`]
@@ -1149,6 +1167,25 @@ impl Kbucket {
             n: n,
             buckets: vec![Box::new(Bucket::new(None)); n as usize]
         }
+    }
+
+    /** Try to find [`PackedNode`](./struct.PackedNode.html) in the kbucket
+    by PK. Used in tests to check whether a `PackedNode` was added or
+    removed.
+
+    This method uses quadratic search as the simplest one.
+
+    Returns Some(bucket_index, node_index) if it was found.
+    Returns None if there is no a `PackedNode` with the given PK.
+    */
+    pub fn find(&mut self, pk: &PublicKey) -> Option<(usize, usize)> {
+        for bucket_index in 0..self.buckets.len() {
+            match self.buckets[bucket_index].find(pk) {
+                None => {},
+                Some(node_index) => return Some((bucket_index, node_index))
+            }
+        }
+        None
     }
 
     /** Add [`PackedNode`](./struct.PackedNode.html) to `Kbucket`.
