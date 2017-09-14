@@ -3,17 +3,31 @@ rust:
   - stable
   - beta
   - nightly
-# needed for `travis-cargo coveralls --no-sudo`
+cache:
+  - apt
+  - cargo
+# needed for `cargo install cargo-travis`
 addons:
   apt:
     packages:
       - libcurl4-openssl-dev
       - libelf-dev
       - libdw-dev
-      - binutils-dev # needed only for `--verify` coveralls flag
+      - binutils-dev
+      - cmake
+    sources:
+      - kalakris-cmake
 
 os:
   - linux
+
+matrix:
+  allow_failures:
+  - rust: beta
+  - rust: nightly
+  - os: osx
+
+sudo: required
 
 env:
   global:
@@ -31,19 +45,6 @@ notifications:
     on_success: change
     skip_join: true
 
-matrix:
-  allow_failures:
-  - rust: beta
-  - rust: nightly
-  - os: osx
-
-sudo: required
-
-before_script:
-  - >
-      pip install 'travis-cargo<0.2' --user &&
-      export PATH=$HOME/.local/bin:$PATH
-
 before_install:
   - |
     if [[ "$TRAVIS_OS_NAME" == "linux" ]]
@@ -60,11 +61,10 @@ before_install:
     fi
 
 script:
-  - travis-cargo clean
   - cargo build --verbose
   - cargo test --verbose
   - |
-    if rustc --version | grep -q nightly
+    if [[ "$TRAVIS_RUST_VERSION" == nightly ]]
     then
         cargo build --features "clippy" \
         && cargo test --features "clippy"
@@ -77,14 +77,11 @@ after_success:
     && (test $TRAVIS_BRANCH == "travis"
     || test $TRAVIS_BRANCH == "master" )
     && bash ./scripts/deploy-gh-pages.sh
-  # measure code coverage and upload to coveralls.io (the verify
-  # argument mitigates kcov crashes due to malformed debuginfo, at the
-  # cost of some speed <https://github.com/huonw/travis-cargo/issues/12>)
+  # measure code coverage and upload to coveralls.io
   - |
-    if [[ "$TRAVIS_OS_NAME" == "linux" ]] \
-        && (! rustc --version | grep -q -E 'beta|nightly')
+    if [[ "$TRAVIS_OS_NAME" == "linux" ]] && [[ "$TRAVIS_RUST_VERSION" == stable ]]
     then
-        travis-cargo coveralls --no-sudo --verify # (can) fails
-        # NOTE: doc tests aren't included
-        KCOV=./kcov/build/src/kcov ./scripts/coverage.sh
+      cargo install cargo-travis || echo "cargo-travis has been already installed"
+      export PATH=$HOME/.cargo/bin:$PATH
+      cargo coveralls
     fi
