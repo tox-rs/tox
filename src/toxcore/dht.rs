@@ -1019,6 +1019,25 @@ impl Bucket {
         }
     }
 
+    /** Try to find [`PackedNode`](./struct.PackedNode.html) in the bucket
+    by PK. Used in tests to check whether a `PackedNode` was added or
+    removed.
+
+    This method uses linear search as the simplest one.
+
+    Returns Some(index) if it was found.
+    Returns None if there is no a `PackedNode` with the given PK.
+    */
+    #[cfg(test)]
+    fn find(&mut self, pk: &PublicKey) -> Option<usize> {
+        for n in 0..self.nodes.len() {
+            if pk == &self.nodes[n].pk {
+                return Some(n)
+            }
+        }
+        None
+    }
+
     /** Try to add [`PackedNode`](./struct.PackedNode.html) to the bucket.
 
     If bucket doesn't have [`BUCKET_DEFAULT_SIZE`]
@@ -1079,7 +1098,6 @@ impl Bucket {
 
     If there's no `PackedNode` with given PK, nothing is being done.
     */
-    // TODO: write test
     pub fn remove(&mut self, pubkey: &PublicKey) {
         trace!(target: "Bucket", "Removing PackedNode with PK: {:?}", pubkey);
         for n in 0..self.nodes.len() {
@@ -1149,6 +1167,26 @@ impl Kbucket {
             n: n,
             buckets: vec![Box::new(Bucket::new(None)); n as usize]
         }
+    }
+
+    /** Try to find [`PackedNode`](./struct.PackedNode.html) in the kbucket
+    by PK. Used in tests to check whether a `PackedNode` was added or
+    removed.
+
+    This method uses quadratic search as the simplest one.
+
+    Returns Some(bucket_index, node_index) if it was found.
+    Returns None if there is no a `PackedNode` with the given PK.
+    */
+    #[cfg(test)]
+    fn find(&mut self, pk: &PublicKey) -> Option<(usize, usize)> {
+        for bucket_index in 0..self.buckets.len() {
+            match self.buckets[bucket_index].find(pk) {
+                None => {},
+                Some(node_index) => return Some((bucket_index, node_index))
+            }
+        }
+        None
     }
 
     /** Add [`PackedNode`](./struct.PackedNode.html) to `Kbucket`.
@@ -1432,5 +1470,218 @@ impl DhtRequest {
         trace!("Decrypted bytes: {:?}", &decrypted);
 
         P::from_bytes(&decrypted)
+    }
+}
+
+
+#[cfg(test)]
+mod test {
+    use toxcore::dht::*;
+
+    #[test]
+    fn bucket_position_test() {
+        fn with_data<F>(test_fn: F)
+            where F: Fn(&mut Bucket, // bucket
+                &PublicKey,  // base_pk
+                &PackedNode, // n1
+                &PackedNode, // n2
+                &PackedNode) // n3
+        {
+            let mut bucket = Bucket::new(None);
+
+            let base_pk = PublicKey([3; PUBLICKEYBYTES]);
+
+            let addr = Ipv4Addr::new(0, 0, 0, 0);
+            let saddr = SocketAddrV4::new(addr, 0);
+
+            let pk1 = PublicKey([1; PUBLICKEYBYTES]);
+            let n1 = PackedNode::new(false, SocketAddr::V4(saddr), &pk1);
+
+            let pk2 = PublicKey([2; PUBLICKEYBYTES]);
+            let n2 = PackedNode::new(false, SocketAddr::V4(saddr), &pk2);
+
+            let pk3 = PublicKey([4; PUBLICKEYBYTES]);
+            let n3 = PackedNode::new(false, SocketAddr::V4(saddr), &pk3);
+
+            assert!(base_pk > pk1);
+            assert!(base_pk > pk2);
+            assert!(base_pk < pk3);
+
+            assert!(pk1 < pk2);
+            assert!(pk2 < pk3);
+            assert!(pk1 < pk3);
+
+            test_fn(&mut bucket, &base_pk, &n1, &n2, &n3);
+        }
+        // Check that insertion order does not affect
+        // the result order in the bucket if the number nodes =
+        // bucket size and nodes' pk are unique
+        with_data(|bucket, base_pk, n1, n2, n3| {
+            // insert order: n1 n2 n3 maps to position
+            // n1 => 1, n2 => 0, n3 => 2
+            bucket.try_add(base_pk, n1);
+            bucket.try_add(base_pk, n2);
+            bucket.try_add(base_pk, n3);
+            assert_eq!(Some(1), bucket.find(n1.pk()));
+            assert_eq!(Some(0), bucket.find(n2.pk()));
+            assert_eq!(Some(2), bucket.find(n3.pk()));
+        });
+        with_data(|bucket, base_pk, n1, n2, n3| {
+            // insert order: n3 n2 n1 maps to position
+            // n1 => 1, n2 => 0, n3 => 2
+            bucket.try_add(base_pk, n3);
+            bucket.try_add(base_pk, n2);
+            bucket.try_add(base_pk, n1);
+            assert_eq!(Some(1), bucket.find(n1.pk()));
+            assert_eq!(Some(0), bucket.find(n2.pk()));
+            assert_eq!(Some(2), bucket.find(n3.pk()));
+        });
+        with_data(|bucket, base_pk, n1, n2, n3| {
+            // insert order: n1 n2 n1 n2 n3 n2 maps to position
+            // n1 => 1, n2 => 0, n3 => 2
+            bucket.try_add(base_pk, n1);
+            bucket.try_add(base_pk, n2);
+            bucket.try_add(base_pk, n1);
+            bucket.try_add(base_pk, n2);
+            bucket.try_add(base_pk, n3);
+            bucket.try_add(base_pk, n2);
+            assert_eq!(Some(1), bucket.find(n1.pk()));
+            assert_eq!(Some(0), bucket.find(n2.pk()));
+            assert_eq!(Some(2), bucket.find(n3.pk()));
+        });
+        // Check that removing order does not affect
+        // the order of nodes inside
+        with_data(|bucket, base_pk, n1, n2, n3| {
+            // prepare bucket
+            bucket.try_add(base_pk, n1); // => 1
+            bucket.try_add(base_pk, n2); // => 0
+            bucket.try_add(base_pk, n3); // => 2
+            // test removing from the beginning (n2 => 0)
+            bucket.remove(n2.pk());
+            assert_eq!(Some(0), bucket.find(n1.pk()));
+            assert_eq!(None,    bucket.find(n2.pk()));
+            assert_eq!(Some(1), bucket.find(n3.pk()));
+        });
+        with_data(|bucket, base_pk, n1, n2, n3| {
+            // prepare bucket
+            bucket.try_add(base_pk, n1); // => 1
+            bucket.try_add(base_pk, n2); // => 0
+            bucket.try_add(base_pk, n3); // => 2
+            // test removing from the middle (n1 => 1)
+            bucket.remove(n1.pk());
+            assert_eq!(None,    bucket.find(n1.pk()));
+            assert_eq!(Some(0), bucket.find(n2.pk()));
+            assert_eq!(Some(1), bucket.find(n3.pk()));
+        });
+        with_data(|bucket, base_pk, n1, n2, n3| {
+            // prepare bucket
+            bucket.try_add(base_pk, n1); // => 1
+            bucket.try_add(base_pk, n2); // => 0
+            bucket.try_add(base_pk, n3); // => 2
+            // test removing from the end (n3 => 2)
+            bucket.remove(n3.pk());
+            assert_eq!(Some(1), bucket.find(n1.pk()));
+            assert_eq!(Some(0), bucket.find(n2.pk()));
+            assert_eq!(None,    bucket.find(n3.pk()));
+        });
+    }
+
+    #[test]
+    fn kbucket_position_test() {
+        fn with_data<F>(test_fn: F)
+            where F: Fn(&mut Kbucket, // kbucket
+                &PackedNode, // n1
+                &PackedNode, // n2
+                &PackedNode) // n3
+        {
+            let mut pk_bytes = [3; PUBLICKEYBYTES];
+
+            pk_bytes[0] = 1;
+            let base_pk = PublicKey(pk_bytes);
+
+            let mut kbucket = Kbucket::new(KBUCKET_MAX_ENTRIES, &base_pk);
+
+            let addr = Ipv4Addr::new(0, 0, 0, 0);
+            let saddr = SocketAddrV4::new(addr, 0);
+
+            pk_bytes[5] = 1;
+            let pk1 = PublicKey(pk_bytes);
+            let n1 = PackedNode::new(false, SocketAddr::V4(saddr), &pk1);
+
+            pk_bytes[10] = 2;
+            let pk2 = PublicKey(pk_bytes);
+            let n2 = PackedNode::new(false, SocketAddr::V4(saddr), &pk2);
+
+            pk_bytes[14] = 4;
+            let pk3 = PublicKey(pk_bytes);
+            let n3 = PackedNode::new(false, SocketAddr::V4(saddr), &pk3);
+
+            assert!(pk1 > pk2);
+            assert!(pk2 < pk3);
+            assert!(pk1 > pk3);
+
+            assert_eq!(Some(46), kbucket_index(&base_pk, &pk1));
+            assert_eq!(Some(46), kbucket_index(&base_pk, &pk2));
+            assert_eq!(Some(46), kbucket_index(&base_pk, &pk3));
+
+            test_fn(&mut kbucket, &n1, &n2, &n3);
+        }
+        // Check that insertion order does not affect
+        // the result order in the kbucket
+        with_data(|kbucket, n1, n2, n3| {
+            // insert order: n1 n2 n3 maps to position
+            // n1 => 0, n2 => 1, n3 => 2
+            kbucket.try_add(n1);
+            kbucket.try_add(n2);
+            kbucket.try_add(n3);
+            assert_eq!(Some((46, 0)), kbucket.find(n1.pk()));
+            assert_eq!(Some((46, 1)), kbucket.find(n2.pk()));
+            assert_eq!(Some((46, 2)), kbucket.find(n3.pk()));
+        });
+        with_data(|kbucket, n1, n2, n3| {
+            // insert order: n3 n2 n1 maps to position
+            // n1 => 0, n2 => 1, n3 => 2
+            kbucket.try_add(n3);
+            kbucket.try_add(n2);
+            kbucket.try_add(n1);
+            assert_eq!(Some((46, 0)), kbucket.find(n1.pk()));
+            assert_eq!(Some((46, 1)), kbucket.find(n2.pk()));
+            assert_eq!(Some((46, 2)), kbucket.find(n3.pk()));
+        });
+        // Check that removing order does not affect
+        // the order of nodes inside
+        with_data(|kbucket, n1, n2, n3| {
+            // prepare kbucket
+            kbucket.try_add(n1); // => 0
+            kbucket.try_add(n2); // => 1
+            kbucket.try_add(n3); // => 2
+            // test removing from the beginning (n1 => 0)
+            kbucket.remove(n1.pk());
+            assert_eq!(None,          kbucket.find(n1.pk()));
+            assert_eq!(Some((46, 0)), kbucket.find(n2.pk()));
+            assert_eq!(Some((46, 1)), kbucket.find(n3.pk()));
+        });
+        with_data(|kbucket, n1, n2, n3| {
+            // prepare kbucket
+            kbucket.try_add(n1); // => 0
+            kbucket.try_add(n2); // => 1
+            kbucket.try_add(n3); // => 2
+            // test removing from the middle (n2 => 1)
+            kbucket.remove(n2.pk());
+            assert_eq!(Some((46, 0)), kbucket.find(n1.pk()));
+            assert_eq!(None,          kbucket.find(n2.pk()));
+            assert_eq!(Some((46, 1)), kbucket.find(n3.pk()));
+        });
+        with_data(|kbucket, n1, n2, n3| {
+            // prepare kbucket
+            kbucket.try_add(n1); // => 0
+            kbucket.try_add(n2); // => 1
+            kbucket.try_add(n3); // => 2
+            // test removing from the end (n3 => 2)
+            kbucket.remove(n3.pk());
+            assert_eq!(Some((46, 0)), kbucket.find(n1.pk()));
+            assert_eq!(Some((46, 1)), kbucket.find(n2.pk()));
+            assert_eq!(None,          kbucket.find(n3.pk()));
+        });
     }
 }
