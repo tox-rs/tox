@@ -30,7 +30,7 @@ use toxcore::toxid::{NoSpam, NOSPAMBYTES};
 
 
 #[cfg(test)]
-use ::toxcore_tests::quickcheck::{Arbitrary, Gen, quickcheck, TestResult};
+use ::toxcore_tests::quickcheck::*;
 
 
 // TODO: add logging where it's missing
@@ -1722,7 +1722,7 @@ macro_rules! section_data_into_sect_mult_into {
                     }));
                 }
             }
-            quickcheck(with_sects as fn(Vec<$sect>));
+            QuickCheck::new().max_tests(20).quickcheck(with_sects as fn(Vec<$sect>));
         }
     )+)
 }
