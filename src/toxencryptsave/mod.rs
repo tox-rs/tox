@@ -66,7 +66,7 @@ pub use sodiumoxide::crypto::box_::PRECOMPUTEDKEYBYTES as KEY_LENGTH;
 use ::toxcore::crypto_core;
 
 #[cfg(test)]
-use ::toxcore_tests::quickcheck::{quickcheck, TestResult};
+use ::toxcore_tests::quickcheck::{QuickCheck, TestResult};
 
 
 /// Length (in bytes) of [`MAGIC_NUMBER`](./constant.MAGIC_NUMBER.html).
@@ -458,7 +458,7 @@ fn pass_key_new_test() {
         assert!(pk.key.0 != [0; KEY_LENGTH]);
         TestResult::passed()
     }
-    quickcheck(with_pw as fn(Vec<u8>) -> TestResult);
+    QuickCheck::new().max_tests(20).quickcheck(with_pw as fn(Vec<u8>) -> TestResult);
 }
 
 // PassKey::with_salt()
@@ -478,5 +478,5 @@ fn pass_key_with_salt_test() {
         assert!(pk.key.0 != [0; KEY_LENGTH]);
         TestResult::passed()
     }
-    quickcheck(with_pw as fn(Vec<u8>) -> TestResult);
+    QuickCheck::new().max_tests(20).quickcheck(with_pw as fn(Vec<u8>) -> TestResult);
 }

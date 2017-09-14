@@ -19,12 +19,7 @@
 */
 
 
-use super::quickcheck::{
-    Arbitrary,
-    Gen,
-    quickcheck,
-    TestResult,
-};
+use super::quickcheck::*;
 
 use toxencryptsave::*;
 
@@ -61,7 +56,7 @@ fn pass_key_encrypt_test() {
         assert_eq!(plain, passk.decrypt(&encrypted).expect("Decrypting failed"));
         TestResult::passed()
     }
-    quickcheck(with_data as fn(Vec<u8>, PassKey) -> TestResult);
+    QuickCheck::new().max_tests(20).quickcheck(with_data as fn(Vec<u8>, PassKey) -> TestResult);
 }
 
 // PassKey::decrypt()
@@ -100,7 +95,7 @@ fn pass_key_decrypt_test() {
 
         TestResult::passed()
     }
-    quickcheck(with_data as fn(Vec<u8>, PassKey) -> TestResult);
+    QuickCheck::new().max_tests(20).quickcheck(with_data as fn(Vec<u8>, PassKey) -> TestResult);
 }
 
 
@@ -143,7 +138,8 @@ fn pass_encrypt_test() {
 
         TestResult::passed()
     }
-    quickcheck(with_data_pass as fn(Vec<u8>, Vec<u8>) -> TestResult);
+    QuickCheck::new().max_tests(20).quickcheck(with_data_pass as
+        fn(Vec<u8>, Vec<u8>) -> TestResult);
 
     {
         use sodiumoxide::randombytes::randombytes;
@@ -192,7 +188,7 @@ fn get_salt_test() {
             assert_eq!(None, get_salt(&v));
         }
     }
-    quickcheck(with_bytes as fn(Vec<u8>));
+    QuickCheck::new().max_tests(20).quickcheck(with_bytes as fn(Vec<u8>));
 
     assert_eq!(
         get_salt(include_bytes!("ciphertext")).unwrap().0,
