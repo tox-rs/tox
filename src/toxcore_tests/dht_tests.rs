@@ -806,7 +806,27 @@ fn get_nodes_new_test() {
     quickcheck(with_pk as fn(u64, u64, u64, u64));
 }
 
-// GetNodes::kind()()
+// SendNodes::from_request()
+
+#[test]
+fn get_nodes_response_test() {
+    fn with_req(req: GetNodes, kbucket: Kbucket) {
+        let nodes = kbucket.get_closest(&req.pk);
+        let sn = req.response(&kbucket);
+        if nodes.is_empty() {
+            assert_eq!(None, sn);
+        } else {
+            let sn = sn.expect("failed to create response");
+            assert_eq!(req.id, sn.id);
+            assert_eq!(nodes, sn.nodes);
+        }
+    }
+    quickcheck(with_req as fn(GetNodes, Kbucket));
+    with_req(GetNodes::new(&PublicKey([0; PUBLICKEYBYTES])),
+        Kbucket::new(1, &PublicKey([1; PUBLICKEYBYTES])));
+}
+
+// GetNodes::kind()
 
 #[test]
 fn get_nodes_kind_test() {
@@ -867,23 +887,22 @@ fn get_nodes_parse_bytes_rest_test() {
 
 impl Arbitrary for SendNodes {
     fn arbitrary<G: Gen>(g: &mut G) -> Self {
-        let mut nodes: Vec<PackedNode> = vec![];
-        for _ in 0..g.gen_range(1, 4) {
-            nodes.push(Arbitrary::arbitrary(g));
+        SendNodes {
+            nodes: vec![Arbitrary::arbitrary(g); g.gen_range(1,4)],
+            id: g.gen()
         }
-        SendNodes { nodes: nodes, id: g.gen() }
     }
 }
 
-// SendNodes::from_request()
+// SendNodes::with_nodes()
 
 #[test]
-fn send_nodes_from_request_test() {
+fn send_nodes_with_nodes_test() {
     fn with_request(req: GetNodes, nodes: Vec<PackedNode>) {
         if nodes.len() > 4 || nodes.is_empty() {
-            assert_eq!(None, SendNodes::from_request(&req, nodes));
+            assert_eq!(None, SendNodes::with_nodes(&req, nodes));
         } else {
-            let sn = SendNodes::from_request(&req, nodes.clone()).unwrap();
+            let sn = SendNodes::with_nodes(&req, nodes.clone()).unwrap();
             assert_eq!(req.id, sn.id);
             assert_eq!(nodes, sn.nodes);
         }
@@ -913,7 +932,7 @@ fn send_nodes_to_bytes_test() {
         if let Some(n) = n2 { nodes.push(n); }
         if let Some(n) = n3 { nodes.push(n); }
         if let Some(n) = n4 { nodes.push(n); }
-        let sn_bytes = SendNodes::from_request(&req, nodes.clone())
+        let sn_bytes = SendNodes::with_nodes(&req, nodes.clone())
                         .unwrap().to_bytes();
 
         // number of nodes should match

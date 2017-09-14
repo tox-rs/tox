@@ -523,6 +523,17 @@ impl GetNodes {
         trace!(target: "GetNodes", "Creating new GetNodes request.");
         GetNodes { pk: *their_public_key, id: random_u64() }
     }
+
+
+    /**
+    Create response to `self` request with nodes provided from the `Kbucket`.
+
+    Fails (returns `None`) if `Kbucket` is empty.
+    */
+    pub fn response(&self, kbucket: &Kbucket) -> Option<SendNodes> {
+        let nodes = kbucket.get_closest(&self.pk);
+        SendNodes::with_nodes(self, nodes)
+    }
 }
 
 impl DhtPacketT for GetNodes {
@@ -604,12 +615,13 @@ pub struct SendNodes {
 }
 
 impl SendNodes {
-    /** Create new `SendNodes`. Returns `None` if 0 or more than 4 nodes are
+    /**
+    Create new `SendNodes`. Returns `None` if 0 or more than 4 nodes are
     supplied.
 
-    Created as an answer to `GetNodes` request.
+    Created as a response to `GetNodes` request.
     */
-    pub fn from_request(request: &GetNodes, nodes: Vec<PackedNode>) -> Option<Self> {
+    pub fn with_nodes(request: &GetNodes, nodes: Vec<PackedNode>) -> Option<Self> {
         debug!(target: "SendNodes", "Creating SendNodes from GetNodes.");
         trace!(target: "SendNodes", "With GetNodes: {:?}", request);
         trace!("With nodes: {:?}", &nodes);

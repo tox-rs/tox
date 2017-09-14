@@ -12,6 +12,7 @@ log = "0.3"
 num-traits = "0.1"
 sodiumoxide = "0.0.15"
 tokio-core = "0.1"
+tokio-proto = "0.1"
 
 [dev-dependencies]
 quickcheck = "0.4"

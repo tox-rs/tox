@@ -128,6 +128,7 @@ extern crate log;
 extern crate num_traits;
 extern crate sodiumoxide;
 extern crate tokio_core;
+extern crate tokio_proto;
 
 
 // TODO: refactor macros
