@@ -37,7 +37,7 @@ use std::net::{
 use std::str::FromStr;
 use byteorder::{ByteOrder, BigEndian, LittleEndian, NativeEndian, WriteBytesExt};
 
-use super::quickcheck::{Arbitrary, Gen, quickcheck, TestResult, StdGen};
+use super::quickcheck::{Arbitrary, Gen, quickcheck, StdGen, TestResult};
 use super::rand::chacha::ChaChaRng;
 
 
@@ -167,7 +167,7 @@ macro_rules! tests_for_pings {
                 }
             }
             quickcheck(with_bytes as fn(Vec<u8>));
-        
+
             // just in case
             let mut ping = vec![PacketKind::$p as u8];
             ping.write_u64::<NativeEndian>(random_u64())
@@ -183,7 +183,7 @@ macro_rules! tests_for_pings {
                 let mut bytes = Vec::with_capacity(PING_SIZE + r_rest.len());
                 bytes.extend_from_slice(&p.to_bytes());
                 bytes.extend_from_slice(&r_rest);
-        
+
                 let Parsed(_, rest) = $p::parse_bytes(&bytes)
                     .expect("Ping parsing failure.");
                 assert_eq!(&r_rest[..], rest);
@@ -1233,25 +1233,26 @@ fn kbucket_index_test() {
 
 #[test]
 fn bucket_new_test() {
-    fn with_capacity(num: u8) {
-        let default = Bucket::new(None);
-        assert_eq!(BUCKET_DEFAULT_SIZE, default.nodes.capacity());
-        let bucket = Bucket::new(Some(num));
-        assert_eq!(num as usize, bucket.nodes.capacity());
+    fn check_with_capacity(num: Option<u8>, expected_capacity: usize) {
+        let bucket1 = Bucket::new(num);
+        assert_eq!(expected_capacity, bucket1.capacity());
 
         // check if always the same with same parameters
-        let default2 = Bucket::new(None);
-        assert_eq!(default, default2);
-        let bucket2 = Bucket::new(Some(num));
-        assert_eq!(bucket, bucket2);
-
-        if num as usize != BUCKET_DEFAULT_SIZE  {
-            assert!(default != bucket);
-        } else {
-            assert_eq!(default, bucket);
-        }
+        let bucket2 = Bucket::new(num);
+        assert_eq!(bucket1, bucket2);
     }
-    quickcheck(with_capacity as fn(u8));
+    check_with_capacity(None, BUCKET_DEFAULT_SIZE);
+    check_with_capacity(Some(0), BUCKET_DEFAULT_SIZE);
+
+    fn wrapped_check(num: u8) -> TestResult {
+        // check Some(n) where n > 0
+        if num == 0 {
+            return TestResult::discard()
+        }
+        check_with_capacity(Some(num), num as usize);
+        TestResult::passed()
+    }
+    quickcheck(wrapped_check as fn(u8) -> TestResult);
 }
 
 // Bucket::try_add()
@@ -1281,38 +1282,59 @@ fn bucket_try_add_test() {
                 PackedNode, PackedNode, PackedNode, PackedNode));
 }
 
+#[test]
+fn bucket_1_capacity_try_add_test() {
+    fn with_nodes(n1: PackedNode, n2: PackedNode) -> TestResult {
+        let pk = PublicKey([0; PUBLICKEYBYTES]);
+        if pk.distance(n2.pk(), n1.pk()) != Ordering::Greater {
+            // n2 should be greater to check we can't add it
+            return TestResult::discard()
+        }
+
+        let mut node = Bucket::new(Some(1));
+
+        assert_eq!(true, node.try_add(&pk, &n1));
+        assert_eq!(false, node.try_add(&pk, &n2));
+
+        // updating node
+        assert_eq!(true, node.try_add(&pk, &n1));
+        TestResult::passed()
+    }
+    quickcheck(with_nodes as fn(PackedNode, PackedNode) -> TestResult);
+}
+
 // Bucket::remove()
 
 #[test]
 fn bucket_remove_test() {
-    fn with_nodes(num: u8, bucket_size: u8, rng_num: usize) -> TestResult {
-        if bucket_size < num {
-            // FIXME remove after merging https://github.com/zetok/tox/issues/59
-            return TestResult::discard()
-        }
+    fn with_nodes(num: u8, bucket_size: u8, rng_num: usize) {
+        let mut rng = StdGen::new(ChaChaRng::new_unseeded(), rng_num);
 
-        let pk = PublicKey([0; PUBLICKEYBYTES]);
-
-        let mut rm_pubkeys: Vec<PublicKey> = Vec::new();
+        let base_pk = PublicKey([0; PUBLICKEYBYTES]);
         let mut bucket = Bucket::new(Some(bucket_size));
 
-        bucket.remove(&pk);  // "removing" non-existent node
+        let non_existent_node: PackedNode = Arbitrary::arbitrary(&mut rng);
+        bucket.remove(&base_pk, non_existent_node.pk());  // "removing" non-existent node
         assert_eq!(true, bucket.is_empty());
 
-        let mut rng = StdGen::new(ChaChaRng::new_unseeded(), rng_num);
-        for _ in 0..num {
-            let node: PackedNode = Arbitrary::arbitrary(&mut rng);
-            rm_pubkeys.push(*node.pk());
-            assert!(bucket.try_add(&pk, &node));
+        let nodes = vec![Arbitrary::arbitrary(&mut rng); num as usize];
+        for node in &nodes {
+            bucket.try_add(&base_pk, node);
+        }
+        if num == 0 {
+            // nothing was added
+            assert_eq!(true, bucket.is_empty());
+        } else {
+            // some nodes were added
+            assert_eq!(false, bucket.is_empty());
         }
 
-        for pubkey in &rm_pubkeys {
-            bucket.remove(pubkey);
+        for node in &nodes {
+            bucket.remove(&base_pk, node.pk());
         }
         assert_eq!(true, bucket.is_empty());
-        TestResult::passed()
     }
-    quickcheck(with_nodes as fn(u8, u8, usize) -> TestResult)
+    quickcheck(with_nodes as fn(u8, u8, usize))
 }
 
 
@@ -1411,13 +1433,15 @@ fn kbucket_remove_test() {
         for node in &nodes {
             assert!(kbucket.try_add(node));
         }
+        if !nodes.is_empty() {
+            assert!(!kbucket.is_empty());
+        }
 
         // Check for actual removing
         for node in &nodes {
             kbucket.remove(node.pk());
         }
-        // TODO add check kbucket.empty() after merging
-        // https://github.com/zetok/tox/pull/59
+        assert!(kbucket.is_empty());
         TestResult::passed()
     }
     quickcheck(with_nodes as fn(Vec<PackedNode>) -> TestResult);
@@ -1553,12 +1577,12 @@ macro_rules! impls_tests_for_nat_pings {
                 } else {
                     let p = $np::from_bytes(&bytes)
                         .expect("De-serialization failed");
-        
+
                     assert_eq!(p.id(), NativeEndian::read_u64(&bytes[2..NAT_PING_SIZE]));
                 }
             }
             quickcheck(with_bytes as fn(Vec<u8>));
-        
+
             // just in case
             let mut ping = vec![NAT_PING_TYPE, PacketKind::$p as u8];
             ping.write_u64::<NativeEndian>(random_u64())
@@ -1574,7 +1598,7 @@ macro_rules! impls_tests_for_nat_pings {
                 let mut bytes = vec![];
                 bytes.extend_from_slice(&np.to_bytes());
                 bytes.extend_from_slice(&r_rest);
-        
+
                 let Parsed(_, rest) = $np::parse_bytes(&bytes)
                     .expect("Parsing failure.");
                 assert_eq!(&r_rest[..], rest);
