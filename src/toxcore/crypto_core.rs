@@ -193,14 +193,8 @@ impl FromBytes for PublicKey {
         if bytes.len() < PUBLICKEYBYTES {
             return parse_error!("Not enough bytes for PublicKey.");
         }
-        
-        let pk = match PublicKey::from_slice(&bytes[..PUBLICKEYBYTES]) {
-            Some(p) => p,
-            None    =>
-                return parse_error!("Failed; de-serializing PublicKey! \
-                                     With bytes for PublicKey: {:?}",
-                                     &bytes[..PUBLICKEYBYTES])
-        };
+
+        let pk = PublicKey::from_slice(&bytes[..PUBLICKEYBYTES]).unwrap();
 
         Ok(Parsed(pk, &bytes[PUBLICKEYBYTES..]))
     }
@@ -213,14 +207,8 @@ impl FromBytes for SecretKey {
         if bytes.len() < SECRETKEYBYTES {
             return parse_error!("Not enough bytes for SecretKey.");
         }
-        
-        let pk = match SecretKey::from_slice(&bytes[..SECRETKEYBYTES]) {
-            Some(p) => p,
-            None    =>
-                return parse_error!("Failed; de-serializing SecretKey! \
-                                     With bytes for SecretKey: {:?}",
-                                     &bytes[..SECRETKEYBYTES])
-        };
+
+        let pk = SecretKey::from_slice(&bytes[..SECRETKEYBYTES]).unwrap();
 
         Ok(Parsed(pk, &bytes[SECRETKEYBYTES..]))
     }
@@ -234,14 +222,8 @@ impl FromBytes for Nonce {
         if bytes.len() < NONCEBYTES {
             return parse_error!("Not enough bytes for Nonce.");
         }
-        
-        let nonce = match Nonce::from_slice(&bytes[..NONCEBYTES]) {
-            Some(n) => n,
-            None    =>
-                return parse_error!("Failed; de-serializing nonce! \
-                                     With bytes for nonce: {:?}",
-                                     &bytes[..NONCEBYTES])
-        };
+
+        let nonce = Nonce::from_slice(&bytes[..NONCEBYTES]).unwrap();
 
         Ok(Parsed(nonce, &bytes[NONCEBYTES..]))
     }

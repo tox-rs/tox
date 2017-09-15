@@ -1073,8 +1073,7 @@ macro_rules! nodes_list {
                     bytes.append(&mut pn.to_bytes());
                 }
                 {
-                    let Parsed(p, r_bytes) = $name::parse_bytes(&bytes)
-                        .expect("Parsing can't fail.");
+                    let Parsed(p, r_bytes) = $name::parse_bytes(&bytes).unwrap();
 
                     assert_eq!(p.0, pns);
                     assert_eq!(&[] as &[u8], r_bytes);
@@ -1502,8 +1501,7 @@ fn friend_state_new_from_pk_test() {
             return TestResult::discard()
         }
 
-        let pk = PublicKey::from_slice(&bytes[..PUBLICKEYBYTES])
-            .expect("PK failed");
+        let pk = PublicKey::from_slice(&bytes[..PUBLICKEYBYTES]).unwrap();
 
         let fs = FriendState::new_from_pk(&pk);
 
@@ -1532,8 +1530,7 @@ fn friend_state_parse_bytes_test() {
 
     // serialized and deserialized remain the same
     fn assert_success(bytes: &[u8], friend_state: &FriendState) {
-        let Parsed(ref p, _) = FriendState::parse_bytes(bytes)
-            .expect("Failed to unwrap FriendState!");
+        let Parsed(ref p, _) = FriendState::parse_bytes(bytes).unwrap();
         assert_eq!(friend_state, p);
     }
 
@@ -1754,10 +1751,8 @@ fn section_data_into_sect_mult_test_random() {
 fn section_data_parse_bytes_test() {
     fn rand_b_sect(kind: SectionKind, bytes: &[u8]) -> Vec<u8> {
         let mut b_sect = Vec::with_capacity(bytes.len() + SECTION_MIN_LEN);
-        b_sect.write_u32::<LittleEndian>(bytes.len() as u32)
-            .expect("Failed to write Section length!");
-        b_sect.write_u16::<LittleEndian>(kind as u16)
-            .expect("Failed to write Section kind!");
+        b_sect.write_u32::<LittleEndian>(bytes.len() as u32).unwrap();
+        b_sect.write_u16::<LittleEndian>(kind as u16).unwrap();
         b_sect.extend_from_slice(SECTION_MAGIC);
         b_sect.extend_from_slice(bytes);
         b_sect
@@ -1767,8 +1762,7 @@ fn section_data_parse_bytes_test() {
         let b_sect = rand_b_sect(kind, &bytes);
 
         { // working case
-            let Parsed(section, left) = SectionData::parse_bytes(&b_sect)
-                .expect("Failed to parse SectionData bytes!");
+            let Parsed(section, left) = SectionData::parse_bytes(&b_sect).unwrap();
 
             assert_eq!(0, left.len());
             assert_eq!(section.kind, kind);
@@ -1960,4 +1954,5 @@ fn state_parse_bytes_test_section_detect() {
         TestResult::passed()
     }
     quickcheck(with_state as fn(State, u8) -> TestResult);
+    with_state(State::default(), SECTION_MAGIC[0]);
 }

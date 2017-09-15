@@ -225,16 +225,16 @@ impl ToBytes for IpAddr {
     fn to_bytes(&self) -> Vec<u8> {
         debug!(target: "IpAddr", "Serializing IpAddr to bytes.");
         trace!(target: "IpAddr", "With IpAddr: {:?}", self);
-        match *self {
-            IpAddr::V4(a) => a.octets().iter().cloned().collect(),
-            IpAddr::V6(a) => {
+        match self {
+            &IpAddr::V4(a) => a.octets().iter().cloned().collect(),
+            &IpAddr::V6(a) => {
                 let mut result: Vec<u8> = vec![];
                 for n in &a.segments() {
                     result.write_u16::<LittleEndian>(*n) // TODO: check if LittleEndian is correct here
                         .expect("Failed to write Ipv6Addr segments!");
                 }
                 result
-            },
+            }
         }
     }
 }
@@ -322,7 +322,7 @@ pub const PACKED_NODE_IPV6_SIZE: usize = PUBLICKEYBYTES + 19;
 impl PackedNode {
     /** New `PackedNode`.
 
-    `udp` – whether UDP or TCP should be used. UDP is used for DHT nodes,
+    `udp` - whether UDP or TCP should be used. UDP is used for DHT nodes,
     whereas TCP is used for TCP relays. When `true`, UDP is used, otherwise
     TCP is used.
     */
@@ -747,6 +747,7 @@ impl DhtPacket {
         own_public_key: {:?}, nonce: {:?}, packet: {:?}",
         own_public_key, nonce, &dp);
 
+
         let payload = dp.into_dht_packet_payload(symmetric_key, nonce);
 
         DhtPacket {
@@ -967,18 +968,12 @@ pub fn kbucket_index(&PublicKey(ref own_pk): &PublicKey,
 
     debug!(target: "KBucketIndex", "Calculating KBucketIndex for PKs.");
     trace!(target: "KBucketIndex", "With PK1: {:?}; PK2: {:?}", own_pk, other_pk);
-    let mut index = 0;
 
     for byte in 0..PUBLICKEYBYTES {
         for bit in 0..8 {
             let shift = 7 - bit;
             if (own_pk[byte] >> shift) & 0b1 != (other_pk[byte] >> shift) & 0b1 {
-                return Some(index)
-            } else {
-                index = match index.checked_add(1) {
-                    Some(n) => n,
-                    None => return None,
-                };
+                return Some((byte * 8 + bit) as u8)
             }
         }
     }
@@ -1709,6 +1704,10 @@ mod test {
 
             let addr = Ipv4Addr::new(0, 0, 0, 0);
             let saddr = SocketAddrV4::new(addr, 0);
+
+            let n0_base_pk = PackedNode::new(false, SocketAddr::V4(saddr), &base_pk);
+            assert!(!kbucket.try_add(&n0_base_pk));
+            kbucket.remove(&base_pk);
 
             pk_bytes[5] = 1;
             let pk1 = PublicKey(pk_bytes);

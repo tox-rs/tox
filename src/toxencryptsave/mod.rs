@@ -167,10 +167,10 @@ impl PassKey {
 
         memzero(&mut key);
 
-        Ok(PassKey {
-            salt: Box::new(salt),
-            key: Box::new(try!(maybe_key.ok_or(KeyDerivationError::Failed)))
-        })
+        let salt = Box::new(salt);
+        let key = Box::new(try!(maybe_key.ok_or(KeyDerivationError::Failed)));
+
+        Ok(PassKey { salt: salt, key: key })
     }
 
     /**
@@ -470,8 +470,7 @@ fn pass_key_with_salt_test() {
         if passwd.is_empty() { return TestResult::discard() }
 
         let salt = gen_salt();
-        let pk = PassKey::with_salt(&passwd, salt)
-                    .expect("Failed to unwrap PassKey!");
+        let pk = PassKey::with_salt(&passwd, salt).unwrap();
 
         assert_eq!(&*pk.salt, &salt);
         assert!(pk.key.0.as_ref() != passwd.as_slice());

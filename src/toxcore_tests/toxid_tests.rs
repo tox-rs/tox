@@ -100,6 +100,41 @@ fn no_spam_parse_bytes_rest_test() {
     quickcheck(with_bytes as fn(Vec<u8>));
 }
 
+// ToxId::
+
+// ToxId::new_nospam
+
+#[test]
+fn tox_id_new_nospam_test() {
+    let (pk, _) = gen_keypair();
+    let toxid = ToxId::new(pk);
+    let mut toxid2 = toxid;
+    toxid2.new_nospam(None);
+
+    assert!(toxid != toxid2);
+    assert_eq!(toxid.pk, toxid2.pk);
+
+    let mut toxid3 = toxid;
+
+    // with same `NoSpam` IDs are identical
+    let nospam = NoSpam::new();
+    toxid2.new_nospam(Some(nospam));
+    toxid3.new_nospam(Some(nospam));
+    assert_eq!(toxid2, toxid3);
+}
+
+// ToxId::to_bytes()
+
+#[test]
+fn tox_id_to_bytes_test() {
+    let (pk, _) = gen_keypair();
+    let PublicKey(ref pk_bytes) = pk;
+    let toxid_bytes = ToxId::new(pk).to_bytes();
+    assert!(toxid_bytes.len() > PUBLICKEYBYTES);
+    assert_eq!(TOXIDBYTES, toxid_bytes.len());
+    // first PUBLICKEYBYTES of toxid is PK
+    assert_eq!(pk_bytes, &toxid_bytes[..PUBLICKEYBYTES]);
+}
 
 // ToxId::from_bytes()
 
