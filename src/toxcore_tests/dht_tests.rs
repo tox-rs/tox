@@ -37,7 +37,7 @@ use std::net::{
 use std::str::FromStr;
 use byteorder::{ByteOrder, BigEndian, LittleEndian, NativeEndian, WriteBytesExt};
 
-use super::quickcheck::{Arbitrary, Gen, quickcheck, StdGen, TestResult};
+use quickcheck::{Arbitrary, Gen, quickcheck, StdGen, TestResult};
 use super::rand::chacha::ChaChaRng;
 
 

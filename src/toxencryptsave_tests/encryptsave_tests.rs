@@ -19,7 +19,7 @@
 */
 
 
-use super::quickcheck::*;
+use quickcheck::*;
 
 use toxencryptsave::*;
 

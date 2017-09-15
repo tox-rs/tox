@@ -21,7 +21,7 @@
 
 use byteorder::{LittleEndian, WriteBytesExt};
 
-use super::quickcheck::{Arbitrary, Gen, TestResult, quickcheck};
+use quickcheck::{Arbitrary, Gen, TestResult, quickcheck};
 
 use toxcore::binary_io::*;
 use toxcore::dht::*;

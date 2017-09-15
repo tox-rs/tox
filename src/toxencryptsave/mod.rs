@@ -66,7 +66,7 @@ pub use sodiumoxide::crypto::box_::PRECOMPUTEDKEYBYTES as KEY_LENGTH;
 use ::toxcore::crypto_core;
 
 #[cfg(test)]
-use ::toxcore_tests::quickcheck::{QuickCheck, TestResult};
+use quickcheck::{QuickCheck, TestResult};
 
 
 /// Length (in bytes) of [`MAGIC_NUMBER`](./constant.MAGIC_NUMBER.html).

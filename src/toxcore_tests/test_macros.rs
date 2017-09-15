@@ -39,7 +39,7 @@ E.g.
 
 ```
 #[cfg(test)]
-use ::toxcore_tests::quickcheck::Arbitrary;
+use ::quickcheck::Arbitrary;
 
 struct Name(Vec<u8>);
 
@@ -67,7 +67,7 @@ macro_rules! impl_arb_for_bytes {
 E.g.
 
 ```
-use ::toxcore_tests::quickcheck::Arbitrary;
+use ::quickcheck::Arbitrary;
 use ::toxcore::dht::*;
 
 struct Nodes(Vec<PackedNode>);

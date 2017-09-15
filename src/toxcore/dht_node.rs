@@ -211,7 +211,7 @@ mod test {
     use toxcore::dht_node::ToxCodec;
     use toxcore::packet_kind::PacketKind;
 
-    use toxcore_tests::quickcheck::{quickcheck, TestResult};
+    use quickcheck::{quickcheck, TestResult};
 
     /// Bind to this IpAddr.
     // NOTE: apparently using `0.0.0.0`/`::` is not allowed on CIs like

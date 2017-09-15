@@ -20,7 +20,7 @@
 //! Tests for `binary_io` module.
 
 use num_traits::identities::Zero;
-use super::quickcheck::{quickcheck, TestResult};
+use quickcheck::{quickcheck, TestResult};
 
 use toxcore::binary_io::*;
 

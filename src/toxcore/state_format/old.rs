@@ -30,8 +30,7 @@ use toxcore::toxid::{NoSpam, NOSPAMBYTES};
 
 
 #[cfg(test)]
-use ::toxcore_tests::quickcheck::*;
-
+use quickcheck::*;
 
 // TODO: add logging where it's missing
 

@@ -21,7 +21,7 @@
 use toxcore::binary_io::*;
 use toxcore::packet_kind::PacketKind;
 
-use super::quickcheck::{Arbitrary, Gen, quickcheck};
+use quickcheck::{Arbitrary, Gen, quickcheck};
 
 // PacketKind::
 

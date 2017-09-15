@@ -19,7 +19,7 @@
 
 //! Tests for `toxid` module.
 
-use super::quickcheck::quickcheck;
+use quickcheck::quickcheck;
 use super::regex::Regex;
 
 use toxcore::binary_io::*;
