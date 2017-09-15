@@ -27,7 +27,7 @@ use std::thread;
 use toxcore::crypto_core::*;
 use toxcore::binary_io::*;
 
-use super::quickcheck::quickcheck;
+use quickcheck::quickcheck;
 
 
 // crypto_init()

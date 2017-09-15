@@ -127,15 +127,18 @@ extern crate log;
 // for Zero trait
 extern crate num_traits;
 extern crate sodiumoxide;
+
+#[cfg(test)]
+extern crate quickcheck;
+
 extern crate tokio_core;
 extern crate tokio_proto;
 
 
 // TODO: refactor macros
-#[macro_use]
 #[cfg(test)]
+#[macro_use]
 pub mod toxcore_tests {
-    pub extern crate quickcheck;
     extern crate rand;
     extern crate rustc_serialize;
     extern crate regex;
@@ -182,7 +185,6 @@ pub mod toxencryptsave;
 
 #[cfg(test)]
 mod toxencryptsave_tests {
-    extern crate quickcheck;
     extern crate rand;
 
     mod encryptsave_tests;
