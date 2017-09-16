@@ -8,7 +8,7 @@ clone_folder: C:\projects\tox
 
 branches:
   except:
-    - test
+    - /test.*/
 
 environment:
   matrix:
