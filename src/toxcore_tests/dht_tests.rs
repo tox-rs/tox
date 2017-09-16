@@ -1039,25 +1039,6 @@ impl Arbitrary for DhtPacket {
     }
 }
 
-// DhtPacket::new()
-
-// TODO: improve test ↓ (perhaps by making other struct fields public?)
-#[test]
-fn dht_packet_new_test() {
-    fn with_dht_packet<P>(dpt: P)
-        where P: DhtPacketT
-    {
-        let (pk, sk) = gen_keypair();
-        let precomputed = precompute(&pk, &sk);
-        let nonce = gen_nonce();
-        let dhtp = DhtPacket::new(&precomputed, &pk, &nonce, &dpt);
-        assert_eq!(dhtp.sender_pk, pk);
-    }
-    quickcheck(with_dht_packet as fn(PingReq));
-    quickcheck(with_dht_packet as fn(PingResp));
-    quickcheck(with_dht_packet as fn(GetNodes));
-    quickcheck(with_dht_packet as fn(SendNodes));
-}
 
 // DhtPacket::get_packet()
 
@@ -1068,6 +1049,7 @@ fn dht_paket_get_packet_test() {
     {
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, bob_sk) = gen_keypair();
+        let (_, eve_sk) = gen_keypair();
         let precomputed = precompute(&bob_pk, &alice_sk);
         let nonce = gen_nonce();
 
@@ -1075,6 +1057,9 @@ fn dht_paket_get_packet_test() {
                                         &alice_pk,
                                         &nonce,
                                         &dpt);
+
+        // eve can't decrypt it
+        assert_eq!(None, new_packet.get_packet::<P>(&eve_sk));
 
         let bob_packet = new_packet.get_packet(&bob_sk).unwrap();
         assert_eq!(dpt, bob_packet);
@@ -1110,6 +1095,29 @@ fn dht_packet_ping_resp_test() {
     quickcheck(with_dpt as fn(GetNodes));
     quickcheck(with_dpt as fn(SendNodes));
 }
+
+quickcheck! {
+    fn dht_packet_ping_resp_test_invalid(ping: PingReq) -> () {
+        // test whether a malformed DhtPacket can be parsed as PingReq
+        let (pk, sk) = gen_keypair();
+        let prec = precompute(&pk, &sk);
+        let nonce = gen_nonce();
+
+        // create a malformed packet that contains PingResp even though
+        // it claims to be a PingReq
+        let ping = DhtPacket::new(&prec, &pk, &nonce, &ping)
+            .ping_resp(&sk, &prec, &pk).unwrap();
+        let mut bytes = ping.to_bytes();
+        bytes[0] = PacketKind::PingReq as u8;
+        // parsing as DhtPacket doesn't fail, since its contents are
+        // encrypted
+        let dhtp = DhtPacket::from_bytes(&bytes).unwrap();
+        assert_eq!(PacketKind::PingReq, dhtp.kind());
+
+        assert!(dhtp.ping_resp(&sk, &prec, &pk).is_none());
+    }
+}
+
 
 // DhtPacket::to_bytes()
 

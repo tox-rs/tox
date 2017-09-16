@@ -1547,7 +1547,38 @@ impl DhtRequest {
 
 #[cfg(test)]
 mod test {
+    use quickcheck::quickcheck;
+
     use toxcore::dht::*;
+
+
+    // DhtPacket::
+
+    // DhtPacket::new()
+
+    #[test]
+    fn dht_packet_new_test() {
+        fn with_dht_packet<P>(dpt: P)
+            where P: DhtPacketT
+        {
+            let (pk, sk) = gen_keypair();
+            let precomputed = precompute(&pk, &sk);
+            let nonce = gen_nonce();
+            let dhtp = DhtPacket::new(&precomputed, &pk, &nonce, &dpt);
+            assert_eq!(dhtp.sender_pk, pk);
+            assert_eq!(dpt.kind(), dhtp.packet_type);
+            assert_eq!(nonce, dhtp.nonce);
+        }
+        quickcheck(with_dht_packet as fn(PingReq));
+        quickcheck(with_dht_packet as fn(PingResp));
+        quickcheck(with_dht_packet as fn(GetNodes));
+        quickcheck(with_dht_packet as fn(SendNodes));
+    }
+
+
+    // Bucket::
+
+    // Bucket::position()
 
     #[test]
     fn bucket_position_test() {
@@ -1656,6 +1687,10 @@ mod test {
             assert_eq!(None,    bucket.find(n3.pk()));
         });
     }
+
+    // Kbucket::
+
+    // Kbucket::position()
 
     #[test]
     fn kbucket_position_test() {
