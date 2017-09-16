@@ -127,6 +127,16 @@ fn ping_resp_to_bytes_test_cmp_ping_req() {
     quickcheck(with_ping_req as fn(PingReq));
 }
 
+// PingResp::from()
+
+#[test]
+fn ping_resp_from_test() {
+    fn with_ping_req(p: PingReq) {
+        assert_eq!(p.id(), PingResp::from(p).id());
+    }
+    quickcheck(with_ping_req as fn(PingReq));
+}
+
 
 macro_rules! tests_for_pings {
     ($($p:ident $k_t:ident $b_t:ident $f_t:ident $p_t:ident)+) => ($(

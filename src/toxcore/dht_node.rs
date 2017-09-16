@@ -1,5 +1,5 @@
 /*
-    Copyright © 2017 Zetok Zalbavar <zetok@openmailbox.org>
+    Copyright © 2017 Zetok Zalbavar <zexavexxe@gmail.com>
 
     This file is part of Tox.
 
@@ -95,6 +95,58 @@ impl DhtNode {
         self.kbucket.try_add(node)
     }
 
+
+    /**
+    Create a [`DhtPacket`](../dht/struct.DhtPacket.html) to peer with `peer_pk`
+    `PublicKey` containing a [`PingReq`](../dht/struct.PingReq.html) request.
+    */
+    fn create_ping_req(&self, peer_pk: &PublicKey) -> DhtPacket {
+        let ping = PingReq::new();
+        // TODO: precompute shared key to calculate it 1 time
+        let shared_secret = &encrypt_precompute(peer_pk, &self.dht_secret_key);
+        let nonce = &gen_nonce();
+        DhtPacket::new(shared_secret,
+                       &self.dht_public_key,
+                       nonce,
+                       &ping)
+    }
+
+    /**
+    Request ping response from a peer. Peer might or might not even reply.
+
+    Creates a future for sending request for ping.
+    */
+    // TODO: track requests
+    pub fn request_ping(&self,
+                         sink: UdpFramed<ToxCodec>,
+                         peer: &PackedNode)
+        -> sink::Send<UdpFramed<ToxCodec>>
+    {
+        let request = self.create_ping_req(peer.pk());
+        sink.send((peer.socket_addr(), request))
+    }
+
+    /**
+    Create a [`DhtPacket`] encapsulating [ping response] to given ping
+    request.
+
+    [`DhtPacket`]: ../dht/struct.DhtPacket.html
+    [ping response]: ../dht/struct.PingResp.html
+    */
+    pub fn respond_ping(&self,
+                        sink: UdpFramed<ToxCodec>,
+                        peer: &PackedNode,
+                        request: &DhtPacket)
+        -> Option<sink::Send<UdpFramed<ToxCodec>>>
+    {
+        // TODO: precompute shared key to calculate it 1 time
+        let precomp = encrypt_precompute(peer.pk(), &self.dht_secret_key);
+        request.ping_resp(&self.dht_secret_key,
+                          &precomp,
+                          &self.dht_public_key)
+            .map(|p| sink.send((peer.socket_addr(), p)))
+    }
+
     /**
     Create a [`DhtPacket`](../dht/struct.DhtPacket.html) to peer with `peer_pk`
     `PublicKey` containing a [`GetNodes`](../dht/struct.GetNodes.html) request
@@ -114,8 +166,7 @@ impl DhtNode {
     /**
     Request nodes from a peer. Peer might or might not even reply.
 
-    Creates a future for sending request for nodes. Upon future completion
-
+    Creates a future for sending request for nodes.
     */
     // TODO: track requests ?
     pub fn request_nodes(&self,
@@ -232,6 +283,7 @@ mod test {
                 // `allow` doesn't work here, regardless of whether it's
                 // located above the statement, macro, or the test fn :/
                 // lets hope that one day compiler will make things work
+                // rust bug: https://github.com/rust-lang/rust/issues/40491
                 let mut $name = DhtNode::new().unwrap();
                 let $name_socket = bind_udp(SOCKET_ADDR.parse().unwrap(),
                                             // make port range sufficiently big
@@ -267,11 +319,26 @@ mod test {
         );
     }
 
+    /**
+    Verify that given `$packet` can't be parsed as packet type `$kind`
+    using secret key `$sk`.
+    */
+    macro_rules! cant_parse_as_packet {
+        ($packet:expr, $sk:expr, $($kind:ty)+) => ($(
+            assert!($packet.get_packet::<$kind>(&$sk).is_none());
+        )+)
+    }
+
+    // DhtNode::
+
+    // DhtNode::new()
 
     #[test]
     fn dht_node_new() {
         let _ = DhtNode::new().unwrap();
     }
+
+    // DhtNode::try_add()
 
     #[test]
     fn dht_node_try_add_to_empty() {
@@ -287,133 +354,296 @@ mod test {
         quickcheck(with_nodes as fn(Vec<PackedNode>));
     }
 
+    // DhtNode::create_ping_req()
+
     #[test]
-    fn dht_node_create_getn_test() {
-        let node = DhtNode::new().unwrap();
-        let (peer_pk, peer_sk) = gen_keypair();
-        let packet1 = node.create_getn(&peer_pk);
-        assert_eq!(*node.dht_public_key, packet1.sender_pk);
-        assert_eq!(PacketKind::GetN, packet1.kind());
+    fn dht_node_create_ping_req_test() {
+        let alice = DhtNode::new().unwrap();
+        let (bob_pk, bob_sk) = gen_keypair();
+        let (_, eve_sk) = gen_keypair();
+        let packet1 = alice.create_ping_req(&bob_pk);
+        assert_eq!(*alice.dht_public_key, packet1.sender_pk);
+        assert_eq!(PacketKind::PingReq, packet1.kind());
 
-        let payload1: GetNodes = packet1.get_packet(&peer_sk)
-            .expect("failed to get payload1");
-        assert_eq!(*node.dht_public_key, payload1.pk);
-
-        let packet2 = node.create_getn(&peer_pk);
+        let packet2 = alice.create_ping_req(&bob_pk);
         assert_ne!(packet1, packet2);
 
-        let payload2: GetNodes = packet2.get_packet(&peer_sk)
+        // eve can't decrypt it
+        assert_eq!(None, packet1.get_packet::<PingReq>(&eve_sk));
+
+        let payload1: PingReq = packet1.get_packet(&bob_sk)
+            .expect("failed to get payload1");
+        let payload2: PingReq = packet2.get_packet(&bob_sk)
             .expect("failed to get payload2");
-        assert_ne!(payload1.id, payload2.id);
+        assert_ne!(payload1.id(), payload2.id());
+
+        // wrong packet kind
+        cant_parse_as_packet!(packet1, bob_sk,
+            PingResp GetNodes SendNodes);
     }
 
-    #[test]
-    fn dht_node_create_sendn_test() {
-        fn with_pns(pns: Vec<PackedNode>) -> TestResult {
-            if pns.is_empty() { return TestResult::discard() }
 
-            let node1 = DhtNode::new().unwrap();
-            let mut node2 = DhtNode::new().unwrap();
-            let req = node1.create_getn(&node2.dht_public_key);
-
-            let req_payload: GetNodes = req.get_packet(&node2.dht_secret_key)
-                .expect("failed to get req_payload");
-
-            // errors with an empty kbucket
-            let error = node2.create_sendn(&node1.dht_public_key, &req_payload);
-            assert_eq!(None, error);
-
-            for pn in &pns {
-                drop(node2.try_add(pn));
-            }
-
-            let resp1 = node2.create_sendn(&node1.dht_public_key, &req_payload)
-                .expect("failed to create response1");
-            let resp2 = node2.create_sendn(&node1.dht_public_key, &req_payload)
-                .expect("failed to create response2");
-
-            assert_eq!(resp1.sender_pk, *node2.dht_public_key);
-            assert_eq!(PacketKind::SendN, resp1.kind());
-            // encrypted payload differs due to different nonce
-            assert_ne!(resp1, resp2);
-
-            let resp1_payload: SendNodes = resp1
-                .get_packet(&node1.dht_secret_key)
-                .expect("failed to get payload1");
-            let resp2_payload: SendNodes = resp2
-                .get_packet(&node1.dht_secret_key)
-                .expect("failed to get payload2");
-            assert_eq!(resp1_payload, resp2_payload);
-            assert!(!resp1_payload.nodes.is_empty());
-
-            TestResult::passed()
-        }
-        quickcheck(with_pns as fn(Vec<PackedNode>) -> TestResult);
-
-    }
+    // DhtNode::request_ping()
 
     #[test]
-    fn dht_node_request_nodes_test() {
+    fn dht_node_request_ping_test() {
+        // bob creates & sends PingReq to alice
+        // received PingReq has to be succesfully decrypted
         node_socket!(core, handle,
-            server, server_socket,
-            client, client_socket);
+            alice, alice_socket,
+            bob, bob_socket);
 
-        let server_node = PackedNode::new(true,
-            server_socket.local_addr().unwrap(),
-            &server.dht_public_key);
+        let alice_pn = PackedNode::new(true,
+            alice_socket.local_addr().unwrap(),
+            &alice.dht_public_key);
 
         let mut recv_buf = [0; MAX_UDP_PACKET_SIZE];
 
-        let client_framed = client_socket.framed(ToxCodec);
-        let client_request = client.request_nodes(client_framed, &server_node);
+        let bob_framed = bob_socket.framed(ToxCodec);
+        let bob_request = bob.request_ping(bob_framed, &alice_pn);
 
-        let future_recv = server_socket.recv_dgram(&mut recv_buf[..]);
+        let future_recv = alice_socket.recv_dgram(&mut recv_buf[..]);
         let future_recv = add_timeout!(future_recv, &handle);
-        handle.spawn(client_request.then(|_| ok(())));
+        handle.spawn(bob_request.then(|_| ok(())));
 
         let received = core.run(future_recv).unwrap();
-        let (_server_socket, recv_buf, size, _saddr) = received;
+        let (_alice_socket, recv_buf, size, _saddr) = received;
+        assert!(size != 0);
+
+        let recv_packet = DhtPacket::from_bytes(&recv_buf[..size]).unwrap();
+        let payload: PingReq = recv_packet
+            .get_packet(&alice.dht_secret_key)
+            .expect("Failed to decrypt payload");
+
+        assert_eq!(PacketKind::PingReq, payload.kind());
+    }
+
+    // DhtNode::respond_ping()
+
+    quickcheck! {
+        fn dht_node_respond_ping_test(req: PingReq) -> () {
+            // bob creates a DhtPacket with PingReq, and alice
+            // sends a response to it
+            // response has to be successfully decrypted by alice
+            // response can't be decrypted by eve
+            node_socket!(core, handle,
+                alice, alice_socket,
+                bob, bob_socket);
+            let (_, eve_sk) = gen_keypair();
+
+            let bob_pn = PackedNode::new(true,
+                bob_socket.local_addr()
+                    .expect("failed to get saddr"),
+                &bob.dht_public_key);
+
+            let precomp = encrypt_precompute(&alice.dht_public_key,
+                                             &bob.dht_secret_key);
+            let nonce = gen_nonce();
+            let bob_ping = DhtPacket::new(&precomp,
+                                             &bob.dht_public_key,
+                                             &nonce,
+                                             &req);
+
+            let alice_framed = alice_socket.framed(ToxCodec);
+            let alice_send = alice.respond_ping(
+                alice_framed,
+                &bob_pn,
+                &bob_ping);
+
+            let mut recv_buf = [0; MAX_UDP_PACKET_SIZE];
+            let future_recv = bob_socket.recv_dgram(&mut recv_buf[..]);
+            let future_recv = add_timeout!(future_recv, &handle);
+            handle.spawn(alice_send.then(|_| ok(())));
+
+            let received = core.run(future_recv).unwrap();
+            let (_bob_socket, recv_buf, size, _saddr) = received;
+            assert!(size != 0);
+            assert_eq!(size, bob_ping.to_bytes().len());
+
+            let recv_packet = DhtPacket::from_bytes(&recv_buf[..size])
+                .expect("failed to parse as DhtPacket");
+            assert_eq!(PacketKind::PingResp, recv_packet.kind());
+
+            // eve can't decrypt it
+            assert_eq!(None, recv_packet.get_packet::<PingResp>(&eve_sk));
+
+            let payload: PingResp = recv_packet
+                .get_packet(&bob.dht_secret_key)
+                .expect("Failed to decrypt payload");
+
+            assert_eq!(PacketKind::PingResp, payload.kind());
+            assert_eq!(req.id(), payload.id());
+
+            // wrong packet kind
+            cant_parse_as_packet!(recv_packet, bob.dht_secret_key,
+                PingReq GetNodes SendNodes);
+        }
+    }
+
+    // DhtNode::create_getn()
+
+    #[test]
+    fn dht_node_create_getn_test() {
+        // alice sends GetNodes request to bob
+        // bob has to successfully decrypt the request
+        // eve can't decrypt the request
+        let alice = DhtNode::new().unwrap();
+        let (bob_pk, bob_sk) = gen_keypair();
+        let (_, eve_sk) = gen_keypair();
+        let packet1 = alice.create_getn(&bob_pk);
+        assert_eq!(*alice.dht_public_key, packet1.sender_pk);
+        assert_eq!(PacketKind::GetN, packet1.kind());
+
+        // eve can't decrypt
+        assert_eq!(None, packet1.get_packet::<GetNodes>(&eve_sk));
+
+        let payload1: GetNodes = packet1.get_packet(&bob_sk)
+            .expect("failed to get payload1");
+        assert_eq!(*alice.dht_public_key, payload1.pk);
+
+        let packet2 = alice.create_getn(&bob_pk);
+        assert_ne!(packet1, packet2);
+
+        let payload2: GetNodes = packet2.get_packet(&bob_sk)
+            .expect("failed to get payload2");
+        assert_ne!(payload1.id, payload2.id);
+
+        // wrong packet kind
+        cant_parse_as_packet!(packet1, bob_sk, SendNodes);
+    }
+
+    // DhtNode::request_nodes()
+
+    #[test]
+    fn dht_node_request_nodes_test() {
+        // bob sends via Sink GetNodes request to alice
+        // alice has to successfully decrypt & parse it
+        node_socket!(core, handle,
+            alice, alice_socket,
+            bob, bob_socket);
+
+        let alice_pn = PackedNode::new(true,
+            alice_socket.local_addr().unwrap(),
+            &alice.dht_public_key);
+
+        let mut recv_buf = [0; MAX_UDP_PACKET_SIZE];
+
+        let bob_framed = bob_socket.framed(ToxCodec);
+        let bob_request = bob.request_nodes(bob_framed, &alice_pn);
+
+        let future_recv = alice_socket.recv_dgram(&mut recv_buf[..]);
+        let future_recv = add_timeout!(future_recv, &handle);
+        handle.spawn(bob_request.then(|_| ok(())));
+
+        let received = core.run(future_recv).unwrap();
+        let (_alice_socket, recv_buf, size, _saddr) = received;
         assert!(size != 0);
 
         let recv_packet = DhtPacket::from_bytes(&recv_buf[..size]).unwrap();
         let payload: GetNodes = recv_packet
-            .get_packet(&server.dht_secret_key)
+            .get_packet(&alice.dht_secret_key)
             .expect("Failed to decrypt payload");
 
-        assert_eq!(payload.pk, *client.dht_public_key);
+        assert_eq!(payload.pk, *bob.dht_public_key);
     }
 
-    #[test]
-    fn dht_node_send_nodes() {
-        fn with_nodes(pns: Vec<PackedNode>, gn: GetNodes) -> TestResult {
+    // DhtNode::create_sendn()
+
+    quickcheck! {
+        fn dht_node_create_sendn_test(pns: Vec<PackedNode>) -> TestResult {
             if pns.is_empty() { return TestResult::discard() }
 
-            node_socket!(core, handle,
-                server, server_socket,
-                client, client_socket);
+            // alice creates GetNodes request
+            // bob has to respond to it with SendNodes
+            // alice has to be able to decrypt response
+            // alice has to be able to successfully add received nodes
+            // eve can't decrypt response
 
-            let client_node = PackedNode::new(true,
-                client_socket.local_addr()
-                    .expect("failed to get saddr"),
-                &client.dht_public_key);
+            let mut alice = DhtNode::new().unwrap();
+            let mut bob = DhtNode::new().unwrap();
+            let (_, eve_sk) = gen_keypair();
+            let req = alice.create_getn(&bob.dht_public_key);
+
+            let req_payload: GetNodes = req.get_packet(&bob.dht_secret_key)
+                .expect("failed to get req_payload");
+
+            // errors with an empty kbucket
+            let error = bob.create_sendn(&alice.dht_public_key, &req_payload);
+            assert_eq!(None, error);
 
             for pn in &pns {
-                drop(server.try_add(pn));
+                bob.try_add(pn);
             }
 
-            let server_framed = server_socket.framed(ToxCodec);
-            let server_response = server.send_nodes(
-                server_framed,
-                &client_node,
+            let resp1 = bob.create_sendn(&alice.dht_public_key, &req_payload)
+                .expect("failed to create response1");
+            let resp2 = bob.create_sendn(&alice.dht_public_key, &req_payload)
+                .expect("failed to create response2");
+
+            assert_eq!(resp1.sender_pk, *bob.dht_public_key);
+            assert_eq!(PacketKind::SendN, resp1.kind());
+            // encrypted payload differs due to different nonce
+            assert_ne!(resp1, resp2);
+
+            // eve can't decrypt
+            assert_eq!(None, resp1.get_packet::<SendNodes>(&eve_sk));
+
+            let resp1_payload: SendNodes = resp1
+                .get_packet(&alice.dht_secret_key)
+                .expect("failed to get payload1");
+            let resp2_payload: SendNodes = resp2
+                .get_packet(&alice.dht_secret_key)
+                .expect("failed to get payload2");
+            assert_eq!(resp1_payload, resp2_payload);
+            assert!(!resp1_payload.nodes.is_empty());
+
+            for node in &resp1_payload.nodes {
+                // has to succeed, since nodes in response have to differ
+                assert!(alice.try_add(node));
+            }
+
+            TestResult::passed()
+        }
+    }
+
+    // DhtNode::send_nodes()
+
+    #[test]
+    quickcheck! {
+        fn dht_node_send_nodes(pns: Vec<PackedNode>, gn: GetNodes)
+            -> TestResult
+        {
+            if pns.is_empty() { return TestResult::discard() }
+
+            // alice sends SendNodes response to random GetNodes request
+            // to bob
+
+            node_socket!(core, handle,
+                alice, alice_socket,
+                bob, bob_socket);
+
+            let bob_node = PackedNode::new(true,
+                bob_socket.local_addr()
+                    .expect("failed to get saddr"),
+                &bob.dht_public_key);
+
+            for pn in &pns {
+                drop(alice.try_add(pn));
+            }
+
+            let alice_framed = alice_socket.framed(ToxCodec);
+            let alice_response = alice.send_nodes(
+                alice_framed,
+                &bob_node,
                 &gn);
 
             let mut recv_buf = [0; MAX_UDP_PACKET_SIZE];
-            let future_recv = client_socket.recv_dgram(&mut recv_buf[..]);
+            let future_recv = bob_socket.recv_dgram(&mut recv_buf[..]);
             let future_recv = add_timeout!(future_recv, &handle);
-            handle.spawn(server_response.then(|_| ok(())));
+            handle.spawn(alice_response.then(|_| ok(())));
 
             let received = core.run(future_recv).unwrap();
-            let (_client_socket, recv_buf, size, _saddr) = received;
+            let (_bob_socket, recv_buf, size, _saddr) = received;
             assert!(size != 0);
 
             let _recv_packet = DhtPacket::from_bytes(&recv_buf[..size])
@@ -421,7 +651,6 @@ mod test {
 
             TestResult::passed()
         }
-        quickcheck(with_nodes as fn(Vec<PackedNode>, GetNodes) -> TestResult);
     }
 
 

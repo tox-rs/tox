@@ -105,6 +105,7 @@ fn main() {
         .expect("Failed to decrypt payload!");
 
     assert_eq!(PacketKind::PingResp, payload.kind());
+    assert_eq!(ping.id(), payload.id());
     println!("And contents of payload:\n{:?}", payload);
 }
 ```
@@ -129,6 +130,7 @@ extern crate num_traits;
 extern crate sodiumoxide;
 
 #[cfg(test)]
+#[macro_use]
 extern crate quickcheck;
 
 extern crate tokio_core;
