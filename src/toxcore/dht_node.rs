@@ -119,11 +119,12 @@ impl DhtNode {
     // TODO: track requests
     pub fn request_ping(&self,
                          sink: UdpFramed<ToxCodec>,
-                         peer: &PackedNode)
+                         peer_addr: SocketAddr,
+                         peer_pk: &PublicKey)
         -> sink::Send<UdpFramed<ToxCodec>>
     {
-        let request = self.create_ping_req(peer.pk());
-        sink.send((peer.socket_addr(), request))
+        let request = self.create_ping_req(peer_pk);
+        sink.send((peer_addr, request))
     }
 
     /**
@@ -135,16 +136,17 @@ impl DhtNode {
     */
     pub fn respond_ping(&self,
                         sink: UdpFramed<ToxCodec>,
-                        peer: &PackedNode,
+                        peer_addr: SocketAddr,
                         request: &DhtPacket)
         -> Option<sink::Send<UdpFramed<ToxCodec>>>
     {
         // TODO: precompute shared key to calculate it 1 time
-        let precomp = encrypt_precompute(peer.pk(), &self.dht_secret_key);
+        let precomp = encrypt_precompute(&request.sender_pk,
+                                         &self.dht_secret_key);
         request.ping_resp(&self.dht_secret_key,
                           &precomp,
                           &self.dht_public_key)
-            .map(|p| sink.send((peer.socket_addr(), p)))
+            .map(|p| sink.send((peer_addr, p)))
     }
 
     /**
@@ -171,11 +173,12 @@ impl DhtNode {
     // TODO: track requests ?
     pub fn request_nodes(&self,
                          sink: UdpFramed<ToxCodec>,
-                         peer: &PackedNode)
+                         peer_addr: SocketAddr,
+                         peer_pk: &PublicKey)
         -> sink::Send<UdpFramed<ToxCodec>>
     {
-        let request = self.create_getn(peer.pk());
-        sink.send((peer.socket_addr(), request))
+        let request = self.create_getn(peer_pk);
+        sink.send((peer_addr, request))
     }
 
     /**
@@ -207,12 +210,13 @@ impl DhtNode {
     */
     pub fn send_nodes(&self,
                       sink: UdpFramed<ToxCodec>,
-                      peer: &PackedNode,
+                      peer_addr: SocketAddr,
+                      peer_pk: &PublicKey,
                       request: &GetNodes)
         -> Option<sink::Send<UdpFramed<ToxCodec>>>
     {
-        self.create_sendn(peer.pk(), request)
-            .map(|sn| sink.send((peer.socket_addr(), sn)))
+        self.create_sendn(peer_pk, request)
+            .map(|sn| sink.send((peer_addr, sn)))
     }
 }
 
@@ -282,7 +286,8 @@ mod test {
                 #[allow(unused_mut)]
                 // `allow` doesn't work here, regardless of whether it's
                 // located above the statement, macro, or the test fn :/
-                // lets hope that one day compiler will make things work
+                // fixed on latest nightly, remove comment once minimal
+                // supported rustc will no longer complain about it
                 // rust bug: https://github.com/rust-lang/rust/issues/40491
                 let mut $name = DhtNode::new().unwrap();
                 let $name_socket = bind_udp(SOCKET_ADDR.parse().unwrap(),
@@ -392,15 +397,13 @@ mod test {
         node_socket!(core, handle,
             alice, alice_socket,
             bob, bob_socket);
-
-        let alice_pn = PackedNode::new(true,
-            alice_socket.local_addr().unwrap(),
-            &alice.dht_public_key);
+        let alice_addr = alice_socket.local_addr().unwrap();
 
         let mut recv_buf = [0; MAX_UDP_PACKET_SIZE];
 
         let bob_framed = bob_socket.framed(ToxCodec);
-        let bob_request = bob.request_ping(bob_framed, &alice_pn);
+        let bob_request = bob.request_ping(bob_framed, alice_addr,
+            &alice.dht_public_key);
 
         let future_recv = alice_socket.recv_dgram(&mut recv_buf[..]);
         let future_recv = add_timeout!(future_recv, &handle);
@@ -431,23 +434,18 @@ mod test {
                 bob, bob_socket);
             let (_, eve_sk) = gen_keypair();
 
-            let bob_pn = PackedNode::new(true,
-                bob_socket.local_addr()
-                    .expect("failed to get saddr"),
-                &bob.dht_public_key);
-
             let precomp = encrypt_precompute(&alice.dht_public_key,
                                              &bob.dht_secret_key);
             let nonce = gen_nonce();
             let bob_ping = DhtPacket::new(&precomp,
-                                             &bob.dht_public_key,
-                                             &nonce,
-                                             &req);
+                                          &bob.dht_public_key,
+                                          &nonce,
+                                          &req);
 
             let alice_framed = alice_socket.framed(ToxCodec);
             let alice_send = alice.respond_ping(
                 alice_framed,
-                &bob_pn,
+                bob_socket.local_addr().unwrap(),
                 &bob_ping);
 
             let mut recv_buf = [0; MAX_UDP_PACKET_SIZE];
@@ -521,15 +519,13 @@ mod test {
         node_socket!(core, handle,
             alice, alice_socket,
             bob, bob_socket);
-
-        let alice_pn = PackedNode::new(true,
-            alice_socket.local_addr().unwrap(),
-            &alice.dht_public_key);
+        let alice_addr = alice_socket.local_addr().unwrap();
 
         let mut recv_buf = [0; MAX_UDP_PACKET_SIZE];
 
         let bob_framed = bob_socket.framed(ToxCodec);
-        let bob_request = bob.request_nodes(bob_framed, &alice_pn);
+        let bob_request = bob.request_nodes(bob_framed, alice_addr,
+            &alice.dht_public_key);
 
         let future_recv = alice_socket.recv_dgram(&mut recv_buf[..]);
         let future_recv = add_timeout!(future_recv, &handle);
@@ -634,7 +630,8 @@ mod test {
             let alice_framed = alice_socket.framed(ToxCodec);
             let alice_response = alice.send_nodes(
                 alice_framed,
-                &bob_node,
+                bob_socket.local_addr().unwrap(),
+                &bob.dht_public_key,
                 &gn);
 
             let mut recv_buf = [0; MAX_UDP_PACKET_SIZE];
