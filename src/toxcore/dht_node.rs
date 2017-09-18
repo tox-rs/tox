@@ -276,27 +276,35 @@ mod test {
     /// Provide:
     ///   - mut core ($c)
     ///   - handle ($h)
-    ///   - mut DhtNode $name
-    ///   - socket $name_socket
-    macro_rules! node_socket {
-        ($c:ident, $h:ident, $($name:ident, $name_socket:ident),+) => (
+    macro_rules! create_core {
+        ($c:ident, $h:ident) => (
             let mut $c = Core::new().unwrap();
             let $h = $c.handle();
-            $(
-                #[allow(unused_mut)]
-                // `allow` doesn't work here, regardless of whether it's
-                // located above the statement, macro, or the test fn :/
-                // fixed on latest nightly, remove comment once minimal
-                // supported rustc will no longer complain about it
-                // rust bug: https://github.com/rust-lang/rust/issues/40491
-                let mut $name = DhtNode::new().unwrap();
-                let $name_socket = bind_udp(SOCKET_ADDR.parse().unwrap(),
-                                            // make port range sufficiently big
-                                            2048..65000,
-                                            &$h)
-                    .expect("failed to bind to socket");
-            )+
         )
+    }
+
+    /// Accept:
+    ///   - handle ($h)
+    /// Provide:
+    ///   - [mut] DhtNode $name
+    ///   - socket $name_socket
+    macro_rules! node_socket {
+        ($h:ident, mut $name:ident, $name_socket:ident) => (
+            let mut $name = DhtNode::new().unwrap();
+            let $name_socket = bind_udp(SOCKET_ADDR.parse().unwrap(),
+                                        // make port range sufficiently big
+                                        2048..65000,
+                                        &$h)
+                .expect("failed to bind to socket");
+        );
+        ($h:ident, $name:ident, $name_socket:ident) => (
+            let $name = DhtNode::new().unwrap();
+            let $name_socket = bind_udp(SOCKET_ADDR.parse().unwrap(),
+                                        // make port range sufficiently big
+                                        2048..65000,
+                                        &$h)
+                .expect("failed to bind to socket");
+        );
     }
 
     /// Add timeout to the future, and panic upon timing out.
@@ -394,9 +402,9 @@ mod test {
     fn dht_node_request_ping_test() {
         // bob creates & sends PingReq to alice
         // received PingReq has to be succesfully decrypted
-        node_socket!(core, handle,
-            alice, alice_socket,
-            bob, bob_socket);
+        create_core!(core, handle);
+        node_socket!(handle, alice, alice_socket);
+        node_socket!(handle, bob, bob_socket);
         let alice_addr = alice_socket.local_addr().unwrap();
 
         let mut recv_buf = [0; MAX_UDP_PACKET_SIZE];
@@ -429,9 +437,9 @@ mod test {
             // sends a response to it
             // response has to be successfully decrypted by alice
             // response can't be decrypted by eve
-            node_socket!(core, handle,
-                alice, alice_socket,
-                bob, bob_socket);
+            create_core!(core, handle);
+            node_socket!(handle, alice, alice_socket);
+            node_socket!(handle, bob, bob_socket);
             let (_, eve_sk) = gen_keypair();
 
             let precomp = encrypt_precompute(&alice.dht_public_key,
@@ -516,9 +524,9 @@ mod test {
     fn dht_node_request_nodes_test() {
         // bob sends via Sink GetNodes request to alice
         // alice has to successfully decrypt & parse it
-        node_socket!(core, handle,
-            alice, alice_socket,
-            bob, bob_socket);
+        create_core!(core, handle);
+        node_socket!(handle, alice, alice_socket);
+        node_socket!(handle, bob, bob_socket);
         let alice_addr = alice_socket.local_addr().unwrap();
 
         let mut recv_buf = [0; MAX_UDP_PACKET_SIZE];
@@ -614,14 +622,9 @@ mod test {
             // alice sends SendNodes response to random GetNodes request
             // to bob
 
-            node_socket!(core, handle,
-                alice, alice_socket,
-                bob, bob_socket);
-
-            let bob_node = PackedNode::new(true,
-                bob_socket.local_addr()
-                    .expect("failed to get saddr"),
-                &bob.dht_public_key);
+            create_core!(core, handle);
+            node_socket!(handle, mut alice, alice_socket);
+            node_socket!(handle, bob, bob_socket);
 
             for pn in &pns {
                 drop(alice.try_add(pn));
