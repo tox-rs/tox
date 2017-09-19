@@ -126,6 +126,26 @@ impl DhtNode {
     }
 
     /**
+    Try to add nodes from a [`DhtPacket`] that claims to contain
+    [`SendNodes`] packet.
+
+    [`DhtPacket`]: (../dht/struct.DhtPacket.html)
+    [`SendNodes`]: (../dht/struct.SendNodes.html)
+    */
+    pub fn try_add_nodes(&mut self, packet: &DhtPacket) {
+        match packet.get_packet::<SendNodes>(self.sk()) {
+            Some(sn) => {
+                trace!("Adding nodes from SendNodes to DhtNode's Kbucket");
+                for node in &sn.nodes {
+                    self.try_add(node);
+                }
+            },
+            None =>
+                error!("Wrong DhtPacket; should have contained SendNodes"),
+        }
+    }
+
+    /**
     Create a [`DhtPacket`](../dht/struct.DhtPacket.html) to peer with `peer_pk`
     `PublicKey` containing a [`PingReq`](../dht/struct.PingReq.html) request.
     */
@@ -375,7 +395,7 @@ mod test {
     fn dht_node_try_add_to_empty() {
         fn with_nodes(pns: Vec<PackedNode>) {
             let mut dhtn = DhtNode::new().unwrap();
-            let mut kbuc = Kbucket::new(KBUCKET_BUCKETS, &dhtn.dht_public_key);
+            let mut kbuc = Kbucket::new(KBUCKET_BUCKETS, dhtn.pk());
 
             for pn in &pns {
                 assert_eq!(dhtn.try_add(pn), kbuc.try_add(pn));
@@ -400,6 +420,44 @@ mod test {
     fn dht_node_sk_test() {
         let dn = DhtNode::new().unwrap();
         assert_eq!(&*dn.dht_secret_key, dn.sk());
+    }
+
+    // DhtNode::try_add_nodes()
+
+    quickcheck! {
+        fn dht_node_try_add_nodes_test(sn: SendNodes,
+                                       gn: GetNodes,
+                                       pq: PingReq,
+                                       pr: PingResp)
+            -> ()
+        {
+            // bob creates a DhtPacket to alice that contains SendNodes
+            // alice adds the nodes
+
+            let mut alice = DhtNode::new().unwrap();
+            let (bob_pk, bob_sk) = gen_keypair();
+            let precomp = precompute(alice.pk(), &bob_sk);
+            let nonce = gen_nonce();
+            macro_rules! try_add_with {
+                ($($kind:expr)+) => ($(
+                    alice.try_add_nodes(&DhtPacket::new(&precomp,
+                                                        &bob_pk,
+                                                        &nonce,
+                                                        &$kind));
+                )+)
+            }
+            // also try to add nodes from a DhtPacket that don't contain
+            // SendNodes
+            try_add_with!(sn /* and invalid ones */ gn pq pr);
+
+            // verify that alice's kbucket's contents are the same as
+            // stand-alone kbucket
+            let mut kbuc = Kbucket::new(KBUCKET_BUCKETS, alice.pk());
+            for pn in &sn.nodes {
+                kbuc.try_add(pn);
+            }
+            assert_eq!(kbuc, *alice.kbucket);
+        }
     }
 
     // DhtNode::create_ping_req()
