@@ -210,7 +210,7 @@ impl DhtNode {
 
     Creates a future for sending request for nodes.
     */
-    // TODO: track requests ?
+    // TODO: track requests
     pub fn request_nodes(&self,
                          sink: ToxSplitSink,
                          peer_addr: SocketAddr,
@@ -222,37 +222,50 @@ impl DhtNode {
     }
 
     /**
-    Create a [`DhtPacket`](../dht/struct.DhtPacket.html) to peer with `peer_pk`
-    `PublicKey` containing [`SendNodes`](../dht/struct.SendNodes.html)
-    response.
+    Create a [`DhtPacket`]  to peer with `peer_pk` `PublicKey`
+    containing [`SendNodes`] response.
 
-    Returns `None` if own `Kbucket` is empty.
+    Returns `None` if own `Kbucket` is empty or supplied `DhtPacket`
+    doesn't contain [`GetNodes`] request.
+
+    [`DhtPacket`]: ../dht/struct.DhtPacket.html
+    [`GetNodes`]: ../dht/struct.GetNodes.html
+    [`SendNodes`]: ../dht/struct.SendNodes.html
     */
-    fn create_sendn(&self, peer_pk: &PublicKey, request: &GetNodes)
+    fn create_sendn(&self, request: &DhtPacket)
         -> Option<DhtPacket>
     {
-        let sendn = match request.response(&*self.kbucket) {
+        // TODO: precompute shared key to calculate it 1 time
+        let getn = match request.get_packet::<GetNodes>(self.sk()) {
+            Some(g) => g,
+            None => return None,
+        };
+        let sendn = match getn.response(&*self.kbucket) {
             Some(s) => s,
             None => return None,
         };
-        let shared_secret = &encrypt_precompute(peer_pk, self.sk());
+        let shared_secret = &encrypt_precompute(&request.sender_pk, self.sk());
         let nonce = &gen_nonce();
         Some(DhtPacket::new(shared_secret, self.pk(), nonce, &sendn))
     }
 
     /**
-    Send nodes close to requested PK.
+    Send nodes in response to [`GetNodes`] request contained in
+    [`DhtPacket`].
 
-    Can fail (return `None`) if Kbucket is empty.
+    Can fail (return `None`) if Kbucket is empty or `DhtPacket` doesn't
+    contain `GetNodes` request.
+
+    [`DhtPacket`]: ../dht/struct.DhtPacket.html
+    [`GetNodes`]: ../dht/struct.GetNodes.html
     */
     pub fn send_nodes(&self,
                       sink: ToxSplitSink,
                       peer_addr: SocketAddr,
-                      peer_pk: &PublicKey,
-                      request: &GetNodes)
+                      request: &DhtPacket)
         -> Option<SendSink>
     {
-        self.create_sendn(peer_pk, request)
+        self.create_sendn(request)
             .map(|sn| sink.send((peer_addr, sn)))
     }
 }
@@ -425,6 +438,8 @@ mod test {
     // DhtNode::try_add_nodes()
 
     quickcheck! {
+        // TODO: silence unnecessary `error!` messages by disabling
+        //       quickcheck's `use_logging` feature?
         fn dht_node_try_add_nodes_test(sn: SendNodes,
                                        gn: GetNodes,
                                        pq: PingReq,
@@ -536,10 +551,7 @@ mod test {
 
             let precomp = encrypt_precompute(alice.pk(), bob.sk());
             let nonce = gen_nonce();
-            let bob_ping = DhtPacket::new(&precomp,
-                                          bob.pk(),
-                                          &nonce,
-                                          &req);
+            let bob_ping = DhtPacket::new(&precomp, bob.pk(), &nonce, &req);
 
             let (alice_sink, _) = alice_socket.framed(ToxCodec).split();
             let alice_send = alice.respond_ping(
@@ -647,7 +659,7 @@ mod test {
         fn dht_node_create_sendn_test(pns: Vec<PackedNode>) -> TestResult {
             if pns.is_empty() { return TestResult::discard() }
 
-            // alice creates GetNodes request
+            // alice creates DhtPacket containing GetNodes request
             // bob has to respond to it with SendNodes
             // alice has to be able to decrypt response
             // alice has to be able to successfully add received nodes
@@ -658,20 +670,17 @@ mod test {
             let (_, eve_sk) = gen_keypair();
             let req = alice.create_getn(bob.pk());
 
-            let req_payload: GetNodes = req.get_packet(bob.sk())
-                .expect("failed to get req_payload");
-
             // errors with an empty kbucket
-            let error = bob.create_sendn(alice.pk(), &req_payload);
+            let error = bob.create_sendn(&req);
             assert_eq!(None, error);
 
             for pn in &pns {
                 bob.try_add(pn);
             }
 
-            let resp1 = bob.create_sendn(alice.pk(), &req_payload)
+            let resp1 = bob.create_sendn(&req)
                 .expect("failed to create response1");
-            let resp2 = bob.create_sendn(alice.pk(), &req_payload)
+            let resp2 = bob.create_sendn(&req)
                 .expect("failed to create response2");
 
             assert_eq!(resp1.sender_pk, *bob.pk());
@@ -704,9 +713,7 @@ mod test {
 
     #[test]
     quickcheck! {
-        fn dht_node_send_nodes(pns: Vec<PackedNode>, gn: GetNodes)
-            -> TestResult
-        {
+        fn dht_node_send_nodes(pns: Vec<PackedNode>) -> TestResult {
             if pns.is_empty() { return TestResult::discard() }
 
             // alice sends SendNodes response to random GetNodes request
@@ -720,12 +727,13 @@ mod test {
                 drop(alice.try_add(pn));
             }
 
+            let getn = bob.create_getn(alice.pk());
+
             let (alice_sink, _) = alice_socket.framed(ToxCodec).split();
             let alice_response = alice.send_nodes(
                 alice_sink,
                 bob_socket.local_addr().unwrap(),
-                &bob.pk(),
-                &gn);
+                &getn);
 
             let mut recv_buf = [0; MAX_UDP_PACKET_SIZE];
             let future_recv = bob_socket.recv_dgram(&mut recv_buf[..]);
