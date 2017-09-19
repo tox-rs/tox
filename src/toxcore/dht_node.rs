@@ -18,12 +18,16 @@
 */
 
 
-//! Functionality needed to work as a DHT node.
-//!
-//! Made on top of `dht` and `network` modules.
+/*!
+Functionality needed to work as a DHT node.
+
+Made on top of `dht` and `network` modules.
+*/
+// TODO: expand doc
 
 
 use futures::*;
+use futures::stream::*;
 use futures::sink;
 use tokio_core::net::{UdpCodec, UdpFramed};
 use tokio_proto::multiplex::RequestId;
@@ -34,6 +38,17 @@ use std::net::SocketAddr;
 use toxcore::binary_io::{FromBytes, ToBytes};
 use toxcore::crypto_core::*;
 use toxcore::dht::*;
+
+
+/// Type for sending `SplitSink` with `ToxCodec`.
+// FIXME: docs
+// TODO: rename
+pub type ToxSplitSink = SplitSink<UdpFramed<ToxCodec>>;
+
+/// Type representing future `Send` via `SplitSink`.
+// FIXME: docs
+// TODO: rename
+pub type SendSink = sink::Send<SplitSink<UdpFramed<ToxCodec>>>;
 
 
 /**
@@ -61,11 +76,12 @@ pub struct DhtNode {
 
 
 impl DhtNode {
-    /** Create new `DhtNode` instance.
+    /**
+    Create new `DhtNode` instance.
 
     Note: a new instance generates new DHT public and secret keys.
 
-    DHT PublicKey and SecretKey are supposed to be ephemeral.
+    DHT `PublicKey` and `SecretKey` are supposed to be ephemeral.
     */
     pub fn new() -> io::Result<Self> {
         if !crypto_init() {
@@ -95,6 +111,19 @@ impl DhtNode {
         self.kbucket.try_add(node)
     }
 
+    /**
+    Reference to own DHT `PublicKey`.
+    */
+    fn pk(&self) -> &PublicKey {
+        &self.dht_public_key
+    }
+
+    /**
+    Reference to own DHT `SecretKey`.
+    */
+    fn sk(&self) -> &SecretKey {
+        &self.dht_secret_key
+    }
 
     /**
     Create a [`DhtPacket`](../dht/struct.DhtPacket.html) to peer with `peer_pk`
@@ -103,12 +132,9 @@ impl DhtNode {
     fn create_ping_req(&self, peer_pk: &PublicKey) -> DhtPacket {
         let ping = PingReq::new();
         // TODO: precompute shared key to calculate it 1 time
-        let shared_secret = &encrypt_precompute(peer_pk, &self.dht_secret_key);
+        let shared_secret = &encrypt_precompute(peer_pk, self.sk());
         let nonce = &gen_nonce();
-        DhtPacket::new(shared_secret,
-                       &self.dht_public_key,
-                       nonce,
-                       &ping)
+        DhtPacket::new(shared_secret, self.pk(), nonce, &ping)
     }
 
     /**
@@ -118,10 +144,10 @@ impl DhtNode {
     */
     // TODO: track requests
     pub fn request_ping(&self,
-                         sink: UdpFramed<ToxCodec>,
+                         sink: ToxSplitSink,
                          peer_addr: SocketAddr,
                          peer_pk: &PublicKey)
-        -> sink::Send<UdpFramed<ToxCodec>>
+        -> SendSink
     {
         let request = self.create_ping_req(peer_pk);
         sink.send((peer_addr, request))
@@ -135,17 +161,14 @@ impl DhtNode {
     [ping response]: ../dht/struct.PingResp.html
     */
     pub fn respond_ping(&self,
-                        sink: UdpFramed<ToxCodec>,
+                        sink: ToxSplitSink,
                         peer_addr: SocketAddr,
                         request: &DhtPacket)
-        -> Option<sink::Send<UdpFramed<ToxCodec>>>
+        -> Option<SendSink>
     {
         // TODO: precompute shared key to calculate it 1 time
-        let precomp = encrypt_precompute(&request.sender_pk,
-                                         &self.dht_secret_key);
-        request.ping_resp(&self.dht_secret_key,
-                          &precomp,
-                          &self.dht_public_key)
+        let precomp = encrypt_precompute(&request.sender_pk, self.sk());
+        request.ping_resp(self.sk(), &precomp, self.pk())
             .map(|p| sink.send((peer_addr, p)))
     }
 
@@ -156,13 +179,10 @@ impl DhtNode {
     */
     fn create_getn(&self, peer_pk: &PublicKey) -> DhtPacket {
         // request for nodes that are close to our own DHT PK
-        let getn_req = &GetNodes::new(&self.dht_public_key);
-        let shared_secret = &encrypt_precompute(peer_pk, &self.dht_secret_key);
+        let getn_req = &GetNodes::new(self.pk());
+        let shared_secret = &encrypt_precompute(peer_pk, self.sk());
         let nonce = &gen_nonce();
-        DhtPacket::new(shared_secret,
-                       &self.dht_public_key,
-                       nonce,
-                       getn_req)
+        DhtPacket::new(shared_secret, self.pk(), nonce, getn_req)
     }
 
     /**
@@ -172,10 +192,10 @@ impl DhtNode {
     */
     // TODO: track requests ?
     pub fn request_nodes(&self,
-                         sink: UdpFramed<ToxCodec>,
+                         sink: ToxSplitSink,
                          peer_addr: SocketAddr,
                          peer_pk: &PublicKey)
-        -> sink::Send<UdpFramed<ToxCodec>>
+        -> SendSink
     {
         let request = self.create_getn(peer_pk);
         sink.send((peer_addr, request))
@@ -195,12 +215,9 @@ impl DhtNode {
             Some(s) => s,
             None => return None,
         };
-        let shared_secret = &encrypt_precompute(peer_pk, &self.dht_secret_key);
+        let shared_secret = &encrypt_precompute(peer_pk, self.sk());
         let nonce = &gen_nonce();
-        Some(DhtPacket::new(shared_secret,
-                            &self.dht_public_key,
-                            nonce,
-                            &sendn))
+        Some(DhtPacket::new(shared_secret, self.pk(), nonce, &sendn))
     }
 
     /**
@@ -209,11 +226,11 @@ impl DhtNode {
     Can fail (return `None`) if Kbucket is empty.
     */
     pub fn send_nodes(&self,
-                      sink: UdpFramed<ToxCodec>,
+                      sink: ToxSplitSink,
                       peer_addr: SocketAddr,
                       peer_pk: &PublicKey,
                       request: &GetNodes)
-        -> Option<sink::Send<UdpFramed<ToxCodec>>>
+        -> Option<SendSink>
     {
         self.create_sendn(peer_pk, request)
             .map(|sn| sink.send((peer_addr, sn)))
@@ -250,6 +267,7 @@ impl UdpCodec for ToxCodec {
 
 #[cfg(test)]
 mod test {
+    use futures::*;
     use futures::future::*;
     use tokio_core::reactor::{Core, Timeout};
     use tokio_core::net::UdpCodec;
@@ -297,14 +315,14 @@ mod test {
                                         &$h)
                 .expect("failed to bind to socket");
         );
-        ($h:ident, $name:ident, $name_socket:ident) => (
+        ($($h:ident, $name:ident, $name_socket:ident),+) => ($(
             let $name = DhtNode::new().unwrap();
             let $name_socket = bind_udp(SOCKET_ADDR.parse().unwrap(),
                                         // make port range sufficiently big
                                         2048..65000,
                                         &$h)
                 .expect("failed to bind to socket");
-        );
+        )+);
     }
 
     /// Add timeout to the future, and panic upon timing out.
@@ -367,6 +385,23 @@ mod test {
         quickcheck(with_nodes as fn(Vec<PackedNode>));
     }
 
+
+    // DhtNode::pk()
+
+    #[test]
+    fn dht_node_pk_test() {
+        let dn = DhtNode::new().unwrap();
+        assert_eq!(&*dn.dht_public_key, dn.pk());
+    }
+
+    // DhtNode::pk()
+
+    #[test]
+    fn dht_node_sk_test() {
+        let dn = DhtNode::new().unwrap();
+        assert_eq!(&*dn.dht_secret_key, dn.sk());
+    }
+
     // DhtNode::create_ping_req()
 
     #[test]
@@ -375,7 +410,7 @@ mod test {
         let (bob_pk, bob_sk) = gen_keypair();
         let (_, eve_sk) = gen_keypair();
         let packet1 = alice.create_ping_req(&bob_pk);
-        assert_eq!(*alice.dht_public_key, packet1.sender_pk);
+        assert_eq!(alice.pk(), &packet1.sender_pk);
         assert_eq!(PacketKind::PingReq, packet1.kind());
 
         let packet2 = alice.create_ping_req(&bob_pk);
@@ -403,15 +438,14 @@ mod test {
         // bob creates & sends PingReq to alice
         // received PingReq has to be succesfully decrypted
         create_core!(core, handle);
-        node_socket!(handle, alice, alice_socket);
-        node_socket!(handle, bob, bob_socket);
+        node_socket!(handle, alice, alice_socket,
+                     handle, bob, bob_socket);
         let alice_addr = alice_socket.local_addr().unwrap();
 
         let mut recv_buf = [0; MAX_UDP_PACKET_SIZE];
 
-        let bob_framed = bob_socket.framed(ToxCodec);
-        let bob_request = bob.request_ping(bob_framed, alice_addr,
-            &alice.dht_public_key);
+        let (bob_sink, _) = bob_socket.framed(ToxCodec).split();
+        let bob_request = bob.request_ping(bob_sink, alice_addr, alice.pk());
 
         let future_recv = alice_socket.recv_dgram(&mut recv_buf[..]);
         let future_recv = add_timeout!(future_recv, &handle);
@@ -423,7 +457,7 @@ mod test {
 
         let recv_packet = DhtPacket::from_bytes(&recv_buf[..size]).unwrap();
         let payload: PingReq = recv_packet
-            .get_packet(&alice.dht_secret_key)
+            .get_packet(alice.sk())
             .expect("Failed to decrypt payload");
 
         assert_eq!(PacketKind::PingReq, payload.kind());
@@ -438,21 +472,20 @@ mod test {
             // response has to be successfully decrypted by alice
             // response can't be decrypted by eve
             create_core!(core, handle);
-            node_socket!(handle, alice, alice_socket);
-            node_socket!(handle, bob, bob_socket);
+            node_socket!(handle, alice, alice_socket,
+                         handle, bob, bob_socket);
             let (_, eve_sk) = gen_keypair();
 
-            let precomp = encrypt_precompute(&alice.dht_public_key,
-                                             &bob.dht_secret_key);
+            let precomp = encrypt_precompute(alice.pk(), bob.sk());
             let nonce = gen_nonce();
             let bob_ping = DhtPacket::new(&precomp,
-                                          &bob.dht_public_key,
+                                          bob.pk(),
                                           &nonce,
                                           &req);
 
-            let alice_framed = alice_socket.framed(ToxCodec);
+            let (alice_sink, _) = alice_socket.framed(ToxCodec).split();
             let alice_send = alice.respond_ping(
-                alice_framed,
+                alice_sink,
                 bob_socket.local_addr().unwrap(),
                 &bob_ping);
 
@@ -474,14 +507,14 @@ mod test {
             assert_eq!(None, recv_packet.get_packet::<PingResp>(&eve_sk));
 
             let payload: PingResp = recv_packet
-                .get_packet(&bob.dht_secret_key)
+                .get_packet(bob.sk())
                 .expect("Failed to decrypt payload");
 
             assert_eq!(PacketKind::PingResp, payload.kind());
             assert_eq!(req.id(), payload.id());
 
             // wrong packet kind
-            cant_parse_as_packet!(recv_packet, bob.dht_secret_key,
+            cant_parse_as_packet!(recv_packet, bob.sk(),
                 PingReq GetNodes SendNodes);
         }
     }
@@ -497,7 +530,7 @@ mod test {
         let (bob_pk, bob_sk) = gen_keypair();
         let (_, eve_sk) = gen_keypair();
         let packet1 = alice.create_getn(&bob_pk);
-        assert_eq!(*alice.dht_public_key, packet1.sender_pk);
+        assert_eq!(alice.pk(), &packet1.sender_pk);
         assert_eq!(PacketKind::GetN, packet1.kind());
 
         // eve can't decrypt
@@ -505,7 +538,7 @@ mod test {
 
         let payload1: GetNodes = packet1.get_packet(&bob_sk)
             .expect("failed to get payload1");
-        assert_eq!(*alice.dht_public_key, payload1.pk);
+        assert_eq!(alice.pk(), &payload1.pk);
 
         let packet2 = alice.create_getn(&bob_pk);
         assert_ne!(packet1, packet2);
@@ -525,15 +558,14 @@ mod test {
         // bob sends via Sink GetNodes request to alice
         // alice has to successfully decrypt & parse it
         create_core!(core, handle);
-        node_socket!(handle, alice, alice_socket);
-        node_socket!(handle, bob, bob_socket);
+        node_socket!(handle, alice, alice_socket,
+                     handle, bob, bob_socket);
         let alice_addr = alice_socket.local_addr().unwrap();
 
         let mut recv_buf = [0; MAX_UDP_PACKET_SIZE];
 
-        let bob_framed = bob_socket.framed(ToxCodec);
-        let bob_request = bob.request_nodes(bob_framed, alice_addr,
-            &alice.dht_public_key);
+        let (bob_sink, _) = bob_socket.framed(ToxCodec).split();
+        let bob_request = bob.request_nodes(bob_sink, alice_addr, alice.pk());
 
         let future_recv = alice_socket.recv_dgram(&mut recv_buf[..]);
         let future_recv = add_timeout!(future_recv, &handle);
@@ -545,10 +577,10 @@ mod test {
 
         let recv_packet = DhtPacket::from_bytes(&recv_buf[..size]).unwrap();
         let payload: GetNodes = recv_packet
-            .get_packet(&alice.dht_secret_key)
+            .get_packet(alice.sk())
             .expect("Failed to decrypt payload");
 
-        assert_eq!(payload.pk, *bob.dht_public_key);
+        assert_eq!(&payload.pk, bob.pk());
     }
 
     // DhtNode::create_sendn()
@@ -566,25 +598,25 @@ mod test {
             let mut alice = DhtNode::new().unwrap();
             let mut bob = DhtNode::new().unwrap();
             let (_, eve_sk) = gen_keypair();
-            let req = alice.create_getn(&bob.dht_public_key);
+            let req = alice.create_getn(bob.pk());
 
-            let req_payload: GetNodes = req.get_packet(&bob.dht_secret_key)
+            let req_payload: GetNodes = req.get_packet(bob.sk())
                 .expect("failed to get req_payload");
 
             // errors with an empty kbucket
-            let error = bob.create_sendn(&alice.dht_public_key, &req_payload);
+            let error = bob.create_sendn(alice.pk(), &req_payload);
             assert_eq!(None, error);
 
             for pn in &pns {
                 bob.try_add(pn);
             }
 
-            let resp1 = bob.create_sendn(&alice.dht_public_key, &req_payload)
+            let resp1 = bob.create_sendn(alice.pk(), &req_payload)
                 .expect("failed to create response1");
-            let resp2 = bob.create_sendn(&alice.dht_public_key, &req_payload)
+            let resp2 = bob.create_sendn(alice.pk(), &req_payload)
                 .expect("failed to create response2");
 
-            assert_eq!(resp1.sender_pk, *bob.dht_public_key);
+            assert_eq!(resp1.sender_pk, *bob.pk());
             assert_eq!(PacketKind::SendN, resp1.kind());
             // encrypted payload differs due to different nonce
             assert_ne!(resp1, resp2);
@@ -593,10 +625,10 @@ mod test {
             assert_eq!(None, resp1.get_packet::<SendNodes>(&eve_sk));
 
             let resp1_payload: SendNodes = resp1
-                .get_packet(&alice.dht_secret_key)
+                .get_packet(alice.sk())
                 .expect("failed to get payload1");
             let resp2_payload: SendNodes = resp2
-                .get_packet(&alice.dht_secret_key)
+                .get_packet(alice.sk())
                 .expect("failed to get payload2");
             assert_eq!(resp1_payload, resp2_payload);
             assert!(!resp1_payload.nodes.is_empty());
@@ -630,11 +662,11 @@ mod test {
                 drop(alice.try_add(pn));
             }
 
-            let alice_framed = alice_socket.framed(ToxCodec);
+            let (alice_sink, _) = alice_socket.framed(ToxCodec).split();
             let alice_response = alice.send_nodes(
-                alice_framed,
+                alice_sink,
                 bob_socket.local_addr().unwrap(),
-                &bob.dht_public_key,
+                &bob.pk(),
                 &gn);
 
             let mut recv_buf = [0; MAX_UDP_PACKET_SIZE];
