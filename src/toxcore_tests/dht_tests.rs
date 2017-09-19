@@ -54,14 +54,10 @@ fn u64_as_u16s(num: u64) -> (u16, u16, u16, u16) {
 /// Get a PK from 4 `u64`s.
 fn nums_to_pk(a: u64, b: u64, c: u64, d: u64) -> PublicKey {
     let mut pk_bytes: Vec<u8> = Vec::with_capacity(PUBLICKEYBYTES);
-    pk_bytes.write_u64::<NativeEndian>(a)
-        .expect("Failed to write private key bytes!");
-    pk_bytes.write_u64::<NativeEndian>(b)
-        .expect("Failed to write private key bytes!");
-    pk_bytes.write_u64::<NativeEndian>(c)
-        .expect("Failed to write private key bytes!");
-    pk_bytes.write_u64::<NativeEndian>(d)
-        .expect("Failed to write private key bytes!");
+    pk_bytes.write_u64::<NativeEndian>(a).unwrap();
+    pk_bytes.write_u64::<NativeEndian>(b).unwrap();
+    pk_bytes.write_u64::<NativeEndian>(c).unwrap();
+    pk_bytes.write_u64::<NativeEndian>(d).unwrap();
     let pk_bytes = &pk_bytes[..];
     PublicKey::from_slice(pk_bytes).expect("Making PK out of bytes failed!")
 }
@@ -180,8 +176,7 @@ macro_rules! tests_for_pings {
 
             // just in case
             let mut ping = vec![PacketKind::$p as u8];
-            ping.write_u64::<NativeEndian>(random_u64())
-                .expect("Failed to write Ping id!");
+            ping.write_u64::<NativeEndian>(random_u64()).unwrap();
             with_bytes(ping);
         }
 
@@ -194,8 +189,7 @@ macro_rules! tests_for_pings {
                 bytes.extend_from_slice(&p.to_bytes());
                 bytes.extend_from_slice(&r_rest);
 
-                let Parsed(_, rest) = $p::parse_bytes(&bytes)
-                    .expect("Ping parsing failure.");
+                let Parsed(_, rest) = $p::parse_bytes(&bytes).unwrap();
                 assert_eq!(&r_rest[..], rest);
             }
             quickcheck(with_bytes as fn($p, Vec<u8>));
@@ -364,13 +358,11 @@ fn ip_addr_parse_bytes_rest_test() {
 
         let rest = match ip_addr {
             IpAddr::V4(_) => {
-                let Parsed(_, rest) = Ipv4Addr::parse_bytes(&bytes)
-                    .expect("Ipv4Addr parsing failure.");
+                let Parsed(_, rest) = Ipv4Addr::parse_bytes(&bytes).unwrap();
                 rest
             },
             IpAddr::V6(_) => {
-                let Parsed(_, rest) = Ipv6Addr::parse_bytes(&bytes)
-                    .expect("Ipv6Addr parsing failure.");
+                let Parsed(_, rest) = Ipv6Addr::parse_bytes(&bytes).unwrap();
                 rest
             }
         };
@@ -461,21 +453,13 @@ fn packed_node_ip_test() {
     let ipv4 = PackedNode::new(true,
                                SocketAddr::V4("0.0.0.0:0".parse().unwrap()),
                                &PublicKey([0; PUBLICKEYBYTES]));
-
-    match ipv4.ip() {
-        IpAddr::V4(_) => {},
-        IpAddr::V6(_) => panic!("This should not have happened, since IPv4 was supplied!"),
-    }
+    assert!(ipv4.ip().is_ipv4());
 
     let ipv6 = PackedNode::new(true,
                                SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::from_str("::0").unwrap(),
                                    0, 0, 0)),
                                &PublicKey([0; PUBLICKEYBYTES]));
-
-    match ipv6.ip() {
-        IpAddr::V4(_) => panic!("This should not have happened, since IPv6 was supplied!"),
-        IpAddr::V6(_) => {},
-    }
+    assert!(ipv6.ip().is_ipv6());
 }
 
 
@@ -527,7 +511,8 @@ fn packed_node_parse_bytes_multiple_test() {
 #[test]
 fn packed_node_parse_bytes_multiple_n_test() {
     fn with_nodes(nodes: Vec<PackedNode>, random_rest: Vec<u8>) {
-        { // should parse nodes
+        {
+            // should parse nodes
             let mut bytes = vec![];
             for n in &nodes {
                 bytes.extend_from_slice(&n.to_bytes());
@@ -536,14 +521,15 @@ fn packed_node_parse_bytes_multiple_n_test() {
 
             let Parsed(nodes2, rest) =
                 PackedNode::parse_bytes_multiple_n(nodes.len(), &bytes)
-                    .expect("Nodes parsing failed.");
+                    .unwrap();
 
             assert_eq!(nodes.len(), nodes2.len());
             assert_eq!(nodes, nodes2);
             assert_eq!(&random_rest[..], rest);
         }
 
-        { // should fail if not enough nodes
+        {
+            // should fail if not enough nodes
             let mut bytes = vec![];
             for n in &nodes {
                 bytes.extend_from_slice(&n.to_bytes());
@@ -897,10 +883,9 @@ fn get_nodes_parse_bytes_rest_test() {
 
 impl Arbitrary for SendNodes {
     fn arbitrary<G: Gen>(g: &mut G) -> Self {
-        SendNodes {
-            nodes: vec![Arbitrary::arbitrary(g); g.gen_range(1,4)],
-            id: g.gen()
-        }
+        let nodes = vec![Arbitrary::arbitrary(g); g.gen_range(1,4)];
+        let id = g.gen();
+        SendNodes { nodes: nodes, id: id }
     }
 }
 
@@ -976,8 +961,7 @@ fn send_nodes_from_bytes_test() {
             bytes.extend_from_slice(&node.to_bytes());
         }
         // and ping id
-        bytes.write_u64::<NativeEndian>(r_u64)
-            .expect("Failed to write Ping id!");
+        bytes.write_u64::<NativeEndian>(r_u64).unwrap();
 
         if nodes.len() > 4 || nodes.is_empty() {
             assert_eq!(None, SendNodes::from_bytes(&bytes));
@@ -1000,13 +984,12 @@ fn send_nodes_parse_bytes_rest_test() {
             bytes.extend_from_slice(&node.to_bytes());
         }
         // and ping id
-        bytes.write_u64::<NativeEndian>(r_u64)
-            .expect("Failed to write Ping id!");
+        bytes.write_u64::<NativeEndian>(r_u64).unwrap();
         bytes.extend_from_slice(&r_rest);
 
         if nodes.len() <= 4 && !nodes.is_empty() {
             let Parsed(_, rest) = SendNodes::parse_bytes(&bytes)
-                .expect("SendNodes parsing failed.");
+                .unwrap();
             assert_eq!(&r_rest[..], rest);
         }
     }
@@ -1034,7 +1017,7 @@ impl Arbitrary for DhtPacket {
                 DhtPacket::new(&precomputed, &pk, &nonce, &GetNodes::arbitrary(g)),
             3 =>
                 DhtPacket::new(&precomputed, &pk, &nonce, &SendNodes::arbitrary(g)),
-            _ => panic!("Arbitrary for DhtPacketT – should not have happened!"),
+            _ => panic!("Arbitrary for DhtPacket - should not have happened!")
         }
     }
 }
@@ -1290,6 +1273,7 @@ fn bucket_new_test() {
         TestResult::passed()
     }
     quickcheck(wrapped_check as fn(u8) -> TestResult);
+    wrapped_check(0);
 }
 
 // Bucket::try_add()
@@ -1639,7 +1623,7 @@ macro_rules! impls_tests_for_nat_pings {
             // just in case
             let mut ping = vec![NAT_PING_TYPE, PacketKind::$p as u8];
             ping.write_u64::<NativeEndian>(random_u64())
-                .expect("Failed to write Ping id!");
+                .unwrap();
             with_bytes(ping);
         }
 
@@ -1653,7 +1637,7 @@ macro_rules! impls_tests_for_nat_pings {
                 bytes.extend_from_slice(&r_rest);
 
                 let Parsed(_, rest) = $np::parse_bytes(&bytes)
-                    .expect("Parsing failure.");
+                    .unwrap();
                 assert_eq!(&r_rest[..], rest);
             }
             quickcheck(with_bytes as fn($np, Vec<u8>));

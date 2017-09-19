@@ -117,6 +117,16 @@ fn is_encrypted_test() {
 // pass_encrypt()
 
 #[test]
+fn pass_encrypt_error_test() {
+    // empty data
+    assert_eq!(Err(EncryptionError::Null), pass_encrypt(&[], &[0]));
+
+    // empty passphrase
+    assert_eq!(Err(EncryptionError::KeyDerivation(KeyDerivationError::Null)),
+           pass_encrypt(&[0], &[]));
+}
+
+#[test]
 fn pass_encrypt_test() {
     fn with_data_pass(data: Vec<u8>, pass: Vec<u8>) -> TestResult {
         // tested for empty data / passphrase in docs test
@@ -152,6 +162,21 @@ fn pass_encrypt_test() {
 
 
 // pass_decrypt()
+
+#[test]
+fn pass_decrypt_error_test() {
+    // empty data
+    assert_eq!(Err(DecryptionError::Null), pass_decrypt(&[], &[0]));
+
+    // not enough data
+    assert_eq!(Err(DecryptionError::InvalidLength),
+           pass_decrypt(&[0], &[]));
+
+    // empty passphrase
+    let ciphertext = include_bytes!("ciphertext");
+    assert_eq!(Err(DecryptionError::KeyDerivation(KeyDerivationError::Null)),
+           pass_decrypt(ciphertext, &[]));
+}
 
 #[test]
 fn pass_decrypt_test() {

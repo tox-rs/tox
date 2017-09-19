@@ -127,6 +127,7 @@ fn public_key_valid_test() {
         }
     }
     quickcheck(pk_from_u8 as fn(u8));
+    pk_from_u8(128);
 }
 
 
