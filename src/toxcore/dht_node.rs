@@ -27,13 +27,16 @@ Made on top of `dht` and `network` modules.
 
 
 use futures::*;
-use futures::stream::*;
 use futures::sink;
+use futures::stream::*;
+use futures::sync::mpsc;
 use tokio_core::net::{UdpCodec, UdpFramed};
+use tokio_core::reactor::Core;
 use tokio_proto::multiplex::RequestId;
 
 use std::io::{self, ErrorKind};
 use std::net::SocketAddr;
+use std::thread;
 
 use toxcore::binary_io::{FromBytes, ToBytes};
 use toxcore::crypto_core::*;
@@ -45,10 +48,19 @@ use toxcore::dht::*;
 // TODO: rename
 pub type ToxSplitSink = SplitSink<UdpFramed<ToxCodec>>;
 
+/// Type for receiving `SplitStream` with `ToxCodec`.
+// FIXME: docs
+// TODO: rename
+pub type ToxSplitStream = SplitStream<UdpFramed<ToxCodec>>;
+
 /// Type representing future `Send` via `SplitSink`.
 // FIXME: docs
 // TODO: rename
 pub type SendSink = sink::Send<SplitSink<UdpFramed<ToxCodec>>>;
+
+/// Type representing recived packets.
+// TODO: change DhtPacket to and enum with all possible packets
+pub type ToxUdpPacket = (SocketAddr, DhtPacket);
 
 
 /**
@@ -93,7 +105,6 @@ impl DhtNode {
         let kbucket = Kbucket::new(KBUCKET_BUCKETS, &pk);
 
         debug!("Created new DhtNode instance");
-
         Ok(DhtNode {
             dht_secret_key: Box::new(sk),
             dht_public_key: Box::new(pk),
@@ -278,8 +289,8 @@ pub struct ToxCodec;
 impl UdpCodec for ToxCodec {
     // TODO: make `In`/`Out` support more than just DhtPacket
     //       (by using enum or Trait: FromBytes + ToBytes ?)
-    type In = (SocketAddr, DhtPacket);
-    type Out = (SocketAddr, DhtPacket);
+    type In = ToxUdpPacket;
+    type Out = ToxUdpPacket;
 
     fn decode(&mut self, src: &SocketAddr, buf: &[u8]) -> io::Result<Self::In> {
         match DhtPacket::from_bytes(buf) {
@@ -295,6 +306,34 @@ impl UdpCodec for ToxCodec {
     }
 }
 
+
+/**
+Spawn a thread that will start receiving packets from [`ToxSplitStream`].
+
+[`ToxSplitStream`]: ./type.ToxSplitStream.html
+*/
+// TODO: move to network.rs ?
+pub fn receive_packets(stream: ToxSplitStream)
+    -> mpsc::Receiver<ToxUdpPacket>
+{
+    let (tx, rx) = mpsc::channel(2048);
+    thread::spawn(move || {
+        // can this fail to unwrap?
+        let mut core = Core::new().unwrap();
+        let handle = core.handle();
+
+        let f = stream.for_each(|recv| {
+            let tx = tx.clone();
+            let send_one = tx.send(recv).then(|_| Ok(()));
+            handle.spawn(send_one);
+            Ok(())
+        });
+
+        core.run(f).unwrap();
+    });
+
+    rx
+}
 
 
 
@@ -313,8 +352,7 @@ mod test {
     use toxcore::crypto_core::*;
     use toxcore::dht::*;
     use toxcore::network::*;
-    use toxcore::dht_node::DhtNode;
-    use toxcore::dht_node::ToxCodec;
+    use toxcore::dht_node::*;
     use toxcore::packet_kind::PacketKind;
 
     use quickcheck::{quickcheck, TestResult};
@@ -801,5 +839,42 @@ mod test {
             assert_eq!(buf, dp.to_bytes());
         }
         quickcheck(with_dp as fn(DhtPacket));
+    }
+
+
+    // receive_packets()
+
+    quickcheck! {
+        fn receive_packets_test(dps: Vec<DhtPacket>) -> TestResult {
+            if dps.is_empty() { return TestResult::discard() }
+            // alice sends packets to bob
+            create_core!(core, handle);
+            node_socket!(handle, _alice, a_socket);
+            node_socket!(handle, _bob, b_socket);
+
+            let a_addr = a_socket.local_addr().unwrap();
+            let b_addr = b_socket.local_addr().unwrap();
+            let (_sink, stream) = b_socket.framed(ToxCodec).split();
+
+            // start receiving packets
+            let to_receive = receive_packets(stream);
+
+            let mut a_socket = a_socket;
+            for dp in &dps {
+                let send = a_socket.send_dgram(dp.to_bytes(), b_addr);
+                let (s, _) = core.run(send).unwrap();
+                a_socket = s;
+            }
+
+            let f_recv = to_receive.take(dps.len() as u64).collect();
+            let received = core.run(f_recv).unwrap();
+
+            for (n, &(ref addr, ref packet)) in received.iter().enumerate() {
+                assert_eq!(a_addr, *addr);
+                assert_eq!(dps[n], *packet);
+            }
+
+            TestResult::passed()
+        }
     }
 }
