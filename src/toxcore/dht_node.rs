@@ -41,6 +41,7 @@ use std::thread;
 use toxcore::binary_io::{FromBytes, ToBytes};
 use toxcore::crypto_core::*;
 use toxcore::dht::*;
+use toxcore::packet_kind::PacketKind;
 
 
 /// Type for sending `SplitSink` with `ToxCodec`.
@@ -140,8 +141,8 @@ impl DhtNode {
     Try to add nodes from a [`DhtPacket`] that claims to contain
     [`SendNodes`] packet.
 
-    [`DhtPacket`]: (../dht/struct.DhtPacket.html)
-    [`SendNodes`]: (../dht/struct.SendNodes.html)
+    [`DhtPacket`]: ../dht/struct.DhtPacket.html
+    [`SendNodes`]: ../dht/struct.SendNodes.html
     */
     pub fn try_add_nodes(&mut self, packet: &DhtPacket) {
         match packet.get_packet::<SendNodes>(self.sk()) {
@@ -157,8 +158,11 @@ impl DhtNode {
     }
 
     /**
-    Create a [`DhtPacket`](../dht/struct.DhtPacket.html) to peer with `peer_pk`
-    `PublicKey` containing a [`PingReq`](../dht/struct.PingReq.html) request.
+    Create a [`DhtPacket`] to peer with `peer_pk` `PublicKey` containing
+    a [`PingReq`] request.
+
+    [`DhtPacket`]: ../dht/struct.DhtPacket.html
+    [`PingReq`]: ../dht/struct.PingReq.html
     */
     fn create_ping_req(&self, peer_pk: &PublicKey) -> DhtPacket {
         let ping = PingReq::new();
@@ -185,8 +189,25 @@ impl DhtNode {
     }
 
     /**
-    Create a [`DhtPacket`] encapsulating [ping response] to given ping
-    request.
+    Create a [`DhtPacket`] in response to [`DhtPacket`] containing
+    [`PingReq`] packet.
+
+    Returns `None` if [`DhtPacket`] is not a [`PingReq`].
+
+    [`DhtPacket`]: ../dht/struct.DhtPacket.html
+    [`PingReq`]: ../dht/struct.PingReq.html
+    */
+    fn create_ping_resp(&self, request: &DhtPacket)
+        -> Option<DhtPacket>
+    {
+        // TODO: precompute shared key to calculate it 1 time
+        let precomp = encrypt_precompute(&request.sender_pk, self.sk());
+        request.ping_resp(self.sk(), &precomp, self.pk())
+    }
+
+    /**
+    Create a future sending [`DhtPacket`] that encapsulates
+    [ping response] to supplied ping request.
 
     [`DhtPacket`]: ../dht/struct.DhtPacket.html
     [ping response]: ../dht/struct.PingResp.html
@@ -197,16 +218,17 @@ impl DhtNode {
                         request: &DhtPacket)
         -> Option<SendSink>
     {
-        // TODO: precompute shared key to calculate it 1 time
-        let precomp = encrypt_precompute(&request.sender_pk, self.sk());
-        request.ping_resp(self.sk(), &precomp, self.pk())
+        self.create_ping_resp(request)
             .map(|p| sink.send((peer_addr, p)))
     }
 
     /**
-    Create a [`DhtPacket`](../dht/struct.DhtPacket.html) to peer with `peer_pk`
-    `PublicKey` containing a [`GetNodes`](../dht/struct.GetNodes.html) request
-    for nodes close to own DHT `PublicKey`.
+    Create a [`DhtPacket`] to peer with `peer_pk` `PublicKey` containing
+    a [`GetNodes`] request for nodes close to own DHT `PublicKey`.
+
+
+    [`DhtPacket`]: ../dht/struct.DhtPacket.html
+    [`GetNodes`]: ../dht/struct.GetNodes.html
     */
     fn create_getn(&self, peer_pk: &PublicKey) -> DhtPacket {
         // request for nodes that are close to our own DHT PK
@@ -279,7 +301,30 @@ impl DhtNode {
         self.create_sendn(request)
             .map(|sn| sink.send((peer_addr, sn)))
     }
+
+    /**
+    Function to handle incoming packets. If there is a response packet,
+    `Some(DhtPacket)` is returned.
+    */
+    pub fn handle_packet(&mut self, packet: &DhtPacket)
+        -> Option<DhtPacket>
+    {
+        match packet.kind() {
+            PacketKind::PingReq => self.create_ping_resp(packet),
+            PacketKind::GetN => self.create_sendn(packet),
+            PacketKind::SendN => {
+                self.try_add_nodes(packet);
+                None
+            },
+            // TODO: handle other kinds of packets
+            p => {
+                error!("Received unhandled packet kind: {:?}", p);
+                None
+            },
+        }
+    }
 }
+
 
 /// Struct to use for {de-,}serializing Tox UDP packets.
 // TODO: move elsewhere(?)
@@ -335,6 +380,31 @@ pub fn receive_packets(stream: ToxSplitStream)
     rx
 }
 
+/**
+Spawn a thread that will start sending packets via [`ToxSplitSink`].
+
+Send all packets that need to be sent via returned `Sender`.
+
+[`ToxSplitSink`]: ./type.ToxSplitSink.html
+*/
+// TODO: move to network.rs ?
+pub fn send_packets(sink: ToxSplitSink)
+    -> mpsc::Sender<ToxUdpPacket>
+{
+    let (tx, rx) = mpsc::channel(2048);
+    thread::spawn(move || {
+        // can this fail to unwrap?
+        let mut core = Core::new().unwrap();
+
+        let f = sink.send_all(rx.map_err(|_| {
+            // needed only to satisfy Sink::send_all() error constraints
+            io::Error::new(ErrorKind::Other, "")
+        }));
+        drop(core.run(f));
+    });
+
+    tx
+}
 
 
 #[cfg(test)]
@@ -541,7 +611,6 @@ mod test {
             PingResp GetNodes SendNodes);
     }
 
-
     // DhtNode::request_ping()
 
     #[test]
@@ -572,6 +641,51 @@ mod test {
             .expect("Failed to decrypt payload");
 
         assert_eq!(PacketKind::PingReq, payload.kind());
+    }
+
+    // DhtNode::create_ping_resp()
+
+    quickcheck! {
+        fn dht_node_create_ping_resp_test(req: PingReq) -> () {
+            // alice creates DhtPacket containing PingReq request
+            // bob has to respond to it with PingResp
+            // alice has to be able to decrypt response
+            // eve can't decrypt response
+
+            let alice = DhtNode::new().unwrap();
+            let bob = DhtNode::new().unwrap();
+            let (_, eve_sk) = gen_keypair();
+            let precomp = encrypt_precompute(bob.pk(), alice.sk());
+            let nonce = gen_nonce();
+            let a_ping = DhtPacket::new(&precomp, alice.pk(), &nonce, &req);
+
+            let resp1 = bob.create_ping_resp(&a_ping)
+                .expect("failed to create ping resp1");
+            let resp2 = bob.create_ping_resp(&a_ping)
+                .expect("failed to create ping resp2");
+
+            assert_eq!(resp1.sender_pk, *bob.pk());
+            assert_eq!(PacketKind::PingResp, resp1.kind());
+            // encrypted payload differs due to different nonce
+            assert_ne!(resp1, resp2);
+
+            // eve can't decrypt
+            assert_eq!(None, resp1.get_packet::<PingResp>(&eve_sk));
+
+            let resp1_payload: PingResp = resp1
+                .get_packet(alice.sk()).unwrap();
+            let resp2_payload: PingResp = resp2
+                .get_packet(alice.sk()).unwrap();
+            assert_eq!(resp1_payload, resp2_payload);
+            assert_eq!(req.id(), resp1_payload.id());
+            assert_eq!(PacketKind::PingResp, resp1_payload.kind());
+
+            // can't create response from DhtPacket containing PingResp
+            assert!(alice.create_ping_resp(&resp1).is_none());
+
+            // wrong packet kind
+            cant_parse_as_packet!(resp1, alice.sk(), PingReq);
+        }
     }
 
     // DhtNode::respond_ping()
@@ -614,16 +728,8 @@ mod test {
             // eve can't decrypt it
             assert_eq!(None, recv_packet.get_packet::<PingResp>(&eve_sk));
 
-            let payload: PingResp = recv_packet
-                .get_packet(bob.sk())
-                .expect("Failed to decrypt payload");
-
-            assert_eq!(PacketKind::PingResp, payload.kind());
-            assert_eq!(req.id(), payload.id());
-
-            // wrong packet kind
-            cant_parse_as_packet!(recv_packet, bob.sk(),
-                PingReq GetNodes SendNodes);
+            let _payload: PingResp = recv_packet
+                .get_packet(bob.sk()).unwrap();
         }
     }
 
@@ -789,6 +895,57 @@ mod test {
         }
     }
 
+    // DhtNode::send_nodes()
+
+    quickcheck! {
+        fn dht_node_handle_packet(pq: PingReq,
+                                  pr: PingResp,
+                                  gn: GetNodes,
+                                  sn: SendNodes)
+            -> ()
+        {
+            let alice = DhtNode::new().unwrap();
+            let mut bob = DhtNode::new().unwrap();
+            let precom = precompute(bob.pk(), alice.sk());
+            let nonce = gen_nonce();
+
+            // test with
+
+            {
+                // PingReq
+                let dp = DhtPacket::new(&precom, alice.pk(), &nonce, &pq);
+                assert_eq!(bob.create_ping_resp(&dp).unwrap().kind(),
+                           bob.handle_packet(&dp).unwrap().kind());
+            }
+
+            {
+                // PingResp
+                let dp = DhtPacket::new(&precom, alice.pk(), &nonce, &pr);
+                assert_eq!(None, bob.handle_packet(&dp));
+            }
+
+            {
+                // GetNodes with an empty kbucket
+                let dp = DhtPacket::new(&precom, alice.pk(), &nonce, &gn);
+                assert_eq!(None, bob.handle_packet(&dp));
+            }
+
+            {
+                // SendNodes
+                let dp = DhtPacket::new(&precom, alice.pk(), &nonce, &sn);
+                assert_eq!(None, bob.handle_packet(&dp));
+                assert!(!bob.kbucket.is_empty());
+            }
+
+            {
+                // GetNodes with something in kbucket
+                let dp = DhtPacket::new(&precom, alice.pk(), &nonce, &gn);
+                assert_eq!(bob.create_sendn(&dp).unwrap().kind(),
+                           bob.handle_packet(&dp).unwrap().kind());
+            }
+        }
+    }
+
 
     // ToxCodec::
 
@@ -867,6 +1024,44 @@ mod test {
             }
 
             let f_recv = to_receive.take(dps.len() as u64).collect();
+            let received = core.run(f_recv).unwrap();
+
+            for (n, &(ref addr, ref packet)) in received.iter().enumerate() {
+                assert_eq!(a_addr, *addr);
+                assert_eq!(dps[n], *packet);
+            }
+
+            TestResult::passed()
+        }
+    }
+
+    // send_packets()
+
+    quickcheck! {
+        fn send_packets_test(dps: Vec<DhtPacket>) -> TestResult {
+            if dps.is_empty() { return TestResult::discard() }
+            // alice sends packets to bob
+            create_core!(core, handle);
+            node_socket!(handle, _alice, a_socket);
+            node_socket!(handle, _bob, b_socket);
+
+            let a_addr = a_socket.local_addr().unwrap();
+            let b_addr = b_socket.local_addr().unwrap();
+            let (sink, _stream) = a_socket.framed(ToxCodec).split();
+            let (_sink, stream) = b_socket.framed(ToxCodec).split();
+
+            // start receiving/sending packets
+            let receiver = receive_packets(stream);
+            let sender = send_packets(sink);
+
+            let dps_send = dps.clone();
+            for dp in dps_send {
+                let tx = sender.clone();
+                let send = tx.send((b_addr, dp)).then(|_| Ok(()));
+                handle.spawn(send);
+            }
+
+            let f_recv = receiver.take(dps.len() as u64).collect();
             let received = core.run(f_recv).unwrap();
 
             for (n, &(ref addr, ref packet)) in received.iter().enumerate() {
