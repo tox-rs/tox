@@ -1184,52 +1184,6 @@ fn public_key_distance_test() {
 }
 
 
-// Node::
-
-impl Arbitrary for Node {
-    fn arbitrary<G: Gen>(g: &mut G) -> Self {
-        Node::new(&Arbitrary::arbitrary(g), g.gen())
-    }
-}
-
-
-// Node::new()
-
-#[test]
-fn node_new_test() {
-    fn with_pn(pn: PackedNode, timeout: u64) {
-        let node = Node::new(&pn, timeout);
-        assert_eq!(timeout, node.timeout);
-        assert_eq!(0, node.id);
-        assert_eq!(pn, node.node);
-    }
-    quickcheck(with_pn as fn(PackedNode, u64));
-}
-
-// Node::id()
-
-#[test]
-fn node_id_test() {
-    fn with_id(node: Node, id: u64) {
-        let mut node = node;
-        node.id(id);
-        assert_eq!(id, node.id);
-    }
-    quickcheck(with_id as fn(Node, u64));
-}
-
-// Nodes::pk()
-
-#[test]
-fn node_pk_test() {
-    fn with_pn(pn: PackedNode, timeout: u64) {
-        let node = Node::new(&pn, timeout);
-        assert_eq!(pn.pk(), node.pk());
-    }
-    quickcheck(with_pn as fn(PackedNode, u64));
-}
-
-
 // kbucket_index()
 
 #[test]

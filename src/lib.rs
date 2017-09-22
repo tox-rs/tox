@@ -177,6 +177,7 @@ pub mod toxcore {
     pub mod network;
     pub mod packet_kind;
     pub mod state_format;
+    pub mod timeout;
     pub mod toxid;
 }
 

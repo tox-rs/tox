@@ -26,6 +26,15 @@
     * ..
 */
 
+
+use byteorder::{
+    BigEndian,
+    LittleEndian,
+    NativeEndian,
+    WriteBytesExt
+};
+use nom::{be_u16, le_u8, le_u16, rest};
+
 use std::cmp::{Ord, Ordering};
 use std::convert::From;
 use std::fmt::Debug;
@@ -38,8 +47,6 @@ use std::net::{
     SocketAddrV6
 };
 use std::ops::Deref;
-use byteorder::{BigEndian, LittleEndian, NativeEndian, WriteBytesExt};
-use nom::{be_u16, le_u8, le_u16, rest};
 
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
@@ -787,46 +794,6 @@ impl Distance for PublicKey {
             }
         }
         Ordering::Equal
-    }
-}
-
-
-/// DHT Node and its associated info.
-// TODO: move it up ↑
-// TODO: is it even needed?
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct Node {
-    /** Add [`PackedNode`](./struct.PackedNode.html) to `Kbucket`.
-    Time when node will reach it's timeout - value consists of `seconds
-    since UNIX epoch + timeout`. If value equals or is lower than current
-    time since UNIX epoch, node is timed out.
-
-    Timeout value should be updated every time a valid packet from given
-    node is received.
-    */
-    pub timeout: u64,
-    /// Ping ID of last sent [`Ping`](./struct.Ping.html) request.
-    pub id: u64,
-    /// [`PackedNode`](./struct.PackedNode.html) contained by [`Node`]
-    /// (./struct.Node.html).
-    pub node: PackedNode,
-}
-
-impl Node {
-    /// Create a new `Node`. New node has `req`, `resp` and `id` values set to
-    /// `0`.
-    pub fn new(pn: &PackedNode, timeout: u64) -> Self {
-        Node { timeout: timeout, id: 0, node: *pn }
-    }
-
-    /// Set the ID of last [`Ping`](./struct.Ping.html) request sent.
-    pub fn id(&mut self, id: u64) {
-        self.id = id;
-    }
-
-    /// Get the PK of the node.
-    pub fn pk(&self) -> &PublicKey {
-        &self.node.pk
     }
 }
 
