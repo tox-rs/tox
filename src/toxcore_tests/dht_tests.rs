@@ -1023,10 +1023,10 @@ impl Arbitrary for DhtPacket {
 }
 
 
-// DhtPacket::get_packet()
+// DhtPacket::get_payload()
 
 #[test]
-fn dht_paket_get_packet_test() {
+fn dht_paket_get_payload_test() {
     fn with_dht_packet<P>(dpt: P)
         where P: DhtPacketT
     {
@@ -1042,9 +1042,9 @@ fn dht_paket_get_packet_test() {
                                         &dpt);
 
         // eve can't decrypt it
-        assert_eq!(None, new_packet.get_packet::<P>(&eve_sk));
+        assert_eq!(None, new_packet.get_payload::<P>(&eve_sk));
 
-        let bob_packet = new_packet.get_packet(&bob_sk).unwrap();
+        let bob_packet = new_packet.get_payload(&bob_sk).unwrap();
         assert_eq!(dpt, bob_packet);
     }
     quickcheck(with_dht_packet as fn(PingReq));

@@ -101,7 +101,7 @@ fn main() {
     };
 
     // decrypt payload of the received packet
-    let payload: PingResp = recv_packet.get_packet(&sk)
+    let payload: PingResp = recv_packet.get_payload(&sk)
         .expect("Failed to decrypt payload!");
 
     assert_eq!(PacketKind::PingResp, payload.kind());

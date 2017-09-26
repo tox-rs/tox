@@ -767,11 +767,10 @@ impl DhtPacket {
     }
 
     /**
-    Get packet data. This function decrypts payload and tries to parse it
-    as packet type.
+    Decrypt payload and try to parse it as packet type.
 
     To get info about it's packet type use
-    [`.kind()`](./struct.DhtPacket.html#method.kind).
+    [`.kind()`](./struct.DhtPacket.html#method.kind) method.
 
     Returns `None` in case of faliure:
 
@@ -783,11 +782,10 @@ impl DhtPacket {
                 costly operation when it comes to crypto, using precomputed
                 key might (would significantly?) lower resource usage
 
-                Alternatively, another method `get_packetnm()` which would use
+                Alternatively, another method `get_payloadnm()` which would use
                 symmetric key.
     */
-    // TODO: rename to `get_payload` ?
-    pub fn get_packet<P>(&self, own_secret_key: &SecretKey) -> Option<P>
+    pub fn get_payload<P>(&self, own_secret_key: &SecretKey) -> Option<P>
         where P: DhtPacketT
     {
         debug!(target: "DhtPacket", "Getting packet data from DhtPacket.");
@@ -826,7 +824,7 @@ impl DhtPacket {
             return None
         }
 
-        let payload: PingReq = match self.get_packet(secret_key) {
+        let payload: PingReq = match self.get_payload(secret_key) {
             Some(dpt) => dpt,
             None => return None,
         };

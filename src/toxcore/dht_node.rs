@@ -145,7 +145,7 @@ impl DhtNode {
     [`SendNodes`]: ../dht/struct.SendNodes.html
     */
     pub fn try_add_nodes(&mut self, packet: &DhtPacket) {
-        match packet.get_packet::<SendNodes>(self.sk()) {
+        match packet.get_payload::<SendNodes>(self.sk()) {
             Some(sn) => {
                 trace!("Adding nodes from SendNodes to DhtNode's Kbucket");
                 for node in &sn.nodes {
@@ -269,7 +269,7 @@ impl DhtNode {
         -> Option<DhtPacket>
     {
         // TODO: precompute shared key to calculate it 1 time
-        let getn = match request.get_packet::<GetNodes>(self.sk()) {
+        let getn = match request.get_payload::<GetNodes>(self.sk()) {
             Some(g) => g,
             None => return None,
         };
@@ -497,7 +497,7 @@ mod test {
     */
     macro_rules! cant_parse_as_packet {
         ($packet:expr, $sk:expr, $($kind:ty)+) => ($(
-            assert!($packet.get_packet::<$kind>(&$sk).is_none());
+            assert!($packet.get_payload::<$kind>(&$sk).is_none());
         )+)
     }
 
@@ -598,11 +598,11 @@ mod test {
         assert_ne!(packet1, packet2);
 
         // eve can't decrypt it
-        assert_eq!(None, packet1.get_packet::<PingReq>(&eve_sk));
+        assert_eq!(None, packet1.get_payload::<PingReq>(&eve_sk));
 
-        let payload1: PingReq = packet1.get_packet(&bob_sk)
+        let payload1: PingReq = packet1.get_payload(&bob_sk)
             .expect("failed to get payload1");
-        let payload2: PingReq = packet2.get_packet(&bob_sk)
+        let payload2: PingReq = packet2.get_payload(&bob_sk)
             .expect("failed to get payload2");
         assert_ne!(payload1.id(), payload2.id());
 
@@ -637,7 +637,7 @@ mod test {
 
         let recv_packet = DhtPacket::from_bytes(&recv_buf[..size]).unwrap();
         let payload: PingReq = recv_packet
-            .get_packet(alice.sk())
+            .get_payload(alice.sk())
             .expect("Failed to decrypt payload");
 
         assert_eq!(PacketKind::PingReq, payload.kind());
@@ -670,12 +670,12 @@ mod test {
             assert_ne!(resp1, resp2);
 
             // eve can't decrypt
-            assert_eq!(None, resp1.get_packet::<PingResp>(&eve_sk));
+            assert_eq!(None, resp1.get_payload::<PingResp>(&eve_sk));
 
             let resp1_payload: PingResp = resp1
-                .get_packet(alice.sk()).unwrap();
+                .get_payload(alice.sk()).unwrap();
             let resp2_payload: PingResp = resp2
-                .get_packet(alice.sk()).unwrap();
+                .get_payload(alice.sk()).unwrap();
             assert_eq!(resp1_payload, resp2_payload);
             assert_eq!(req.id(), resp1_payload.id());
             assert_eq!(PacketKind::PingResp, resp1_payload.kind());
@@ -726,10 +726,10 @@ mod test {
             assert_eq!(PacketKind::PingResp, recv_packet.kind());
 
             // eve can't decrypt it
-            assert_eq!(None, recv_packet.get_packet::<PingResp>(&eve_sk));
+            assert_eq!(None, recv_packet.get_payload::<PingResp>(&eve_sk));
 
             let _payload: PingResp = recv_packet
-                .get_packet(bob.sk()).unwrap();
+                .get_payload(bob.sk()).unwrap();
         }
     }
 
@@ -748,16 +748,16 @@ mod test {
         assert_eq!(PacketKind::GetN, packet1.kind());
 
         // eve can't decrypt
-        assert_eq!(None, packet1.get_packet::<GetNodes>(&eve_sk));
+        assert_eq!(None, packet1.get_payload::<GetNodes>(&eve_sk));
 
-        let payload1: GetNodes = packet1.get_packet(&bob_sk)
+        let payload1: GetNodes = packet1.get_payload(&bob_sk)
             .expect("failed to get payload1");
         assert_eq!(alice.pk(), &payload1.pk);
 
         let packet2 = alice.create_getn(&bob_pk);
         assert_ne!(packet1, packet2);
 
-        let payload2: GetNodes = packet2.get_packet(&bob_sk)
+        let payload2: GetNodes = packet2.get_payload(&bob_sk)
             .expect("failed to get payload2");
         assert_ne!(payload1.id, payload2.id);
 
@@ -791,7 +791,7 @@ mod test {
 
         let recv_packet = DhtPacket::from_bytes(&recv_buf[..size]).unwrap();
         let payload: GetNodes = recv_packet
-            .get_packet(alice.sk())
+            .get_payload(alice.sk())
             .expect("Failed to decrypt payload");
 
         assert_eq!(&payload.pk, bob.pk());
@@ -833,13 +833,13 @@ mod test {
             assert_ne!(resp1, resp2);
 
             // eve can't decrypt
-            assert_eq!(None, resp1.get_packet::<SendNodes>(&eve_sk));
+            assert_eq!(None, resp1.get_payload::<SendNodes>(&eve_sk));
 
             let resp1_payload: SendNodes = resp1
-                .get_packet(alice.sk())
+                .get_payload(alice.sk())
                 .expect("failed to get payload1");
             let resp2_payload: SendNodes = resp2
-                .get_packet(alice.sk())
+                .get_payload(alice.sk())
                 .expect("failed to get payload2");
             assert_eq!(resp1_payload, resp2_payload);
             assert!(!resp1_payload.nodes.is_empty());
