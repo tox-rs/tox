@@ -1399,7 +1399,7 @@ impl Arbitrary for Kbucket {
         // might want to add some buckets
         for _ in 0..(g.gen_range(0, KBUCKET_MAX_ENTRIES as usize *
                         BUCKET_DEFAULT_SIZE as usize * 2)) {
-            drop(kbucket.try_add(&Arbitrary::arbitrary(g)));
+            kbucket.try_add(&Arbitrary::arbitrary(g));
         }
         kbucket
     }
@@ -1444,7 +1444,7 @@ fn kbucket_try_add_test() {
         for node in pns {
             // result may vary, so discard it
             // TODO: can be done better?
-            drop(kbucket.try_add(&node));
+            kbucket.try_add(&node);
         }
     }
     quickcheck(with_pns as fn(Vec<PackedNode>, u8, u64, u64, u64, u64));

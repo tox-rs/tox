@@ -1,6 +1,6 @@
 /*
     Copyright (C) 2013 Tox project All Rights Reserved.
-    Copyright © 2016 Zetok Zalbavar <zexavexxe@gmail.com>
+    Copyright © 2016-2017 Zetok Zalbavar <zexavexxe@gmail.com>
 
     This file is part of Tox.
 
@@ -1078,7 +1078,7 @@ impl Bucket {
         match self.nodes.binary_search_by(|n| base_pk.distance(n.pk(), new_node.pk()) ) {
             Ok(index) => {
                 debug!("Updated: the node was already in the bucket.");
-                drop(self.nodes.remove(index));
+                self.nodes.remove(index);
                 self.nodes.insert(index, *new_node);
                 true
             },
@@ -1099,7 +1099,7 @@ impl Bucket {
                     // index is pointing inside the list
                     if self.is_full() {
                         debug!("No free space left in the bucket, the last node removed.");
-                        drop(self.nodes.pop());
+                        self.nodes.pop();
                     }
                     debug!("Node inserted inside the bucket.");
                     self.nodes.insert(index, *new_node);
@@ -1122,7 +1122,7 @@ impl Bucket {
         trace!(target: "Bucket", "Removing PackedNode with PK: {:?}", node_pk);
         match self.nodes.binary_search_by(|n| base_pk.distance(n.pk(), node_pk) ) {
             Ok(index) => {
-                drop(self.nodes.remove(index));
+                self.nodes.remove(index);
             },
             Err(_) => {
                 trace!("No PackedNode to remove with PK: {:?}", node_pk);
@@ -1298,7 +1298,7 @@ impl Kbucket {
         let mut bucket = Bucket::new(Some(4));
         for buc in &*self.buckets {
             for node in &*buc.nodes {
-                drop(bucket.try_add(pk, node));
+                bucket.try_add(pk, node);
             }
         }
         trace!("Returning nodes: {:?}", &bucket.nodes);

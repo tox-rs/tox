@@ -342,7 +342,8 @@ for pos in 0..MAGIC_LENGTH {
     assert_eq!(Err(DecryptionError::Failed), pass_decrypt(&enc, &[0]));
 
     // less
-    drop((enc.pop(), enc.pop()));
+    enc.pop();
+    enc.pop();
     assert_eq!(Err(DecryptionError::Failed), pass_decrypt(&enc, &[0]));
 }
 ```
