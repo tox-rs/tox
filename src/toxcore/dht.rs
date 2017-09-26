@@ -855,7 +855,8 @@ pub fn kbucket_index(&PublicKey(ref own_pk): &PublicKey,
     None  // PKs are equal
 }
 
-/** Structure for holding nodes.
+/**
+Structure for holding nodes.
 
 Number of nodes it can contain is set during creation. If not set (aka `None`
 is supplied), number of nodes defaults to [`BUCKET_DEFAULT_SIZE`]
@@ -928,24 +929,28 @@ impl Bucket {
         None
     }
 
-    /** Try to add [`PackedNode`](./struct.PackedNode.html) to the bucket.
+    /**
+    Try to add [`PackedNode`] to the bucket.
 
-    If bucket doesn't have [`BUCKET_DEFAULT_SIZE`]
-    (./constant.BUCKET_DEFAULT_SIZE.html) nodes, node is appended.
-
-    If bucket has `capacity` nodes already, node's closeness is compared to
-    nodes already in bucket, and if it's closer than some node, it prepends
-    that node, and last node is removed from the list.
-
-    If the node being added is farther away than the nodes in the bucket,
-    it isn't added and `false` is returned.
+    - If the [`PackedNode`] with given `PublicKey` is already in the `Bucket`,
+      the [`PackedNode`] is updated (since its `SocketAddr` can differ).
+    - If bucket is not full, node is appended.
+    - If bucket is full, node's closeness is compared to nodes already
+      in bucket, and if it's closer than some node, it prepends that
+      node, and last node is removed from the list.
+    - If the node being added is farther away than the nodes in the bucket,
+      it isn't added and `false` is returned.
 
     Note that you must pass the same `base_pk` each call or the internal
     state will be undefined.
 
     Returns `true` if node was added, `false` otherwise.
+
+    [`PackedNode`]: ./struct.PackedNode.html
     */
-    pub fn try_add(&mut self, base_pk: &PublicKey, new_node: &PackedNode) -> bool {
+    pub fn try_add(&mut self, base_pk: &PublicKey, new_node: &PackedNode)
+        -> bool
+    {
         debug!(target: "Bucket", "Trying to add PackedNode.");
         trace!(target: "Bucket", "With bucket: {:?}; PK: {:?} and new node: {:?}",
             self, base_pk, new_node);
@@ -957,29 +962,28 @@ impl Bucket {
                 self.nodes.insert(index, *new_node);
                 true
             },
-            Err(index) => {
-                if index == self.nodes.len() {
-                    // index is pointing past the end
-                    if self.is_full() {
-                        debug!("Node is too distant to add to the bucket.");
-                        false
-                    } else {
-                        // distance to the PK was bigger than the other keys, but there's still
-                        // free space in the bucket for a node
-                        debug!("Node inserted at the end of the bucket.");
-                        self.nodes.push(*new_node);
-                        true
-                    }
+            Err(index) if index == self.nodes.len() => {
+                // index is pointing past the end
+                if self.is_full() {
+                    debug!("Node is too distant to add to the bucket.");
+                    false
                 } else {
-                    // index is pointing inside the list
-                    if self.is_full() {
-                        debug!("No free space left in the bucket, the last node removed.");
-                        self.nodes.pop();
-                    }
-                    debug!("Node inserted inside the bucket.");
-                    self.nodes.insert(index, *new_node);
+                    // distance to the PK was bigger than the other keys, but
+                    // there's still free space in the bucket for a node
+                    debug!("Node inserted at the end of the bucket.");
+                    self.nodes.push(*new_node);
                     true
                 }
+            },
+            Err(index) => {
+                // index is pointing inside the list
+                if self.is_full() {
+                    debug!("No free space left in the bucket, the last node removed.");
+                    self.nodes.pop();
+                }
+                debug!("Node inserted inside the bucket.");
+                self.nodes.insert(index, *new_node);
+                true
             },
         }
     }
