@@ -153,7 +153,7 @@ impl DhtNode {
                 }
             },
             None =>
-                error!("Wrong DhtPacket; should have contained SendNodes"),
+                debug!("Wrong DhtPacket; should have contained SendNodes"),
         }
     }
 
@@ -318,7 +318,7 @@ impl DhtNode {
             },
             // TODO: handle other kinds of packets
             p => {
-                error!("Received unhandled packet kind: {:?}", p);
+                debug!("Received unhandled packet kind: {:?}", p);
                 None
             },
         }
@@ -546,8 +546,6 @@ mod test {
     // DhtNode::try_add_nodes()
 
     quickcheck! {
-        // TODO: silence unnecessary `error!` messages by disabling
-        //       quickcheck's `use_logging` feature?
         fn dht_node_try_add_nodes_test(sn: SendNodes,
                                        gn: GetNodes,
                                        pq: PingReq,
