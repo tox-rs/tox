@@ -21,7 +21,10 @@
 //! better will become available.*
 
 use std::default::Default;
-use byteorder::{ByteOrder, BigEndian, LittleEndian, WriteBytesExt};
+use byteorder::{BigEndian, LittleEndian, WriteBytesExt};
+#[cfg(test)]
+use byteorder::ByteOrder;
+use nom::{be_u16, le_u16, le_u8, le_u32, le_u64, rest};
 
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
@@ -97,29 +100,17 @@ pub enum SectionKind {
     EOF =        0xff,
 }
 
-impl FromBytes for SectionKind {
-    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
-        if bytes.len() < 2 {
-            return parse_error!("Not enough bytes for SectionKind.")
-        }
-
-        let num = LittleEndian::read_u16(bytes);
-        let result = match num {
-            0x01 => SectionKind::NospamKeys,
-            0x02 => SectionKind::DHT,
-            0x03 => SectionKind::Friends,
-            0x04 => SectionKind::Name,
-            0x05 => SectionKind::StatusMsg,
-            0x06 => SectionKind::Status,
-            0x0a => SectionKind::TcpRelays,
-            0x0b => SectionKind::PathNodes,
-            0xff => SectionKind::EOF,
-            _ => return parse_error!("Incorrect SectionKind: {:x}.", num),
-        };
-
-        Ok(Parsed(result, &bytes[2..]))
-    }
-}
+from_bytes!(SectionKind, switch!(le_u16,
+    0x01 => value!(SectionKind::NospamKeys) |
+    0x02 => value!(SectionKind::DHT) |
+    0x03 => value!(SectionKind::Friends) |
+    0x04 => value!(SectionKind::Name) |
+    0x05 => value!(SectionKind::StatusMsg) |
+    0x06 => value!(SectionKind::Status) |
+    0x0a => value!(SectionKind::TcpRelays) |
+    0x0b => value!(SectionKind::PathNodes) |
+    0xff => value!(SectionKind::EOF)
+));
 
 /** Serialization into bytes
 
@@ -239,17 +230,16 @@ assert_eq!(result, NospamKeys::from_bytes(&bytes)
                     .expect("Failed to parse NospamKeys!"));
 ```
 */
-impl FromBytes for NospamKeys {
-    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
-        debug!(target: "NospamKeys", "Creating NospamKeys from bytes.");
-
-        let Parsed(nospam, bytes) = try!(NoSpam::parse_bytes(bytes));
-        let Parsed(pk, bytes) = try!(PublicKey::parse_bytes(bytes));
-        let Parsed(sk, bytes) = try!(SecretKey::parse_bytes(bytes));
-
-        Ok(Parsed(NospamKeys { nospam: nospam, pk: pk, sk: sk }, bytes))
-    }
-}
+from_bytes!(NospamKeys, do_parse!(
+    nospam: call!(NoSpam::parse_bytes) >>
+    pk: call!(PublicKey::parse_bytes) >>
+    sk: call!(SecretKey::parse_bytes) >>
+    (NospamKeys {
+        nospam: nospam,
+        pk: pk,
+        sk: sk
+    })
+));
 
 /** E.g.
 
@@ -384,35 +374,14 @@ let serialized = vec![
 assert_eq!(DhtState(vec![]), DhtState::from_bytes(&serialized).unwrap());
 ```
 */
-impl FromBytes for DhtState {
-    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
-        if bytes.len() < DHT_STATE_MIN_SIZE ||
-           // check whether beginning of the section matches DHT magic bytes
-           LittleEndian::read_u32(bytes) != DHT_MAGICAL ||
-           // check DHT section type
-           LittleEndian::read_u16(&bytes[8..10]) != DHT_SECTION_TYPE ||
-           // check whether yet another magic number matches
-           LittleEndian::read_u16(&bytes[10..12]) != DHT_2ND_MAGICAL {
-            return parse_error!("Incorect DhtState.")
-        } // can I haz yet another magical number?
-
-        // length of the whole section
-        let section_len = {
-            let nodes = LittleEndian::read_u32(&bytes[4..]);
-            let whole_len = nodes as usize + DHT_STATE_MIN_SIZE;
-            // check if it's bigger, since that would be the only thing that
-            // could cause panic
-            if whole_len > bytes.len() {
-                return parse_error!("Not enough bytes for DhtState.")
-            }
-            whole_len
-        };
-
-        let nodes_bytes = &bytes[DHT_STATE_MIN_SIZE..section_len];
-        let Parsed(pns, _) = try!(PackedNode::parse_bytes_multiple(nodes_bytes));
-        Ok(Parsed(DhtState(pns), &bytes[section_len..]))
-    }
-}
+from_bytes!(DhtState, do_parse!(
+    verify!(le_u32, |value| value == DHT_MAGICAL) >> // check whether beginning of the section matches DHT magic bytes
+    nodes: le_u32 >>
+    verify!(le_u16, |value| value == DHT_SECTION_TYPE) >> // check DHT section type
+    verify!(le_u16, |value| value == DHT_2ND_MAGICAL) >> // check whether yet another magic number matches
+    pns: flat_map!(take!(nodes as usize), many0!(PackedNode::parse_bytes)) >>
+    (DhtState(pns))
+));
 
 /** E.g. serialization of an empty list:
 
@@ -553,24 +522,13 @@ for i in 5..256 {
 }
 ```
 */
-impl FromBytes for FriendStatus {
-    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
-        if bytes.is_empty() {
-            return parse_error!("Not enough bytes for FriendStatus.")
-        }
-
-        let result = match bytes[0] {
-            0 => FriendStatus::NotFriend,
-            1 => FriendStatus::Added,
-            2 => FriendStatus::FrSent,
-            3 => FriendStatus::Confirmed,
-            4 => FriendStatus::Online,
-            _ => return parse_error!("Unknown FriendStatus: {}.", bytes[0]),
-        };
-
-        Ok(Parsed(result, &bytes[1..]))
-    }
-}
+from_bytes!(FriendStatus, switch!(le_u8,
+    0 => value!(FriendStatus::NotFriend) |
+    1 => value!(FriendStatus::Added) |
+    2 => value!(FriendStatus::FrSent) |
+    3 => value!(FriendStatus::Confirmed) |
+    4 => value!(FriendStatus::Online)
+));
 
 
 /** User status. Used for both own & friend statuses.
@@ -601,22 +559,11 @@ impl Default for UserStatus {
     }
 }
 
-impl FromBytes for UserStatus {
-    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
-        if bytes.is_empty() {
-            return parse_error!("Not enough bytes for UserStatus.")
-        }
-
-        let result = match bytes[0] {
-            0 => UserStatus::Online,
-            1 => UserStatus::Away,
-            2 => UserStatus::Busy,
-            _ => return parse_error!("Unknown UserStatus: {}.", bytes[0])
-        };
-
-        Ok(Parsed(result, &bytes[1..]))
-    }
-}
+from_bytes!(UserStatus, switch!(le_u8,
+    0 => value!(UserStatus::Online) |
+    1 => value!(UserStatus::Away) |
+    2 => value!(UserStatus::Busy)
+));
 
 impl ToBytes for UserStatus {
     fn to_bytes(&self) -> Vec<u8> {
@@ -687,64 +634,35 @@ pub const FRIENDSTATEBYTES: usize = 1      // "Status"
 /* only used for sending FR    */ + NOSPAMBYTES
 /* last time seen              */ + 8;
 
-impl FromBytes for FriendState {
-    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
-        if bytes.len() < FRIENDSTATEBYTES {
-            return parse_error!("Not enough bytes for FriendState.")
-        }
-
-        let Parsed(status, bytes) = try!(FriendStatus::parse_bytes(bytes));
-
-        let Parsed(pk, bytes) = try!(PublicKey::parse_bytes(bytes));
-
-        // supply length and number of bytes that need to be padded
-        // if no padding needed, supply `0`
-        // TODO: refactor?
-        fn get_bytes(bytes: &[u8], len: usize, pad: usize)
-            -> ParseResult<Vec<u8>>
-        {
-            let str_len = BigEndian::read_u16(&bytes[len+pad..len+pad+2]) as usize;
-            if str_len > len {
-                return parse_error!("Value demands {} bytes when it is \
-                    supposed to take {}!", str_len, len)
-            }
-
-            Ok(Parsed(bytes[..str_len].to_vec(), &bytes[len+pad+2..]))
-        };
-
-        let Parsed(fr_msg, bytes) = try!(get_bytes(bytes, REQUEST_MSG_LEN, 1));
-
-        // TODO: refactor?
-        let Parsed(name_bytes, bytes) = try!(get_bytes(bytes, NAME_LEN, 0));
-        let name = Name(name_bytes);
-
-        // TODO: refactor?
-        let Parsed(status_msg_bytes, bytes) = try!(
-            get_bytes(bytes, STATUS_MSG_LEN, 1)
-        );
-        let status_msg = StatusMsg(status_msg_bytes);
-
-        let Parsed(user_status, bytes) = try!(UserStatus::parse_bytes(bytes));
-
-        let bytes = &bytes[3..]; // padding
-        let Parsed(nospam, bytes) = try!(NoSpam::parse_bytes(&bytes));
-
-        let seen = LittleEndian::read_u64(bytes);
-
-        let bytes = &bytes[8..];
-
-        Ok(Parsed(FriendState {
-            status: status,
-            pk: pk,
-            fr_msg: fr_msg,
-            name: name,
-            status_msg: status_msg,
-            user_status: user_status,
-            nospam: nospam,
-            last_seen: seen,
-        }, bytes))
-    }
-}
+from_bytes!(FriendState, do_parse!(
+    status: call!(FriendStatus::parse_bytes) >>
+    pk: call!(PublicKey::parse_bytes) >>
+    fr_msg_bytes: take!(REQUEST_MSG_LEN) >>
+    take!(1) >> // padding
+    fr_msg_len: verify!(map!(be_u16, |len| len as usize), |len| len <= REQUEST_MSG_LEN) >>
+    fr_msg: value!(fr_msg_bytes[..fr_msg_len].to_vec()) >>
+    name_bytes: take!(NAME_LEN) >>
+    name_len: verify!(map!(be_u16, |len| len as usize), |len| len <= NAME_LEN) >>
+    name: value!(Name(name_bytes[..name_len].to_vec())) >>
+    status_msg_bytes: take!(STATUS_MSG_LEN) >>
+    take!(1) >> // padding
+    status_msg_len: verify!(map!(be_u16, |len| len as usize), |len| len <= STATUS_MSG_LEN) >>
+    status_msg: value!(StatusMsg(status_msg_bytes[..status_msg_len].to_vec())) >>
+    user_status: call!(UserStatus::parse_bytes) >>
+    take!(3) >> // padding
+    nospam: call!(NoSpam::parse_bytes) >>
+    seen: le_u64 >>
+    (FriendState {
+        status: status,
+        pk: pk,
+        fr_msg: fr_msg,
+        name: name,
+        status_msg: status_msg,
+        user_status: user_status,
+        nospam: nospam,
+        last_seen: seen,
+    })
+));
 // TODO: write tests ↑
 
 impl ToBytes for FriendState {
@@ -875,12 +793,7 @@ impl Friends {
     }
 }
 
-impl FromBytes for Friends {
-    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
-        FriendState::parse_bytes_multiple(bytes)
-            .map(|Parsed(fs, b)| Parsed(Friends(fs), b))
-    }
-}
+from_bytes!(Friends, map!(many0!(FriendState::parse_bytes), Friends));
 
 impl ToBytes for Friends {
     fn to_bytes(&self) -> Vec<u8> {
@@ -963,15 +876,7 @@ impl Name {
 /** Produces up to [`NAME_LEN`](./constant.NAME_LEN.html) bytes long `Name`.
     Can't fail.
 */
-impl FromBytes for Name {
-    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
-        if bytes.len() < NAME_LEN {
-            Ok(Parsed(Name::new(bytes), &bytes[bytes.len()..]))
-        } else {
-            Ok(Parsed(Name::new(bytes), &bytes[NAME_LEN..]))
-        }
-    }
-}
+from_bytes!(Name, map!(alt_complete!(take!(NAME_LEN) | rest), Name::new));
 
 impl_to_bytes_for_bytes_struct!(Name, name_to_bytes_test);
 
@@ -1023,15 +928,7 @@ impl StatusMsg {
 /** Produces up to [`STATUS_MSG_LEN`](./constant.STATUS_MSG_LEN.html) bytes
 long `StatusMsg`. Can't fail.
 */
-impl FromBytes for StatusMsg {
-    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
-        if bytes.len() < STATUS_MSG_LEN {
-            Ok(Parsed(StatusMsg::new(bytes), &bytes[bytes.len()..]))
-        } else {
-            Ok(Parsed(StatusMsg::new(bytes), &bytes[STATUS_MSG_LEN..]))
-        }
-    }
-}
+from_bytes!(StatusMsg, map!(alt_complete!(take!(STATUS_MSG_LEN) | rest), StatusMsg::new));
 
 impl_to_bytes_for_bytes_struct!(StatusMsg, status_msg_to_bytes_test);
 
@@ -1041,13 +938,7 @@ macro_rules! nodes_list {
         #[derive(Clone, Debug, Default, Eq, PartialEq)]
         pub struct $name(pub Vec<PackedNode>);
 
-        impl FromBytes for $name {
-            fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
-                let Parsed(value, rest) =
-                    try!(PackedNode::parse_bytes_multiple(&bytes));
-                Ok(Parsed($name(value), rest))
-            }
-        }
+        from_bytes!($name, map!(many0!(PackedNode::parse_bytes), $name));
 
         impl ToBytes for $name {
             fn to_bytes(&self) -> Vec<u8> {
@@ -1073,7 +964,7 @@ macro_rules! nodes_list {
                     bytes.append(&mut pn.to_bytes());
                 }
                 {
-                    let Parsed(p, r_bytes) = $name::parse_bytes(&bytes).unwrap();
+                    let (r_bytes, p) = $name::parse_bytes(&bytes).unwrap();
 
                     assert_eq!(p.0, pns);
                     assert_eq!(&[] as &[u8], r_bytes);
@@ -1171,39 +1062,16 @@ impl SectionData {
 }
 
 
-impl FromBytes for SectionData {
-    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
-        if bytes.len() < SECTION_MIN_LEN {
-            return parse_error!("Parsing failed: Not enough bytes for \
-            SectionData!")
-        }
-
-        let data_len = {
-            let num = LittleEndian::read_u32(bytes) as usize;
-            if num > (bytes.len() - SECTION_MIN_LEN) {
-                return parse_error!("Parsing failed: there are not enough \
-                bytes in section to parse!")
-            }
-            num
-        };
-        let left = &bytes[4..SECTION_MIN_LEN+data_len];
-
-        let Parsed(kind, left) = try!(SectionKind::parse_bytes(left));
-
-        if SECTION_MAGIC != &left[..2] {
-            return parse_error!("Parsing failed: SECTION_MAGIC doesn't match!")
-        }
-        let left = &left[2..];
-
-        Ok(Parsed(
-            SectionData {
-                kind: kind,
-                data: left.to_vec()
-            },
-            &bytes[SECTION_MIN_LEN + left.len()..]
-        ))
-    }
-}
+from_bytes!(SectionData, do_parse!(
+    data_len: le_u32 >>
+    kind: call!(SectionKind::parse_bytes) >>
+    tag!(SECTION_MAGIC) >>
+    data: take!(data_len) >>
+    (SectionData {
+        kind: kind,
+        data: data.to_vec()
+    })
+));
 
 
 #[cfg(test)]
@@ -1304,10 +1172,8 @@ pub struct State {
 const STATE_MAGIC: &'static [u8; 4] = &[0x1f, 0x1b, 0xed, 0x15];
 
 /// Length of `State` header.
+#[cfg(test)]
 const STATE_HEAD_LEN: usize = 8;
-
-/// Minimal length of State Format.
-const STATE_MIN_LEN: usize = STATE_HEAD_LEN + SECTION_MIN_LEN;
 
 
 // TODO: refactor the whole thing
@@ -1333,31 +1199,6 @@ impl State {
     */
     pub fn is_own_pk(&self, pk: &PublicKey) -> bool {
         self.nospamkeys.pk == *pk
-    }
-
-    /** Checks if given bytes have `State` header, i.e. whether the first
-    8 bytes match.
-
-    > **Note:** Even if data has `State` header, it still can fail to
-    >           de-serialize when even a part of the data is invalid.
-
-    Returns `true` if there's matching header, `false` otherwise.
-    */
-    pub fn is_state(bytes: &[u8]) -> bool {
-        if bytes.len() < STATE_MIN_LEN {
-            return false
-        }
-        // should start with 4 `0` bytes
-        if &bytes[..4] != &[0; 4] {
-            return false
-        }
-        let bytes = &bytes[4..];
-
-        // match magic bytes
-        if &bytes[..4] != STATE_MAGIC {
-            return false
-        }
-        true
     }
 
     /** Fails (returns `None`) only if there is no `NospamKeys` in supplied
@@ -1411,22 +1252,13 @@ impl State {
     }
 }
 
-impl FromBytes for State {
-    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
-        if !State::is_state(bytes) {
-            return parse_error!("Not a State!")
-        }
-        let bytes = &bytes[STATE_HEAD_LEN..];
-
-        let (sections, bytes) = try!(SectionData::parse_bytes_multiple(bytes)
-            .map(|Parsed(ref sd, b)| (SectionData::into_sect_mult(sd), b)));
-
-        match Self::from_sects(&sections) {
-            Some(s) => Ok(Parsed(s, bytes)),
-            None => parse_error!("Failed to parse data, no valid sections!"),
-        }
-    }
-}
+from_bytes!(State, do_parse!(
+    tag!(&[0; 4]) >>
+    tag!(STATE_MAGIC) >>
+    sections: map!(many0!(SectionData::parse_bytes), |ref sd| SectionData::into_sect_mult(sd)) >>
+    state: expr_opt!(Self::from_sects(&sections)) >>
+    (state)
+));
 
 impl ToBytes for State {
     // unoptimized
@@ -1522,15 +1354,10 @@ fn friend_state_new_from_pk_test() {
 // FriendState::parse_bytes()
 
 #[test]
-#[cfg(test)] // ← https://github.com/rust-lang/rust/issues/16688
 fn friend_state_parse_bytes_test() {
-    fn assert_error(bytes: &[u8], error: &str) {
-        contains_err!(FriendState::parse_bytes, bytes, error);
-    }
-
     // serialized and deserialized remain the same
     fn assert_success(bytes: &[u8], friend_state: &FriendState) {
-        let Parsed(ref p, _) = FriendState::parse_bytes(bytes).unwrap();
+        let (_, ref p) = FriendState::parse_bytes(bytes).unwrap();
         assert_eq!(friend_state, p);
     }
 
@@ -1539,7 +1366,7 @@ fn friend_state_parse_bytes_test() {
         assert_success(&fs_bytes, &fs);
 
         for b in 0..(FRIENDSTATEBYTES - 1) {
-            assert_error(&fs_bytes[..b], "Not enough bytes for FriendState.");
+            assert!(FriendState::parse_bytes(&fs_bytes[..b]).is_incomplete());
         }
 
         { // FriendStatus
@@ -1548,7 +1375,7 @@ fn friend_state_parse_bytes_test() {
             //       rust #28237
             for b in 5..u8::max_value() {
                 bytes[0] = b;
-                assert_error(&bytes, &format!("Unknown FriendStatus: {}", b));
+                assert!(FriendState::parse_bytes(&bytes).is_err());
             }
         }
 
@@ -1557,8 +1384,7 @@ fn friend_state_parse_bytes_test() {
             let mut bytes = fs_bytes.clone();
             for i in (REQUEST_MSG_LEN+1)..2500 { // too slow with bigger ranges
                 BigEndian::write_u16(&mut bytes[FR_MSG_LEN_POS..], i as u16);
-                assert_error(&bytes, &format!("Value demands {} bytes \
-                    when it is supposed to take {}!", i, REQUEST_MSG_LEN));
+                assert!(FriendState::parse_bytes(&bytes).is_err());
             }
         }
 
@@ -1567,8 +1393,7 @@ fn friend_state_parse_bytes_test() {
             let mut bytes = fs_bytes.clone();
             for i in (NAME_LEN+1)..2500 { // too slow with bigger ranges
                 BigEndian::write_u16(&mut bytes[NAME_LEN_POS..], i as u16);
-                assert_error(&bytes, &format!("Value demands {} bytes \
-                    when it is supposed to take {}!", i, NAME_LEN));
+                assert!(FriendState::parse_bytes(&bytes).is_err());
             }
         }
 
@@ -1578,8 +1403,7 @@ fn friend_state_parse_bytes_test() {
             let mut bytes = fs_bytes.clone();
             for i in (STATUS_MSG_LEN+1)..2500 { // too slow with bigger ranges
                 BigEndian::write_u16(&mut bytes[STATUS_MSG_LEN_POS..], i as u16);
-                assert_error(&bytes, &format!("Value demands {} bytes \
-                    when it is supposed to take {}!", i, STATUS_MSG_LEN));
+                assert!(FriendState::parse_bytes(&bytes).is_err());
             }
         }
 
@@ -1587,7 +1411,7 @@ fn friend_state_parse_bytes_test() {
         const USTATUS_POS: usize = STATUS_MSG_LEN_POS + 2;
         { // user status
             fn has_status(bytes: &[u8], status: UserStatus) {
-                let Parsed(fs, _) = FriendState::parse_bytes(bytes).unwrap();
+                let (_, fs) = FriendState::parse_bytes(bytes).unwrap();
                 assert_eq!(fs.user_status, status);
             }
 
@@ -1602,8 +1426,7 @@ fn friend_state_parse_bytes_test() {
                     0 => has_status(&bytes, UserStatus::Online),
                     1 => has_status(&bytes, UserStatus::Away),
                     2 => has_status(&bytes, UserStatus::Busy),
-                    n => assert_error(&bytes,
-                            &format!("Unknown UserStatus: {}.", n)),
+                    _ => assert!(FriendState::parse_bytes(&bytes).is_err()),
                 }
             }
         }
@@ -1747,7 +1570,6 @@ fn section_data_into_sect_mult_test_random() {
 // SectionData::parse_bytes()
 
 #[test]
-#[cfg(test)] // ← https://github.com/rust-lang/rust/issues/16688
 fn section_data_parse_bytes_test() {
     fn rand_b_sect(kind: SectionKind, bytes: &[u8]) -> Vec<u8> {
         let mut b_sect = Vec::with_capacity(bytes.len() + SECTION_MIN_LEN);
@@ -1762,7 +1584,7 @@ fn section_data_parse_bytes_test() {
         let b_sect = rand_b_sect(kind, &bytes);
 
         { // working case
-            let Parsed(section, left) = SectionData::parse_bytes(&b_sect).unwrap();
+            let (left, section) = SectionData::parse_bytes(&b_sect).unwrap();
 
             assert_eq!(0, left.len());
             assert_eq!(section.kind, kind);
@@ -1771,8 +1593,7 @@ fn section_data_parse_bytes_test() {
 
         { // wrong SectionKind
             fn wrong_skind(bytes: &[u8]) {
-                contains_err!(SectionData::parse_bytes, bytes,
-                              "Incorrect SectionKind: ");
+                assert!(SectionData::parse_bytes(bytes).is_err());
             }
 
             let mut b_sect = b_sect.clone();
@@ -1794,17 +1615,12 @@ fn section_data_parse_bytes_test() {
 
         // too short
         for l in 0..SECTION_MIN_LEN {
-            contains_err!(SectionData::parse_bytes,
-                          &b_sect[..l],
-                          "Parsing failed: Not enough bytes for SectionData!");
+            assert!(SectionData::parse_bytes(&b_sect[..l]).is_incomplete());
         }
 
         // wrong len
         for l in SECTION_MIN_LEN..(b_sect.len() - 1) {
-            contains_err!(SectionData::parse_bytes,
-                          &b_sect[..l],
-                          "Parsing failed: there are not enough bytes in \
-                          section to parse!");
+            assert!(SectionData::parse_bytes(&b_sect[..l]).is_incomplete());
         }
     }
     quickcheck(with_bytes as fn(Vec<u8>, SectionKind));
@@ -1821,9 +1637,7 @@ fn section_data_parse_bytes_test() {
         b_sect.extend_from_slice(&tmp_b_sect[..SECTION_MIN_LEN - 2]);
         b_sect.extend_from_slice(&magic[..2]);
         b_sect.extend_from_slice(&tmp_b_sect[SECTION_MIN_LEN..]);
-        contains_err!(SectionData::parse_bytes,
-                      &b_sect,
-                      "Parsing failed: SECTION_MAGIC doesn\\'t match!");
+        assert!(SectionData::parse_bytes(&b_sect).is_err());
         TestResult::passed()
     }
     quickcheck(with_magic as fn(Vec<u8>, SectionKind, Vec<u8>) -> TestResult);
@@ -1835,7 +1649,6 @@ fn section_data_parse_bytes_test() {
 // State::add_friend_norequest()
 
 #[test]
-#[cfg(test)] // ← https://github.com/rust-lang/rust/issues/16688
 fn state_add_friend_norequest_test() {
     fn with_pk(state: State, pkbytes: Vec<u8>) -> TestResult {
         quick_pk_from_bytes!(pkbytes, pk);
@@ -1859,7 +1672,6 @@ fn state_add_friend_norequest_test() {
 // State::is_own_pk()
 
 #[test]
-#[cfg(test)] // ← https://github.com/rust-lang/rust/issues/16688
 fn state_is_own_pk_test() {
     fn with_pk(state: State, bytes: Vec<u8>) -> TestResult {
         quick_pk_from_bytes!(bytes, rand_pk);
@@ -1869,51 +1681,6 @@ fn state_is_own_pk_test() {
         TestResult::passed()
     }
     quickcheck(with_pk as fn(State, Vec<u8>) -> TestResult);
-}
-
-// State::is_state()
-
-#[test]
-fn state_is_state_test() {
-    // test parsing right and wrong bytes
-    fn with_num(num: u8) -> TestResult {
-        // right bytes
-        let sf_bytes = vec![0, 0, 0, 0,
-                            0x1f, 0x1b, 0xed, 0x15,
-                            // ↑ section header
-                            // ↓ this would be section data
-                            0, 0, 0, 0,
-                            0, 0 ,0 ,0];
-        assert_eq!(true, State::is_state(&sf_bytes));
-
-        // wrong, mismatching magic
-        for pos in 4..8 {
-            let mut bytes = sf_bytes.clone();
-            match (pos, num) {
-                (4, 0x1f) | (5, 0x1b) | (6, 0xed) | (7, 0x15) =>
-                    return TestResult::discard(),
-                _ => {},
-            }
-
-            bytes[pos] = num;
-            assert_eq!(false, State::is_state(&bytes));
-        }
-        TestResult::passed()
-    }
-    quickcheck(with_num as fn(u8) -> TestResult);
-
-    fn with_bytes(b: Vec<u8>) -> TestResult {
-        if b.len() < STATE_MIN_LEN { return TestResult::discard() }
-        for n in 0..(STATE_MIN_LEN - 1) {
-            assert_eq!(false, State::is_state(&b[..n]));
-        }
-        assert_eq!(false, State::is_state(&b));
-        TestResult::passed()
-    }
-    quickcheck(with_bytes as fn(Vec<u8>) -> TestResult);
-
-    // empty bytes case
-    assert_eq!(false, State::is_state(&[]));
 }
 
 // State::parse_bytes()
@@ -1926,12 +1693,12 @@ fn state_parse_bytes_test_magic() {
         }
 
         let state_bytes = state.to_bytes();
-        assert!(State::is_state(&state_bytes));
+        assert!(State::parse_bytes(&state_bytes).is_done());
 
         let mut invalid_bytes = Vec::with_capacity(state_bytes.len());
         invalid_bytes.extend_from_slice(&rand_bytes[..STATE_HEAD_LEN]);
         invalid_bytes.extend_from_slice(&state_bytes[STATE_HEAD_LEN..]);
-        contains_err!(State::parse_bytes, &invalid_bytes, "Not a State!");
+        assert!(State::parse_bytes(&invalid_bytes).is_err());
         TestResult::passed()
     }
     quickcheck(with_state as fn(State, Vec<u8>) -> TestResult);
@@ -1948,8 +1715,7 @@ fn state_parse_bytes_test_section_detect() {
             .map(|b| { if *b == SECTION_MAGIC[0] { *b = rand_byte; } *b })
             .collect();
 
-        contains_err!(State::parse_bytes, &bytes,
-                      "Failed to parse data, no valid sections!");
+        assert!(State::parse_bytes(&bytes).is_err());
 
         TestResult::passed()
     }

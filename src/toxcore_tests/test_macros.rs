@@ -21,18 +21,6 @@
 //! File with testing macros. **Use only in tests!**
 
 
-/// Assert that function with given data fails with given error.
-macro_rules! contains_err {
-    ($func: path, $data: expr, $error: expr) => (
-        { // ← ensure that expanded macro won't interfere with other code
-            let e = format!("{:?}", $func($data).unwrap_err());
-            assert!(e.contains($error),
-                    format!("e: {}", e));
-        }
-    )
-}
-
-
 /** Implement `Arbitrary` trait for given struct with bytes.
 
 E.g.

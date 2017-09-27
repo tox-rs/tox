@@ -19,6 +19,8 @@
 
 //! Tests for `binary_io` module.
 
+use byteorder::{NativeEndian, WriteBytesExt};
+use nom::IResult;
 use num_traits::identities::Zero;
 use quickcheck::{quickcheck, TestResult};
 
@@ -83,4 +85,19 @@ fn xor_checksum_test() {
         assert_eq!(x[1], b ^ d);
     }
     quickcheck(with_numbers as fn(u8, u8, u8, u8));
+}
+
+// ne_u64()
+
+#[test]
+fn ne_u64_test() {
+    fn with_numbers(n: u64) {
+        let mut v = Vec::new();
+        v.write_u64::<NativeEndian>(n).unwrap();
+        // TODO: remove `as &[u8]` when Rust RFC 803 gets fully
+        //       implemented on ~stable - 1
+        //       https://github.com/rust-lang/rust/issues/23416
+        assert_eq!(ne_u64(&v), IResult::Done(&[] as &[u8], n));
+    }
+    quickcheck(with_numbers as fn(u64));
 }

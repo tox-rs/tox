@@ -109,20 +109,7 @@ impl fmt::Display for NoSpam {
     }
 }
 
-impl FromBytes for NoSpam {
-    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
-        debug!(target: "NoSpam", "Creating NoSpam from bytes.");
-        trace!(target: "NoSpam", "Bytes: {:?}", bytes);
-
-        if bytes.len() < NOSPAMBYTES {
-            return parse_error!("Not enough bytes for NoSpam.");
-        }
-
-        let nospam = NoSpam([bytes[0], bytes[1], bytes[2], bytes[3]]);
-
-        Ok(Parsed(nospam, &bytes[NOSPAMBYTES..]))
-    }
-}
+from_bytes!(NoSpam, map!(take!(NOSPAMBYTES), |bytes| NoSpam([bytes[0], bytes[1], bytes[2], bytes[3]])));
 
 
 /** `Tox ID`.
@@ -143,6 +130,9 @@ pub struct ToxId {
     nospam: NoSpam,
     checksum: [u8; 2],
 }
+
+/// Number of bytes that checksum of [`ToxId`](./struct.ToxId.html) has.
+pub const CHECKSUMBYTES: usize = 2;
 
 /// Number of bytes of serialized [`ToxId`](./struct.ToxId.html).
 pub const TOXIDBYTES: usize = PUBLICKEYBYTES + NOSPAMBYTES + 2;
@@ -264,30 +254,16 @@ assert_eq!(None, ToxId::from_bytes(&bytes[..TOXIDBYTES - 11]));
 let _toxid = ToxId::from_bytes(&bytes).expect("Failed to get ToxId from bytes!");
 ```
 */
-impl FromBytes for ToxId {
-    fn parse_bytes(bytes: &[u8]) -> ParseResult<Self> {
-        debug!(target: "ToxId", "Creating ToxId from bytes.");
-        trace!(target: "ToxId", "Bytes: {:?}", bytes);
-
-        fn parse_checksum(bytes: &[u8]) -> ParseResult<[u8; 2]> {
-            if bytes.len() < 2 {
-                return parse_error!("Not enough bytes for ToxId checksum.")
-            }
-
-            Ok(Parsed([bytes[0], bytes[1]], &bytes[2..]))
-        }
-
-        let Parsed(pk, bytes) = try!(PublicKey::parse_bytes(bytes));
-        let Parsed(nospam, bytes) = try!(NoSpam::parse_bytes(bytes));
-        let Parsed(checksum, bytes) = try!(parse_checksum(bytes));
-
-        Ok(Parsed(ToxId {
-            pk: pk,
-            nospam: nospam,
-            checksum: checksum,
-        }, bytes))
-    }
-}
+from_bytes!(ToxId, do_parse!(
+    pk: call!(PublicKey::parse_bytes) >>
+    nospam: call!(NoSpam::parse_bytes) >>
+    checksum: map!(take!(CHECKSUMBYTES), |bytes| { [bytes[0], bytes[1]] }) >>
+    (ToxId {
+        pk: pk,
+        nospam: nospam,
+        checksum: checksum
+    })
+));
 
 /** E.g.
 

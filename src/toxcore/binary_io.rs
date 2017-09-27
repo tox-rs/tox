@@ -19,6 +19,8 @@
 
 //! Functions for binary IO.
 
+use byteorder::{ByteOrder, NativeEndian};
+use nom::{IResult, Needed};
 use num_traits::identities::Zero;
 
 /// Serialization into bytes.
@@ -27,109 +29,47 @@ pub trait ToBytes {
     fn to_bytes(&self) -> Vec<u8>;
 }
 
-/// Parsing result. Provides result and remaining input.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Parsed<'a, Output>(
-    /// Result.
-    pub Output,
-    /// Remaining input.
-    pub &'a [u8]
-);
-
-/// Parsing error.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ParseError{
-    target: &'static str,
-    message: String,
-    file: &'static str,
-    line: u32
-}
-
-impl ParseError {
-    /// Create new ParseError
-    pub fn new(target: &'static str, message: String,
-           file: &'static str, line: u32) -> ParseError {
-        ParseError{
-            target: target,
-            message: message,
-            file: file,
-            line: line
-        }
-    }
-}
-
-macro_rules! parse_error {
-    (target: $target:expr, $($arg:tt)*) => (
-        Err(ParseError::new(
-                $target,
-                format!($($arg)*),
-                file!(),
-                line!()))
-    );
-    ($($arg:tt)*) => (parse_error!(target: module_path!(), $($arg)*))
-}
-
 /// Result type for parsing methods
-pub type ParseResult<'a, Output> = Result<Parsed<'a, Output>, ParseError>;
+pub type ParseResult<'a, Output> = IResult<&'a [u8], Output>;
 
-/// Methods for de-serialization from bytes
-// TODO: remove Option<T> types in favour of reworking `ParseResult` into a
-//       real™ `Result` that could be just `ok()`d
+/// De-serialization from bytes.
 pub trait FromBytes: Sized {
-
     /// De-serialize from bytes.
     fn parse_bytes(bytes: &[u8]) -> ParseResult<Self>;
 
-    /** De-serialize exact `times` entities from bytes.
-
-    Note that even if `Vec<_>` is returned, it still can be empty.
-    */
-    fn parse_bytes_multiple_n(times: usize, bytes: &[u8]) -> ParseResult<Vec<Self>> {
-        debug!("De-serializing multiple ({}) outputs.", times);
-        trace!("With bytes: {:?}", bytes);
-
-        let mut bytes = bytes;
-        let mut result = Vec::with_capacity(times);
-
-        for _ in 0..times {
-            let Parsed(value, rest) = try!(Self::parse_bytes(bytes));
-            bytes = rest;
-            result.push(value);
-        }
-
-        Ok(Parsed(result, bytes))
+    /// De-serialize as many entities from bytes as posible.
+    /// Note that even if `Vec<_>` is returned, it still can be empty.
+    fn parse_bytes_multiple<'a>(bytes: &'a [u8]) -> ParseResult<Vec<Self>> {
+        closure!(&'a [u8], many0!(Self::parse_bytes))(bytes)
     }
 
-    /** De-serialize as many entities from bytes as posible.
-
-    Note that even if `Vec<_>` is returned, it still can be empty.
-    */
-    fn parse_bytes_multiple(bytes: &[u8]) -> ParseResult<Vec<Self>> {
-        debug!("De-serializing multiple outputs.");
-        trace!("With bytes: {:?}", bytes);
-
-        let mut bytes = bytes;
-        let mut result = Vec::new();
-
-        while let Ok(Parsed(value, rest)) = Self::parse_bytes(bytes) {
-            bytes = rest;
-            result.push(value);
-        }
-
-        Ok(Parsed(result, bytes))
+    /// De-serialize exact `times` entities from bytes.
+    /// Note that even if `Vec<_>` is returned, it still can be empty.
+    fn parse_bytes_multiple_n<'a>(bytes: &'a [u8], times: usize) -> ParseResult<Vec<Self>> {
+        closure!(&'a [u8], many_m_n!(times, times, Self::parse_bytes))(bytes)
     }
+
     /// De-serialize from bytes, or return `None` if de-serialization failed.
     /// Note: `Some` is returned even if there are remaining bytes left.
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
         match Self::parse_bytes(bytes) {
-            Ok(Parsed(value, _)) => Some(value),
-            Err(err) => {
+            IResult::Done(_, value) => Some(value),
+            IResult::Error(err) => {
                 debug!("Can't parse bytes. Error: {:?}", err);
                 None
-            }
+            },
+            IResult::Incomplete(_) => None
         }
     }
 }
+
+macro_rules! from_bytes (
+    ($name:ident, $submac:ident!( $($args:tt)* )) => (
+        impl FromBytes for $name {
+            named!(parse_bytes<&[u8], Self>, $submac!($($args)*));
+        }
+    );
+);
 
 
 /// Append `0`s to given bytes up to `len`. Panics if `len` is smaller than
@@ -148,4 +88,35 @@ pub fn append_zeros<T: Clone + Zero>(v: &mut Vec<T>, len: usize) {
 */
 pub fn xor_checksum(lhs: &[u8; 2], rhs: &[u8; 2]) -> [u8; 2] {
     [lhs[0] ^ rhs[0], lhs[1] ^ rhs[1]]
+}
+
+/// Recognizes native endian unsigned 8 bytes integer
+#[inline]
+pub fn ne_u64(i: &[u8]) -> IResult<&[u8], u64> {
+    if i.len() < 8 {
+        IResult::Incomplete(Needed::Size(8))
+    } else {
+        let res = NativeEndian::read_u64(i);
+        IResult::Done(&i[8..], res)
+    }
+}
+
+/// Adds an expect method.
+pub trait Expect<T> {
+    /// Unwraps a result, yielding the content.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the value is an error, with a passed panic message.
+    fn expect(self, &str) -> T;
+}
+
+impl<I, O> Expect<(I, O)> for IResult<I, O> {
+    fn expect(self, err: &str) -> (I, O) {
+        match self {
+            IResult::Done(i, o) => (i, o),
+            IResult::Incomplete(_) => panic!("Incomplete: {}", err),
+            IResult::Error(e) => panic!("{}: {}", e.description(), err)
+        }
+    }
 }
