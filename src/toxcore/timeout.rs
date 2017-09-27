@@ -24,24 +24,56 @@ Managing requests IDs and timeouts.
 Peers are to be timed out when they do not show any activity before
 running into a timeout.
 
-Data associated with timeouts that needs to be stored:
+# Timeout data to store:
 
+- Instant (when was the last interaction with given peer)
 - request ID (from PingReq, GetNodes, ..other?)
 - PK (unique identifier of a peer)
   - does it really need to be stored? can't it be a reference to PK
     stored somewhere else? it's "just" 32 bytes, but still
-- Instant (when was the last interaction with given peer)
+    - can it be replaced by futures?
 
 By what storage needs to be accessed:
 
 - timeout, based on Instant::elapsed() < Duration::from_secs(TIMEOUT);
   - sorting according to increasing timeout?
-    - multiple storages according to what the timeout is?
-- PK (update Instant when receiving incoming packet from peer)
-- Request ID (update Instant when receiving response for sent request)
+    - multiple storages according to what the timeout is for?
+- Request ID: remove NodeTimeout from the queue if IDs match and spawn
+  TimeoutFuture
+
+
+# How it is supposed to work
+
+## Storage for timeouts
+
+- store [`NodeTimeout`] in `VecDeque`
+  - separate queues for each [`PacketKind`] request
+- append new timeouts at the end of the queue
+- `front()` to check if first timeout is to be triggered
+  - `pop_front()` to remove timeout from queue if it's past it
+
+### Dependant behaviour
+
+- Once it's past the [`NodeTimeout`], remove it from both queue and:
+  - initial implementation: from `Kbucket`
+  - better implementation: modify [`NodeState`] in table of `NodeInfo`s,
+    and act accordingly to the [`NodeState`]
+
+## Timeout future
+
+Possibly create a new `TimoutFuture` for each known node – future is
+created to trigger [`GetNodes`] requests.
+
+
+[`GetNodes`]: ../dht/struct.GetNodes.html
+[`NodeState`]: ./enum.NodeState.html
+[`NodeTimeout`]: ./struct.NodeTimeout.html
+[`PacketKind`]: ../packet_kind/enum.PacketKind.html
 */
 
+use tokio_proto::multiplex::RequestId;
 
+use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use toxcore::crypto_core::*;
@@ -146,7 +178,7 @@ pub enum NodeState {
 
 
 /// A DHT node's associated timeout info.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NodeTimeout {
     /**
     `Instant` when we received a valid packet from the node or we sent
@@ -157,25 +189,20 @@ pub struct NodeTimeout {
     */
     time: Instant,
     /// ID of last sent request.
-    id: u64,
+    id: RequestId,
     /// PK of the node.
     pk: PublicKey,
 }
 
 impl NodeTimeout {
     /// Create a new `NodeTimeout`.
-    pub fn new(pk: &PublicKey) -> Self {
-        NodeTimeout { time: Instant::now(), id: 0, pk: *pk }
+    pub fn new(pk: &PublicKey, id: RequestId) -> Self {
+        NodeTimeout { time: Instant::now(), id: id, pk: *pk }
     }
 
     /// Get the ID of last sent request to the node.
-    pub fn id(&self) -> u64 {
+    pub fn id(&self) -> RequestId {
         self.id
-    }
-
-    /// Set the ID of last request sent.
-    pub fn set_id(&mut self, id: u64) {
-        self.id = id;
     }
 
     /// Get the PK of the node.
@@ -183,21 +210,78 @@ impl NodeTimeout {
         &self.pk
     }
 
-    // TODO: add `active(&mut self)` fn to give it a new instant
-
-    // TODO: add `is_timeout(u64) -> bool` fn to check whether given
-    //       timeout has already happened
+    /// Check whether it's already past the timeout.
+    pub fn is_timed_out(&self, secs: u64) -> bool {
+        self.time.elapsed() > Duration::from_secs(secs)
+    }
 }
+
+/**
+Store & manage timeout data.
+*/
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TimeoutQueue {
+    vec: VecDeque<NodeTimeout>,
+}
+
+impl TimeoutQueue {
+    /// Create new `TimeoutQueue`.
+    pub fn new() -> Self {
+        TimeoutQueue { vec: VecDeque::new() }
+    }
+
+    /**
+    Push the timeout to queue.
+    */
+    pub fn push(&mut self, nt: NodeTimeout) {
+        self.vec.push_back(nt)
+    }
+
+    /**
+    Create new timeout and add it to the queue
+    */
+    pub fn add(&mut self, pk: &PublicKey, id: RequestId) {
+        self.push(NodeTimeout::new(pk, id));
+    }
+
+    /**
+    Remove and return all `PublicKey`s of nodes that timed out.
+
+    **Note**: Returns an empty `Vec` if there are no nodes that have
+    timed out.
+    */
+    // TODO: write test
+    pub fn get_timed_out(&mut self, secs: u64) -> Vec<PublicKey> {
+        let mut ret = Vec::new();
+
+        loop {
+            match self.vec.front() {
+                Some(node) if node.is_timed_out(secs) => {},
+                // no timed out nodes remain
+                _ => break,
+            }
+
+            if let Some(node) = self.vec.pop_front() {
+                ret.push(*node.pk());
+            }
+        }
+
+        ret
+    }
+}
+
+
 
 
 #[cfg(test)]
 mod test {
-    use quickcheck::{Arbitrary, Gen};
+    use quickcheck::{Arbitrary, Gen, TestResult};
 
     use std::time::Duration;
 
     use toxcore::crypto_core::*;
     use toxcore::timeout::*;
+    use std::thread;
 
 
     // NodeTimeout::
@@ -206,7 +290,7 @@ mod test {
         fn arbitrary<G: Gen>(g: &mut G) -> Self {
             let mut bytes = [0; PUBLICKEYBYTES];
             g.fill_bytes(&mut bytes);
-            NodeTimeout::new(&PublicKey(bytes))
+            NodeTimeout::new(&PublicKey(bytes), g.gen())
         }
     }
 
@@ -214,13 +298,14 @@ mod test {
     // NodeTimeout::new()
 
     quickcheck! {
-        fn node_timeout_new_test(nt: NodeTimeout) -> () {
+        fn node_timeout_new_test(nt: NodeTimeout, id: u64) -> () {
             assert!(Duration::from_secs(1) > nt.time.elapsed());
-            assert_eq!(0, nt.id);
 
             let pk = PublicKey([0; PUBLICKEYBYTES]);
-            let nt2 = NodeTimeout::new(&pk);
+            let nt2 = NodeTimeout::new(&pk, id);
             assert_eq!(nt2.pk(), &pk);
+            assert_eq!(id, nt2.id);
+
             assert_ne!(nt.pk(), nt2.pk());
             assert!(nt.time < nt2.time);
         }
@@ -231,28 +316,68 @@ mod test {
     quickcheck! {
         fn node_timeout_id_test(nt: NodeTimeout, id: u64) -> () {
             let mut nt = nt;
-            assert_eq!(0, nt.id());
             nt.id = id;
             assert_eq!(id, nt.id());
         }
     }
 
-    // NodeTimeout::set_id()
-
-    quickcheck! {
-        fn node_timeout_set_id_test(nt: NodeTimeout, id: u64) -> () {
-            let mut nt = nt;
-            assert_eq!(0, nt.id());
-            nt.set_id(id);
-            assert_eq!(id, nt.id());
-        }
-    }
-
-    // NodeTimeouts::pk()
+    // NodeTimeout::pk()
 
     quickcheck! {
         fn node_timeout_pk_test(nt: NodeTimeout) -> () {
             assert_eq!(nt.pk(), &nt.pk);
+        }
+    }
+
+    // NodeTimeout::timed_out()
+
+    #[test]
+    fn node_timeout_is_timed_out_test() {
+        let nt = NodeTimeout::new(&PublicKey([0; PUBLICKEYBYTES]), 0);
+        assert!(nt.is_timed_out(0));
+        assert!(!nt.is_timed_out(1));
+        thread::sleep(Duration::from_secs(1));
+        assert!(nt.is_timed_out(1));
+        thread::sleep(Duration::from_secs(1));
+        assert!(nt.is_timed_out(2));
+    }
+
+
+    // TimeoutQueue::new()
+
+    #[test]
+    fn timeout_queue_new_test() {
+        let tq = TimeoutQueue::new();
+        assert!(tq.vec.is_empty());
+    }
+
+    // TimeoutQueue::push()
+
+    quickcheck! {
+        fn timeout_queue_push_test(nts: Vec<NodeTimeout>) -> TestResult {
+            if nts.is_empty() { return TestResult::discard() }
+
+            let mut tq = TimeoutQueue::new();
+
+            for (n, nt) in nts.iter().enumerate() {
+                assert_eq!(n, tq.vec.len());
+                tq.push(*nt);
+                assert_eq!(nt, tq.vec.get(n).unwrap());
+            }
+            TestResult::passed()
+        }
+    }
+
+
+    // TimeoutQueue::add()
+
+    quickcheck! {
+        fn timeout_queue_add_test(id: u64) -> () {
+            let mut tq = TimeoutQueue::new();
+            let (pk, _) = gen_keypair();
+            tq.add(&pk, id);
+            assert_eq!(&pk, tq.vec.get(0).unwrap().pk());
+            assert_eq!(id, tq.vec.get(0).unwrap().id());
         }
     }
 }
