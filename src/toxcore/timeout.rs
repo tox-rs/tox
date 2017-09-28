@@ -162,6 +162,7 @@ State of a `Good` node that goes offline:
 [`UNRESPONSIVE_TIME`]: ./constant.UNRESPONSIVE_TIME.html
 */
 // TODO: rename
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NodeState {
     /// Node responds within
     /// [`RESPONSE_CHECK`](./constant.RESPONSE_CHECK.html).
@@ -218,18 +219,21 @@ impl NodeTimeout {
 
 /**
 Store & manage timeout data.
+
+To create new `TimeoutQueue` use `Default` trait:
+
+```
+use tox::toxcore::timeout::TimeoutQueue;
+
+let _timeout_queue = TimeoutQueue::default();
+```
 */
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct TimeoutQueue {
     vec: VecDeque<NodeTimeout>,
 }
 
 impl TimeoutQueue {
-    /// Create new `TimeoutQueue`.
-    pub fn new() -> Self {
-        TimeoutQueue { vec: VecDeque::new() }
-    }
-
     /**
     Push the timeout to queue.
     */
@@ -245,7 +249,26 @@ impl TimeoutQueue {
     }
 
     /**
-    Remove and return all `PublicKey`s of nodes that timed out.
+    Remove timeout with supplied ID.
+
+    Returns `true` if there was timeout that was removed, `false` otherwise.
+
+    **Note**: implementation assumes that `TimeoutQueue` doesn't contain
+    timeouts wiht duplicated IDs.
+    */
+    pub fn remove(&mut self, id: RequestId) -> bool {
+        match self.vec.iter().position(|nt| nt.id() == id) {
+            Some(pos) => {
+                self.vec.remove(pos);
+                true
+            },
+            None => false
+        }
+    }
+
+    /**
+    Remove from `TimeoutQueue` and return all `PublicKey`s of nodes that
+    timed out.
 
     **Note**: Returns an empty `Vec` if there are no nodes that have
     timed out.
@@ -343,13 +366,7 @@ mod test {
     }
 
 
-    // TimeoutQueue::new()
-
-    #[test]
-    fn timeout_queue_new_test() {
-        let tq = TimeoutQueue::new();
-        assert!(tq.vec.is_empty());
-    }
+    // TimeoutQueue::
 
     // TimeoutQueue::push()
 
@@ -357,7 +374,7 @@ mod test {
         fn timeout_queue_push_test(nts: Vec<NodeTimeout>) -> TestResult {
             if nts.is_empty() { return TestResult::discard() }
 
-            let mut tq = TimeoutQueue::new();
+            let mut tq = TimeoutQueue::default();
 
             for (n, nt) in nts.iter().enumerate() {
                 assert_eq!(n, tq.vec.len());
@@ -373,11 +390,77 @@ mod test {
 
     quickcheck! {
         fn timeout_queue_add_test(id: u64) -> () {
-            let mut tq = TimeoutQueue::new();
+            let mut tq = TimeoutQueue::default();
             let (pk, _) = gen_keypair();
             tq.add(&pk, id);
             assert_eq!(&pk, tq.vec.get(0).unwrap().pk());
             assert_eq!(id, tq.vec.get(0).unwrap().id());
         }
     }
+
+    // TimeoutQueue::remove()
+
+    quickcheck! {
+        fn timeout_queue_remove_test(nts: Vec<NodeTimeout>) -> TestResult {
+            if nts.is_empty() { return TestResult::discard() }
+
+            let mut tq = TimeoutQueue::default();
+            for nt in &nts {
+                tq.push(*nt);
+            }
+
+            for (num, nt) in nts.iter().enumerate() {
+                assert!(tq.remove(nt.id()));
+                assert!(!tq.remove(nt.id()));
+                assert_eq!(nts.len() - (num + 1), tq.vec.len());
+                assert_eq!(&nts[num + 1..],
+                    tq.vec.iter().map(|n| *n)
+                    .collect::<Vec<_>>().as_slice());
+            }
+            assert!(tq.vec.is_empty());
+
+            TestResult::passed()
+        }
+    }
+
+    // TimeoutQueue::get_timed_out()
+
+    quickcheck! {
+        fn timeout_queue_get_timed_out_test(nts: Vec<NodeTimeout>)
+            -> TestResult
+        {
+            if nts.is_empty() { return TestResult::discard() }
+
+            let mut tq = TimeoutQueue::default();
+            assert!(tq.get_timed_out(0).is_empty());
+
+            for (n, nt) in nts.iter().enumerate() {
+                tq.push(*nt);
+                assert!(tq.get_timed_out(1).is_empty());
+                assert_eq!(n + 1, tq.vec.len());
+            }
+
+            assert_eq!(nts.iter().map(|nt| *nt.pk()).collect::<Vec<_>>(),
+                       tq.get_timed_out(0));
+            assert!(tq.vec.is_empty());
+
+            ////
+
+            let nodetimeout = {
+                let mut nt = nts[0];
+                nt.time = nt.time - Duration::from_secs(1);
+                nt
+            };
+
+            tq.push(nodetimeout);
+
+            for nt in &nts[1..] {
+                tq.push(*nt);
+            }
+            assert_eq!(vec![*nodetimeout.pk()], tq.get_timed_out(1));
+
+            TestResult::passed()
+        }
+    }
+
 }

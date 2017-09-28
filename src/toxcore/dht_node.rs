@@ -32,7 +32,6 @@ use futures::stream::*;
 use futures::sync::mpsc;
 use tokio_core::net::{UdpCodec, UdpFramed};
 use tokio_core::reactor::Core;
-use tokio_proto::multiplex::RequestId;
 
 use std::io::{self, ErrorKind};
 use std::net::SocketAddr;
@@ -42,6 +41,7 @@ use toxcore::binary_io::{FromBytes, ToBytes};
 use toxcore::crypto_core::*;
 use toxcore::dht::*;
 use toxcore::packet_kind::PacketKind;
+use toxcore::timeout::*;
 
 
 /// Type for sending `SplitSink` with `ToxCodec`.
@@ -79,12 +79,10 @@ pub struct DhtNode {
     dht_public_key: Box<PublicKey>,
     /// contains nodes close to own DHT PK
     kbucket: Box<Kbucket>,
-    /// track sent ping requests
-    ping_req: Box<Vec<RequestId>>,
+    getn_timeout: TimeoutQueue,
 
-
-    // TODO: track sent GetNodes request IDs?
-    // TODO: have a table with precomputed keys for all known NetNodes?
+    // TODO: track sent ping request IDs
+    // TODO: have a table with precomputed keys for all known nodes?
 }
 
 
@@ -110,7 +108,7 @@ impl DhtNode {
             dht_secret_key: Box::new(sk),
             dht_public_key: Box::new(pk),
             kbucket: Box::new(kbucket),
-            ping_req: Box::new(Vec::new()),
+            getn_timeout: Default::default(),
         })
     }
 
@@ -135,26 +133,6 @@ impl DhtNode {
     */
     fn sk(&self) -> &SecretKey {
         &self.dht_secret_key
-    }
-
-    /**
-    Try to add nodes from a [`DhtPacket`] that claims to contain
-    [`SendNodes`] packet.
-
-    [`DhtPacket`]: ../dht/struct.DhtPacket.html
-    [`SendNodes`]: ../dht/struct.SendNodes.html
-    */
-    pub fn try_add_nodes(&mut self, packet: &DhtPacket) {
-        match packet.get_payload::<SendNodes>(self.sk()) {
-            Some(sn) => {
-                trace!("Adding nodes from SendNodes to DhtNode's Kbucket");
-                for node in &sn.nodes {
-                    self.try_add(node);
-                }
-            },
-            None =>
-                debug!("Wrong DhtPacket; should have contained SendNodes"),
-        }
     }
 
     /**
@@ -230,9 +208,12 @@ impl DhtNode {
     [`DhtPacket`]: ../dht/struct.DhtPacket.html
     [`GetNodes`]: ../dht/struct.GetNodes.html
     */
-    fn create_getn(&self, peer_pk: &PublicKey) -> DhtPacket {
+    pub fn create_getn(&mut self, peer_pk: &PublicKey) -> DhtPacket {
         // request for nodes that are close to our own DHT PK
         let getn_req = &GetNodes::new(self.pk());
+        // FIXME: timeout shouldn't actually be added at the time of
+        //        packet creation, but after the packet has been sent
+        self.getn_timeout.add(peer_pk, getn_req.id);
         let shared_secret = &encrypt_precompute(peer_pk, self.sk());
         let nonce = &gen_nonce();
         DhtPacket::new(shared_secret, self.pk(), nonce, getn_req)
@@ -244,7 +225,7 @@ impl DhtNode {
     Creates a future for sending request for nodes.
     */
     // TODO: track requests
-    pub fn request_nodes(&self,
+    pub fn request_nodes(&mut self,
                          sink: ToxSplitSink,
                          peer_addr: SocketAddr,
                          peer_pk: &PublicKey)
@@ -303,6 +284,34 @@ impl DhtNode {
     }
 
     /**
+    Handle [`DhtPacket`] that claims to contain [`SendNodes`] packet.
+
+    Packet is dropped if:
+
+    - it doesn't contain [`SendNodes`]
+    - it's not a response to a [`GetNodes`] request (invalid ID)
+
+    [`DhtPacket`]: ../dht/struct.DhtPacket.html
+    [`GetNodes`]: ../dht/struct.GetNodes.html
+    [`SendNodes`]: ../dht/struct.SendNodes.html
+    */
+    pub fn handle_packet_sendn(&mut self, packet: &DhtPacket) {
+        match packet.get_payload::<SendNodes>(self.sk()) {
+            Some(sn) => {
+                if self.getn_timeout.remove(sn.id) {
+                    // received SendNodes packet is a response to our request
+                    trace!("Adding nodes from SendNodes to DhtNode's Kbucket");
+                    for node in &sn.nodes {
+                        self.try_add(node);
+                    }
+                }
+            },
+            None =>
+                debug!("Wrong DhtPacket; should have contained SendNodes"),
+        }
+    }
+
+    /**
     Function to handle incoming packets. If there is a response packet,
     `Some(DhtPacket)` is returned.
     */
@@ -313,7 +322,7 @@ impl DhtNode {
             PacketKind::PingReq => self.create_ping_resp(packet),
             PacketKind::GetN => self.create_sendn(packet),
             PacketKind::SendN => {
-                self.try_add_nodes(packet);
+                self.handle_packet_sendn(packet);
                 None
             },
             // TODO: handle other kinds of packets
@@ -543,44 +552,6 @@ mod test {
         assert_eq!(&*dn.dht_secret_key, dn.sk());
     }
 
-    // DhtNode::try_add_nodes()
-
-    quickcheck! {
-        fn dht_node_try_add_nodes_test(sn: SendNodes,
-                                       gn: GetNodes,
-                                       pq: PingReq,
-                                       pr: PingResp)
-            -> ()
-        {
-            // bob creates a DhtPacket to alice that contains SendNodes
-            // alice adds the nodes
-
-            let mut alice = DhtNode::new().unwrap();
-            let (bob_pk, bob_sk) = gen_keypair();
-            let precomp = precompute(alice.pk(), &bob_sk);
-            let nonce = gen_nonce();
-            macro_rules! try_add_with {
-                ($($kind:expr)+) => ($(
-                    alice.try_add_nodes(&DhtPacket::new(&precomp,
-                                                        &bob_pk,
-                                                        &nonce,
-                                                        &$kind));
-                )+)
-            }
-            // also try to add nodes from a DhtPacket that don't contain
-            // SendNodes
-            try_add_with!(sn /* and invalid ones */ gn pq pr);
-
-            // verify that alice's kbucket's contents are the same as
-            // stand-alone kbucket
-            let mut kbuc = Kbucket::new(KBUCKET_BUCKETS, alice.pk());
-            for pn in &sn.nodes {
-                kbuc.try_add(pn);
-            }
-            assert_eq!(kbuc, *alice.kbucket);
-        }
-    }
-
     // DhtNode::create_ping_req()
 
     #[test]
@@ -734,11 +705,12 @@ mod test {
     // DhtNode::create_getn()
 
     #[test]
+    // TODO: verify that getn id has been added to the timeout queue
     fn dht_node_create_getn_test() {
         // alice sends GetNodes request to bob
         // bob has to successfully decrypt the request
         // eve can't decrypt the request
-        let alice = DhtNode::new().unwrap();
+        let mut alice = DhtNode::new().unwrap();
         let (bob_pk, bob_sk) = gen_keypair();
         let (_, eve_sk) = gen_keypair();
         let packet1 = alice.create_getn(&bob_pk);
@@ -770,8 +742,8 @@ mod test {
         // bob sends via Sink GetNodes request to alice
         // alice has to successfully decrypt & parse it
         create_core!(core, handle);
-        node_socket!(handle, alice, alice_socket,
-                     handle, bob, bob_socket);
+        node_socket!(handle, alice, alice_socket);
+        node_socket!(handle, mut bob, bob_socket);
         let alice_addr = alice_socket.local_addr().unwrap();
 
         let mut recv_buf = [0; MAX_UDP_PACKET_SIZE];
@@ -863,7 +835,7 @@ mod test {
 
             create_core!(core, handle);
             node_socket!(handle, mut alice, alice_socket);
-            node_socket!(handle, bob, bob_socket);
+            node_socket!(handle, mut bob, bob_socket);
 
             for pn in &pns {
                 drop(alice.try_add(pn));
@@ -893,7 +865,54 @@ mod test {
         }
     }
 
-    // DhtNode::send_nodes()
+    // DhtNode::handle_packet_sendn()
+
+    quickcheck! {
+        fn dht_node_handle_packet_sendn_test(sn: SendNodes,
+                                             gn: GetNodes,
+                                             pq: PingReq,
+                                             pr: PingResp)
+            -> ()
+        {
+            // bob creates a DhtPacket to alice that contains SendNodes
+            // alice adds the nodes
+
+            let mut alice = DhtNode::new().unwrap();
+            let (bob_pk, bob_sk) = gen_keypair();
+            let precomp = precompute(alice.pk(), &bob_sk);
+            let nonce = gen_nonce();
+            macro_rules! try_add_with {
+                ($($kind:expr)+) => ($(
+                    alice.handle_packet_sendn(&DhtPacket::new(&precomp,
+                                                              &bob_pk,
+                                                              &nonce,
+                                                              &$kind));
+                )+)
+            }
+            // also try to add nodes from a DhtPacket that don't contain
+            // SendNodes
+            try_add_with!(sn /* and invalid ones */ gn pq pr);
+
+            // since alice doesn't have stored ID for SendNodes response,
+            // packet is supposed to be ignored
+            assert!(alice.kbucket.is_empty());
+
+            // add needed packet ID to alice's timeout table
+            alice.getn_timeout.add(&bob_pk, sn.id);
+            // now nodes from SendNodes can be processed
+            try_add_with!(sn);
+
+            // verify that alice's kbucket's contents are the same as
+            // stand-alone kbucket
+            let mut kbuc = Kbucket::new(KBUCKET_BUCKETS, alice.pk());
+            for pn in &sn.nodes {
+                kbuc.try_add(pn);
+            }
+            assert_eq!(kbuc, *alice.kbucket);
+        }
+    }
+
+    // DhtNode::handle_packet()
 
     quickcheck! {
         fn dht_node_handle_packet(pq: PingReq,
@@ -931,6 +950,11 @@ mod test {
             {
                 // SendNodes
                 let dp = DhtPacket::new(&precom, alice.pk(), &nonce, &sn);
+                assert_eq!(None, bob.handle_packet(&dp));
+                // bob doesn't have request ID, thus packet is dropped
+                assert!(bob.kbucket.is_empty());
+                // add request ID, so that nods could be processed
+                bob.getn_timeout.add(alice.pk(), sn.id);
                 assert_eq!(None, bob.handle_packet(&dp));
                 assert!(!bob.kbucket.is_empty());
             }
