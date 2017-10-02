@@ -234,6 +234,12 @@ pub struct TimeoutQueue {
 }
 
 impl TimeoutQueue {
+    /// Number of currently stored timeouts.
+    #[cfg(test)] // if used outside of tests add a test
+    pub fn len(&self) -> usize {
+        self.vec.len()
+    }
+
     /**
     Push the timeout to queue.
     */
@@ -256,6 +262,8 @@ impl TimeoutQueue {
     **Note**: implementation assumes that `TimeoutQueue` doesn't contain
     timeouts wiht duplicated IDs.
     */
+    // TODO: remove all timeouts that have same PK as removed timeout
+    //       to prevent removing valid nodes just because of packet drops
     pub fn remove(&mut self, id: RequestId) -> bool {
         match self.vec.iter().position(|nt| nt.id() == id) {
             Some(pos) => {
@@ -273,7 +281,6 @@ impl TimeoutQueue {
     **Note**: Returns an empty `Vec` if there are no nodes that have
     timed out.
     */
-    // TODO: write test
     pub fn get_timed_out(&mut self, secs: u64) -> Vec<PublicKey> {
         let mut ret = Vec::new();
 

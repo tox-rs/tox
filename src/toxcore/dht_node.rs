@@ -59,10 +59,13 @@ pub type ToxSplitStream = SplitStream<UdpFramed<ToxCodec>>;
 // TODO: rename
 pub type SendSink = sink::Send<SplitSink<UdpFramed<ToxCodec>>>;
 
-/// Type representing recived packets.
+/// Type representing Tox UDP packets.
 // TODO: change DhtPacket to and enum with all possible packets
 pub type ToxUdpPacket = (SocketAddr, DhtPacket);
 
+/// Type representing received Tox UDP packets.
+// TODO: change DhtPacket to and enum with all possible packets
+pub type ToxRecvUdpPacket = (SocketAddr, Option<DhtPacket>);
 
 /**
 Own DHT node data.
@@ -83,6 +86,7 @@ pub struct DhtNode {
 
     // TODO: track sent ping request IDs
     // TODO: have a table with precomputed keys for all known nodes?
+    //       (use lru-cache for storing last used 1024?)
 }
 
 
@@ -136,6 +140,17 @@ impl DhtNode {
     }
 
     /**
+    Remove nodes that have crossed `secs` timeout threshold.
+    */
+    // TODO: write test
+    pub fn remove_timed_out(&mut self, secs: u64) {
+        for pk in self.getn_timeout.get_timed_out(secs) {
+            debug!("Removing timed out node");
+            self.kbucket.remove(&pk);
+        }
+    }
+
+    /**
     Create a [`DhtPacket`] to peer with `peer_pk` `PublicKey` containing
     a [`PingReq`] request.
 
@@ -151,19 +166,18 @@ impl DhtNode {
     }
 
     /**
-    Request ping response from a peer. Peer might or might not even reply.
+    Create a [`ToxUdpPacket`] with request for ping response from a peer.
 
-    Creates a future for sending request for ping.
+    [`ToxUdpPacket`] is to be passed to `Sender` created by
+    [`send_packets()`].
+
+    [`send_packets()`]: ./fn.send_packets.html
+    [`ToxUdpPacket`]: ./type.ToxUdpPacket.html
     */
     // TODO: track requests
-    pub fn request_ping(&self,
-                         sink: ToxSplitSink,
-                         peer_addr: SocketAddr,
-                         peer_pk: &PublicKey)
-        -> SendSink
-    {
-        let request = self.create_ping_req(peer_pk);
-        sink.send((peer_addr, request))
+    pub fn request_ping(&self, peer: &PackedNode) -> ToxUdpPacket {
+        let request = self.create_ping_req(peer.pk());
+        (peer.socket_addr(), request)
     }
 
     /**
@@ -220,20 +234,44 @@ impl DhtNode {
     }
 
     /**
-    Request nodes from a peer. Peer might or might not even reply.
+    Create a [`ToxUdpPacket`] with request for nodes from a peer.
 
-    Creates a future for sending request for nodes.
+    [`ToxUdpPacket`] is to be passed to `Sender` created by
+    [`send_packets()`].
+
+    [`send_packets()`]: ./fn.send_packets.html
+    [`ToxUdpPacket`]: ./type.ToxUdpPacket.html
     */
-    // TODO: track requests
-    pub fn request_nodes(&mut self,
-                         sink: ToxSplitSink,
-                         peer_addr: SocketAddr,
-                         peer_pk: &PublicKey)
-        -> SendSink
+    pub fn request_nodes(&mut self, peer: &PackedNode)
+        -> ToxUdpPacket
     {
-        let request = self.create_getn(peer_pk);
-        sink.send((peer_addr, request))
+        let request = self.create_getn(peer.pk());
+        (peer.socket_addr(), request)
     }
+
+    /**
+    Create [`ToxUdpPacket`]s with request for nodes from every known
+    peer.
+
+    [`ToxUdpPacket`]s are to be passed to `Sender` created by
+    [`send_packets()`].
+
+    **Note**: returned `Vec` can be empty if there are no known nodes.
+
+    [`send_packets()`]: ./fn.send_packets.html
+    [`ToxUdpPacket`]: ./type.ToxUdpPacket.html
+    */
+    // TODO: test
+    pub fn request_nodes_all(&mut self) -> Vec<ToxUdpPacket> {
+        self.kbucket.iter()
+            // copy, collect & iter again to work around borrow checker
+            .map(|pn| *pn)
+            .collect::<Vec<PackedNode>>()
+            .iter()
+            .map(|pn| self.request_nodes(pn))
+            .collect()
+    }
+
 
     /**
     Create a [`DhtPacket`]  to peer with `peer_pk` `PublicKey`
@@ -299,6 +337,7 @@ impl DhtNode {
         match packet.get_payload::<SendNodes>(self.sk()) {
             Some(sn) => {
                 if self.getn_timeout.remove(sn.id) {
+                    debug!("Received SendN is a valid response");
                     // received SendNodes packet is a response to our request
                     trace!("Adding nodes from SendNodes to DhtNode's Kbucket");
                     for node in &sn.nodes {
@@ -319,9 +358,16 @@ impl DhtNode {
         -> Option<DhtPacket>
     {
         match packet.kind() {
-            PacketKind::PingReq => self.create_ping_resp(packet),
-            PacketKind::GetN => self.create_sendn(packet),
+            PacketKind::PingReq => {
+                debug!("Received ping request");
+                self.create_ping_resp(packet)
+            },
+            PacketKind::GetN => {
+                debug!("Received GetN request");
+                self.create_sendn(packet)
+            },
             PacketKind::SendN => {
+                debug!("Received SendN packet");
                 self.handle_packet_sendn(packet);
                 None
             },
@@ -343,14 +389,27 @@ pub struct ToxCodec;
 impl UdpCodec for ToxCodec {
     // TODO: make `In`/`Out` support more than just DhtPacket
     //       (by using enum or Trait: FromBytes + ToBytes ?)
-    type In = ToxUdpPacket;
+    type In = ToxRecvUdpPacket;
     type Out = ToxUdpPacket;
 
-    fn decode(&mut self, src: &SocketAddr, buf: &[u8]) -> io::Result<Self::In> {
+    fn decode(&mut self, src: &SocketAddr, buf: &[u8]) -> io::Result<Self::In>
+    {
         match DhtPacket::from_bytes(buf) {
-            Some(k) => Ok((*src, k)),
-            None => Err(io::Error::new(ErrorKind::InvalidData,
-                "not a supported Tox DHT packet")),
+            Some(dp) => Ok((*src, Some(dp))),
+            None => {
+                match PacketKind::from_bytes(buf) {
+                    Some(p) => {
+                        debug!("Received currently not supported packet kind: \
+                            {:?}", p);
+                    },
+                    None => {
+                        warn!("Received not supported UDP packet.");
+                        trace!("Not supported UDP packet from {:?}: {:?}",
+                            src, buf);
+                    },
+                }
+                Ok((*src, None))
+            }
         }
     }
 
@@ -376,10 +435,12 @@ pub fn receive_packets(stream: ToxSplitStream)
         let mut core = Core::new().unwrap();
         let handle = core.handle();
 
-        let f = stream.for_each(|recv| {
-            let tx = tx.clone();
-            let send_one = tx.send(recv).then(|_| Ok(()));
-            handle.spawn(send_one);
+        let f = stream.for_each(|(src, p)| {
+            if let Some(packet) = p {
+                let tx = tx.clone();
+                let send_one = tx.send((src, packet)).then(|_| Ok(()));
+                handle.spawn(send_one);
+            }
             Ok(())
         });
 
@@ -423,7 +484,6 @@ mod test {
     use tokio_core::reactor::{Core, Timeout};
     use tokio_core::net::UdpCodec;
 
-    use std::io::ErrorKind;
     use std::net::SocketAddr;
     use std::time::Duration;
 
@@ -446,9 +506,14 @@ mod test {
     ///   - handle ($h)
     macro_rules! create_core {
         ($c:ident, $h:ident) => (
+            let $c = Core::new().unwrap();
+            let $h = $c.handle();
+        );
+
+        (mut $c:ident, $h:ident) => (
             let mut $c = Core::new().unwrap();
             let $h = $c.handle();
-        )
+        );
     }
 
     /// Accept:
@@ -587,25 +652,15 @@ mod test {
         // bob creates & sends PingReq to alice
         // received PingReq has to be succesfully decrypted
         create_core!(core, handle);
-        node_socket!(handle, alice, alice_socket,
-                     handle, bob, bob_socket);
+        node_socket!(handle, alice, alice_socket);
+        let bob = DhtNode::new().unwrap();
         let alice_addr = alice_socket.local_addr().unwrap();
+        let alice_pn = PackedNode::new(true, alice_addr, alice.pk());
 
-        let mut recv_buf = [0; MAX_UDP_PACKET_SIZE];
+        let (dest_addr, bob_request) = bob.request_ping(&alice_pn);
+        assert_eq!(alice_addr, dest_addr);
 
-        let (bob_sink, _) = bob_socket.framed(ToxCodec).split();
-        let bob_request = bob.request_ping(bob_sink, alice_addr, alice.pk());
-
-        let future_recv = alice_socket.recv_dgram(&mut recv_buf[..]);
-        let future_recv = add_timeout!(future_recv, &handle);
-        handle.spawn(bob_request.then(|_| ok(())));
-
-        let received = core.run(future_recv).unwrap();
-        let (_alice_socket, recv_buf, size, _saddr) = received;
-        assert!(size != 0);
-
-        let recv_packet = DhtPacket::from_bytes(&recv_buf[..size]).unwrap();
-        let payload: PingReq = recv_packet
+        let payload: PingReq = bob_request
             .get_payload(alice.sk())
             .expect("Failed to decrypt payload");
 
@@ -665,7 +720,7 @@ mod test {
             // sends a response to it
             // response has to be successfully decrypted by alice
             // response can't be decrypted by eve
-            create_core!(core, handle);
+            create_core!(mut core, handle);
             node_socket!(handle, alice, alice_socket,
                          handle, bob, bob_socket);
             let (_, eve_sk) = gen_keypair();
@@ -716,6 +771,7 @@ mod test {
         let packet1 = alice.create_getn(&bob_pk);
         assert_eq!(alice.pk(), &packet1.sender_pk);
         assert_eq!(PacketKind::GetN, packet1.kind());
+        assert_eq!(1, alice.getn_timeout.len());
 
         // eve can't decrypt
         assert_eq!(None, packet1.get_payload::<GetNodes>(&eve_sk));
@@ -739,28 +795,18 @@ mod test {
 
     #[test]
     fn dht_node_request_nodes_test() {
-        // bob sends via Sink GetNodes request to alice
+        // bob creates a ToxUdpPacket with GetNodes request to alice
         // alice has to successfully decrypt & parse it
         create_core!(core, handle);
         node_socket!(handle, alice, alice_socket);
-        node_socket!(handle, mut bob, bob_socket);
+        let mut bob = DhtNode::new().unwrap();
         let alice_addr = alice_socket.local_addr().unwrap();
+        let alice_pn = PackedNode::new(true, alice_addr, alice.pk());
 
-        let mut recv_buf = [0; MAX_UDP_PACKET_SIZE];
+        let (dest_addr, bob_request) = bob.request_nodes(&alice_pn);
+        assert_eq!(alice_addr, dest_addr);
 
-        let (bob_sink, _) = bob_socket.framed(ToxCodec).split();
-        let bob_request = bob.request_nodes(bob_sink, alice_addr, alice.pk());
-
-        let future_recv = alice_socket.recv_dgram(&mut recv_buf[..]);
-        let future_recv = add_timeout!(future_recv, &handle);
-        handle.spawn(bob_request.then(|_| ok(())));
-
-        let received = core.run(future_recv).unwrap();
-        let (_alice_socket, recv_buf, size, _saddr) = received;
-        assert!(size != 0);
-
-        let recv_packet = DhtPacket::from_bytes(&recv_buf[..size]).unwrap();
-        let payload: GetNodes = recv_packet
+        let payload: GetNodes = bob_request
             .get_payload(alice.sk())
             .expect("Failed to decrypt payload");
 
@@ -833,7 +879,7 @@ mod test {
             // alice sends SendNodes response to random GetNodes request
             // to bob
 
-            create_core!(core, handle);
+            create_core!(mut core, handle);
             node_socket!(handle, mut alice, alice_socket);
             node_socket!(handle, mut bob, bob_socket);
 
@@ -989,14 +1035,17 @@ mod test {
 
             let (decoded_a, decoded_dp) = tc.decode(&addr, &bytes)
                 .unwrap();
+            // it did have correct packet
+            let decoded_dp = decoded_dp.unwrap();
 
             assert_eq!(addr, decoded_a);
             assert_eq!(dp, decoded_dp);
 
             // make it error
             bytes[0] = kind;
-            let error = tc.decode(&addr, &bytes).unwrap_err();
-            assert_eq!(ErrorKind::InvalidData, error.kind());
+            let (r_addr, none) = tc.decode(&addr, &bytes).unwrap();
+            assert_eq!(addr, r_addr);
+            assert!(none.is_none());
 
             TestResult::passed()
         }
@@ -1027,7 +1076,7 @@ mod test {
         fn receive_packets_test(dps: Vec<DhtPacket>) -> TestResult {
             if dps.is_empty() { return TestResult::discard() }
             // alice sends packets to bob
-            create_core!(core, handle);
+            create_core!(mut core, handle);
             node_socket!(handle, _alice, a_socket);
             node_socket!(handle, _bob, b_socket);
 
@@ -1063,7 +1112,7 @@ mod test {
         fn send_packets_test(dps: Vec<DhtPacket>) -> TestResult {
             if dps.is_empty() { return TestResult::discard() }
             // alice sends packets to bob
-            create_core!(core, handle);
+            create_core!(mut core, handle);
             node_socket!(handle, _alice, a_socket);
             node_socket!(handle, _bob, b_socket);
 
