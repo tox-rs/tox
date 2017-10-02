@@ -877,14 +877,16 @@ impl Bucket {
         }
     }
 
-    /** Try to find [`PackedNode`](./struct.PackedNode.html) in the bucket
-    by PK. Used in tests to check whether a `PackedNode` was added or
-    removed.
+    /**
+    Try to get position of [`PackedNode`] in the bucket by PK. Used in
+    tests to check whether a `PackedNode` was added or removed.
 
     This method uses linear search as the simplest one.
 
     Returns Some(index) if it was found.
     Returns None if there is no a `PackedNode` with the given PK.
+
+    [`PackedNode`]: ./struct.PackedNode.html
     */
     #[cfg(test)]
     fn find(&mut self, pk: &PublicKey) -> Option<usize> {
@@ -998,6 +1000,24 @@ impl Bucket {
     pub fn is_full(&self) -> bool {
         self.nodes.len() == self.capacity()
     }
+
+    /// Returns an iterator over [`PackedNode`](./struct.PackedNode.html)s.
+    pub fn iter(&self) -> BucketIter {
+        BucketIter { iter: self.nodes.iter() }
+    }
+}
+
+/// Iterator over `Bucket`.
+pub struct BucketIter<'a> {
+    iter: ::std::slice::Iter<'a, PackedNode>,
+}
+
+impl<'a> Iterator for BucketIter<'a> {
+    type Item = &'a PackedNode;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next()
+    }
 }
 
 
@@ -1057,14 +1077,16 @@ impl Kbucket {
         self.pk
     }
 
-    /** Try to find [`PackedNode`](./struct.PackedNode.html) in the kbucket
-    by PK. Used in tests to check whether a `PackedNode` was added or
-    removed.
+    /**
+    Try to get position of [`PackedNode`] in the kbucket by PK. Used in
+    tests to check whether a `PackedNode` was added or removed.
 
     This method uses quadratic search as the simplest one.
 
-    Returns Some(bucket_index, node_index) if it was found.
-    Returns None if there is no a `PackedNode` with the given PK.
+    Returns `Some(bucket_index, node_index)` if it was found.
+    Returns `None` if there is no a [`PackedNode`] with the given PK.
+
+    [`PackedNode`]: ./struct.PackedNode.html
     */
     #[cfg(test)]
     fn find(&mut self, pk: &PublicKey) -> Option<(usize, usize)> {
@@ -1158,6 +1180,45 @@ impl Kbucket {
     */
     pub fn is_empty(&self) -> bool {
         self.buckets.iter().all(|bucket| bucket.is_empty())
+    }
+
+    /// Create iterator over [`PackedNode`](./struct.PackedNode.html)s in
+    /// `Kbucket`.
+    pub fn iter(&self) -> KbucketIter {
+        KbucketIter {
+            pos_b: 0,
+            pos_pn: 0,
+            buckets: self.buckets.as_slice(),
+        }
+    }
+}
+
+/// Iterator over `PackedNode`s in `Kbucket`.
+pub struct KbucketIter<'a> {
+    pos_b: usize,
+    pos_pn: usize,
+    buckets: &'a [Box<Bucket>],
+}
+
+impl<'a> Iterator for KbucketIter<'a> {
+    type Item = &'a PackedNode;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pos_b < self.buckets.len() {
+            match self.buckets[self.pos_b].iter().nth(self.pos_pn) {
+                Some(s) => {
+                    self.pos_pn += 1;
+                    Some(s)
+                },
+                None => {
+                    self.pos_b += 1;
+                    self.pos_pn = 0;
+                    self.next()
+                },
+            }
+        } else {
+            None
+        }
     }
 }
 
@@ -1519,6 +1580,40 @@ mod test {
         });
     }
 
+    // BucketIter::next()
+
+    quickcheck! {
+        fn bucket_iter_next_test(n: u8, pns: Vec<PackedNode>) -> () {
+            // can contain all nodes
+            let mut bucket = Bucket::new(Some(n));
+            // empty always returns None
+            assert!(bucket.iter().next().is_none());
+
+            let (pk, _) = gen_keypair();
+
+            for node in &pns {
+                bucket.try_add(&pk, &node);
+            }
+
+            let mut expect = Vec::new();
+            for node in &bucket.nodes {
+                expect.push(*node);
+            }
+
+            let mut e_iter = expect.iter();
+            let mut b_iter = bucket.iter();
+            loop {
+                let enext = e_iter.next();
+                let bnext = b_iter.next();
+                assert_eq!(enext, bnext);
+                if enext.is_none() {
+                    break;
+                }
+            }
+        }
+    }
+
+
     // Kbucket::
 
     // Kbucket::position()
@@ -1624,5 +1719,38 @@ mod test {
             assert_eq!(Some((46, 1)), kbucket.find(n2.pk()));
             assert_eq!(None,          kbucket.find(n3.pk()));
         });
+    }
+
+    // KbucketIter::next()
+
+    quickcheck! {
+        fn kbucket_iter_next_test(n: u8, pns: Vec<PackedNode>) -> () {
+            let (pk, _) = gen_keypair();
+            let mut kbucket = Kbucket::new(n, &pk);
+            // empty always returns None
+            assert!(kbucket.iter().next().is_none());
+
+            for node in &pns {
+                kbucket.try_add(&node);
+            }
+
+            let mut expect = Vec::new();
+            for bucket in &kbucket.buckets {
+                for node in bucket.iter() {
+                    expect.push(*node);
+                }
+            }
+
+            let mut e_iter = expect.iter();
+            let mut k_iter = kbucket.iter();
+            loop {
+                let enext = e_iter.next();
+                let knext = k_iter.next();
+                assert_eq!(enext, knext);
+                if enext.is_none() {
+                    break;
+                }
+            }
+        }
     }
 }
