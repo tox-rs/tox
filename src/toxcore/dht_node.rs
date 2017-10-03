@@ -74,8 +74,28 @@ Contains:
 
 - DHT public key
 - DHT secret key
-- `Kbucket` with nodes close to own DHT public key
-- sent `PingReq` IDs
+- Close List ([`Kbucket`] with nodes close to own DHT public key)
+- ping timeout lists ([`TimeoutQueue`])
+
+# Adding node to Close List
+
+Before a [`PackedNode`] is added to the Close List, it needs to be
+checked whether:
+
+- it can be added to [`Kbucket`] \(using [`Kbucket::can_add()`])
+- [`PackedNode`] is actually online
+
+Once the first check passes node is added to the temporary list, and
+a [`GetNodes`] request is sent to it in order to check whether it's
+online. If the node responds correctly within [`PING_TIMEOUT`], it's
+removed from temporary list and added to the Close List.
+
+[`GetNodes`]: ../dht/struct.GetNodes.html
+[`Kbucket`]: ../dht/struct.Kbucket.html
+[`Kbucket::can_add()`]: ../dht/struct.Kbucket.html#method.can_add
+[`PackedNode`]: ../dht/struct.PackedNode.html
+[`PING_TIMEOUT`]: ../timeout/constant.PING_TIMEOUT.html
+[`TimeoutQueue`]: ../timeout/struct.TimeoutQueue.html
 */
 pub struct DhtNode {
     dht_secret_key: Box<SecretKey>,

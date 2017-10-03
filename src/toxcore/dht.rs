@@ -1215,6 +1215,24 @@ impl Kbucket {
         }
     }
 
+    /**
+    Naive check whether a [`PackedNode`] can be added to the `Kbucket`.
+
+    Returns `true` if [`Bucket`] where node could be placed is not full
+    and node is not already in the [`Bucket`].
+
+    Otherwise `false` is returned.
+
+    [`Bucket`]: ./struct.Bucket.html
+    [`PackedNode`]: ./struct.PackedNode.html
+    */
+    pub fn can_add(&self, pk: &PublicKey) -> bool {
+        match self.bucket_index(pk) {
+            None => false,
+            Some(i) =>
+                !self.buckets[i].is_full() && !self.buckets[i].contains(pk),
+        }
+    }
 
     /** Check if `Kbucket` is empty.
 
@@ -1482,7 +1500,7 @@ impl DhtRequest {
 
 #[cfg(test)]
 mod test {
-    use quickcheck::quickcheck;
+    use quickcheck::{quickcheck, TestResult};
 
     use toxcore::dht::*;
 
@@ -1796,7 +1814,9 @@ mod test {
     // Kbucket::contains()
 
     quickcheck! {
-        fn kbucket_contains_test(n: u8, pns: Vec<PackedNode>) -> () {
+        fn kbucket_contains_test(n: u8, pns: Vec<PackedNode>) -> TestResult {
+            if pns.is_empty() { return TestResult::discard() }
+
             let (pk, _) = gen_keypair();
             let mut kbucket = Kbucket::new(n, &pk);
             assert!(!kbucket.contains(&pk));
@@ -1807,8 +1827,49 @@ mod test {
             }
 
             assert!(kbucket.iter().all(|pn| kbucket.contains(pn.pk())));
+
+            TestResult::passed()
         }
     }
+
+    // Kbucket::can_add()
+
+    quickcheck! {
+        fn kbucket_can_add_test(n: u8, pns: Vec<PackedNode>) -> TestResult {
+            if pns.len() < 2 { return TestResult::discard() }
+
+            let (pk, _) = gen_keypair();
+            // there should be at least a pair of nodes with same index
+            {
+                let fitting_nodes = pns.iter().any(|p1| pns.iter()
+                    .filter(|p2| p1 != *p2)
+                    .any(|p2| kbucket_index(&pk, p1.pk()) == kbucket_index(&pk, p2.pk())));
+                if !fitting_nodes {
+                    return TestResult::discard()
+                }
+            }
+
+            let mut kbucket = Kbucket {
+                pk: pk,
+                buckets: vec![Box::new(Bucket::new(Some(1))); n as usize],
+            };
+
+            for node in &pns {
+                if kbucket.try_add(node) {
+                    let index = kbucket_index(&pk, node.pk());
+                    // none of nodes with the same index can be added
+                    // to the kbucket
+                    assert!(pns.iter()
+                        .filter(|pn| kbucket_index(&pk, pn.pk()) == index)
+                        .all(|pn| !kbucket.can_add(pn.pk())));
+                }
+            }
+
+            TestResult::passed()
+        }
+    }
+
+
 
 
     // KbucketIter::next()
