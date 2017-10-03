@@ -849,7 +849,7 @@ pub struct Bucket {
 pub const BUCKET_DEFAULT_SIZE: usize = 8;
 
 impl Bucket {
-    /** Create a new `Bucket` to store nodes close to the `pk`.
+    /** Create a new `Bucket` to store nodes close to the `PublicKey`.
 
     Can hold up to `num` nodes if number is supplied. If `None` is
     supplied, holds up to [`BUCKET_DEFAULT_SIZE`]
@@ -924,7 +924,7 @@ impl Bucket {
         trace!(target: "Bucket", "With bucket: {:?}; PK: {:?} and new node: {:?}",
             self, base_pk, new_node);
 
-        match self.nodes.binary_search_by(|n| base_pk.distance(n.pk(), new_node.pk()) ) {
+        match self.nodes.binary_search_by(|n| base_pk.distance(n.pk(), new_node.pk())) {
             Ok(index) => {
                 debug!(target: "Bucket",
                     "Updated: the node was already in the bucket.");
@@ -982,6 +982,11 @@ impl Bucket {
         }
     }
 
+    /// Check if node with given PK is in the `Bucket`.
+    pub fn contains(&self, pk: &PublicKey) -> bool {
+        self.nodes.iter().any(|n| n.pk() == pk)
+    }
+
     /// Get the capacity of the Bucket.
     pub fn capacity(&self) -> usize {
         self.capacity as usize
@@ -1005,7 +1010,8 @@ impl Bucket {
         self.nodes.len() == self.capacity()
     }
 
-    /// Returns an iterator over [`PackedNode`](./struct.PackedNode.html)s.
+    /// Returns an iterator over contained [`PackedNode`]
+    /// (./struct.PackedNode.html)s.
     pub fn iter(&self) -> BucketIter {
         BucketIter { iter: self.nodes.iter() }
     }
@@ -1021,6 +1027,22 @@ impl<'a> Iterator for BucketIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next()
+    }
+}
+
+/**
+Equivalent to calling [`Bucket::new()`] with `None`:
+
+```
+# use tox::toxcore::dht::Bucket;
+assert_eq!(Bucket::new(None), Bucket::default());
+```
+
+[`Bucket::new()`]: ./struct.Bucket.html#method.new
+*/
+impl Default for Bucket {
+    fn default() -> Self {
+        Bucket::new(Some(BUCKET_DEFAULT_SIZE as u8))
     }
 }
 
@@ -1080,6 +1102,10 @@ impl Kbucket {
     pub fn pk(&self) -> PublicKey {
         self.pk
     }
+    /**
+    Check if given node can be added to the `Kbucket`.
+    */
+
 
     /**
     Try to get position of [`PackedNode`] in the kbucket by PK. Used in
@@ -1107,8 +1133,8 @@ impl Kbucket {
     /** Return the possible internal index of [`Bucket`](./struct.Bucket.html)
         where the key could be inserted/removed.
 
-    Returns `Some(index)` if [`kbucket index`](./fn.kbucket_index.html) is defined
-    and it is lower than the number of buckets.
+    Returns `Some(index)` if [`kbucket index`](./fn.kbucket_index.html) is
+    defined and it is lower than the number of buckets.
 
     Returns `None` otherwise.
     */
@@ -1176,6 +1202,19 @@ impl Kbucket {
         trace!("Returning nodes: {:?}", &bucket.nodes);
         bucket.nodes
     }
+
+    /**
+    Check if `Kbucket` contains [`PackedNode`] with given PK.
+
+    [`PackedNode`]: ./struct.PackedNode.html
+    */
+    pub fn contains(&self, pk: &PublicKey) -> bool {
+        match self.bucket_index(pk) {
+            Some(i) => self.buckets[i].contains(pk),
+            None => false,
+        }
+    }
+
 
     /** Check if `Kbucket` is empty.
 
@@ -1584,6 +1623,35 @@ mod test {
         });
     }
 
+    // Bucket::contains()
+
+    quickcheck! {
+        fn bucket_contains_test(n: u8, pns: Vec<PackedNode>) -> () {
+            let mut bucket = Bucket::new(Some(n));
+            // empty never contains any node
+            assert!(!bucket.contains(&PublicKey([0; PUBLICKEYBYTES])));
+            for pn in &pns {
+                assert!(!bucket.contains(pn.pk()));
+            }
+
+            let (pk, _) = gen_keypair();
+            for node in &pns {
+                bucket.try_add(&pk, node);
+            }
+
+            for node in &bucket.nodes {
+                assert!(bucket.contains(node.pk()));
+            }
+        }
+    }
+
+    // Bucket::default()
+
+    #[test]
+    fn bucket_default_test() {
+        assert_eq!(Bucket::new(None), Bucket::default());
+    }
+
     // BucketIter::next()
 
     quickcheck! {
@@ -1724,6 +1792,24 @@ mod test {
             assert_eq!(None,          kbucket.find(n3.pk()));
         });
     }
+
+    // Kbucket::contains()
+
+    quickcheck! {
+        fn kbucket_contains_test(n: u8, pns: Vec<PackedNode>) -> () {
+            let (pk, _) = gen_keypair();
+            let mut kbucket = Kbucket::new(n, &pk);
+            assert!(!kbucket.contains(&pk));
+            assert!(pns.iter().all(|pn| !kbucket.contains(pn.pk())));
+
+            for pn in &pns {
+                kbucket.try_add(pn);
+            }
+
+            assert!(kbucket.iter().all(|pn| kbucket.contains(pn.pk())));
+        }
+    }
+
 
     // KbucketIter::next()
 
