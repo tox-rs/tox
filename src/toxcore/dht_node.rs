@@ -82,6 +82,8 @@ pub struct DhtNode {
     dht_public_key: Box<PublicKey>,
     /// contains nodes close to own DHT PK
     kbucket: Box<Kbucket>,
+    // TODO: add a "verify" TimeoutQueue to check if nodes are online
+    //       before adding them to the kbucket
     getn_timeout: TimeoutQueue,
 
     // TODO: track sent ping request IDs
@@ -143,6 +145,7 @@ impl DhtNode {
     Remove nodes that have crossed `secs` timeout threshold.
     */
     // TODO: write test
+    // TODO: add fn for ping/getn req timeouts with hardcoded consts?
     pub fn remove_timed_out(&mut self, secs: u64) {
         for pk in self.getn_timeout.get_timed_out(secs) {
             debug!("Removing timed out node");

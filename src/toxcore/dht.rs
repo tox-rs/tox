@@ -926,7 +926,8 @@ impl Bucket {
 
         match self.nodes.binary_search_by(|n| base_pk.distance(n.pk(), new_node.pk()) ) {
             Ok(index) => {
-                debug!("Updated: the node was already in the bucket.");
+                debug!(target: "Bucket",
+                    "Updated: the node was already in the bucket.");
                 self.nodes.remove(index);
                 self.nodes.insert(index, *new_node);
                 true
@@ -934,12 +935,14 @@ impl Bucket {
             Err(index) if index == self.nodes.len() => {
                 // index is pointing past the end
                 if self.is_full() {
-                    debug!("Node is too distant to add to the bucket.");
+                    debug!(target: "Bucket",
+                        "Node is too distant to add to the bucket.");
                     false
                 } else {
                     // distance to the PK was bigger than the other keys, but
                     // there's still free space in the bucket for a node
-                    debug!("Node inserted at the end of the bucket.");
+                    debug!(target: "Bucket",
+                        "Node inserted at the end of the bucket.");
                     self.nodes.push(*new_node);
                     true
                 }
@@ -947,10 +950,11 @@ impl Bucket {
             Err(index) => {
                 // index is pointing inside the list
                 if self.is_full() {
-                    debug!("No free space left in the bucket, the last node removed.");
+                    debug!(target: "Bucket",
+                        "No free space left in the bucket, the last node removed.");
                     self.nodes.pop();
                 }
-                debug!("Node inserted inside the bucket.");
+                debug!(target: "Bucket", "Node inserted inside the bucket.");
                 self.nodes.insert(index, *new_node);
                 true
             },

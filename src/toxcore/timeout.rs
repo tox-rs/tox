@@ -255,19 +255,18 @@ impl TimeoutQueue {
     }
 
     /**
-    Remove timeout with supplied ID.
+    Remove timeout with supplied ID and all timeouts that have same PK
+    as the removed timeout.
 
-    Returns `true` if there was timeout that was removed, `false` otherwise.
-
-    **Note**: implementation assumes that `TimeoutQueue` doesn't contain
-    timeouts wiht duplicated IDs.
+    Returns `true` if there was at least 1 timeout that was removed,
+    `false` otherwise.
     */
-    // TODO: remove all timeouts that have same PK as removed timeout
-    //       to prevent removing valid nodes just because of packet drops
     pub fn remove(&mut self, id: RequestId) -> bool {
         match self.vec.iter().position(|nt| nt.id() == id) {
             Some(pos) => {
-                self.vec.remove(pos);
+                if let Some(rm) = self.vec.remove(pos) {
+                    self.vec.retain(|nt| nt.pk() != rm.pk());
+                }
                 true
             },
             None => false
@@ -408,7 +407,9 @@ mod test {
     // TimeoutQueue::remove()
 
     quickcheck! {
-        fn timeout_queue_remove_test(nts: Vec<NodeTimeout>) -> TestResult {
+        fn timeout_queue_remove_test(nts: Vec<NodeTimeout>, id: u64)
+            -> TestResult
+        {
             if nts.is_empty() { return TestResult::discard() }
 
             let mut tq = TimeoutQueue::default();
@@ -420,10 +421,18 @@ mod test {
                 assert!(tq.remove(nt.id()));
                 assert!(!tq.remove(nt.id()));
                 assert_eq!(nts.len() - (num + 1), tq.vec.len());
+                // rest of timeouts is still there
                 assert_eq!(&nts[num + 1..],
                     tq.vec.iter().map(|n| *n)
                     .collect::<Vec<_>>().as_slice());
             }
+            assert!(tq.vec.is_empty());
+
+            // timeout with different ID, but same PK also get removed
+            let ntout = NodeTimeout::new(nts[0].pk(), id);
+            tq.push(nts[0]);
+            tq.push(ntout);
+            tq.remove(nts[0].id());
             assert!(tq.vec.is_empty());
 
             TestResult::passed()
