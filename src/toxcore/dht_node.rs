@@ -32,7 +32,9 @@ use futures::stream::*;
 use futures::sync::mpsc;
 use tokio_core::net::{UdpCodec, UdpFramed};
 use tokio_core::reactor::Core;
+use tokio_proto::multiplex::RequestId;
 
+use std::collections::VecDeque;
 use std::io::{self, ErrorKind};
 use std::net::SocketAddr;
 use std::thread;
@@ -97,14 +99,23 @@ removed from temporary list and added to the Close List.
 [`PING_TIMEOUT`]: ../timeout/constant.PING_TIMEOUT.html
 [`TimeoutQueue`]: ../timeout/struct.TimeoutQueue.html
 */
+#[derive(Clone, Eq, PartialEq)]
 pub struct DhtNode {
     dht_secret_key: Box<SecretKey>,
     dht_public_key: Box<PublicKey>,
-    /// contains nodes close to own DHT PK
+    /// Close List (contains nodes close to own DHT PK)
     kbucket: Box<Kbucket>,
+    getn_timeout: TimeoutQueue,
+    /// timeouts for requests that check whether a node is online before
+    /// adding it to the Close List
+    // TODO: rename
+    to_close_tout: TimeoutQueue,
+    /// list of nodes that are checked for being online before adding
+    /// to the Close List
+    // TODO: rename
+    to_close_nodes: VecDeque<PackedNode>,
     // TODO: add a "verify" TimeoutQueue to check if nodes are online
     //       before adding them to the kbucket
-    getn_timeout: TimeoutQueue,
 
     // TODO: track sent ping request IDs
     // TODO: have a table with precomputed keys for all known nodes?
@@ -135,6 +146,8 @@ impl DhtNode {
             dht_public_key: Box::new(pk),
             kbucket: Box::new(kbucket),
             getn_timeout: Default::default(),
+            to_close_tout: Default::default(),
+            to_close_nodes: Default::default(),
         })
     }
 
@@ -164,7 +177,7 @@ impl DhtNode {
     /**
     Remove nodes that have crossed `secs` timeout threshold.
     */
-    // TODO: write test
+    // TODO: test
     // TODO: add fn for ping/getn req timeouts with hardcoded consts?
     pub fn remove_timed_out(&mut self, secs: u64) {
         for pk in self.getn_timeout.get_timed_out(secs) {
@@ -227,6 +240,7 @@ impl DhtNode {
     [`DhtPacket`]: ../dht/struct.DhtPacket.html
     [ping response]: ../dht/struct.PingResp.html
     */
+    // TODO: change to return Option<ToxUdpPakcet>
     pub fn respond_ping(&self,
                         sink: ToxSplitSink,
                         peer_addr: SocketAddr,
@@ -238,22 +252,21 @@ impl DhtNode {
     }
 
     /**
-    Create a [`DhtPacket`] to peer with `peer_pk` `PublicKey` containing
+    Create a [`DhtPacket`] to peer's `PublicKey` containing
     a [`GetNodes`] request for nodes close to own DHT `PublicKey`.
 
+    `RequestId` is to be used for tracking node timeouts.
 
     [`DhtPacket`]: ../dht/struct.DhtPacket.html
     [`GetNodes`]: ../dht/struct.GetNodes.html
     */
-    pub fn create_getn(&mut self, peer_pk: &PublicKey) -> DhtPacket {
+    pub fn create_getn(&self, peer_pk: &PublicKey)
+        -> (RequestId, DhtPacket) {
         // request for nodes that are close to our own DHT PK
-        let getn_req = &GetNodes::new(self.pk());
-        // FIXME: timeout shouldn't actually be added at the time of
-        //        packet creation, but after the packet has been sent
-        self.getn_timeout.add(peer_pk, getn_req.id);
+        let req = &GetNodes::new(self.pk());
         let shared_secret = &encrypt_precompute(peer_pk, self.sk());
         let nonce = &gen_nonce();
-        DhtPacket::new(shared_secret, self.pk(), nonce, getn_req)
+        (req.id, DhtPacket::new(shared_secret, self.pk(), nonce, req))
     }
 
     /**
@@ -262,36 +275,44 @@ impl DhtNode {
     [`ToxUdpPacket`] is to be passed to `Sender` created by
     [`send_packets()`].
 
+    `RequestId` is to be used for tracking node timeouts.
+
     [`send_packets()`]: ./fn.send_packets.html
     [`ToxUdpPacket`]: ./type.ToxUdpPacket.html
     */
     pub fn request_nodes(&mut self, peer: &PackedNode)
-        -> ToxUdpPacket
+        -> (RequestId, ToxUdpPacket)
     {
-        let request = self.create_getn(peer.pk());
-        (peer.socket_addr(), request)
+        let (id, request) = self.create_getn(peer.pk());
+        (id, (peer.socket_addr(), request))
     }
 
     /**
-    Create [`ToxUdpPacket`]s with request for nodes from every known
-    peer.
+    Create [`ToxUdpPacket`]s with request for nodes from every peer in
+    the Close List.
 
     [`ToxUdpPacket`]s are to be passed to `Sender` created by
     [`send_packets()`].
+
+    **Adds request to response timeout queue.**
 
     **Note**: returned `Vec` can be empty if there are no known nodes.
 
     [`send_packets()`]: ./fn.send_packets.html
     [`ToxUdpPacket`]: ./type.ToxUdpPacket.html
     */
-    // TODO: test
-    pub fn request_nodes_all(&mut self) -> Vec<ToxUdpPacket> {
+    pub fn request_nodes_close(&mut self) -> Vec<ToxUdpPacket> {
         self.kbucket.iter()
             // copy, collect & iter again to work around borrow checker
             .map(|pn| *pn)
             .collect::<Vec<PackedNode>>()
             .iter()
-            .map(|pn| self.request_nodes(pn))
+            .map(|pn| {
+                let (id, packet) = self.request_nodes(pn);
+                // add to timeout queue
+                self.getn_timeout.add(pn.pk(), id);
+                packet
+            })
             .collect()
     }
 
@@ -356,7 +377,7 @@ impl DhtNode {
     [`GetNodes`]: ../dht/struct.GetNodes.html
     [`SendNodes`]: ../dht/struct.SendNodes.html
     */
-    pub fn handle_packet_sendn(&mut self, packet: &DhtPacket) {
+    fn handle_packet_sendn(&mut self, packet: &DhtPacket) {
         match packet.get_payload::<SendNodes>(self.sk()) {
             Some(sn) => {
                 if self.getn_timeout.remove(sn.id) {
@@ -632,7 +653,7 @@ mod test {
         assert_eq!(&*dn.dht_public_key, dn.pk());
     }
 
-    // DhtNode::pk()
+    // DhtNode::sk()
 
     #[test]
     fn dht_node_sk_test() {
@@ -783,18 +804,16 @@ mod test {
     // DhtNode::create_getn()
 
     #[test]
-    // TODO: verify that getn id has been added to the timeout queue
     fn dht_node_create_getn_test() {
         // alice sends GetNodes request to bob
         // bob has to successfully decrypt the request
         // eve can't decrypt the request
-        let mut alice = DhtNode::new().unwrap();
+        let alice = DhtNode::new().unwrap();
         let (bob_pk, bob_sk) = gen_keypair();
         let (_, eve_sk) = gen_keypair();
-        let packet1 = alice.create_getn(&bob_pk);
+        let (req_id1, packet1) = alice.create_getn(&bob_pk);
         assert_eq!(alice.pk(), &packet1.sender_pk);
         assert_eq!(PacketKind::GetN, packet1.kind());
-        assert_eq!(1, alice.getn_timeout.len());
 
         // eve can't decrypt
         assert_eq!(None, packet1.get_payload::<GetNodes>(&eve_sk));
@@ -802,8 +821,9 @@ mod test {
         let payload1: GetNodes = packet1.get_payload(&bob_sk)
             .expect("failed to get payload1");
         assert_eq!(alice.pk(), &payload1.pk);
+        assert_eq!(req_id1, payload1.id);
 
-        let packet2 = alice.create_getn(&bob_pk);
+        let (_req_id2, packet2) = alice.create_getn(&bob_pk);
         assert_ne!(packet1, packet2);
 
         let payload2: GetNodes = packet2.get_payload(&bob_sk)
@@ -826,7 +846,7 @@ mod test {
         let alice_addr = alice_socket.local_addr().unwrap();
         let alice_pn = PackedNode::new(true, alice_addr, alice.pk());
 
-        let (dest_addr, bob_request) = bob.request_nodes(&alice_pn);
+        let (id, (dest_addr, bob_request)) = bob.request_nodes(&alice_pn);
         assert_eq!(alice_addr, dest_addr);
 
         let payload: GetNodes = bob_request
@@ -834,7 +854,37 @@ mod test {
             .expect("Failed to decrypt payload");
 
         assert_eq!(&payload.pk, bob.pk());
+        assert_eq!(payload.id, id);
     }
+
+    // DhtNode::request_nodes_close()
+
+    quickcheck! {
+        fn dht_node_request_nodes_close_test(pns: Vec<PackedNode>)
+            -> TestResult
+        {
+            if pns.is_empty() { return TestResult::discard() }
+
+            let mut dnode = DhtNode::new().unwrap();
+            for pn in &pns {
+                dnode.try_add(pn);
+            }
+
+            let requests = dnode.request_nodes_close();
+
+            for (n, node) in dnode.kbucket.iter().enumerate() {
+                // each request creates a response timeout
+                assert_eq!(dnode.getn_timeout.get(n).unwrap().pk(),
+                           node.pk());
+                let (req_addr, ref _req_packet) = requests[n];
+                assert_eq!(node.socket_addr(), req_addr);
+            }
+
+            TestResult::passed()
+        }
+    }
+
+
 
     // DhtNode::create_sendn()
 
@@ -851,7 +901,7 @@ mod test {
             let mut alice = DhtNode::new().unwrap();
             let mut bob = DhtNode::new().unwrap();
             let (_, eve_sk) = gen_keypair();
-            let req = alice.create_getn(bob.pk());
+            let (_id, req) = alice.create_getn(bob.pk());
 
             // errors with an empty kbucket
             let error = bob.create_sendn(&req);
@@ -904,13 +954,13 @@ mod test {
 
             create_core!(mut core, handle);
             node_socket!(handle, mut alice, alice_socket);
-            node_socket!(handle, mut bob, bob_socket);
+            node_socket!(handle, bob, bob_socket);
 
             for pn in &pns {
                 drop(alice.try_add(pn));
             }
 
-            let getn = bob.create_getn(alice.pk());
+            let (_id, getn) = bob.create_getn(alice.pk());
 
             let (alice_sink, _) = alice_socket.framed(ToxCodec).split();
             let alice_response = alice.send_nodes(

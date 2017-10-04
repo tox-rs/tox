@@ -74,6 +74,7 @@ created to trigger [`GetNodes`] requests.
 use tokio_proto::multiplex::RequestId;
 
 use std::collections::VecDeque;
+use std::ops::Deref;
 use std::time::{Duration, Instant};
 
 use toxcore::crypto_core::*;
@@ -299,6 +300,13 @@ impl TimeoutQueue {
     }
 }
 
+impl Deref for TimeoutQueue {
+    type Target = VecDeque<NodeTimeout>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.vec
+    }
+}
 
 
 
@@ -479,4 +487,11 @@ mod test {
         }
     }
 
+    // TimeoutQueue::deref()
+
+    #[test]
+    fn timeout_queue_deref_test() {
+        let tq = TimeoutQueue::default();
+        assert_eq!(&tq.vec, tq.deref());
+    }
 }
