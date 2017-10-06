@@ -889,9 +889,9 @@ impl Bucket {
     [`PackedNode`]: ./struct.PackedNode.html
     */
     #[cfg(test)]
-    fn find(&mut self, pk: &PublicKey) -> Option<usize> {
-        for n in 0..self.nodes.len() {
-            if pk == &self.nodes[n].pk {
+    fn find(&self, pk: &PublicKey) -> Option<usize> {
+        for (n, node) in self.iter().enumerate() {
+            if node.pk() == pk {
                 return Some(n)
             }
         }
@@ -984,7 +984,7 @@ impl Bucket {
 
     /// Check if node with given PK is in the `Bucket`.
     pub fn contains(&self, pk: &PublicKey) -> bool {
-        self.nodes.iter().any(|n| n.pk() == pk)
+        self.iter().any(|n| n.pk() == pk)
     }
 
     /// Get the capacity of the Bucket.
@@ -1102,10 +1102,6 @@ impl Kbucket {
     pub fn pk(&self) -> PublicKey {
         self.pk
     }
-    /**
-    Check if given node can be added to the `Kbucket`.
-    */
-
 
     /**
     Try to get position of [`PackedNode`] in the kbucket by PK. Used in
@@ -1119,9 +1115,9 @@ impl Kbucket {
     [`PackedNode`]: ./struct.PackedNode.html
     */
     #[cfg(test)]
-    fn find(&mut self, pk: &PublicKey) -> Option<(usize, usize)> {
-        for bucket_index in 0..self.buckets.len() {
-            match self.buckets[bucket_index].find(pk) {
+    fn find(&self, pk: &PublicKey) -> Option<(usize, usize)> {
+        for (bucket_index, bucket) in self.buckets.iter().enumerate() {
+            match bucket.find(pk) {
                 None => {},
                 Some(node_index) => return Some((bucket_index, node_index))
             }
