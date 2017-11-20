@@ -98,7 +98,8 @@ fn main() {
         let process_messages = process_handshake.and_then(|(socket, channel, client_pk)| {
             println!("Handshake for client {:?} complited", &client_pk);
             let secure_socket = socket.framed(codec::Codec::new(channel));
-            let (reader, writer) = secure_socket.split();
+            let (_to_client, _from_client) = secure_socket.split();
+            // use example https://github.com/jgallagher/tokio-chat-example/blob/master/tokio-chat-server/src/main.rs
             Ok(())
         }).map_err(|e| {
             println!("error: {}", e);
