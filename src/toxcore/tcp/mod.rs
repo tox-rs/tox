@@ -83,7 +83,7 @@ pub fn handle_client_handshake(server_sk: SecretKey,
 
     let server_handshake = handshake::Server { nonce: nonce, payload: server_encrypted_payload };
     let channel = secure::Channel::new(session, &client_pk, &client_nonce);
-    Ok((channel, client_pk, server_handshake))
+    Ok((channel, client_handshake.pk, server_handshake))
 }
 
 /// Handle received server handshake on the client side.
@@ -121,7 +121,8 @@ mod tests {
         // ..
         // server receives a handshake packet
         // handles it & creates a secure Channel
-        let (server_channel, _client_pk, server_handshake) = handle_client_handshake(server_sk, client_handshake).unwrap();
+        let (server_channel, received_client_pk, server_handshake) = handle_client_handshake(server_sk, client_handshake).unwrap();
+        assert_eq!(received_client_pk, client_pk);
         // sends server_handshake via network
         // ..
         // .. network
