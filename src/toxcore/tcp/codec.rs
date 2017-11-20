@@ -214,7 +214,7 @@ mod tests {
         let encrypted_packet = EncryptedPacket { payload: encrypted };
 
         // serialize EncryptedPacket to binary form
-        let mut stack_buf = [0; 2050];
+        let mut stack_buf = [0; MAX_TCP_ENC_PACKET_SIZE];
         let (_, encrypted_packet_size) = encrypted_packet.to_bytes((&mut stack_buf, 0)).unwrap();
         stack_buf[..encrypted_packet_size].to_vec()
     }

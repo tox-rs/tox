@@ -44,7 +44,7 @@ pub fn create_client_handshake(client_pk: PublicKey,
     let session = secure::Session::new();
     let payload = handshake::Payload { session_pk: *session.pk(), session_nonce: *session.nonce() };
 
-    let mut serialized_payload = [0; 32 + 24 + 72];
+    let mut serialized_payload = [0; handshake::PAYLOAD_SIZE];
     let (serialized_payload, _) = payload.to_bytes((&mut serialized_payload, 0)).unwrap();
 
     let common_key = encrypt_precompute(&server_pk, &client_sk);
@@ -75,7 +75,7 @@ pub fn handle_client_handshake(server_sk: SecretKey,
     let session = secure::Session::new();
     let server_payload = handshake::Payload { session_pk: *session.pk(), session_nonce: *session.nonce() };
 
-    let mut serialized_payload = [0; 32 + 24];
+    let mut serialized_payload = [0; handshake::PAYLOAD_SIZE];
     let (serialized_payload, _) = server_payload.to_bytes((&mut serialized_payload, 0)).unwrap();
 
     let nonce = gen_nonce();
@@ -114,6 +114,7 @@ mod tests {
 
         // client creates a handshake packet
         let (client_session, common_key, client_handshake) = create_client_handshake(client_pk, client_sk, server_pk).unwrap();
+        assert_eq!(handshake::ENC_PAYLOAD_SIZE, client_handshake.payload.len());
         // sends client_handshake via network
         // ..
         // .. network

@@ -57,11 +57,15 @@ pub struct Client {
     pub payload: Vec<u8>
 }
 
+/// A serialized client handshake must be equal to 32 (PK) + 24 (nonce)
+/// + 72 (encrypted payload) bytes
+pub const CLIENT_HANDSHAKE_SIZE: usize = 128;
+
 impl FromBytes for Client {
     named!(from_bytes<Client>, do_parse!(
         pk: call!(PublicKey::from_bytes) >>
         nonce: call!(Nonce::from_bytes) >>
-        payload: take!(72) >>
+        payload: take!(ENC_PAYLOAD_SIZE) >>
         (Client { pk: pk, nonce: nonce, payload: payload.to_vec() })
     ));
 }
@@ -98,10 +102,14 @@ pub struct Server {
     pub payload: Vec<u8>
 }
 
+/// A serialized server handshake must be equal to 24 (nonce)
+/// + 72 (encrypted payload) bytes
+pub const SERVER_HANDSHAKE_SIZE: usize = 96;
+
 impl FromBytes for Server {
     named!(from_bytes<Server>, do_parse!(
         nonce: call!(Nonce::from_bytes) >>
-        payload: take!(72) >>
+        payload: take!(ENC_PAYLOAD_SIZE) >>
         (Server { nonce: nonce, payload: payload.to_vec() })
     ));
 }
@@ -138,6 +146,12 @@ pub struct Payload {
     /// Temporary Session Nonce
     pub session_nonce: Nonce
 }
+
+/// A serialized payload must be equal to 32 (PK) + 24 (nonce) bytes
+pub const PAYLOAD_SIZE: usize = 56;
+
+/// A serialized encrypted payload must be equal to 32 (PK) + 24 (nonce) + 16 (MAC) bytes
+pub const ENC_PAYLOAD_SIZE: usize = 72;
 
 impl FromBytes for Payload {
     named!(from_bytes<Payload>, do_parse!(
@@ -188,7 +202,7 @@ impl Encoder for ClientCodec {
     type Error = Error;
 
     fn encode(&mut self, handshake: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
-        let mut handshake_buf = [0; 32+24+72];
+        let mut handshake_buf = [0; CLIENT_HANDSHAKE_SIZE];
         handshake.to_bytes((&mut handshake_buf, 0))
             .map(|(handshake_buf, handshake_size)| {
                 buf.extend_from_slice(&handshake_buf[..handshake_size]);
@@ -231,7 +245,7 @@ impl Encoder for ServerCodec {
     type Error = Error;
 
     fn encode(&mut self, handshake: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
-        let mut handshake_buf = [0; 24+72];
+        let mut handshake_buf = [0; SERVER_HANDSHAKE_SIZE];
         handshake.to_bytes((&mut handshake_buf, 0))
             .map(|(handshake_buf, handshake_size)| {
                 buf.extend_from_slice(&handshake_buf[..handshake_size]);
@@ -254,7 +268,7 @@ mod tests {
         let nonce = gen_nonce();
         let mut buf = BytesMut::new();
         let mut codec = ClientCodec { };
-        let handshake = Client { pk: pk, nonce: nonce, payload: vec![42;72] };
+        let handshake = Client { pk: pk, nonce: nonce, payload: vec![42; ENC_PAYLOAD_SIZE] };
         codec.encode(handshake.clone(), &mut buf).expect("should encode");
         let res = codec.decode(&mut buf).unwrap().expect("should decode");
         assert_eq!(handshake, res);
@@ -270,7 +284,7 @@ mod tests {
     fn client_encode_too_big() {
         let nonce = gen_nonce();
         let (pk, _) = gen_keypair();
-        let handshake = Client { pk: pk, nonce: nonce, payload: vec![42;72 + 1] };
+        let handshake = Client { pk: pk, nonce: nonce, payload: vec![42; ENC_PAYLOAD_SIZE + 1] };
         let mut buf = BytesMut::new();
         let mut codec = ClientCodec { };
         assert!(codec.encode(handshake, &mut buf).is_err());
@@ -280,7 +294,7 @@ mod tests {
         let nonce = gen_nonce();
         let mut buf = BytesMut::new();
         let mut codec = ServerCodec { };
-        let handshake = Server { nonce: nonce, payload: vec![42;72] };
+        let handshake = Server { nonce: nonce, payload: vec![42; ENC_PAYLOAD_SIZE] };
         codec.encode(handshake.clone(), &mut buf).expect("should encode");
         let res = codec.decode(&mut buf).unwrap().expect("should decode");
         assert_eq!(handshake, res);
@@ -297,7 +311,7 @@ mod tests {
         let nonce = gen_nonce();
         let mut buf = BytesMut::new();
         let mut codec = ServerCodec { };
-        let handshake = Server { nonce: nonce, payload: vec![42;72 + 1] };
+        let handshake = Server { nonce: nonce, payload: vec![42; ENC_PAYLOAD_SIZE + 1] };
         assert!(codec.encode(handshake, &mut buf).is_err());
     }
 }
