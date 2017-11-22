@@ -31,21 +31,22 @@ pub mod secure;
 pub mod packet;
 pub mod codec;
 
+use self::handshake::*;
+use self::binary_io::*;
 
 use futures::{self, Stream, Sink, Future};
 use std::io::{Error, ErrorKind};
 use tokio_io::*;
 use tokio_core::net::TcpStream;
-use self::binary_io::*;
 
 /// Create a handshake from client to server
 pub fn create_client_handshake(client_pk: PublicKey,
                            client_sk: SecretKey,
                            server_pk: PublicKey)
-    -> Result<(secure::Session, PrecomputedKey, handshake::Client), Error>
+    -> Result<(secure::Session, PrecomputedKey, ClientHandshake), Error>
 {
     let session = secure::Session::new();
-    let payload = handshake::Payload { session_pk: *session.pk(), session_nonce: *session.nonce() };
+    let payload = HandshakePayload { session_pk: *session.pk(), session_nonce: *session.nonce() };
 
     let mut serialized_payload = [0; handshake::PAYLOAD_SIZE];
     let (serialized_payload, _) = payload.to_bytes((&mut serialized_payload, 0)).unwrap();
@@ -54,15 +55,15 @@ pub fn create_client_handshake(client_pk: PublicKey,
     let nonce = gen_nonce();
     let encrypted_payload = encrypt_data_symmetric(&common_key, &nonce, &serialized_payload);
 
-    let handshake = handshake::Client { pk: client_pk, nonce: nonce, payload: encrypted_payload };
+    let handshake = ClientHandshake { pk: client_pk, nonce: nonce, payload: encrypted_payload };
     Ok((session, common_key, handshake))
 }
 
 /// Handle received client handshake on the server side.
 /// Return secure::Channel, Client PK, server handshake
 pub fn handle_client_handshake(server_sk: SecretKey,
-                           client_handshake: handshake::Client)
-    -> Result<(secure::Channel, PublicKey, handshake::Server), Error>
+                           client_handshake: ClientHandshake)
+    -> Result<(secure::Channel, PublicKey, ServerHandshake), Error>
 {
     let common_key = encrypt_precompute(&client_handshake.pk, &server_sk);
     let payload_bytes = decrypt_data_symmetric(&common_key, &client_handshake.nonce, &client_handshake.payload)
@@ -70,13 +71,13 @@ pub fn handle_client_handshake(server_sk: SecretKey,
             |_| Error::new(ErrorKind::Other, "Failed to decrypt handshake::Client payload")
         )?;
 
-    let payload = handshake::Payload::from_bytes(&payload_bytes).to_full_result().unwrap();
+    let payload = HandshakePayload::from_bytes(&payload_bytes).to_full_result().unwrap();
 
     let client_pk = payload.session_pk;
     let client_nonce = payload.session_nonce;
 
     let session = secure::Session::new();
-    let server_payload = handshake::Payload { session_pk: *session.pk(), session_nonce: *session.nonce() };
+    let server_payload = HandshakePayload { session_pk: *session.pk(), session_nonce: *session.nonce() };
 
     let mut serialized_payload = [0; handshake::PAYLOAD_SIZE];
     let (serialized_payload, _) = server_payload.to_bytes((&mut serialized_payload, 0)).unwrap();
@@ -84,7 +85,7 @@ pub fn handle_client_handshake(server_sk: SecretKey,
     let nonce = gen_nonce();
     let server_encrypted_payload = encrypt_data_symmetric(&common_key, &nonce, &serialized_payload);
 
-    let server_handshake = handshake::Server { nonce: nonce, payload: server_encrypted_payload };
+    let server_handshake = ServerHandshake { nonce: nonce, payload: server_encrypted_payload };
     let channel = secure::Channel::new(session, &client_pk, &client_nonce);
     Ok((channel, client_handshake.pk, server_handshake))
 }
@@ -92,14 +93,14 @@ pub fn handle_client_handshake(server_sk: SecretKey,
 /// Handle received server handshake on the client side.
 pub fn handle_server_handshake(common_key: PrecomputedKey,
                            client_session: secure::Session,
-                           server_handshake: handshake::Server)
+                           server_handshake: ServerHandshake)
    -> Result<secure::Channel, Error>
 {
     let payload_bytes = decrypt_data_symmetric(&common_key, &server_handshake.nonce, &server_handshake.payload)
         .map_err(
             |_| Error::new(ErrorKind::Other, "Failed to decrypt handshake::Server payload")
         )?;
-    let payload = handshake::Payload::from_bytes(&payload_bytes).to_full_result().unwrap();
+    let payload = HandshakePayload::from_bytes(&payload_bytes).to_full_result().unwrap();
 
     let server_pk = payload.session_pk;
     let server_nonce = payload.session_nonce;
@@ -119,7 +120,7 @@ pub fn make_client_handshake(socket: TcpStream,
     let res = futures::done(create_client_handshake(client_pk, client_sk, server_pk))
         .and_then(|(session, common_key, handshake)| {
             // send handshake
-            socket.framed(handshake::ClientCodec)
+            socket.framed(ClientHandshakeCodec)
                 .send(handshake)
                 .map_err(|e| {
                     Error::new(
@@ -133,7 +134,7 @@ pub fn make_client_handshake(socket: TcpStream,
         })
         .and_then(|(socket, session, common_key)| {
             // receive handshake from server
-            socket.framed(handshake::ServerCodec)
+            socket.framed(ServerHandshakeCodec)
                 .into_future()
                 .map_err(|(e, _socket)| {
                     Error::new(
@@ -165,7 +166,7 @@ pub fn make_server_handshake(socket: TcpStream,
     server_sk: SecretKey
 ) -> IoFuture<(TcpStream, secure::Channel, PublicKey)>
 {
-    let res = socket.framed(handshake::ClientCodec)
+    let res = socket.framed(ClientHandshakeCodec)
         .into_future() // receive handshake from client
         .map_err(|(e, _socket)| {
             Error::new(
@@ -189,7 +190,7 @@ pub fn make_server_handshake(socket: TcpStream,
         })
         .and_then(|(socket, channel, client_pk, server_handshake)| {
             // send handshake
-            socket.framed(handshake::ServerCodec)
+            socket.framed(ServerHandshakeCodec)
                 .send(server_handshake)
                 .map_err(|e| {
                     Error::new(
