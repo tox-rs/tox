@@ -30,56 +30,11 @@ use tox::toxcore::crypto_core::*;
 use tox::toxcore::tcp::*;
 use tox::toxcore::tcp::codec;
 
-use std::io::{Error, ErrorKind};
-use futures::{Stream, Sink, Future};
+use futures::{Stream, Future};
 
 use tokio_io::*;
 use tokio_core::reactor::Core;
-use tokio_core::net::{TcpListener, TcpStream};
-
-
-fn make_server_handshake(socket: TcpStream,
-    server_sk: SecretKey
-) -> Box<Future<Item=(TcpStream, secure::Channel, PublicKey), Error=Error>>
-{
-    let res = socket.framed(handshake::ClientCodec)
-        .into_future() // receive handshake from client
-        .map_err(|(e, _socket)| {
-            Error::new(
-                ErrorKind::Other,
-                format!("Could not read handshake::Client {:?}", e),
-            )
-        })
-        .and_then(|(handshake, socket)| {
-            // `handshake` here is an `Option<handshake::Client>`
-            handshake.map_or_else(
-                || Err(Error::new(ErrorKind::Other, "Option<handshake::Client> is empty")),
-                |handshake| Ok(( socket.into_inner(), handshake ))
-            )
-        })
-        .and_then(|(socket, handshake)| {
-            // handle handshake
-            handle_client_handshake(server_sk, handshake)
-                .map(|(channel, client_pk, server_handshake)| {
-                    (socket, channel, client_pk, server_handshake)
-                })
-        })
-        .and_then(|(socket, channel, client_pk, server_handshake)| {
-            // send handshake
-            socket.framed(handshake::ServerCodec)
-                .send(server_handshake)
-                .map_err(|e| {
-                    Error::new(
-                        ErrorKind::Other,
-                        format!("Could not send handshake::Server {:?}", e),
-                    )
-                })
-                .map(move |socket| {
-                    (socket.into_inner(), channel, client_pk)
-                })
-        });
-    Box::new(res)
-}
+use tokio_core::net::TcpListener;
 
 fn main() {
     // Some constant keypair

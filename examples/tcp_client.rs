@@ -30,61 +30,11 @@ use tox::toxcore::crypto_core::*;
 use tox::toxcore::tcp::*;
 use tox::toxcore::tcp::codec;
 
-use std::io::{Error, ErrorKind};
-use futures::{Stream, Sink, Future};
+use futures::{Stream, Future};
 
 use tokio_io::*;
 use tokio_core::reactor::Core;
 use tokio_core::net::TcpStream;
-
-fn make_client_handshake(socket: TcpStream,
-    client_pk: PublicKey,
-    client_sk: SecretKey,
-    server_pk: PublicKey
-) -> Box<Future<Item=(TcpStream, secure::Channel), Error=Error>>
-{
-    let res = futures::done(create_client_handshake(client_pk, client_sk, server_pk))
-        .and_then(|(session, common_key, handshake)| {
-            // send handshake
-            socket.framed(handshake::ClientCodec)
-                .send(handshake)
-                .map_err(|e| {
-                    Error::new(
-                        ErrorKind::Other,
-                        format!("Could not send handshake::Client {:?}", e),
-                    )
-                })
-                .map(|socket| {
-                    (socket.into_inner(), session, common_key)
-                })
-        })
-        .and_then(|(socket, session, common_key)| {
-            // receive handshake from server
-            socket.framed(handshake::ServerCodec)
-                .into_future()
-                .map_err(|(e, _socket)| {
-                    Error::new(
-                        ErrorKind::Other,
-                        format!("Could not read handshake::Server {:?}", e),
-                    )
-                })
-                .and_then(|(handshake, socket)| {
-                    // `handshake` here is an `Option<handshake::Server>`
-                    handshake.map_or_else(
-                        || Err(Error::new(ErrorKind::Other, "Option<handshake::Server> is empty")),
-                        |handshake| Ok(( socket.into_inner(), common_key, session, handshake ))
-                    )
-                })
-        })
-        .and_then(|(socket, common_key, session, handshake)| {
-            // handle it
-            handle_server_handshake(common_key, session, handshake)
-                .map(|channel| {
-                    (socket, channel)
-                })
-        });
-    Box::new(res)
-}
 
 fn main() {
     // Server constant PK for examples/tests

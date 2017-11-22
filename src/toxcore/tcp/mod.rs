@@ -31,8 +31,11 @@ pub mod secure;
 pub mod packet;
 pub mod codec;
 
-use std::io::{Error, ErrorKind};
 
+use futures::{self, Stream, Sink, Future};
+use std::io::{Error, ErrorKind};
+use tokio_io::*;
+use tokio_core::net::TcpStream;
 use self::binary_io::*;
 
 /// Create a handshake from client to server
@@ -103,6 +106,102 @@ pub fn handle_server_handshake(common_key: PrecomputedKey,
 
     let channel = secure::Channel::new(client_session, &server_pk, &server_nonce);
     Ok(channel)
+}
+
+/// Sends handshake to the server, receives handshake from the server
+/// and processes it
+pub fn make_client_handshake(socket: TcpStream,
+    client_pk: PublicKey,
+    client_sk: SecretKey,
+    server_pk: PublicKey
+) -> IoFuture<(TcpStream, secure::Channel)>
+{
+    let res = futures::done(create_client_handshake(client_pk, client_sk, server_pk))
+        .and_then(|(session, common_key, handshake)| {
+            // send handshake
+            socket.framed(handshake::ClientCodec)
+                .send(handshake)
+                .map_err(|e| {
+                    Error::new(
+                        ErrorKind::Other,
+                        format!("Could not send handshake::Client {:?}", e),
+                    )
+                })
+                .map(|socket| {
+                    (socket.into_inner(), session, common_key)
+                })
+        })
+        .and_then(|(socket, session, common_key)| {
+            // receive handshake from server
+            socket.framed(handshake::ServerCodec)
+                .into_future()
+                .map_err(|(e, _socket)| {
+                    Error::new(
+                        ErrorKind::Other,
+                        format!("Could not read handshake::Server {:?}", e),
+                    )
+                })
+                .and_then(|(handshake, socket)| {
+                    // `handshake` here is an `Option<handshake::Server>`
+                    handshake.map_or_else(
+                        || Err(Error::new(ErrorKind::Other, "Option<handshake::Server> is empty")),
+                        |handshake| Ok(( socket.into_inner(), common_key, session, handshake ))
+                    )
+                })
+        })
+        .and_then(|(socket, common_key, session, handshake)| {
+            // handle it
+            handle_server_handshake(common_key, session, handshake)
+                .map(|channel| {
+                    (socket, channel)
+                })
+        });
+    Box::new(res)
+}
+
+/// Receives handshake from the client, processes it and
+/// sends handshake to the client
+pub fn make_server_handshake(socket: TcpStream,
+    server_sk: SecretKey
+) -> IoFuture<(TcpStream, secure::Channel, PublicKey)>
+{
+    let res = socket.framed(handshake::ClientCodec)
+        .into_future() // receive handshake from client
+        .map_err(|(e, _socket)| {
+            Error::new(
+                ErrorKind::Other,
+                format!("Could not read handshake::Client {:?}", e),
+            )
+        })
+        .and_then(|(handshake, socket)| {
+            // `handshake` here is an `Option<handshake::Client>`
+            handshake.map_or_else(
+                || Err(Error::new(ErrorKind::Other, "Option<handshake::Client> is empty")),
+                |handshake| Ok(( socket.into_inner(), handshake ))
+            )
+        })
+        .and_then(|(socket, handshake)| {
+            // handle handshake
+            handle_client_handshake(server_sk, handshake)
+                .map(|(channel, client_pk, server_handshake)| {
+                    (socket, channel, client_pk, server_handshake)
+                })
+        })
+        .and_then(|(socket, channel, client_pk, server_handshake)| {
+            // send handshake
+            socket.framed(handshake::ServerCodec)
+                .send(server_handshake)
+                .map_err(|e| {
+                    Error::new(
+                        ErrorKind::Other,
+                        format!("Could not send handshake::Server {:?}", e),
+                    )
+                })
+                .map(move |socket| {
+                    (socket.into_inner(), channel, client_pk)
+                })
+        });
+    Box::new(res)
 }
 
 #[cfg(test)]
