@@ -35,7 +35,51 @@ use futures::{Stream, Sink, Future};
 
 use tokio_io::*;
 use tokio_core::reactor::Core;
-use tokio_core::net::TcpListener;
+use tokio_core::net::{TcpListener, TcpStream};
+
+
+fn make_server_handshake(socket: TcpStream,
+    server_sk: SecretKey
+) -> Box<Future<Item=(TcpStream, secure::Channel, PublicKey), Error=Error>>
+{
+    let res = socket.framed(handshake::ClientCodec)
+        .into_future() // receive handshake from client
+        .map_err(|(e, _socket)| {
+            Error::new(
+                ErrorKind::Other,
+                format!("Could not read handshake::Client {:?}", e),
+            )
+        })
+        .and_then(|(handshake, socket)| {
+            // `handshake` here is an `Option<handshake::Client>`
+            handshake.map_or_else(
+                || Err(Error::new(ErrorKind::Other, "Option<handshake::Client> is empty")),
+                |handshake| Ok(( socket.into_inner(), handshake ))
+            )
+        })
+        .and_then(|(socket, handshake)| {
+            // handle handshake
+            handle_client_handshake(server_sk, handshake)
+                .map(|(channel, client_pk, server_handshake)| {
+                    (socket, channel, client_pk, server_handshake)
+                })
+        })
+        .and_then(|(socket, channel, client_pk, server_handshake)| {
+            // send handshake
+            socket.framed(handshake::ServerCodec)
+                .send(server_handshake)
+                .map_err(|e| {
+                    Error::new(
+                        ErrorKind::Other,
+                        format!("Could not send handshake::Server {:?}", e),
+                    )
+                })
+                .map(move |socket| {
+                    (socket.into_inner(), channel, client_pk)
+                })
+        });
+    Box::new(res)
+}
 
 fn main() {
     // Some constant keypair
@@ -57,53 +101,16 @@ fn main() {
     let server = listener.incoming().for_each(|(socket, addr)| {
         println!("A new client connected from {}", addr);
 
-        let server_sk = server_sk.clone();
-
-        let process_handshake = socket.framed(handshake::ClientCodec)
-            .into_future()
-            .map_err(|(e, _socket)| {
-                Error::new(
-                    ErrorKind::Other,
-                    format!("Could not read handshake::Client {:?}", e),
-                )
-            })
-            .and_then(|(handshake, socket)| {
-                // `handshake` here is an `Option<handshake::Client>`
-                handshake.map_or_else(
-                    || Err(Error::new(ErrorKind::Other, "Option<handshake::Client> is empty")),
-                    |handshake| Ok(( socket.into_inner(), handshake ))
-                )
-            })
-            .and_then(move |(socket, handshake)| {
-                handle_client_handshake(server_sk, handshake)
-                    .map(|(channel, client_pk, server_handshake)| {
-                        (socket, channel, client_pk, server_handshake)
-                    })
-            })
-            .and_then(|(socket, channel, client_pk, server_handshake)| {
-                socket.framed(handshake::ServerCodec)
-                    .send(server_handshake)
-                    .map_err(|e| {
-                        Error::new(
-                            ErrorKind::Other,
-                            format!("Could not send handshake::Server {:?}", e),
-                        )
-                    })
-                    .map(move |socket| {
-                        (socket.into_inner(), channel, client_pk)
-                    })
-            })
-        ;
-
-        let process_messages = process_handshake.and_then(|(socket, channel, client_pk)| {
-            println!("Handshake for client {:?} complited", &client_pk);
-            let secure_socket = socket.framed(codec::Codec::new(channel));
-            let (_to_client, _from_client) = secure_socket.split();
-            // use example https://github.com/jgallagher/tokio-chat-example/blob/master/tokio-chat-server/src/main.rs
-            Ok(())
-        }).map_err(|e| {
-            println!("error: {}", e);
-        });
+        let process_messages = make_server_handshake(socket, server_sk.clone())
+            .and_then(|(socket, channel, client_pk)| {
+                println!("Handshake for client {:?} complited", &client_pk);
+                let secure_socket = socket.framed(codec::Codec::new(channel));
+                let (_to_client, _from_client) = secure_socket.split();
+                // use example https://github.com/jgallagher/tokio-chat-example/blob/master/tokio-chat-server/src/main.rs
+                Ok(())
+            }).map_err(|e| {
+                println!("error: {}", e);
+            });
         handle.spawn(process_messages);
 
         Ok(())
