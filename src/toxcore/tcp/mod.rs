@@ -276,4 +276,32 @@ mod tests {
         let common_key = encrypt_precompute(&client_pk, &mallory_sk);
         assert!(handle_server_handshake(common_key, client_session, server_handshake).is_err());
     }
+    #[test]
+    fn network_handshake() {
+        use futures::{Stream, Future};
+
+        use tokio_core::reactor::Core;
+        use tokio_core::net::{TcpListener, TcpStream};
+
+        let (client_pk, client_sk) = gen_keypair();
+        let (server_pk, server_sk) = gen_keypair();
+
+        let mut core = Core::new().unwrap();
+        let handle = core.handle();
+
+        let addr = "127.0.0.1:12345".parse().unwrap();
+        let server = TcpListener::bind(&addr, &handle).unwrap().incoming()
+            .into_future() // take the first connection
+            .map_err(|(e, _other_incomings)| e)
+            .map(|(connection, _other_incomings)| connection.unwrap())
+            .and_then(|(socket, _addr)| {
+                make_server_handshake(socket, server_sk.clone())
+            });
+        let client = TcpStream::connect(&addr, &handle)
+            .and_then(|socket| {
+                make_client_handshake(socket, client_pk, client_sk, server_pk)
+            });
+        let both = server.join(client);
+        assert!(core.run(both).is_ok());
+    }
 }
