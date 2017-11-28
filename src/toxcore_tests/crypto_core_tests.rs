@@ -113,9 +113,9 @@ fn public_key_valid_test() {
     assert_eq!(true, public_key_valid(&pk));
 
     assert_eq!(true, public_key_valid(&PublicKey([0; PUBLICKEYBYTES]))); // 0
-    assert_eq!(true, public_key_valid(&PublicKey([0b01111111; PUBLICKEYBYTES]))); // 127
-    assert_eq!(false, public_key_valid(&PublicKey([0b10000000; PUBLICKEYBYTES]))); // 128
-    assert_eq!(false, public_key_valid(&PublicKey([0b11111111; PUBLICKEYBYTES]))); // 255
+    assert_eq!(true, public_key_valid(&PublicKey([0b01_11_11_11; PUBLICKEYBYTES]))); // 127
+    assert_eq!(false, public_key_valid(&PublicKey([0b10_00_00_00; PUBLICKEYBYTES]))); // 128
+    assert_eq!(false, public_key_valid(&PublicKey([0b11_11_11_11; PUBLICKEYBYTES]))); // 255
 
     fn pk_from_u8(num: u8) {
         let pk = PublicKey([num; PUBLICKEYBYTES]);
@@ -292,7 +292,7 @@ fn increment_nonce_number_test_0xff0000_plus_0x011000() {
                            0, 0, 0, 0, 0, 0, 0, 0,
                            0, 0, 0, 0, 0, 0xff, 0, 0]);
 
-    increment_nonce_number(&mut nonce, 0x11000);
+    increment_nonce_number(&mut nonce, 0x01_10_00);
     assert_eq!(nonce, cmp_nonce);
 }
 

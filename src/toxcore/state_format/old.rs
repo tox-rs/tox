@@ -328,7 +328,7 @@ pub const DHT_STATE_MIN_SIZE: usize = 12;
 
 /// Special, magical beginning of DHT section in LE.
 // TODO: change to &'static [u8]
-const DHT_MAGICAL: u32 = 0x159000d;
+const DHT_MAGICAL: u32 = 0x159_000d;
 
 /** Special DHT section type encoded in LE.
 
@@ -1011,7 +1011,7 @@ struct SectionData {
 const SECTION_MIN_LEN: usize = 8;
 
 /// According to https://zetok.github.io/tox-spec/#sections
-const SECTION_MAGIC: &'static [u8; 2] = &[206, 1];
+const SECTION_MAGIC: &[u8; 2] = &[206, 1];
 
 impl SectionData {
 
@@ -1169,7 +1169,7 @@ pub struct State {
 }
 
 /// State Format magic bytes.
-const STATE_MAGIC: &'static [u8; 4] = &[0x1f, 0x1b, 0xed, 0x15];
+const STATE_MAGIC: &[u8; 4] = &[0x1f, 0x1b, 0xed, 0x15];
 
 /// Length of `State` header.
 #[cfg(test)]

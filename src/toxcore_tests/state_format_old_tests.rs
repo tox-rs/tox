@@ -225,7 +225,7 @@ fn dht_state_from_bytes() {
         }
 
         // check if fails to de-serialize with wrong magic number
-        for pos in [0, 1, 2, 3, 8, 9, 10, 11].into_iter() {
+        for pos in &[0, 1, 2, 3, 8, 9, 10, 11] {
             let mut s = serialized.clone();
             if *pos == 1 || *pos == 9 { s[*pos] = 0xff; } else { s[*pos] = 0; }
             assert_eq!(None, DhtState::from_bytes(&s));

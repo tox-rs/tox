@@ -76,7 +76,7 @@ fn bind_udp_test() {
         thread::spawn(move || {
             let core = Core::new().unwrap();
             let handle = core.handle();
-            let socket = bind_udp("::".parse().unwrap(), 33445..33546, &handle);
+            let socket = bind_udp("::".parse().unwrap(), 33_445..33_546, &handle);
             match socket {
                 Some(_) => {},
                 None => panic!("This should have worked; bind_udp()"),

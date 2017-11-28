@@ -75,7 +75,7 @@ pub const MAGIC_LENGTH: usize = 8;
 
     Located at the beginning of the encrypted data.
 */
-pub const MAGIC_NUMBER: &'static [u8; MAGIC_LENGTH] = b"toxEsave";
+pub const MAGIC_NUMBER: &[u8; MAGIC_LENGTH] = b"toxEsave";
 /** Minimal size in bytes of an encrypted file.
 
 I.e. the amount of bytes that data will "gain" after encryption.

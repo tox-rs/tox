@@ -393,7 +393,7 @@ mod test {
             for (n, nt) in nts.iter().enumerate() {
                 assert_eq!(n, tq.vec.len());
                 tq.push(*nt);
-                assert_eq!(nt, tq.vec.get(n).unwrap());
+                assert_eq!(nt, &tq.vec[n]);
             }
             TestResult::passed()
         }
@@ -407,8 +407,8 @@ mod test {
             let mut tq = TimeoutQueue::default();
             let (pk, _) = gen_keypair();
             tq.add(&pk, id);
-            assert_eq!(&pk, tq.vec.get(0).unwrap().pk());
-            assert_eq!(id, tq.vec.get(0).unwrap().id());
+            assert_eq!(&pk, tq.vec[0].pk());
+            assert_eq!(id, tq.vec[0].id());
         }
     }
 
@@ -431,7 +431,7 @@ mod test {
                 assert_eq!(nts.len() - (num + 1), tq.vec.len());
                 // rest of timeouts is still there
                 assert_eq!(&nts[num + 1..],
-                    tq.vec.iter().map(|n| *n)
+                    tq.vec.iter().cloned()
                     .collect::<Vec<_>>().as_slice());
             }
             assert!(tq.vec.is_empty());
@@ -472,7 +472,7 @@ mod test {
 
             let nodetimeout = {
                 let mut nt = nts[0];
-                nt.time = nt.time - Duration::from_secs(1);
+                nt.time -= Duration::from_secs(1);
                 nt
             };
 

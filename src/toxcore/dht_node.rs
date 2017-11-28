@@ -304,7 +304,7 @@ impl DhtNode {
     pub fn request_nodes_close(&mut self) -> Vec<ToxUdpPacket> {
         self.kbucket.iter()
             // copy, collect & iter again to work around borrow checker
-            .map(|pn| *pn)
+            .cloned()
             .collect::<Vec<PackedNode>>()
             .iter()
             .map(|pn| {
@@ -543,7 +543,7 @@ mod test {
     /// Bind to this IpAddr.
     // NOTE: apparently using `0.0.0.0`/`::` is not allowed on CIs like
     //       appveyor / travis
-    const SOCKET_ADDR: &'static str = "127.0.0.1";
+    const SOCKET_ADDR: &str = "127.0.0.1";
 
     /// Provide:
     ///   - mut core ($c)
@@ -570,7 +570,7 @@ mod test {
             let mut $name = DhtNode::new().unwrap();
             let $name_socket = bind_udp(SOCKET_ADDR.parse().unwrap(),
                                         // make port range sufficiently big
-                                        2048..65000,
+                                        2048..65_000,
                                         &$h)
                 .expect("failed to bind to socket");
         );
@@ -578,7 +578,7 @@ mod test {
             let $name = DhtNode::new().unwrap();
             let $name_socket = bind_udp(SOCKET_ADDR.parse().unwrap(),
                                         // make port range sufficiently big
-                                        2048..65000,
+                                        2048..65_000,
                                         &$h)
                 .expect("failed to bind to socket");
         )+);
@@ -957,7 +957,7 @@ mod test {
             node_socket!(handle, bob, bob_socket);
 
             for pn in &pns {
-                drop(alice.try_add(pn));
+                alice.try_add(pn);
             }
 
             let (_id, getn) = bob.create_getn(alice.pk());

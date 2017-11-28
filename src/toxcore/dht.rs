@@ -206,9 +206,9 @@ impl ToBytes for IpAddr {
     fn to_bytes(&self) -> Vec<u8> {
         debug!(target: "IpAddr", "Serializing IpAddr to bytes.");
         trace!(target: "IpAddr", "With IpAddr: {:?}", self);
-        match self {
-            &IpAddr::V4(a) => a.octets().iter().cloned().collect(),
-            &IpAddr::V6(a) => {
+        match *self {
+            IpAddr::V4(a) => a.octets().to_vec(),
+            IpAddr::V6(a) => {
                 let mut result: Vec<u8> = vec![];
                 for n in &a.segments() {
                     result.write_u16::<LittleEndian>(*n) // TODO: check if LittleEndian is correct here
@@ -1678,7 +1678,7 @@ mod test {
             let (pk, _) = gen_keypair();
 
             for node in &pns {
-                bucket.try_add(&pk, &node);
+                bucket.try_add(&pk, node);
             }
 
             let mut expect = Vec::new();
@@ -1878,7 +1878,7 @@ mod test {
             assert!(kbucket.iter().next().is_none());
 
             for node in &pns {
-                kbucket.try_add(&node);
+                kbucket.try_add(node);
             }
 
             let mut expect = Vec::new();
