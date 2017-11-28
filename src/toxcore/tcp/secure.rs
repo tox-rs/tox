@@ -130,8 +130,8 @@ impl Channel {
     */
     pub fn new(our_session: Session, their_pk: &PublicKey, their_nonce: &Nonce) -> Channel {
         let precomputed = our_session.create_precomputed_key(their_pk);
-        let sent_n = our_session.nonce().clone().into();
-        let recv_n = their_nonce.clone().into();
+        let sent_n = RefCell::new(*our_session.nonce());
+        let recv_n = RefCell::new(*their_nonce);
         Channel { precomputed_key: precomputed, sent_nonce: sent_n, recv_nonce: recv_n }
     }
     /** Encrypt data, increment sent_nonce

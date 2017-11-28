@@ -53,7 +53,7 @@ pub fn create_client_handshake(client_pk: PublicKey,
 
     let common_key = encrypt_precompute(&server_pk, &client_sk);
     let nonce = gen_nonce();
-    let encrypted_payload = encrypt_data_symmetric(&common_key, &nonce, &serialized_payload);
+    let encrypted_payload = encrypt_data_symmetric(&common_key, &nonce, serialized_payload);
 
     let handshake = ClientHandshake { pk: client_pk, nonce: nonce, payload: encrypted_payload };
     Ok((session, common_key, handshake))
@@ -83,7 +83,7 @@ pub fn handle_client_handshake(server_sk: SecretKey,
     let (serialized_payload, _) = server_payload.to_bytes((&mut serialized_payload, 0)).unwrap();
 
     let nonce = gen_nonce();
-    let server_encrypted_payload = encrypt_data_symmetric(&common_key, &nonce, &serialized_payload);
+    let server_encrypted_payload = encrypt_data_symmetric(&common_key, &nonce, serialized_payload);
 
     let server_handshake = ServerHandshake { nonce: nonce, payload: server_encrypted_payload };
     let channel = secure::Channel::new(session, &client_pk, &client_nonce);

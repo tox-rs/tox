@@ -77,16 +77,16 @@ impl FromBytes for Packet {
 
 impl ToBytes for Packet {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        match self {
-            &Packet::RouteRequest(ref p) => p.to_bytes(buf),
-            &Packet::RouteResponse(ref p) => p.to_bytes(buf),
-            &Packet::ConnectNotification(ref p) => p.to_bytes(buf),
-            &Packet::DisconnectNotification(ref p) => p.to_bytes(buf),
-            &Packet::PingRequest(ref p) => p.to_bytes(buf),
-            &Packet::PongResponse(ref p) => p.to_bytes(buf),
-            &Packet::OobSend(ref p) => p.to_bytes(buf),
-            &Packet::OobReceive(ref p) => p.to_bytes(buf),
-            &Packet::Data(ref p) => p.to_bytes(buf),
+        match *self {
+            Packet::RouteRequest(ref p) => p.to_bytes(buf),
+            Packet::RouteResponse(ref p) => p.to_bytes(buf),
+            Packet::ConnectNotification(ref p) => p.to_bytes(buf),
+            Packet::DisconnectNotification(ref p) => p.to_bytes(buf),
+            Packet::PingRequest(ref p) => p.to_bytes(buf),
+            Packet::PongResponse(ref p) => p.to_bytes(buf),
+            Packet::OobSend(ref p) => p.to_bytes(buf),
+            Packet::OobReceive(ref p) => p.to_bytes(buf),
+            Packet::Data(ref p) => p.to_bytes(buf),
         }
     }
 }
