@@ -80,9 +80,9 @@ fn xor_checksum_test() {
     assert_eq!([0; 2], xor_checksum(&[255; 2], &[255; 2]));
 
     fn with_numbers(a: u8, b: u8, c: u8, d: u8) {
-        let x = xor_checksum(&[a, b], &[c, d]);
-        assert_eq!(x[0], a ^ c);
-        assert_eq!(x[1], b ^ d);
+        let checksum = xor_checksum(&[a, b], &[c, d]);
+        assert_eq!(checksum[0], a ^ c);
+        assert_eq!(checksum[1], b ^ d);
     }
     quickcheck(with_numbers as fn(u8, u8, u8, u8));
 }

@@ -19,6 +19,7 @@
 
 //! Tests for the DHT module.
 
+#![cfg_attr(feature = "clippy", allow(many_single_char_names, too_many_arguments))]
 
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
@@ -1188,9 +1189,9 @@ fn public_key_distance_test() {
 
 #[test]
 fn kbucket_index_test() {
-    let pk1 = PublicKey([0b10101010; PUBLICKEYBYTES]);
+    let pk1 = PublicKey([0b10_10_10_10; PUBLICKEYBYTES]);
     let pk2 = PublicKey([0; PUBLICKEYBYTES]);
-    let pk3 = PublicKey([0b00101010; PUBLICKEYBYTES]);
+    let pk3 = PublicKey([0b00_10_10_10; PUBLICKEYBYTES]);
     assert_eq!(None, kbucket_index(&pk1, &pk1));
     assert_eq!(Some(0), kbucket_index(&pk1, &pk2));
     assert_eq!(Some(2), kbucket_index(&pk2, &pk3));

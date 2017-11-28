@@ -28,7 +28,7 @@ use toxencryptsave::*;
 
 impl Arbitrary for PassKey {
     fn arbitrary<G: Gen>(g: &mut G) -> Self {
-        let up_to_range = g.gen_range(2, 1000000);
+        let up_to_range = g.gen_range(2, 1_000_000);
         let mut passwd = Vec::with_capacity(up_to_range);
         for _ in 1..up_to_range {
             passwd.push(g.gen());

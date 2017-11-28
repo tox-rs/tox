@@ -40,9 +40,9 @@ use super::crypto_core::crypto_init;
 
 
 /// Minimum default port which Tox will try to bind to.
-pub const PORT_MIN: u16 = 33445;
+pub const PORT_MIN: u16 = 33_445;
 /// Maximum default port which Tox will try to bind to.
-pub const PORT_MAX: u16 = 33545;
+pub const PORT_MAX: u16 = 33_545;
 /// Maximum size of a UDP packet that tox will handle.
 // TODO: check if it's still the biggest packet size
 pub const MAX_UDP_PACKET_SIZE: usize = 2048;
@@ -66,7 +66,7 @@ struct PacketHandles {
 impl PacketHandles {
     #[inline]
     fn handle(&self, addr: SocketAddr, data: &[u8]) {
-        (self.function)(self.object.clone(), addr, data);
+        (self.function)(Rc::clone(&self.object), addr, data);
     }
 }
 
