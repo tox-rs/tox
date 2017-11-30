@@ -49,6 +49,7 @@ pub fn create_client_handshake(client_pk: PublicKey,
     let payload = HandshakePayload { session_pk: *session.pk(), session_nonce: *session.nonce() };
 
     let mut serialized_payload = [0; handshake::PAYLOAD_SIZE];
+    // HandshakePayload::to_bytes may not fail because we created buffer with enough size
     let (serialized_payload, _) = payload.to_bytes((&mut serialized_payload, 0)).unwrap();
 
     let common_key = encrypt_precompute(&server_pk, &client_sk);
@@ -68,10 +69,13 @@ pub fn handle_client_handshake(server_sk: SecretKey,
     let common_key = encrypt_precompute(&client_handshake.pk, &server_sk);
     let payload_bytes = decrypt_data_symmetric(&common_key, &client_handshake.nonce, &client_handshake.payload)
         .map_err(
-            |_| Error::new(ErrorKind::Other, "Failed to decrypt handshake::Client payload")
+            |_| Error::new(ErrorKind::Other, "Failed to decrypt ClientHandshake payload")
         )?;
 
-    let payload = HandshakePayload::from_bytes(&payload_bytes).to_full_result().unwrap();
+    let payload = HandshakePayload::from_bytes(&payload_bytes).to_full_result()
+        .map_err(
+            |_| Error::new(ErrorKind::Other, "Failed to deserialize ClientHandshake payload")
+        )?;
 
     let client_pk = payload.session_pk;
     let client_nonce = payload.session_nonce;
@@ -80,6 +84,7 @@ pub fn handle_client_handshake(server_sk: SecretKey,
     let server_payload = HandshakePayload { session_pk: *session.pk(), session_nonce: *session.nonce() };
 
     let mut serialized_payload = [0; handshake::PAYLOAD_SIZE];
+    // HandshakePayload::to_bytes may not fail because we created buffer with enough size
     let (serialized_payload, _) = server_payload.to_bytes((&mut serialized_payload, 0)).unwrap();
 
     let nonce = gen_nonce();
@@ -98,9 +103,12 @@ pub fn handle_server_handshake(common_key: PrecomputedKey,
 {
     let payload_bytes = decrypt_data_symmetric(&common_key, &server_handshake.nonce, &server_handshake.payload)
         .map_err(
-            |_| Error::new(ErrorKind::Other, "Failed to decrypt handshake::Server payload")
+            |_| Error::new(ErrorKind::Other, "Failed to decrypt ServerHandshake payload")
         )?;
-    let payload = HandshakePayload::from_bytes(&payload_bytes).to_full_result().unwrap();
+    let payload = HandshakePayload::from_bytes(&payload_bytes).to_full_result()
+        .map_err(
+            |_| Error::new(ErrorKind::Other, "Failed to deserialize ServerHandshake payload")
+        )?;
 
     let server_pk = payload.session_pk;
     let server_nonce = payload.session_nonce;
@@ -125,7 +133,7 @@ pub fn make_client_handshake(socket: TcpStream,
                 .map_err(|e| {
                     Error::new(
                         ErrorKind::Other,
-                        format!("Could not send handshake::Client {:?}", e),
+                        format!("Could not send ClientHandshake {:?}", e),
                     )
                 })
                 .map(|socket| {
@@ -139,13 +147,13 @@ pub fn make_client_handshake(socket: TcpStream,
                 .map_err(|(e, _socket)| {
                     Error::new(
                         ErrorKind::Other,
-                        format!("Could not read handshake::Server {:?}", e),
+                        format!("Could not read ServerHandshake {:?}", e),
                     )
                 })
                 .and_then(|(handshake, socket)| {
                     // `handshake` here is an `Option<handshake::Server>`
                     handshake.map_or_else(
-                        || Err(Error::new(ErrorKind::Other, "Option<handshake::Server> is empty")),
+                        || Err(Error::new(ErrorKind::Other, "Option<ServerHandshake> is empty")),
                         |handshake| Ok(( socket.into_inner(), common_key, session, handshake ))
                     )
                 })
@@ -171,13 +179,13 @@ pub fn make_server_handshake(socket: TcpStream,
         .map_err(|(e, _socket)| {
             Error::new(
                 ErrorKind::Other,
-                format!("Could not read handshake::Client {:?}", e),
+                format!("Could not read ClientHandshake {:?}", e),
             )
         })
         .and_then(|(handshake, socket)| {
             // `handshake` here is an `Option<handshake::Client>`
             handshake.map_or_else(
-                || Err(Error::new(ErrorKind::Other, "Option<handshake::Client> is empty")),
+                || Err(Error::new(ErrorKind::Other, "Option<ClientHandshake> is empty")),
                 |handshake| Ok(( socket.into_inner(), handshake ))
             )
         })
@@ -195,7 +203,7 @@ pub fn make_server_handshake(socket: TcpStream,
                 .map_err(|e| {
                     Error::new(
                         ErrorKind::Other,
-                        format!("Could not send handshake::Server {:?}", e),
+                        format!("Could not send ServerHandshake {:?}", e),
                     )
                 })
                 .map(move |socket| {
@@ -274,6 +282,47 @@ mod tests {
         let (client_session, _common_key, client_handshake) = create_client_handshake(client_pk, client_sk, server_pk).unwrap();
         let (_server_channel, _client_pk, server_handshake) = handle_client_handshake(server_sk, client_handshake).unwrap();
         let common_key = encrypt_precompute(&client_pk, &mallory_sk);
+        assert!(handle_server_handshake(common_key, client_session, server_handshake).is_err());
+    }
+    #[test]
+    fn client_handshake_with_bad_payload() {
+        let (client_pk, client_sk) = gen_keypair();
+        let (server_pk, server_sk) = gen_keypair();
+        fn create_bad_client_handshake(client_pk: &PublicKey,
+                                   client_sk: &SecretKey,
+                                   server_pk: &PublicKey)
+            -> ClientHandshake
+        {
+            let common_key = encrypt_precompute(server_pk, client_sk);
+            let nonce = gen_nonce();
+            // bad payload [1,2,3]
+            let encrypted_payload = encrypt_data_symmetric(&common_key, &nonce, &[1, 2, 3]);
+
+            ClientHandshake { pk: *client_pk, nonce: nonce, payload: encrypted_payload }
+        }
+
+        let client_handshake = create_bad_client_handshake(&client_pk, &client_sk, &server_pk);
+        assert!(handle_client_handshake(server_sk, client_handshake).is_err());
+    }
+    #[test]
+    fn server_handshake_with_bad_payload() {
+        use self::secure::*;
+        let (client_pk, _) = gen_keypair();
+        let (_, server_sk) = gen_keypair();
+        let common_key = encrypt_precompute(&client_pk, &server_sk);
+        let client_session = Session::new();
+
+        fn create_bad_server_handshake(common_key: &PrecomputedKey)
+            -> ServerHandshake
+        {
+            let nonce = gen_nonce();
+            // bad payload [1,2,3]
+            let server_encrypted_payload = encrypt_data_symmetric(&common_key, &nonce, &[1, 2, 3]);
+
+            ServerHandshake { nonce: nonce, payload: server_encrypted_payload }
+        }
+
+        let server_handshake = create_bad_server_handshake(&common_key);
         assert!(handle_server_handshake(common_key, client_session, server_handshake).is_err());
     }
     #[test]
