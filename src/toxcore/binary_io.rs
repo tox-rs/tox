@@ -71,7 +71,6 @@ macro_rules! from_bytes (
     );
 );
 
-
 /// Append `0`s to given bytes up to `len`. Panics if `len` is smaller than
 /// padded `Vec`.
 pub fn append_zeros<T: Clone + Zero>(v: &mut Vec<T>, len: usize) {
