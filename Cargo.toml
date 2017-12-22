@@ -9,7 +9,7 @@ clippy = { version = "<= 0.1.0", optional = true }
 bytes = "0.4"
 byteorder = "1"
 futures = "0.1"
-log = "0.3"
+log = "0.4"
 num-traits = "0.1"
 sodiumoxide = "0.0.15"
 tokio-core = "0.1"
