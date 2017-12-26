@@ -30,6 +30,7 @@ pub mod handshake;
 pub mod secure;
 pub mod packet;
 pub mod codec;
+pub mod server;
 
 use self::handshake::*;
 use self::binary_io::*;
