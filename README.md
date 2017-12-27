@@ -25,10 +25,10 @@ Current [API docs](https://zetok.github.io/tox) are a subject to changes.
 ## Dependencies
 | **Name** | **Version** |
 |----------|-------------|
-| libsodium | >=1.0.4 |
+| libsodium | >=1.0.13 |
 
 ## Building
-Fairly simple. You'll need [Rust] >= 1.16.0 and [libsodium].
+Fairly simple. You'll need [Rust] >= 1.21.0 and [libsodium].
 
 When you'll have deps, build debug version with
 ```bash
@@ -83,7 +83,7 @@ consider helping :wink:
  - [ ] C API – [CAPI]
     - [x] toxencryptsave
  - [x] Rust API
-   
+
    It will be a subject to changes, and most likely parts that are currently
    public will at later point become hidden. That though depends on the needs.
  - [x] Documentation
