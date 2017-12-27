@@ -320,3 +320,593 @@ impl Server {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use ::toxcore::crypto_core::*;
+    use ::toxcore::tcp::packet::*;
+    use ::toxcore::tcp::server::{Client, Server};
+    use futures::sync::mpsc;
+    use futures::{Stream, Future};
+
+    /// A function that generates random keypair, creates mpsc channel
+    ///  and inserts them as a mock Client into Server
+    fn add_random_client(server: &Server) -> (PublicKey, mpsc::Receiver<Packet>) {
+        let (client_pk, _) = gen_keypair();
+        let (tx, rx) = mpsc::channel(1);
+        server.insert(Client::new(tx, &client_pk));
+        (client_pk, rx)
+    }
+
+    #[test]
+    fn normal_communication_scenario() {
+        let server = Server::new();
+
+        // client 1 connects to the server
+        let (client_pk_1, rx_1) = add_random_client(&server);
+
+        let (client_pk_2, _) = gen_keypair();
+
+        // emulate send RouteRequest from client_1
+        server.handle_packet(&client_pk_1, Packet::RouteRequest(
+            RouteRequest { peer_pk: client_pk_2 }
+        )).wait().unwrap();
+
+        // the server should put RouteResponse into rx_1
+        let (packet, rx_1) = rx_1.into_future().wait().unwrap();
+        assert_eq!(packet.unwrap(), Packet::RouteResponse(
+            RouteResponse { pk: client_pk_2, connection_id: 16 }
+        ));
+
+        // client 2 connects to the server
+        let (tx_2, rx_2) = mpsc::channel(1);
+        server.insert(Client::new(tx_2, &client_pk_2));
+
+        // emulate send RouteRequest from client_1 again
+        server.handle_packet(&client_pk_1, Packet::RouteRequest(
+            RouteRequest { peer_pk: client_pk_2 }
+        )).wait().unwrap();
+
+        // the server should put RouteResponse into rx_1
+        let (packet, rx_1) = rx_1.into_future().wait().unwrap();
+        assert_eq!(packet.unwrap(), Packet::RouteResponse(
+            RouteResponse { pk: client_pk_2, connection_id: 16 }
+        ));
+
+        // emulate send RouteRequest from client_2
+        server.handle_packet(&client_pk_2, Packet::RouteRequest(
+            RouteRequest { peer_pk: client_pk_1 }
+        )).wait().unwrap();
+
+        // the server should put RouteResponse into rx_2
+        let (packet, rx_2) = rx_2.into_future().wait().unwrap();
+        assert_eq!(packet.unwrap(), Packet::RouteResponse(
+            RouteResponse { pk: client_pk_1, connection_id: 16 }
+        ));
+        // AND
+        // the server should put ConnectNotification into rx_1
+        let (packet, _rx_1) = rx_1.into_future().wait().unwrap();
+        assert_eq!(packet.unwrap(), Packet::ConnectNotification(
+            ConnectNotification { connection_id: 16 }
+        ));
+        // AND
+        // the server should put ConnectNotification into rx_2
+        let (packet, rx_2) = rx_2.into_future().wait().unwrap();
+        assert_eq!(packet.unwrap(), Packet::ConnectNotification(
+            ConnectNotification { connection_id: 16 }
+        ));
+
+        // emulate send Data from client_1
+        server.handle_packet(&client_pk_1, Packet::Data(
+            Data { connection_id: 16, data: vec![13, 42] }
+        )).wait().unwrap();
+
+        // the server should put Data into rx_2
+        let (packet, rx_2) = rx_2.into_future().wait().unwrap();
+        assert_eq!(packet.unwrap(), Packet::Data(
+            Data { connection_id: 16, data: vec![13, 42] }
+        ));
+
+        // emulate client_1 disconnected
+        server.shutdown_client(&client_pk_1).wait().unwrap();
+        // the server should put DisconnectNotification into rx_2
+        let (packet, _rx_2) = rx_2.into_future().wait().unwrap();
+        assert_eq!(packet.unwrap(), Packet::DisconnectNotification(
+            DisconnectNotification { connection_id: 16 }
+        ));
+    }
+    #[test]
+    fn handle_route_request() {
+        let server = Server::new();
+        let (client_pk_1, rx_1) = add_random_client(&server);
+        let (client_pk_2, _rx_2) = add_random_client(&server);
+
+        // emulate send RouteRequest from client_1
+        server.handle_packet(&client_pk_1, Packet::RouteRequest(
+            RouteRequest { peer_pk: client_pk_2 }
+        )).wait().unwrap();
+
+        // the server should put RouteResponse into rx_1
+        let (packet, _rx_1) = rx_1.into_future().wait().unwrap();
+        assert_eq!(packet.unwrap(), Packet::RouteResponse(
+            RouteResponse { pk: client_pk_2, connection_id: 16 }
+        ));
+    }
+    #[test]
+    fn handle_route_request_to_itself() {
+        let server = Server::new();
+        let (client_pk_1, rx_1) = add_random_client(&server);
+
+        // emulate send RouteRequest from client_1
+        server.handle_packet(&client_pk_1, Packet::RouteRequest(
+            RouteRequest { peer_pk: client_pk_1 }
+        )).wait().unwrap();
+
+        // the server should put RouteResponse into rx_1
+        let (packet, _rx_1) = rx_1.into_future().wait().unwrap();
+        assert_eq!(packet.unwrap(), Packet::RouteResponse(
+            RouteResponse { pk: client_pk_1, connection_id: 0 }
+        ));
+    }
+    #[test]
+    fn handle_route_request_too_many_connections() {
+        let server = Server::new();
+        let (client_pk_1, rx_1) = add_random_client(&server);
+        let mut rx_1 = rx_1;
+
+        // send 240 RouteRequest
+        for i in 0..240 {
+            let (other_client_pk, _other_rx) = add_random_client(&server);
+            // emulate send RouteRequest from client_1
+            server.handle_packet(&client_pk_1, Packet::RouteRequest(
+                RouteRequest { peer_pk: other_client_pk }
+            )).wait().unwrap();
+
+            // the server should put RouteResponse into rx_1
+            let (packet, rx_1_nested) = rx_1.into_future().wait().unwrap();
+            assert_eq!(packet.unwrap(), Packet::RouteResponse(
+                RouteResponse { pk: other_client_pk, connection_id: i + 16 }
+            ));
+            rx_1 = rx_1_nested;
+        }
+        // and send one more again
+        let (other_client_pk, _other_rx) = add_random_client(&server);
+        // emulate send RouteRequest from client_1
+        server.handle_packet(&client_pk_1, Packet::RouteRequest(
+            RouteRequest { peer_pk: other_client_pk }
+        )).wait().unwrap();
+
+        // the server should put RouteResponse into rx_1
+        let (packet, _rx_1) = rx_1.into_future().wait().unwrap();
+        assert_eq!(packet.unwrap(), Packet::RouteResponse(
+            RouteResponse { pk: other_client_pk, connection_id: 0 }
+        ));
+    }
+    #[test]
+    fn handle_connect_notification() {
+        let server = Server::new();
+        let (client_pk_1, _rx_1) = add_random_client(&server);
+
+        // emulate send ConnectNotification from client_1
+        let handle_res = server.handle_packet(&client_pk_1, Packet::ConnectNotification(
+            ConnectNotification { connection_id: 42 }
+        )).wait();
+        assert!(handle_res.is_ok());
+    }
+    #[test]
+    fn handle_disconnect_notification() {
+        let server = Server::new();
+        let (client_pk_1, rx_1) = add_random_client(&server);
+        let (client_pk_2, rx_2) = add_random_client(&server);
+
+        // emulate send RouteRequest from client_1
+        server.handle_packet(&client_pk_1, Packet::RouteRequest(
+            RouteRequest { peer_pk: client_pk_2 }
+        )).wait().unwrap();
+
+        // the server should put RouteResponse into rx_1
+        let (packet, rx_1) = rx_1.into_future().wait().unwrap();
+        assert_eq!(packet.unwrap(), Packet::RouteResponse(
+            RouteResponse { pk: client_pk_2, connection_id: 16 }
+        ));
+
+        // emulate send RouteRequest from client_2
+        server.handle_packet(&client_pk_2, Packet::RouteRequest(
+            RouteRequest { peer_pk: client_pk_1 }
+        )).wait().unwrap();
+
+        // the server should put RouteResponse into rx_2
+        let (packet, rx_2) = rx_2.into_future().wait().unwrap();
+        assert_eq!(packet.unwrap(), Packet::RouteResponse(
+            RouteResponse { pk: client_pk_1, connection_id: 16 }
+        ));
+        // AND
+        // the server should put ConnectNotification into rx_1
+        let (packet, _rx_1) = rx_1.into_future().wait().unwrap();
+        assert_eq!(packet.unwrap(), Packet::ConnectNotification(
+            ConnectNotification { connection_id: 16 }
+        ));
+        // AND
+        // the server should put ConnectNotification into rx_2
+        let (packet, rx_2) = rx_2.into_future().wait().unwrap();
+        assert_eq!(packet.unwrap(), Packet::ConnectNotification(
+            ConnectNotification { connection_id: 16 }
+        ));
+
+        // emulate send DisconnectNotification from client_1
+        server.handle_packet(&client_pk_1, Packet::DisconnectNotification(
+            DisconnectNotification { connection_id: 16 }
+        )).wait().unwrap();
+
+        // the server should put DisconnectNotification into rx_2
+        let (packet, _rx_2) = rx_2.into_future().wait().unwrap();
+        assert_eq!(packet.unwrap(), Packet::DisconnectNotification(
+            DisconnectNotification { connection_id: 16 }
+        ));
+    }
+    #[test]
+    fn handle_disconnect_notification_other_not_linked() {
+        let server = Server::new();
+        let (client_pk_1, _rx_1) = add_random_client(&server);
+        let (client_pk_2, _rx_2) = add_random_client(&server);
+
+        // emulate send RouteRequest from client_1
+        server.handle_packet(&client_pk_1, Packet::RouteRequest(
+            RouteRequest { peer_pk: client_pk_2 }
+        )).wait().unwrap();
+
+        // emulate send DisconnectNotification from client_1
+        let handle_res = server.handle_packet(&client_pk_1, Packet::DisconnectNotification(
+            DisconnectNotification { connection_id: 16 }
+        )).wait();
+        assert!(handle_res.is_ok());
+    }
+    #[test]
+    fn handle_ping_request() {
+        let server = Server::new();
+        let (client_pk_1, rx_1) = add_random_client(&server);
+
+        // emulate send PingRequest from client_1
+        server.handle_packet(&client_pk_1, Packet::PingRequest(
+            PingRequest { ping_id: 42 }
+        )).wait().unwrap();
+
+        // the server should put PongResponse into rx_1
+        let (packet, _rx_1) = rx_1.into_future().wait().unwrap();
+        assert_eq!(packet.unwrap(), Packet::PongResponse(
+            PongResponse { ping_id: 42 }
+        ));
+    }
+    #[test]
+    fn handle_oob_send() {
+        let server = Server::new();
+        let (client_pk_1, _rx_1) = add_random_client(&server);
+        let (client_pk_2, rx_2) = add_random_client(&server);
+
+        // emulate send OobSend from client_1
+        server.handle_packet(&client_pk_1, Packet::OobSend(
+            OobSend { destination_pk: client_pk_2, data: vec![13; 1024] }
+        )).wait().unwrap();
+
+        // the server should put OobReceive into rx_2
+        let (packet, _rx_2) = rx_2.into_future().wait().unwrap();
+        assert_eq!(packet.unwrap(), Packet::OobReceive(
+            OobReceive { sender_pk: client_pk_1, data: vec![13; 1024] }
+        ));
+    }
+    #[test]
+    fn shutdown_other_not_linked() {
+        let server = Server::new();
+        let (client_pk_1, rx_1) = add_random_client(&server);
+        let (client_pk_2, _rx_2) = add_random_client(&server);
+
+        // emulate send RouteRequest from client_1
+        server.handle_packet(&client_pk_1, Packet::RouteRequest(
+            RouteRequest { peer_pk: client_pk_2 }
+        )).wait().unwrap();
+
+        // the server should put RouteResponse into rx_1
+        let (packet, _rx_1) = rx_1.into_future().wait().unwrap();
+        assert_eq!(packet.unwrap(), Packet::RouteResponse(
+            RouteResponse { pk: client_pk_2, connection_id: 16 }
+        ));
+
+        // emulate shutdown
+        let handle_res = server.shutdown_client(&client_pk_1).wait();
+        assert!(handle_res.is_ok());
+    }
+    #[test]
+    fn handle_data_other_not_linked() {
+        let server = Server::new();
+        let (client_pk_1, rx_1) = add_random_client(&server);
+        let (client_pk_2, _rx_2) = add_random_client(&server);
+
+        // emulate send RouteRequest from client_1
+        server.handle_packet(&client_pk_1, Packet::RouteRequest(
+            RouteRequest { peer_pk: client_pk_2 }
+        )).wait().unwrap();
+
+        // the server should put RouteResponse into rx_1
+        let (packet, _rx_1) = rx_1.into_future().wait().unwrap();
+        assert_eq!(packet.unwrap(), Packet::RouteResponse(
+            RouteResponse { pk: client_pk_2, connection_id: 16 }
+        ));
+
+        // emulate send Data from client_1
+        let handle_res = server.handle_packet(&client_pk_1, Packet::Data(
+            Data { connection_id: 16, data: vec![13, 42] }
+        )).wait();
+        assert!(handle_res.is_ok());
+    }
+
+    ////////////////////////////////////////////////////////////////////////////////////////
+    // Here be all handle_* tests with wrong args
+    #[test]
+    fn handle_route_response() {
+        let server = Server::new();
+        let (client_pk_1, _rx_1) = add_random_client(&server);
+
+        // emulate send RouteResponse from client_1
+        let handle_res = server.handle_packet(&client_pk_1, Packet::RouteResponse(
+            RouteResponse { pk: client_pk_1, connection_id: 42 }
+        )).wait();
+        assert!(handle_res.is_err());
+    }
+    #[test]
+    fn handle_disconnect_notification_0() {
+        let server = Server::new();
+        let (client_pk_1, _rx_1) = add_random_client(&server);
+
+        // emulate send DisconnectNotification from client_1
+        let handle_res = server.handle_packet(&client_pk_1, Packet::DisconnectNotification(
+            DisconnectNotification { connection_id: 0 }
+        )).wait();
+        assert!(handle_res.is_err());
+    }
+    #[test]
+    fn handle_disconnect_notification_not_linked() {
+        let server = Server::new();
+        let (client_pk_1, _rx_1) = add_random_client(&server);
+
+        // emulate send DisconnectNotification from client_1
+        let handle_res = server.handle_packet(&client_pk_1, Packet::DisconnectNotification(
+            DisconnectNotification { connection_id: 16 }
+        )).wait();
+        assert!(handle_res.is_err());
+    }
+    #[test]
+    fn handle_ping_request_0() {
+        let server = Server::new();
+        let (client_pk_1, _rx_1) = add_random_client(&server);
+
+        // emulate send PingRequest from client_1
+        let handle_res = server.handle_packet(&client_pk_1, Packet::PingRequest(
+            PingRequest { ping_id: 0 }
+        )).wait();
+        assert!(handle_res.is_err());
+    }
+    #[test]
+    fn handle_pong_response_0() {
+        let server = Server::new();
+        let (client_pk_1, _rx_1) = add_random_client(&server);
+
+        // emulate send PongResponse from client_1
+        let handle_res = server.handle_packet(&client_pk_1, Packet::PongResponse(
+            PongResponse { ping_id: 0 }
+        )).wait();
+        assert!(handle_res.is_err());
+    }
+    #[test]
+    fn handle_oob_send_empty_data() {
+        let server = Server::new();
+        let (client_pk_1, _rx_1) = add_random_client(&server);
+        let (client_pk_2, _rx_2) = add_random_client(&server);
+
+        // emulate send OobSend from client_1
+        let handle_res = server.handle_packet(&client_pk_1, Packet::OobSend(
+            OobSend { destination_pk: client_pk_2, data: vec![] }
+        )).wait();
+        assert!(handle_res.is_err());
+    }
+    #[test]
+    fn handle_data_0() {
+        let server = Server::new();
+        let (client_pk_1, _rx_1) = add_random_client(&server);
+
+        // emulate send Data from client_1
+        let handle_res = server.handle_packet(&client_pk_1, Packet::Data(
+            Data { connection_id: 0, data: vec![13, 42] }
+        )).wait();
+        assert!(handle_res.is_err());
+    }
+    #[test]
+    fn handle_data_self_not_linked() {
+        let server = Server::new();
+        let (client_pk_1, _rx_1) = add_random_client(&server);
+
+        // emulate send Data from client_1
+        let handle_res = server.handle_packet(&client_pk_1, Packet::Data(
+            Data { connection_id: 16, data: vec![13, 42] }
+        )).wait();
+        assert!(handle_res.is_err());
+    }
+    #[test]
+    fn handle_oob_send_to_loooong_data() {
+        let server = Server::new();
+        let (client_pk_1, _rx_1) = add_random_client(&server);
+        let (client_pk_2, _rx_2) = add_random_client(&server);
+
+        // emulate send OobSend from client_1
+        let handle_res = server.handle_packet(&client_pk_1, Packet::OobSend(
+            OobSend { destination_pk: client_pk_2, data: vec![42; 1024 + 1] }
+        )).wait();
+        assert!(handle_res.is_err());
+    }
+    #[test]
+    fn handle_oob_recv() {
+        let server = Server::new();
+        let (client_pk_1, _rx_1) = add_random_client(&server);
+        let (client_pk_2, _rx_2) = add_random_client(&server);
+
+        // emulate send OobReceive from client_1
+        let handle_res = server.handle_packet(&client_pk_1, Packet::OobReceive(
+            OobReceive { sender_pk: client_pk_2, data: vec![42; 1024] }
+        )).wait();
+        assert!(handle_res.is_err());
+    }
+
+    ////////////////////////////////////////////////////////////////////////////////////////
+    // Here be all handle_* tests from PK or to PK not in connected clients list
+    #[test]
+    fn handle_route_request_not_connected() {
+        let server = Server::new();
+        let (client_pk_1, _) = gen_keypair();
+        let (client_pk_2, _) = gen_keypair();
+
+        // emulate send RouteRequest from client_pk_1
+        let handle_res = server.handle_packet(&client_pk_1, Packet::RouteRequest(
+            RouteRequest { peer_pk: client_pk_2 }
+        )).wait();
+        assert!(handle_res.is_err());
+    }
+    #[test]
+    fn handle_disconnect_notification_not_connected() {
+        let server = Server::new();
+        let (client_pk_1, _) = gen_keypair();
+
+        // emulate send DisconnectNotification from client_1
+        let handle_res = server.handle_packet(&client_pk_1, Packet::DisconnectNotification(
+            DisconnectNotification { connection_id: 42 }
+        )).wait();
+        assert!(handle_res.is_err());
+    }
+    #[test]
+    fn handle_disconnect_notification_other_not_connected() {
+        let server = Server::new();
+        let (client_pk_1, _rx_1) = add_random_client(&server);
+        let (client_pk_2, _) = gen_keypair();
+
+        // emulate send RouteRequest from client_1
+        server.handle_packet(&client_pk_1, Packet::RouteRequest(
+            RouteRequest { peer_pk: client_pk_2 }
+        )).wait().unwrap();
+
+        // emulate send DisconnectNotification from client_1
+        let handle_res = server.handle_packet(&client_pk_1, Packet::DisconnectNotification(
+            DisconnectNotification { connection_id: 16 }
+        )).wait();
+        assert!(handle_res.is_ok());
+    }
+    #[test]
+    fn handle_ping_request_not_connected() {
+        let server = Server::new();
+        let (client_pk_1, _) = gen_keypair();
+
+        // emulate send PingRequest from client_1
+        let handle_res = server.handle_packet(&client_pk_1, Packet::PingRequest(
+            PingRequest { ping_id: 42 }
+        )).wait();
+        assert!(handle_res.is_err());
+    }
+    #[test]
+    fn handle_pong_response_not_connected() {
+        let server = Server::new();
+        let (client_pk_1, _) = gen_keypair();
+
+        // emulate send PongResponse from client_1
+        let handle_res = server.handle_packet(&client_pk_1, Packet::PongResponse(
+            PongResponse { ping_id: 42 }
+        )).wait();
+        assert!(handle_res.is_err());
+    }
+    #[test]
+    fn handle_oob_send_not_connected() {
+        let server = Server::new();
+        let (client_pk_1, _) = gen_keypair();
+        let (client_pk_2, _) = gen_keypair();
+
+        // emulate send OobSend from client_1
+        let handle_res = server.handle_packet(&client_pk_1, Packet::OobSend(
+            OobSend { destination_pk: client_pk_2, data: vec![42; 1024] }
+        )).wait();
+        assert!(handle_res.is_ok());
+    }
+    #[test]
+    fn handle_data_not_connected() {
+        let server = Server::new();
+        let (client_pk_1, _) = gen_keypair();
+
+        // emulate send Data from client_1
+        let handle_res = server.handle_packet(&client_pk_1, Packet::Data(
+            Data { connection_id: 16, data: vec![13, 42] }
+        )).wait();
+        assert!(handle_res.is_err());
+    }
+    #[test]
+    fn handle_data_other_not_connected() {
+        let server = Server::new();
+        let (client_pk_1, rx_1) = add_random_client(&server);
+        let (client_pk_2, _) = gen_keypair();
+
+        // emulate send RouteRequest from client_1
+        server.handle_packet(&client_pk_1, Packet::RouteRequest(
+            RouteRequest { peer_pk: client_pk_2 }
+        )).wait().unwrap();
+
+        // the server should put RouteResponse into rx_1
+        let (packet, _rx_1) = rx_1.into_future().wait().unwrap();
+        assert_eq!(packet.unwrap(), Packet::RouteResponse(
+            RouteResponse { pk: client_pk_2, connection_id: 16 }
+        ));
+
+        // emulate send Data from client_1
+        let handle_res = server.handle_packet(&client_pk_1, Packet::Data(
+            Data { connection_id: 16, data: vec![13, 42] }
+        )).wait();
+        assert!(handle_res.is_ok());
+    }
+    #[test]
+    fn shutdown_not_connected() {
+        let server = Server::new();
+        let (client_pk, _) = gen_keypair();
+
+        // emulate shutdown
+        let handle_res = server.shutdown_client(&client_pk).wait();
+        assert!(handle_res.is_err());
+    }
+    #[test]
+    fn shutdown_other_not_connected() {
+        let server = Server::new();
+        let (client_pk_1, rx_1) = add_random_client(&server);
+        let (client_pk_2, _) = gen_keypair();
+
+        // emulate send RouteRequest from client_1
+        server.handle_packet(&client_pk_1, Packet::RouteRequest(
+            RouteRequest { peer_pk: client_pk_2 }
+        )).wait().unwrap();
+
+        // the server should put RouteResponse into rx_1
+        let (packet, _rx_1) = rx_1.into_future().wait().unwrap();
+        assert_eq!(packet.unwrap(), Packet::RouteResponse(
+            RouteResponse { pk: client_pk_2, connection_id: 16 }
+        ));
+
+        // emulate shutdown
+        let handle_res = server.shutdown_client(&client_pk_1).wait();
+        assert!(handle_res.is_ok());
+    }
+    #[test]
+    fn send_anything_to_dropped_client() {
+        let server = Server::new();
+        let (client_pk_1, rx_1) = add_random_client(&server);
+        let (client_pk_2, _rx_2) = add_random_client(&server);
+
+        drop(rx_1);
+
+        // emulate send RouteRequest from client_1
+        let handle_res = server.handle_packet(&client_pk_1, Packet::RouteRequest(
+            RouteRequest { peer_pk: client_pk_2 }
+        )).wait();
+        assert!(handle_res.is_err())
+    }
+}
