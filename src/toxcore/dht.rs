@@ -52,6 +52,7 @@ use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 use toxcore::packet_kind::PacketKind;
 
+use cookie_factory::*;
 
 
 /// Length in bytes of [`PingReq`](./struct.PingReq.html) and
@@ -111,31 +112,28 @@ macro_rules! impls_for_pings {
         [`PING_SIZE`](./constant.PING_SIZE.html) bytes from supplied slice
         as `Ping`.
         */
-        from_bytes!($n, do_parse!(
-            packet_t: call!(PacketKind::parse_bytes) >>
-            id: cond_reduce!(
-                packet_t == PacketKind::$n,
-                ne_u64
-            ) >>
-            ($n {
-                id: id
-            })
-        ));
+        
+        // 2017.12.31 added
+        impl FromBytes for $n {
+            named!(from_bytes<$n>, do_parse!(
+                packet_t: call!(PacketKind::parse_bytes) >>
+                id: cond_reduce!(
+                    packet_t == PacketKind::$n,
+                    ne_u64
+                ) >>
+                ($n {
+                    id: id
+                })
+            ));
+        }
 
         /// Serialize to bytes.
         impl ToBytes for $n {
-            fn to_bytes(&self) -> Vec<u8> {
-                let pname = stringify!($n);
-                debug!(target: pname, "Serializing {} into bytes.", pname);
-                trace!(target: pname, "With {}: {:?}", pname, self);
-                let mut res = Vec::with_capacity(PING_SIZE);
-                // `PingType`
-                res.push(self.kind() as u8);
-                // And random ping_id as bytes
-                res.write_u64::<NativeEndian>(self.id)
-                    .expect("Failed to write Ping id!");
-                trace!("Serialized Ping: {:?}", &res);
-                res
+            fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+                do_gen!(buf,
+                    gen_be_u8!(self.kind() as u8) >>
+                    gen_be_u64!(self.id)
+                )
             }
         }
     )+)
@@ -193,28 +191,40 @@ pub enum IpType {
 
 /// Match first byte from the provided slice as `IpType`. If no match found,
 /// return `None`.
-from_bytes!(IpType, switch!(le_u8,
-    2   => value!(IpType::U4) |
-    10  => value!(IpType::U6) |
-    130 => value!(IpType::T4) |
-    138 => value!(IpType::T6)
-));
-
+impl FromBytes for IpType {
+    named!(from_bytes<IpType>, switch!(le_u8,
+        2   => value!(IpType::U4) |
+        10  => value!(IpType::U6) |
+        130 => value!(IpType::T4) |
+        138 => value!(IpType::T6)
+    ));
+}
 
 // TODO: move it somewhere else
 impl ToBytes for IpAddr {
-    fn to_bytes(&self) -> Vec<u8> {
-        debug!(target: "IpAddr", "Serializing IpAddr to bytes.");
-        trace!(target: "IpAddr", "With IpAddr: {:?}", self);
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         match *self {
-            IpAddr::V4(a) => a.octets().to_vec(),
+            IpAddr::V4(a) => {
+                let oct = a.octects();
+                do_gen!(buf,
+                    gen_le_u8!(oct[0]) >>
+                    gen_le_u8!(oct[1]) >>
+                    gen_le_u8!(oct[2]) >>
+                    gen_le_u8!(oct[3])
+                )
+            },
             IpAddr::V6(a) => {
-                let mut result: Vec<u8> = vec![];
-                for n in &a.segments() {
-                    result.write_u16::<LittleEndian>(*n) // TODO: check if LittleEndian is correct here
-                        .expect("Failed to write Ipv6Addr segments!");
-                }
-                result
+                let segs = a.segments();
+                do_gen!(buf,
+                    gen_le_u16!(segs[0]) >>
+                    gen_le_u16!(segs[1]) >>
+                    gen_le_u16!(segs[2]) >>
+                    gen_le_u16!(segs[3]) >>
+                    gen_le_u16!(segs[4]) >>
+                    gen_le_u16!(segs[5]) >>
+                    gen_le_u16!(segs[6]) >>
+                    gen_le_u16!(segs[7])
+                )
             }
         }
     }
@@ -223,12 +233,20 @@ impl ToBytes for IpAddr {
 // TODO: move it somewhere else
 /// Fail if there are less than 4 bytes supplied, otherwise parses first
 /// 4 bytes as an `Ipv4Addr`.
-from_bytes!(Ipv4Addr, map!(take!(4), |bytes| Ipv4Addr::new(bytes[0], bytes[1], bytes[2], bytes[3])));
+impl FromBytes for Ipv4Addr {
+    named!(from_bytes<Ipv4Addr>, map!(count!(le_u8, 4), 
+        |v| Ipv4Addr::new(v[0], v[1], v[2], v[3])
+    ));
+}
 
 // TODO: move it somewhere else
 /// Fail if there are less than 16 bytes supplied, otherwise parses first
 /// 16 bytes as an `Ipv6Addr`.
-from_bytes!(Ipv6Addr, map!(count!(le_u16, 8), |v| Ipv6Addr::new(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7])));
+impl FromBytes for Ipv6Addr {
+    named!(from_bytes<Ipv6Addr>, map!(count!(le_u16, 8), 
+        |v| Ipv6Addr::new(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7])
+    ));
+}
 
 
 /** `PackedNode` format is a way to store the node info in a small yet easy to
@@ -404,13 +422,14 @@ Blindly trusts that provided `IpType` matches - i.e. if there are provided
 says that it's actually IPv4, bytes will be parsed as if that was an IPv4
 address.
 */
-from_bytes!(PackedNode, switch!(call!(IpType::parse_bytes),
-    IpType::U4 => call!(as_ipv4_packed_node, IpType::U4) |
-    IpType::T4 => call!(as_ipv4_packed_node, IpType::T4) |
-    IpType::U6 => call!(as_ipv6_packed_node, IpType::U6) |
-    IpType::T6 => call!(as_ipv6_packed_node, IpType::T6)
-));
-
+impl FromBytes for PackedNode {
+    named!(from_bytes<PackedNode>, switch!(call!(IpType::parse_bytes),
+        IpType::U4 => call!(as_ipv4_packed_node, IpType::U4) |
+        IpType::T4 => call!(as_ipv4_packed_node, IpType::T4) |
+        IpType::U6 => call!(as_ipv6_packed_node, IpType::U6) |
+        IpType::T6 => call!(as_ipv6_packed_node, IpType::T6)
+    ));
+}
 
 /** Request to get address of given DHT PK, or nodes that are closest in DHT
 to the given PK.
@@ -465,16 +484,11 @@ impl DhtPacketT for GetNodes {
 /// Serialization of `GetNodes`. Resulting length should be
 /// [`GET_NODES_SIZE`](./constant.GET_NODES_SIZE.html).
 impl ToBytes for GetNodes {
-    fn to_bytes(&self) -> Vec<u8> {
-        debug!(target: "GetNodes", "Serializing GetNodes as bytes.");
-        trace!(target: "GetNodes", "With GetNodes: {:?}", self);
-        let mut result = Vec::with_capacity(GET_NODES_SIZE);
-        let PublicKey(pk_bytes) = self.pk;
-        result.extend_from_slice(&pk_bytes);
-        result.write_u64::<NativeEndian>(self.id)
-            .expect("Failed to write GetNodes id!");
-        trace!("Resulting bytes: {:?}", &result);
-        result
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_slice!(self.pk.as_ref()) >>
+            gen_be_u64!(self.id)
+        )
     }
 }
 
@@ -482,12 +496,13 @@ impl ToBytes for GetNodes {
 [`GET_NODES_SIZE`](./constant.GET_NODES_SIZE.html) bytes are provided,
 de-serialization will fail, returning `None`.
 */
-from_bytes!(GetNodes, do_parse!(
-    pk: call!(PublicKey::parse_bytes) >>
-    id: ne_u64 >>
-    (GetNodes { pk: pk, id: id })
-));
-
+impl FromBytes for GetNodes {
+    named!(from_bytes<GetNodes>, do_parse!(
+        pk: call!(PublicKey::parse_bytes) >>
+        id: ne_u64 >>
+        (GetNodes { pk: pk, id: id })
+    ));
+}
 
 /** Response to [`GetNodes`](./struct.GetNodes.html) request, containing up to
 `4` nodes closest to the requested node.
@@ -549,18 +564,11 @@ impl DhtPacketT for SendNodes {
 /// Method assumes that supplied `SendNodes` has correct number of nodes
 /// included – `[1, 4]`.
 impl ToBytes for SendNodes {
-    fn to_bytes(&self) -> Vec<u8> {
-        debug!(target: "SendNodes", "Serializing SendNodes into bytes.");
-        trace!(target: "SendNodes", "With SendNodes: {:?}", self);
-        // first byte is number of nodes
-        let mut result: Vec<u8> = vec![self.nodes.len() as u8];
-        for node in &*self.nodes {
-            result.extend_from_slice(&node.to_bytes());
-        }
-        result.write_u64::<NativeEndian>(self.id)
-            .expect("Failed to write SendNodes id!");
-        trace!("Resulting bytes: {:?}", &result);
-        result
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_slice!(self.nodes.as_ref()) >>
+            gen_be_u64!(self.id)
+        )
     }
 }
 
@@ -568,18 +576,20 @@ impl ToBytes for SendNodes {
 
     Returns `None` if bytes can't be parsed into `SendNodes`.
 */
-from_bytes!(SendNodes, do_parse!(
-    nodes_number: le_u8 >>
-    nodes: cond_reduce!(
-        nodes_number > 0 && nodes_number <= 4,
-        count!(PackedNode::parse_bytes, nodes_number as usize)
-    ) >>
-    id: ne_u64 >>
-    (SendNodes {
-        nodes: nodes,
-        id: id
-    })
-));
+impl FromBytes for SendNodes {
+    named!(from_bytes<SendNodes>, do_parse!(
+        nodes_number: le_u8 >>
+        nodes: cond_reduce!(
+            nodes_number > 0 && nodes_number <= 4,
+            count!(PackedNode::parse_bytes, nodes_number as usize)
+        ) >>
+        id: ne_u64 >>
+        (SendNodes {
+            nodes: nodes,
+            id: id
+        })
+    ));
+}
 
 /// Trait for types of DHT packets that can be put in [`DhtPacket`]
 /// (./struct.DhtPacket.html).
@@ -737,42 +747,35 @@ impl DhtPacket {
 
 /// Serialize `DhtPacket` into bytes.
 impl ToBytes for DhtPacket {
-    fn to_bytes(&self) -> Vec<u8> {
-        debug!(target: "DhtPacket", "Serializing DhtPacket into bytes.");
-        trace!(target: "DhtPacket", "With DhtPacket: {:?}", self);
-        let mut result = Vec::with_capacity(DHT_PACKET_MIN_SIZE);
-        result.push(self.packet_type as u8);
-
-        let PublicKey(pk) = self.sender_pk;
-        result.extend_from_slice(&pk);
-
-        let Nonce(nonce) = self.nonce;
-        result.extend_from_slice(&nonce);
-
-        result.extend_from_slice(&self.payload);
-        trace!("Resulting bytes: {:?}", &result);
-        result
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_be_u8!(self.packet_type as u8) >>
+            gen_slice!(self.sender_pk.as_ref()) >>
+            gen_slice!(self.nonce.as_ref()) >>
+            gen_slice!(self.payload.as_slice())
+        )
     }
 }
 
 /// De-serialize bytes into `DhtPacket`.
-from_bytes!(DhtPacket, do_parse!(
-    packet_type: verify!(call!(PacketKind::parse_bytes), |packet_type| match packet_type {
-        PacketKind::PingReq | PacketKind::PingResp |
-        PacketKind::GetN | PacketKind::SendN => true,
-        _ => false
-    }) >>
-    sender_pk: call!(PublicKey::parse_bytes) >>
-    nonce: call!(Nonce::parse_bytes) >>
-    payload: map!(rest, |bytes| bytes.to_vec() ) >>
-    (DhtPacket {
-        packet_type: packet_type,
-        sender_pk: sender_pk,
-        nonce: nonce,
-        payload: payload
-    })
-));
-
+impl FromBytes for DhtPacket {
+    named!(from_bytes<DhtPacket>, do_parse!(
+        packet_type: verify!(call!(PacketKind::parse_bytes), |packet_type| match packet_type {
+            PacketKind::PingReq | PacketKind::PingResp |
+            PacketKind::GetN | PacketKind::SendN => true,
+            _ => false
+        }) >>
+        sender_pk: call!(PublicKey::parse_bytes) >>
+        nonce: call!(Nonce::parse_bytes) >>
+        payload: map!(rest, |bytes| bytes.to_vec() ) >>
+        (DhtPacket {
+            packet_type: packet_type,
+            sender_pk: sender_pk,
+            nonce: nonce,
+            payload: payload
+        })
+    ));
+}
 
 /// Trait for functionality related to distance between `PublicKey`s.
 pub trait Distance {
@@ -1334,25 +1337,23 @@ macro_rules! impls_for_nat_pings {
 
         impl DhtRequestT for $np {}
 
-        from_bytes!($np, do_parse!(
-            tag!(&[NAT_PING_TYPE][..]) >>
-            p: call!($p::parse_bytes) >>
-            ($np(p))
-        ));
+        impl FromBytes for $np {
+            named!(from_bytes<$np>, do_parse!(
+                tag!(&[NAT_PING_TYPE][..]) >>
+                p: call!($p::parse_bytes) >>
+                ($np(p))
+            ));
+        }
 
         /// Serializes into bytes.
         impl ToBytes for $np {
-            fn to_bytes(&self) -> Vec<u8> {
-                debug!(target: "NatPing", "Serializing NatPing into bytes.");
-                let mut result = Vec::with_capacity(NAT_PING_SIZE);
-
+            fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
                 // special, "magic" type of NatPing, according to spec:
                 // https://zetok.github.io/tox-spec/#nat-ping-request
-                result.push(NAT_PING_TYPE);
-                // and the rest of stuff inherited from `Ping`
-                result.extend_from_slice($p::to_bytes(self).as_slice());
-                trace!("Serialized {}: {:?}", stringify!($np), &result);
-                result
+                do_gen!(buf,
+                    gen_be_u8!(NAT_PING_TYPE) >>
+                    gen_slice!($p::to_bytes(self).as_slice())
+                )
             }
         }
 
