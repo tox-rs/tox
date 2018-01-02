@@ -425,38 +425,58 @@ pub const DHT_PACKET_MIN_SIZE: usize = 1 // packet type, plain
                                      + MACBYTES
                                      + PING_SIZE; // smallest payload
 
-/// Serialize `DhtPacket` into bytes.
 impl ToBytes for DhtPacket {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        do_gen!(buf,
-            gen_be_u8!(self.packet_type as u8) >>
-            gen_slice!(self.sender_pk.as_ref()) >>
-            gen_slice!(self.nonce.as_ref()) >>
-            gen_slice!(self.payload.as_slice())
-        )
+        match *self {
+            DhtPacket::PingReq(ref p) => p.to_bytes(buf),
+            DhtPacket::PingResp(ref p) => p.to_bytes(buf),
+            DhtPacket::GetN(ref p) => p.to_bytes(buf),
+            DhtPacket::SendN(ref p) => p.to_bytes(buf),
+            DhtPacket::CookieReq(ref p) => p.to_bytes(buf),
+            DhtPacket::CookieResp(ref p) => p.to_bytes(buf),
+            DhtPacket::CryptoHs(ref p) => p.to_bytes(buf),
+            DhtPacket::CryptoData(ref p) => p.to_bytes(buf),
+            DhtPacket::DhtReq(ref p) => p.to_bytes(buf),
+            DhtPacket::LanDisc(ref p) => p.to_bytes(buf),
+            DhtPacket::OnionReq0(ref p) => p.to_bytes(buf),
+            DhtPacket::OnionReq1(ref p) => p.to_bytes(buf),
+            DhtPacket::OnionReq2(ref p) => p.to_bytes(buf),
+            DhtPacket::AnnReq(ref p) => p.to_bytes(buf),
+            DhtPacket::AnnResp(ref p) => p.to_bytes(buf),
+            DhtPacket::OnionDataReq(ref p) => p.to_bytes(buf),
+            DhtPacket::OnionDataResp(ref p) => p.to_bytes(buf),
+            DhtPacket::OnionResp3(ref p) => p.to_bytes(buf),
+            DhtPacket::OnionResp2(ref p) => p.to_bytes(buf),
+            DhtPacket::OnionResp1(ref p) => p.to_bytes(buf),
+        }
     }
 }
-
 /// De-serialize bytes into `DhtPacket`.
 impl FromBytes for DhtPacket {
-    named!(from_bytes<DhtPacket>, do_parse!(
-        packet_type: verify!(call!(PacketKind::parse_bytes), |packet_type| match packet_type {
-            PacketKind::PingReq | PacketKind::PingResp |
-            PacketKind::GetN | PacketKind::SendN => true,
-            _ => false
-        }) >>
-        sender_pk: call!(PublicKey::parse_bytes) >>
-        nonce: call!(Nonce::parse_bytes) >>
-        payload: map!(rest, |bytes| bytes.to_vec() ) >>
-        (DhtPacket {
-            packet_type: packet_type,
-            sender_pk: sender_pk,
-            nonce: nonce,
-            payload: payload
-        })
+    named!(from_bytes<DhtPacket>, alt!(
+        map!(PingReq::from_bytes, DhtPacket::PingReq) |
+        map!(PingResp::from_bytes, DhtPacket::PingResp) |
+        map!(GetN::from_bytes, DhtPacket::GetN) |
+        map!(SendN::from_bytes, DhtPacket::SendN) |
+        map!(CookieReq::from_bytes, DhtPacket::CookieReq) |
+        map!(CookieResp::from_bytes, DhtPacket::CookieResp) |
+        map!(CryptoHs::from_bytes, DhtPacket::CryptoHs) |
+        map!(CryptoData::from_bytes, DhtPacket::CryptoData) |
+        map!(DhtReq::from_bytes, DhtPacket::DhtReq) |
+        map!(LanDisc::from_bytes, DhtPacket::LanDisc) |
+        map!(OnionReq0::from_bytes, DhtPacket::OnionReq0) |
+        map!(OnionReq1::from_bytes, DhtPacket::OnionReq1) |
+        map!(OnionReq2::from_bytes, DhtPacket::OnionReq2) |
+        map!(AnnReq::from_bytes, DhtPacket::AnnReq) |
+        map!(AnnResp::from_bytes, DhtPacket::AnnResp) |
+        map!(OnionDataReq::from_bytes, DhtPacket::OnionDataReq) |
+        map!(OnionDataResp::from_bytes, DhtPacket::OnionDataResp) |
+        map!(OnionResp3::from_bytes, DhtPacket::OnionResp3) |
+        map!(OnionResp2::from_bytes, DhtPacket::OnionResp2) |
+        map!(OnionResp1::from_bytes, DhtPacket::OnionResp1)
     ));
 }
-
+ 
 /**
 Structure for holding nodes.
 
