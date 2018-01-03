@@ -409,12 +409,55 @@ variable    | Encrypted payload
 https://zetok.github.io/tox-spec/#dht-packet
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DhtPacket {
-    packet_type: PacketKind,
-    /// Public key of sender.
-    pub sender_pk: PublicKey,
-    nonce: Nonce,
-    payload: Vec<u8>,
+pub enum DhtPacket {
+    /// [`PingReq`](./struct.PingReq.html) structure.
+    PingReq(PingReq),
+    /// [`PingResp`](./struct.PingResp.html) structure.
+    PingResp(PingResp),
+    /// [`GetN`](./struct.GetN.html) structure.
+    GetN(GetN),
+    /// [`SendN`](./struct.SendN.html) structure.
+    SendN(SendN),
+    /// [`CookieReq`](./struct.CookieReq.html) structure.
+    CookieReq(CookieReq),
+    /// [`CookieResp`](./struct.CookieResp.html) structure.
+    CookieResp(CookieResp),
+    /// [`CryptoHs`](./struct.CryptoHs.html) structure.
+    CryptoHs(CryptoHs),
+    /// [`CryptoData`](./struct.CryptoData.html) structure.
+    CryptoData(CryptoData),
+    /// [`DhtReq`](./struct.DhtReq.html) structure.
+    DhtReq(DhtReq),
+    /// [`LanDisc`](./struct.LanDisc.html) structure.
+    LanDisc(LanDisc),
+    /// [`OnionReq0`](./struct.OnionReq0.html) structure.
+    // TODO
+    // OnionReq0(OnionReq0),
+    // /// [`OnionReq1`](./struct.OnionReq1.html) structure.
+    // TODO
+    // OnionReq1(OnionReq1),
+    // /// [`OnionReq2`](./struct.OnionReq2.html) structure.
+    // TODO
+    // OnionReq2(OnionReq2),
+    /// [`AnnReq`](./struct.AnnReq.html) structure.
+    AnnReq(AnnReq),
+    /// [`AnnResp`](./struct.AnnResp.html) structure.
+    AnnResp(AnnResp),
+    /// [`OnionDataReq`](./struct.OnionDataReq.html) structure.
+    // TODO
+    // OnionDataReq(OnionDataReq),
+    // /// [`OnionDataResp`](./struct.OnionDataResp.html) structure.
+    // TODO
+    // OnionDataResp(OnionDataResp),
+    /// [`OnionResp3`](./struct.OnionResp3.html) structure.
+    // TODO
+    // OnionResp3(OnionResp3),
+    // /// [`OnionResp2`](./struct.OnionResp2.html) structure.
+    // TODO
+    // OnionResp2(OnionResp2),
+    // /// [`OnionResp1`](./struct.OnionResp1.html) structure.
+    // TODO
+    // OnionResp1(OnionResp1),
 }
 
 // TODO: max dht_packet size?
@@ -438,16 +481,16 @@ impl ToBytes for DhtPacket {
             DhtPacket::CryptoData(ref p) => p.to_bytes(buf),
             DhtPacket::DhtReq(ref p) => p.to_bytes(buf),
             DhtPacket::LanDisc(ref p) => p.to_bytes(buf),
-            DhtPacket::OnionReq0(ref p) => p.to_bytes(buf),
-            DhtPacket::OnionReq1(ref p) => p.to_bytes(buf),
-            DhtPacket::OnionReq2(ref p) => p.to_bytes(buf),
+            // DhtPacket::OnionReq0(ref p) => p.to_bytes(buf),
+            // DhtPacket::OnionReq1(ref p) => p.to_bytes(buf),
+            // DhtPacket::OnionReq2(ref p) => p.to_bytes(buf),
             DhtPacket::AnnReq(ref p) => p.to_bytes(buf),
             DhtPacket::AnnResp(ref p) => p.to_bytes(buf),
-            DhtPacket::OnionDataReq(ref p) => p.to_bytes(buf),
-            DhtPacket::OnionDataResp(ref p) => p.to_bytes(buf),
-            DhtPacket::OnionResp3(ref p) => p.to_bytes(buf),
-            DhtPacket::OnionResp2(ref p) => p.to_bytes(buf),
-            DhtPacket::OnionResp1(ref p) => p.to_bytes(buf),
+            // DhtPacket::OnionDataReq(ref p) => p.to_bytes(buf),
+            // DhtPacket::OnionDataResp(ref p) => p.to_bytes(buf),
+            // DhtPacket::OnionResp3(ref p) => p.to_bytes(buf),
+            // DhtPacket::OnionResp2(ref p) => p.to_bytes(buf),
+            // DhtPacket::OnionResp1(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -464,16 +507,16 @@ impl FromBytes for DhtPacket {
         map!(CryptoData::from_bytes, DhtPacket::CryptoData) |
         map!(DhtReq::from_bytes, DhtPacket::DhtReq) |
         map!(LanDisc::from_bytes, DhtPacket::LanDisc) |
-        map!(OnionReq0::from_bytes, DhtPacket::OnionReq0) |
-        map!(OnionReq1::from_bytes, DhtPacket::OnionReq1) |
-        map!(OnionReq2::from_bytes, DhtPacket::OnionReq2) |
+        // map!(OnionReq0::from_bytes, DhtPacket::OnionReq0) |
+        // map!(OnionReq1::from_bytes, DhtPacket::OnionReq1) |
+        // map!(OnionReq2::from_bytes, DhtPacket::OnionReq2) |
         map!(AnnReq::from_bytes, DhtPacket::AnnReq) |
-        map!(AnnResp::from_bytes, DhtPacket::AnnResp) |
-        map!(OnionDataReq::from_bytes, DhtPacket::OnionDataReq) |
-        map!(OnionDataResp::from_bytes, DhtPacket::OnionDataResp) |
-        map!(OnionResp3::from_bytes, DhtPacket::OnionResp3) |
-        map!(OnionResp2::from_bytes, DhtPacket::OnionResp2) |
-        map!(OnionResp1::from_bytes, DhtPacket::OnionResp1)
+        map!(AnnResp::from_bytes, DhtPacket::AnnResp)
+        // map!(OnionDataReq::from_bytes, DhtPacket::OnionDataReq) |
+        // map!(OnionDataResp::from_bytes, DhtPacket::OnionDataResp) |
+        // map!(OnionResp3::from_bytes, DhtPacket::OnionResp3) |
+        // map!(OnionResp2::from_bytes, DhtPacket::OnionResp2) |
+        // map!(OnionResp1::from_bytes, DhtPacket::OnionResp1)
     ));
 }
  
