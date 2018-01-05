@@ -1,6 +1,7 @@
 /*
     Copyright (C) 2013 Tox project All Rights Reserved.
     Copyright © 2016-2017 Zetok Zalbavar <zexavexxe@gmail.com>
+    Copyright © 2018 Namsoo CHO <nscho66@gmail.com>
 
     This file is part of Tox.
 
@@ -27,17 +28,17 @@
 */
 
 
-use byteorder::{
-    BigEndian,
-    LittleEndian,
-    NativeEndian,
-    WriteBytesExt
-};
-use nom::{be_u16, le_u8, le_u16, rest};
+// use byteorder::{
+//     BigEndian,
+//     LittleEndian,
+//     NativeEndian,
+//     WriteBytesExt
+// };
+use nom::{le_u8, le_u16, be_u64, be_u16, rest};
 
-use std::cmp::{Ord, Ordering};
-use std::convert::From;
-use std::fmt::Debug;
+//use std::cmp::{Ord, Ordering};
+//use std::convert::From;
+//use std::fmt::Debug;
 use std::net::{
     IpAddr,
     Ipv4Addr,
@@ -46,13 +47,13 @@ use std::net::{
     SocketAddrV4,
     SocketAddrV6
 };
-use std::ops::Deref;
+//use std::ops::Deref;
 
-use toxcore::binary_io::*;
+use toxcore::dht_new::binary_io::*;
 use toxcore::crypto_core::*;
-use toxcore::packet_kind::PacketKind;
+//use toxcore::packet_kind::PacketKind;
 
-use cookie_factory::*;
+use toxcore::dht_new::cookie_factory::*;
 
 
 /// Length in bytes of [`PingReq`](./struct.PingReq.html) and
@@ -89,28 +90,42 @@ pub const PING_SIZE: usize = 9;
         to [`PingReq`](./struct.PingReq.html).
         */
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct $n {
-    id: u64,
+pub struct PingReq {
+     id: u64,
 }
 
-impl FromBytes for $n {
-    named!(from_bytes<$n>, do_parse!(
-        packet_t: call!(PacketKind::parse_bytes) >>
-        id: cond_reduce!(
-            packet_t == PacketKind::$n,
-            ne_u64
-        ) >>
-        ($n {
-            id: id
-        })
+impl FromBytes for PingReq {
+    named!(from_bytes<PingReq>, do_parse!(
+        id: be_u64 >>
+        (PingReq { id: id})
     ));
 }
 
 /// Serialize to bytes.
-impl ToBytes for $n {
+impl ToBytes for PingReq {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
-            gen_be_u8!(self.kind() as u8) >>
+            gen_be_u64!(self.id)
+        )
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct PingResp {
+     id: u64,
+}
+
+impl FromBytes for PingResp {
+    named!(from_bytes<PingResp>, do_parse!(
+        id: be_u64 >>
+        (PingResp { id: id})
+    ));
+}
+
+/// Serialize to bytes.
+impl ToBytes for PingResp {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
             gen_be_u64!(self.id)
         )
     }
@@ -161,28 +176,8 @@ impl FromBytes for IpType {
 impl ToBytes for IpAddr {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         match *self {
-            IpAddr::V4(a) => {
-                let oct = a.octects();
-                do_gen!(buf,
-                    gen_le_u8!(oct[0]) >>
-                    gen_le_u8!(oct[1]) >>
-                    gen_le_u8!(oct[2]) >>
-                    gen_le_u8!(oct[3])
-                )
-            },
-            IpAddr::V6(a) => {
-                let segs = a.segments();
-                do_gen!(buf,
-                    gen_le_u16!(segs[0]) >>
-                    gen_le_u16!(segs[1]) >>
-                    gen_le_u16!(segs[2]) >>
-                    gen_le_u16!(segs[3]) >>
-                    gen_le_u16!(segs[4]) >>
-                    gen_le_u16!(segs[5]) >>
-                    gen_le_u16!(segs[6]) >>
-                    gen_le_u16!(segs[7])
-                )
-            }
+            IpAddr::V4(ref p) => p.to_bytes(buf),
+            IpAddr::V6(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -196,6 +191,18 @@ impl FromBytes for Ipv4Addr {
     ));
 }
 
+impl ToBytes for Ipv4Addr {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        let mut o = self.octets();
+        do_gen!(buf,
+            gen_be_u8!(o[0]) >>
+            gen_be_u8!(o[1]) >>
+            gen_be_u8!(o[2]) >>
+            gen_be_u8!(o[3]) 
+        )
+    }
+}
+
 // TODO: move it somewhere else
 /// Fail if there are less than 16 bytes supplied, otherwise parses first
 /// 16 bytes as an `Ipv6Addr`.
@@ -205,6 +212,21 @@ impl FromBytes for Ipv6Addr {
     ));
 }
 
+impl ToBytes for Ipv6Addr {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        let s = self.segments();
+        do_gen!(buf,
+            gen_le_u16!(s[0]) >>
+            gen_le_u16!(s[1]) >>
+            gen_le_u16!(s[2]) >>
+            gen_le_u16!(s[3]) >>
+            gen_le_u16!(s[4]) >>
+            gen_le_u16!(s[5]) >>
+            gen_le_u16!(s[6]) >>
+            gen_le_u16!(s[7]) 
+        )
+    }
+}
 
 /** `PackedNode` format is a way to store the node info in a small yet easy to
 parse format.
@@ -255,11 +277,13 @@ IPv4 or IPv6 is being used.
 */
 impl ToBytes for PackedNode {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        let mut ip_addr: [u8; 16] = [0; 16];
+        self.saddr.ip().to_bytes((&mut ip_addr, 16));
         do_gen!(buf,
             gen_be_u8!(self.ip_type as u8) >>
-            gen_slice!(self.ip().to_bytes().as_slice()) >>
+            gen_slice!(ip_addr) >>
             gen_be_u16!(self.saddr.port()) >>
-            gen_slice!(self.pk.as_slice())
+            gen_slice!(self.pk.as_ref())
         )
     }
 }
@@ -277,15 +301,39 @@ Blindly trusts that provided `IpType` matches - i.e. if there are provided
 says that it's actually IPv4, bytes will be parsed as if that was an IPv4
 address.
 */
+named_args!(as_ipv4_packed_node(iptype: IpType) <PackedNode>, do_parse!(
+    addr: call!(Ipv4Addr::from_bytes) >>
+    port: be_u16 >>
+    saddr: value!(SocketAddrV4::new(addr, port)) >>
+    pk: call!(PublicKey::from_bytes) >>
+    (PackedNode {
+        ip_type: iptype,
+        saddr: SocketAddr::V4(saddr),
+        pk: pk
+    })
+));
+
+// Parse bytes as an IPv6 PackedNode.
+named_args!(as_ipv6_packed_node(iptype: IpType) <PackedNode>, do_parse!(
+    addr: call!(Ipv6Addr::from_bytes) >>
+    port: be_u16 >>
+    saddr: value!(SocketAddrV6::new(addr, port, 0, 0)) >>
+    pk: call!(PublicKey::from_bytes) >>
+    (PackedNode {
+        ip_type: iptype,
+        saddr: SocketAddr::V6(saddr),
+        pk: pk
+    })
+));
+
 impl FromBytes for PackedNode {
-    named!(from_bytes<PackedNode>, switch!(call!(IpType::parse_bytes),
+    named!(from_bytes<PackedNode>, switch!(call!(IpType::from_bytes),
         IpType::U4 => call!(as_ipv4_packed_node, IpType::U4) |
         IpType::T4 => call!(as_ipv4_packed_node, IpType::T4) |
         IpType::U6 => call!(as_ipv6_packed_node, IpType::U6) |
         IpType::T6 => call!(as_ipv6_packed_node, IpType::T6)
     ));
 }
-
 /** Request to get address of given DHT PK, or nodes that are closest in DHT
 to the given PK.
 
@@ -328,8 +376,8 @@ de-serialization will fail, returning `None`.
 */
 impl FromBytes for GetNodes {
     named!(from_bytes<GetNodes>, do_parse!(
-        pk: call!(PublicKey::parse_bytes) >>
-        id: ne_u64 >>
+        pk: call!(PublicKey::from_bytes) >>
+        id: be_u64 >>
         (GetNodes { pk: pk, id: id })
     ));
 }
@@ -369,7 +417,7 @@ pub struct SendNodes {
 impl ToBytes for SendNodes {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
-            gen_slice!(self.nodes.as_ref()) >>
+            gen_many_ref!(self.nodes, PackedNode::to_bytes) >>
             gen_be_u64!(self.id)
         )
     }
@@ -384,9 +432,9 @@ impl FromBytes for SendNodes {
         nodes_number: le_u8 >>
         nodes: cond_reduce!(
             nodes_number > 0 && nodes_number <= 4,
-            count!(PackedNode::parse_bytes, nodes_number as usize)
+            count!(PackedNode::from_bytes, nodes_number as usize)
         ) >>
-        id: ne_u64 >>
+        id: be_u64 >>
         (SendNodes {
             nodes: nodes,
             id: id
@@ -415,22 +463,22 @@ pub enum DhtPacket {
     /// [`PingResp`](./struct.PingResp.html) structure.
     PingResp(PingResp),
     /// [`GetN`](./struct.GetN.html) structure.
-    GetN(GetN),
+    GetNodes(GetNodes),
     /// [`SendN`](./struct.SendN.html) structure.
-    SendN(SendN),
-    /// [`CookieReq`](./struct.CookieReq.html) structure.
-    CookieReq(CookieReq),
-    /// [`CookieResp`](./struct.CookieResp.html) structure.
-    CookieResp(CookieResp),
-    /// [`CryptoHs`](./struct.CryptoHs.html) structure.
-    CryptoHs(CryptoHs),
+    SendNodes(SendNodes),
+    // /// [`CookieReq`](./struct.CookieReq.html) structure.
+    //CookieReq(CookieReq),
+    // /// [`CookieResp`](./struct.CookieResp.html) structure.
+    // CookieResp(CookieResp),
+    // /// [`CryptoHs`](./struct.CryptoHs.html) structure.
+    //CryptoHs(CryptoHs),
     /// [`CryptoData`](./struct.CryptoData.html) structure.
-    CryptoData(CryptoData),
+    //CryptoData(CryptoData),
     /// [`DhtReq`](./struct.DhtReq.html) structure.
-    DhtReq(DhtReq),
-    /// [`LanDisc`](./struct.LanDisc.html) structure.
-    LanDisc(LanDisc),
-    /// [`OnionReq0`](./struct.OnionReq0.html) structure.
+    DhtRequest(DhtRequest),
+    // /// [`LanDisc`](./struct.LanDisc.html) structure.
+    //LanDisc(LanDisc),
+    // /// [`OnionReq0`](./struct.OnionReq0.html) structure.
     // TODO
     // OnionReq0(OnionReq0),
     // /// [`OnionReq1`](./struct.OnionReq1.html) structure.
@@ -439,17 +487,17 @@ pub enum DhtPacket {
     // /// [`OnionReq2`](./struct.OnionReq2.html) structure.
     // TODO
     // OnionReq2(OnionReq2),
-    /// [`AnnReq`](./struct.AnnReq.html) structure.
-    AnnReq(AnnReq),
-    /// [`AnnResp`](./struct.AnnResp.html) structure.
-    AnnResp(AnnResp),
-    /// [`OnionDataReq`](./struct.OnionDataReq.html) structure.
+    // /// [`AnnReq`](./struct.AnnReq.html) structure.
+    // AnnReq(AnnReq),
+    // /// [`AnnResp`](./struct.AnnResp.html) structure.
+    // AnnResp(AnnResp),
+    // /// [`OnionDataReq`](./struct.OnionDataReq.html) structure.
     // TODO
     // OnionDataReq(OnionDataReq),
     // /// [`OnionDataResp`](./struct.OnionDataResp.html) structure.
     // TODO
     // OnionDataResp(OnionDataResp),
-    /// [`OnionResp3`](./struct.OnionResp3.html) structure.
+    // /// [`OnionResp3`](./struct.OnionResp3.html) structure.
     // TODO
     // OnionResp3(OnionResp3),
     // /// [`OnionResp2`](./struct.OnionResp2.html) structure.
@@ -473,19 +521,19 @@ impl ToBytes for DhtPacket {
         match *self {
             DhtPacket::PingReq(ref p) => p.to_bytes(buf),
             DhtPacket::PingResp(ref p) => p.to_bytes(buf),
-            DhtPacket::GetN(ref p) => p.to_bytes(buf),
-            DhtPacket::SendN(ref p) => p.to_bytes(buf),
-            DhtPacket::CookieReq(ref p) => p.to_bytes(buf),
-            DhtPacket::CookieResp(ref p) => p.to_bytes(buf),
-            DhtPacket::CryptoHs(ref p) => p.to_bytes(buf),
-            DhtPacket::CryptoData(ref p) => p.to_bytes(buf),
-            DhtPacket::DhtReq(ref p) => p.to_bytes(buf),
-            DhtPacket::LanDisc(ref p) => p.to_bytes(buf),
+            DhtPacket::GetNodes(ref p) => p.to_bytes(buf),
+            DhtPacket::SendNodes(ref p) => p.to_bytes(buf),
+            //DhtPacket::CookieReq(ref p) => p.to_bytes(buf),
+            //DhtPacket::CookieResp(ref p) => p.to_bytes(buf),
+            //DhtPacket::CryptoHs(ref p) => p.to_bytes(buf),
+            //DhtPacket::CryptoData(ref p) => p.to_bytes(buf),
+            DhtPacket::DhtRequest(ref p) => p.to_bytes(buf),
+            //DhtPacket::LanDisc(ref p) => p.to_bytes(buf),
             // DhtPacket::OnionReq0(ref p) => p.to_bytes(buf),
             // DhtPacket::OnionReq1(ref p) => p.to_bytes(buf),
             // DhtPacket::OnionReq2(ref p) => p.to_bytes(buf),
-            DhtPacket::AnnReq(ref p) => p.to_bytes(buf),
-            DhtPacket::AnnResp(ref p) => p.to_bytes(buf),
+            //DhtPacket::AnnReq(ref p) => p.to_bytes(buf),
+            //DhtPacket::AnnResp(ref p) => p.to_bytes(buf),
             // DhtPacket::OnionDataReq(ref p) => p.to_bytes(buf),
             // DhtPacket::OnionDataResp(ref p) => p.to_bytes(buf),
             // DhtPacket::OnionResp3(ref p) => p.to_bytes(buf),
@@ -499,19 +547,19 @@ impl FromBytes for DhtPacket {
     named!(from_bytes<DhtPacket>, alt!(
         map!(PingReq::from_bytes, DhtPacket::PingReq) |
         map!(PingResp::from_bytes, DhtPacket::PingResp) |
-        map!(GetN::from_bytes, DhtPacket::GetN) |
-        map!(SendN::from_bytes, DhtPacket::SendN) |
-        map!(CookieReq::from_bytes, DhtPacket::CookieReq) |
-        map!(CookieResp::from_bytes, DhtPacket::CookieResp) |
-        map!(CryptoHs::from_bytes, DhtPacket::CryptoHs) |
-        map!(CryptoData::from_bytes, DhtPacket::CryptoData) |
-        map!(DhtReq::from_bytes, DhtPacket::DhtReq) |
-        map!(LanDisc::from_bytes, DhtPacket::LanDisc) |
+        map!(GetNodes::from_bytes, DhtPacket::GetNodes) |
+        map!(SendNodes::from_bytes, DhtPacket::SendNodes) |
+        //map!(CookieReq::from_bytes, DhtPacket::CookieReq) |
+        //map!(CookieResp::from_bytes, DhtPacket::CookieResp) |
+        //map!(CryptoHs::from_bytes, DhtPacket::CryptoHs) |
+        //map!(CryptoData::from_bytes, DhtPacket::CryptoData) |
+        map!(DhtRequest::from_bytes, DhtPacket::DhtRequest)
+        //map!(LanDisc::from_bytes, DhtPacket::LanDisc) |
         // map!(OnionReq0::from_bytes, DhtPacket::OnionReq0) |
         // map!(OnionReq1::from_bytes, DhtPacket::OnionReq1) |
         // map!(OnionReq2::from_bytes, DhtPacket::OnionReq2) |
-        map!(AnnReq::from_bytes, DhtPacket::AnnReq) |
-        map!(AnnResp::from_bytes, DhtPacket::AnnResp)
+        //map!(AnnReq::from_bytes, DhtPacket::AnnReq) |
+        //map!(AnnResp::from_bytes, DhtPacket::AnnResp)
         // map!(OnionDataReq::from_bytes, DhtPacket::OnionDataReq) |
         // map!(OnionDataResp::from_bytes, DhtPacket::OnionDataResp) |
         // map!(OnionResp3::from_bytes, DhtPacket::OnionResp3) |
@@ -608,29 +656,6 @@ NatPings:
 */
 pub const NAT_PING_SIZE: usize = PING_SIZE + 1;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct $np(pub $p);
-
-impl FromBytes for $np {
-    named!(from_bytes<$np>, do_parse!(
-        tag!(&[NAT_PING_TYPE][..]) >>
-        p: call!($p::parse_bytes) >>
-        ($np(p))
-    ));
-}
-
-/// Serializes into bytes.
-impl ToBytes for $np {
-    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        // special, "magic" type of NatPing, according to spec:
-        // https://zetok.github.io/tox-spec/#nat-ping-request
-        do_gen!(buf,
-            gen_be_u8!(NAT_PING_TYPE) >>
-            gen_slice!($p::to_bytes(self).as_slice())
-        )
-    }
-}
-
 /** DHT Request packet structure.
 
 Used to send data via one node1 to other node2 via intermediary node when
@@ -664,4 +689,30 @@ pub struct DhtRequest {
     pub sender: PublicKey,
     nonce: Nonce,
     payload: Vec<u8>,
+}
+
+impl ToBytes for DhtRequest {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_slice!(self.receiver.as_ref()) >>
+            gen_slice!(self.sender.as_ref()) >>
+            gen_slice!(self.nonce.as_ref()) >>
+            gen_slice!(self.payload.as_slice())
+        )
+    }
+}
+
+impl FromBytes for DhtRequest {
+    named!(from_bytes<DhtRequest>, do_parse!(
+        receiver: call!(PublicKey::from_bytes) >>
+        sender: call!(PublicKey::from_bytes) >>
+        nonce: call!(Nonce::from_bytes) >>
+        payload: rest >>
+        (DhtRequest {
+            receiver: receiver,
+            sender: sender,
+            nonce: nonce,
+            payload: payload.to_vec()
+        })
+    ));
 }

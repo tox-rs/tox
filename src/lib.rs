@@ -125,7 +125,6 @@ fn main() {
 // Too many false positives in tests
 #![cfg_attr(feature = "clippy", allow(needless_pass_by_value))]
 
-extern crate bytes;
 extern crate byteorder;
 extern crate futures;
 #[macro_use]
@@ -135,14 +134,12 @@ extern crate nom;
 #[macro_use]
 extern crate cookie_factory;
 extern crate sodiumoxide;
-
 #[cfg(test)]
 #[macro_use]
 extern crate quickcheck;
 
 extern crate tokio_core;
 extern crate tokio_proto;
-extern crate tokio_io;
 
 
 // TODO: refactor macros
@@ -184,7 +181,7 @@ pub mod toxcore {
     pub mod state_format;
     pub mod timeout;
     pub mod toxid;
-    pub mod tcp;
+    pub mod dht_new;
 }
 
 /// Tox Encrypt Save (a.k.a. **TES**) module. Can be used to ecrypt / decrypt
