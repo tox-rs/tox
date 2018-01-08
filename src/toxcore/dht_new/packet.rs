@@ -55,393 +55,6 @@ use toxcore::crypto_core::*;
 
 use toxcore::dht_new::cookie_factory::*;
 
-
-/// Length in bytes of [`PingReq`](./struct.PingReq.html) and
-/// [`PingResp`](./struct.PingResp.html) when serialized into bytes.
-pub const PING_SIZE: usize = 9;
-
-
-        /**
-        Used to request/respond to ping. Use in an encrypted form.
-
-        Used in:
-
-        - [`DhtPacket`](./struct.DhtPacket.html)
-        - [`DhtRequest`](./struct.DhtRequest.html)
-
-        Serialized form:
-
-        Ping Packet (request and response)
-
-        Packet type `0x00` for request and `0x01` for response.
-
-        Response ID must match ID of the request, otherwise ping is invalid.
-
-        Length      | Contents
-        ----------- | --------
-        `1`         | `u8` packet type
-        `8`         | Ping ID
-
-        Serialized form should be put in the encrypted part of DHT packet.
-
-        # Creating new
-
-        [`PingResp`](./struct.PingResp.html) can only be created as a response
-        to [`PingReq`](./struct.PingReq.html).
-        */
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct PingReq {
-     id: u64,
-}
-
-impl FromBytes for PingReq {
-    named!(from_bytes<PingReq>, do_parse!(
-        id: be_u64 >>
-        (PingReq { id: id})
-    ));
-}
-
-/// Serialize to bytes.
-impl ToBytes for PingReq {
-    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        do_gen!(buf,
-            gen_be_u64!(self.id)
-        )
-    }
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct PingResp {
-     id: u64,
-}
-
-impl FromBytes for PingResp {
-    named!(from_bytes<PingResp>, do_parse!(
-        id: be_u64 >>
-        (PingResp { id: id})
-    ));
-}
-
-/// Serialize to bytes.
-impl ToBytes for PingResp {
-    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        do_gen!(buf,
-            gen_be_u64!(self.id)
-        )
-    }
-}
-
-/** Used by [`PackedNode`](./struct.PackedNode.html).
-
-* 1st bit – protocol
-* 3 bits – `0`
-* 4th bit – address family
-
-Value | Type
------ | ----
-`2`   | UDP IPv4
-`10`  | UDP IPv6
-`130` | TCP IPv4
-`138` | TCP IPv6
-
-DHT module *should* use only UDP variants of `IpType`, given that DHT runs
-solely over the UDP.
-
-TCP variants are to be used for sending/receiving info about TCP relays.
-*/
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum IpType {
-    /// UDP over IPv4.
-    U4 = 2,
-    /// UDP over IPv6.
-    U6 = 10,
-    /// TCP over IPv4.
-    T4 = 130,
-    /// TCP over IPv6.
-    T6 = 138,
-}
-
-/// Match first byte from the provided slice as `IpType`. If no match found,
-/// return `None`.
-impl FromBytes for IpType {
-    named!(from_bytes<IpType>, switch!(le_u8,
-        2   => value!(IpType::U4) |
-        10  => value!(IpType::U6) |
-        130 => value!(IpType::T4) |
-        138 => value!(IpType::T6)
-    ));
-}
-
-// TODO: move it somewhere else
-impl ToBytes for IpAddr {
-    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        match *self {
-            IpAddr::V4(ref p) => p.to_bytes(buf),
-            IpAddr::V6(ref p) => p.to_bytes(buf),
-        }
-    }
-}
-
-// TODO: move it somewhere else
-/// Fail if there are less than 4 bytes supplied, otherwise parses first
-/// 4 bytes as an `Ipv4Addr`.
-impl FromBytes for Ipv4Addr {
-    named!(from_bytes<Ipv4Addr>, map!(count!(le_u8, 4), 
-        |v| Ipv4Addr::new(v[0], v[1], v[2], v[3])
-    ));
-}
-
-impl ToBytes for Ipv4Addr {
-    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        let mut o = self.octets();
-        do_gen!(buf,
-            gen_be_u8!(o[0]) >>
-            gen_be_u8!(o[1]) >>
-            gen_be_u8!(o[2]) >>
-            gen_be_u8!(o[3]) 
-        )
-    }
-}
-
-// TODO: move it somewhere else
-/// Fail if there are less than 16 bytes supplied, otherwise parses first
-/// 16 bytes as an `Ipv6Addr`.
-impl FromBytes for Ipv6Addr {
-    named!(from_bytes<Ipv6Addr>, map!(count!(le_u16, 8), 
-        |v| Ipv6Addr::new(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7])
-    ));
-}
-
-impl ToBytes for Ipv6Addr {
-    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        let s = self.segments();
-        do_gen!(buf,
-            gen_le_u16!(s[0]) >>
-            gen_le_u16!(s[1]) >>
-            gen_le_u16!(s[2]) >>
-            gen_le_u16!(s[3]) >>
-            gen_le_u16!(s[4]) >>
-            gen_le_u16!(s[5]) >>
-            gen_le_u16!(s[6]) >>
-            gen_le_u16!(s[7]) 
-        )
-    }
-}
-
-/** `PackedNode` format is a way to store the node info in a small yet easy to
-parse format.
-
-It is used in many places in Tox, e.g. in `DHT Send nodes`.
-
-To store more than one node, simply append another on to the previous one:
-
-`[packed node 1][packed node 2][...]`
-
-Serialized Packed node:
-
-Length | Content
------- | -------
-`1`    | [`IpType`](./.enum.IpType.html)
-`4` or `16` | IPv4 or IPv6 address
-`2`    | port
-`32`   | node ID
-
-Size of serialized `PackedNode` is 39 bytes with IPv4 node info, or 51 with
-IPv6 node info.
-
-DHT module *should* use only UDP variants of `IpType`, given that DHT runs
-solely on the UDP.
-*/
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct PackedNode {
-    /// IP type, includes also info about protocol used.
-    ip_type: IpType,
-    /// Socket addr of node.
-    saddr: SocketAddr,
-    /// Public Key of the node.
-    pk: PublicKey,
-}
-
-/// Size in bytes of serialized [`PackedNode`](./struct.PackedNode.html) with
-/// IPv4.
-pub const PACKED_NODE_IPV4_SIZE: usize = PUBLICKEYBYTES + 7;
-/// Size in bytes of serialized [`PackedNode`](./struct.PackedNode.html) with
-/// IPv6.
-pub const PACKED_NODE_IPV6_SIZE: usize = PUBLICKEYBYTES + 19;
-/** Serialize `PackedNode` into bytes.
-
-Can be either [`PACKED_NODE_IPV4_SIZE`]
-(./constant.PACKED_NODE_IPV4_SIZE.html) or [`PACKED_NODE_IPV6_SIZE`]
-(./constant.PACKED_NODE_IPV6_SIZE.html) bytes long, depending on whether
-IPv4 or IPv6 is being used.
-*/
-impl ToBytes for PackedNode {
-    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        let mut ip_addr: [u8; 16] = [0; 16];
-        self.saddr.ip().to_bytes((&mut ip_addr, 16));
-        do_gen!(buf,
-            gen_be_u8!(self.ip_type as u8) >>
-            gen_slice!(ip_addr) >>
-            gen_be_u16!(self.saddr.port()) >>
-            gen_slice!(self.pk.as_ref())
-        )
-    }
-}
-
-/** Deserialize bytes into `PackedNode`. Returns `None` if deseralizing
-failed.
-
-Can fail if:
-
- - length is too short for given [`IpType`](./enum.IpType.html)
- - PK can't be parsed
-
-Blindly trusts that provided `IpType` matches - i.e. if there are provided
-51 bytes (which is length of `PackedNode` that contains IPv6), and `IpType`
-says that it's actually IPv4, bytes will be parsed as if that was an IPv4
-address.
-*/
-named_args!(as_ipv4_packed_node(iptype: IpType) <PackedNode>, do_parse!(
-    addr: call!(Ipv4Addr::from_bytes) >>
-    port: be_u16 >>
-    saddr: value!(SocketAddrV4::new(addr, port)) >>
-    pk: call!(PublicKey::from_bytes) >>
-    (PackedNode {
-        ip_type: iptype,
-        saddr: SocketAddr::V4(saddr),
-        pk: pk
-    })
-));
-
-// Parse bytes as an IPv6 PackedNode.
-named_args!(as_ipv6_packed_node(iptype: IpType) <PackedNode>, do_parse!(
-    addr: call!(Ipv6Addr::from_bytes) >>
-    port: be_u16 >>
-    saddr: value!(SocketAddrV6::new(addr, port, 0, 0)) >>
-    pk: call!(PublicKey::from_bytes) >>
-    (PackedNode {
-        ip_type: iptype,
-        saddr: SocketAddr::V6(saddr),
-        pk: pk
-    })
-));
-
-impl FromBytes for PackedNode {
-    named!(from_bytes<PackedNode>, switch!(call!(IpType::from_bytes),
-        IpType::U4 => call!(as_ipv4_packed_node, IpType::U4) |
-        IpType::T4 => call!(as_ipv4_packed_node, IpType::T4) |
-        IpType::U6 => call!(as_ipv6_packed_node, IpType::U6) |
-        IpType::T6 => call!(as_ipv6_packed_node, IpType::T6)
-    ));
-}
-/** Request to get address of given DHT PK, or nodes that are closest in DHT
-to the given PK.
-
-Packet type [`PacketKind::GetN`](../packet_kind/enum.PacketKind.html).
-
-Serialized form:
-
-Length | Content
------- | ------
-`32`   | DHT Public Key
-`8`    | ping id
-
-Serialized form should be put in the encrypted part of DHT packet.
-*/
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct GetNodes {
-    /// Public Key of the DHT node `GetNodes` is supposed to get address of.
-    pub pk: PublicKey,
-    /// An ID of the request.
-    pub id: u64,
-}
-
-/// Size of serialized [`GetNodes`](./struct.GetNodes.html) in bytes.
-pub const GET_NODES_SIZE: usize = PUBLICKEYBYTES + 8;
-
-/// Serialization of `GetNodes`. Resulting length should be
-/// [`GET_NODES_SIZE`](./constant.GET_NODES_SIZE.html).
-impl ToBytes for GetNodes {
-    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        do_gen!(buf,
-            gen_slice!(self.pk.as_ref()) >>
-            gen_be_u64!(self.id)
-        )
-    }
-}
-
-/** De-serialization of bytes into `GetNodes`. If less than
-[`GET_NODES_SIZE`](./constant.GET_NODES_SIZE.html) bytes are provided,
-de-serialization will fail, returning `None`.
-*/
-impl FromBytes for GetNodes {
-    named!(from_bytes<GetNodes>, do_parse!(
-        pk: call!(PublicKey::from_bytes) >>
-        id: be_u64 >>
-        (GetNodes { pk: pk, id: id })
-    ));
-}
-
-/** Response to [`GetNodes`](./struct.GetNodes.html) request, containing up to
-`4` nodes closest to the requested node.
-
-Packet type `0x04`.
-
-Serialized form:
-
-Length      | Contents
------------ | --------
-`1`         | Number of packed nodes (maximum 4)
-`[39, 204]` | Nodes in packed format
-`8`         | Ping ID
-
-An IPv4 node is 39 bytes, an IPv6 node is 51 bytes, so the maximum size is
-`51 * 4 = 204` bytes.
-
-Serialized form should be put in the encrypted part of DHT packet.
-*/
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SendNodes {
-    /** Nodes sent in response to [`GetNodes`](./struct.GetNodes.html) request.
-
-    There can be only 1 to 4 nodes in `SendNodes`.
-    */
-    pub nodes: Vec<PackedNode>,
-    /// Ping id that was received in [`GetNodes`](./struct.GetNodes.html)
-    /// request.
-    pub id: u64,
-}
-
-/// Method assumes that supplied `SendNodes` has correct number of nodes
-/// included – `[1, 4]`.
-impl ToBytes for SendNodes {
-    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        do_gen!(buf,
-            gen_many_ref!(self.nodes, PackedNode::to_bytes) >>
-            gen_be_u64!(self.id)
-        )
-    }
-}
-
-/** Method to parse received bytes as `SendNodes`.
-
-    Returns `None` if bytes can't be parsed into `SendNodes`.
-*/
-impl FromBytes for SendNodes {
-    named!(from_bytes<SendNodes>, do_parse!(
-        nodes_number: le_u8 >>
-        nodes: cond_reduce!(
-            nodes_number > 0 && nodes_number <= 4,
-            count!(PackedNode::from_bytes, nodes_number as usize)
-        ) >>
-        id: be_u64 >>
-        (SendNodes {
-            nodes: nodes,
-            id: id
-        })
-    ));
-}
-
 /** Standard DHT packet that encapsulates in the encrypted payload
 [`DhtPacketT`](./trait.DhtPacketT.html).
 
@@ -567,7 +180,442 @@ impl FromBytes for DhtPacket {
         // map!(OnionResp1::from_bytes, DhtPacket::OnionResp1)
     ));
 }
- 
+
+/// Length in bytes of [`PingReq`](./struct.PingReq.html) and
+/// [`PingResp`](./struct.PingResp.html) when serialized into bytes.
+pub const PING_SIZE: usize = 9;
+
+
+/**
+Used to request/respond to ping. Use in an encrypted form.
+
+Used in:
+
+- [`DhtPacket`](./struct.DhtPacket.html)
+- [`DhtRequest`](./struct.DhtRequest.html)
+
+Serialized form:
+
+Ping Packet (request and response)
+
+Packet type `0x00` for request and `0x01` for response.
+
+Response ID must match ID of the request, otherwise ping is invalid.
+
+Length      | Contents
+----------- | --------
+`1`         | `u8` packet type
+`8`         | Ping ID
+
+Serialized form should be put in the encrypted part of DHT packet.
+
+# Creating new
+
+[`PingResp`](./struct.PingResp.html) can only be created as a response
+to [`PingReq`](./struct.PingReq.html).
+*/
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct PingReq {
+    /// Request ping id
+    pub id: u64,
+}
+
+impl FromBytes for PingReq {
+    named!(from_bytes<PingReq>, do_parse!(
+        tag!("\x00") >>
+        id: be_u64 >>
+        (PingReq { id: id})
+    ));
+}
+
+/// Serialize to bytes.
+impl ToBytes for PingReq {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_be_u8!(0x00) >>
+            gen_be_u64!(self.id)
+        )
+    }
+}
+
+/**
+Used to request/respond to ping. Use in an encrypted form.
+
+Used in:
+
+- [`DhtPacket`](./struct.DhtPacket.html)
+- [`DhtRequest`](./struct.DhtRequest.html)
+
+Serialized form:
+
+Ping Packet (request and response)
+
+Packet type `0x00` for request and `0x01` for response.
+
+Response ID must match ID of the request, otherwise ping is invalid.
+
+Length      | Contents
+----------- | --------
+`1`         | `u8` packet type
+`8`         | Ping ID
+
+Serialized form should be put in the encrypted part of DHT packet.
+
+# Creating new
+
+[`PingResp`](./struct.PingResp.html) can only be created as a response
+to [`PingReq`](./struct.PingReq.html).
+*/
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct PingResp {
+    /// Ping id same as requested from PingReq
+    pub id: u64,
+}
+
+impl FromBytes for PingResp {
+    named!(from_bytes<PingResp>, do_parse!(
+        tag!("\x01") >>
+        id: be_u64 >>
+        (PingResp { id: id})
+    ));
+}
+
+/// Serialize to bytes.
+impl ToBytes for PingResp {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_be_u8!(0x01) >>
+            gen_be_u64!(self.id)
+        )
+    }
+}
+
+/** Used by [`PackedNode`](./struct.PackedNode.html).
+
+* 1st bit – protocol
+* 3 bits – `0`
+* 4th bit – address family
+
+Value | Type
+----- | ----
+`2`   | UDP IPv4
+`10`  | UDP IPv6
+`130` | TCP IPv4
+`138` | TCP IPv6
+
+DHT module *should* use only UDP variants of `IpType`, given that DHT runs
+solely over the UDP.
+
+TCP variants are to be used for sending/receiving info about TCP relays.
+*/
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum IpType {
+    /// UDP over IPv4.
+    U4 = 2,
+    /// UDP over IPv6.
+    U6 = 10,
+    /// TCP over IPv4.
+    T4 = 130,
+    /// TCP over IPv6.
+    T6 = 138,
+}
+
+/// Match first byte from the provided slice as `IpType`. If no match found,
+/// return `None`.
+impl FromBytes for IpType {
+    named!(from_bytes<IpType>, switch!(le_u8,
+        2   => value!(IpType::U4) |
+        10  => value!(IpType::U6) |
+        130 => value!(IpType::T4) |
+        138 => value!(IpType::T6)
+    ));
+}
+
+// TODO: move it somewhere else
+impl ToBytes for IpAddr {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        match *self {
+            IpAddr::V4(ref p) => p.to_bytes(buf),
+            IpAddr::V6(ref p) => p.to_bytes(buf),
+        }
+    }
+}
+
+// TODO: move it somewhere else
+/// Fail if there are less than 4 bytes supplied, otherwise parses first
+/// 4 bytes as an `Ipv4Addr`.
+impl FromBytes for Ipv4Addr {
+    named!(from_bytes<Ipv4Addr>, map!(count!(le_u8, 4), 
+        |v| Ipv4Addr::new(v[0], v[1], v[2], v[3])
+    ));
+}
+
+impl ToBytes for Ipv4Addr {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        let o = self.octets();
+        do_gen!(buf,
+            gen_be_u8!(o[0]) >>
+            gen_be_u8!(o[1]) >>
+            gen_be_u8!(o[2]) >>
+            gen_be_u8!(o[3]) 
+        )
+    }
+}
+
+// TODO: move it somewhere else
+/// Fail if there are less than 16 bytes supplied, otherwise parses first
+/// 16 bytes as an `Ipv6Addr`.
+impl FromBytes for Ipv6Addr {
+    named!(from_bytes<Ipv6Addr>, map!(count!(le_u16, 8), 
+        |v| Ipv6Addr::new(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7])
+    ));
+}
+
+impl ToBytes for Ipv6Addr {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        let s = self.segments();
+        do_gen!(buf,
+            gen_le_u16!(s[0]) >>
+            gen_le_u16!(s[1]) >>
+            gen_le_u16!(s[2]) >>
+            gen_le_u16!(s[3]) >>
+            gen_le_u16!(s[4]) >>
+            gen_le_u16!(s[5]) >>
+            gen_le_u16!(s[6]) >>
+            gen_le_u16!(s[7]) 
+        )
+    }
+}
+
+/** `PackedNode` format is a way to store the node info in a small yet easy to
+parse format.
+
+It is used in many places in Tox, e.g. in `DHT Send nodes`.
+
+To store more than one node, simply append another on to the previous one:
+
+`[packed node 1][packed node 2][...]`
+
+Serialized Packed node:
+
+Length | Content
+------ | -------
+`1`    | [`IpType`](./.enum.IpType.html)
+`4` or `16` | IPv4 or IPv6 address
+`2`    | port
+`32`   | node ID
+
+Size of serialized `PackedNode` is 39 bytes with IPv4 node info, or 51 with
+IPv6 node info.
+
+DHT module *should* use only UDP variants of `IpType`, given that DHT runs
+solely on the UDP.
+*/
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct PackedNode {
+    /// IP type, includes also info about protocol used.
+    ip_type: IpType,
+    /// Socket addr of node.
+    saddr: SocketAddr,
+    /// Public Key of the node.
+    pk: PublicKey,
+}
+
+/// Size in bytes of serialized [`PackedNode`](./struct.PackedNode.html) with
+/// IPv4.
+pub const PACKED_NODE_IPV4_SIZE: usize = PUBLICKEYBYTES + 7;
+/// Size in bytes of serialized [`PackedNode`](./struct.PackedNode.html) with
+/// IPv6.
+pub const PACKED_NODE_IPV6_SIZE: usize = PUBLICKEYBYTES + 19;
+/** Serialize `PackedNode` into bytes.
+
+Can be either [`PACKED_NODE_IPV4_SIZE`]
+(./constant.PACKED_NODE_IPV4_SIZE.html) or [`PACKED_NODE_IPV6_SIZE`]
+(./constant.PACKED_NODE_IPV6_SIZE.html) bytes long, depending on whether
+IPv4 or IPv6 is being used.
+*/
+impl ToBytes for PackedNode {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        let mut ip_addr: [u8; 16] = [0; 16];
+        {
+            let tmp_result = self.saddr.ip().to_bytes((&mut ip_addr, 16));
+        
+            match tmp_result {
+                Ok(_) => {},
+                Err(_) => {
+                    debug!("Ip address serializing failed!");
+                }
+            }
+        }
+        do_gen!(buf,
+            gen_be_u8!(self.ip_type as u8) >>
+            gen_slice!(ip_addr) >>
+            gen_be_u16!(self.saddr.port()) >>
+            gen_slice!(self.pk.as_ref())
+        )
+    }
+}
+
+/** Deserialize bytes into `PackedNode`. Returns `None` if deseralizing
+failed.
+
+Can fail if:
+
+ - length is too short for given [`IpType`](./enum.IpType.html)
+ - PK can't be parsed
+
+Blindly trusts that provided `IpType` matches - i.e. if there are provided
+51 bytes (which is length of `PackedNode` that contains IPv6), and `IpType`
+says that it's actually IPv4, bytes will be parsed as if that was an IPv4
+address.
+*/
+named_args!(as_ipv4_packed_node(iptype: IpType) <PackedNode>, do_parse!(
+    addr: call!(Ipv4Addr::from_bytes) >>
+    port: be_u16 >>
+    saddr: value!(SocketAddrV4::new(addr, port)) >>
+    pk: call!(PublicKey::from_bytes) >>
+    (PackedNode {
+        ip_type: iptype,
+        saddr: SocketAddr::V4(saddr),
+        pk: pk
+    })
+));
+
+// Parse bytes as an IPv6 PackedNode.
+named_args!(as_ipv6_packed_node(iptype: IpType) <PackedNode>, do_parse!(
+    addr: call!(Ipv6Addr::from_bytes) >>
+    port: be_u16 >>
+    saddr: value!(SocketAddrV6::new(addr, port, 0, 0)) >>
+    pk: call!(PublicKey::from_bytes) >>
+    (PackedNode {
+        ip_type: iptype,
+        saddr: SocketAddr::V6(saddr),
+        pk: pk
+    })
+));
+
+impl FromBytes for PackedNode {
+    named!(from_bytes<PackedNode>, switch!(call!(IpType::from_bytes),
+        IpType::U4 => call!(as_ipv4_packed_node, IpType::U4) |
+        IpType::T4 => call!(as_ipv4_packed_node, IpType::T4) |
+        IpType::U6 => call!(as_ipv6_packed_node, IpType::U6) |
+        IpType::T6 => call!(as_ipv6_packed_node, IpType::T6)
+    ));
+}
+/** Request to get address of given DHT PK, or nodes that are closest in DHT
+to the given PK.
+
+Packet type [`PacketKind::GetN`](../packet_kind/enum.PacketKind.html).
+
+Serialized form:
+
+Length | Content
+------ | ------
+`32`   | DHT Public Key
+`8`    | ping id
+
+Serialized form should be put in the encrypted part of DHT packet.
+*/
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct GetNodes {
+    /// Public Key of the DHT node `GetNodes` is supposed to get address of.
+    pub pk: PublicKey,
+    /// An ID of the request.
+    pub id: u64,
+}
+
+/// Size of serialized [`GetNodes`](./struct.GetNodes.html) in bytes.
+pub const GET_NODES_SIZE: usize = PUBLICKEYBYTES + 8;
+
+/// Serialization of `GetNodes`. Resulting length should be
+/// [`GET_NODES_SIZE`](./constant.GET_NODES_SIZE.html).
+impl ToBytes for GetNodes {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_be_u8!(0x02) >>
+            gen_slice!(self.pk.as_ref()) >>
+            gen_be_u64!(self.id)
+        )
+    }
+}
+
+/** De-serialization of bytes into `GetNodes`. If less than
+[`GET_NODES_SIZE`](./constant.GET_NODES_SIZE.html) bytes are provided,
+de-serialization will fail, returning `None`.
+*/
+impl FromBytes for GetNodes {
+    named!(from_bytes<GetNodes>, do_parse!(
+        tag!("\x02") >>
+        pk: call!(PublicKey::from_bytes) >>
+        id: be_u64 >>
+        (GetNodes { pk: pk, id: id })
+    ));
+}
+
+/** Response to [`GetNodes`](./struct.GetNodes.html) request, containing up to
+`4` nodes closest to the requested node.
+
+Packet type `0x04`.
+
+Serialized form:
+
+Length      | Contents
+----------- | --------
+`1`         | Number of packed nodes (maximum 4)
+`[39, 204]` | Nodes in packed format
+`8`         | Ping ID
+
+An IPv4 node is 39 bytes, an IPv6 node is 51 bytes, so the maximum size is
+`51 * 4 = 204` bytes.
+
+Serialized form should be put in the encrypted part of DHT packet.
+*/
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SendNodes {
+    /** Nodes sent in response to [`GetNodes`](./struct.GetNodes.html) request.
+
+    There can be only 1 to 4 nodes in `SendNodes`.
+    */
+    pub nodes: Vec<PackedNode>,
+    /// Ping id that was received in [`GetNodes`](./struct.GetNodes.html)
+    /// request.
+    pub id: u64,
+}
+
+/// Method assumes that supplied `SendNodes` has correct number of nodes
+/// included – `[1, 4]`.
+impl ToBytes for SendNodes {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_be_u8!(0x04) >>
+            gen_many_ref!(&self.nodes, |buf, node| PackedNode::to_bytes(node, buf)) >>
+            gen_be_u64!(self.id)
+        )
+    }
+}
+
+/** Method to parse received bytes as `SendNodes`.
+
+    Returns `None` if bytes can't be parsed into `SendNodes`.
+*/
+impl FromBytes for SendNodes {
+    named!(from_bytes<SendNodes>, do_parse!(
+        tag!("\x04") >>
+        nodes_number: le_u8 >>
+        nodes: cond_reduce!(
+            nodes_number > 0 && nodes_number <= 4,
+            count!(PackedNode::from_bytes, nodes_number as usize)
+        ) >>
+        id: be_u64 >>
+        (SendNodes {
+            nodes: nodes,
+            id: id
+        })
+    ));
+}
+
 /**
 Structure for holding nodes.
 
@@ -595,9 +643,9 @@ pub struct Bucket {
 pub const BUCKET_DEFAULT_SIZE: usize = 8;
 
 /// Iterator over `Bucket`.
-pub struct BucketIter<'a> {
-    iter: ::std::slice::Iter<'a, PackedNode>,
-}
+// pub struct BucketIter<'a> {
+//     iter: ::std::slice::Iter<'a, PackedNode>,
+// }
 
 /** K-buckets structure to hold up to
 [`KBUCKET_MAX_ENTRIES`](./constant.KBUCKET_MAX_ENTRIES.html) *
@@ -632,11 +680,11 @@ pub const KBUCKET_MAX_ENTRIES: u8 = ::std::u8::MAX;
 pub const KBUCKET_BUCKETS: u8 = 128;
 
 /// Iterator over `PackedNode`s in `Kbucket`.
-pub struct KbucketIter<'a> {
-    pos_b: usize,
-    pos_pn: usize,
-    buckets: &'a [Box<Bucket>],
-}
+// pub struct KbucketIter<'a> {
+//     pos_b: usize,
+//     pos_pn: usize,
+//     buckets: &'a [Box<Bucket>],
+// }
 
 /** `NatPing` type byte for [`NatPingReq`] and [`NatPingResp`].
 
@@ -694,6 +742,7 @@ pub struct DhtRequest {
 impl ToBytes for DhtRequest {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
+            gen_be_u8!(0x20) >>
             gen_slice!(self.receiver.as_ref()) >>
             gen_slice!(self.sender.as_ref()) >>
             gen_slice!(self.nonce.as_ref()) >>
@@ -704,6 +753,7 @@ impl ToBytes for DhtRequest {
 
 impl FromBytes for DhtRequest {
     named!(from_bytes<DhtRequest>, do_parse!(
+        tag!("\x20") >>
         receiver: call!(PublicKey::from_bytes) >>
         sender: call!(PublicKey::from_bytes) >>
         nonce: call!(Nonce::from_bytes) >>
