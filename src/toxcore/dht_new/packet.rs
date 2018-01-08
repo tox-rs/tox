@@ -293,7 +293,7 @@ pub enum IpType {
 }
 
 /// Match first byte from the provided slice as `IpType`. If no match found,
-/// return `None`.
+/// return `Error`.
 impl FromBytes for IpType {
     named!(from_bytes<IpType>, switch!(le_u8,
         2   => value!(IpType::U4) |
@@ -408,27 +408,16 @@ IPv4 or IPv6 is being used.
 */
 impl ToBytes for PackedNode {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        let mut ip_addr: [u8; 16] = [0; 16];
-        {
-            let tmp_result = self.saddr.ip().to_bytes((&mut ip_addr, 16));
-        
-            match tmp_result {
-                Ok(_) => {},
-                Err(_) => {
-                    debug!("Ip address serializing failed!");
-                }
-            }
-        }
         do_gen!(buf,
             gen_be_u8!(self.ip_type as u8) >>
-            gen_slice!(ip_addr) >>
+            gen_call!(|buf, addr| IpAddr::to_bytes(addr, buf), &self.saddr.ip()) >>
             gen_be_u16!(self.saddr.port()) >>
             gen_slice!(self.pk.as_ref())
         )
     }
 }
 
-/** Deserialize bytes into `PackedNode`. Returns `None` if deseralizing
+/** Deserialize bytes into `PackedNode`. Returns `Error` if deseralizing
 failed.
 
 Can fail if:
@@ -512,7 +501,7 @@ impl ToBytes for GetNodes {
 
 /** De-serialization of bytes into `GetNodes`. If less than
 [`GET_NODES_SIZE`](./constant.GET_NODES_SIZE.html) bytes are provided,
-de-serialization will fail, returning `None`.
+de-serialization will fail, returning `Error`.
 */
 impl FromBytes for GetNodes {
     named!(from_bytes<GetNodes>, do_parse!(
@@ -535,7 +524,6 @@ Length      | Contents
 `1`         | 0x04
 `1`         | Number of packed nodes (maximum 4)
 `[39, 204]` | Nodes in packed format
-`8`         | Ping ID
 
 An IPv4 node is 39 bytes, an IPv6 node is 51 bytes, so the maximum size is
 `51 * 4 = 204` bytes.
@@ -549,9 +537,6 @@ pub struct SendNodes {
     There can be only 1 to 4 nodes in `SendNodes`.
     */
     pub nodes: Vec<PackedNode>,
-    /// Ping id that was received in [`GetNodes`](./struct.GetNodes.html)
-    /// request.
-    pub id: u64,
 }
 
 /// Method assumes that supplied `SendNodes` has correct number of nodes
@@ -560,15 +545,14 @@ impl ToBytes for SendNodes {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x04) >>
-            gen_many_ref!(&self.nodes, |buf, node| PackedNode::to_bytes(node, buf)) >>
-            gen_be_u64!(self.id)
+            gen_many_ref!(&self.nodes, |buf, node| PackedNode::to_bytes(node, buf))
         )
     }
 }
 
 /** Method to parse received bytes as `SendNodes`.
 
-    Returns `None` if bytes can't be parsed into `SendNodes`.
+    Returns `Error` if bytes can't be parsed into `SendNodes`.
 */
 impl FromBytes for SendNodes {
     named!(from_bytes<SendNodes>, do_parse!(
@@ -578,10 +562,8 @@ impl FromBytes for SendNodes {
             nodes_number > 0 && nodes_number <= 4,
             count!(PackedNode::from_bytes, nodes_number as usize)
         ) >>
-        id: be_u64 >>
         (SendNodes {
             nodes: nodes,
-            id: id
         })
     ));
 }
