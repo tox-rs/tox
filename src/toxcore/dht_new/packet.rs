@@ -44,21 +44,18 @@ use std::net::{
 
 use toxcore::dht_new::binary_io::*;
 use toxcore::crypto_core::*;
-//use toxcore::packet_kind::PacketKind;
 
 use toxcore::dht_new::cookie_factory::*;
 
-/** Standard DHT packet that encapsulates in the encrypted payload
+/** Standard DHT packet that encapsulates in the payload
 [`DhtPacketT`](./trait.DhtPacketT.html).
 
 Length      | Contents
 ----------- | --------
-`1`         | `uint8_t` [`PacketKind`](../packet_kind/enum.PacketKind.html)
 `32`        | Sender DHT Public Key
 `24`        | Random nonce
-variable    | Encrypted payload
+variable    | Payload
 
-`PacketKind` values for `DhtPacket` can be only `<= 4`.
 
 https://zetok.github.io/tox-spec/#dht-packet
 */
@@ -113,14 +110,6 @@ pub enum DhtPacket {
     // TODO
     // OnionResp1(OnionResp1),
 }
-
-// TODO: max dht_packet size?
-/// Minimal size of [`DhtPacket`](./struct.DhtPacket.html) in bytes.
-pub const DHT_PACKET_MIN_SIZE: usize = 1 // packet type, plain
-                                     + PUBLICKEYBYTES
-                                     + NONCEBYTES
-                                     + MACBYTES
-                                     + PING_SIZE; // smallest payload
 
 impl ToBytes for DhtPacket {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
@@ -499,8 +488,6 @@ impl FromBytes for PackedNode {
 }
 /** Request to get address of given DHT PK, or nodes that are closest in DHT
 to the given PK.
-
-Packet type [`PacketKind::GetN`](../packet_kind/enum.PacketKind.html).
 
 Serialized form:
 
