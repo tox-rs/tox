@@ -119,19 +119,19 @@ impl Server {
             // check if client was already linked to pk
             let mut clients = self.connected_clients.borrow_mut();
             if let Some(client_a) = clients.get_mut(pk) {
-                if pk == &packet.peer_pk {
+                if pk == &packet.pk {
                     // send RouteResponse(0) if client requests its own pk
                     return client_a.send_route_response(pk, 0)
                 }
-                if let Some(b_id_in_client_a) = client_a.get_connection_id(&packet.peer_pk) {
+                if let Some(b_id_in_client_a) = client_a.get_connection_id(&packet.pk) {
                     // send RouteResponse if client was already linked to pk
-                    return client_a.send_route_response(&packet.peer_pk, b_id_in_client_a)
-                } else if let Some(b_id_in_client_a) = client_a.insert_connection_id(&packet.peer_pk) {
+                    return client_a.send_route_response(&packet.pk, b_id_in_client_a)
+                } else if let Some(b_id_in_client_a) = client_a.insert_connection_id(&packet.pk) {
                     // new link was inserted into client.links
                     b_id_in_client_a
                 } else {
                     // send RouteResponse(0) if no space to insert new link
-                    return client_a.send_route_response(&packet.peer_pk, 0)
+                    return client_a.send_route_response(&packet.pk, 0)
                 }
             } else {
                 return Box::new( future::err(
@@ -142,7 +142,7 @@ impl Server {
         };
         let clients = self.connected_clients.borrow();
         let client_a = clients.get(pk).unwrap(); // can not fail
-        if let Some(client_b) = clients.get(&packet.peer_pk) {
+        if let Some(client_b) = clients.get(&packet.pk) {
             // check if current pk is linked inside other_client
             if let Some(a_id_in_client_b) = client_b.get_connection_id(pk) {
                 // the are both linked, send RouteResponse and
@@ -151,7 +151,7 @@ impl Server {
                 let client_a_notification = client_a.send_connect_notification(b_id_in_client_a);
                 let client_b_notification = client_b.send_connect_notification(a_id_in_client_b);
                 return Box::new(
-                    client_a.send_route_response(&packet.peer_pk, b_id_in_client_a)
+                    client_a.send_route_response(&packet.pk, b_id_in_client_a)
                         .join(client_a_notification)
                         .join(client_b_notification)
                         .map(|_| ())
@@ -159,11 +159,11 @@ impl Server {
             } else {
                 // they are not linked
                 // send RouteResponse only to current client
-                client_a.send_route_response(&packet.peer_pk, b_id_in_client_a)
+                client_a.send_route_response(&packet.pk, b_id_in_client_a)
             }
         } else {
             // send RouteResponse only to current client
-            client_a.send_route_response(&packet.peer_pk, b_id_in_client_a)
+            client_a.send_route_response(&packet.pk, b_id_in_client_a)
         }
     }
     fn handle_route_response(&self, _pk: &PublicKey, _packet: RouteResponse) -> IoFuture<()> {
@@ -349,7 +349,7 @@ mod tests {
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { peer_pk: client_pk_2 }
+            RouteRequest { pk: client_pk_2 }
         )).wait().unwrap();
 
         // the server should put RouteResponse into rx_1
@@ -364,7 +364,7 @@ mod tests {
 
         // emulate send RouteRequest from client_1 again
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { peer_pk: client_pk_2 }
+            RouteRequest { pk: client_pk_2 }
         )).wait().unwrap();
 
         // the server should put RouteResponse into rx_1
@@ -375,7 +375,7 @@ mod tests {
 
         // emulate send RouteRequest from client_2
         server.handle_packet(&client_pk_2, Packet::RouteRequest(
-            RouteRequest { peer_pk: client_pk_1 }
+            RouteRequest { pk: client_pk_1 }
         )).wait().unwrap();
 
         // the server should put RouteResponse into rx_2
@@ -423,7 +423,7 @@ mod tests {
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { peer_pk: client_pk_2 }
+            RouteRequest { pk: client_pk_2 }
         )).wait().unwrap();
 
         // the server should put RouteResponse into rx_1
@@ -439,7 +439,7 @@ mod tests {
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { peer_pk: client_pk_1 }
+            RouteRequest { pk: client_pk_1 }
         )).wait().unwrap();
 
         // the server should put RouteResponse into rx_1
@@ -459,7 +459,7 @@ mod tests {
             let (other_client_pk, _other_rx) = add_random_client(&server);
             // emulate send RouteRequest from client_1
             server.handle_packet(&client_pk_1, Packet::RouteRequest(
-                RouteRequest { peer_pk: other_client_pk }
+                RouteRequest { pk: other_client_pk }
             )).wait().unwrap();
 
             // the server should put RouteResponse into rx_1
@@ -473,7 +473,7 @@ mod tests {
         let (other_client_pk, _other_rx) = add_random_client(&server);
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { peer_pk: other_client_pk }
+            RouteRequest { pk: other_client_pk }
         )).wait().unwrap();
 
         // the server should put RouteResponse into rx_1
@@ -501,7 +501,7 @@ mod tests {
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { peer_pk: client_pk_2 }
+            RouteRequest { pk: client_pk_2 }
         )).wait().unwrap();
 
         // the server should put RouteResponse into rx_1
@@ -512,7 +512,7 @@ mod tests {
 
         // emulate send RouteRequest from client_2
         server.handle_packet(&client_pk_2, Packet::RouteRequest(
-            RouteRequest { peer_pk: client_pk_1 }
+            RouteRequest { pk: client_pk_1 }
         )).wait().unwrap();
 
         // the server should put RouteResponse into rx_2
@@ -552,7 +552,7 @@ mod tests {
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { peer_pk: client_pk_2 }
+            RouteRequest { pk: client_pk_2 }
         )).wait().unwrap();
 
         // emulate send DisconnectNotification from client_1
@@ -602,7 +602,7 @@ mod tests {
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { peer_pk: client_pk_2 }
+            RouteRequest { pk: client_pk_2 }
         )).wait().unwrap();
 
         // the server should put RouteResponse into rx_1
@@ -623,7 +623,7 @@ mod tests {
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { peer_pk: client_pk_2 }
+            RouteRequest { pk: client_pk_2 }
         )).wait().unwrap();
 
         // the server should put RouteResponse into rx_1
@@ -765,7 +765,7 @@ mod tests {
 
         // emulate send RouteRequest from client_pk_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { peer_pk: client_pk_2 }
+            RouteRequest { pk: client_pk_2 }
         )).wait();
         assert!(handle_res.is_err());
     }
@@ -788,7 +788,7 @@ mod tests {
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { peer_pk: client_pk_2 }
+            RouteRequest { pk: client_pk_2 }
         )).wait().unwrap();
 
         // emulate send DisconnectNotification from client_1
@@ -850,7 +850,7 @@ mod tests {
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { peer_pk: client_pk_2 }
+            RouteRequest { pk: client_pk_2 }
         )).wait().unwrap();
 
         // the server should put RouteResponse into rx_1
@@ -882,7 +882,7 @@ mod tests {
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { peer_pk: client_pk_2 }
+            RouteRequest { pk: client_pk_2 }
         )).wait().unwrap();
 
         // the server should put RouteResponse into rx_1
@@ -905,7 +905,7 @@ mod tests {
 
         // emulate send RouteRequest from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { peer_pk: client_pk_2 }
+            RouteRequest { pk: client_pk_2 }
         )).wait();
         assert!(handle_res.is_err())
     }
