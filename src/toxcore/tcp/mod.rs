@@ -37,7 +37,7 @@ use self::binary_io::*;
 
 use futures::{self, Stream, Sink, Future};
 use std::io::{Error, ErrorKind};
-use tokio_io::*;
+use tokio_io::{IoFuture, AsyncRead};
 use tokio_core::net::TcpStream;
 
 /// Create a handshake from client to server

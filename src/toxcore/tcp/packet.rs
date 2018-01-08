@@ -20,17 +20,17 @@
 */
 
 /*! Top-level TCP Packets according
-    to https://zetok.github.io/tox-spec/#encrypted-payload-types
+    to [Tox spec](https://zetok.github.io/tox-spec/#encrypted-payload-types)
 */
 
 use toxcore::crypto_core::*;
 use toxcore::tcp::binary_io::*;
-use nom::*;
-use cookie_factory::*;
+
+use nom::{be_u8, be_u16, be_u64, rest};
 
 /** Top-level TCP packet.
 
-    According to https://zetok.github.io/tox-spec/#encrypted-payload-types.
+    According to [Tox spec](https://zetok.github.io/tox-spec/#encrypted-payload-types)
 */
 #[derive(Debug, PartialEq, Clone)]
 pub enum Packet {
@@ -132,14 +132,12 @@ Send a routing request to the server that we want to connect
 to peer with public key where the public key is the public the peer
 announced themselves as. The server must respond to this with a `RouteResponse`.
 
-Packet type [`Kind::RouteRequest`](./enum.Kind.html).
-
 Serialized form:
 
 Length | Content
 ------ | ------
-`1`    | 0x00
-`32`   | DHT Public Key
+`1`    | `0x00`
+`32`   | Public Key
 
 */
 #[derive(Debug, PartialEq, Clone)]
@@ -173,15 +171,13 @@ key sent in the routing request is also sent in the response so
 that the client can send many requests at the same time to the
 server without having code to track which response belongs to which public key.
 
-Packet type [`Kind::RouteResponse`](./enum.Kind.html).
-
 Serialized form:
 
 Length | Content
 ------ | ------
-`1`    | 0x01
+`1`    | `0x01`
 `1`    | connection_id
-`32`   | DHT Public Key
+`32`   | Public Key
 
 */
 #[derive(Debug, PartialEq, Clone)]
@@ -215,13 +211,11 @@ impl ToBytes for RouteResponse {
 Tell the client that connection_id is now connected meaning the other
 is online and data can be sent using this `connection_id`.
 
-Packet type [`Kind::ConnectNotification`](./enum.Kind.html).
-
 Serialized form:
 
 Length | Content
 ------ | ------
-`1`    | 0x02
+`1`    | `0x02`
 `1`    | connection_id
 
 */
@@ -262,13 +256,11 @@ Sent by the server to the client to tell them that the connection with
 when the other client of the connection disconnect or when they tell the
 server to kill the connection (see above).
 
-Packet type [`Kind::DisconnectNotification`](./enum.Kind.html).
-
 Serialized form:
 
 Length | Content
 ------ | ------
-`1`    | 0x03
+`1`    | `0x03`
 `1`    | connection_id
 
 */
@@ -308,13 +300,11 @@ them every 30 seconds and times out the peer if it doesn't get a response in 10)
 The server should respond immediately to ping packets with pong packets.
 
 
-Packet type [`Kind::PingRequest`](./enum.Kind.html).
-
 Serialized form:
 
 Length | Content
 ------ | ------
-`1`    | 0x04
+`1`    | `0x04`
 `8`    | ping_id in BigEndian
 
 */
@@ -346,13 +336,11 @@ The server should respond to ping packets with pong packets with the same `ping_
 as was in the ping packet. The server should check that each pong packet contains
 the same `ping_id` as was in the ping, if not the pong packet must be ignored.
 
-Packet type [`Kind::PongResponse`](./enum.Kind.html).
-
 Serialized form:
 
 Length | Content
 ------ | ------
-`1`    | 0x05
+`1`    | `0x05`
 `8`    | ping_id in BigEndian
 
 */
@@ -393,14 +381,12 @@ prevent sending those via OOB packets.
 OOB packets can be used just like normal data packets however the extra size
 makes sending data only through them less efficient than data packets.
 
-Packet type [`Kind::OobSend`](./enum.Kind.html).
-
 Serialized form:
 
 Length   | Content
 -------- | ------
-`1`      | 0x06
-`32`     | DHT Public Key
+`1`      | `0x06`
+`32`     | Public Key
 variable | Data
 
 */
@@ -435,14 +421,12 @@ impl ToBytes for OobSend {
 OOB recv are sent with the announced public key of the peer that sent the
 OOB send packet and the exact data.
 
-Packet type [`Kind::OobSend`](./enum.Kind.html).
-
 Serialized form:
 
 Length   | Content
 -------- | ------
-`1`      | 0x07
-`32`     | DHT Public Key
+`1`      | `0x07`
+`32`     | Public Key
 variable | Data
 
 */
@@ -477,13 +461,11 @@ impl ToBytes for OobReceive {
 The client sends data with `connection_id` and the server
 relays it to the given connection
 
-Packet type [`Kind::Data`](./enum.Kind.html).
-
 Serialized form:
 
 Length   | Content
 -------- | ------
-`1`      | connection_id [ 0x10 .. 0xF0 )
+`1`      | connection_id [ `0x10` .. `0xF0` )
 variable | Data
 
 */

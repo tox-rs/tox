@@ -27,11 +27,9 @@ handshake using [`diagram`](https://zetok.github.io/tox-spec/#handshake-diagram)
 use toxcore::crypto_core::*;
 use toxcore::tcp::binary_io::*;
 
-use cookie_factory::*;
-
 /** The request of the client to create a TCP handshake.
 
-According to https://zetok.github.io/tox-spec/#handshake-request.
+According to [Tox spec](https://zetok.github.io/tox-spec/#handshake-request).
 
 Serialized form:
 
@@ -50,12 +48,12 @@ pub struct ClientHandshake {
     /// Nonce for the current encrypted payload
     pub nonce: Nonce,
     /// Encrypted payload according to
-    /// https://zetok.github.io/tox-spec/#handshake-request-packet-payload
+    /// [Tox spec](https://zetok.github.io/tox-spec/#handshake-request-packet-payload).
     pub payload: Vec<u8>
 }
 
 /// A serialized client handshake must be equal to 32 (PK) + 24 (nonce)
-/// + 72 (encrypted payload) bytes
+/// \+ 72 (encrypted payload) bytes
 pub const CLIENT_HANDSHAKE_SIZE: usize = 128;
 
 impl FromBytes for ClientHandshake {
@@ -79,7 +77,7 @@ impl ToBytes for ClientHandshake {
 
 /** The response of the server to a TCP handshake.
 
-According to https://zetok.github.io/tox-spec/#handshake-response.
+According to [Tox spec](https://zetok.github.io/tox-spec/#handshake-response).
 
 Serialized form:
 
@@ -95,12 +93,12 @@ pub struct ServerHandshake {
     /// Nonce of the encrypted payload
     pub nonce: Nonce,
     /// Encrypted payload according to
-    /// https://zetok.github.io/tox-spec/#handshake-response-payload.
+    /// [Tox spec](https://zetok.github.io/tox-spec/#handshake-response-payload).
     pub payload: Vec<u8>
 }
 
 /// A serialized server handshake must be equal to 24 (nonce)
-/// + 72 (encrypted payload) bytes
+/// \+ 72 (encrypted payload) bytes
 pub const SERVER_HANDSHAKE_SIZE: usize = 96;
 
 impl FromBytes for ServerHandshake {
@@ -120,13 +118,17 @@ impl ToBytes for ServerHandshake {
     }
 }
 
-/** The payload of a TCP handshake. The payload is encrypted with algo:
+/** The payload of a TCP handshake.
 
+The payload is encrypted with algo:
+
+```text
 precomputed_key = precomputed(self_pk, other_sk);
 encrypted_payload = encrypt_data_symmetric(precomputed_key, nonce, payload);
+```
 
-According to https://zetok.github.io/tox-spec/#handshake-request-packet-payload
-or https://zetok.github.io/tox-spec/#handshake-response-payload
+According to [Request payload](https://zetok.github.io/tox-spec/#handshake-request-packet-payload)
+or [Response payload](https://zetok.github.io/tox-spec/#handshake-response-payload).
 
 Serialized and decrypted form:
 
