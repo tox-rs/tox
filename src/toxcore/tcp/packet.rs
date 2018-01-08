@@ -145,14 +145,14 @@ Length | Content
 #[derive(Debug, PartialEq, Clone)]
 pub struct RouteRequest {
     /// The requested PK
-    pub peer_pk: PublicKey,
+    pub pk: PublicKey,
 }
 
 impl FromBytes for RouteRequest {
     named!(from_bytes<RouteRequest>, do_parse!(
         tag!("\x00") >>
-        peer_pk: call!(PublicKey::from_bytes) >>
-        (RouteRequest { peer_pk: peer_pk })
+        pk: call!(PublicKey::from_bytes) >>
+        (RouteRequest { pk: pk })
     ));
 }
 
@@ -160,7 +160,7 @@ impl ToBytes for RouteRequest {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x00) >>
-            gen_slice!(self.peer_pk.as_ref())
+            gen_slice!(self.pk.as_ref())
         )
     }
 }
