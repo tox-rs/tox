@@ -134,8 +134,6 @@ extern crate log;
 extern crate nom;
 #[macro_use]
 extern crate cookie_factory;
-// for Zero trait
-extern crate num_traits;
 extern crate sodiumoxide;
 
 #[cfg(test)]
