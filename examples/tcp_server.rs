@@ -27,10 +27,12 @@ extern crate tokio_core;
 extern crate tokio_io;
 
 use tox::toxcore::crypto_core::*;
-use tox::toxcore::tcp::*;
+use tox::toxcore::tcp::make_server_handshake;
 use tox::toxcore::tcp::codec;
+use tox::toxcore::tcp::server::{Server, Client};
 
-use futures::{Stream, Future};
+use futures::{Sink, Stream, Future};
+use futures::sync::mpsc;
 
 use tokio_io::*;
 use tokio_core::reactor::Core;
@@ -53,20 +55,67 @@ fn main() {
 
     println!("Listening on {} using PK {:?}", addr, &server_pk.0);
 
+    let server_inner = Server::new();
+
+    // TODO move this processing future into a standalone library function
     let server = listener.incoming().for_each(|(socket, addr)| {
         println!("A new client connected from {}", addr);
 
-        let process_messages = make_server_handshake(socket, server_sk.clone())
-            .and_then(|(socket, channel, client_pk)| {
+        let server_inner_c = server_inner.clone();
+        let register_client = make_server_handshake(socket, server_sk.clone())
+            .map_err(|e| {
+                println!("handshake error: {}", e);
+                e
+            })
+            .and_then(move |(socket, channel, client_pk)| {
                 println!("Handshake for client {:?} complited", &client_pk);
-                let secure_socket = socket.framed(codec::Codec::new(channel));
-                let (_to_client, _from_client) = secure_socket.split();
-                // use example https://github.com/jgallagher/tokio-chat-example/blob/master/tokio-chat-server/src/main.rs
-                Ok(())
-            }).map_err(|e| {
-                println!("error: {}", e);
+                let (tx, rx) = mpsc::channel(8);
+                server_inner_c.insert(Client::new(tx, &client_pk));
+
+                Ok((socket, channel, client_pk, rx))
             });
-        handle.spawn(process_messages);
+        let server_inner_c = server_inner.clone();
+        let process_connection = register_client
+            .and_then(move |(socket, channel, client_pk, rx)| {
+                let secure_socket = socket.framed(codec::Codec::new(channel));
+                let (to_client, from_client) = secure_socket.split();
+
+                // reader = for each Packet from client process it
+                let server_inner_c_c = server_inner_c.clone();
+                let reader = from_client.for_each(move |packet| {
+                    println!("Handle {:?} => {:?}", client_pk, packet);
+                    server_inner_c_c.handle_packet(&client_pk, packet)
+                });
+
+                // writer = for each Packet from rx send it to client
+                let writer = rx
+                    .map_err(|()| unreachable!("rx can't fail"))
+                    .fold(to_client, move |to_client, packet| {
+                        println!("Send {:?} => {:?}", client_pk, packet);
+                        to_client.send(packet)
+                    })
+                    // drop to_client when rx stream is exhausted
+                    .map(|_to_client| ());
+
+                // TODO ping request = each 30s send PingRequest to client
+
+                let server_inner_c_c = server_inner_c.clone();
+                reader.select(writer)
+                    .map(|_| ())
+                    .map_err(move |(err, _select_next)| {
+                        println!("Processing client {:?} ended with error: {:?}", &client_pk, err);
+                        err
+                    })
+                    .then(move |r_processing| {
+                        println!("shutdown PK {:?}", &client_pk);
+                        server_inner_c_c.shutdown_client(&client_pk)
+                            .then(move |r_shutdown| r_processing.and(r_shutdown))
+                    })
+            });
+        handle.spawn(process_connection.then(|r| {
+            println!("end of processing with result {:?}", r);
+            Ok(())
+        }));
 
         Ok(())
     });
