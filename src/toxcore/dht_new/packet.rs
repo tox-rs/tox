@@ -27,13 +27,6 @@
     * ..
 */
 
-
-// use byteorder::{
-//     BigEndian,
-//     LittleEndian,
-//     NativeEndian,
-//     WriteBytesExt
-// };
 use nom::{le_u8, le_u16, be_u64, be_u16, rest};
 
 //use std::cmp::{Ord, Ordering};
