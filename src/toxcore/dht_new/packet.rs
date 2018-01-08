@@ -50,13 +50,6 @@ use toxcore::dht_new::cookie_factory::*;
 /** Standard DHT packet that encapsulates in the payload
 [`DhtPacketT`](./trait.DhtPacketT.html).
 
-Length      | Contents
------------ | --------
-`32`        | Sender DHT Public Key
-`24`        | Random nonce
-variable    | Payload
-
-
 https://zetok.github.io/tox-spec/#dht-packet
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
