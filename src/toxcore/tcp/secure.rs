@@ -19,8 +19,12 @@
     along with Tox.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-/*! Establish a secure [`Channel`](./struct.Channel.html)
+/*! A tls-like module for relay packets
+
+Establish a secure [`Channel`](./struct.Channel.html)
 between two people using temporary [`Session`](./struct.Session.html)s.
+
+# Example
 
 ```no_run
 use tox::toxcore::tcp::secure::*;
