@@ -134,8 +134,6 @@ extern crate log;
 extern crate nom;
 #[macro_use]
 extern crate cookie_factory;
-// for Zero trait
-extern crate num_traits;
 extern crate sodiumoxide;
 
 #[cfg(test)]
@@ -153,7 +151,6 @@ extern crate tokio_io;
 pub mod toxcore_tests {
     extern crate rand;
     extern crate rustc_serialize;
-    extern crate regex;
 
     // Helper macros for testing, no tests
     #[warn(missing_docs)]

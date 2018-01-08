@@ -21,7 +21,6 @@
 
 use byteorder::{NativeEndian, WriteBytesExt};
 use nom::IResult;
-use num_traits::identities::Zero;
 use quickcheck::{quickcheck, TestResult};
 
 use toxcore::binary_io::*;
@@ -54,7 +53,7 @@ macro_rules! test_append_zeros_for {
                 let mut bc = bytes.clone();
                 append_zeros(&mut bc, len);
                 assert_eq!(bytes[..], bc[..bytes.len()]);
-                assert_eq!(&vec![Zero::zero(); len - bytes.len()] as &[$num],
+                assert_eq!(&vec![0u8; len - bytes.len()] as &[$num],
                            &bc[bytes.len()..]);
                 TestResult::passed()
             }
@@ -63,10 +62,7 @@ macro_rules! test_append_zeros_for {
     )+)
 }
 test_append_zeros_for!(
-    u8, append_zeros_test_u8_fail, append_zeros_test_u8_pass,
-    u16, append_zeros_test_u16_fail, append_zeros_test_u16_pass,
-    u32, append_zeros_test_u32_fail, append_zeros_test_u32_pass,
-    u64, append_zeros_test_u64_fail, append_zeros_test_u64_pass
+    u8, append_zeros_test_u8_fail, append_zeros_test_u8_pass
 );
 
 // xor_checksum()

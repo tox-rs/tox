@@ -21,7 +21,8 @@
 
 use byteorder::{ByteOrder, NativeEndian};
 use nom::{IResult, Needed};
-use num_traits::identities::Zero;
+
+use std::iter;
 
 /// Serialization into bytes.
 pub trait ToBytes {
@@ -73,9 +74,10 @@ macro_rules! from_bytes (
 
 /// Append `0`s to given bytes up to `len`. Panics if `len` is smaller than
 /// padded `Vec`.
-pub fn append_zeros<T: Clone + Zero>(v: &mut Vec<T>, len: usize) {
+pub fn append_zeros(v: &mut Vec<u8>, len: usize) {
     let l = v.len();
-    v.append(&mut vec![T::zero(); len - l]);
+    let mut zeroes: Vec<u8> = iter::repeat(0).take(len - l).collect::<_>();
+    v.append(&mut zeroes);
 }
 
 
