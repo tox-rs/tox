@@ -156,11 +156,6 @@ impl FromBytes for DhtPacket {
     ));
 }
 
-/// Length in bytes of [`PingReq`](./struct.PingReq.html) and
-/// [`PingResp`](./struct.PingResp.html) when serialized into bytes.
-pub const PING_SIZE: usize = 9;
-
-
 /**
 Used to request/respond to ping. Use in an encrypted form.
 
@@ -179,7 +174,7 @@ Response ID must match ID of the request, otherwise ping is invalid.
 
 Length      | Contents
 ----------- | --------
-`1`         | `u8` packet type
+`1`         | 0x00
 `8`         | Ping ID
 
 Serialized form should be put in the encrypted part of DHT packet.
@@ -232,7 +227,7 @@ Response ID must match ID of the request, otherwise ping is invalid.
 
 Length      | Contents
 ----------- | --------
-`1`         | `u8` packet type
+`1`         | 0x01
 `8`         | Ping ID
 
 Serialized form should be put in the encrypted part of DHT packet.
@@ -486,6 +481,7 @@ Serialized form:
 
 Length | Content
 ------ | ------
+`1`    | 0x02
 `32`   | DHT Public Key
 `8`    | ping id
 
@@ -536,6 +532,7 @@ Serialized form:
 
 Length      | Contents
 ----------- | --------
+`1`         | 0x04
 `1`         | Number of packed nodes (maximum 4)
 `[39, 204]` | Nodes in packed format
 `8`         | Ping ID
@@ -666,16 +663,6 @@ https://zetok.github.io/tox-spec/#nat-ping-request
 [`NatPingReq`]: ./struct.PingReq.html
 [`NatPingResp`]: ./struct.PingResp.html
 */
-pub const NAT_PING_TYPE: u8 = 0xfe;
-
-/** Length in bytes of NatPings when serialized into bytes.
-
-NatPings:
-
- - [`NatPingReq`](./struct.PingReq.html)
- - [`NatPingResp`](./struct.PingResp.html)
-*/
-pub const NAT_PING_SIZE: usize = PING_SIZE + 1;
 
 /** DHT Request packet structure.
 
@@ -694,7 +681,7 @@ Serialized structure:
 
 Length | Contents
 -------|---------
-1  | `32`
+1  | `0x20`
 32 | receiver's DHT public key
 32 | sender's DHT public key
 24 | Nonce
