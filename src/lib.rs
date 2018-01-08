@@ -151,7 +151,6 @@ extern crate tokio_io;
 pub mod toxcore_tests {
     extern crate rand;
     extern crate rustc_serialize;
-    extern crate regex;
 
     // Helper macros for testing, no tests
     #[warn(missing_docs)]

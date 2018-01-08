@@ -20,11 +20,24 @@
 //! Tests for `toxid` module.
 
 use quickcheck::quickcheck;
-use super::regex::Regex;
 
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 use toxcore::toxid::*;
+
+#[cfg(test)]
+fn test_is_hexdump_uppercase(s: &str) -> bool {
+    fn test_is_hexdump_uppercase_b(b: u8) -> bool {
+        if let b'A' ... b'F' = b {
+            true
+        } else if let b'0' ... b'9' = b {
+            true
+        } else {
+            false
+        }
+    }
+    s.bytes().all(test_is_hexdump_uppercase_b)
+}
 
 // NoSpam::
 
@@ -56,14 +69,13 @@ fn no_spam_default_test() {
 fn no_spam_fmt_test() {
     // check if formatted NoSpam is always upper-case hexadecimal with matching
     // length
-    let re = Regex::new("^([0-9A-F]){8}$").expect("Creating regex failed!");
     let nospam = NoSpam::new();
-    assert_eq!(true, re.is_match(&format!("{:X}", nospam)));
-    assert_eq!(true, re.is_match(&format!("{}", nospam)));
-    assert_eq!(true, re.is_match(&format!("{:X}", NoSpam([0, 0, 0, 0]))));
-    assert_eq!(true, re.is_match(&format!("{}", NoSpam([0, 0, 0, 0]))));
-    assert_eq!(true, re.is_match(&format!("{:X}", NoSpam([15, 15, 15, 15]))));
-    assert_eq!(true, re.is_match(&format!("{}", NoSpam([15, 15, 15, 15]))));
+    assert_eq!(true, test_is_hexdump_uppercase(&format!("{:X}", nospam)));
+    assert_eq!(true, test_is_hexdump_uppercase(&format!("{}", nospam)));
+    assert_eq!(true, test_is_hexdump_uppercase(&format!("{:X}", NoSpam([0, 0, 0, 0]))));
+    assert_eq!(true, test_is_hexdump_uppercase(&format!("{}", NoSpam([0, 0, 0, 0]))));
+    assert_eq!(true, test_is_hexdump_uppercase(&format!("{:X}", NoSpam([15, 15, 15, 15]))));
+    assert_eq!(true, test_is_hexdump_uppercase(&format!("{}", NoSpam([15, 15, 15, 15]))));
 }
 
 // NoSpam::from_bytes()
@@ -172,12 +184,8 @@ fn tox_id_parse_bytes_rest_test() {
 fn tox_id_fmt_test() {
     // check if formatted ToxId is always upper-case hexadecimal with matching
     // length
-    let right = Regex::new("^([0-9A-F]){76}$").expect("Creating regex failed!");
-    let wrong = Regex::new("F{76}").expect("Creating 2nd regexp failed!");
     let (pk, _) = gen_keypair();
     let toxid = ToxId::new(pk);
-    assert_eq!(true, right.is_match(&format!("{:X}", toxid)));
-    assert_eq!(true, right.is_match(&format!("{}", toxid)));
-    assert_eq!(false, wrong.is_match(&format!("{:X}", toxid)));
-    assert_eq!(false, wrong.is_match(&format!("{}", toxid)));
+    assert_eq!(true, test_is_hexdump_uppercase(&format!("{:X}", toxid)));
+    assert_eq!(true, test_is_hexdump_uppercase(&format!("{}", toxid)));
 }
