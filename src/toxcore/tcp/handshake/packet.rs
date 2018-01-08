@@ -27,8 +27,6 @@ handshake using [`diagram`](https://zetok.github.io/tox-spec/#handshake-diagram)
 use toxcore::crypto_core::*;
 use toxcore::tcp::binary_io::*;
 
-use cookie_factory::*;
-
 /** The request of the client to create a TCP handshake.
 
 According to https://zetok.github.io/tox-spec/#handshake-request.

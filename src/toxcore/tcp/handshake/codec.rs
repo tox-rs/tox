@@ -26,7 +26,7 @@
 use toxcore::tcp::handshake::packet::*;
 use toxcore::tcp::binary_io::*;
 
-use nom::*;
+use nom::Offset;
 use bytes::BytesMut;
 use std::io::{Error, ErrorKind};
 use tokio_io::codec::{Decoder, Encoder};

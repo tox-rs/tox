@@ -25,8 +25,8 @@
 
 use toxcore::crypto_core::*;
 use toxcore::tcp::binary_io::*;
-use nom::*;
-use cookie_factory::*;
+
+use nom::{be_u8, be_u16, be_u64, rest};
 
 /** Top-level TCP packet.
 

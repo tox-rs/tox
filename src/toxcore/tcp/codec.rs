@@ -26,7 +26,7 @@ use toxcore::tcp::packet::*;
 use toxcore::tcp::secure::*;
 use toxcore::tcp::binary_io::*;
 
-use nom::{IResult, Offset};
+use nom::Offset;
 use std::io::{Error, ErrorKind};
 use bytes::BytesMut;
 use tokio_io::codec::{Decoder, Encoder};
