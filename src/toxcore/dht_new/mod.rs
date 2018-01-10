@@ -23,7 +23,7 @@
 
 */
 
-extern crate cookie_factory;
-extern crate tokio_io;
+// extern crate cookie_factory;
+// extern crate tokio_io;
 pub mod packet;
 pub mod binary_io;

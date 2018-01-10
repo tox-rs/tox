@@ -25,8 +25,8 @@
 // FIXME: merge with toxcore/binary_io.rs
 
 use toxcore::crypto_core::*;
-use nom::*;
-use toxcore::dht_new::cookie_factory::*;
+pub use nom::IResult;
+pub use cookie_factory::GenError;
 
 /// The trait provides method to deserialize struct from raw bytes
 pub trait FromBytes : Sized {

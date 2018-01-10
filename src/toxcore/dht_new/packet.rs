@@ -45,8 +45,6 @@ use std::net::{
 use toxcore::dht_new::binary_io::*;
 use toxcore::crypto_core::*;
 
-use toxcore::dht_new::cookie_factory::*;
-
 /** Standard DHT packet that encapsulates in the payload
 [`DhtPacketT`](./trait.DhtPacketT.html).
 
@@ -58,9 +56,9 @@ pub enum DhtPacket {
     PingReq(PingReq),
     /// [`PingResp`](./struct.PingResp.html) structure.
     PingResp(PingResp),
-    /// [`GetN`](./struct.GetN.html) structure.
+    /// [`GetNodes`](./struct.GetNodes.html) structure.
     GetNodes(GetNodes),
-    /// [`SendN`](./struct.SendN.html) structure.
+    /// [`SendNodes`](./struct.SendNodes.html) structure.
     SendNodes(SendNodes),
     // /// [`CookieReq`](./struct.CookieReq.html) structure.
     //CookieReq(CookieReq),
@@ -70,7 +68,7 @@ pub enum DhtPacket {
     //CryptoHs(CryptoHs),
     /// [`CryptoData`](./struct.CryptoData.html) structure.
     //CryptoData(CryptoData),
-    /// [`DhtReq`](./struct.DhtReq.html) structure.
+    /// [`DhtRequest`](./struct.DhtRequest.html) structure.
     DhtRequest(DhtRequest),
     // /// [`LanDisc`](./struct.LanDisc.html) structure.
     //LanDisc(LanDisc),
@@ -470,7 +468,6 @@ Serialized form:
 
 Length | Content
 ------ | ------
-`1`    | 0x02
 `32`   | DHT Public Key
 `8`    | ping id
 
@@ -492,7 +489,6 @@ pub const GET_NODES_SIZE: usize = PUBLICKEYBYTES + 8;
 impl ToBytes for GetNodes {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
-            gen_be_u8!(0x02) >>
             gen_slice!(self.pk.as_ref()) >>
             gen_be_u64!(self.id)
         )
@@ -505,7 +501,6 @@ de-serialization will fail, returning `Error`.
 */
 impl FromBytes for GetNodes {
     named!(from_bytes<GetNodes>, do_parse!(
-        tag!("\x02") >>
         pk: call!(PublicKey::from_bytes) >>
         id: be_u64 >>
         (GetNodes { pk: pk, id: id })
@@ -521,9 +516,9 @@ Serialized form:
 
 Length      | Contents
 ----------- | --------
-`1`         | 0x04
 `1`         | Number of packed nodes (maximum 4)
 `[39, 204]` | Nodes in packed format
+`8`         | ping id
 
 An IPv4 node is 39 bytes, an IPv6 node is 51 bytes, so the maximum size is
 `51 * 4 = 204` bytes.
@@ -537,6 +532,8 @@ pub struct SendNodes {
     There can be only 1 to 4 nodes in `SendNodes`.
     */
     pub nodes: Vec<PackedNode>,
+    /// request id
+    pub id: u64,
 }
 
 /// Method assumes that supplied `SendNodes` has correct number of nodes
@@ -544,8 +541,9 @@ pub struct SendNodes {
 impl ToBytes for SendNodes {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
-            gen_be_u8!(0x04) >>
-            gen_many_ref!(&self.nodes, |buf, node| PackedNode::to_bytes(node, buf))
+            gen_be_u8!(self.nodes.len() as u8) >>
+            gen_many_ref!(&self.nodes, |buf, node| PackedNode::to_bytes(node, buf)) >>
+            gen_be_u64!(self.id)
         )
     }
 }
@@ -556,95 +554,18 @@ impl ToBytes for SendNodes {
 */
 impl FromBytes for SendNodes {
     named!(from_bytes<SendNodes>, do_parse!(
-        tag!("\x04") >>
         nodes_number: le_u8 >>
         nodes: cond_reduce!(
             nodes_number > 0 && nodes_number <= 4,
             count!(PackedNode::from_bytes, nodes_number as usize)
         ) >>
+        id: be_u64 >>
         (SendNodes {
             nodes: nodes,
+            id: id,
         })
     ));
 }
-
-/**
-Structure for holding nodes.
-
-Number of nodes it can contain is set during creation. If not set (aka `None`
-is supplied), number of nodes defaults to [`BUCKET_DEFAULT_SIZE`]
-(./constant.BUCKET_DEFAULT_SIZE.html).
-
-Nodes stored in `Bucket` are in [`PackedNode`](./struct.PackedNode.html)
-format.
-
-Used in [`Kbucket`](./struct.Kbucket.html) for storing nodes close to given
-PK; and additionally used to store nodes closest to friends.
-
-[Spec definition](https://zetok.github.io/tox-spec#updating-k-buckets).
-*/
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Bucket {
-    /// Amount of nodes it can hold.
-    capacity: u8,
-    /// Nodes that bucket has, sorted by distance to PK.
-    nodes: Vec<PackedNode>
-}
-
-/// Default number of nodes that bucket can hold.
-pub const BUCKET_DEFAULT_SIZE: usize = 8;
-
-/// Iterator over `Bucket`.
-// pub struct BucketIter<'a> {
-//     iter: ::std::slice::Iter<'a, PackedNode>,
-// }
-
-/** K-buckets structure to hold up to
-[`KBUCKET_MAX_ENTRIES`](./constant.KBUCKET_MAX_ENTRIES.html) *
-[`BUCKET_DEFAULT_SIZE`](./constant.BUCKET_DEFAULT_SIZE.html) nodes close to
-own PK.
-
-Nodes in bucket are sorted by closeness to the PK; closest node is the first,
-while furthest is last.
-
-Further reading: [Tox spec](https://zetok.github.io/tox-spec#k-buckets).
-*/
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Kbucket {
-    /// `PublicKey` for which `Kbucket` holds close nodes.
-    pk: PublicKey,
-
-    /// List of [`Bucket`](./struct.Bucket.html)s.
-    buckets: Vec<Box<Bucket>>,
-}
-
-/** Maximum number of [`Bucket`](./struct.Bucket.html)s that [`Kbucket`]
-(./struct.Kbucket.html) can hold.
-
-Realistically, not even half of that will be ever used, given how
-[index calculation](./fn.kbucket_index.html) works.
-*/
-pub const KBUCKET_MAX_ENTRIES: u8 = ::std::u8::MAX;
-
-/** Default number of [`Bucket`](./struct.Bucket.html)s that [`Kbucket`]
-(./struct.Kbucket.html) holds.
-*/
-pub const KBUCKET_BUCKETS: u8 = 128;
-
-/// Iterator over `PackedNode`s in `Kbucket`.
-// pub struct KbucketIter<'a> {
-//     pos_b: usize,
-//     pos_pn: usize,
-//     buckets: &'a [Box<Bucket>],
-// }
-
-/** `NatPing` type byte for [`NatPingReq`] and [`NatPingResp`].
-
-https://zetok.github.io/tox-spec/#nat-ping-request
-
-[`NatPingReq`]: ./struct.PingReq.html
-[`NatPingResp`]: ./struct.PingResp.html
-*/
 
 /** DHT Request packet structure.
 
@@ -663,11 +584,11 @@ Serialized structure:
 
 Length | Contents
 -------|---------
-1  | `0x20`
-32 | receiver's DHT public key
-32 | sender's DHT public key
-24 | Nonce
-?  | encrypted data
+1      | `0x20`
+32     | receiver's DHT public key
+32     | sender's DHT public key
+24     | Nonce
+?      | encrypted data
 
 https://zetok.github.io/tox-spec/#dht-request-packets
 */
@@ -707,4 +628,60 @@ impl FromBytes for DhtRequest {
             payload: payload.to_vec()
         })
     ));
+}
+
+#[cfg(test)]
+mod test {
+    use ::toxcore::dht_new::packet::*;
+    use ::std::net::SocketAddr;
+    use ::bytes::BytesMut;
+
+    /* Current GetnNodes | SendNodes parser can't distinguish each other from raw bytes.
+    Therefore current situation is SendNodes --> to_bytes --> raw bytes --> from_bytes --> GetNodes.
+    */
+
+    #[test]
+    fn serial_deserial() {
+        let (pk, _) = gen_keypair();
+        let mut buf = BytesMut::new();
+        let mut dht_buf = [0; 1024];
+        
+        let test_packets = vec![
+            DhtPacket::PingReq( PingReq { id: 4242 } ),
+            DhtPacket::PingResp( PingResp { id: 4242 } ),
+            DhtPacket::GetNodes( GetNodes { pk: pk, id: 4243 } ),
+            DhtPacket::SendNodes( SendNodes { nodes: vec![
+                PackedNode{ip_type: IpType::T4,
+                    saddr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
+                    pk: pk },
+                PackedNode{ip_type: IpType::U4,
+                    saddr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8088),
+                    pk: pk },
+                PackedNode{ip_type: IpType::T6,
+                    saddr: SocketAddr::new(IpAddr::V6(Ipv6Addr::new(1, 2, 3, 4, 5, 6, 7, 8)), 8089),
+                    pk: pk },
+                ], 
+                id: 4243 
+                } ),
+        ];
+        for packet in test_packets {
+            buf.clear();
+            packet.to_bytes((&mut dht_buf, 0))
+            .map(|(dht_buf, dht_size)| {
+                buf.extend_from_slice(&dht_buf[..dht_size]);
+                ()
+            })
+            .map_err(|e|
+                panic!("Server handshake serialize error: {:?}", e)
+            );
+
+            match DhtPacket::from_bytes(&mut buf) {
+                IResult::Done(_, packet_parsed) => {
+                    assert_eq!(packet, packet_parsed);                
+                },
+                IResult::Error(err) => {panic!("Err {:?}",err)},
+                IResult::Incomplete(needed) => {panic!("Needed {:?}",needed)}
+            };
+        }
+    }
 }
