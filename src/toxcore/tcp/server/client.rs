@@ -40,7 +40,7 @@ pub struct Client {
     /// PublicKey of the client.
     pk: PublicKey,
     /// The transmission end of a channel which is used to send values.
-    tx: mpsc::Sender<Packet>,
+    tx: mpsc::UnboundedSender<Packet>,
     /** links - a table of indexing links from this client to another
 
     A client requests to link him with another client by PK with RouteRequest.
@@ -59,7 +59,7 @@ pub struct Client {
 impl Client {
     /** Create new Client
     */
-    pub fn new(tx: mpsc::Sender<Packet>, pk: &PublicKey) -> Client {
+    pub fn new(tx: mpsc::UnboundedSender<Packet>, pk: &PublicKey) -> Client {
         Client {
             pk: *pk,
             tx: tx,

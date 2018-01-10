@@ -38,9 +38,9 @@ use tokio_io::IoFuture;
 /** A `Server` is a structure that holds connected clients, manages their links and handles
 their responses. Notice that there is no actual network code here, the `Server` accepts packets
 by value from `Server::handle_packet`, sends packets back to clients via
-`futures::sync::mpsc::Sender<Packet>` channel. The outer code should manage how to handshake
+`futures::sync::mpsc::UnboundedSender<Packet>` channel. The outer code should manage how to handshake
 connections, get packets from clients, pass them into `Server::handle_packet`,
-create `mpsc` chanel, take packets from `futures::sync::mpsc::Receiver<Packet>` send them back
+create `mpsc` chanel, take packets from `futures::sync::mpsc::UnboundedReceiver<Packet>` send them back
 to clients via network.
 */
 #[derive(Clone)]
@@ -331,9 +331,9 @@ mod tests {
 
     /// A function that generates random keypair, creates mpsc channel
     ///  and inserts them as a mock Client into Server
-    fn add_random_client(server: &Server) -> (PublicKey, mpsc::Receiver<Packet>) {
+    fn add_random_client(server: &Server) -> (PublicKey, mpsc::UnboundedReceiver<Packet>) {
         let (client_pk, _) = gen_keypair();
-        let (tx, rx) = mpsc::channel(1);
+        let (tx, rx) = mpsc::unbounded();
         server.insert(Client::new(tx, &client_pk));
         (client_pk, rx)
     }
@@ -359,7 +359,7 @@ mod tests {
         ));
 
         // client 2 connects to the server
-        let (tx_2, rx_2) = mpsc::channel(1);
+        let (tx_2, rx_2) = mpsc::unbounded();
         server.insert(Client::new(tx_2, &client_pk_2));
 
         // emulate send RouteRequest from client_1 again

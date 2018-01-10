@@ -69,7 +69,7 @@ fn main() {
             })
             .and_then(move |(socket, channel, client_pk)| {
                 println!("Handshake for client {:?} complited", &client_pk);
-                let (tx, rx) = mpsc::channel(8);
+                let (tx, rx) = mpsc::unbounded();
                 server_inner_c.insert(Client::new(tx, &client_pk));
 
                 Ok((socket, channel, client_pk, rx))
