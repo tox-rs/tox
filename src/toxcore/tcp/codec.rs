@@ -69,8 +69,7 @@ impl Decoder for Codec {
             )?;
 
         // deserialize Packet
-        let local_stack = BytesMut::from(decrypted_data);
-        match Packet::from_bytes(&local_stack) {
+        match Packet::from_bytes(&decrypted_data) {
             IResult::Incomplete(_) => {
                 Err(Error::new(ErrorKind::Other,
                     "Packet should not be incomplete"))
