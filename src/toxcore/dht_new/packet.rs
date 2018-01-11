@@ -388,7 +388,7 @@ pub struct PackedNode {
     /// Socket addr of node.
     saddr: SocketAddr,
     /// Public Key of the node.
-    pk: PublicKey,
+    pub pk: PublicKey,
 }
 
 /// Size in bytes of serialized [`PackedNode`](./struct.PackedNode.html) with
@@ -541,7 +541,8 @@ pub struct SendNodes {
 impl ToBytes for SendNodes {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
-            gen_be_u8!(self.nodes.len() as u8) >>
+            gen_if_else!(self.nodes.len() > 0 && self.nodes.len() < 5,
+                gen_be_u8!(self.nodes.len() as u8), gen_call!(|_,_| Err(GenError::CustomError(0)), 1) ) >>
             gen_many_ref!(&self.nodes, |buf, node| PackedNode::to_bytes(node, buf)) >>
             gen_be_u64!(self.id)
         )
@@ -636,21 +637,89 @@ mod test {
     use ::std::net::SocketAddr;
     use ::bytes::BytesMut;
 
-    /* Current GetnNodes | SendNodes parser can't distinguish each other from raw bytes.
-    Therefore current situation is SendNodes --> to_bytes --> raw bytes --> from_bytes --> GetNodes.
-    */
+    #[test]
+    fn ping_req() {
+        let mut buf = BytesMut::new();
+        let mut dht_buf = [0; 1024];
+        
+        let packet = PingReq { id: 4242 };
+
+        packet.to_bytes((&mut dht_buf, 0)) // work from suhr
+        .map(|(dht_buf, dht_size)| {
+            buf.extend_from_slice(&dht_buf[..dht_size]);
+            ()
+        })
+        .map_err(|e|
+            panic!("packet serialize error: {:?}", e)
+        ).ok().unwrap_or(());
+
+        match PingReq::from_bytes(&mut buf) {
+            IResult::Done(_, packet_parsed) => {
+                assert_eq!(packet, packet_parsed);                
+            },
+            IResult::Error(err) => {panic!("Err {:?}",err)},
+            IResult::Incomplete(needed) => {panic!("Needed {:?}",needed)}
+        };
+    }
 
     #[test]
-    fn serial_deserial() {
+    fn ping_resp() {
+        let mut buf = BytesMut::new();
+        let mut dht_buf = [0; 1024];
+        
+        let packet = PingResp { id: 4242 };
+
+        packet.to_bytes((&mut dht_buf, 0)) // work from suhr
+        .map(|(dht_buf, dht_size)| {
+            buf.extend_from_slice(&dht_buf[..dht_size]);
+            ()
+        })
+        .map_err(|e|
+            panic!("packet serialize error: {:?}", e)
+        ).ok().unwrap_or(());
+
+        match PingResp::from_bytes(&mut buf) {
+            IResult::Done(_, packet_parsed) => {
+                assert_eq!(packet, packet_parsed);                
+            },
+            IResult::Error(err) => {panic!("Err {:?}",err)},
+            IResult::Incomplete(needed) => {panic!("Needed {:?}",needed)}
+        };
+    }
+
+    #[test]
+    fn get_nodes() {
         let (pk, _) = gen_keypair();
         let mut buf = BytesMut::new();
         let mut dht_buf = [0; 1024];
         
-        let test_packets = vec![
-            DhtPacket::PingReq( PingReq { id: 4242 } ),
-            DhtPacket::PingResp( PingResp { id: 4242 } ),
-            DhtPacket::GetNodes( GetNodes { pk: pk, id: 4243 } ),
-            DhtPacket::SendNodes( SendNodes { nodes: vec![
+        let packet = GetNodes { pk: pk, id: 4243 };
+
+        packet.to_bytes((&mut dht_buf, 0)) // work from suhr
+        .map(|(dht_buf, dht_size)| {
+            buf.extend_from_slice(&dht_buf[..dht_size]);
+            ()
+        })
+        .map_err(|e|
+            panic!("packet serialize error: {:?}", e)
+        ).ok().unwrap_or(());
+
+        match GetNodes::from_bytes(&mut buf) {
+            IResult::Done(_, packet_parsed) => {
+                assert_eq!(packet, packet_parsed);                
+            },
+            IResult::Error(err) => {panic!("Err {:?}",err)},
+            IResult::Incomplete(needed) => {panic!("Needed {:?}",needed)}
+        };
+    }
+
+    #[test]
+    fn send_nodes() {
+        let (pk, _) = gen_keypair();
+        let mut buf = BytesMut::new();
+        let mut dht_buf = [0; 1024];
+        
+        let packet = SendNodes { nodes: vec![
                 PackedNode{ip_type: IpType::T4,
                     saddr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
                     pk: pk },
@@ -662,26 +731,90 @@ mod test {
                     pk: pk },
                 ], 
                 id: 4243 
-                } ),
-        ];
-        for packet in test_packets {
-            buf.clear();
-            packet.to_bytes((&mut dht_buf, 0))
-            .map(|(dht_buf, dht_size)| {
-                buf.extend_from_slice(&dht_buf[..dht_size]);
-                ()
-            })
-            .map_err(|e|
-                panic!("Server handshake serialize error: {:?}", e)
-            );
-
-            match DhtPacket::from_bytes(&mut buf) {
-                IResult::Done(_, packet_parsed) => {
-                    assert_eq!(packet, packet_parsed);                
-                },
-                IResult::Error(err) => {panic!("Err {:?}",err)},
-                IResult::Incomplete(needed) => {panic!("Needed {:?}",needed)}
             };
-        }
+
+        packet.to_bytes((&mut dht_buf, 0)) // work from suhr
+        .map(|(dht_buf, dht_size)| {
+            buf.extend_from_slice(&dht_buf[..dht_size]);
+            ()
+        })
+        .map_err(|e|
+            panic!("packet serialize error: {:?}", e)
+        ).ok().unwrap_or(());
+
+        match SendNodes::from_bytes(&mut buf) {
+            IResult::Done(_, packet_parsed) => {
+                assert_eq!(packet, packet_parsed);                
+            },
+            IResult::Error(err) => {panic!("Err {:?}",err)},
+            IResult::Incomplete(needed) => {panic!("Needed {:?}",needed)}
+        };
+    }
+
+    #[test]
+    fn send_nodes_0() {
+        let mut buf = BytesMut::new();
+        let mut dht_buf = [0; 1024];
+        
+        let packet = SendNodes { nodes: vec![], id: 4243 };
+
+        packet.to_bytes((&mut dht_buf, 0)) // work from suhr
+        .map(|(_,_)| {
+            panic!("zero packed_node must fail to to_bytes")
+        })
+        .map_err(|_|
+            assert!(true)
+        ).ok().unwrap_or(());
+
+        match SendNodes::from_bytes(&mut buf) {
+            IResult::Done(_, _) => {
+                panic!("zero packed_node must fail to from_bytes ");
+            },
+            IResult::Error(_) => {assert!(true)},
+            IResult::Incomplete(_) => {assert!(true)}
+        };
+    }
+
+    #[test]
+    fn send_nodes_5() {
+        let (pk, _) = gen_keypair();
+        let mut buf = BytesMut::new();
+        let mut dht_buf = [0; 1024];
+        
+        let packet = SendNodes { nodes: vec![
+                PackedNode{ip_type: IpType::T4,
+                    saddr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
+                    pk: pk },
+                PackedNode{ip_type: IpType::U4,
+                    saddr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8088),
+                    pk: pk },
+                PackedNode{ip_type: IpType::T6,
+                    saddr: SocketAddr::new(IpAddr::V6(Ipv6Addr::new(1, 2, 3, 4, 5, 6, 7, 8)), 8089),
+                    pk: pk },
+                PackedNode{ip_type: IpType::U6,
+                    saddr: SocketAddr::new(IpAddr::V6(Ipv6Addr::new(1, 2, 3, 4, 5, 6, 7, 8)), 8089),
+                    pk: pk },
+                PackedNode{ip_type: IpType::T4,
+                    saddr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
+                    pk: pk },
+                ], 
+                id: 4243 
+            };
+
+        packet.to_bytes((&mut dht_buf, 0)) // work from suhr
+        .map(|(_,_)| {
+            panic!("more than 4 packed_node must fail to to_bytes")
+        })
+        .map_err(|_|
+            assert!(true)
+        ).ok().unwrap_or(());
+
+        match SendNodes::from_bytes(&mut buf) {
+            IResult::Done(_, _) => {
+                panic!("more than 4 packed_node must fail to from_bytes ");
+            },
+            IResult::Error(_) => {assert!(true)},
+            IResult::Incomplete(_) => {assert!(true)}
+        };
     }
 }
