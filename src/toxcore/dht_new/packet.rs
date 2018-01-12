@@ -45,6 +45,10 @@ use std::net::{
 use toxcore::dht_new::binary_io::*;
 use toxcore::crypto_core::*;
 
+/// Length in bytes of [`PingReq`](./struct.PingReq.html) and
+/// [`PingResp`](./struct.PingResp.html) when serialized into bytes.
+pub const PING_SIZE: usize = 9;
+
 /** Standard DHT packet that encapsulates in the payload
 [`DhtPacketT`](./trait.DhtPacketT.html).
 
@@ -633,188 +637,371 @@ impl FromBytes for DhtRequest {
 
 #[cfg(test)]
 mod test {
+    extern crate rand;
+    extern crate rustc_serialize;
+
     use ::toxcore::dht_new::packet::*;
-    use ::std::net::SocketAddr;
-    use ::bytes::BytesMut;
+    use ::toxcore::packet_kind::PacketKind;
 
-    #[test]
-    fn ping_req() {
-        let mut buf = BytesMut::new();
-        let mut dht_buf = [0; 1024];
-        
-        let packet = PingReq { id: 4242 };
+    //use ::std::cmp::Ordering;
+    // use ::std::net::{
+    //             IpAddr,
+    //             Ipv4Addr,
+    //             Ipv6Addr,
+    //             SocketAddr,
+    //             SocketAddrV4,
+    //             SocketAddrV6
+    // };
+    // use ::std::str::FromStr;
+    use ::std::fmt::Debug;
+    use ::byteorder::{ByteOrder, BigEndian, WriteBytesExt};
 
-        packet.to_bytes((&mut dht_buf, 0)) // work from suhr
-        .map(|(dht_buf, dht_size)| {
-            buf.extend_from_slice(&dht_buf[..dht_size]);
-            ()
-        })
-        .map_err(|e|
-            panic!("packet serialize error: {:?}", e)
-        ).ok().unwrap_or(());
+    use ::quickcheck::{Arbitrary, Gen, quickcheck};
+    //use self::rand::chacha::ChaChaRng;
 
-        match PingReq::from_bytes(&mut buf) {
-            IResult::Done(_, packet_parsed) => {
-                assert_eq!(packet, packet_parsed);                
-            },
-            IResult::Error(err) => {panic!("Err {:?}",err)},
-            IResult::Incomplete(needed) => {panic!("Needed {:?}",needed)}
-        };
+    // PingReq::
+
+    impl Arbitrary for PingReq {
+        fn arbitrary<G: Gen>(_g: &mut G) -> Self {
+            PingReq::new()
+        }
+    }
+    
+    // PingResp::
+
+    impl Arbitrary for PingResp {
+        fn arbitrary<G: Gen>(_g: &mut G) -> Self {
+            PingReq::new().into()
+        }
     }
 
-    #[test]
-    fn ping_resp() {
-        let mut buf = BytesMut::new();
-        let mut dht_buf = [0; 1024];
-        
-        let packet = PingResp { id: 4242 };
+    impl PingReq {
+        /// Create new ping request with a randomly generated `request id`.
+        pub fn new() -> Self {
+            trace!("Creating new Ping.");
+            PingReq { id: random_u64() }
+        }
 
-        packet.to_bytes((&mut dht_buf, 0)) // work from suhr
-        .map(|(dht_buf, dht_size)| {
-            buf.extend_from_slice(&dht_buf[..dht_size]);
-            ()
-        })
-        .map_err(|e|
-            panic!("packet serialize error: {:?}", e)
-        ).ok().unwrap_or(());
-
-        match PingResp::from_bytes(&mut buf) {
-            IResult::Done(_, packet_parsed) => {
-                assert_eq!(packet, packet_parsed);                
-            },
-            IResult::Error(err) => {panic!("Err {:?}",err)},
-            IResult::Incomplete(needed) => {panic!("Needed {:?}",needed)}
-        };
+        /// An ID of the request / response.
+        pub fn id(&self) -> u64 {
+            self.id
+        }
     }
 
-    #[test]
-    fn get_nodes() {
-        let (pk, _) = gen_keypair();
-        let mut buf = BytesMut::new();
-        let mut dht_buf = [0; 1024];
-        
-        let packet = GetNodes { pk: pk, id: 4243 };
-
-        packet.to_bytes((&mut dht_buf, 0)) // work from suhr
-        .map(|(dht_buf, dht_size)| {
-            buf.extend_from_slice(&dht_buf[..dht_size]);
-            ()
-        })
-        .map_err(|e|
-            panic!("packet serialize error: {:?}", e)
-        ).ok().unwrap_or(());
-
-        match GetNodes::from_bytes(&mut buf) {
-            IResult::Done(_, packet_parsed) => {
-                assert_eq!(packet, packet_parsed);                
-            },
-            IResult::Error(err) => {panic!("Err {:?}",err)},
-            IResult::Incomplete(needed) => {panic!("Needed {:?}",needed)}
-        };
+    impl PingResp {
+        /// An ID of the request / response.
+        pub fn id(&self) -> u64 {
+            self.id
+        }
     }
 
+    impl From<PingReq> for PingResp {
+        fn from(p: PingReq) -> Self {
+            PingResp { id: p.id }
+        }
+    }
+
+    impl DhtPacketT for PingReq {
+        fn kind(&self) -> PacketKind {
+            PacketKind::PingReq
+        }
+    }
+
+    impl DhtPacketT for PingResp {
+        fn kind(&self) -> PacketKind {
+            PacketKind::PingResp
+        }
+    }
+
+    /// Trait for types of DHT packets that can be put in [`DhtPacket`]
+    /// (./struct.DhtPacket.html).
+    pub trait DhtPacketT: ToBytes + FromBytes + Eq + PartialEq + Debug {
+        /// Provide packet type number.
+        ///
+        /// To use for serialization: `.kind() as u8`.
+        fn kind(&self) -> PacketKind;
+
+        // / Create a payload for [`DhtPacket`](./struct.DhtPacket.html) from
+        // / `self`.
+        // TODO: better name?
+        // fn into_dht_packet_payload(
+        //     &self,
+        //     symmetric_key: &PrecomputedKey,
+        //     nonce: &Nonce) -> Vec<u8>
+        // {
+        //     seal_precomputed(&self.to_bytes(), nonce, symmetric_key)
+        // }
+    }
+
+    macro_rules! tests_for_pings {
+        ($($p:ident $b_t:ident $f_t:ident)+) => ($(
+            // ::to_bytes()
+
+            #[test]
+            fn $b_t() {
+                fn with_ping(p: $p) {
+                    let mut _buf = [0; 1024];
+                    let pb = p.to_bytes((&mut _buf, 0)).ok().unwrap();
+                    assert_eq!(PING_SIZE, pb.1);
+                    assert_eq!(PacketKind::$p as u8, pb.0[0]);
+                }
+                quickcheck(with_ping as fn($p));
+            }
+
+            // ::from_bytes()
+
+            #[test]
+            fn $f_t() {
+                fn with_bytes(bytes: Vec<u8>) {
+                    if bytes.len() < PING_SIZE ||
+                    bytes[0] != PacketKind::$p as u8 {
+                        assert!(!($p::from_bytes(&bytes)).is_done());
+                    } else {
+                        let p = $p::from_bytes(&bytes).unwrap();
+                        // `id` should not differ
+                        assert_eq!(p.1.id(), BigEndian::read_u64(&bytes[1..PING_SIZE]));
+                    }
+                }
+                quickcheck(with_bytes as fn(Vec<u8>));
+
+                // just in case
+                let mut ping = vec![PacketKind::$p as u8];
+                ping.write_u64::<BigEndian>(random_u64()).unwrap();
+                with_bytes(ping);
+            }
+        )+)
+    }
+    tests_for_pings!(PingReq
+                        packet_ping_req_to_bytes_test
+                        packet_ping_req_from_bytes_test
+                    PingResp
+                        packet_ping_resp_to_bytes_test
+                        packet_ping_resp_from_bytes_test
+    );
+
+    // GetNodes::
+
+    impl Arbitrary for GetNodes {
+        fn arbitrary<G: Gen>(g: &mut G) -> Self {
+            let mut a: [u8; PUBLICKEYBYTES] = [0; PUBLICKEYBYTES];
+            g.fill_bytes(&mut a);
+            GetNodes { pk: PublicKey(a), id: g.gen() }
+        }
+    }
+
+    // GetNodes::to_bytes()
+
     #[test]
-    fn send_nodes() {
-        let (pk, _) = gen_keypair();
-        let mut buf = BytesMut::new();
-        let mut dht_buf = [0; 1024];
-        
-        let packet = SendNodes { nodes: vec![
-                PackedNode{ip_type: IpType::T4,
-                    saddr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
-                    pk: pk },
-                PackedNode{ip_type: IpType::U4,
-                    saddr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8088),
-                    pk: pk },
-                PackedNode{ip_type: IpType::T6,
-                    saddr: SocketAddr::new(IpAddr::V6(Ipv6Addr::new(1, 2, 3, 4, 5, 6, 7, 8)), 8089),
-                    pk: pk },
-                ], 
-                id: 4243 
+    fn packet_get_nodes_to_bytes_test() {
+        fn with_gn(gn: GetNodes) {
+            let mut _buf = [0;1024];
+            let g_bytes = gn.to_bytes((&mut _buf, 0)).ok().unwrap().0;
+            let PublicKey(pk_bytes) = gn.pk;
+            assert_eq!(&pk_bytes, &g_bytes[..PUBLICKEYBYTES]);
+            assert_eq!(gn.id, BigEndian::read_u64(&g_bytes[PUBLICKEYBYTES..]));
+        }
+        quickcheck(with_gn as fn(GetNodes));
+    }
+
+    // GetNodes::from_bytes()
+
+    #[test]
+    fn packet_get_nodes_from_bytes_test() {
+        fn with_bytes(bytes: Vec<u8>) {
+            if bytes.len() < GET_NODES_SIZE {
+                assert!(!GetNodes::from_bytes(&bytes).is_done());
+            } else {
+                let gn = GetNodes::from_bytes(&bytes).unwrap().1;
+                // ping_id as bytes should match "original" bytes
+                assert_eq!(BigEndian::read_u64(&bytes[PUBLICKEYBYTES..GET_NODES_SIZE]), gn.id);
+
+                let PublicKey(ref pk) = gn.pk;
+                assert_eq!(pk, &bytes[..PUBLICKEYBYTES]);
+            }
+        }
+        quickcheck(with_bytes as fn(Vec<u8>));
+    }
+
+    // PackedNode::
+
+    /// Valid, random `PackedNode`.
+    impl Arbitrary for PackedNode {
+        fn arbitrary<G: Gen>(g: &mut G) -> Self {
+            let ipv4: bool = g.gen();
+
+            let mut pk_bytes = [0; PUBLICKEYBYTES];
+            g.fill_bytes(&mut pk_bytes);
+            let pk = PublicKey(pk_bytes);
+
+            if ipv4 {
+                let addr = Ipv4Addr::new(g.gen(), g.gen(), g.gen(), g.gen());
+                let saddr = SocketAddrV4::new(addr, g.gen());
+
+                PackedNode::new(g.gen(), SocketAddr::V4(saddr), &pk)
+            } else {
+                let addr = Ipv6Addr::new(g.gen(), g.gen(), g.gen(), g.gen(),
+                                        g.gen(), g.gen(), g.gen(), g.gen());
+                let saddr = SocketAddrV6::new(addr, g.gen(), 0, 0);
+
+                PackedNode::new(g.gen(), SocketAddr::V6(saddr), &pk)
+            }
+        }
+    }
+
+    impl PackedNode {
+        /** New `PackedNode`.
+
+        `udp` - whether UDP or TCP should be used. UDP is used for DHT nodes,
+        whereas TCP is used for TCP relays. When `true`, UDP is used, otherwise
+        TCP is used.
+        */
+        pub fn new(udp: bool, saddr: SocketAddr, pk: &PublicKey) -> Self {
+            debug!(target: "PackedNode", "Creating new PackedNode.");
+            trace!(target: "PackedNode", "With args: udp: {}, saddr: {:?}, PK: {:?}",
+                udp, &saddr, pk);
+
+            let v4: bool = match saddr {
+                SocketAddr::V4(_) => true,
+                SocketAddr::V6(_) => false,
             };
 
-        packet.to_bytes((&mut dht_buf, 0)) // work from suhr
-        .map(|(dht_buf, dht_size)| {
-            buf.extend_from_slice(&dht_buf[..dht_size]);
-            ()
-        })
-        .map_err(|e|
-            panic!("packet serialize error: {:?}", e)
-        ).ok().unwrap_or(());
-
-        match SendNodes::from_bytes(&mut buf) {
-            IResult::Done(_, packet_parsed) => {
-                assert_eq!(packet, packet_parsed);                
-            },
-            IResult::Error(err) => {panic!("Err {:?}",err)},
-            IResult::Incomplete(needed) => {panic!("Needed {:?}",needed)}
-        };
-    }
-
-    #[test]
-    fn send_nodes_0() {
-        let mut buf = BytesMut::new();
-        let mut dht_buf = [0; 1024];
-        
-        let packet = SendNodes { nodes: vec![], id: 4243 };
-
-        packet.to_bytes((&mut dht_buf, 0)) // work from suhr
-        .map(|(_,_)| {
-            panic!("zero packed_node must fail to to_bytes")
-        })
-        .map_err(|_|
-            assert!(true)
-        ).ok().unwrap_or(());
-
-        match SendNodes::from_bytes(&mut buf) {
-            IResult::Done(_, _) => {
-                panic!("zero packed_node must fail to from_bytes ");
-            },
-            IResult::Error(_) => {assert!(true)},
-            IResult::Incomplete(_) => {assert!(true)}
-        };
-    }
-
-    #[test]
-    fn send_nodes_5() {
-        let (pk, _) = gen_keypair();
-        let mut buf = BytesMut::new();
-        let mut dht_buf = [0; 1024];
-        
-        let packet = SendNodes { nodes: vec![
-                PackedNode{ip_type: IpType::T4,
-                    saddr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
-                    pk: pk },
-                PackedNode{ip_type: IpType::U4,
-                    saddr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8088),
-                    pk: pk },
-                PackedNode{ip_type: IpType::T6,
-                    saddr: SocketAddr::new(IpAddr::V6(Ipv6Addr::new(1, 2, 3, 4, 5, 6, 7, 8)), 8089),
-                    pk: pk },
-                PackedNode{ip_type: IpType::U6,
-                    saddr: SocketAddr::new(IpAddr::V6(Ipv6Addr::new(1, 2, 3, 4, 5, 6, 7, 8)), 8089),
-                    pk: pk },
-                PackedNode{ip_type: IpType::T4,
-                    saddr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
-                    pk: pk },
-                ], 
-                id: 4243 
+            let ip_type = match (udp, v4) {
+                (true, true)   => IpType::U4,
+                (true, false)  => IpType::U6,
+                (false, true)  => IpType::T4,
+                (false, false) => IpType::T6,
             };
 
-        packet.to_bytes((&mut dht_buf, 0)) // work from suhr
-        .map(|(_,_)| {
-            panic!("more than 4 packed_node must fail to to_bytes")
-        })
-        .map_err(|_|
-            assert!(true)
-        ).ok().unwrap_or(());
+            PackedNode {
+                ip_type: ip_type,
+                saddr: saddr,
+                pk: *pk,
+            }
+        }
 
-        match SendNodes::from_bytes(&mut buf) {
-            IResult::Done(_, _) => {
-                panic!("more than 4 packed_node must fail to from_bytes ");
-            },
-            IResult::Error(_) => {assert!(true)},
-            IResult::Incomplete(_) => {assert!(true)}
-        };
+        /// Get an IP type from the `PackedNode`.
+        pub fn ip_type(&self) -> IpType {
+            trace!(target: "PackedNode", "Getting IP type from PackedNode.");
+            trace!("With address: {:?}", self);
+            self.ip_type
+        }
+
+        /// Get an IP address from the `PackedNode`.
+        pub fn ip(&self) -> IpAddr {
+            trace!(target: "PackedNode", "Getting IP address from PackedNode.");
+            trace!("With address: {:?}", self);
+            match self.saddr {
+                SocketAddr::V4(addr) => IpAddr::V4(*addr.ip()),
+                SocketAddr::V6(addr) => IpAddr::V6(*addr.ip()),
+            }
+        }
+
+        /// Get a Socket address from the `PackedNode`.
+        pub fn socket_addr(&self) -> SocketAddr {
+            trace!(target: "PackedNode", "Getting Socket address from PackedNode.");
+            trace!("With address: {:?}", self);
+            self.saddr
+        }
+
+        /// Get an IP address from the `PackedNode`.
+        pub fn pk(&self) -> &PublicKey {
+            trace!(target: "PackedNode", "Getting PK from PackedNode.");
+            trace!("With address: {:?}", self);
+            &self.pk
+        }
+
+    }
+
+    // SendNodes::
+
+    impl Arbitrary for SendNodes {
+        fn arbitrary<G: Gen>(g: &mut G) -> Self {
+            let nodes = vec![Arbitrary::arbitrary(g); g.gen_range(1,4)];
+            let id = g.gen();
+            SendNodes { nodes: nodes, id: id }
+        }
+    }
+
+    impl SendNodes {
+        /**
+        Create new `SendNodes`. Returns `None` if 0 or more than 4 nodes are
+        supplied.
+
+        Created as a response to `GetNodes` request.
+        */
+        pub fn with_nodes(request: &GetNodes, nodes: Vec<PackedNode>) -> Option<Self> {
+            debug!(target: "SendNodes", "Creating SendNodes from GetNodes.");
+            trace!(target: "SendNodes", "With GetNodes: {:?}", request);
+            trace!("With nodes: {:?}", &nodes);
+
+            if nodes.is_empty() || nodes.len() > 4 {
+                warn!(target: "SendNodes", "Wrong number of nodes supplied!");
+                return None
+            }
+
+            Some(SendNodes { nodes: nodes, id: request.id })
+        }
+    }
+
+    // SendNodes::to_bytes()
+
+    #[test]
+    fn packet_send_nodes_to_bytes_test() {
+        // there should be at least 1 valid node; there can be up to 4 nodes
+        fn with_nodes(req: GetNodes, n1: PackedNode, n2: Option<PackedNode>,
+                    n3: Option<PackedNode>, n4: Option<PackedNode>) {
+
+            let mut _buf = [0;1024];
+            let mut nodes = vec![n1];
+            if let Some(n) = n2 { nodes.push(n); }
+            if let Some(n) = n3 { nodes.push(n); }
+            if let Some(n) = n4 { nodes.push(n); }
+            let sn_bytes = SendNodes::with_nodes(&req, nodes.clone())
+                            .unwrap().to_bytes((&mut _buf, 0)).ok().unwrap().0;
+
+            // number of nodes should match
+            assert_eq!(nodes.len(), sn_bytes[0] as usize);
+
+            // bytes before current PackedNode in serialized SendNodes
+            // starts from `1` since first byte of serialized SendNodes is number of
+            // nodes
+            let mut len_before = 1;
+            for node in &nodes {
+                let mut _buf = [0; 1024];
+                let cur_len = node.to_bytes((&mut _buf, 0)).ok().unwrap().1;
+                assert_eq!(&_buf[..cur_len],
+                        &sn_bytes[len_before..(len_before + cur_len)]);
+                len_before += cur_len;
+            }
+            // ping id should be the same as in request
+            assert_eq!(req.id, BigEndian::read_u64(&sn_bytes[len_before..]));
+        }
+        quickcheck(with_nodes as fn(GetNodes, PackedNode, Option<PackedNode>,
+                                    Option<PackedNode>, Option<PackedNode>));
+    }
+
+    // SendNodes::from_bytes()
+
+    #[test]
+    fn packet_send_nodes_from_bytes_test() {
+        fn with_nodes(nodes: Vec<PackedNode>, r_u64: u64) {
+            let mut bytes = vec![nodes.len() as u8];
+            let mut _buf = [0; 1024];
+            for node in &nodes {
+                let buf = node.to_bytes((&mut _buf, 0)).ok().unwrap();
+                bytes.extend_from_slice(&buf.0[..buf.1]);
+            }
+            // and ping id
+            bytes.write_u64::<BigEndian>(r_u64).unwrap();
+
+            if nodes.len() > 4 || nodes.is_empty() {
+                assert!(!SendNodes::from_bytes(&bytes).is_done());
+            } else {
+                let nodes2 = SendNodes::from_bytes(&bytes).unwrap().1;
+                assert_eq!(&nodes, &nodes2.nodes);
+                assert_eq!(r_u64, nodes2.id);
+            }
+        }
+        quickcheck(with_nodes as fn(Vec<PackedNode>, u64));
     }
 }
