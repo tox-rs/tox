@@ -20,18 +20,12 @@
 */
 
 
-// ↓ FIXME expand doc
-/*! DHT part of the toxcore.
-
+/*! DHT packet part of the toxcore.
     * takes care of the serializing and de-serializing DHT packets
-    * ..
 */
 
 use nom::{le_u8, le_u16, be_u64, be_u16};
 
-//use std::cmp::{Ord, Ordering};
-//use std::convert::From;
-//use std::fmt::Debug;
 use std::net::{
     IpAddr,
     Ipv4Addr,
@@ -40,7 +34,6 @@ use std::net::{
     SocketAddrV4,
     SocketAddrV6
 };
-//use std::ops::Deref;
 
 use toxcore::dht_new::binary_io::*;
 use toxcore::crypto_core::*;
@@ -50,20 +43,11 @@ use toxcore::crypto_core::*;
 pub const PING_SIZE: usize = 9;
 
 /** `NatPing` type byte for [`NatPingReq`] and [`NatPingResp`].
-
-https://zetok.github.io/tox-spec/#nat-ping-request
-
-[`NatPingReq`]: ./struct.PingReq.html
-[`NatPingResp`]: ./struct.PingResp.html
+[./struct.PingReq.html] [./struct.PingResp.html]
 */
 pub const NAT_PING_TYPE: u8 = 0xfe;
 
 /** Length in bytes of NatPings when serialized into bytes.
-
-NatPings:
-
- - [`NatPingReq`](./struct.PingReq.html)
- - [`NatPingResp`](./struct.PingResp.html)
 */
 pub const NAT_PING_SIZE: usize = PING_SIZE + 1;
 
@@ -94,7 +78,7 @@ impl ToBytes for DhtPacket {
         }
     }
 }
-/// De-serialize bytes into `DhtPacket`.
+
 impl FromBytes for DhtPacket {
     named!(from_bytes<DhtPacket>, alt!(
         map!(PingReq::from_bytes, DhtPacket::PingReq) |
@@ -104,21 +88,24 @@ impl FromBytes for DhtPacket {
     ));
 }
 
-/** Standard DHT request packet.
+/** DHT Request packet.
+
+https://zetok.github.io/tox-spec/#dht-request-packets
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DhtRequest {
-    /// [`NatPingReq`](./struct.PingReq.html) structure.
+    /// [`NatPingReq`](./struct.NatPingReq.html) structure.
     NatPingReq(PingReq),
-    /// [`NatPingResp`](./struct.PingResp.html) structure.
+    /// [`NatPingResp`](./struct.NatPingResp.html) structure.
     NatPingResp(PingResp),
 }
 
-/** NatPing request DHT request packet.
+/** NatPing request of DHT Request packet.
 */
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct NatPingReq(pub PingReq);
-/** NatPing response DHT request packet.
+
+/** NatPing response of DHT Request packet.
 */
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct NatPingResp(pub PingResp);
@@ -147,7 +134,6 @@ impl FromBytes for NatPingReq {
     ));
 }
 
-/// Serialize to bytes.
 impl ToBytes for NatPingReq {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         let &NatPingReq(x) = self;
@@ -166,7 +152,6 @@ impl FromBytes for NatPingResp {
     ));
 }
 
-/// Serialize to bytes.
 impl ToBytes for NatPingResp {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         let &NatPingResp(x) = self;
@@ -178,7 +163,7 @@ impl ToBytes for NatPingResp {
 }
 
 /**
-Used to request/respond to ping. Use in an encrypted form.
+Used to request/respond to ping. Used in an encrypted form.
 
 Used in:
 
@@ -189,7 +174,7 @@ Serialized form:
 
 Ping Packet (request and response)
 
-Packet type `0x00` for request and `0x01` for response.
+Packet type `0x00` for request.
 
 Response ID must match ID of the request, otherwise ping is invalid.
 
@@ -199,8 +184,6 @@ Length      | Contents
 `8`         | Ping ID
 
 Serialized form should be put in the encrypted part of DHT packet.
-
-# Creating new
 
 [`PingResp`](./struct.PingResp.html) can only be created as a response
 to [`PingReq`](./struct.PingReq.html).
@@ -220,7 +203,6 @@ impl FromBytes for PingReq {
     ));
 }
 
-/// Serialize to bytes.
 impl ToBytes for PingReq {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
@@ -231,7 +213,7 @@ impl ToBytes for PingReq {
 }
 
 /**
-Used to request/respond to ping. Use in an encrypted form.
+Used to request/respond to ping. Used in an encrypted form.
 
 Used in:
 
@@ -242,7 +224,7 @@ Serialized form:
 
 Ping Packet (request and response)
 
-Packet type `0x00` for request and `0x01` for response.
+Packet type `0x01` for response.
 
 Response ID must match ID of the request, otherwise ping is invalid.
 
@@ -252,8 +234,6 @@ Length      | Contents
 `8`         | Ping ID
 
 Serialized form should be put in the encrypted part of DHT packet.
-
-# Creating new
 
 [`PingResp`](./struct.PingResp.html) can only be created as a response
 to [`PingReq`](./struct.PingReq.html).
@@ -273,7 +253,6 @@ impl FromBytes for PingResp {
     ));
 }
 
-/// Serialize to bytes.
 impl ToBytes for PingResp {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
@@ -335,8 +314,6 @@ impl ToBytes for IpAddr {
 }
 
 // TODO: move it somewhere else
-/// Fail if there are less than 4 bytes supplied, otherwise parses first
-/// 4 bytes as an `Ipv4Addr`.
 impl FromBytes for Ipv4Addr {
     named!(from_bytes<Ipv4Addr>, map!(count!(le_u8, 4), 
         |v| Ipv4Addr::new(v[0], v[1], v[2], v[3])
@@ -356,8 +333,6 @@ impl ToBytes for Ipv4Addr {
 }
 
 // TODO: move it somewhere else
-/// Fail if there are less than 16 bytes supplied, otherwise parses first
-/// 16 bytes as an `Ipv6Addr`.
 impl FromBytes for Ipv6Addr {
     named!(from_bytes<Ipv6Addr>, map!(count!(le_u16, 8), 
         |v| Ipv6Addr::new(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7])
@@ -393,10 +368,10 @@ Serialized Packed node:
 
 Length | Content
 ------ | -------
-`1`    | [`IpType`](./.enum.IpType.html)
-`4` or `16` | IPv4 or IPv6 address
-`2`    | port
-`32`   | node ID
+1      | [`IpType`](./.enum.IpType.html)
+4 or 16| IPv4 or IPv6 address
+2      | port
+32     | node ID
 
 Size of serialized `PackedNode` is 39 bytes with IPv4 node info, or 51 with
 IPv6 node info.
@@ -406,8 +381,6 @@ solely on the UDP.
 */
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct PackedNode {
-    /// IP type, includes also info about protocol used.
-    ip_type: IpType,
     /// Socket addr of node.
     saddr: SocketAddr,
     /// Public Key of the node.
@@ -420,6 +393,7 @@ pub const PACKED_NODE_IPV4_SIZE: usize = PUBLICKEYBYTES + 7;
 /// Size in bytes of serialized [`PackedNode`](./struct.PackedNode.html) with
 /// IPv6.
 pub const PACKED_NODE_IPV6_SIZE: usize = PUBLICKEYBYTES + 19;
+
 /** Serialize `PackedNode` into bytes.
 
 Can be either [`PACKED_NODE_IPV4_SIZE`]
@@ -430,7 +404,7 @@ IPv4 or IPv6 is being used.
 impl ToBytes for PackedNode {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
-            gen_be_u8!(self.ip_type as u8) >>
+            gen_if_else!(self.saddr.is_ipv4(), gen_be_u8!(IpType::U4 as u8), gen_be_u8!(IpType::U6 as u8)) >>
             gen_call!(|buf, addr| IpAddr::to_bytes(addr, buf), &self.saddr.ip()) >>
             gen_be_u16!(self.saddr.port()) >>
             gen_slice!(self.pk.as_ref())
@@ -451,26 +425,24 @@ Blindly trusts that provided `IpType` matches - i.e. if there are provided
 says that it's actually IPv4, bytes will be parsed as if that was an IPv4
 address.
 */
-named_args!(as_ipv4_packed_node(iptype: IpType) <PackedNode>, do_parse!(
+named!(as_ipv4_packed_node<PackedNode>, do_parse!(
     addr: call!(Ipv4Addr::from_bytes) >>
     port: be_u16 >>
     saddr: value!(SocketAddrV4::new(addr, port)) >>
     pk: call!(PublicKey::from_bytes) >>
     (PackedNode {
-        ip_type: iptype,
         saddr: SocketAddr::V4(saddr),
         pk: pk
     })
 ));
 
 // Parse bytes as an IPv6 PackedNode.
-named_args!(as_ipv6_packed_node(iptype: IpType) <PackedNode>, do_parse!(
+named!(as_ipv6_packed_node<PackedNode>, do_parse!(
     addr: call!(Ipv6Addr::from_bytes) >>
     port: be_u16 >>
     saddr: value!(SocketAddrV6::new(addr, port, 0, 0)) >>
     pk: call!(PublicKey::from_bytes) >>
     (PackedNode {
-        ip_type: iptype,
         saddr: SocketAddr::V6(saddr),
         pk: pk
     })
@@ -478,12 +450,11 @@ named_args!(as_ipv6_packed_node(iptype: IpType) <PackedNode>, do_parse!(
 
 impl FromBytes for PackedNode {
     named!(from_bytes<PackedNode>, switch!(call!(IpType::from_bytes),
-        IpType::U4 => call!(as_ipv4_packed_node, IpType::U4) |
-        IpType::T4 => call!(as_ipv4_packed_node, IpType::T4) |
-        IpType::U6 => call!(as_ipv6_packed_node, IpType::U6) |
-        IpType::T6 => call!(as_ipv6_packed_node, IpType::T6)
+        IpType::U4 => call!(as_ipv4_packed_node) |
+        IpType::U6 => call!(as_ipv6_packed_node)
     ));
 }
+
 /** Request to get address of given DHT PK, or nodes that are closest in DHT
 to the given PK.
 
@@ -533,8 +504,6 @@ impl FromBytes for GetNodes {
 /** Response to [`GetNodes`](./struct.GetNodes.html) request, containing up to
 `4` nodes closest to the requested node.
 
-Packet type `0x04`.
-
 Serialized form:
 
 Length      | Contents
@@ -559,8 +528,6 @@ pub struct SendNodes {
     pub id: u64,
 }
 
-/// Method assumes that supplied `SendNodes` has correct number of nodes
-/// included – `[1, 4]`.
 impl ToBytes for SendNodes {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
@@ -587,41 +554,6 @@ impl FromBytes for SendNodes {
     ));
 }
 
-/** DHT Request packet structure.
-
-Used to send data via one node1 to other node2 via intermediary node when
-there is no direct connection between nodes 1 and 2.
-
-`<own node> → <connected, intermediary node> → <not connected node>`
-
-When receiving `DhtRequest` own instance should check whether receiver PK
-matches own PK, or PK of a known node.
-
-- if it matches own PK, handle it.
-- if it matches PK of a known node, send packet to that node
-
-Serialized structure:
-
-Length | Contents
--------|---------
-1      | `0x20`
-32     | receiver's DHT public key
-32     | sender's DHT public key
-24     | Nonce
-?      | encrypted data
-
-https://zetok.github.io/tox-spec/#dht-request-packets
-*/
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DhtRequestT {
-    /// `PublicKey` of receiver.
-    pub receiver: PublicKey,
-    /// `PUblicKey` of sender.
-    pub sender: PublicKey,
-    nonce: Nonce,
-    payload: Vec<u8>,
-}
-
 #[cfg(test)]
 mod test {
     extern crate rand;
@@ -634,10 +566,8 @@ mod test {
     use ::byteorder::{ByteOrder, BigEndian, WriteBytesExt};
 
     use ::quickcheck::{Arbitrary, Gen, quickcheck};
-    //use self::rand::chacha::ChaChaRng;
 
     // PingReq::
-
     impl Arbitrary for PingReq {
         fn arbitrary<G: Gen>(_g: &mut G) -> Self {
             PingReq::new()
@@ -645,7 +575,6 @@ mod test {
     }
     
     // PingResp::
-
     impl Arbitrary for PingResp {
         fn arbitrary<G: Gen>(_g: &mut G) -> Self {
             PingReq::new().into()
@@ -698,22 +627,12 @@ mod test {
         /// To use for serialization: `.kind() as u8`.
         fn kind(&self) -> PacketKind;
 
-        // / Create a payload for [`DhtPacket`](./struct.DhtPacket.html) from
-        // / `self`.
-        // TODO: better name?
-        // fn into_dht_packet_payload(
-        //     &self,
-        //     symmetric_key: &PrecomputedKey,
-        //     nonce: &Nonce) -> Vec<u8>
-        // {
-        //     seal_precomputed(&self.to_bytes(), nonce, symmetric_key)
-        // }
     }
 
     macro_rules! tests_for_pings {
         ($($p:ident $b_t:ident $f_t:ident)+) => ($(
-            // ::to_bytes()
 
+            // ::to_bytes()
             #[test]
             fn $b_t() {
                 fn with_ping(p: $p) {
@@ -726,7 +645,6 @@ mod test {
             }
 
             // ::from_bytes()
-
             #[test]
             fn $f_t() {
                 fn with_bytes(bytes: Vec<u8>) {
@@ -757,7 +675,6 @@ mod test {
     );
 
     // GetNodes::
-
     impl Arbitrary for GetNodes {
         fn arbitrary<G: Gen>(g: &mut G) -> Self {
             let mut a: [u8; PUBLICKEYBYTES] = [0; PUBLICKEYBYTES];
@@ -767,7 +684,6 @@ mod test {
     }
 
     // GetNodes::to_bytes()
-
     #[test]
     fn packet_get_nodes_to_bytes_test() {
         fn with_gn(gn: GetNodes) {
@@ -781,7 +697,6 @@ mod test {
     }
 
     // GetNodes::from_bytes()
-
     #[test]
     fn packet_get_nodes_from_bytes_test() {
         fn with_bytes(bytes: Vec<u8>) {
@@ -800,7 +715,6 @@ mod test {
     }
 
     // PackedNode::
-
     /// Valid, random `PackedNode`.
     impl Arbitrary for PackedNode {
         fn arbitrary<G: Gen>(g: &mut G) -> Self {
@@ -837,20 +751,7 @@ mod test {
             trace!(target: "PackedNode", "With args: udp: {}, saddr: {:?}, PK: {:?}",
                 udp, &saddr, pk);
 
-            let v4: bool = match saddr {
-                SocketAddr::V4(_) => true,
-                SocketAddr::V6(_) => false,
-            };
-
-            let ip_type = match (udp, v4) {
-                (true, true)   => IpType::U4,
-                (true, false)  => IpType::U6,
-                (false, true)  => IpType::T4,
-                (false, false) => IpType::T6,
-            };
-
             PackedNode {
-                ip_type: ip_type,
                 saddr: saddr,
                 pk: *pk,
             }
@@ -860,7 +761,12 @@ mod test {
         pub fn ip_type(&self) -> IpType {
             trace!(target: "PackedNode", "Getting IP type from PackedNode.");
             trace!("With address: {:?}", self);
-            self.ip_type
+            if self.saddr.is_ipv4() {
+                IpType::U4
+            }
+            else {
+                IpType::U6
+            }
         }
 
         /// Get an IP address from the `PackedNode`.
@@ -880,17 +786,16 @@ mod test {
             self.saddr
         }
 
-        /// Get an IP address from the `PackedNode`.
+        /// Get an PK from the `PackedNode`.
         pub fn pk(&self) -> &PublicKey {
             trace!(target: "PackedNode", "Getting PK from PackedNode.");
-            trace!("With address: {:?}", self);
+            trace!("With PK: {:?}", self);
             &self.pk
         }
 
     }
 
     // SendNodes::
-
     impl Arbitrary for SendNodes {
         fn arbitrary<G: Gen>(g: &mut G) -> Self {
             let nodes = vec![Arbitrary::arbitrary(g); g.gen_range(1,4)];
@@ -921,7 +826,6 @@ mod test {
     }
 
     // SendNodes::to_bytes()
-
     #[test]
     fn packet_send_nodes_to_bytes_test() {
         // there should be at least 1 valid node; there can be up to 4 nodes
@@ -958,7 +862,6 @@ mod test {
     }
 
     // SendNodes::from_bytes()
-
     #[test]
     fn packet_send_nodes_from_bytes_test() {
         fn with_nodes(nodes: Vec<PackedNode>, r_u64: u64) {
@@ -1004,7 +907,6 @@ mod test {
             }
 
             // ::from_bytes()
-
             #[test]
             fn $f_t() {
                 fn with_bytes(bytes: Vec<u8>) {
