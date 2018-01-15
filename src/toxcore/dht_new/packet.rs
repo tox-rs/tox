@@ -27,7 +27,7 @@
     * ..
 */
 
-use nom::{le_u8, le_u16, be_u64, be_u16, rest};
+use nom::{le_u8, le_u16, be_u64, be_u16};
 
 //use std::cmp::{Ord, Ordering};
 //use std::convert::From;
@@ -49,6 +49,24 @@ use toxcore::crypto_core::*;
 /// [`PingResp`](./struct.PingResp.html) when serialized into bytes.
 pub const PING_SIZE: usize = 9;
 
+/** `NatPing` type byte for [`NatPingReq`] and [`NatPingResp`].
+
+https://zetok.github.io/tox-spec/#nat-ping-request
+
+[`NatPingReq`]: ./struct.PingReq.html
+[`NatPingResp`]: ./struct.PingResp.html
+*/
+pub const NAT_PING_TYPE: u8 = 0xfe;
+
+/** Length in bytes of NatPings when serialized into bytes.
+
+NatPings:
+
+ - [`NatPingReq`](./struct.PingReq.html)
+ - [`NatPingResp`](./struct.PingResp.html)
+*/
+pub const NAT_PING_SIZE: usize = PING_SIZE + 1;
+
 /** Standard DHT packet that encapsulates in the payload
 [`DhtPacketT`](./trait.DhtPacketT.html).
 
@@ -64,46 +82,6 @@ pub enum DhtPacket {
     GetNodes(GetNodes),
     /// [`SendNodes`](./struct.SendNodes.html) structure.
     SendNodes(SendNodes),
-    // /// [`CookieReq`](./struct.CookieReq.html) structure.
-    //CookieReq(CookieReq),
-    // /// [`CookieResp`](./struct.CookieResp.html) structure.
-    // CookieResp(CookieResp),
-    // /// [`CryptoHs`](./struct.CryptoHs.html) structure.
-    //CryptoHs(CryptoHs),
-    /// [`CryptoData`](./struct.CryptoData.html) structure.
-    //CryptoData(CryptoData),
-    /// [`DhtRequest`](./struct.DhtRequest.html) structure.
-    DhtRequest(DhtRequest),
-    // /// [`LanDisc`](./struct.LanDisc.html) structure.
-    //LanDisc(LanDisc),
-    // /// [`OnionReq0`](./struct.OnionReq0.html) structure.
-    // TODO
-    // OnionReq0(OnionReq0),
-    // /// [`OnionReq1`](./struct.OnionReq1.html) structure.
-    // TODO
-    // OnionReq1(OnionReq1),
-    // /// [`OnionReq2`](./struct.OnionReq2.html) structure.
-    // TODO
-    // OnionReq2(OnionReq2),
-    // /// [`AnnReq`](./struct.AnnReq.html) structure.
-    // AnnReq(AnnReq),
-    // /// [`AnnResp`](./struct.AnnResp.html) structure.
-    // AnnResp(AnnResp),
-    // /// [`OnionDataReq`](./struct.OnionDataReq.html) structure.
-    // TODO
-    // OnionDataReq(OnionDataReq),
-    // /// [`OnionDataResp`](./struct.OnionDataResp.html) structure.
-    // TODO
-    // OnionDataResp(OnionDataResp),
-    // /// [`OnionResp3`](./struct.OnionResp3.html) structure.
-    // TODO
-    // OnionResp3(OnionResp3),
-    // /// [`OnionResp2`](./struct.OnionResp2.html) structure.
-    // TODO
-    // OnionResp2(OnionResp2),
-    // /// [`OnionResp1`](./struct.OnionResp1.html) structure.
-    // TODO
-    // OnionResp1(OnionResp1),
 }
 
 impl ToBytes for DhtPacket {
@@ -113,22 +91,6 @@ impl ToBytes for DhtPacket {
             DhtPacket::PingResp(ref p) => p.to_bytes(buf),
             DhtPacket::GetNodes(ref p) => p.to_bytes(buf),
             DhtPacket::SendNodes(ref p) => p.to_bytes(buf),
-            //DhtPacket::CookieReq(ref p) => p.to_bytes(buf),
-            //DhtPacket::CookieResp(ref p) => p.to_bytes(buf),
-            //DhtPacket::CryptoHs(ref p) => p.to_bytes(buf),
-            //DhtPacket::CryptoData(ref p) => p.to_bytes(buf),
-            DhtPacket::DhtRequest(ref p) => p.to_bytes(buf),
-            //DhtPacket::LanDisc(ref p) => p.to_bytes(buf),
-            // DhtPacket::OnionReq0(ref p) => p.to_bytes(buf),
-            // DhtPacket::OnionReq1(ref p) => p.to_bytes(buf),
-            // DhtPacket::OnionReq2(ref p) => p.to_bytes(buf),
-            //DhtPacket::AnnReq(ref p) => p.to_bytes(buf),
-            //DhtPacket::AnnResp(ref p) => p.to_bytes(buf),
-            // DhtPacket::OnionDataReq(ref p) => p.to_bytes(buf),
-            // DhtPacket::OnionDataResp(ref p) => p.to_bytes(buf),
-            // DhtPacket::OnionResp3(ref p) => p.to_bytes(buf),
-            // DhtPacket::OnionResp2(ref p) => p.to_bytes(buf),
-            // DhtPacket::OnionResp1(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -138,24 +100,81 @@ impl FromBytes for DhtPacket {
         map!(PingReq::from_bytes, DhtPacket::PingReq) |
         map!(PingResp::from_bytes, DhtPacket::PingResp) |
         map!(GetNodes::from_bytes, DhtPacket::GetNodes) |
-        map!(SendNodes::from_bytes, DhtPacket::SendNodes) |
-        //map!(CookieReq::from_bytes, DhtPacket::CookieReq) |
-        //map!(CookieResp::from_bytes, DhtPacket::CookieResp) |
-        //map!(CryptoHs::from_bytes, DhtPacket::CryptoHs) |
-        //map!(CryptoData::from_bytes, DhtPacket::CryptoData) |
-        map!(DhtRequest::from_bytes, DhtPacket::DhtRequest)
-        //map!(LanDisc::from_bytes, DhtPacket::LanDisc) |
-        // map!(OnionReq0::from_bytes, DhtPacket::OnionReq0) |
-        // map!(OnionReq1::from_bytes, DhtPacket::OnionReq1) |
-        // map!(OnionReq2::from_bytes, DhtPacket::OnionReq2) |
-        //map!(AnnReq::from_bytes, DhtPacket::AnnReq) |
-        //map!(AnnResp::from_bytes, DhtPacket::AnnResp)
-        // map!(OnionDataReq::from_bytes, DhtPacket::OnionDataReq) |
-        // map!(OnionDataResp::from_bytes, DhtPacket::OnionDataResp) |
-        // map!(OnionResp3::from_bytes, DhtPacket::OnionResp3) |
-        // map!(OnionResp2::from_bytes, DhtPacket::OnionResp2) |
-        // map!(OnionResp1::from_bytes, DhtPacket::OnionResp1)
+        map!(SendNodes::from_bytes, DhtPacket::SendNodes)
     ));
+}
+
+/** Standard DHT request packet.
+*/
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DhtRequest {
+    /// [`NatPingReq`](./struct.PingReq.html) structure.
+    NatPingReq(PingReq),
+    /// [`NatPingResp`](./struct.PingResp.html) structure.
+    NatPingResp(PingResp),
+}
+
+/** NatPing request DHT request packet.
+*/
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct NatPingReq(pub PingReq);
+/** NatPing response DHT request packet.
+*/
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct NatPingResp(pub PingResp);
+
+impl ToBytes for DhtRequest {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        match *self {
+            DhtRequest::NatPingReq(ref p) => p.to_bytes(buf),
+            DhtRequest::NatPingResp(ref p) => p.to_bytes(buf),
+        }
+    }
+}
+
+impl FromBytes for DhtRequest {
+    named!(from_bytes<DhtRequest>, alt!(
+        map!(PingReq::from_bytes, DhtRequest::NatPingReq) |
+        map!(PingResp::from_bytes, DhtRequest::NatPingResp)
+    ));
+}
+
+impl FromBytes for NatPingReq {
+    named!(from_bytes<NatPingReq>, do_parse!(
+        tag!(&[0xfe][..]) >>
+        ping: call!(PingReq::from_bytes) >>
+        (NatPingReq(ping))
+    ));
+}
+
+/// Serialize to bytes.
+impl ToBytes for NatPingReq {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        let &NatPingReq(x) = self;
+        do_gen!(buf,
+            gen_be_u8!(0xfe) >>
+            gen_call!(|buf, data| PingReq::to_bytes(data, buf), &x)
+        )
+    }
+}
+
+impl FromBytes for NatPingResp {
+    named!(from_bytes<NatPingResp>, do_parse!(
+        tag!(&[0xfe][..]) >>
+        ping: call!(PingResp::from_bytes) >>
+        (NatPingResp(ping))
+    ));
+}
+
+/// Serialize to bytes.
+impl ToBytes for NatPingResp {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        let &NatPingResp(x) = self;
+        do_gen!(buf,
+            gen_be_u8!(0xfe) >>
+            gen_call!(|buf, data| PingResp::to_bytes(data, buf), &x)
+        )
+    }
 }
 
 /**
@@ -598,41 +617,13 @@ Length | Contents
 https://zetok.github.io/tox-spec/#dht-request-packets
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DhtRequest {
+pub struct DhtRequestT {
     /// `PublicKey` of receiver.
     pub receiver: PublicKey,
     /// `PUblicKey` of sender.
     pub sender: PublicKey,
     nonce: Nonce,
     payload: Vec<u8>,
-}
-
-impl ToBytes for DhtRequest {
-    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        do_gen!(buf,
-            gen_be_u8!(0x20) >>
-            gen_slice!(self.receiver.as_ref()) >>
-            gen_slice!(self.sender.as_ref()) >>
-            gen_slice!(self.nonce.as_ref()) >>
-            gen_slice!(self.payload.as_slice())
-        )
-    }
-}
-
-impl FromBytes for DhtRequest {
-    named!(from_bytes<DhtRequest>, do_parse!(
-        tag!("\x20") >>
-        receiver: call!(PublicKey::from_bytes) >>
-        sender: call!(PublicKey::from_bytes) >>
-        nonce: call!(Nonce::from_bytes) >>
-        payload: rest >>
-        (DhtRequest {
-            receiver: receiver,
-            sender: sender,
-            nonce: nonce,
-            payload: payload.to_vec()
-        })
-    ));
 }
 
 #[cfg(test)]
@@ -643,16 +634,6 @@ mod test {
     use ::toxcore::dht_new::packet::*;
     use ::toxcore::packet_kind::PacketKind;
 
-    //use ::std::cmp::Ordering;
-    // use ::std::net::{
-    //             IpAddr,
-    //             Ipv4Addr,
-    //             Ipv6Addr,
-    //             SocketAddr,
-    //             SocketAddrV4,
-    //             SocketAddrV6
-    // };
-    // use ::std::str::FromStr;
     use ::std::fmt::Debug;
     use ::byteorder::{ByteOrder, BigEndian, WriteBytesExt};
 
@@ -1004,4 +985,59 @@ mod test {
         }
         quickcheck(with_nodes as fn(Vec<PackedNode>, u64));
     }
+    
+    macro_rules! impls_tests_for_nat_pings {
+        ($($np:ident($p:ident) $b_t:ident $f_t:ident)+) => ($(
+            impl Arbitrary for $np {
+                fn arbitrary<G: Gen>(g: &mut G) -> Self {
+                    $np(Arbitrary::arbitrary(g))
+                }
+            }
+
+            #[test]
+            fn $b_t() {
+                fn with_np(p: $np) {
+                    let mut _buf = [0; 1024];
+                    let pb = p.to_bytes((&mut _buf, 0)).ok().unwrap();
+                    let $np(x) = p;
+                    assert_eq!(NAT_PING_SIZE, pb.1);
+                    assert_eq!(NAT_PING_TYPE as u8, pb.0[0]);
+                    assert_eq!(x.kind() as u8, pb.0[1]);
+                }
+                quickcheck(with_np as fn($np));
+            }
+
+            // ::from_bytes()
+
+            #[test]
+            fn $f_t() {
+                fn with_bytes(bytes: Vec<u8>) {
+                    if bytes.len() < NAT_PING_SIZE ||
+                    bytes[0] != NAT_PING_TYPE as u8 {
+                        assert!(!($np::from_bytes(&bytes)).is_done());
+                    } else {
+                        let $np(p) = $np::from_bytes(&bytes).unwrap().1;
+                        // `id` should not differ
+                        assert_eq!(p.id(), BigEndian::read_u64(&bytes[2..NAT_PING_SIZE]));
+                    }
+                }
+                quickcheck(with_bytes as fn(Vec<u8>));
+
+                // just in case
+                let mut ping = vec![NAT_PING_TYPE, PacketKind::$p as u8 as u8];
+                ping.write_u64::<BigEndian>(random_u64())
+                    .unwrap();
+                with_bytes(ping);
+            }
+        )+)
+    }
+
+    impls_tests_for_nat_pings!(
+        NatPingReq(PingReq)
+            packet_nat_ping_req_to_bytes_test
+            packet_nat_ping_req_from_bytes_test
+        NatPingResp(PingResp)
+            packet_nat_ping_resp_to_bytes_test
+            packet_nat_ping_resp_from_bytes_test
+    );
 }
