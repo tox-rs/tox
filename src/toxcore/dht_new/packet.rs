@@ -572,10 +572,6 @@ impl ToBytes for SendNodes {
     }
 }
 
-/** Method to parse received bytes as `SendNodes`.
-
-    Returns `Error` if bytes can't be parsed into `SendNodes`.
-*/
 impl FromBytes for SendNodes {
     named!(from_bytes<SendNodes>, do_parse!(
         nodes_number: le_u8 >>
