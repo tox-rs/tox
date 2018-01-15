@@ -19,7 +19,7 @@
     along with Tox.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-/**
+/*
 Structure for holding nodes.
 
 Number of nodes it can contain is set during creation. If not set (aka `None`
@@ -33,6 +33,13 @@ Used in [`Kbucket`](./struct.Kbucket.html) for storing nodes close to given
 PK; and additionally used to store nodes closest to friends.
 
 [Spec definition](https://zetok.github.io/tox-spec#updating-k-buckets).
+*/
+
+// ↓ FIXME expand doc
+/*! DHT part of the toxcore.
+
+    * takes care of the K-Bucket 
+    * ..
 */
 
 use toxcore::crypto_core::*;
@@ -101,6 +108,21 @@ impl Distance for PublicKey {
     }
 }
 
+/**
+Structure for holding nodes.
+
+Number of nodes it can contain is set during creation. If not set (aka `None`
+is supplied), number of nodes defaults to [`BUCKET_DEFAULT_SIZE`]
+(./constant.BUCKET_DEFAULT_SIZE.html).
+
+Nodes stored in `Bucket` are in [`PackedNode`](./struct.PackedNode.html)
+format.
+
+Used in [`Kbucket`](./struct.Kbucket.html) for storing nodes close to given
+PK; and additionally used to store nodes closest to friends.
+
+[Spec definition](https://zetok.github.io/tox-spec#updating-k-buckets).
+*/
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Bucket {
     /// Amount of nodes it can hold.
