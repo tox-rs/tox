@@ -30,6 +30,7 @@ pub mod secure;
 pub mod packet;
 pub mod codec;
 pub mod server;
+pub mod client;
 
 use self::handshake::*;
 
