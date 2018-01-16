@@ -71,6 +71,7 @@ fn networking_core_register_test() {
 
    Thus test only whether binding to at least 50 ports works :/
 */
+#[ignore] // TODO remove in favor of `Future` code
 fn bind_udp_test() {
     for _ in 0..50 {
         thread::spawn(move || {
