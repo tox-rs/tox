@@ -25,4 +25,4 @@
 
 pub mod packet;
 pub mod binary_io;
-pub mod bucket;
+pub mod kbucket;
