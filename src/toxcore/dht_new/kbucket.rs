@@ -37,9 +37,7 @@ PK; and additionally used to store nodes closest to friends.
 
 // ↓ FIXME expand doc
 /*! DHT part of the toxcore.
-
     * takes care of the K-Bucket 
-    * ..
 */
 use toxcore::crypto_core::*;
 use toxcore::dht_new::packet::PackedNode;
