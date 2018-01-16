@@ -41,7 +41,6 @@ PK; and additionally used to store nodes closest to friends.
     * takes care of the K-Bucket 
     * ..
 */
-
 use toxcore::crypto_core::*;
 use toxcore::dht_new::packet::PackedNode;
 use std::cmp::{Ord, Ordering};
@@ -59,11 +58,11 @@ pub fn kbucket_index(&PublicKey(ref own_pk): &PublicKey,
     debug!(target: "KBucketIndex", "Calculating KBucketIndex for PKs.");
     trace!(target: "KBucketIndex", "With PK1: {:?}; PK2: {:?}", own_pk, other_pk);
 
-    for byte in 0..PUBLICKEYBYTES {
-        for bit in 0..8 {
-            let shift = 7 - bit;
-            if (own_pk[byte] >> shift) & 0b1 != (other_pk[byte] >> shift) & 0b1 {
-                return Some((byte * 8 + bit) as u8)
+    let xoring = own_pk.iter().zip(other_pk.iter()).map(|(x, y)| x ^ y); // work from shur
+    for (i, byte) in xoring.enumerate() {
+        for j in 0..8 {
+            if byte & (0x80 >> j) != 0 {
+                return Some(i as u8 * 8 + j);
             }
         }
     }
@@ -161,27 +160,6 @@ impl Bucket {
                 Bucket { capacity: n, nodes: Vec::with_capacity(n as usize) }
             }
         }
-    }
-
-    /**
-    Try to get position of [`PackedNode`] in the bucket by PK. Used in
-    tests to check whether a `PackedNode` was added or removed.
-
-    This method uses linear search as the simplest one.
-
-    Returns Some(index) if it was found.
-    Returns None if there is no a `PackedNode` with the given PK.
-
-    [`PackedNode`]: ./struct.PackedNode.html
-    */
-    #[cfg(test)]
-    fn find(&self, pk: &PublicKey) -> Option<usize> {
-        for (n, node) in self.iter().enumerate() {
-            if node.pk() == pk {
-                return Some(n)
-            }
-        }
-        None
     }
 
     /**
@@ -389,29 +367,6 @@ impl Kbucket {
         self.pk
     }
 
-    /**
-    Try to get position of [`PackedNode`] in the kbucket by PK. Used in
-    tests to check whether a `PackedNode` was added or removed.
-
-    This method uses quadratic search as the simplest one.
-
-    Returns `Some(bucket_index, node_index)` if it was found.
-    Returns `None` if there is no a [`PackedNode`] with the given PK.
-
-    [`PackedNode`]: ./struct.PackedNode.html
-    */
-    #[cfg(test)]
-    fn find(&self, pk: &PublicKey) -> Option<(usize, usize)> {
-        for (bucket_index, bucket) in self.buckets.iter().enumerate() {
-            match bucket.find(pk) {
-                None => {},
-                Some(node_index) => return Some((bucket_index, node_index))
-            }
-        }
-        None
-    }
-
-
     /** Return the possible internal index of [`Bucket`](./struct.Bucket.html)
         where the key could be inserted/removed.
 
@@ -562,5 +517,343 @@ impl<'a> Iterator for KbucketIter<'a> {
         } else {
             None
         }
+    }
+}
+
+#[cfg(test)]
+extern crate rand;
+#[cfg(test)]
+mod test {
+    use super::rand::chacha::ChaChaRng;
+    use super::*;
+    use quickcheck::{Arbitrary, Gen, quickcheck, StdGen, TestResult};
+    use byteorder::{BigEndian, WriteBytesExt};
+
+    /// Get a PK from 4 `u64`s.
+    fn nums_to_pk(a: u64, b: u64, c: u64, d: u64) -> PublicKey {
+        let mut pk_bytes: Vec<u8> = Vec::with_capacity(PUBLICKEYBYTES);
+        pk_bytes.write_u64::<BigEndian>(a).unwrap();
+        pk_bytes.write_u64::<BigEndian>(b).unwrap();
+        pk_bytes.write_u64::<BigEndian>(c).unwrap();
+        pk_bytes.write_u64::<BigEndian>(d).unwrap();
+        let pk_bytes = &pk_bytes[..];
+        PublicKey::from_slice(pk_bytes).expect("Making PK out of bytes failed!")
+    }
+
+    // PublicKey::distance()
+
+    #[test]
+    // TODO: possible to use quickcheck?
+    fn dht_public_key_distance_test() {
+        let pk_0 = PublicKey([0; PUBLICKEYBYTES]);
+        let pk_1 = PublicKey([1; PUBLICKEYBYTES]);
+        let pk_2 = PublicKey([2; PUBLICKEYBYTES]);
+        let pk_ff = PublicKey([0xff; PUBLICKEYBYTES]);
+        let pk_fe = PublicKey([0xfe; PUBLICKEYBYTES]);
+
+        assert_eq!(Ordering::Less, pk_0.distance(&pk_1, &pk_2));
+        assert_eq!(Ordering::Equal, pk_2.distance(&pk_2, &pk_2));
+        assert_eq!(Ordering::Less, pk_2.distance(&pk_0, &pk_1));
+        assert_eq!(Ordering::Greater, pk_2.distance(&pk_ff, &pk_fe));
+        assert_eq!(Ordering::Greater, pk_2.distance(&pk_ff, &pk_fe));
+        assert_eq!(Ordering::Less, pk_fe.distance(&pk_ff, &pk_2));
+    }
+
+
+    // kbucket_index()
+
+    #[test]
+    fn dht_kbucket_index_test() {
+        let pk1 = PublicKey([0b10_10_10_10; PUBLICKEYBYTES]);
+        let pk2 = PublicKey([0; PUBLICKEYBYTES]);
+        let pk3 = PublicKey([0b00_10_10_10; PUBLICKEYBYTES]);
+        assert_eq!(None, kbucket_index(&pk1, &pk1));
+        assert_eq!(Some(0), kbucket_index(&pk1, &pk2));
+        assert_eq!(Some(2), kbucket_index(&pk2, &pk3));
+    }
+
+
+    // Bucket::
+
+    // Bucket::new()
+
+    #[test]
+    fn dht_bucket_new_test() {
+        fn check_with_capacity(num: Option<u8>, expected_capacity: usize) {
+            let bucket1 = Bucket::new(num);
+            assert_eq!(expected_capacity, bucket1.capacity());
+
+            // check if always the same with same parameters
+            let bucket2 = Bucket::new(num);
+            assert_eq!(bucket1, bucket2);
+        }
+        check_with_capacity(None, BUCKET_DEFAULT_SIZE);
+        check_with_capacity(Some(0), BUCKET_DEFAULT_SIZE);
+
+        fn wrapped_check(num: u8) -> TestResult {
+            // check Some(n) where n > 0
+            if num == 0 {
+                return TestResult::discard()
+            }
+            check_with_capacity(Some(num), num as usize);
+            TestResult::passed()
+        }
+        quickcheck(wrapped_check as fn(u8) -> TestResult);
+        wrapped_check(0);
+    }
+
+    // Bucket::try_add()
+
+    #[test]
+    fn dht_bucket_try_add_test() {
+        fn with_nodes(n1: PackedNode, n2: PackedNode, n3: PackedNode,
+                    n4: PackedNode, n5: PackedNode, n6: PackedNode,
+                    n7: PackedNode, n8: PackedNode) {
+            let pk = PublicKey([0; PUBLICKEYBYTES]);
+            let mut bucket = Bucket::new(None);
+            assert_eq!(true, bucket.try_add(&pk, &n1));
+            assert_eq!(true, bucket.try_add(&pk, &n2));
+            assert_eq!(true, bucket.try_add(&pk, &n3));
+            assert_eq!(true, bucket.try_add(&pk, &n4));
+            assert_eq!(true, bucket.try_add(&pk, &n5));
+            assert_eq!(true, bucket.try_add(&pk, &n6));
+            assert_eq!(true, bucket.try_add(&pk, &n7));
+            assert_eq!(true, bucket.try_add(&pk, &n8));
+
+            // updating bucket
+            assert_eq!(true, bucket.try_add(&pk, &n1));
+
+            // TODO: check whether adding a closest node will always work
+        }
+        quickcheck(with_nodes as fn(PackedNode, PackedNode, PackedNode, PackedNode,
+                    PackedNode, PackedNode, PackedNode, PackedNode));
+    }
+
+    #[test]
+    fn dht_bucket_1_capacity_try_add_test() {
+        fn with_nodes(n1: PackedNode, n2: PackedNode) -> TestResult {
+            let pk = PublicKey([0; PUBLICKEYBYTES]);
+            if pk.distance(n2.pk(), n1.pk()) != Ordering::Greater {
+                // n2 should be greater to check we can't add it
+                return TestResult::discard()
+            }
+
+            let mut node = Bucket::new(Some(1));
+
+            assert_eq!(true, node.try_add(&pk, &n1));
+            assert_eq!(false, node.try_add(&pk, &n2));
+
+            // updating node
+            assert_eq!(true, node.try_add(&pk, &n1));
+            TestResult::passed()
+        }
+        quickcheck(with_nodes as fn(PackedNode, PackedNode) -> TestResult);
+    }
+
+    // Bucket::remove()
+
+    #[test]
+    fn dht_bucket_remove_test() {
+        fn with_nodes(num: u8, bucket_size: u8, rng_num: usize) {
+            let mut rng = StdGen::new(ChaChaRng::new_unseeded(), rng_num);
+
+            let base_pk = PublicKey([0; PUBLICKEYBYTES]);
+            let mut bucket = Bucket::new(Some(bucket_size));
+
+            let non_existent_node: PackedNode = Arbitrary::arbitrary(&mut rng);
+            bucket.remove(&base_pk, non_existent_node.pk());  // "removing" non-existent node
+            assert_eq!(true, bucket.is_empty());
+
+            let nodes = vec![Arbitrary::arbitrary(&mut rng); num as usize];
+            for node in &nodes {
+                bucket.try_add(&base_pk, node);
+            }
+            if num == 0 {
+                // nothing was added
+                assert_eq!(true, bucket.is_empty());
+            } else {
+                // some nodes were added
+                assert_eq!(false, bucket.is_empty());
+            }
+
+            for node in &nodes {
+                bucket.remove(&base_pk, node.pk());
+            }
+            assert_eq!(true, bucket.is_empty());
+        }
+        quickcheck(with_nodes as fn(u8, u8, usize))
+    }
+
+
+    // Bucket::is_empty()
+
+    #[test]
+    fn dht_bucket_is_empty_test() {
+        fn with_pns(pns: Vec<PackedNode>, p1: u64, p2: u64, p3: u64, p4: u64) -> TestResult {
+            if pns.len() > BUCKET_DEFAULT_SIZE {
+                // it's possible that not all nodes will be inserted if
+                // len > BUCKET_DEFAULT_SIZE
+                return TestResult::discard()
+            }
+
+            let mut bucket = Bucket::new(None);
+            assert_eq!(true, bucket.is_empty());
+
+            let pk = nums_to_pk(p1, p2, p3, p4);
+            for n in &pns {
+                assert!(bucket.try_add(&pk, n));
+            }
+            if !pns.is_empty() {
+                assert_eq!(false, bucket.is_empty());
+            }
+            TestResult::passed()
+        }
+        quickcheck(with_pns as fn(Vec<PackedNode>, u64, u64, u64, u64) -> TestResult);
+    }
+
+
+    // Kbucket::
+
+    impl Arbitrary for Kbucket {
+        fn arbitrary<G: Gen>(g: &mut G) -> Self {
+            let mut pk = [0; PUBLICKEYBYTES];
+            g.fill_bytes(&mut pk);
+            let pk = PublicKey([0; PUBLICKEYBYTES]);
+
+            let mut kbucket = Kbucket::new(g.gen(), &pk);
+
+            // might want to add some buckets
+            for _ in 0..(g.gen_range(0, KBUCKET_MAX_ENTRIES as usize *
+                            BUCKET_DEFAULT_SIZE as usize * 2)) {
+                kbucket.try_add(&Arbitrary::arbitrary(g));
+            }
+            kbucket
+        }
+    }
+
+    // Kbucket::new()
+
+    #[test]
+    fn dht_kbucket_new_test() {
+        fn with_pk(a: u64, b: u64, c: u64, d: u64, buckets: u8) {
+            let pk = nums_to_pk(a, b, c, d);
+            let kbucket = Kbucket::new(buckets, &pk);
+            assert_eq!(buckets, kbucket.size());
+            assert_eq!(pk, kbucket.pk());
+        }
+        quickcheck(with_pk as fn(u64, u64, u64, u64, u8));
+    }
+
+    // Kbucket::size()
+
+    #[test]
+    fn dht_kbucket_size_test() {
+        let pk = PublicKey([0; PUBLICKEYBYTES]);
+
+        let k0 = Kbucket::new(0, &pk);
+        assert_eq!(0, k0.size());
+
+        let k1 = Kbucket::new(1, &pk);
+        assert_eq!(1, k1.size());
+
+        let k255 = Kbucket::new(255, &pk);
+        assert_eq!(255, k255.size());
+    }
+
+    // Kbucket::try_add()
+
+    #[test]
+    fn dht_kbucket_try_add_test() {
+        fn with_pns(pns: Vec<PackedNode>, n: u8, p1: u64, p2: u64, p3: u64, p4: u64) {
+            let pk = nums_to_pk(p1, p2, p3, p4);
+            let mut kbucket = Kbucket::new(n, &pk);
+            for node in pns {
+                // result may vary, so discard it
+                // TODO: can be done better?
+                kbucket.try_add(&node);
+            }
+        }
+        quickcheck(with_pns as fn(Vec<PackedNode>, u8, u64, u64, u64, u64));
+    }
+
+    // Kbucket::remove()
+
+    #[test]
+    fn dht_kbucket_remove_test() {
+        fn with_nodes(nodes: Vec<PackedNode>) -> TestResult {
+            if nodes.len() > BUCKET_DEFAULT_SIZE {
+                // it's possible that not all nodes will be inserted if
+                // len > BUCKET_DEFAULT_SIZE
+                return TestResult::discard()
+            }
+
+            let pk = nums_to_pk(random_u64(), random_u64(), random_u64(),
+                    random_u64());
+
+            let mut kbucket = Kbucket::new(KBUCKET_MAX_ENTRIES, &pk);
+
+            // Fill Kbucked with nodes
+            for node in &nodes {
+                assert!(kbucket.try_add(node));
+            }
+            if !nodes.is_empty() {
+                assert!(!kbucket.is_empty());
+            }
+
+            // Check for actual removing
+            for node in &nodes {
+                kbucket.remove(node.pk());
+            }
+            assert!(kbucket.is_empty());
+            TestResult::passed()
+        }
+        quickcheck(with_nodes as fn(Vec<PackedNode>) -> TestResult);
+    }
+
+    // Kbucket::get_closest()
+
+    #[test]
+    fn dht_kbucket_get_closest_test() {
+        fn with_kbucket(kb: Kbucket, a: u64, b: u64, c: u64, d: u64) {
+            let pk = nums_to_pk(a, b, c, d);
+            assert!(kb.get_closest(&pk).len() <= 4);
+            assert_eq!(kb.get_closest(&pk), kb.get_closest(&pk));
+        }
+        quickcheck(with_kbucket as fn(Kbucket, u64, u64, u64, u64));
+
+
+        fn with_nodes(n1: PackedNode, n2: PackedNode, n3: PackedNode,
+                        n4: PackedNode, a: u64, b: u64, c: u64, d: u64) {
+
+            let pk = nums_to_pk(a, b, c, d);
+            let mut kbucket = Kbucket::new(::std::u8::MAX, &pk);
+
+            // check whether number of correct nodes that are returned is right
+            let correctness = |should, kbc: &Kbucket| {
+                assert_eq!(kbc.get_closest(&pk), kbc.get_closest(&kbc.pk()));
+
+                let got_nodes = kbc.get_closest(&pk);
+                let mut got_correct = 0;
+                for node in got_nodes {
+                    if node == n1 || node == n2 || node == n3 || node == n4 {
+                        got_correct += 1;
+                    }
+                }
+                assert_eq!(should, got_correct);
+            };
+
+            correctness(0, &kbucket);
+
+            assert_eq!(true, kbucket.try_add(&n1));
+            correctness(1, &kbucket);
+            assert_eq!(true, kbucket.try_add(&n2));
+            correctness(2, &kbucket);
+            assert_eq!(true, kbucket.try_add(&n3));
+            correctness(3, &kbucket);
+            assert_eq!(true, kbucket.try_add(&n4));
+            correctness(4, &kbucket);
+        }
+        quickcheck(with_nodes as fn(PackedNode, PackedNode, PackedNode,
+                        PackedNode, u64, u64, u64, u64));
     }
 }

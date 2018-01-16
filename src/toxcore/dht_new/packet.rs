@@ -556,16 +556,13 @@ impl FromBytes for SendNodes {
 
 #[cfg(test)]
 mod test {
-    extern crate rand;
-    extern crate rustc_serialize;
+    use super::*;
+    use toxcore::packet_kind::PacketKind;
 
-    use ::toxcore::dht_new::packet::*;
-    use ::toxcore::packet_kind::PacketKind;
+    use std::fmt::Debug;
+    use byteorder::{ByteOrder, BigEndian, WriteBytesExt};
 
-    use ::std::fmt::Debug;
-    use ::byteorder::{ByteOrder, BigEndian, WriteBytesExt};
-
-    use ::quickcheck::{Arbitrary, Gen, quickcheck};
+    use quickcheck::{Arbitrary, Gen, quickcheck};
 
     // PingReq::
     impl Arbitrary for PingReq {
@@ -922,7 +919,7 @@ mod test {
                 quickcheck(with_bytes as fn(Vec<u8>));
 
                 // just in case
-                let mut ping = vec![NAT_PING_TYPE, PacketKind::$p as u8 as u8];
+                let mut ping = vec![NAT_PING_TYPE, PacketKind::$p as u8];
                 ping.write_u64::<BigEndian>(random_u64())
                     .unwrap();
                 with_bytes(ping);
