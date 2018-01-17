@@ -19,6 +19,19 @@
     along with Tox.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+/*
+    Packet structure
+
+    first class                         second class
+    ------------------------+--------------------------------------------
+    PingRequest             +    ----------------------
+    PingResponse            +    | this 4 first class packet is also
+    GetNodes                + <--| grouped as DhtPacket
+    SendNodes               +    ----------------------
+    ------------------------+--------------------------------------------
+    DhtRequest              +    NatPingRequest and NatPingResponse
+    ------------------------+--------------------------------------------
+*/
 
 /*! DHT packet part of the toxcore.
     * takes care of the serializing and de-serializing DHT packets
@@ -31,8 +44,6 @@ use std::net::{
     Ipv4Addr,
     Ipv6Addr,
     SocketAddr,
-    SocketAddrV4,
-    SocketAddrV6
 };
 
 use toxcore::dht_new::binary_io::*;
@@ -299,22 +310,24 @@ address.
 impl FromBytes for PackedNode {
     named!(from_bytes<PackedNode>, switch!(le_u8,
         2 => do_parse!(
-            addr: call!(Ipv4Addr::from_bytes) >>
+            addr_v4: call!(Ipv4Addr::from_bytes) >>
+            addr: value!(IpAddr::V4(addr_v4)) >>
             port: be_u16 >>
-            saddr: value!(SocketAddrV4::new(addr, port)) >>
+            saddr: value!(SocketAddr::new(addr, port)) >>
             pk: call!(PublicKey::from_bytes) >>
             (PackedNode {
-                saddr: SocketAddr::V4(saddr),
+                saddr: saddr,
                 pk: pk
         }))
         |
         10 => do_parse!(
-            addr: call!(Ipv6Addr::from_bytes) >>
+            addr_v6: call!(Ipv6Addr::from_bytes) >>
+            addr: value!(IpAddr::V6(addr_v6)) >>
             port: be_u16 >>
-            saddr: value!(SocketAddrV6::new(addr, port, 0, 0)) >>
+            saddr: value!(SocketAddr::new(addr, port)) >>
             pk: call!(PublicKey::from_bytes) >>
             (PackedNode {
-                saddr: SocketAddr::V6(saddr),
+                saddr: saddr,
                 pk: pk
         }))
     ));
@@ -496,6 +509,7 @@ impl ToBytes for NatPingResponse {
 mod test {
     use super::*;
     use std::fmt::Debug;
+    use std::net::{SocketAddrV4, SocketAddrV6};
     use byteorder::{ByteOrder, BigEndian, WriteBytesExt};
 
     use quickcheck::{Arbitrary, Gen, quickcheck};
