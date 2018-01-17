@@ -329,6 +329,14 @@ mod tests {
     use futures::sync::mpsc;
     use futures::{Stream, Future};
 
+    #[test]
+    fn server_is_clonable() {
+        let server = Server::new();
+        add_random_client(&server);
+        let _cloned = server.clone();
+        // that's all.
+    }
+
     /// A function that generates random keypair, creates mpsc channel
     ///  and inserts them as a mock Client into Server
     fn add_random_client(server: &Server) -> (PublicKey, mpsc::UnboundedReceiver<Packet>) {
