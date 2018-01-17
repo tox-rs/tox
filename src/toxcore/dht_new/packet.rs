@@ -308,28 +308,15 @@ address.
 */
 
 impl FromBytes for PackedNode {
-    named!(from_bytes<PackedNode>, switch!(le_u8,
-        2 => do_parse!(
-            addr_v4: call!(Ipv4Addr::from_bytes) >>
-            addr: value!(IpAddr::V4(addr_v4)) >>
-            port: be_u16 >>
-            saddr: value!(SocketAddr::new(addr, port)) >>
-            pk: call!(PublicKey::from_bytes) >>
-            (PackedNode {
-                saddr: saddr,
-                pk: pk
-        }))
-        |
-        10 => do_parse!(
-            addr_v6: call!(Ipv6Addr::from_bytes) >>
-            addr: value!(IpAddr::V6(addr_v6)) >>
-            port: be_u16 >>
-            saddr: value!(SocketAddr::new(addr, port)) >>
-            pk: call!(PublicKey::from_bytes) >>
-            (PackedNode {
-                saddr: saddr,
-                pk: pk
-        }))
+    named!(from_bytes<PackedNode>, do_parse!(
+        addr: switch!(le_u8,
+            2  => map!(Ipv4Addr::from_bytes, IpAddr::V4) |
+            10 => map!(Ipv6Addr::from_bytes, IpAddr::V6)
+        ) >>
+        port: be_u16 >>
+        saddr: value!(SocketAddr::new(addr, port)) >>
+        pk: call!(PublicKey::from_bytes) >>
+        (PackedNode { saddr: saddr, pk: pk })
     ));
 }
 
