@@ -38,18 +38,9 @@ use std::net::{
 use toxcore::dht_new::binary_io::*;
 use toxcore::crypto_core::*;
 
-/// Length in bytes of [`PingReq`](./struct.PingReq.html) and
-/// [`PingResp`](./struct.PingResp.html) when serialized into bytes.
+/// Length in bytes of [`PingRequest`](./struct.PingRequest.html) and
+/// [`PingResponse`](./struct.PingResponse.html) when serialized into bytes.
 pub const PING_SIZE: usize = 9;
-
-/** `NatPing` type byte for [`NatPingReq`] and [`NatPingResp`].
-[./struct.PingReq.html] [./struct.PingResp.html]
-*/
-pub const NAT_PING_TYPE: u8 = 0xfe;
-
-/** Length in bytes of NatPings when serialized into bytes.
-*/
-pub const NAT_PING_SIZE: usize = PING_SIZE + 1;
 
 /** Standard DHT packet that encapsulates in the payload
 [`DhtPacketT`](./trait.DhtPacketT.html).
@@ -58,10 +49,10 @@ https://zetok.github.io/tox-spec/#dht-packet
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DhtPacket {
-    /// [`PingReq`](./struct.PingReq.html) structure.
-    PingReq(PingReq),
-    /// [`PingResp`](./struct.PingResp.html) structure.
-    PingResp(PingResp),
+    /// [`PingRequest`](./struct.PingRequest.html) structure.
+    PingRequest(PingRequest),
+    /// [`PingResponse`](./struct.PingResponse.html) structure.
+    PingResponse(PingResponse),
     /// [`GetNodes`](./struct.GetNodes.html) structure.
     GetNodes(GetNodes),
     /// [`SendNodes`](./struct.SendNodes.html) structure.
@@ -71,8 +62,8 @@ pub enum DhtPacket {
 impl ToBytes for DhtPacket {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         match *self {
-            DhtPacket::PingReq(ref p) => p.to_bytes(buf),
-            DhtPacket::PingResp(ref p) => p.to_bytes(buf),
+            DhtPacket::PingRequest(ref p) => p.to_bytes(buf),
+            DhtPacket::PingResponse(ref p) => p.to_bytes(buf),
             DhtPacket::GetNodes(ref p) => p.to_bytes(buf),
             DhtPacket::SendNodes(ref p) => p.to_bytes(buf),
         }
@@ -81,85 +72,11 @@ impl ToBytes for DhtPacket {
 
 impl FromBytes for DhtPacket {
     named!(from_bytes<DhtPacket>, alt!(
-        map!(PingReq::from_bytes, DhtPacket::PingReq) |
-        map!(PingResp::from_bytes, DhtPacket::PingResp) |
+        map!(PingRequest::from_bytes, DhtPacket::PingRequest) |
+        map!(PingResponse::from_bytes, DhtPacket::PingResponse) |
         map!(GetNodes::from_bytes, DhtPacket::GetNodes) |
         map!(SendNodes::from_bytes, DhtPacket::SendNodes)
     ));
-}
-
-/** DHT Request packet.
-
-https://zetok.github.io/tox-spec/#dht-request-packets
-*/
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum DhtRequest {
-    /// [`NatPingReq`](./struct.NatPingReq.html) structure.
-    NatPingReq(PingReq),
-    /// [`NatPingResp`](./struct.NatPingResp.html) structure.
-    NatPingResp(PingResp),
-}
-
-/** NatPing request of DHT Request packet.
-*/
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct NatPingReq(pub PingReq);
-
-/** NatPing response of DHT Request packet.
-*/
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct NatPingResp(pub PingResp);
-
-impl ToBytes for DhtRequest {
-    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        match *self {
-            DhtRequest::NatPingReq(ref p) => p.to_bytes(buf),
-            DhtRequest::NatPingResp(ref p) => p.to_bytes(buf),
-        }
-    }
-}
-
-impl FromBytes for DhtRequest {
-    named!(from_bytes<DhtRequest>, alt!(
-        map!(PingReq::from_bytes, DhtRequest::NatPingReq) |
-        map!(PingResp::from_bytes, DhtRequest::NatPingResp)
-    ));
-}
-
-impl FromBytes for NatPingReq {
-    named!(from_bytes<NatPingReq>, do_parse!(
-        tag!(&[0xfe][..]) >>
-        ping: call!(PingReq::from_bytes) >>
-        (NatPingReq(ping))
-    ));
-}
-
-impl ToBytes for NatPingReq {
-    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        let &NatPingReq(x) = self;
-        do_gen!(buf,
-            gen_be_u8!(0xfe) >>
-            gen_call!(|buf, data| PingReq::to_bytes(data, buf), &x)
-        )
-    }
-}
-
-impl FromBytes for NatPingResp {
-    named!(from_bytes<NatPingResp>, do_parse!(
-        tag!(&[0xfe][..]) >>
-        ping: call!(PingResp::from_bytes) >>
-        (NatPingResp(ping))
-    ));
-}
-
-impl ToBytes for NatPingResp {
-    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        let &NatPingResp(x) = self;
-        do_gen!(buf,
-            gen_be_u8!(0xfe) >>
-            gen_call!(|buf, data| PingResp::to_bytes(data, buf), &x)
-        )
-    }
 }
 
 /**
@@ -185,25 +102,25 @@ Length      | Contents
 
 Serialized form should be put in the encrypted part of DHT packet.
 
-[`PingResp`](./struct.PingResp.html) can only be created as a response
-to [`PingReq`](./struct.PingReq.html).
+[`PingResponse`](./struct.PingResponse.html) can only be created as a response
+to [`PingRequest`](./struct.PingRequest.html).
 */
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct PingReq {
+pub struct PingRequest {
     /// Request ping id
     pub id: u64,
 }
 
-impl FromBytes for PingReq {
-    named!(from_bytes<PingReq>, do_parse!(
+impl FromBytes for PingRequest {
+    named!(from_bytes<PingRequest>, do_parse!(
         tag!("\x00") >>
         id: be_u64 >>
-        (PingReq { id: id})
+        (PingRequest { id: id})
     ));
 }
 
-impl ToBytes for PingReq {
+impl ToBytes for PingRequest {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x00) >>
@@ -235,25 +152,25 @@ Length      | Contents
 
 Serialized form should be put in the encrypted part of DHT packet.
 
-[`PingResp`](./struct.PingResp.html) can only be created as a response
-to [`PingReq`](./struct.PingReq.html).
+[`PingResponse`](./struct.PingResponse.html) can only be created as a response
+to [`PingRequest`](./struct.PingRequest.html).
 */
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct PingResp {
-    /// Ping id same as requested from PingReq
+pub struct PingResponse {
+    /// Ping id same as requested from PingRequest
     pub id: u64,
 }
 
-impl FromBytes for PingResp {
-    named!(from_bytes<PingResp>, do_parse!(
+impl FromBytes for PingResponse {
+    named!(from_bytes<PingResponse>, do_parse!(
         tag!("\x01") >>
         id: be_u64 >>
-        (PingResp { id: id})
+        (PingResponse { id: id})
     ));
 }
 
-impl ToBytes for PingResp {
+impl ToBytes for PingResponse {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x01) >>
@@ -262,46 +179,13 @@ impl ToBytes for PingResp {
     }
 }
 
-/** Used by [`PackedNode`](./struct.PackedNode.html).
-
-* 1st bit – protocol
-* 3 bits – `0`
-* 4th bit – address family
-
-Value | Type
------ | ----
-`2`   | UDP IPv4
-`10`  | UDP IPv6
-`130` | TCP IPv4
-`138` | TCP IPv6
-
-DHT module *should* use only UDP variants of `IpType`, given that DHT runs
-solely over the UDP.
-
-TCP variants are to be used for sending/receiving info about TCP relays.
-*/
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum IpType {
-    /// UDP over IPv4.
-    U4 = 2,
-    /// UDP over IPv6.
-    U6 = 10,
-    /// TCP over IPv4.
-    T4 = 130,
-    /// TCP over IPv6.
-    T6 = 138,
-}
-
-/// Match first byte from the provided slice as `IpType`. If no match found,
-/// return `Error`.
-impl FromBytes for IpType {
-    named!(from_bytes<IpType>, switch!(le_u8,
-        2   => value!(IpType::U4) |
-        10  => value!(IpType::U6) |
-        130 => value!(IpType::T4) |
-        138 => value!(IpType::T6)
-    ));
-}
+// Ip Type
+// Value | Type
+// ----- | ----
+// `2`   | UDP IPv4
+// `10`  | UDP IPv6
+// `130` | TCP IPv4
+// `138` | TCP IPv6
 
 // TODO: move it somewhere else
 impl ToBytes for IpAddr {
@@ -368,7 +252,7 @@ Serialized Packed node:
 
 Length | Content
 ------ | -------
-1      | [`IpType`](./.enum.IpType.html)
+1      | Ip type (v4 or v6)
 4 or 16| IPv4 or IPv6 address
 2      | port
 32     | node ID
@@ -376,7 +260,7 @@ Length | Content
 Size of serialized `PackedNode` is 39 bytes with IPv4 node info, or 51 with
 IPv6 node info.
 
-DHT module *should* use only UDP variants of `IpType`, given that DHT runs
+DHT module *should* use only UDP variants of Ip type, given that DHT runs
 solely on the UDP.
 */
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -387,24 +271,10 @@ pub struct PackedNode {
     pub pk: PublicKey,
 }
 
-/// Size in bytes of serialized [`PackedNode`](./struct.PackedNode.html) with
-/// IPv4.
-pub const PACKED_NODE_IPV4_SIZE: usize = PUBLICKEYBYTES + 7;
-/// Size in bytes of serialized [`PackedNode`](./struct.PackedNode.html) with
-/// IPv6.
-pub const PACKED_NODE_IPV6_SIZE: usize = PUBLICKEYBYTES + 19;
-
-/** Serialize `PackedNode` into bytes.
-
-Can be either [`PACKED_NODE_IPV4_SIZE`]
-(./constant.PACKED_NODE_IPV4_SIZE.html) or [`PACKED_NODE_IPV6_SIZE`]
-(./constant.PACKED_NODE_IPV6_SIZE.html) bytes long, depending on whether
-IPv4 or IPv6 is being used.
-*/
 impl ToBytes for PackedNode {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
-            gen_if_else!(self.saddr.is_ipv4(), gen_be_u8!(IpType::U4 as u8), gen_be_u8!(IpType::U6 as u8)) >>
+            gen_if_else!(self.saddr.is_ipv4(), gen_be_u8!(2), gen_be_u8!(10)) >>
             gen_call!(|buf, addr| IpAddr::to_bytes(addr, buf), &self.saddr.ip()) >>
             gen_be_u16!(self.saddr.port()) >>
             gen_slice!(self.pk.as_ref())
@@ -417,41 +287,36 @@ failed.
 
 Can fail if:
 
- - length is too short for given [`IpType`](./enum.IpType.html)
+ - length is too short for given Ip Type
  - PK can't be parsed
 
-Blindly trusts that provided `IpType` matches - i.e. if there are provided
-51 bytes (which is length of `PackedNode` that contains IPv6), and `IpType`
+Blindly trusts that provided `Ip Type` matches - i.e. if there are provided
+51 bytes (which is length of `PackedNode` that contains IPv6), and `Ip Type`
 says that it's actually IPv4, bytes will be parsed as if that was an IPv4
 address.
 */
-named!(as_ipv4_packed_node<PackedNode>, do_parse!(
-    addr: call!(Ipv4Addr::from_bytes) >>
-    port: be_u16 >>
-    saddr: value!(SocketAddrV4::new(addr, port)) >>
-    pk: call!(PublicKey::from_bytes) >>
-    (PackedNode {
-        saddr: SocketAddr::V4(saddr),
-        pk: pk
-    })
-));
-
-// Parse bytes as an IPv6 PackedNode.
-named!(as_ipv6_packed_node<PackedNode>, do_parse!(
-    addr: call!(Ipv6Addr::from_bytes) >>
-    port: be_u16 >>
-    saddr: value!(SocketAddrV6::new(addr, port, 0, 0)) >>
-    pk: call!(PublicKey::from_bytes) >>
-    (PackedNode {
-        saddr: SocketAddr::V6(saddr),
-        pk: pk
-    })
-));
 
 impl FromBytes for PackedNode {
-    named!(from_bytes<PackedNode>, switch!(call!(IpType::from_bytes),
-        IpType::U4 => call!(as_ipv4_packed_node) |
-        IpType::U6 => call!(as_ipv6_packed_node)
+    named!(from_bytes<PackedNode>, switch!(le_u8,
+        2 => do_parse!(
+            addr: call!(Ipv4Addr::from_bytes) >>
+            port: be_u16 >>
+            saddr: value!(SocketAddrV4::new(addr, port)) >>
+            pk: call!(PublicKey::from_bytes) >>
+            (PackedNode {
+                saddr: SocketAddr::V4(saddr),
+                pk: pk
+        }))
+        |
+        10 => do_parse!(
+            addr: call!(Ipv6Addr::from_bytes) >>
+            port: be_u16 >>
+            saddr: value!(SocketAddrV6::new(addr, port, 0, 0)) >>
+            pk: call!(PublicKey::from_bytes) >>
+            (PackedNode {
+                saddr: SocketAddr::V6(saddr),
+                pk: pk
+        }))
     ));
 }
 
@@ -475,11 +340,6 @@ pub struct GetNodes {
     pub id: u64,
 }
 
-/// Size of serialized [`GetNodes`](./struct.GetNodes.html) in bytes.
-pub const GET_NODES_SIZE: usize = PUBLICKEYBYTES + 8;
-
-/// Serialization of `GetNodes`. Resulting length should be
-/// [`GET_NODES_SIZE`](./constant.GET_NODES_SIZE.html).
 impl ToBytes for GetNodes {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
@@ -489,10 +349,6 @@ impl ToBytes for GetNodes {
     }
 }
 
-/** De-serialization of bytes into `GetNodes`. If less than
-[`GET_NODES_SIZE`](./constant.GET_NODES_SIZE.html) bytes are provided,
-de-serialization will fail, returning `Error`.
-*/
 impl FromBytes for GetNodes {
     named!(from_bytes<GetNodes>, do_parse!(
         pk: call!(PublicKey::from_bytes) >>
@@ -531,7 +387,7 @@ pub struct SendNodes {
 impl ToBytes for SendNodes {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
-            gen_if_else!(self.nodes.len() > 0 && self.nodes.len() < 5,
+            gen_if_else!(!self.nodes.is_empty() && self.nodes.len() <= 4,
                 gen_be_u8!(self.nodes.len() as u8), gen_call!(|_,_| Err(GenError::CustomError(0)), 1) ) >>
             gen_many_ref!(&self.nodes, |buf, node| PackedNode::to_bytes(node, buf)) >>
             gen_be_u64!(self.id)
@@ -554,35 +410,123 @@ impl FromBytes for SendNodes {
     ));
 }
 
+/** DHT Request packet.
+
+https://zetok.github.io/tox-spec/#dht-request-packets
+*/
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DhtRequest {
+    /// [`NatPingRequest`](./struct.NatPingRequest.html) structure.
+    NatPingRequest(NatPingRequest),
+    /// [`NatPingResponse`](./struct.NatPingResponse.html) structure.
+    NatPingResponse(NatPingResponse),
+}
+
+/** NatPing request of DHT Request packet.
+*/
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct NatPingRequest {
+    /// Request ping id
+    pub id: u64,
+}
+
+/** NatPing response of DHT Request packet.
+*/
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct NatPingResponse {
+    /// Ping id same as requested from PingRequest
+    pub id: u64,
+}
+
+impl ToBytes for DhtRequest {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        match *self {
+            DhtRequest::NatPingRequest(ref p) => p.to_bytes(buf),
+            DhtRequest::NatPingResponse(ref p) => p.to_bytes(buf),
+        }
+    }
+}
+
+impl FromBytes for DhtRequest {
+    named!(from_bytes<DhtRequest>, alt!(
+        map!(NatPingRequest::from_bytes, DhtRequest::NatPingRequest) |
+        map!(NatPingResponse::from_bytes, DhtRequest::NatPingResponse)
+    ));
+}
+
+impl FromBytes for NatPingRequest {
+    named!(from_bytes<NatPingRequest>, do_parse!(
+        tag!(&[0xfe][..]) >>
+        tag!("\x00") >>
+        id: be_u64 >>
+        (NatPingRequest { id: id})
+    ));
+}
+
+impl ToBytes for NatPingRequest {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_be_u8!(0xfe) >>
+            gen_be_u8!(0x00) >>
+            gen_be_u64!(self.id)
+        )
+    }
+}
+
+impl FromBytes for NatPingResponse {
+    named!(from_bytes<NatPingResponse>, do_parse!(
+        tag!(&[0xfe][..]) >>
+        tag!("\x01") >>
+        id: be_u64 >>
+        (NatPingResponse { id: id})
+    ));
+}
+
+impl ToBytes for NatPingResponse {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_be_u8!(0xfe) >>
+            gen_be_u8!(0x01) >>
+            gen_be_u64!(self.id)
+        )
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
-    use toxcore::packet_kind::PacketKind;
-
     use std::fmt::Debug;
     use byteorder::{ByteOrder, BigEndian, WriteBytesExt};
 
     use quickcheck::{Arbitrary, Gen, quickcheck};
 
-    // PingReq::
-    impl Arbitrary for PingReq {
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub enum PacketKind {
+        PingRequest       = 0,
+        PingResponse      = 1,
+    }
+    const NatPingRequest: PacketKind = PacketKind::PingRequest;
+    const NatPingResponse: PacketKind = PacketKind::PingResponse;
+
+    // PingRequest::
+    impl Arbitrary for PingRequest {
         fn arbitrary<G: Gen>(_g: &mut G) -> Self {
-            PingReq::new()
+            PingRequest::new()
         }
     }
     
-    // PingResp::
-    impl Arbitrary for PingResp {
+    // PingResponse::
+    impl Arbitrary for PingResponse {
         fn arbitrary<G: Gen>(_g: &mut G) -> Self {
-            PingReq::new().into()
+            PingRequest::new().into()
         }
     }
 
-    impl PingReq {
+    impl PingRequest {
         /// Create new ping request with a randomly generated `request id`.
         pub fn new() -> Self {
             trace!("Creating new Ping.");
-            PingReq { id: random_u64() }
+            PingRequest { id: random_u64() }
         }
 
         /// An ID of the request / response.
@@ -591,28 +535,68 @@ mod test {
         }
     }
 
-    impl PingResp {
+    impl PingResponse {
         /// An ID of the request / response.
         pub fn id(&self) -> u64 {
             self.id
         }
     }
 
-    impl From<PingReq> for PingResp {
-        fn from(p: PingReq) -> Self {
-            PingResp { id: p.id }
+    impl From<PingRequest> for PingResponse {
+        fn from(p: PingRequest) -> Self {
+            PingResponse { id: p.id }
         }
     }
 
-    impl DhtPacketT for PingReq {
-        fn kind(&self) -> PacketKind {
-            PacketKind::PingReq
+    // PingRequest::
+    impl Arbitrary for NatPingRequest {
+        fn arbitrary<G: Gen>(_g: &mut G) -> Self {
+            NatPingRequest::new()
+        }
+    }
+    
+    // PingResponse::
+    impl Arbitrary for NatPingResponse {
+        fn arbitrary<G: Gen>(_g: &mut G) -> Self {
+            NatPingRequest::new().into()
         }
     }
 
-    impl DhtPacketT for PingResp {
+    impl NatPingRequest {
+        /// Create new ping request with a randomly generated `request id`.
+        pub fn new() -> Self {
+            trace!("Creating new Ping.");
+            NatPingRequest { id: random_u64() }
+        }
+
+        /// An ID of the request / response.
+        pub fn id(&self) -> u64 {
+            self.id
+        }
+    }
+
+    impl NatPingResponse {
+        /// An ID of the request / response.
+        pub fn id(&self) -> u64 {
+            self.id
+        }
+    }
+
+    impl From<NatPingRequest> for NatPingResponse {
+        fn from(p: NatPingRequest) -> Self {
+            NatPingResponse { id: p.id }
+        }
+    }
+
+    impl DhtPacketT for PingRequest {
         fn kind(&self) -> PacketKind {
-            PacketKind::PingResp
+            PacketKind::PingRequest
+        }
+    }
+
+    impl DhtPacketT for PingResponse {
+        fn kind(&self) -> PacketKind {
+            PacketKind::PingResponse
         }
     }
 
@@ -663,10 +647,10 @@ mod test {
             }
         )+)
     }
-    tests_for_pings!(PingReq
+    tests_for_pings!(PingRequest
                         packet_ping_req_to_bytes_test
                         packet_ping_req_from_bytes_test
-                    PingResp
+                    PingResponse
                         packet_ping_resp_to_bytes_test
                         packet_ping_resp_from_bytes_test
     );
@@ -692,6 +676,9 @@ mod test {
         }
         quickcheck(with_gn as fn(GetNodes));
     }
+
+    /// Size of serialized [`GetNodes`](./struct.GetNodes.html) in bytes.
+    pub const GET_NODES_SIZE: usize = PUBLICKEYBYTES + 8;
 
     // GetNodes::from_bytes()
     #[test]
@@ -755,14 +742,14 @@ mod test {
         }
 
         /// Get an IP type from the `PackedNode`.
-        pub fn ip_type(&self) -> IpType {
+        pub fn ip_type(&self) -> u8 {
             trace!(target: "PackedNode", "Getting IP type from PackedNode.");
             trace!("With address: {:?}", self);
             if self.saddr.is_ipv4() {
-                IpType::U4
+                2
             }
             else {
-                IpType::U6
+                10
             }
         }
 
@@ -882,23 +869,31 @@ mod test {
         quickcheck(with_nodes as fn(Vec<PackedNode>, u64));
     }
     
+    /** `NatPing` type byte for [`NatPingRequest`] and [`NatPingResponse`].
+    [./struct.PingRequest.html] [./struct.PingResponse.html]
+    */
+    pub const NAT_PING_TYPE: u8 = 0xfe;
+
+    /** Length in bytes of NatPings when serialized into bytes.
+    */
+    pub const NAT_PING_SIZE: usize = PING_SIZE + 1;
+
     macro_rules! impls_tests_for_nat_pings {
-        ($($np:ident($p:ident) $b_t:ident $f_t:ident)+) => ($(
-            impl Arbitrary for $np {
-                fn arbitrary<G: Gen>(g: &mut G) -> Self {
-                    $np(Arbitrary::arbitrary(g))
-                }
-            }
+        ($($np:ident $b_t:ident $f_t:ident)+) => ($(
+            // impl Arbitrary for $np {
+            //     fn arbitrary<G: Gen>(g: &mut G) -> Self {
+            //         $np(Arbitrary::arbitrary(g))
+            //     }
+            // }
 
             #[test]
             fn $b_t() {
                 fn with_np(p: $np) {
                     let mut _buf = [0; 1024];
                     let pb = p.to_bytes((&mut _buf, 0)).ok().unwrap();
-                    let $np(x) = p;
                     assert_eq!(NAT_PING_SIZE, pb.1);
                     assert_eq!(NAT_PING_TYPE as u8, pb.0[0]);
-                    assert_eq!(x.kind() as u8, pb.0[1]);
+                    assert_eq!($np as u8, pb.0[1]);
                 }
                 quickcheck(with_np as fn($np));
             }
@@ -911,7 +906,7 @@ mod test {
                     bytes[0] != NAT_PING_TYPE as u8 {
                         assert!(!($np::from_bytes(&bytes)).is_done());
                     } else {
-                        let $np(p) = $np::from_bytes(&bytes).unwrap().1;
+                        let p = $np::from_bytes(&bytes).unwrap().1;
                         // `id` should not differ
                         assert_eq!(p.id(), BigEndian::read_u64(&bytes[2..NAT_PING_SIZE]));
                     }
@@ -919,7 +914,7 @@ mod test {
                 quickcheck(with_bytes as fn(Vec<u8>));
 
                 // just in case
-                let mut ping = vec![NAT_PING_TYPE, PacketKind::$p as u8];
+                let mut ping = vec![NAT_PING_TYPE, $np as u8];
                 ping.write_u64::<BigEndian>(random_u64())
                     .unwrap();
                 with_bytes(ping);
@@ -928,10 +923,10 @@ mod test {
     }
 
     impls_tests_for_nat_pings!(
-        NatPingReq(PingReq)
+        NatPingRequest
             packet_nat_ping_req_to_bytes_test
             packet_nat_ping_req_from_bytes_test
-        NatPingResp(PingResp)
+        NatPingResponse
             packet_nat_ping_resp_to_bytes_test
             packet_nat_ping_resp_from_bytes_test
     );

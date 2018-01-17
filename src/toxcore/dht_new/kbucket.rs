@@ -56,7 +56,7 @@ pub fn kbucket_index(&PublicKey(ref own_pk): &PublicKey,
     debug!(target: "KBucketIndex", "Calculating KBucketIndex for PKs.");
     trace!(target: "KBucketIndex", "With PK1: {:?}; PK2: {:?}", own_pk, other_pk);
 
-    let xoring = own_pk.iter().zip(other_pk.iter()).map(|(x, y)| x ^ y); // work from shur
+    let xoring = own_pk.iter().zip(other_pk.iter()).map(|(x, y)| x ^ y);
     for (i, byte) in xoring.enumerate() {
         for j in 0..8 {
             if byte & (0x80 >> j) != 0 {
