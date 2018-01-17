@@ -35,7 +35,6 @@ use tokio_io::IoFuture;
 /** Structure that represents how Server keeps connected clients. A write-only socket with
 human interface. A client cannot send a message directly to another client, whereas server can.
 */
-#[derive(Clone)]
 pub struct Client {
     /// PublicKey of the client.
     pk: PublicKey,
