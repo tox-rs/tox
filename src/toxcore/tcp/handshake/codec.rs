@@ -43,10 +43,7 @@ impl Decoder for ClientHandshakeCodec {
             IResult::Incomplete(_) => {
                 return Ok(None)
             },
-            IResult::Error(e) => {
-                return Err(Error::new(ErrorKind::Other,
-                                      format!("Client handshake deserialize error: {:?}", e)))
-            },
+            IResult::Error(_) => unreachable!("ClientHandshake cannot be deserialized with error"),
             IResult::Done(i, handshake) => {
                 (buf.offset(i), handshake)
             }
@@ -86,10 +83,7 @@ impl Decoder for ServerHandshakeCodec {
             IResult::Incomplete(_) => {
                 return Ok(None)
             },
-            IResult::Error(e) => {
-                return Err(Error::new(ErrorKind::Other,
-                                      format!("Server handshake deserialize error: {:?}", e)))
-            },
+            IResult::Error(_) => unreachable!("ServerHandshake cannot be deserialized with error"),
             IResult::Done(i, handshake) => {
                 (buf.offset(i), handshake)
             }
