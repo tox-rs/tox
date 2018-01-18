@@ -715,7 +715,7 @@ mod test {
     fn dht_packet_get_nodes_from_bytes_test() {
         fn with_bytes(bytes: Vec<u8>) {
             if bytes.len() < GET_NODES_SIZE {
-                assert!(!DhtPacket::from_bytes(&bytes).is_done());
+                assert!(!GetNodes::from_bytes(&bytes).is_done());
             } else {
                 let gn = DhtPacket::from_bytes(&bytes).unwrap().1;
                 if let DhtPacket::GetNodes(gp) = gn {
