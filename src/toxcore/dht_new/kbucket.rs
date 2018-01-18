@@ -160,6 +160,16 @@ impl Bucket {
         }
     }
 
+    #[cfg(test)]
+    fn find(&self, pk: &PublicKey) -> Option<usize> {
+        for (n, node) in self.iter().enumerate() {
+            if node.pk() == pk {
+                return Some(n)
+            }
+        }
+        None
+    }
+
     /**
     Try to add [`PackedNode`] to the bucket.
 
@@ -365,7 +375,18 @@ impl Kbucket {
         self.pk
     }
 
-    /** Return the possible internal index of [`Bucket`](./struct.Bucket.html)
+     #[cfg(test)]
+    fn find(&self, pk: &PublicKey) -> Option<(usize, usize)> {
+        for (bucket_index, bucket) in self.buckets.iter().enumerate() {
+            match bucket.find(pk) {
+                None => {},
+                Some(node_index) => return Some((bucket_index, node_index))
+            }
+        }
+        None
+    }
+
+   /** Return the possible internal index of [`Bucket`](./struct.Bucket.html)
         where the key could be inserted/removed.
 
     Returns `Some(index)` if [`kbucket index`](./fn.kbucket_index.html) is
@@ -526,6 +547,11 @@ mod test {
     use super::*;
     use quickcheck::{Arbitrary, Gen, quickcheck, StdGen, TestResult};
     use byteorder::{BigEndian, WriteBytesExt};
+    use std::net::{
+        Ipv4Addr,
+        SocketAddr,
+        SocketAddrV4,
+    };
 
     /// Get a PK from 4 `u64`s.
     fn nums_to_pk(a: u64, b: u64, c: u64, d: u64) -> PublicKey {
@@ -853,5 +879,201 @@ mod test {
         }
         quickcheck(with_nodes as fn(PackedNode, PackedNode, PackedNode,
                         PackedNode, u64, u64, u64, u64));
+    }
+
+     // Kbucket::position()
+
+    #[test]
+    fn kbucket_position_test() {
+        fn with_data<F>(test_fn: F)
+            where F: Fn(&mut Kbucket, // kbucket
+                &PackedNode, // n1
+                &PackedNode, // n2
+                &PackedNode) // n3
+        {
+            let mut pk_bytes = [3; PUBLICKEYBYTES];
+
+            pk_bytes[0] = 1;
+            let base_pk = PublicKey(pk_bytes);
+
+            let mut kbucket = Kbucket::new(KBUCKET_MAX_ENTRIES, &base_pk);
+
+            let addr = Ipv4Addr::new(0, 0, 0, 0);
+            let saddr = SocketAddrV4::new(addr, 0);
+
+            let n0_base_pk = PackedNode::new(false, SocketAddr::V4(saddr), &base_pk);
+            assert!(!kbucket.try_add(&n0_base_pk));
+            kbucket.remove(&base_pk);
+
+            pk_bytes[5] = 1;
+            let pk1 = PublicKey(pk_bytes);
+            let n1 = PackedNode::new(false, SocketAddr::V4(saddr), &pk1);
+
+            pk_bytes[10] = 2;
+            let pk2 = PublicKey(pk_bytes);
+            let n2 = PackedNode::new(false, SocketAddr::V4(saddr), &pk2);
+
+            pk_bytes[14] = 4;
+            let pk3 = PublicKey(pk_bytes);
+            let n3 = PackedNode::new(false, SocketAddr::V4(saddr), &pk3);
+
+            assert!(pk1 > pk2);
+            assert!(pk2 < pk3);
+            assert!(pk1 > pk3);
+
+            assert_eq!(Some(46), kbucket_index(&base_pk, &pk1));
+            assert_eq!(Some(46), kbucket_index(&base_pk, &pk2));
+            assert_eq!(Some(46), kbucket_index(&base_pk, &pk3));
+
+            test_fn(&mut kbucket, &n1, &n2, &n3);
+        }
+        // Check that insertion order does not affect
+        // the result order in the kbucket
+        with_data(|kbucket, n1, n2, n3| {
+            // insert order: n1 n2 n3 maps to position
+            // n1 => 0, n2 => 1, n3 => 2
+            kbucket.try_add(n1);
+            kbucket.try_add(n2);
+            kbucket.try_add(n3);
+            assert_eq!(Some((46, 0)), kbucket.find(n1.pk()));
+            assert_eq!(Some((46, 1)), kbucket.find(n2.pk()));
+            assert_eq!(Some((46, 2)), kbucket.find(n3.pk()));
+        });
+        with_data(|kbucket, n1, n2, n3| {
+            // insert order: n3 n2 n1 maps to position
+            // n1 => 0, n2 => 1, n3 => 2
+            kbucket.try_add(n3);
+            kbucket.try_add(n2);
+            kbucket.try_add(n1);
+            assert_eq!(Some((46, 0)), kbucket.find(n1.pk()));
+            assert_eq!(Some((46, 1)), kbucket.find(n2.pk()));
+            assert_eq!(Some((46, 2)), kbucket.find(n3.pk()));
+        });
+        // Check that removing order does not affect
+        // the order of nodes inside
+        with_data(|kbucket, n1, n2, n3| {
+            // prepare kbucket
+            kbucket.try_add(n1); // => 0
+            kbucket.try_add(n2); // => 1
+            kbucket.try_add(n3); // => 2
+            // test removing from the beginning (n1 => 0)
+            kbucket.remove(n1.pk());
+            assert_eq!(None,          kbucket.find(n1.pk()));
+            assert_eq!(Some((46, 0)), kbucket.find(n2.pk()));
+            assert_eq!(Some((46, 1)), kbucket.find(n3.pk()));
+        });
+        with_data(|kbucket, n1, n2, n3| {
+            // prepare kbucket
+            kbucket.try_add(n1); // => 0
+            kbucket.try_add(n2); // => 1
+            kbucket.try_add(n3); // => 2
+            // test removing from the middle (n2 => 1)
+            kbucket.remove(n2.pk());
+            assert_eq!(Some((46, 0)), kbucket.find(n1.pk()));
+            assert_eq!(None,          kbucket.find(n2.pk()));
+            assert_eq!(Some((46, 1)), kbucket.find(n3.pk()));
+        });
+        with_data(|kbucket, n1, n2, n3| {
+            // prepare kbucket
+            kbucket.try_add(n1); // => 0
+            kbucket.try_add(n2); // => 1
+            kbucket.try_add(n3); // => 2
+            // test removing from the end (n3 => 2)
+            kbucket.remove(n3.pk());
+            assert_eq!(Some((46, 0)), kbucket.find(n1.pk()));
+            assert_eq!(Some((46, 1)), kbucket.find(n2.pk()));
+            assert_eq!(None,          kbucket.find(n3.pk()));
+        });
+    }
+
+    // Kbucket::contains()
+
+    quickcheck! {
+        fn kbucket_contains_test(n: u8, pns: Vec<PackedNode>) -> TestResult {
+            if pns.is_empty() { return TestResult::discard() }
+
+            let (pk, _) = gen_keypair();
+            let mut kbucket = Kbucket::new(n, &pk);
+            assert!(!kbucket.contains(&pk));
+            assert!(pns.iter().all(|pn| !kbucket.contains(pn.pk())));
+
+            for pn in &pns {
+                kbucket.try_add(pn);
+            }
+
+            assert!(kbucket.iter().all(|pn| kbucket.contains(pn.pk())));
+
+            TestResult::passed()
+        }
+    }
+
+   // Kbucket::can_add()
+
+    quickcheck! {
+        fn kbucket_can_add_test(n: u8, pns: Vec<PackedNode>) -> TestResult {
+            if pns.len() < 2 { return TestResult::discard() }
+
+            let (pk, _) = gen_keypair();
+            // there should be at least a pair of nodes with same index
+            {
+                let fitting_nodes = pns.iter().any(|p1| pns.iter()
+                    .filter(|p2| p1 != *p2)
+                    .any(|p2| kbucket_index(&pk, p1.pk()) == kbucket_index(&pk, p2.pk())));
+                if !fitting_nodes {
+                    return TestResult::discard()
+                }
+            }
+
+            let mut kbucket = Kbucket {
+                pk: pk,
+                buckets: vec![Box::new(Bucket::new(Some(1))); n as usize],
+            };
+
+            for node in &pns {
+                if kbucket.try_add(node) {
+                    let index = kbucket_index(&pk, node.pk());
+                    // none of nodes with the same index can be added
+                    // to the kbucket
+                    assert!(pns.iter()
+                        .filter(|pn| kbucket_index(&pk, pn.pk()) == index)
+                        .all(|pn| !kbucket.can_add(pn.pk())));
+                }
+            }
+
+            TestResult::passed()
+        }
+    }
+
+    // KbucketIter::next()
+
+    quickcheck! {
+        fn kbucket_iter_next_test(n: u8, pns: Vec<PackedNode>) -> () {
+            let (pk, _) = gen_keypair();
+            let mut kbucket = Kbucket::new(n, &pk);
+            // empty always returns None
+            assert!(kbucket.iter().next().is_none());
+
+            for node in &pns {
+                kbucket.try_add(node);
+            }
+
+            let mut expect = Vec::new();
+            for bucket in &kbucket.buckets {
+                for node in bucket.iter() {
+                    expect.push(*node);
+                }
+            }
+
+            let mut e_iter = expect.iter();
+            let mut k_iter = kbucket.iter();
+            loop {
+                let enext = e_iter.next();
+                let knext = k_iter.next();
+                assert_eq!(enext, knext);
+                if enext.is_none() {
+                    break;
+                }
+            }
+        }
     }
 }

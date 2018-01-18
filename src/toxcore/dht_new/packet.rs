@@ -589,18 +589,6 @@ mod test {
         }
     }
 
-    impl DhtPacketT for PingRequest {
-        fn kind(&self) -> PacketKind {
-            PacketKind::PingRequest
-        }
-    }
-
-    impl DhtPacketT for PingResponse {
-        fn kind(&self) -> PacketKind {
-            PacketKind::PingResponse
-        }
-    }
-
     /// Trait for types of DHT packets that can be put in [`DhtPacket`]
     /// (./struct.DhtPacket.html).
     pub trait DhtPacketT: ToBytes + FromBytes + Eq + PartialEq + Debug {
@@ -665,6 +653,14 @@ mod test {
         }
     }
 
+    impl Arbitrary for DhtPacket {
+        fn arbitrary<G: Gen>(g: &mut G) -> Self {
+            let mut a: [u8; PUBLICKEYBYTES] = [0; PUBLICKEYBYTES];
+            g.fill_bytes(&mut a);
+            DhtPacket::GetNodes(GetNodes { pk: PublicKey(a), id: g.gen() })
+        }
+    }
+
     // GetNodes::to_bytes()
     #[test]
     fn packet_get_nodes_to_bytes_test() {
@@ -694,6 +690,41 @@ mod test {
 
                 let PublicKey(ref pk) = gn.pk;
                 assert_eq!(pk, &bytes[..PUBLICKEYBYTES]);
+            }
+        }
+        quickcheck(with_bytes as fn(Vec<u8>));
+    }
+
+    // DhtPacket::GetNodes::to_bytes()
+    #[test]
+    fn dht_packet_get_nodes_to_bytes_test() {
+        fn with_gn(gn: DhtPacket) {
+            let mut _buf = [0;1024];
+            let g_bytes = gn.to_bytes((&mut _buf, 0)).ok().unwrap().0;
+            if let DhtPacket::GetNodes(gp) = gn {
+                let PublicKey(pk_bytes) = gp.pk;
+                assert_eq!(&pk_bytes, &g_bytes[..PUBLICKEYBYTES]);
+                assert_eq!(gp.id, BigEndian::read_u64(&g_bytes[PUBLICKEYBYTES..]));
+            }
+        }
+        quickcheck(with_gn as fn(DhtPacket));
+    }
+
+    // DhtPacket::GetNodes::from_bytes()
+    #[test]
+    fn dht_packet_get_nodes_from_bytes_test() {
+        fn with_bytes(bytes: Vec<u8>) {
+            if bytes.len() < GET_NODES_SIZE {
+                assert!(!DhtPacket::from_bytes(&bytes).is_done());
+            } else {
+                let gn = DhtPacket::from_bytes(&bytes).unwrap().1;
+                if let DhtPacket::GetNodes(gp) = gn {
+                    // ping_id as bytes should match "original" bytes
+                    assert_eq!(BigEndian::read_u64(&bytes[PUBLICKEYBYTES..GET_NODES_SIZE]), gp.id);
+
+                    let PublicKey(ref pk) = gp.pk;
+                    assert_eq!(pk, &bytes[..PUBLICKEYBYTES]);
+                }
             }
         }
         quickcheck(with_bytes as fn(Vec<u8>));
