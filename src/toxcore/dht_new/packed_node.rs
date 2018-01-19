@@ -140,10 +140,7 @@ impl PackedNode {
     pub fn ip(&self) -> IpAddr {
         trace!(target: "PackedNode", "Getting IP address from PackedNode.");
         trace!("With address: {:?}", self);
-        match self.saddr {
-            SocketAddr::V4(addr) => IpAddr::V4(*addr.ip()),
-            SocketAddr::V6(addr) => IpAddr::V6(*addr.ip()),
-        }
+        self.saddr.ip()
     }
 
     /// Get a Socket address from the `PackedNode`.
