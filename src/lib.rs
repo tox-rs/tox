@@ -185,6 +185,7 @@ pub mod toxcore {
     pub mod timeout;
     pub mod toxid;
     pub mod tcp;
+    pub mod dht_new;
 }
 
 /// Tox Encrypt Save (a.k.a. **TES**) module. Can be used to ecrypt / decrypt

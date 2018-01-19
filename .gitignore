@@ -10,6 +10,8 @@ target/
 
 # other
 *.patch
+master.zip
+kcov/
 
 # some scripts
 .*.sh
