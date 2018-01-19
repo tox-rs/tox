@@ -40,7 +40,7 @@ PK; and additionally used to store nodes closest to friends.
     * takes care of the K-Bucket 
 */
 use toxcore::crypto_core::*;
-use toxcore::dht_new::packet::PackedNode;
+use toxcore::dht_new::packed_node::PackedNode;
 use std::cmp::{Ord, Ordering};
 
 /** Calculate the [`k-bucket`](./struct.Kbucket.html) index of a PK compared
@@ -65,21 +65,6 @@ pub fn kbucket_index(&PublicKey(ref own_pk): &PublicKey,
         }
     }
     None  // PKs are equal
-}
-
-/// Trait for functionality get `PublicKey` from PackedNode.
-pub trait GetPk {
-    /// Get an IP address from the `PackedNode`.
-    fn pk(&self) -> &PublicKey;
-}
-
-impl GetPk for PackedNode {
-    /// Get an IP address from the `PackedNode`.
-    fn pk(&self) -> &PublicKey {
-        trace!(target: "PackedNode", "Getting PK from PackedNode.");
-        trace!("With address: {:?}", self);
-        &self.pk
-    }
 }
 
 /// Trait for functionality related to distance between `PublicKey`s.
@@ -162,7 +147,7 @@ impl Bucket {
 
     #[cfg(test)]
     fn find(&self, pk: &PublicKey) -> Option<usize> {
-        for (n, node) in self.iter().enumerate() {
+        for (n, node) in self.nodes.iter().enumerate() {
             if node.pk() == pk {
                 return Some(n)
             }
@@ -256,7 +241,7 @@ impl Bucket {
 
     /// Check if node with given PK is in the `Bucket`.
     pub fn contains(&self, pk: &PublicKey) -> bool {
-        self.iter().any(|n| n.pk() == pk)
+        self.nodes.iter().any(|n| n.pk() == pk)
     }
 
     /// Get the capacity of the Bucket.
@@ -280,25 +265,6 @@ impl Bucket {
     */
     pub fn is_full(&self) -> bool {
         self.nodes.len() == self.capacity()
-    }
-
-    /// Returns an iterator over contained [`PackedNode`]
-    /// (./struct.PackedNode.html)s.
-    pub fn iter(&self) -> BucketIter {
-        BucketIter { iter: self.nodes.iter() }
-    }
-}
-
-/// Iterator over `Bucket`.
-pub struct BucketIter<'a> {
-    iter: ::std::slice::Iter<'a, PackedNode>,
-}
-
-impl<'a> Iterator for BucketIter<'a> {
-    type Item = &'a PackedNode;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next()
     }
 }
 
@@ -522,7 +488,7 @@ impl<'a> Iterator for KbucketIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.pos_b < self.buckets.len() {
-            match self.buckets[self.pos_b].iter().nth(self.pos_pn) {
+            match self.buckets[self.pos_b].nodes.iter().nth(self.pos_pn) {
                 Some(s) => {
                     self.pos_pn += 1;
                     Some(s)
@@ -1059,7 +1025,7 @@ mod test {
 
             let mut expect = Vec::new();
             for bucket in &kbucket.buckets {
-                for node in bucket.iter() {
+                for node in bucket.nodes.iter() {
                     expect.push(*node);
                 }
             }
