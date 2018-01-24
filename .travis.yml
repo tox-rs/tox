@@ -38,14 +38,6 @@ branches:
   except:
     - /test.*/
 
-notifications:
-  irc:
-    channels: "chat.freenode.net#zetox"
-    template:
-      - "%{repository}#%{build_number} (%{branch} - %{commit} : %{author}): %{message} || Change view: %{compare_url}"
-    on_success: change
-    skip_join: true
-
 before_install:
   - |
     if [[ "$TRAVIS_OS_NAME" == "linux" ]]
@@ -73,11 +65,6 @@ script:
   - cargo doc
 
 after_success:
-  - >
-    test $TRAVIS_PULL_REQUEST == "false"
-    && (test $TRAVIS_BRANCH == "travis"
-    || test $TRAVIS_BRANCH == "master" )
-    && bash ./scripts/deploy-gh-pages.sh
   # measure code coverage and upload to coveralls.io
   - |
     if [[ "$TRAVIS_OS_NAME" == "linux" ]] && [[ "$TRAVIS_RUST_VERSION" == stable ]]
