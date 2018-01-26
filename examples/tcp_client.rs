@@ -198,7 +198,7 @@ fn send_packets(tx: mpsc::Sender<Packet>) {
 }
 
 fn main() {
-    env_logger::init().unwrap();
+    env_logger::init();
 
     let (tx, rx) = mpsc::channel(1);
 
