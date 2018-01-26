@@ -54,7 +54,7 @@ use tox::toxcore::network::*;
 use tox::toxcore::timeout::*;
 
 fn main() {
-    env_logger::init().unwrap();
+    env_logger::init();
 
     // the way RefCell is used below can result in a panic
     let node = Arc::new(RefCell::new(DhtNode::new().unwrap()));
@@ -95,7 +95,7 @@ fn main() {
     // network (bootstrapping from multiple nodes would help with that)
     assert!(node.borrow_mut().try_add(&bootstrap_pn));
 
-    
+
     //// handle incoming stuff
 
     let deal_with_it = receive_packets(stream).for_each(|(addr, packet)| {

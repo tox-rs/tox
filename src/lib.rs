@@ -125,6 +125,9 @@ fn main() {
 // Too many false positives in tests
 #![cfg_attr(feature = "clippy", allow(needless_pass_by_value))]
 
+// FIXME update to nom 4 and remove this rule
+#![allow(unused_parens)]
+
 extern crate bytes;
 extern crate byteorder;
 extern crate futures;

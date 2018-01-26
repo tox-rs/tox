@@ -44,7 +44,7 @@ use tokio_core::net::TcpListener;
 use std::time;
 
 fn main() {
-    env_logger::init().unwrap();
+    env_logger::init();
     // Server constant PK for examples/tests
     // Use `gen_keypair` to generate random keys
     let server_pk = PublicKey([177, 185, 54, 250, 10, 168, 174,
