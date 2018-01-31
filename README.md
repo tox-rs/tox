@@ -1,21 +1,30 @@
-# Tox  [![Travis Build Status](https://travis-ci.org/tox-rs/tox.svg?branch=master)](https://travis-ci.org/tox-rs/tox) [![Appveyor Build status](https://ci.appveyor.com/api/projects/status/y3y2hi6552qgmfr0/branch/master?svg=true)](https://ci.appveyor.com/project/kpp/tox/branch/master) [![Coverage Status](https://coveralls.io/repos/github/tox-rs/tox/badge.svg?branch=master)](https://coveralls.io/github/tox-rs/tox?branch=master)
+# Tox
 
-This library is an implementation of [toxcore][toxcore] in Rust - P2P,
+[![Travis Build Status][travis-badge]][travis-url] [![Appveyor Build Status][appveyor-badge]][appveyor-url] [![Coverage Status][cov-badge]][cov-url] [![Docs][doc-badge]][doc-url] [![Current Crates.io Version][crates-badge]][crates-url] [![Join Gitter][gitter-badge]][gitter-url]
+
+[travis-badge]: https://travis-ci.org/tox-rs/tox.svg?branch=master
+[travis-url]: https://travis-ci.org/tox-rs/tox
+[appveyor-badge]: https://ci.appveyor.com/api/projects/status/y3y2hi6552qgmfr0/branch/master?svg=true
+[appveyor-url]: https://ci.appveyor.com/project/kpp/tox/branch/master
+[cov-badge]: https://coveralls.io/repos/github/tox-rs/tox/badge.svg?branch=master
+[cov-url]: https://coveralls.io/github/tox-rs/tox?branch=master
+[doc-badge]: https://docs.rs/tox/badge.svg
+[doc-url]: https://docs.rs/tox
+[crates-badge]: https://img.shields.io/crates/v/tox.svg
+[crates-url]: https://crates.io/crates/tox
+[gitter-badge]: https://badges.gitter.im/tox-rs/tox.svg
+[gitter-url]: https://gitter.im/tox-rs/tox
+
+This library is an implementation of [toxcore][toxcore] in [Rust] - P2P,
 distributed, encrypted, easy to use DHT-based network.
 
-IRC channel: [#zetox @ freenode](https://webchat.freenode.net/?channels=zetox)
-
-Gitter: [![Gitter](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/zetoxcore/tox?utm_source=badge)
-
-## Documentation
+## Reference
 
 [The Tox Reference](https://zetok.github.io/tox-spec) should be used for
 implementing toxcore in Rust. [Reference source repository].
 
 If existing documentation appears to not be complete, or is not clear enough,
 issue / pull request should be filled on the reference repository.
-
-Current [API docs](https://zetok.github.io/tox) are a subject to changes.
 
 ## Contributions
 
@@ -52,12 +61,12 @@ To build with support for [clippy](https://github.com/Manishearth/rust-clippy)
 required.
 
 To build:
-```
+```bash
 cargo build --features "clippy"
 ```
 
 To build & test:
-```
+```bash
 cargo test --features "clippy"
 ```
 
@@ -65,7 +74,6 @@ cargo test --features "clippy"
 ## Goals
  - improved toxcore implementation in Rust
  - Rust API
- - "old" C API for compatibility
  - documentation
  - tests
  - more
@@ -90,17 +98,13 @@ consider helping :wink:
     - [x] Simply great. Further improvements in progress.
  - [x] tests
     - [x] tests cover almost all functionality
-    - [x] tested against [hstox], using [Tox Tester], T.T for short
 
 
 ## License
 
 Licensed under GPLv3+. For details, see [COPYING](/COPYING).
 
-[CAPI]: https://github.com/quininer/tox-capi
-[hstox]: https://github.com/TokTok/hstox
 [libsodium]: https://github.com/jedisct1/libsodium
 [Reference source repository]: https://github.com/zetok/tox-spec
 [Rust]: https://www.rust-lang.org/
-[Tox Tester]: https://github.com/zetok/tox-protocol-test
 [toxcore]: https://github.com/irungentoo/toxcore
