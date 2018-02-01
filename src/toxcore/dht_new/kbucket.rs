@@ -148,7 +148,7 @@ impl Bucket {
     #[cfg(test)]
     fn find(&self, pk: &PublicKey) -> Option<usize> {
         for (n, node) in self.nodes.iter().enumerate() {
-            if node.pk() == pk {
+            if &node.pk == pk {
                 return Some(n)
             }
         }
@@ -181,7 +181,7 @@ impl Bucket {
         trace!(target: "Bucket", "With bucket: {:?}; PK: {:?} and new node: {:?}",
             self, base_pk, new_node);
 
-        match self.nodes.binary_search_by(|n| base_pk.distance(n.pk(), new_node.pk())) {
+        match self.nodes.binary_search_by(|n| base_pk.distance(&n.pk, &new_node.pk)) {
             Ok(index) => {
                 debug!(target: "Bucket",
                     "Updated: the node was already in the bucket.");
@@ -229,7 +229,7 @@ impl Bucket {
     */
     pub fn remove(&mut self, base_pk: &PublicKey, node_pk: &PublicKey) {
         trace!(target: "Bucket", "Removing PackedNode with PK: {:?}", node_pk);
-        match self.nodes.binary_search_by(|n| base_pk.distance(n.pk(), node_pk) ) {
+        match self.nodes.binary_search_by(|n| base_pk.distance(&n.pk, node_pk) ) {
             Ok(index) => {
                 self.nodes.remove(index);
             },
@@ -241,7 +241,7 @@ impl Bucket {
 
     /// Check if node with given PK is in the `Bucket`.
     pub fn contains(&self, pk: &PublicKey) -> bool {
-        self.nodes.iter().any(|n| n.pk() == pk)
+        self.nodes.iter().any(|n| &n.pk == pk)
     }
 
     /// Get the capacity of the Bucket.
@@ -335,13 +335,7 @@ impl Kbucket {
         self.buckets.len() as u8
     }
 
-    /// Get the PK of the Kbucket. Used in tests only
     #[cfg(test)]
-    pub fn pk(&self) -> PublicKey {
-        self.pk
-    }
-
-     #[cfg(test)]
     fn find(&self, pk: &PublicKey) -> Option<(usize, usize)> {
         for (bucket_index, bucket) in self.buckets.iter().enumerate() {
             match bucket.find(pk) {
@@ -382,7 +376,7 @@ impl Kbucket {
         debug!(target: "Kbucket", "Trying to add PackedNode.");
         trace!(target: "Kbucket", "With PN: {:?}; and self: {:?}", node, self);
 
-        match self.bucket_index(node.pk()) {
+        match self.bucket_index(&node.pk) {
             Some(index) => self.buckets[index].try_add(&self.pk, node),
             None => {
                 trace!("Failed to add node: {:?}", node);
@@ -623,7 +617,7 @@ mod test {
     fn dht_bucket_1_capacity_try_add_test() {
         fn with_nodes(n1: PackedNode, n2: PackedNode) -> TestResult {
             let pk = PublicKey([0; PUBLICKEYBYTES]);
-            if pk.distance(n2.pk(), n1.pk()) != Ordering::Greater {
+            if pk.distance(&n2.pk, &n1.pk) != Ordering::Greater {
                 // n2 should be greater to check we can't add it
                 return TestResult::discard()
             }
@@ -651,7 +645,7 @@ mod test {
             let mut bucket = Bucket::new(Some(bucket_size));
 
             let non_existent_node: PackedNode = Arbitrary::arbitrary(&mut rng);
-            bucket.remove(&base_pk, non_existent_node.pk());  // "removing" non-existent node
+            bucket.remove(&base_pk, &non_existent_node.pk);  // "removing" non-existent node
             assert_eq!(true, bucket.is_empty());
 
             let nodes = vec![Arbitrary::arbitrary(&mut rng); num as usize];
@@ -667,7 +661,7 @@ mod test {
             }
 
             for node in &nodes {
-                bucket.remove(&base_pk, node.pk());
+                bucket.remove(&base_pk, &node.pk);
             }
             assert_eq!(true, bucket.is_empty());
         }
@@ -729,7 +723,7 @@ mod test {
             let pk = nums_to_pk(a, b, c, d);
             let kbucket = Kbucket::new(buckets, &pk);
             assert_eq!(buckets, kbucket.size());
-            assert_eq!(pk, kbucket.pk());
+            assert_eq!(pk, kbucket.pk);
         }
         quickcheck(with_pk as fn(u64, u64, u64, u64, u8));
     }
@@ -792,7 +786,7 @@ mod test {
 
             // Check for actual removing
             for node in &nodes {
-                kbucket.remove(node.pk());
+                kbucket.remove(&node.pk);
             }
             assert!(kbucket.is_empty());
             TestResult::passed()
@@ -820,7 +814,7 @@ mod test {
 
             // check whether number of correct nodes that are returned is right
             let correctness = |should, kbc: &Kbucket| {
-                assert_eq!(kbc.get_closest(&pk), kbc.get_closest(&kbc.pk()));
+                assert_eq!(kbc.get_closest(&pk), kbc.get_closest(&kbc.pk));
 
                 let got_nodes = kbc.get_closest(&pk);
                 let mut got_correct = 0;
@@ -901,9 +895,9 @@ mod test {
             kbucket.try_add(n1);
             kbucket.try_add(n2);
             kbucket.try_add(n3);
-            assert_eq!(Some((46, 0)), kbucket.find(n1.pk()));
-            assert_eq!(Some((46, 1)), kbucket.find(n2.pk()));
-            assert_eq!(Some((46, 2)), kbucket.find(n3.pk()));
+            assert_eq!(Some((46, 0)), kbucket.find(&n1.pk));
+            assert_eq!(Some((46, 1)), kbucket.find(&n2.pk));
+            assert_eq!(Some((46, 2)), kbucket.find(&n3.pk));
         });
         with_data(|kbucket, n1, n2, n3| {
             // insert order: n3 n2 n1 maps to position
@@ -911,9 +905,9 @@ mod test {
             kbucket.try_add(n3);
             kbucket.try_add(n2);
             kbucket.try_add(n1);
-            assert_eq!(Some((46, 0)), kbucket.find(n1.pk()));
-            assert_eq!(Some((46, 1)), kbucket.find(n2.pk()));
-            assert_eq!(Some((46, 2)), kbucket.find(n3.pk()));
+            assert_eq!(Some((46, 0)), kbucket.find(&n1.pk));
+            assert_eq!(Some((46, 1)), kbucket.find(&n2.pk));
+            assert_eq!(Some((46, 2)), kbucket.find(&n3.pk));
         });
         // Check that removing order does not affect
         // the order of nodes inside
@@ -923,10 +917,10 @@ mod test {
             kbucket.try_add(n2); // => 1
             kbucket.try_add(n3); // => 2
             // test removing from the beginning (n1 => 0)
-            kbucket.remove(n1.pk());
-            assert_eq!(None,          kbucket.find(n1.pk()));
-            assert_eq!(Some((46, 0)), kbucket.find(n2.pk()));
-            assert_eq!(Some((46, 1)), kbucket.find(n3.pk()));
+            kbucket.remove(&n1.pk);
+            assert_eq!(None,          kbucket.find(&n1.pk));
+            assert_eq!(Some((46, 0)), kbucket.find(&n2.pk));
+            assert_eq!(Some((46, 1)), kbucket.find(&n3.pk));
         });
         with_data(|kbucket, n1, n2, n3| {
             // prepare kbucket
@@ -934,10 +928,10 @@ mod test {
             kbucket.try_add(n2); // => 1
             kbucket.try_add(n3); // => 2
             // test removing from the middle (n2 => 1)
-            kbucket.remove(n2.pk());
-            assert_eq!(Some((46, 0)), kbucket.find(n1.pk()));
-            assert_eq!(None,          kbucket.find(n2.pk()));
-            assert_eq!(Some((46, 1)), kbucket.find(n3.pk()));
+            kbucket.remove(&n2.pk);
+            assert_eq!(Some((46, 0)), kbucket.find(&n1.pk));
+            assert_eq!(None,          kbucket.find(&n2.pk));
+            assert_eq!(Some((46, 1)), kbucket.find(&n3.pk));
         });
         with_data(|kbucket, n1, n2, n3| {
             // prepare kbucket
@@ -945,10 +939,10 @@ mod test {
             kbucket.try_add(n2); // => 1
             kbucket.try_add(n3); // => 2
             // test removing from the end (n3 => 2)
-            kbucket.remove(n3.pk());
-            assert_eq!(Some((46, 0)), kbucket.find(n1.pk()));
-            assert_eq!(Some((46, 1)), kbucket.find(n2.pk()));
-            assert_eq!(None,          kbucket.find(n3.pk()));
+            kbucket.remove(&n3.pk);
+            assert_eq!(Some((46, 0)), kbucket.find(&n1.pk));
+            assert_eq!(Some((46, 1)), kbucket.find(&n2.pk));
+            assert_eq!(None,          kbucket.find(&n3.pk));
         });
     }
 
@@ -961,13 +955,13 @@ mod test {
             let (pk, _) = gen_keypair();
             let mut kbucket = Kbucket::new(n, &pk);
             assert!(!kbucket.contains(&pk));
-            assert!(pns.iter().all(|pn| !kbucket.contains(pn.pk())));
+            assert!(pns.iter().all(|pn| !kbucket.contains(&pn.pk)));
 
             for pn in &pns {
                 kbucket.try_add(pn);
             }
 
-            assert!(kbucket.iter().all(|pn| kbucket.contains(pn.pk())));
+            assert!(kbucket.iter().all(|pn| kbucket.contains(&pn.pk)));
 
             TestResult::passed()
         }
@@ -984,7 +978,7 @@ mod test {
             {
                 let fitting_nodes = pns.iter().any(|p1| pns.iter()
                     .filter(|p2| p1 != *p2)
-                    .any(|p2| kbucket_index(&pk, p1.pk()) == kbucket_index(&pk, p2.pk())));
+                    .any(|p2| kbucket_index(&pk, &p1.pk) == kbucket_index(&pk, &p2.pk)));
                 if !fitting_nodes {
                     return TestResult::discard()
                 }
@@ -997,12 +991,12 @@ mod test {
 
             for node in &pns {
                 if kbucket.try_add(node) {
-                    let index = kbucket_index(&pk, node.pk());
+                    let index = kbucket_index(&pk, &node.pk);
                     // none of nodes with the same index can be added
                     // to the kbucket
                     assert!(pns.iter()
-                        .filter(|pn| kbucket_index(&pk, pn.pk()) == index)
-                        .all(|pn| !kbucket.can_add(pn.pk())));
+                        .filter(|pn| kbucket_index(&pk, &pn.pk) == index)
+                        .all(|pn| !kbucket.can_add(&pn.pk)));
                 }
             }
 
