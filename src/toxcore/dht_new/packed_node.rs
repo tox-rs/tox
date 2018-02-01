@@ -149,13 +149,6 @@ impl PackedNode {
         trace!("With address: {:?}", self);
         self.saddr
     }
-
-    /// Get an PK from the `PackedNode`.
-    pub fn pk(&self) -> &PublicKey {
-        trace!(target: "PackedNode", "Getting PK from PackedNode.");
-        trace!("With PK: {:?}", self);
-        &self.pk
-    }
 }
 
 
