@@ -27,4 +27,6 @@ pub mod packet;
 pub mod kbucket;
 pub mod packed_node;
 pub mod codec;
+pub mod dht_node;
+pub mod dht_impl;
 pub mod packet_kind;
