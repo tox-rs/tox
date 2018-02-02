@@ -231,6 +231,28 @@ impl DhtRequest {
     }
 }
 
+impl DhtPacketPayload {
+    /// Packet kind for enum DhtPacketPayload
+    pub fn kind(&self) -> PacketKind {
+        match *self {
+            DhtPacketPayload::PingRequest(_) => PacketKind::PingRequest,
+            DhtPacketPayload::PingResponse(_) => PacketKind::PingResponse,
+            DhtPacketPayload::GetNodes(_) => PacketKind::GetNodes,
+            DhtPacketPayload::SendNodes(_) => PacketKind::SendNodes,
+        }
+    }
+}
+
+impl DhtBase {
+    /// Packet kind for enum DhtPacketPayload
+    pub fn kind(&self) -> PacketKind {
+        match *self {
+            DhtBase::DhtPacket(ref p) => p.packet_kind,
+            DhtBase::DhtRequest(ref p) => PacketKind::from_bytes(&[p.payload[1]]).unwrap().1,
+        }
+    }
+}
+
 impl GetNodes {
     /**
     Create response to `self` request with nodes provided from the `Kbucket`.
@@ -272,27 +294,5 @@ impl SendNodes {
 impl From<PingRequest> for PingResponse {
     fn from(p: PingRequest) -> Self {
         PingResponse { id: p.id }
-    }
-}
-
-impl DhtPacketPayload {
-    /// Packet kind for enum DhtPacketPayload
-    pub fn kind(&self) -> PacketKind {
-        match *self {
-            DhtPacketPayload::PingRequest(_) => PacketKind::PingRequest,
-            DhtPacketPayload::PingResponse(_) => PacketKind::PingResponse,
-            DhtPacketPayload::GetNodes(_) => PacketKind::GetNodes,
-            DhtPacketPayload::SendNodes(_) => PacketKind::SendNodes,
-        }
-    }
-}
-
-impl DhtBase {
-    /// Packet kind for enum DhtPacketPayload
-    pub fn kind(&self) -> PacketKind {
-        match *self {
-            DhtBase::DhtPacket(ref p) => p.packet_kind,
-            DhtBase::DhtRequest(ref p) => PacketKind::from_bytes(&[p.payload[1]]).unwrap().1,
-        }
     }
 }
