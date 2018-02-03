@@ -45,7 +45,7 @@ use std::net::{
     Ipv6Addr,
 };
 
-use toxcore::dht_new::binary_io::*;
+use toxcore::binary_io_new::*;
 use toxcore::crypto_core::*;
 use toxcore::dht_new::packed_node::PackedNode;
 
