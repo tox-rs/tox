@@ -19,12 +19,11 @@
     along with Tox.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-/*! Encoding/decoding traits for TCP mod
+/*! Encoding/decoding traits
 */
 
-// FIXME: merge with toxcore/binary_io.rs
-
 use toxcore::crypto_core::*;
+
 pub use nom::IResult;
 pub use cookie_factory::GenError;
 

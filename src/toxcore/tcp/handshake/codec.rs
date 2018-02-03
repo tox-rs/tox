@@ -23,8 +23,8 @@
 
 */
 
+use toxcore::binary_io_new::*;
 use toxcore::tcp::handshake::packet::*;
-use toxcore::tcp::binary_io::*;
 
 use nom::Offset;
 use bytes::BytesMut;

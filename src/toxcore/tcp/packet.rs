@@ -23,8 +23,8 @@
     to [Tox spec](https://zetok.github.io/tox-spec/#encrypted-payload-types)
 */
 
+use toxcore::binary_io_new::*;
 use toxcore::crypto_core::*;
-use toxcore::tcp::binary_io::*;
 
 use nom::{be_u8, be_u16, be_u64, rest};
 

@@ -22,9 +22,9 @@
 /*! Codec implementation for encoding/decoding TCP Packets in terms of tokio-io
 */
 
+use toxcore::binary_io_new::*;
 use toxcore::tcp::packet::*;
 use toxcore::tcp::secure::*;
-use toxcore::tcp::binary_io::*;
 
 use nom::Offset;
 use std::io::{Error, ErrorKind};
