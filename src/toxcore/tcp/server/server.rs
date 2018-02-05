@@ -368,37 +368,56 @@ impl Server {
 
 #[cfg(test)]
 mod tests {
+    extern crate rand;
+
     use ::toxcore::crypto_core::*;
     use ::toxcore::tcp::packet::*;
     use ::toxcore::tcp::server::{Client, Server};
     use futures::sync::mpsc;
     use futures::{Stream, Future};
+    use quickcheck::{Arbitrary, StdGen};
+    use std::net::{IpAddr, Ipv4Addr};
 
     #[test]
     fn server_is_clonable() {
-        let server = Server::new();
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
         add_random_client(&server);
         let _cloned = server.clone();
         // that's all.
     }
 
-    /// A function that generates random keypair, creates mpsc channel
-    ///  and inserts them as a mock Client into Server
-    fn add_random_client(server: &Server) -> (PublicKey, mpsc::UnboundedReceiver<Packet>) {
+    /// A function that generates random keypair, random `std::net::IpAddr`,
+    ///  creates mpsc channel and returns created with them Client
+    fn create_random_client() -> (Client, mpsc::UnboundedReceiver<Packet>) {
+        let mut gen = StdGen::new(rand::thread_rng(), 1024);
+        let client_ip_addr = IpAddr::arbitrary(&mut gen);
         let (client_pk, _) = gen_keypair();
         let (tx, rx) = mpsc::unbounded();
-        server.insert(Client::new(tx, &client_pk));
-        (client_pk, rx)
+        let client = Client::new(tx, &client_pk, client_ip_addr);
+        (client, rx)
+    }
+
+    /// A function that generates random keypair, random `std::net::IpAddr`,
+    ///  creates mpsc channel and inserts them as a mock Client into Server
+    fn add_random_client(server: &Server) -> (PublicKey, IpAddr, mpsc::UnboundedReceiver<Packet>) {
+        let (client, rx) = create_random_client();
+        let client_pk = client.pk();
+        let client_addr = client.ip_addr();
+        server.insert(client);
+        (client_pk, client_addr, rx)
     }
 
     #[test]
     fn normal_communication_scenario() {
-        let server = Server::new();
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
 
         // client 1 connects to the server
-        let (client_pk_1, rx_1) = add_random_client(&server);
+        let (client_pk_1, _client_addr_1, rx_1) = add_random_client(&server);
 
-        let (client_pk_2, _) = gen_keypair();
+        let (client_2, rx_2) = create_random_client();
+        let client_pk_2 = client_2.pk();
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
@@ -412,8 +431,7 @@ mod tests {
         ));
 
         // client 2 connects to the server
-        let (tx_2, rx_2) = mpsc::unbounded();
-        server.insert(Client::new(tx_2, &client_pk_2));
+        server.insert(client_2);
 
         // emulate send RouteRequest from client_1 again
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
@@ -470,9 +488,10 @@ mod tests {
     }
     #[test]
     fn handle_route_request() {
-        let server = Server::new();
-        let (client_pk_1, rx_1) = add_random_client(&server);
-        let (client_pk_2, _rx_2) = add_random_client(&server);
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
+        let (client_pk_1, _client_addr_1, rx_1) = add_random_client(&server);
+        let (client_pk_2, _client_addr_2, _rx_2) = add_random_client(&server);
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
@@ -487,8 +506,9 @@ mod tests {
     }
     #[test]
     fn handle_route_request_to_itself() {
-        let server = Server::new();
-        let (client_pk_1, rx_1) = add_random_client(&server);
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
+        let (client_pk_1, _client_addr_1, rx_1) = add_random_client(&server);
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
@@ -503,13 +523,14 @@ mod tests {
     }
     #[test]
     fn handle_route_request_too_many_connections() {
-        let server = Server::new();
-        let (client_pk_1, rx_1) = add_random_client(&server);
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
+        let (client_pk_1, _client_addr_1, rx_1) = add_random_client(&server);
         let mut rx_1 = rx_1;
 
         // send 240 RouteRequest
         for i in 0..240 {
-            let (other_client_pk, _other_rx) = add_random_client(&server);
+            let (other_client_pk, _client_addr_1, _other_rx) = add_random_client(&server);
             // emulate send RouteRequest from client_1
             server.handle_packet(&client_pk_1, Packet::RouteRequest(
                 RouteRequest { pk: other_client_pk }
@@ -523,7 +544,7 @@ mod tests {
             rx_1 = rx_1_nested;
         }
         // and send one more again
-        let (other_client_pk, _other_rx) = add_random_client(&server);
+        let (other_client_pk, _client_addr_1, _other_rx) = add_random_client(&server);
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
             RouteRequest { pk: other_client_pk }
@@ -537,8 +558,9 @@ mod tests {
     }
     #[test]
     fn handle_connect_notification() {
-        let server = Server::new();
-        let (client_pk_1, _rx_1) = add_random_client(&server);
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
+        let (client_pk_1, _client_addr_1, _rx_1) = add_random_client(&server);
 
         // emulate send ConnectNotification from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::ConnectNotification(
@@ -548,9 +570,10 @@ mod tests {
     }
     #[test]
     fn handle_disconnect_notification() {
-        let server = Server::new();
-        let (client_pk_1, rx_1) = add_random_client(&server);
-        let (client_pk_2, rx_2) = add_random_client(&server);
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
+        let (client_pk_1, _client_addr_1, rx_1) = add_random_client(&server);
+        let (client_pk_2, _client_addr_2, rx_2) = add_random_client(&server);
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
@@ -599,9 +622,10 @@ mod tests {
     }
     #[test]
     fn handle_disconnect_notification_other_not_linked() {
-        let server = Server::new();
-        let (client_pk_1, _rx_1) = add_random_client(&server);
-        let (client_pk_2, _rx_2) = add_random_client(&server);
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
+        let (client_pk_1, _client_addr_1, _rx_1) = add_random_client(&server);
+        let (client_pk_2, _client_addr_2, _rx_2) = add_random_client(&server);
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
@@ -616,8 +640,9 @@ mod tests {
     }
     #[test]
     fn handle_ping_request() {
-        let server = Server::new();
-        let (client_pk_1, rx_1) = add_random_client(&server);
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
+        let (client_pk_1, _client_addr_1, rx_1) = add_random_client(&server);
 
         // emulate send PingRequest from client_1
         server.handle_packet(&client_pk_1, Packet::PingRequest(
@@ -632,9 +657,10 @@ mod tests {
     }
     #[test]
     fn handle_oob_send() {
-        let server = Server::new();
-        let (client_pk_1, _rx_1) = add_random_client(&server);
-        let (client_pk_2, rx_2) = add_random_client(&server);
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
+        let (client_pk_1, _client_addr_1, _rx_1) = add_random_client(&server);
+        let (client_pk_2, _client_addr_2, rx_2) = add_random_client(&server);
 
         // emulate send OobSend from client_1
         server.handle_packet(&client_pk_1, Packet::OobSend(
@@ -648,10 +674,48 @@ mod tests {
         ));
     }
     #[test]
+    fn handle_onion_request() {
+        let (tcp_onion_sink, tcp_onion_stream) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
+        let (client_pk_1, _client_addr_1, _rx_1) = add_random_client(&server);
+
+        let request = OnionRequest {
+            nonce: gen_nonce(),
+            addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            port: 12345,
+            data: [13; 100].to_vec()
+        };
+        let handle_res = server
+            .handle_packet(&client_pk_1, Packet::OnionRequest(request.clone()))
+            .wait();
+        assert!(handle_res.is_ok());
+
+        let (packet, _) = tcp_onion_stream.into_future().wait().unwrap();
+        assert_eq!(packet.unwrap(), request);
+    }
+    #[test]
+    fn handle_udp_onion_response() {
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
+        let (_client_pk_1, client_addr_1, rx_1) = add_random_client(&server);
+
+        let data = vec![13; 100];
+        let handle_res = server
+            .handle_udp_onion_response(client_addr_1, data.clone())
+            .wait();
+        assert!(handle_res.is_ok());
+
+        let (packet, _) = rx_1.into_future().wait().unwrap();
+        assert_eq!(packet.unwrap(), Packet::OnionResponse(
+            OnionResponse { data: data }
+        ));
+    }
+    #[test]
     fn shutdown_other_not_linked() {
-        let server = Server::new();
-        let (client_pk_1, rx_1) = add_random_client(&server);
-        let (client_pk_2, _rx_2) = add_random_client(&server);
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
+        let (client_pk_1, _client_addr_1, rx_1) = add_random_client(&server);
+        let (client_pk_2, _client_addr_2, _rx_2) = add_random_client(&server);
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
@@ -670,9 +734,10 @@ mod tests {
     }
     #[test]
     fn handle_data_other_not_linked() {
-        let server = Server::new();
-        let (client_pk_1, rx_1) = add_random_client(&server);
-        let (client_pk_2, _rx_2) = add_random_client(&server);
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
+        let (client_pk_1, _client_addr_1, rx_1) = add_random_client(&server);
+        let (client_pk_2, _client_addr_2, _rx_2) = add_random_client(&server);
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
@@ -696,8 +761,9 @@ mod tests {
     // Here be all handle_* tests with wrong args
     #[test]
     fn handle_route_response() {
-        let server = Server::new();
-        let (client_pk_1, _rx_1) = add_random_client(&server);
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
+        let (client_pk_1, _client_addr_1, _rx_1) = add_random_client(&server);
 
         // emulate send RouteResponse from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::RouteResponse(
@@ -707,8 +773,9 @@ mod tests {
     }
     #[test]
     fn handle_disconnect_notification_0() {
-        let server = Server::new();
-        let (client_pk_1, _rx_1) = add_random_client(&server);
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
+        let (client_pk_1, _client_addr_1, _rx_1) = add_random_client(&server);
 
         // emulate send DisconnectNotification from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::DisconnectNotification(
@@ -718,8 +785,9 @@ mod tests {
     }
     #[test]
     fn handle_disconnect_notification_not_linked() {
-        let server = Server::new();
-        let (client_pk_1, _rx_1) = add_random_client(&server);
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
+        let (client_pk_1, _client_addr_1, _rx_1) = add_random_client(&server);
 
         // emulate send DisconnectNotification from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::DisconnectNotification(
@@ -729,8 +797,9 @@ mod tests {
     }
     #[test]
     fn handle_ping_request_0() {
-        let server = Server::new();
-        let (client_pk_1, _rx_1) = add_random_client(&server);
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
+        let (client_pk_1, _client_addr_1, _rx_1) = add_random_client(&server);
 
         // emulate send PingRequest from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::PingRequest(
@@ -740,8 +809,9 @@ mod tests {
     }
     #[test]
     fn handle_pong_response_0() {
-        let server = Server::new();
-        let (client_pk_1, _rx_1) = add_random_client(&server);
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
+        let (client_pk_1, _client_addr_1, _rx_1) = add_random_client(&server);
 
         // emulate send PongResponse from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::PongResponse(
@@ -751,9 +821,10 @@ mod tests {
     }
     #[test]
     fn handle_oob_send_empty_data() {
-        let server = Server::new();
-        let (client_pk_1, _rx_1) = add_random_client(&server);
-        let (client_pk_2, _rx_2) = add_random_client(&server);
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
+        let (client_pk_1, _client_addr_1, _rx_1) = add_random_client(&server);
+        let (client_pk_2, _client_addr_2, _rx_2) = add_random_client(&server);
 
         // emulate send OobSend from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::OobSend(
@@ -763,8 +834,9 @@ mod tests {
     }
     #[test]
     fn handle_data_0() {
-        let server = Server::new();
-        let (client_pk_1, _rx_1) = add_random_client(&server);
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
+        let (client_pk_1, _client_addr_1, _rx_1) = add_random_client(&server);
 
         // emulate send Data from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::Data(
@@ -774,8 +846,9 @@ mod tests {
     }
     #[test]
     fn handle_data_self_not_linked() {
-        let server = Server::new();
-        let (client_pk_1, _rx_1) = add_random_client(&server);
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
+        let (client_pk_1, _client_addr_1, _rx_1) = add_random_client(&server);
 
         // emulate send Data from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::Data(
@@ -785,9 +858,10 @@ mod tests {
     }
     #[test]
     fn handle_oob_send_to_loooong_data() {
-        let server = Server::new();
-        let (client_pk_1, _rx_1) = add_random_client(&server);
-        let (client_pk_2, _rx_2) = add_random_client(&server);
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
+        let (client_pk_1, _client_addr_1, _rx_1) = add_random_client(&server);
+        let (client_pk_2, _client_addr_2, _rx_2) = add_random_client(&server);
 
         // emulate send OobSend from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::OobSend(
@@ -797,9 +871,10 @@ mod tests {
     }
     #[test]
     fn handle_oob_recv() {
-        let server = Server::new();
-        let (client_pk_1, _rx_1) = add_random_client(&server);
-        let (client_pk_2, _rx_2) = add_random_client(&server);
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
+        let (client_pk_1, _client_addr_1, _rx_1) = add_random_client(&server);
+        let (client_pk_2, _client_addr_2, _rx_2) = add_random_client(&server);
 
         // emulate send OobReceive from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::OobReceive(
@@ -807,12 +882,43 @@ mod tests {
         )).wait();
         assert!(handle_res.is_err());
     }
+    #[test]
+    fn handle_onion_response() {
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
+        let (client_pk_1, _client_addr_1, _rx_1) = add_random_client(&server);
+
+        let handle_res = server.handle_packet(&client_pk_1, Packet::OnionResponse(
+            OnionResponse { data: vec![42; 128] }
+        )).wait();
+        assert!(handle_res.is_err());
+    }
+    #[test]
+    fn handle_udp_onion_response_for_unknown_client() {
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
+
+        let client_addr_1 = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
+        let (client_pk_1, _) = gen_keypair();
+        let (tx_1, _rx_1) = mpsc::unbounded();
+        let client_1 = Client::new(tx_1, &client_pk_1, client_addr_1);
+        server.insert(client_1);
+
+        let client_addr_2 = IpAddr::V4(Ipv4Addr::new(5, 6, 7, 8));
+
+        let data = vec![13; 100];
+        let handle_res = server
+            .handle_udp_onion_response(client_addr_2, data.clone())
+            .wait();
+        assert!(handle_res.is_err());
+    }
 
     ////////////////////////////////////////////////////////////////////////////////////////
     // Here be all handle_* tests from PK or to PK not in connected clients list
     #[test]
     fn handle_route_request_not_connected() {
-        let server = Server::new();
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
         let (client_pk_1, _) = gen_keypair();
         let (client_pk_2, _) = gen_keypair();
 
@@ -824,7 +930,8 @@ mod tests {
     }
     #[test]
     fn handle_disconnect_notification_not_connected() {
-        let server = Server::new();
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
         let (client_pk_1, _) = gen_keypair();
 
         // emulate send DisconnectNotification from client_1
@@ -835,8 +942,9 @@ mod tests {
     }
     #[test]
     fn handle_disconnect_notification_other_not_connected() {
-        let server = Server::new();
-        let (client_pk_1, _rx_1) = add_random_client(&server);
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
+        let (client_pk_1, _client_addr_1, _rx_1) = add_random_client(&server);
         let (client_pk_2, _) = gen_keypair();
 
         // emulate send RouteRequest from client_1
@@ -852,7 +960,8 @@ mod tests {
     }
     #[test]
     fn handle_ping_request_not_connected() {
-        let server = Server::new();
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
         let (client_pk_1, _) = gen_keypair();
 
         // emulate send PingRequest from client_1
@@ -863,7 +972,8 @@ mod tests {
     }
     #[test]
     fn handle_pong_response_not_connected() {
-        let server = Server::new();
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
         let (client_pk_1, _) = gen_keypair();
 
         // emulate send PongResponse from client_1
@@ -874,7 +984,8 @@ mod tests {
     }
     #[test]
     fn handle_oob_send_not_connected() {
-        let server = Server::new();
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
         let (client_pk_1, _) = gen_keypair();
         let (client_pk_2, _) = gen_keypair();
 
@@ -886,7 +997,8 @@ mod tests {
     }
     #[test]
     fn handle_data_not_connected() {
-        let server = Server::new();
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
         let (client_pk_1, _) = gen_keypair();
 
         // emulate send Data from client_1
@@ -897,8 +1009,9 @@ mod tests {
     }
     #[test]
     fn handle_data_other_not_connected() {
-        let server = Server::new();
-        let (client_pk_1, rx_1) = add_random_client(&server);
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
+        let (client_pk_1, _client_addr_1, rx_1) = add_random_client(&server);
         let (client_pk_2, _) = gen_keypair();
 
         // emulate send RouteRequest from client_1
@@ -920,7 +1033,8 @@ mod tests {
     }
     #[test]
     fn shutdown_not_connected() {
-        let server = Server::new();
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
         let (client_pk, _) = gen_keypair();
 
         // emulate shutdown
@@ -929,8 +1043,9 @@ mod tests {
     }
     #[test]
     fn shutdown_other_not_connected() {
-        let server = Server::new();
-        let (client_pk_1, rx_1) = add_random_client(&server);
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
+        let (client_pk_1, _client_addr_1, rx_1) = add_random_client(&server);
         let (client_pk_2, _) = gen_keypair();
 
         // emulate send RouteRequest from client_1
@@ -950,9 +1065,10 @@ mod tests {
     }
     #[test]
     fn send_anything_to_dropped_client() {
-        let server = Server::new();
-        let (client_pk_1, rx_1) = add_random_client(&server);
-        let (client_pk_2, _rx_2) = add_random_client(&server);
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
+        let (client_pk_1, _client_addr_1, rx_1) = add_random_client(&server);
+        let (client_pk_2, _client_addr_2, _rx_2) = add_random_client(&server);
 
         drop(rx_1);
 
@@ -961,5 +1077,25 @@ mod tests {
             RouteRequest { pk: client_pk_2 }
         )).wait();
         assert!(handle_res.is_err())
+    }
+    #[test]
+    fn send_onion_request_to_dropped_stream() {
+        let (tcp_onion_sink, tcp_onion_stream) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
+        let (client_pk_1, _client_addr_1, _rx_1) = add_random_client(&server);
+
+        drop(tcp_onion_stream);
+
+        // emulate send OnionRequest from client_1
+        let request = OnionRequest {
+            nonce: gen_nonce(),
+            addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            port: 12345,
+            data: [13; 100].to_vec()
+        };
+        let handle_res = server
+            .handle_packet(&client_pk_1, Packet::OnionRequest(request))
+            .wait();
+        assert!(handle_res.is_err());
     }
 }
