@@ -28,7 +28,7 @@
 
 use nom::le_u8;
 
-use toxcore::dht_new::binary_io::*;
+use toxcore::binary_io_new::*;
 
 
 /** Top-level packet kind names and their associated numbers.

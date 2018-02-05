@@ -23,7 +23,7 @@
 */
 
 use toxcore::dht_new::packet::*;
-use toxcore::dht_new::binary_io::*;
+use toxcore::binary_io_new::*;
 
 use std::io;
 use std::io::{Error, ErrorKind};
