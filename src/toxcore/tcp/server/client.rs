@@ -25,6 +25,7 @@ use toxcore::crypto_core::*;
 use toxcore::tcp::packet::*;
 
 use std::io::{Error, ErrorKind};
+use std::net::IpAddr;
 use std::slice::Iter;
 
 use futures::{Sink, Future};
@@ -38,6 +39,8 @@ human interface. A client cannot send a message directly to another client, wher
 pub struct Client {
     /// PublicKey of the client.
     pk: PublicKey,
+    /// IpAddr of the client.
+    ip_addr: IpAddr,
     /// The transmission end of a channel which is used to send values.
     tx: mpsc::UnboundedSender<Packet>,
     /** links - a table of indexing links from this client to another
@@ -58,9 +61,10 @@ pub struct Client {
 impl Client {
     /** Create new Client
     */
-    pub fn new(tx: mpsc::UnboundedSender<Packet>, pk: &PublicKey) -> Client {
+    pub fn new(tx: mpsc::UnboundedSender<Packet>, pk: &PublicKey, ip_addr: IpAddr) -> Client {
         Client {
             pk: *pk,
+            ip_addr: ip_addr,
             tx: tx,
             links: [None; 240],
             ping_id: 0
@@ -71,6 +75,12 @@ impl Client {
     */
     pub fn pk(&self) -> PublicKey {
         self.pk
+    }
+
+    /** `std::net::IpAddr` of the `Client`
+    */
+    pub fn ip_addr(&self) -> IpAddr {
+        self.ip_addr
     }
 
     /** Last ping_id sent to client.
@@ -197,6 +207,15 @@ impl Client {
         self.send_ignore_error(
             Packet::OobReceive(OobReceive {
                 sender_pk: *sender_pk,
+                data: data
+            })
+        )
+    }
+    /** Construct OnionResponse and send it to Client
+    */
+    pub fn send_onion_response(&self, data: Vec<u8>) -> IoFuture<()> {
+        self.send(
+            Packet::OnionResponse(OnionResponse {
                 data: data
             })
         )

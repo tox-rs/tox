@@ -28,37 +28,47 @@ use toxcore::tcp::packet::*;
 use std::io::{Error, ErrorKind};
 use std::collections::HashMap;
 use std::cell::RefCell;
+use std::net::IpAddr;
 use std::rc::Rc;
 
-use futures::{Stream, Future, future, stream};
-
+use futures::{Sink, Stream, Future, future, stream};
+use futures::sync::mpsc;
 
 use tokio_io::IoFuture;
 
 /** A `Server` is a structure that holds connected clients, manages their links and handles
 their responses. Notice that there is no actual network code here, the `Server` accepts packets
 by value from `Server::handle_packet`, sends packets back to clients via
-`futures::sync::mpsc::UnboundedSender<Packet>` channel. The outer code should manage how to handshake
-connections, get packets from clients, pass them into `Server::handle_packet`,
-create `mpsc` chanel, take packets from `futures::sync::mpsc::UnboundedReceiver<Packet>` send them back
+`futures::sync::mpsc::UnboundedSender<Packet>` channel, accepts onion responses from
+`Server::handle_udp_onion_response` and sends onion requests via
+`futures::sync::mpsc::UnboundedSender<OnionRequest>` channel. The outer code should manage how to
+handshake connections, get packets from clients, pass them into `Server::handle_packet`, get onion
+responses from UPD socket and send them to `Server::handle_udp_onion_response`, create `mpsc`
+channels, take packets from `futures::sync::mpsc::UnboundedReceiver<Packet>` send them back
 to clients via network.
 */
 #[derive(Clone)]
 pub struct Server {
     connected_clients: Rc<RefCell<HashMap<PublicKey, Client>>>,
+    keys_by_ip_addr: Rc<RefCell<HashMap<IpAddr, PublicKey>>>,
+    onion_sink: mpsc::UnboundedSender<OnionRequest>,
 }
 
 impl Server {
     /** Create a new `Server`
     */
-    pub fn new() -> Server {
+    pub fn new(onion_sink: mpsc::UnboundedSender<OnionRequest>) -> Server {
         Server {
-            connected_clients: Rc::new(RefCell::new(HashMap::new()))
+            connected_clients: Rc::new(RefCell::new(HashMap::new())),
+            keys_by_ip_addr: Rc::new(RefCell::new(HashMap::new())),
+            onion_sink: onion_sink
         }
     }
     /** Insert the client into connected_clients. Do nothing else.
     */
     pub fn insert(&self, client: Client) {
+        self.keys_by_ip_addr.borrow_mut()
+            .insert(client.ip_addr(), client.pk());
         self.connected_clients.borrow_mut()
             .insert(client.pk(), client);
     }
@@ -75,7 +85,22 @@ impl Server {
             Packet::PongResponse(packet) => self.handle_pong_response(pk, packet),
             Packet::OobSend(packet) => self.handle_oob_send(pk, packet),
             Packet::OobReceive(packet) => self.handle_oob_receive(pk, packet),
+            Packet::OnionRequest(packet) => self.handle_onion_request(pk, packet),
+            Packet::OnionResponse(packet) => self.handle_onion_response(pk, packet),
             Packet::Data(packet) => self.handle_data(pk, packet),
+        }
+    }
+    /** Send `OnionResponse` packet to the client by it's `std::net::IpAddr`.
+    */
+    pub fn handle_udp_onion_response(&self, ip_addr: IpAddr, data: Vec<u8>) -> IoFuture<()> {
+        let connected_clients = self.connected_clients.borrow();
+        if let Some(client) = self.keys_by_ip_addr.borrow().get(&ip_addr).and_then(|pk| connected_clients.get(pk)) {
+            client.send_onion_response(data)
+        } else {
+            Box::new( future::err(
+                Error::new(ErrorKind::Other,
+                    "Cannot find client by ip_addr to send onion response"
+            )))
         }
     }
     /** Gracefully shutdown client by pk. Remove it from the list of connected clients.
@@ -91,6 +116,8 @@ impl Server {
                     "Cannot find client by pk to shutdown it"
             )))
         };
+        self.keys_by_ip_addr.borrow_mut()
+            .remove(&client_a.ip_addr());
         let notifications = client_a.iter_links()
             // foreach link that is Some(client_b_pk)
             .filter_map(|&client_b_pk| client_b_pk)
@@ -279,6 +306,24 @@ impl Server {
         Box::new( future::err(
             Error::new(ErrorKind::Other,
                 "Client must not send OobReceive to server"
+        )))
+    }
+    fn handle_onion_request(&self, _pk: &PublicKey, packet: OnionRequest) -> IoFuture<()> {
+        //TODO: check data size
+        Box::new(self.onion_sink.clone() // clone sink for 1 send only
+            .send(packet)
+            .map(|_sink| ()) // ignore sink because it was cloned
+            .map_err(|_| {
+                // This may only happen if sink is gone
+                // So cast SendError<T> to a corresponding std::io::Error
+                Error::from(ErrorKind::UnexpectedEof)
+            })
+        )
+    }
+    fn handle_onion_response(&self, _pk: &PublicKey, _packet: OnionResponse) -> IoFuture<()> {
+        Box::new( future::err(
+            Error::new(ErrorKind::Other,
+                "Client must not send OnionResponse to server"
         )))
     }
     fn handle_data(&self, pk: &PublicKey, packet: Data) -> IoFuture<()> {

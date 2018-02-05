@@ -34,6 +34,7 @@ use tox::toxcore::tcp::make_server_handshake;
 use tox::toxcore::tcp::codec;
 use tox::toxcore::tcp::server::{Server, Client};
 
+use futures::future;
 use futures::prelude::*;
 use futures::sync::mpsc;
 
@@ -62,7 +63,12 @@ fn main() {
 
     info!("Listening on addr={}, {:?}", addr, &server_pk);
 
-    let server_inner = Server::new();
+    let (tcp_onion_sink, tcp_onion_stream) = mpsc::unbounded();
+    // Ignore all TCP onion requests for now
+    let tcp_onion = tcp_onion_stream.for_each(|_| future::ok(()))
+        .map_err(|()| unreachable!("stream can't fail"));
+
+    let server_inner = Server::new(tcp_onion_sink);
 
     // TODO move this processing future into a standalone library function
     let server = listener.incoming().for_each(|(socket, addr)| {
@@ -77,7 +83,7 @@ fn main() {
             .and_then(move |(socket, channel, client_pk)| {
                 debug!("Handshake for client {:?} complited", &client_pk);
                 let (tx, rx) = mpsc::unbounded();
-                server_inner_c.insert(Client::new(tx, &client_pk));
+                server_inner_c.insert(Client::new(tx, &client_pk, addr.ip()));
 
                 Ok((socket, channel, client_pk, rx))
             });
@@ -133,5 +139,5 @@ fn main() {
 
         Ok(())
     });
-    core.run(server).unwrap();
+    core.run(server.join(tcp_onion)).unwrap();
 }

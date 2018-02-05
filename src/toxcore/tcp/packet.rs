@@ -26,7 +26,12 @@
 use toxcore::binary_io_new::*;
 use toxcore::crypto_core::*;
 
-use nom::{be_u8, be_u16, be_u64, rest};
+use nom::{be_u8, be_u16, be_u64, le_u8, rest};
+use std::net::{
+    IpAddr,
+    Ipv4Addr,
+    Ipv6Addr,
+};
 
 /** Top-level TCP packet.
 
@@ -50,10 +55,10 @@ pub enum Packet {
     OobSend(OobSend),
     /// [`OobReceive`](./struct.OobReceive.html) structure.
     OobReceive(OobReceive),
-    /// TODO
-    //OnionDataRequest,
-    /// TODO
-    //OnionDataResponse,
+    /// [`OnionRequest`](./struct.OnionRequest.html) structure.
+    OnionRequest(OnionRequest),
+    /// [`OnionResponse`](./struct.OnionResponse.html) structure.
+    OnionResponse(OnionResponse),
     /// [`Data`](./struct.Data.html) structure.
     Data(Data)
 }
@@ -71,6 +76,8 @@ impl FromBytes for Packet {
         map!(PongResponse::from_bytes, Packet::PongResponse) |
         map!(OobSend::from_bytes, Packet::OobSend) |
         map!(OobReceive::from_bytes, Packet::OobReceive) |
+        map!(OnionRequest::from_bytes, Packet::OnionRequest) |
+        map!(OnionResponse::from_bytes, Packet::OnionResponse) |
         map!(Data::from_bytes, Packet::Data)
     ));
 }
@@ -86,6 +93,8 @@ impl ToBytes for Packet {
             Packet::PongResponse(ref p) => p.to_bytes(buf),
             Packet::OobSend(ref p) => p.to_bytes(buf),
             Packet::OobReceive(ref p) => p.to_bytes(buf),
+            Packet::OnionRequest(ref p) => p.to_bytes(buf),
+            Packet::OnionResponse(ref p) => p.to_bytes(buf),
             Packet::Data(ref p) => p.to_bytes(buf),
         }
     }
@@ -452,6 +461,110 @@ impl ToBytes for OobReceive {
         do_gen!(buf,
             gen_be_u8!(0x07) >>
             gen_slice!(self.sender_pk.as_ref()) >>
+            gen_slice!(self.data)
+        )
+    }
+}
+
+/// IPv4 is padded with 12 bytes of zeroes so that both IPv4 and
+/// IPv6 have the same stored size.
+pub const IPV4_PADDING_SIZE: usize = 12;
+
+/** Sent by client to server.
+The server will pack data from this request to `Onion Request 1` packet and send
+it to UDP socket. The server can accept both TCP and UDP families as destination
+IP address but regardless of this it will always send `Onion Request 1` to UDP
+socket. Return address from `Onion Request 1` will contain TCP address so that
+when we get `Onion Response 2` we will know that this response should be sent to
+TCP client connected to our server.
+
+Serialized form:
+
+Length   | Content
+-------- | ------
+`1`      | `0x08`
+`24`     | Nonce
+`1`      | IpType
+`4` or `16` | IPv4 or IPv6 address
+`0` or `12` | Padding for IPv4
+`2`      | Port
+variable | Data
+
+*/
+#[derive(Debug, PartialEq, Clone)]
+pub struct OnionRequest {
+    /// Nonce that was used for onion data encryption
+    pub nonce: Nonce,
+    /// IP address of the next onion node
+    pub addr: IpAddr,
+    /// Port of the next onion node
+    pub port: u16,
+    /// Onion data packet
+    pub data: Vec<u8>
+}
+
+impl FromBytes for OnionRequest {
+    named!(from_bytes<OnionRequest>, do_parse!(
+        tag!("\x08") >>
+        nonce: call!(Nonce::from_bytes) >>
+        ip_type: le_u8 >>
+        addr: alt!(
+            cond_reduce!(ip_type == 2 || ip_type == 130, terminated!(
+                map!(Ipv4Addr::from_bytes, IpAddr::V4),
+                take!(IPV4_PADDING_SIZE)
+            )) |
+            cond_reduce!(ip_type == 10 || ip_type == 138, map!(Ipv6Addr::from_bytes, IpAddr::V6))
+        ) >>
+        port: be_u16 >>
+        data: rest >>
+        (OnionRequest { nonce: nonce, addr: addr, port: port, data: data.to_vec() })
+    ));
+}
+
+impl ToBytes for OnionRequest {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_be_u8!(0x08) >>
+            gen_slice!(self.nonce.as_ref()) >>
+            gen_if_else!(self.addr.is_ipv4(), gen_be_u8!(130), gen_be_u8!(138)) >>
+            gen_call!(|buf, addr| IpAddr::to_bytes(addr, buf), &self.addr) >>
+            gen_cond!(self.addr.is_ipv4(), gen_slice!(&[0; IPV4_PADDING_SIZE])) >>
+            gen_be_u16!(self.port) >>
+            gen_slice!(self.data)
+        )
+    }
+}
+
+/** Sent by server to client.
+The server just sends data from Onion Response 1 that it got from a UDP node
+to the client.
+
+Serialized form:
+
+Length   | Content
+-------- | ------
+`1`      | `0x09`
+variable | Data
+
+*/
+#[derive(Debug, PartialEq, Clone)]
+pub struct OnionResponse {
+    /// Onion data packet
+    pub data: Vec<u8>
+}
+
+impl FromBytes for OnionResponse {
+    named!(from_bytes<OnionResponse>, do_parse!(
+        tag!("\x09") >>
+        data: rest >>
+        (OnionResponse { data: data.to_vec() })
+    ));
+}
+
+impl ToBytes for OnionResponse {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_be_u8!(0x09) >>
             gen_slice!(self.data)
         )
     }
