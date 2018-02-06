@@ -41,6 +41,8 @@ pub struct Client {
     pk: PublicKey,
     /// IpAddr of the client.
     ip_addr: IpAddr,
+    /// Port of the client.
+    port: u16,
     /// The transmission end of a channel which is used to send values.
     tx: mpsc::UnboundedSender<Packet>,
     /** links - a table of indexing links from this client to another
@@ -61,10 +63,11 @@ pub struct Client {
 impl Client {
     /** Create new Client
     */
-    pub fn new(tx: mpsc::UnboundedSender<Packet>, pk: &PublicKey, ip_addr: IpAddr) -> Client {
+    pub fn new(tx: mpsc::UnboundedSender<Packet>, pk: &PublicKey, ip_addr: IpAddr, port: u16) -> Client {
         Client {
             pk: *pk,
             ip_addr: ip_addr,
+            port: port,
             tx: tx,
             links: [None; 240],
             ping_id: 0
@@ -81,6 +84,12 @@ impl Client {
     */
     pub fn ip_addr(&self) -> IpAddr {
         self.ip_addr
+    }
+
+    /** Port of the `Client`
+    */
+    pub fn port(&self) -> u16 {
+        self.port
     }
 
     /** Last ping_id sent to client.
