@@ -83,7 +83,7 @@ fn main() {
             .and_then(move |(socket, channel, client_pk)| {
                 debug!("Handshake for client {:?} complited", &client_pk);
                 let (tx, rx) = mpsc::unbounded();
-                server_inner_c.insert(Client::new(tx, &client_pk, addr.ip()));
+                server_inner_c.insert(Client::new(tx, &client_pk, addr.ip(), addr.port()));
 
                 Ok((socket, channel, client_pk, rx))
             });
