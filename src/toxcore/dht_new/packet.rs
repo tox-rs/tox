@@ -1000,7 +1000,7 @@ mod test {
                 let ping_kind = match stringify!($np) {
                     "NatPingRequest" => NAT_PING_REQUEST as u8,
                     "NatPingResponse" => NAT_PING_RESPONSE as u8,
-                    e => panic!("can not occur {:?}", e)
+                    e => unreachable!("can not occur {:?}", e)
                 };
                 let mut ping = vec![NAT_PING_TYPE, ping_kind];
                 ping.write_u64::<BigEndian>(random_u64())

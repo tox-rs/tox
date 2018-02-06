@@ -29,7 +29,6 @@ use std::io;
 use std::io::{Error, ErrorKind};
 use tokio_core::net::UdpCodec;
 use std::net::SocketAddr;
-//use std::io::{Error, ErrorKind};
 
 /// Type representing Dht UDP packets.
 pub type DhtUdpPacket = (SocketAddr, DhtBase);
