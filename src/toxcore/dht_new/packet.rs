@@ -37,7 +37,7 @@
     * takes care of the serializing and de-serializing DHT packets
 */
 
-use nom::{le_u8, le_u16, be_u64};
+use nom::{le_u8, le_u16, be_u64, rest};
 
 use std::net::{
     IpAddr,
@@ -47,19 +47,67 @@ use std::net::{
 
 use toxcore::binary_io_new::*;
 use toxcore::crypto_core::*;
+use toxcore::dht_new::packet_kind::*;
 use toxcore::dht_new::packed_node::PackedNode;
 
 /// Length in bytes of [`PingRequest`](./struct.PingRequest.html) and
 /// [`PingResponse`](./struct.PingResponse.html) when serialized into bytes.
 pub const PING_SIZE: usize = 9;
 
-/** Standard DHT packet that encapsulates in the payload
-[`DhtPacketT`](./trait.DhtPacketT.html).
+/** DHT packet base enum that encapsulates
+[`DhtPacket`](./struct.DhtPacket.html) or [`DhtRequest`](./struct.DhtRequest.html).
+
+https://zetok.github.io/tox-spec/#dht-packet
+https://zetok.github.io/tox-spec/#dht-request-packets
+*/
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DhtBase {
+    /// DhtBase are wrapper for DhtPacket and DhtRequest
+    DhtPacket(DhtPacket),
+    /// DhtBase are wrapper for DhtPacket and DhtRequest
+    DhtRequest(DhtRequest),
+}
+
+/** DHT packet struct that encapsulates in the payload
+[`DhtPacketPayload`](./enum.DhtPacketPayload.html).
 
 https://zetok.github.io/tox-spec/#dht-packet
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum DhtPacket {
+pub struct DhtPacket {
+    /// first class packet kind
+    pub packet_kind: PacketKind,
+    /// Public Key of Request Packet
+    pub pk: PublicKey,
+    /// one time serial number
+    pub nonce : Nonce,
+    /// payload of DhtPacket
+    pub payload: Vec<u8>,
+}
+
+/** DHT Request packet struct.
+
+https://zetok.github.io/tox-spec/#dht-request-packets
+*/
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DhtRequest {
+    /// receiver publik key
+    pub rpk: PublicKey,
+    /// sender publick key
+    pub spk: PublicKey,
+    /// one time serial number
+    pub nonce: Nonce,
+    /// payload of DhtRequest packet
+    pub payload: Vec<u8>,
+}
+
+/** Standard DHT packet that embedded in the payload of
+[`DhtPacket`](./struct.DhtPacket.html).
+
+https://zetok.github.io/tox-spec/#dht-packet
+*/
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DhtPacketPayload {
     /// [`PingRequest`](./struct.PingRequest.html) structure.
     PingRequest(PingRequest),
     /// [`PingResponse`](./struct.PingResponse.html) structure.
@@ -70,23 +118,123 @@ pub enum DhtPacket {
     SendNodes(SendNodes),
 }
 
-impl ToBytes for DhtPacket {
+/** Standart DHT Request packet that embedded in the payload of
+[`DhtRequest`](./struct.DhtRequest.html)..
+
+https://zetok.github.io/tox-spec/#dht-request-packets
+*/
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DhtRequestPayload {
+    /// [`NatPingRequest`](./struct.NatPingRequest.html) structure.
+    NatPingRequest(NatPingRequest),
+    /// [`NatPingResponse`](./struct.NatPingResponse.html) structure.
+    NatPingResponse(NatPingResponse),
+}
+
+
+impl ToBytes for DhtBase {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         match *self {
-            DhtPacket::PingRequest(ref p) => p.to_bytes(buf),
-            DhtPacket::PingResponse(ref p) => p.to_bytes(buf),
-            DhtPacket::GetNodes(ref p) => p.to_bytes(buf),
-            DhtPacket::SendNodes(ref p) => p.to_bytes(buf),
+            DhtBase::DhtPacket(ref p) => p.to_bytes(buf),
+            DhtBase::DhtRequest(ref p) => p.to_bytes(buf),
         }
     }
 }
 
+impl FromBytes for DhtBase {
+    named!(from_bytes<DhtBase>, alt!(
+        map!(DhtPacket::from_bytes, DhtBase::DhtPacket) |
+        map!(DhtRequest::from_bytes, DhtBase::DhtRequest)
+    ));
+}
+
+impl ToBytes for DhtPacket {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_be_u8!(self.packet_kind as u8) >>
+            gen_slice!(self.pk.as_ref()) >>
+            gen_slice!(self.nonce.as_ref()) >>
+            gen_slice!(self.payload.as_slice())
+        )
+    }
+}
+
 impl FromBytes for DhtPacket {
-    named!(from_bytes<DhtPacket>, alt!(
-        map!(PingRequest::from_bytes, DhtPacket::PingRequest) |
-        map!(PingResponse::from_bytes, DhtPacket::PingResponse) |
-        map!(GetNodes::from_bytes, DhtPacket::GetNodes) |
-        map!(SendNodes::from_bytes, DhtPacket::SendNodes)
+    named!(from_bytes<DhtPacket>, do_parse!(
+        packet_kind: verify!(call!(PacketKind::from_bytes), |packet_type| match packet_type {
+            PacketKind::PingRequest | PacketKind::PingResponse |
+            PacketKind::GetNodes | PacketKind::SendNodes => true,
+            _ => false
+        }) >>
+        pk: call!(PublicKey::from_bytes) >>
+        nonce: call!(Nonce::from_bytes) >>
+        payload: map!(rest, |bytes| bytes.to_vec() ) >>
+        (DhtPacket {
+            packet_kind: packet_kind,
+            pk: pk,
+            nonce: nonce,
+            payload: payload
+        })
+    ));
+}
+
+impl ToBytes for DhtPacketPayload {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        match *self {
+            DhtPacketPayload::PingRequest(ref p) => p.to_bytes(buf),
+            DhtPacketPayload::PingResponse(ref p) => p.to_bytes(buf),
+            DhtPacketPayload::GetNodes(ref p) => p.to_bytes(buf),
+            DhtPacketPayload::SendNodes(ref p) => p.to_bytes(buf),
+        }
+    }
+}
+
+impl ToBytes for DhtRequestPayload {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        match *self {
+            DhtRequestPayload::NatPingRequest(ref p) => p.to_bytes(buf),
+            DhtRequestPayload::NatPingResponse(ref p) => p.to_bytes(buf),
+        }
+    }
+}
+
+impl FromBytes for DhtPacketPayload {
+    named!(from_bytes<DhtPacketPayload>, alt!(
+        map!(PingRequest::from_bytes, DhtPacketPayload::PingRequest) |
+        map!(PingResponse::from_bytes, DhtPacketPayload::PingResponse) |
+        map!(GetNodes::from_bytes, DhtPacketPayload::GetNodes) |
+        map!(SendNodes::from_bytes, DhtPacketPayload::SendNodes)
+    ));
+}
+
+impl ToBytes for DhtRequest {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_be_u8!(0x20) >>
+            gen_slice!(self.rpk.as_ref()) >>
+            gen_slice!(self.spk.as_ref()) >>
+            gen_slice!(self.nonce.as_ref()) >>
+            gen_slice!(self.payload.as_slice())
+        )
+    }
+}
+
+impl FromBytes for DhtRequest {
+    named!(from_bytes<DhtRequest>, do_parse!(
+        packet_type: verify!(call!(PacketKind::from_bytes), |packet_type| match packet_type {
+            PacketKind::DhtRequest => true,
+            _ => false
+        }) >>
+        rpk: call!(PublicKey::from_bytes) >>
+        spk: call!(PublicKey::from_bytes) >>
+        nonce: call!(Nonce::from_bytes) >>
+        payload: map!(rest, |bytes| bytes.to_vec() ) >>
+        (DhtRequest {
+            rpk: rpk, 
+            spk: spk, 
+            nonce: nonce, 
+            payload: payload
+        })
     ));
 }
 
@@ -340,18 +488,6 @@ impl FromBytes for SendNodes {
     ));
 }
 
-/** DHT Request packet.
-
-https://zetok.github.io/tox-spec/#dht-request-packets
-*/
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum DhtRequest {
-    /// [`NatPingRequest`](./struct.NatPingRequest.html) structure.
-    NatPingRequest(NatPingRequest),
-    /// [`NatPingResponse`](./struct.NatPingResponse.html) structure.
-    NatPingResponse(NatPingResponse),
-}
-
 /** NatPing request of DHT Request packet.
 */
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -366,22 +502,6 @@ pub struct NatPingRequest {
 pub struct NatPingResponse {
     /// Ping id same as requested from PingRequest
     pub id: u64,
-}
-
-impl ToBytes for DhtRequest {
-    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        match *self {
-            DhtRequest::NatPingRequest(ref p) => p.to_bytes(buf),
-            DhtRequest::NatPingResponse(ref p) => p.to_bytes(buf),
-        }
-    }
-}
-
-impl FromBytes for DhtRequest {
-    named!(from_bytes<DhtRequest>, alt!(
-        map!(NatPingRequest::from_bytes, DhtRequest::NatPingRequest) |
-        map!(NatPingResponse::from_bytes, DhtRequest::NatPingResponse)
-    ));
 }
 
 impl FromBytes for NatPingRequest {
@@ -425,18 +545,134 @@ impl ToBytes for NatPingResponse {
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::fmt::Debug;
     use byteorder::{ByteOrder, BigEndian, WriteBytesExt};
+    use toxcore::dht_new::codec::*;
+//    use toxcore::dht_new::packet_kind::*;
 
     use quickcheck::{Arbitrary, Gen, quickcheck};
 
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-    pub enum PacketKind {
-        PingRequest       = 0,
-        PingResponse      = 1,
+    const NAT_PING_REQUEST: PacketKind = PacketKind::PingRequest;
+    const NAT_PING_RESPONSE: PacketKind = PacketKind::PingResponse;
+
+    impl DhtPacket {
+        pub fn new(shared_secret: &PrecomputedKey, pk: &PublicKey, dp: DhtPacketPayload) -> DhtPacket {
+            let nonce = &gen_nonce();
+            let mut buf = [0; MAX_DHT_PACKET_SIZE];
+            let (_, size) = dp.to_bytes((&mut buf, 0)).unwrap();
+            let payload = seal_precomputed(&buf[..size] , nonce, shared_secret);
+
+            DhtPacket {
+                packet_kind: dp.kind(),
+                pk: *pk,
+                nonce: *nonce,
+                payload: payload,
+            }
+        }
     }
-    const NatPingRequest: PacketKind = PacketKind::PingRequest;
-    const NatPingResponse: PacketKind = PacketKind::PingResponse;
+
+    impl DhtRequest {
+        /// create new DhtRequest object
+        pub fn new(shared_secret: &PrecomputedKey, rpk: &PublicKey, spk: &PublicKey, dp: DhtRequestPayload) -> DhtRequest {
+            let nonce = &gen_nonce();
+
+            let mut buf = [0; MAX_DHT_PACKET_SIZE];
+            let (_, size) = dp.to_bytes((&mut buf, 0)).unwrap();
+            let payload = seal_precomputed(&buf[..size], nonce, shared_secret);
+
+            DhtRequest {
+                rpk: *rpk,
+                spk: *spk,
+                nonce: *nonce,
+                payload: payload,
+            }
+        }
+    }
+
+    impl DhtPacketPayload {
+        /// Packet kind for enum DhtPacketPayload
+        pub fn kind(&self) -> PacketKind {
+            match *self {
+                DhtPacketPayload::PingRequest(_) => PacketKind::PingRequest,
+                DhtPacketPayload::PingResponse(_) => PacketKind::PingResponse,
+                DhtPacketPayload::GetNodes(_) => PacketKind::GetNodes,
+                DhtPacketPayload::SendNodes(_) => PacketKind::SendNodes,
+            }
+        }
+    }
+
+    impl SendNodes {
+        /**
+        Create new `SendNodes`. Returns `None` if 0 or more than 4 nodes are
+        supplied.
+
+        Created as a response to `GetNodes` request.
+        */
+        pub fn with_nodes(request: &GetNodes, nodes: Vec<PackedNode>) -> Option<Self> {
+            debug!(target: "SendNodes", "Creating SendNodes from GetNodes.");
+            trace!(target: "SendNodes", "With GetNodes: {:?}", request);
+            trace!("With nodes: {:?}", &nodes);
+
+            if nodes.is_empty() || nodes.len() > 4 {
+                warn!(target: "SendNodes", "Wrong number of nodes supplied!");
+                return None
+            }
+
+            Some(SendNodes { nodes: nodes, id: request.id })
+        }
+    }
+
+    impl From<PingRequest> for PingResponse {
+        fn from(p: PingRequest) -> Self {
+            PingResponse { id: p.id }
+        }
+    }
+
+    impl Arbitrary for DhtBase {
+        fn arbitrary<G: Gen>(g: &mut G) -> Self {
+            let choice = g.gen_range(0, 2);
+            if choice == 0 {
+                DhtBase::DhtPacket(DhtPacket::arbitrary(g))
+            } else {
+                DhtBase::DhtRequest(DhtRequest::arbitrary(g))
+            }
+        }
+    }
+
+    impl Arbitrary for DhtPacket {
+        fn arbitrary<G: Gen>(g: &mut G) -> Self {
+            let (pk, sk) = gen_keypair();  // "sender" keypair
+            let (r_pk, _) = gen_keypair();  // receiver PK
+            let precomputed = encrypt_precompute(&r_pk, &sk);
+
+            let choice = g.gen_range(0, 4);
+            match choice {
+                0 =>
+                    DhtPacket::new(&precomputed, &pk, DhtPacketPayload::PingRequest(PingRequest::arbitrary(g))),
+                1 =>
+                    DhtPacket::new(&precomputed, &pk, DhtPacketPayload::PingResponse(PingResponse::arbitrary(g))),
+                2 =>
+                    DhtPacket::new(&precomputed, &pk, DhtPacketPayload::GetNodes(GetNodes::arbitrary(g))),
+                3 =>
+                    DhtPacket::new(&precomputed, &pk, DhtPacketPayload::SendNodes(SendNodes::arbitrary(g))),
+                _ => unreachable!("Arbitrary for DhtPacket - should not have happened!")
+            }
+        }
+    }
+
+    impl Arbitrary for DhtRequest {
+        fn arbitrary<G: Gen>(g: &mut G) -> Self {
+            let (pk, sk) = gen_keypair();  // "sender" keypair
+            let (r_pk, _) = gen_keypair();  // receiver PK
+            let precomputed = encrypt_precompute(&r_pk, &sk);
+
+            let choice = g.gen_range(0, 2);
+            if choice == 0 {
+                DhtRequest::new(&precomputed, &r_pk, &pk,DhtRequestPayload::NatPingRequest(NatPingRequest::arbitrary(g)))
+            } else {
+                DhtRequest::new(&precomputed, &r_pk, &pk, DhtRequestPayload::NatPingResponse(NatPingResponse::arbitrary(g)))
+            }
+        }
+    }
 
     // PingRequest::
     impl Arbitrary for PingRequest {
@@ -469,12 +705,6 @@ mod test {
         /// An ID of the request / response.
         pub fn id(&self) -> u64 {
             self.id
-        }
-    }
-
-    impl From<PingRequest> for PingResponse {
-        fn from(p: PingRequest) -> Self {
-            PingResponse { id: p.id }
         }
     }
 
@@ -516,16 +746,6 @@ mod test {
         fn from(p: NatPingRequest) -> Self {
             NatPingResponse { id: p.id }
         }
-    }
-
-    /// Trait for types of DHT packets that can be put in [`DhtPacket`]
-    /// (./struct.DhtPacket.html).
-    pub trait DhtPacketT: ToBytes + FromBytes + Eq + PartialEq + Debug {
-        /// Provide packet type number.
-        ///
-        /// To use for serialization: `.kind() as u8`.
-        fn kind(&self) -> PacketKind;
-
     }
 
     macro_rules! tests_for_pings {
@@ -582,11 +802,11 @@ mod test {
         }
     }
 
-    impl Arbitrary for DhtPacket {
+    impl Arbitrary for DhtPacketPayload {
         fn arbitrary<G: Gen>(g: &mut G) -> Self {
             let mut a: [u8; PUBLICKEYBYTES] = [0; PUBLICKEYBYTES];
             g.fill_bytes(&mut a);
-            DhtPacket::GetNodes(GetNodes { pk: PublicKey(a), id: g.gen() })
+            DhtPacketPayload::GetNodes(GetNodes { pk: PublicKey(a), id: g.gen() })
         }
     }
 
@@ -624,30 +844,30 @@ mod test {
         quickcheck(with_bytes as fn(Vec<u8>));
     }
 
-    // DhtPacket::GetNodes::to_bytes()
+    // DhtPacketPayload::GetNodes::to_bytes()
     #[test]
     fn dht_packet_get_nodes_to_bytes_test() {
-        fn with_gn(gn: DhtPacket) {
+        fn with_gn(gn: DhtPacketPayload) {
             let mut _buf = [0;1024];
             let g_bytes = gn.to_bytes((&mut _buf, 0)).ok().unwrap().0;
-            if let DhtPacket::GetNodes(gp) = gn {
+            if let DhtPacketPayload::GetNodes(gp) = gn {
                 let PublicKey(pk_bytes) = gp.pk;
                 assert_eq!(&pk_bytes, &g_bytes[..PUBLICKEYBYTES]);
                 assert_eq!(gp.id, BigEndian::read_u64(&g_bytes[PUBLICKEYBYTES..]));
             }
         }
-        quickcheck(with_gn as fn(DhtPacket));
+        quickcheck(with_gn as fn(DhtPacketPayload));
     }
 
-    // DhtPacket::GetNodes::from_bytes()
+    // DhtPacketPayload::GetNodes::from_bytes()
     #[test]
     fn dht_packet_get_nodes_from_bytes_test() {
         fn with_bytes(bytes: Vec<u8>) {
             if bytes.len() < GET_NODES_SIZE {
                 assert!(!GetNodes::from_bytes(&bytes).is_done());
             } else {
-                let gn = DhtPacket::from_bytes(&bytes).unwrap().1;
-                if let DhtPacket::GetNodes(gp) = gn {
+                let gn = DhtPacketPayload::from_bytes(&bytes).unwrap().1;
+                if let DhtPacketPayload::GetNodes(gp) = gn {
                     // ping_id as bytes should match "original" bytes
                     assert_eq!(BigEndian::read_u64(&bytes[PUBLICKEYBYTES..GET_NODES_SIZE]), gp.id);
 
@@ -665,27 +885,6 @@ mod test {
             let nodes = vec![Arbitrary::arbitrary(g); g.gen_range(1,4)];
             let id = g.gen();
             SendNodes { nodes: nodes, id: id }
-        }
-    }
-
-    impl SendNodes {
-        /**
-        Create new `SendNodes`. Returns `None` if 0 or more than 4 nodes are
-        supplied.
-
-        Created as a response to `GetNodes` request.
-        */
-        pub fn with_nodes(request: &GetNodes, nodes: Vec<PackedNode>) -> Option<Self> {
-            debug!(target: "SendNodes", "Creating SendNodes from GetNodes.");
-            trace!(target: "SendNodes", "With GetNodes: {:?}", request);
-            trace!("With nodes: {:?}", &nodes);
-
-            if nodes.is_empty() || nodes.len() > 4 {
-                warn!(target: "SendNodes", "Wrong number of nodes supplied!");
-                return None
-            }
-
-            Some(SendNodes { nodes: nodes, id: request.id })
         }
     }
 
@@ -773,7 +972,11 @@ mod test {
                     let pb = p.to_bytes((&mut _buf, 0)).ok().unwrap();
                     assert_eq!(NAT_PING_SIZE, pb.1);
                     assert_eq!(NAT_PING_TYPE as u8, pb.0[0]);
-                    assert_eq!($np as u8, pb.0[1]);
+                    if stringify!($np) == "NatPingRequest" {
+                        assert_eq!(NAT_PING_REQUEST as u8, pb.0[1]);
+                    } else {
+                        assert_eq!(NAT_PING_RESPONSE as u8, pb.0[1]);
+                    }
                 }
                 quickcheck(with_np as fn($np));
             }
@@ -794,7 +997,12 @@ mod test {
                 quickcheck(with_bytes as fn(Vec<u8>));
 
                 // just in case
-                let mut ping = vec![NAT_PING_TYPE, $np as u8];
+                let ping_kind = match stringify!($np) {
+                    "NatPingRequest" => NAT_PING_REQUEST as u8,
+                    "NatPingResponse" => NAT_PING_RESPONSE as u8,
+                    e => unreachable!("can not occur {:?}", e)
+                };
+                let mut ping = vec![NAT_PING_TYPE, ping_kind];
                 ping.write_u64::<BigEndian>(random_u64())
                     .unwrap();
                 with_bytes(ping);
