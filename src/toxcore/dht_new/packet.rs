@@ -44,6 +44,7 @@ use std::net::{
     Ipv4Addr,
     Ipv6Addr,
 };
+use std::io::{Error, ErrorKind};
 
 use toxcore::binary_io_new::*;
 use toxcore::crypto_core::*;
@@ -178,6 +179,48 @@ impl FromBytes for DhtPacket {
     ));
 }
 
+impl DhtPacket {
+    /**
+    Decrypt payload and try to parse it as packet type.
+
+    To get info about it's packet type use
+    [`.kind()`](./struct.DhtPacket.html#method.kind) method.
+
+    Returns `Error` in case of failure:
+
+    - fails to decrypt
+    - fails to parse as given packet type
+    */
+    pub fn get_payload(&self, own_secret_key: &SecretKey) -> Result<DhtPacketPayload, Error>
+    {
+        debug!(target: "DhtPacket", "Getting packet data from DhtPacket.");
+        trace!(target: "DhtPacket", "With DhtPacket: {:?}", self);
+        let decrypted = open(&self.payload, &self.nonce, &self.pk,
+                            own_secret_key)
+            .map_err(|e| {
+                debug!("Decrypting DhtPacket failed!");
+                Error::new(ErrorKind::Other,
+                    format!("DhtPacket decrypt error: {:?}", e))
+            });
+
+        match DhtPacketPayload::from_bytes(&decrypted?, self.packet_kind) {
+            IResult::Incomplete(e) => {
+                error!(target: "DhtPacket", "PingRequest deserialize error: {:?}", e);
+                Err(Error::new(ErrorKind::Other,
+                    format!("PingRequest deserialize error: {:?}", e)))
+            },
+            IResult::Error(e) => {
+                error!(target: "DhtPacket", "PingRequest deserialize error: {:?}", e);
+                Err(Error::new(ErrorKind::Other,
+                    format!("PingRequest deserialize error: {:?}", e)))
+            },
+            IResult::Done(_, packet) => {
+                Ok(packet)
+            }
+        }
+    }
+}
+
 impl ToBytes for DhtPacketPayload {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         match *self {
@@ -189,6 +232,23 @@ impl ToBytes for DhtPacketPayload {
     }
 }
 
+#[allow(unused_variables)]
+impl DhtPacketPayload {
+    named_args!(from_bytes_inner(packet_type: PacketKind) <Self>, switch!(value!(packet_type),
+        PacketKind::PingRequest => map!(PingRequest::from_bytes, DhtPacketPayload::PingRequest) |
+        PacketKind::PingResponse => map!(PingResponse::from_bytes, DhtPacketPayload::PingResponse) |
+        PacketKind::GetNodes => map!(GetNodes::from_bytes, DhtPacketPayload::GetNodes) |
+        PacketKind::SendNodes => map!(SendNodes::from_bytes, DhtPacketPayload::SendNodes)
+    ));
+    /** Deserialize `DhtPacketPayload` struct using `nom` from raw bytes.
+    Note that this function is not an implementation of `FromBytes` trait
+    since it takes additional parameter.
+    */
+    pub fn from_bytes(i: &[u8], packet_type: PacketKind) -> IResult<&[u8], Self> {
+        DhtPacketPayload::from_bytes_inner(i, packet_type)
+    }
+}
+
 impl ToBytes for DhtRequestPayload {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         match *self {
@@ -196,15 +256,6 @@ impl ToBytes for DhtRequestPayload {
             DhtRequestPayload::NatPingResponse(ref p) => p.to_bytes(buf),
         }
     }
-}
-
-impl FromBytes for DhtPacketPayload {
-    named!(from_bytes<DhtPacketPayload>, alt!(
-        map!(PingRequest::from_bytes, DhtPacketPayload::PingRequest) |
-        map!(PingResponse::from_bytes, DhtPacketPayload::PingResponse) |
-        map!(GetNodes::from_bytes, DhtPacketPayload::GetNodes) |
-        map!(SendNodes::from_bytes, DhtPacketPayload::SendNodes)
-    ));
 }
 
 impl ToBytes for DhtRequest {
@@ -866,14 +917,12 @@ mod test {
             if bytes.len() < GET_NODES_SIZE {
                 assert!(!GetNodes::from_bytes(&bytes).is_done());
             } else {
-                let gn = DhtPacketPayload::from_bytes(&bytes).unwrap().1;
-                if let DhtPacketPayload::GetNodes(gp) = gn {
-                    // ping_id as bytes should match "original" bytes
-                    assert_eq!(BigEndian::read_u64(&bytes[PUBLICKEYBYTES..GET_NODES_SIZE]), gp.id);
+                let gp = GetNodes::from_bytes(&bytes).unwrap().1;
+                // ping_id as bytes should match "original" bytes
+                assert_eq!(BigEndian::read_u64(&bytes[PUBLICKEYBYTES..GET_NODES_SIZE]), gp.id);
 
-                    let PublicKey(ref pk) = gp.pk;
-                    assert_eq!(pk, &bytes[..PUBLICKEYBYTES]);
-                }
+                let PublicKey(ref pk) = gp.pk;
+                assert_eq!(pk, &bytes[..PUBLICKEYBYTES]);
             }
         }
         quickcheck(with_bytes as fn(Vec<u8>));
