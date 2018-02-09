@@ -191,20 +191,19 @@ impl DhtPacket {
     - fails to decrypt
     - fails to parse as given packet type
     */
-    pub fn get_payload(&self, own_secret_key: &SecretKey) -> Result<Option<DhtPacketPayload>, Error>
+    pub fn get_payload(&self, own_secret_key: &SecretKey) -> Result<DhtPacketPayload, Error>
     {
         debug!(target: "DhtPacket", "Getting packet data from DhtPacket.");
         trace!(target: "DhtPacket", "With DhtPacket: {:?}", self);
         let decrypted = open(&self.payload, &self.nonce, &self.pk,
                             own_secret_key)
-            .and_then(|d| Ok(d))
             .map_err(|e| {
                 debug!("Decrypting DhtPacket failed!");
                 Error::new(ErrorKind::Other,
                     format!("DhtPacket decrypt error: {:?}", e))
             });
 
-        match DhtPacketPayload::from_bytes(&decrypted.unwrap_or(vec![0]), self.packet_kind) {
+        match DhtPacketPayload::from_bytes(&decrypted?, self.packet_kind) {
             IResult::Incomplete(e) => {
                 error!(target: "DhtPacket", "PingRequest deserialize error: {:?}", e);
                 Err(Error::new(ErrorKind::Other,
@@ -216,7 +215,7 @@ impl DhtPacket {
                     format!("PingRequest deserialize error: {:?}", e)))
             },
             IResult::Done(_, packet) => {
-                Ok(Some(packet))
+                Ok(packet)
             }
         }
     }
