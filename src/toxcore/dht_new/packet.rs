@@ -597,86 +597,11 @@ impl ToBytes for NatPingResponse {
 mod test {
     use super::*;
     use byteorder::{ByteOrder, BigEndian, WriteBytesExt};
-    use toxcore::dht_new::codec::*;
-//    use toxcore::dht_new::packet_kind::*;
 
     use quickcheck::{Arbitrary, Gen, quickcheck};
 
     const NAT_PING_REQUEST: PacketKind = PacketKind::PingRequest;
     const NAT_PING_RESPONSE: PacketKind = PacketKind::PingResponse;
-
-    impl DhtPacket {
-        pub fn new(shared_secret: &PrecomputedKey, pk: &PublicKey, dp: DhtPacketPayload) -> DhtPacket {
-            let nonce = &gen_nonce();
-            let mut buf = [0; MAX_DHT_PACKET_SIZE];
-            let (_, size) = dp.to_bytes((&mut buf, 0)).unwrap();
-            let payload = seal_precomputed(&buf[..size] , nonce, shared_secret);
-
-            DhtPacket {
-                packet_kind: dp.kind(),
-                pk: *pk,
-                nonce: *nonce,
-                payload: payload,
-            }
-        }
-    }
-
-    impl DhtRequest {
-        /// create new DhtRequest object
-        pub fn new(shared_secret: &PrecomputedKey, rpk: &PublicKey, spk: &PublicKey, dp: DhtRequestPayload) -> DhtRequest {
-            let nonce = &gen_nonce();
-
-            let mut buf = [0; MAX_DHT_PACKET_SIZE];
-            let (_, size) = dp.to_bytes((&mut buf, 0)).unwrap();
-            let payload = seal_precomputed(&buf[..size], nonce, shared_secret);
-
-            DhtRequest {
-                rpk: *rpk,
-                spk: *spk,
-                nonce: *nonce,
-                payload: payload,
-            }
-        }
-    }
-
-    impl DhtPacketPayload {
-        /// Packet kind for enum DhtPacketPayload
-        pub fn kind(&self) -> PacketKind {
-            match *self {
-                DhtPacketPayload::PingRequest(_) => PacketKind::PingRequest,
-                DhtPacketPayload::PingResponse(_) => PacketKind::PingResponse,
-                DhtPacketPayload::GetNodes(_) => PacketKind::GetNodes,
-                DhtPacketPayload::SendNodes(_) => PacketKind::SendNodes,
-            }
-        }
-    }
-
-    impl SendNodes {
-        /**
-        Create new `SendNodes`. Returns `None` if 0 or more than 4 nodes are
-        supplied.
-
-        Created as a response to `GetNodes` request.
-        */
-        pub fn with_nodes(request: &GetNodes, nodes: Vec<PackedNode>) -> Option<Self> {
-            debug!(target: "SendNodes", "Creating SendNodes from GetNodes.");
-            trace!(target: "SendNodes", "With GetNodes: {:?}", request);
-            trace!("With nodes: {:?}", &nodes);
-
-            if nodes.is_empty() || nodes.len() > 4 {
-                warn!(target: "SendNodes", "Wrong number of nodes supplied!");
-                return None
-            }
-
-            Some(SendNodes { nodes: nodes, id: request.id })
-        }
-    }
-
-    impl From<PingRequest> for PingResponse {
-        fn from(p: PingRequest) -> Self {
-            PingResponse { id: p.id }
-        }
-    }
 
     impl Arbitrary for DhtBase {
         fn arbitrary<G: Gen>(g: &mut G) -> Self {
