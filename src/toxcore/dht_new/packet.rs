@@ -258,6 +258,13 @@ impl ToBytes for DhtRequestPayload {
     }
 }
 
+impl FromBytes for DhtRequestPayload {
+    named!(from_bytes<DhtRequestPayload>, alt!(
+        map!(NatPingRequest::from_bytes, DhtRequestPayload::NatPingRequest) |
+        map!(NatPingResponse::from_bytes, DhtRequestPayload::NatPingResponse)
+    ));
+}
+
 impl ToBytes for DhtRequest {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
