@@ -604,6 +604,7 @@ impl ToBytes for NatPingResponse {
 mod test {
     use super::*;
     use byteorder::{ByteOrder, BigEndian, WriteBytesExt};
+    use std::net::SocketAddr;
     use toxcore::dht_new::codec::*;
 //    use toxcore::dht_new::packet_kind::*;
 
@@ -1074,4 +1075,42 @@ mod test {
             packet_nat_ping_resp_to_bytes_test
             packet_nat_ping_resp_from_bytes_test
     );
+
+    #[test]
+    fn dht_packet_encode_decode() {
+        let (alice_pk, alice_sk) = gen_keypair();
+        let (bob_pk, bob_sk) = gen_keypair();
+        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
+        let packed_node = PackedNode::new(false, SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &alice_pk);
+        let test_payloads = vec![
+            DhtPacketPayload::PingRequest(PingRequest { id: 42 }),
+            DhtPacketPayload::PingResponse(PingResponse { id: 42 }),
+            DhtPacketPayload::GetNodes(GetNodes { pk: alice_pk, id: 42 }),
+            DhtPacketPayload::SendNodes(SendNodes { nodes: vec![packed_node], id: 42 })
+        ];
+        for payload in test_payloads {
+            // encode payload with shared secret
+            let dht_packet = DhtPacket::new(&shared_secret, &alice_pk, payload.clone());
+            // create dht_base
+            let dht_base = DhtBase::DhtPacket(dht_packet.clone());
+            // serialize dht base to bytes
+            let mut buf = [0; MAX_DHT_PACKET_SIZE];
+            let (_, size) = dht_base.to_bytes((&mut buf, 0)).unwrap();
+            // deserialize dht base from bytes
+            let (_, decoded_dht_base) = DhtBase::from_bytes(&buf[..size]).unwrap();
+            // bases should be equal
+            assert_eq!(decoded_dht_base, dht_base);
+            // get packet from base
+            let decoded_dht_packet = match decoded_dht_base {
+                DhtBase::DhtPacket(decoded_dht_packet) => decoded_dht_packet,
+                _ => unreachable!("should be DhtPacket")
+            };
+            // packets should be equal
+            assert_eq!(decoded_dht_packet, dht_packet);
+            // decode payload with bob's secret key
+            let decoded_payload = decoded_dht_packet.get_payload(&bob_sk).unwrap();
+            // payloads should be equal
+            assert_eq!(decoded_payload, payload);
+        }
+    }
 }
