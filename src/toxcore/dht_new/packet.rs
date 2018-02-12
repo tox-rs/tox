@@ -205,14 +205,14 @@ impl DhtPacket {
 
         match DhtPacketPayload::from_bytes(&decrypted?, self.packet_kind) {
             IResult::Incomplete(e) => {
-                error!(target: "DhtPacket", "PingRequest deserialize error: {:?}", e);
+                error!(target: "DhtPacket", "DhtPacket deserialize error: {:?}", e);
                 Err(Error::new(ErrorKind::Other,
-                    format!("PingRequest deserialize error: {:?}", e)))
+                    format!("DhtPacket deserialize error: {:?}", e)))
             },
             IResult::Error(e) => {
-                error!(target: "DhtPacket", "PingRequest deserialize error: {:?}", e);
+                error!(target: "DhtPacket", "DhtPacket deserialize error: {:?}", e);
                 Err(Error::new(ErrorKind::Other,
-                    format!("PingRequest deserialize error: {:?}", e)))
+                    format!("DhtPacket deserialize error: {:?}", e)))
             },
             IResult::Done(_, packet) => {
                 Ok(packet)
@@ -294,6 +294,45 @@ impl FromBytes for DhtRequest {
             payload: payload
         })
     ));
+}
+
+impl DhtRequest {
+    /**
+    Decrypt payload and try to parse it as packet type.
+
+    Returns `Error` in case of failure:
+
+    - fails to decrypt
+    - fails to parse as given packet type
+    */
+    pub fn get_payload(&self, own_secret_key: &SecretKey) -> Result<DhtRequestPayload, Error>
+    {
+        debug!(target: "DhtRequest", "Getting packet data from DhtRequest.");
+        trace!(target: "DhtRequest", "With DhtRequest: {:?}", self);
+        let decrypted = open(&self.payload, &self.nonce, &self.spk,
+                            own_secret_key)
+            .map_err(|e| {
+                debug!("Decrypting DhtRequest failed!");
+                Error::new(ErrorKind::Other,
+                    format!("DhtRequest decrypt error: {:?}", e))
+            });
+
+        match DhtRequestPayload::from_bytes(&decrypted?) {
+            IResult::Incomplete(e) => {
+                error!(target: "DhtRequest", "DhtRequest deserialize error: {:?}", e);
+                Err(Error::new(ErrorKind::Other,
+                    format!("DhtRequest deserialize error: {:?}", e)))
+            },
+            IResult::Error(e) => {
+                error!(target: "DhtRequest", "DhtRequest deserialize error: {:?}", e);
+                Err(Error::new(ErrorKind::Other,
+                    format!("DhtRequest deserialize error: {:?}", e)))
+            },
+            IResult::Done(_, packet) => {
+                Ok(packet)
+            }
+        }
+    }
 }
 
 /**
