@@ -1195,4 +1195,64 @@ mod test {
             assert_eq!(decoded_payload, payload);
         }
     }
+
+    #[test]
+    fn dht_packet_decode_invalid() {
+        let (alice_pk, alice_sk) = gen_keypair();
+        let (bob_pk, bob_sk) = gen_keypair();
+        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
+        let nonce = gen_nonce();
+        // Try long invalid array
+        let invalid_payload = [42; 123];
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
+        let invalid_packet = DhtPacket {
+            packet_kind: PacketKind::PingRequest,
+            pk: alice_pk,
+            nonce: nonce,
+            payload: invalid_payload_encoded
+        };
+        let decoded_payload = invalid_packet.get_payload(&bob_sk);
+        assert!(decoded_payload.is_err());
+        // Try short incomplete
+        let invalid_payload = [0x00];
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
+        let invalid_packet = DhtPacket {
+            packet_kind: PacketKind::PingRequest,
+            pk: alice_pk,
+            nonce: nonce,
+            payload: invalid_payload_encoded
+        };
+        let decoded_payload = invalid_packet.get_payload(&bob_sk);
+        assert!(decoded_payload.is_err());
+    }
+
+    #[test]
+    fn dht_request_decode_invalid() {
+        let (alice_pk, alice_sk) = gen_keypair();
+        let (bob_pk, bob_sk) = gen_keypair();
+        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
+        let nonce = gen_nonce();
+        // Try long invalid array
+        let invalid_payload = [42; 123];
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
+        let invalid_packet = DhtRequest {
+            rpk: bob_pk,
+            spk: alice_pk,
+            nonce: nonce,
+            payload: invalid_payload_encoded
+        };
+        let decoded_payload = invalid_packet.get_payload(&bob_sk);
+        assert!(decoded_payload.is_err());
+        // Try short incomplete
+        let invalid_payload = [0xfe];
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
+        let invalid_packet = DhtRequest {
+            rpk: bob_pk,
+            spk: alice_pk,
+            nonce: nonce,
+            payload: invalid_payload_encoded
+        };
+        let decoded_payload = invalid_packet.get_payload(&bob_sk);
+        assert!(decoded_payload.is_err());
+    }
 }
