@@ -45,23 +45,40 @@ use toxcore::binary_io_new::*;
 use toxcore::crypto_core::*;
 use toxcore::dht_new::packet_kind::*;
 use toxcore::dht_new::packed_node::PackedNode;
+use toxcore::onion::packet::*;
 
 /// Length in bytes of [`PingRequest`](./struct.PingRequest.html) and
 /// [`PingResponse`](./struct.PingResponse.html) when serialized into bytes.
 pub const PING_SIZE: usize = 9;
 
-/** DHT packet base enum that encapsulates
-[`DhtPacket`](./struct.DhtPacket.html) or [`DhtRequest`](./struct.DhtRequest.html).
-
-https://zetok.github.io/tox-spec/#dht-packet
-https://zetok.github.io/tox-spec/#dht-request-packets
+/** DHT packet base enum that encapsulates all types of DHT packets.
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DhtBase {
-    /// DhtBase are wrapper for DhtPacket and DhtRequest
+    /// [`DhtPacket`](./struct.DhtPacket.html) structure.
     DhtPacket(DhtPacket),
-    /// DhtBase are wrapper for DhtPacket and DhtRequest
+    /// [`DhtRequest`](./struct.DhtRequest.html) structure.
     DhtRequest(DhtRequest),
+    /// [`OnionRequest0`](../onion/struct.OnionRequest0.html) structure.
+    OnionRequest0(OnionRequest0),
+    /// [`OnionRequest1`](../onion/struct.OnionRequest1.html) structure.
+    OnionRequest1(OnionRequest1),
+    /// [`OnionRequest2`](../onion/struct.OnionRequest2.html) structure.
+    OnionRequest2(OnionRequest2),
+    /// [`AnnounceRequest`](../onion/struct.AnnounceRequest.html) structure.
+    AnnounceRequest(AnnounceRequest),
+    /// [`AnnounceResponse`](../onion/struct.AnnounceResponse.html) structure.
+    AnnounceResponse(AnnounceResponse),
+    /// [`OnionDataRequest`](../onion/struct.OnionDataRequest.html) structure.
+    OnionDataRequest(OnionDataRequest),
+    /// [`OnionDataResponse`](../onion/struct.OnionDataResponse.html) structure.
+    OnionDataResponse(OnionDataResponse),
+    /// [`OnionResponse3`](../onion/struct.OnionResponse3.html) structure.
+    OnionResponse3(OnionResponse3),
+    /// [`OnionResponse2`](../onion/struct.OnionResponse2.html) structure.
+    OnionResponse2(OnionResponse2),
+    /// [`OnionResponse1`](../onion/struct.OnionResponse1.html) structure.
+    OnionResponse1(OnionResponse1),
 }
 
 /** DHT packet struct that encapsulates in the payload
@@ -133,6 +150,16 @@ impl ToBytes for DhtBase {
         match *self {
             DhtBase::DhtPacket(ref p) => p.to_bytes(buf),
             DhtBase::DhtRequest(ref p) => p.to_bytes(buf),
+            DhtBase::OnionRequest0(ref p) => p.to_bytes(buf),
+            DhtBase::OnionRequest1(ref p) => p.to_bytes(buf),
+            DhtBase::OnionRequest2(ref p) => p.to_bytes(buf),
+            DhtBase::AnnounceRequest(ref p) => p.to_bytes(buf),
+            DhtBase::AnnounceResponse(ref p) => p.to_bytes(buf),
+            DhtBase::OnionDataRequest(ref p) => p.to_bytes(buf),
+            DhtBase::OnionDataResponse(ref p) => p.to_bytes(buf),
+            DhtBase::OnionResponse3(ref p) => p.to_bytes(buf),
+            DhtBase::OnionResponse2(ref p) => p.to_bytes(buf),
+            DhtBase::OnionResponse1(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -140,7 +167,17 @@ impl ToBytes for DhtBase {
 impl FromBytes for DhtBase {
     named!(from_bytes<DhtBase>, alt!(
         map!(DhtPacket::from_bytes, DhtBase::DhtPacket) |
-        map!(DhtRequest::from_bytes, DhtBase::DhtRequest)
+        map!(DhtRequest::from_bytes, DhtBase::DhtRequest) |
+        map!(OnionRequest0::from_bytes, DhtBase::OnionRequest0) |
+        map!(OnionRequest1::from_bytes, DhtBase::OnionRequest1) |
+        map!(OnionRequest2::from_bytes, DhtBase::OnionRequest2) |
+        map!(AnnounceRequest::from_bytes, DhtBase::AnnounceRequest) |
+        map!(AnnounceResponse::from_bytes, DhtBase::AnnounceResponse) |
+        map!(OnionDataRequest::from_bytes, DhtBase::OnionDataRequest) |
+        map!(OnionDataResponse::from_bytes, DhtBase::OnionDataResponse) |
+        map!(OnionResponse3::from_bytes, DhtBase::OnionResponse3) |
+        map!(OnionResponse2::from_bytes, DhtBase::OnionResponse2) |
+        map!(OnionResponse1::from_bytes, DhtBase::OnionResponse1)
     ));
 }
 
