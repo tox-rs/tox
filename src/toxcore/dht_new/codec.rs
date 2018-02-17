@@ -59,8 +59,7 @@ impl UdpCodec for DhtCodec {
     type In = DhtRecvUdpPacket;
     type Out = DhtUdpPacket;
 
-    fn decode(&mut self, src: &SocketAddr, buf: &[u8]) -> io::Result<Self::In>
-    {
+    fn decode(&mut self, src: &SocketAddr, buf: &[u8]) -> io::Result<Self::In> {
         match DhtBase::from_bytes(buf) {
             IResult::Incomplete(_) => {
                 Err(Error::new(ErrorKind::Other,
@@ -94,59 +93,48 @@ mod test {
     use std::net::SocketAddr;
 
     use super::*;
-    use toxcore::dht_new::packet_kind::*;
 
-    use quickcheck::{quickcheck, TestResult};
+    use quickcheck::quickcheck;
 
     #[test]
     fn dht_codec_decode_test() {
-        fn with_dp(dp: DhtPacket) -> TestResult {
-            // need an invalid PacketKind for DhtPacket
-            if dp.packet_kind as u8 <= PacketKind::SendNodes as u8 {
-                return TestResult::discard()
-            }
-
-            let kind = dp.packet_kind.clone() as u8;
+        fn with_packet(packet: DhtBase) {
             // TODO: random SocketAddr
             let addr = SocketAddr::V4("0.1.2.3:4".parse().unwrap());
             let mut tc = DhtCodec;
 
-            let mut buf = [0; 1024];
-            let bytes = dp.to_bytes((&mut buf, 0)).unwrap().0;
+            let mut buf = [0; MAX_DHT_PACKET_SIZE];
+            let (bytes, len) = packet.to_bytes((&mut buf, 0)).unwrap();
 
-            let (decoded_a, decoded_dp) = tc.decode(&addr, &bytes)
+            let (decoded_a, decoded_packet) = tc.decode(&addr, &bytes[..len])
                 .unwrap();
             // it did have correct packet
-            let decoded_dp = decoded_dp.unwrap();
+            let decoded_packet = decoded_packet.unwrap();
 
             assert_eq!(addr, decoded_a);
-            assert_eq!(DhtBase::DhtPacket(dp), decoded_dp);
+            assert_eq!(packet, decoded_packet);
 
             // make it error
-            bytes[0] = kind;
-            let (r_addr, none) = tc.decode(&addr, &bytes).unwrap();
-            assert_eq!(addr, r_addr);
-            assert!(none.is_none());
-
-            TestResult::passed()
+            bytes[0] = 0x03;
+            assert!(tc.decode(&addr, &bytes[..len]).is_err());
         }
-        quickcheck(with_dp as fn(DhtPacket) -> TestResult);
+        quickcheck(with_packet as fn(DhtBase));
     }
 
     #[test]
     fn dht_codec_encode_test() {
-        fn with_dp(dp: DhtPacket) {
+        fn with_packet(packet: DhtBase) {
             // TODO: random SocketAddr
             let addr = SocketAddr::V4("5.6.7.8:9".parse().unwrap());
             let mut buf = Vec::new();
             let mut tc = DhtCodec;
 
-            let socket = tc.encode((addr, DhtBase::DhtPacket(dp.clone())), &mut buf);
+            let socket = tc.encode((addr, packet.clone()), &mut buf);
             assert_eq!(addr, socket);
             let mut enc_buf = [0; MAX_DHT_PACKET_SIZE];
-            let (_, size) = dp.to_bytes((&mut enc_buf, 0)).unwrap();
+            let (_, size) = packet.to_bytes((&mut enc_buf, 0)).unwrap();
             assert_eq!(buf, enc_buf[..size].to_vec());
         }
-        quickcheck(with_dp as fn(DhtPacket));
+        quickcheck(with_packet as fn(DhtBase));
     }
 }
