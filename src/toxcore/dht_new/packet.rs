@@ -37,13 +37,8 @@
     * takes care of the serializing and de-serializing DHT packets
 */
 
-use nom::{le_u8, le_u16, be_u64, rest};
+use nom::{le_u8, be_u64, rest};
 
-use std::net::{
-    IpAddr,
-    Ipv4Addr,
-    Ipv6Addr,
-};
 use std::io::{Error, ErrorKind};
 
 use toxcore::binary_io_new::*;
@@ -431,66 +426,6 @@ impl ToBytes for PingResponse {
         do_gen!(buf,
             gen_be_u8!(0x01) >>
             gen_be_u64!(self.id)
-        )
-    }
-}
-
-// Ip Type
-// Value | Type
-// ----- | ----
-// `2`   | UDP IPv4
-// `10`  | UDP IPv6
-// `130` | TCP IPv4
-// `138` | TCP IPv6
-
-// TODO: move it somewhere else
-impl ToBytes for IpAddr {
-    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        match *self {
-            IpAddr::V4(ref p) => p.to_bytes(buf),
-            IpAddr::V6(ref p) => p.to_bytes(buf),
-        }
-    }
-}
-
-// TODO: move it somewhere else
-impl FromBytes for Ipv4Addr {
-    named!(from_bytes<Ipv4Addr>, map!(count!(le_u8, 4), 
-        |v| Ipv4Addr::new(v[0], v[1], v[2], v[3])
-    ));
-}
-
-impl ToBytes for Ipv4Addr {
-    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        let o = self.octets();
-        do_gen!(buf,
-            gen_be_u8!(o[0]) >>
-            gen_be_u8!(o[1]) >>
-            gen_be_u8!(o[2]) >>
-            gen_be_u8!(o[3]) 
-        )
-    }
-}
-
-// TODO: move it somewhere else
-impl FromBytes for Ipv6Addr {
-    named!(from_bytes<Ipv6Addr>, map!(count!(le_u16, 8), 
-        |v| Ipv6Addr::new(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7])
-    ));
-}
-
-impl ToBytes for Ipv6Addr {
-    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        let s = self.segments();
-        do_gen!(buf,
-            gen_le_u16!(s[0]) >>
-            gen_le_u16!(s[1]) >>
-            gen_le_u16!(s[2]) >>
-            gen_le_u16!(s[3]) >>
-            gen_le_u16!(s[4]) >>
-            gen_le_u16!(s[5]) >>
-            gen_le_u16!(s[6]) >>
-            gen_le_u16!(s[7]) 
         )
     }
 }
