@@ -30,7 +30,7 @@ nodes by sending [`GetNodes`](./toxcore/dht/struct.GetNodes.html) or request
 
 To request a ping response:
 
-```
+```no_run
 // for networking
 extern crate tokio_core;
 use tokio_core::reactor::Core;
