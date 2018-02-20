@@ -36,10 +36,10 @@ use toxcore::onion::packet::*;
 /// [`PingResponse`](./struct.PingResponse.html) when serialized into bytes.
 pub const PING_SIZE: usize = 9;
 
-/** DHT packet base enum that encapsulates all types of DHT packets.
+/** DHT packet enum that encapsulates all types of DHT packets.
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum DhtBase {
+pub enum DhtPacket {
     /// [`PingRequest`](./struct.PingRequest.html) structure.
     PingRequest(PingRequest),
     /// [`PingResponse`](./struct.PingResponse.html) structure.
@@ -78,45 +78,45 @@ pub enum DhtBase {
     // TODO: BootstrapInfo
 }
 
-impl ToBytes for DhtBase {
+impl ToBytes for DhtPacket {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         match *self {
-            DhtBase::PingRequest(ref p) => p.to_bytes(buf),
-            DhtBase::PingResponse(ref p) => p.to_bytes(buf),
-            DhtBase::NodesRequest(ref p) => p.to_bytes(buf),
-            DhtBase::NodesResponse(ref p) => p.to_bytes(buf),
-            DhtBase::DhtRequest(ref p) => p.to_bytes(buf),
-            DhtBase::OnionRequest0(ref p) => p.to_bytes(buf),
-            DhtBase::OnionRequest1(ref p) => p.to_bytes(buf),
-            DhtBase::OnionRequest2(ref p) => p.to_bytes(buf),
-            DhtBase::AnnounceRequest(ref p) => p.to_bytes(buf),
-            DhtBase::AnnounceResponse(ref p) => p.to_bytes(buf),
-            DhtBase::OnionDataRequest(ref p) => p.to_bytes(buf),
-            DhtBase::OnionDataResponse(ref p) => p.to_bytes(buf),
-            DhtBase::OnionResponse3(ref p) => p.to_bytes(buf),
-            DhtBase::OnionResponse2(ref p) => p.to_bytes(buf),
-            DhtBase::OnionResponse1(ref p) => p.to_bytes(buf),
+            DhtPacket::PingRequest(ref p) => p.to_bytes(buf),
+            DhtPacket::PingResponse(ref p) => p.to_bytes(buf),
+            DhtPacket::NodesRequest(ref p) => p.to_bytes(buf),
+            DhtPacket::NodesResponse(ref p) => p.to_bytes(buf),
+            DhtPacket::DhtRequest(ref p) => p.to_bytes(buf),
+            DhtPacket::OnionRequest0(ref p) => p.to_bytes(buf),
+            DhtPacket::OnionRequest1(ref p) => p.to_bytes(buf),
+            DhtPacket::OnionRequest2(ref p) => p.to_bytes(buf),
+            DhtPacket::AnnounceRequest(ref p) => p.to_bytes(buf),
+            DhtPacket::AnnounceResponse(ref p) => p.to_bytes(buf),
+            DhtPacket::OnionDataRequest(ref p) => p.to_bytes(buf),
+            DhtPacket::OnionDataResponse(ref p) => p.to_bytes(buf),
+            DhtPacket::OnionResponse3(ref p) => p.to_bytes(buf),
+            DhtPacket::OnionResponse2(ref p) => p.to_bytes(buf),
+            DhtPacket::OnionResponse1(ref p) => p.to_bytes(buf),
         }
     }
 }
 
-impl FromBytes for DhtBase {
-    named!(from_bytes<DhtBase>, alt!(
-        map!(PingRequest::from_bytes, DhtBase::PingRequest) |
-        map!(PingResponse::from_bytes, DhtBase::PingResponse) |
-        map!(NodesRequest::from_bytes, DhtBase::NodesRequest) |
-        map!(NodesResponse::from_bytes, DhtBase::NodesResponse) |
-        map!(DhtRequest::from_bytes, DhtBase::DhtRequest) |
-        map!(OnionRequest0::from_bytes, DhtBase::OnionRequest0) |
-        map!(OnionRequest1::from_bytes, DhtBase::OnionRequest1) |
-        map!(OnionRequest2::from_bytes, DhtBase::OnionRequest2) |
-        map!(AnnounceRequest::from_bytes, DhtBase::AnnounceRequest) |
-        map!(AnnounceResponse::from_bytes, DhtBase::AnnounceResponse) |
-        map!(OnionDataRequest::from_bytes, DhtBase::OnionDataRequest) |
-        map!(OnionDataResponse::from_bytes, DhtBase::OnionDataResponse) |
-        map!(OnionResponse3::from_bytes, DhtBase::OnionResponse3) |
-        map!(OnionResponse2::from_bytes, DhtBase::OnionResponse2) |
-        map!(OnionResponse1::from_bytes, DhtBase::OnionResponse1)
+impl FromBytes for DhtPacket {
+    named!(from_bytes<DhtPacket>, alt!(
+        map!(PingRequest::from_bytes, DhtPacket::PingRequest) |
+        map!(PingResponse::from_bytes, DhtPacket::PingResponse) |
+        map!(NodesRequest::from_bytes, DhtPacket::NodesRequest) |
+        map!(NodesResponse::from_bytes, DhtPacket::NodesResponse) |
+        map!(DhtRequest::from_bytes, DhtPacket::DhtRequest) |
+        map!(OnionRequest0::from_bytes, DhtPacket::OnionRequest0) |
+        map!(OnionRequest1::from_bytes, DhtPacket::OnionRequest1) |
+        map!(OnionRequest2::from_bytes, DhtPacket::OnionRequest2) |
+        map!(AnnounceRequest::from_bytes, DhtPacket::AnnounceRequest) |
+        map!(AnnounceResponse::from_bytes, DhtPacket::AnnounceResponse) |
+        map!(OnionDataRequest::from_bytes, DhtPacket::OnionDataRequest) |
+        map!(OnionDataResponse::from_bytes, DhtPacket::OnionDataResponse) |
+        map!(OnionResponse3::from_bytes, DhtPacket::OnionResponse3) |
+        map!(OnionResponse2::from_bytes, DhtPacket::OnionResponse2) |
+        map!(OnionResponse1::from_bytes, DhtPacket::OnionResponse1)
     ));
 }
 
@@ -915,16 +915,16 @@ mod test {
         }
     }
 
-    impl Arbitrary for DhtBase {
+    impl Arbitrary for DhtPacket {
         fn arbitrary<G: Gen>(g: &mut G) -> Self {
             let choice = g.gen_range(0, 5);
             match choice {
-                0 => DhtBase::PingRequest(PingRequest::arbitrary(g)),
-                1 => DhtBase::PingResponse(PingResponse::arbitrary(g)),
-                2 => DhtBase::NodesRequest(NodesRequest::arbitrary(g)),
-                3 => DhtBase::NodesResponse(NodesResponse::arbitrary(g)),
-                4 => DhtBase::DhtRequest(DhtRequest::arbitrary(g)),
-                _ => unreachable!("Arbitrary for DhtBase - should not have happened!")
+                0 => DhtPacket::PingRequest(PingRequest::arbitrary(g)),
+                1 => DhtPacket::PingResponse(PingResponse::arbitrary(g)),
+                2 => DhtPacket::NodesRequest(NodesRequest::arbitrary(g)),
+                3 => DhtPacket::NodesResponse(NodesResponse::arbitrary(g)),
+                4 => DhtPacket::DhtRequest(DhtRequest::arbitrary(g)),
+                _ => unreachable!("Arbitrary for DhtPacket - should not have happened!")
             }
         }
     }
@@ -1074,14 +1074,14 @@ mod test {
     }
 
     #[test]
-    fn dht_base_check() {
-        fn with_packet(packet: DhtBase) {
+    fn dht_packet_check() {
+        fn with_packet(packet: DhtPacket) {
             let mut buf = [0; MAX_DHT_PACKET_SIZE];
             let (_, len) = packet.to_bytes((&mut buf, 0)).ok().unwrap();
-            let (_, decoded) = DhtBase::from_bytes(&buf[..len]).unwrap();
+            let (_, decoded) = DhtPacket::from_bytes(&buf[..len]).unwrap();
             assert_eq!(decoded, packet);
         }
-        quickcheck(with_packet as fn(DhtBase));
+        quickcheck(with_packet as fn(DhtPacket));
     }
 
     macro_rules! dht_packet_encode_decode (
@@ -1094,28 +1094,28 @@ mod test {
                 let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
                 let payload = $payload;
                 // encode payload with shared secret
-                let ping_request = $packet::new(&shared_secret, &alice_pk, payload.clone());
-                // create dht_base
-                let dht_base = DhtBase::$packet(ping_request.clone());
-                // serialize dht base to bytes
+                let dht_packet_value = $packet::new(&shared_secret, &alice_pk, payload.clone());
+                // create dht_packet
+                let dht_packet = DhtPacket::$packet(dht_packet_value.clone());
+                // serialize dht packet to bytes
                 let mut buf = [0; MAX_DHT_PACKET_SIZE];
-                let (_, size) = dht_base.to_bytes((&mut buf, 0)).unwrap();
-                // deserialize dht base from bytes
-                let (_, decoded_dht_base) = DhtBase::from_bytes(&buf[..size]).unwrap();
-                // bases should be equal
-                assert_eq!(decoded_dht_base, dht_base);
-                // get packet from base
-                let decoded_ping_request = match decoded_dht_base {
-                    DhtBase::$packet(decoded_ping_request) => decoded_ping_request,
+                let (_, size) = dht_packet.to_bytes((&mut buf, 0)).unwrap();
+                // deserialize dht packet from bytes
+                let (_, decoded_dht_packet) = DhtPacket::from_bytes(&buf[..size]).unwrap();
+                // packets should be equal
+                assert_eq!(decoded_dht_packet, dht_packet);
+                // get exact packet value from packet enum
+                let decoded_dht_packet_value = match decoded_dht_packet {
+                    DhtPacket::$packet(decoded_dht_packet_value) => decoded_dht_packet_value,
                     _ => unreachable!("should be {}", stringify!($packet))
                 };
                 // packets should be equal
-                assert_eq!(decoded_ping_request, ping_request);
+                assert_eq!(decoded_dht_packet_value, dht_packet_value);
                 // try to decode payload with eve's secret key
-                let decoded_payload = decoded_ping_request.get_payload(&eve_sk);
+                let decoded_payload = decoded_dht_packet_value.get_payload(&eve_sk);
                 assert!(decoded_payload.is_err());
                 // decode payload with bob's secret key
-                let decoded_payload = decoded_ping_request.get_payload(&bob_sk).unwrap();
+                let decoded_payload = decoded_dht_packet_value.get_payload(&bob_sk).unwrap();
                 // payloads should be equal
                 assert_eq!(decoded_payload, payload);
             }
@@ -1161,18 +1161,18 @@ mod test {
         for payload in test_payloads {
             // encode payload with shared secret
             let dht_request = DhtRequest::new(&shared_secret, &bob_pk, &alice_pk, payload.clone());
-            // create dht_base
-            let dht_base = DhtBase::DhtRequest(dht_request.clone());
-            // serialize dht base to bytes
+            // create dht_packet
+            let dht_packet = DhtPacket::DhtRequest(dht_request.clone());
+            // serialize dht packet to bytes
             let mut buf = [0; MAX_DHT_PACKET_SIZE];
-            let (_, size) = dht_base.to_bytes((&mut buf, 0)).unwrap();
-            // deserialize dht base from bytes
-            let (_, decoded_dht_base) = DhtBase::from_bytes(&buf[..size]).unwrap();
-            // bases should be equal
-            assert_eq!(decoded_dht_base, dht_base);
-            // get packet from base
-            let decoded_dht_request = match decoded_dht_base {
-                DhtBase::DhtRequest(decoded_dht_request) => decoded_dht_request,
+            let (_, size) = dht_packet.to_bytes((&mut buf, 0)).unwrap();
+            // deserialize dht packet from bytes
+            let (_, decoded_dht_packet) = DhtPacket::from_bytes(&buf[..size]).unwrap();
+            // packets should be equal
+            assert_eq!(decoded_dht_packet, dht_packet);
+            // get exact packet value from packet enum
+            let decoded_dht_request = match decoded_dht_packet {
+                DhtPacket::DhtRequest(decoded_dht_request) => decoded_dht_request,
                 _ => unreachable!("should be DhtRequest")
             };
             // requests should be equal

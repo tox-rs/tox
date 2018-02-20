@@ -31,10 +31,10 @@ use tokio_core::net::UdpCodec;
 use std::net::SocketAddr;
 
 /// Type representing Dht UDP packets.
-pub type DhtUdpPacket = (SocketAddr, DhtBase);
+pub type DhtUdpPacket = (SocketAddr, DhtPacket);
 
 /// Type representing received Dht UDP packets.
-pub type DhtRecvUdpPacket = (SocketAddr, Option<DhtBase>);
+pub type DhtRecvUdpPacket = (SocketAddr, Option<DhtPacket>);
 
 /**
 SendNodes
@@ -60,14 +60,14 @@ impl UdpCodec for DhtCodec {
     type Out = DhtUdpPacket;
 
     fn decode(&mut self, src: &SocketAddr, buf: &[u8]) -> io::Result<Self::In> {
-        match DhtBase::from_bytes(buf) {
+        match DhtPacket::from_bytes(buf) {
             IResult::Incomplete(_) => {
                 Err(Error::new(ErrorKind::Other,
-                    "DhtBase packet should not be incomplete"))
+                    "DhtPacket packet should not be incomplete"))
             },
             IResult::Error(e) => {
                 Err(Error::new(ErrorKind::Other,
-                    format!("deserialize DhtBase packet error: {:?}", e)))
+                    format!("deserialize DhtPacket packet error: {:?}", e)))
             },
             IResult::Done(_, encrypted_packet) => {
                 Ok((*src, Some(encrypted_packet)))
@@ -81,7 +81,7 @@ impl UdpCodec for DhtCodec {
             into.extend(&buf[..size]);
         } else {
             // TODO: move from tokio-core to tokio and return error instead of panic
-            panic!("DhtBase to_bytes error {:?}", dp);
+            panic!("DhtPacket to_bytes error {:?}", dp);
         }
         addr
     }
@@ -98,7 +98,7 @@ mod test {
 
     #[test]
     fn dht_codec_decode_test() {
-        fn with_packet(packet: DhtBase) {
+        fn with_packet(packet: DhtPacket) {
             // TODO: random SocketAddr
             let addr = SocketAddr::V4("0.1.2.3:4".parse().unwrap());
             let mut tc = DhtCodec;
@@ -118,12 +118,12 @@ mod test {
             bytes[0] = 0x03;
             assert!(tc.decode(&addr, &bytes[..len]).is_err());
         }
-        quickcheck(with_packet as fn(DhtBase));
+        quickcheck(with_packet as fn(DhtPacket));
     }
 
     #[test]
     fn dht_codec_encode_test() {
-        fn with_packet(packet: DhtBase) {
+        fn with_packet(packet: DhtPacket) {
             // TODO: random SocketAddr
             let addr = SocketAddr::V4("5.6.7.8:9".parse().unwrap());
             let mut buf = Vec::new();
@@ -135,6 +135,6 @@ mod test {
             let (_, size) = packet.to_bytes((&mut enc_buf, 0)).unwrap();
             assert_eq!(buf, enc_buf[..size].to_vec());
         }
-        quickcheck(with_packet as fn(DhtBase));
+        quickcheck(with_packet as fn(DhtPacket));
     }
 }
