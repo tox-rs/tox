@@ -737,3 +737,164 @@ impl ToBytes for OnionResponse1 {
         )
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - NONCEBYTES;
+    const ONION_RETURN_2_PAYLOAD_SIZE: usize = ONION_RETURN_2_SIZE - NONCEBYTES;
+    const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - NONCEBYTES;
+
+    encode_decode_test!(
+        ip_port_encode_decode,
+        IpPort {
+            ip_addr: "5.6.7.8".parse().unwrap(),
+            port: 12345
+        }
+    );
+
+    encode_decode_test!(
+        onion_return_encode_decode,
+        OnionReturn {
+            nonce: gen_nonce(),
+            payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
+        }
+    );
+
+    encode_decode_test!(
+        onion_request_0_encode_decode,
+        OnionRequest0 {
+            nonce: gen_nonce(),
+            temporary_pk: gen_keypair().0,
+            payload: vec![42, 123]
+        }
+    );
+
+    encode_decode_test!(
+        onion_request_1_encode_decode,
+        OnionRequest1 {
+            nonce: gen_nonce(),
+            temporary_pk: gen_keypair().0,
+            payload: vec![42, 123],
+            onion_return: OnionReturn {
+                nonce: gen_nonce(),
+                payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
+            }
+        }
+    );
+
+    encode_decode_test!(
+        onion_request_2_encode_decode,
+        OnionRequest2 {
+            nonce: gen_nonce(),
+            temporary_pk: gen_keypair().0,
+            payload: vec![42, 123],
+            onion_return: OnionReturn {
+                nonce: gen_nonce(),
+                payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
+            }
+        }
+    );
+
+    encode_decode_test!(
+        inner_announce_request_encode_decode,
+        InnerAnnounceRequest {
+            nonce: gen_nonce(),
+            pk: gen_keypair().0,
+            payload: vec![42, 123]
+        }
+    );
+
+    encode_decode_test!(
+        announce_request_encode_decode,
+        AnnounceRequest {
+            inner: InnerAnnounceRequest {
+                nonce: gen_nonce(),
+                pk: gen_keypair().0,
+                payload: vec![42, 123]
+            },
+            onion_return: OnionReturn {
+                nonce: gen_nonce(),
+                payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
+            }
+        }
+    );
+
+    encode_decode_test!(
+        inner_onion_data_request_encode_decode,
+        InnerOnionDataRequest {
+            destination_pk: gen_keypair().0,
+            nonce: gen_nonce(),
+            temporary_pk: gen_keypair().0,
+            payload: vec![42, 123]
+        }
+    );
+
+    encode_decode_test!(
+        onion_data_request_encode_decode,
+        OnionDataRequest {
+            inner: InnerOnionDataRequest {
+                destination_pk: gen_keypair().0,
+                nonce: gen_nonce(),
+                temporary_pk: gen_keypair().0,
+                payload: vec![42, 123]
+            },
+            onion_return: OnionReturn {
+                nonce: gen_nonce(),
+                payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
+            }
+        }
+    );
+
+    encode_decode_test!(
+        onion_data_response_encode_decode,
+        OnionDataResponse {
+            nonce: gen_nonce(),
+            temporary_pk: gen_keypair().0,
+            payload: vec![42, 123]
+        }
+    );
+
+    encode_decode_test!(
+        announce_response_encode_decode,
+        AnnounceResponse {
+            sendback_data: 12345,
+            nonce: gen_nonce(),
+            payload: vec![42, 123]
+        }
+    );
+
+    encode_decode_test!(
+        onion_response_3_encode_decode,
+        OnionResponse3 {
+            onion_return: OnionReturn {
+                nonce: gen_nonce(),
+                payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
+            },
+            payload: vec![42, 123]
+        }
+    );
+
+    encode_decode_test!(
+        onion_response_2_encode_decode,
+        OnionResponse2 {
+            onion_return: OnionReturn {
+                nonce: gen_nonce(),
+                payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
+            },
+            payload: vec![42, 123]
+        }
+    );
+
+    encode_decode_test!(
+        onion_response_1_encode_decode,
+        OnionResponse1 {
+            onion_return: OnionReturn {
+                nonce: gen_nonce(),
+                payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
+            },
+            payload: vec![42, 123]
+        }
+    );
+}
