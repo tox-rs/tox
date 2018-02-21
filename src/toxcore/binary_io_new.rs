@@ -102,3 +102,27 @@ impl ToBytes for Ipv6Addr {
         )
     }
 }
+
+/** Create test that encodes/decodes specified value and checks that result
+equals original value. Type of this value should implement `ToBytes`,
+`FromBytes`, `Clone`, `Eq` traits.
+*/
+#[cfg(test)]
+macro_rules! encode_decode_test (
+    ($test:ident, $value:expr) => (
+        #[test]
+        fn $test() {
+            let value = $value;
+            let mut buf = [0; 1024];
+            let (_, size) = value.to_bytes((&mut buf, 0)).unwrap();
+            assert!(size <= 1024);
+            let (rest, decoded_value) = FromBytes::from_bytes(&buf[..size]).unwrap();
+            // this helps compiler to infer type of decoded_value
+            // i.e. it means that decoded_value has the same type as value
+            fn infer<T>(_: &T, _: &T) { }
+            infer(&decoded_value, &value);
+            assert!(rest.is_empty());
+            assert_eq!(decoded_value, value);
+        }
+    )
+);
