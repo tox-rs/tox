@@ -921,4 +921,56 @@ mod test {
             payload: vec![42, 123]
         }
     );
+
+    #[test]
+    fn onion_return_encrypt_decrypt() {
+        let alice_symmetric_key = new_symmetric_key();
+        let bob_symmetric_key = new_symmetric_key();
+        let eve_symmetric_key = new_symmetric_key();
+        // alice encrypt
+        let ip_port_1 = IpPort {
+            ip_addr: "5.6.7.8".parse().unwrap(),
+            port: 12345
+        };
+        let onion_return_1 = OnionReturn::new(&alice_symmetric_key, &ip_port_1, None);
+        // bob encrypt
+        let ip_port_2 = IpPort {
+            ip_addr: "7.8.5.6".parse().unwrap(),
+            port: 54321
+        };
+        let onion_return_2 = OnionReturn::new(&bob_symmetric_key, &ip_port_2, Some(&onion_return_1));
+        // eve can't decrypt return addresses
+        assert!(onion_return_1.get_payload(&eve_symmetric_key).is_err());
+        assert!(onion_return_2.get_payload(&eve_symmetric_key).is_err());
+        // bob can decrypt it's return address
+        let (decrypted_ip_port_2, decrypted_onion_return_1) = onion_return_2.get_payload(&bob_symmetric_key).unwrap();
+        assert_eq!(decrypted_ip_port_2, ip_port_2);
+        assert_eq!(decrypted_onion_return_1.unwrap(), onion_return_1);
+        // alice can decrypt it's return address
+        let (decrypted_ip_port_1, none) = onion_return_1.get_payload(&alice_symmetric_key).unwrap();
+        assert_eq!(decrypted_ip_port_1, ip_port_1);
+        assert!(none.is_none());
+    }
+
+    #[test]
+    fn onion_return_decrypt_invalid() {
+        let symmetric_key = new_symmetric_key();
+        let nonce = gen_nonce();
+        // Try long invalid array
+        let invalid_payload = [42; 123];
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_onion_return = OnionReturn {
+            nonce: nonce,
+            payload: invalid_payload_encoded
+        };
+        assert!(invalid_onion_return.get_payload(&symmetric_key).is_err());
+        // Try short incomplete
+        let invalid_payload = [2];
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_onion_return = OnionReturn {
+            nonce: nonce,
+            payload: invalid_payload_encoded
+        };
+        assert!(invalid_onion_return.get_payload(&symmetric_key).is_err());
+    }
 }
