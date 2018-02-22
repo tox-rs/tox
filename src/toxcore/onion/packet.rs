@@ -134,21 +134,45 @@ impl ToBytes for OnionReturn {
 }
 
 impl OnionReturn {
+    fn inner_to_bytes<'a>(ip_port: &IpPort, inner: Option<&OnionReturn>, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_call!(|buf, ip_port| IpPort::to_bytes(ip_port, buf), ip_port) >>
+            gen_call!(|buf, inner| match inner {
+                Some(inner) => OnionReturn::to_bytes(inner, buf),
+                None => Ok(buf)
+            }, inner)
+        )
+    }
+
     named!(inner_from_bytes<(IpPort, Option<OnionReturn>)>, do_parse!(
-        ip_addr: call!(IpPort::from_bytes) >>
+        ip_port: call!(IpPort::from_bytes) >>
         rest_len: rest_len >>
         inner: cond!(rest_len > 0, OnionReturn::from_bytes) >>
-        (ip_addr, inner)
+        (ip_port, inner)
     ));
-    /** Decrypt payload and try to parse it as `IpPort` with possibly inner `OnionReturn`.
+
+    /// Create new `OnionReturn` object using symmetric key for encryption.
+    pub fn new(symmetric_key: &PrecomputedKey, ip_port: &IpPort, inner: Option<&OnionReturn>) -> OnionReturn {
+        let nonce = gen_nonce();
+        let mut buf = [0; ONION_RETURN_2_SIZE + SIZE_IPPORT];
+        let (_, size) = OnionReturn::inner_to_bytes(ip_port, inner, (&mut buf, 0)).unwrap();
+        let payload = seal_precomputed(&buf[..size], &nonce, symmetric_key);
+
+        OnionReturn {
+            nonce: nonce,
+            payload: payload,
+        }
+    }
+
+    /** Decrypt payload with symmetric key and try to parse it as `IpPort` with possibly inner `OnionReturn`.
 
     Returns `Error` in case of failure:
 
     - fails to decrypt
     - fails to parse as `IpPort` with possibly inner `OnionReturn`
     */
-    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<(IpPort, Option<OnionReturn>), Error> {
-        let decrypted = open_precomputed(&self.payload, &self.nonce, &shared_secret)
+    pub fn get_payload(&self, symmetric_key: &PrecomputedKey) -> Result<(IpPort, Option<OnionReturn>), Error> {
+        let decrypted = open_precomputed(&self.payload, &self.nonce, &symmetric_key)
             .map_err(|e| {
                 debug!("Decrypting OnionReturn failed!");
                 Error::new(ErrorKind::Other,
