@@ -185,6 +185,14 @@ pub fn increment_nonce_number(mut nonce: &mut Nonce, num: usize) {
     }
 }
 
+/// Create `PrecomputedKey` filling it with random bytes.
+pub fn new_symmetric_key() -> PrecomputedKey {
+    let mut buf = [0; PRECOMPUTEDKEYBYTES];
+    randombytes_into(&mut buf);
+    // can not fail since the buffer has correct length
+    PrecomputedKey::from_slice(&buf).unwrap()
+}
+
 from_bytes!(PublicKey, map_opt!(take!(PUBLICKEYBYTES), PublicKey::from_slice));
 
 from_bytes!(SecretKey, map_opt!(take!(SECRETKEYBYTES), SecretKey::from_slice));

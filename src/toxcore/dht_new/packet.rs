@@ -1084,7 +1084,70 @@ mod test {
         quickcheck(with_packet as fn(DhtPacket));
     }
 
+    encode_decode_test!(
+        ping_request_payload_encode_decode,
+        PingRequestPayload { id: 42 }
+    );
+
+    encode_decode_test!(
+        ping_response_payload_encode_decode,
+        PingResponsePayload { id: 42 }
+    );
+
+    encode_decode_test!(
+        nodes_request_payload_encode_decode,
+        NodesRequestPayload { pk: gen_keypair().0, id: 42 }
+    );
+
+    encode_decode_test!(
+        nodes_response_payload_encode_decode,
+        NodesResponsePayload { nodes: vec![
+            PackedNode::new(false, SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
+        ], id: 42 }
+    );
+
     macro_rules! dht_packet_encode_decode (
+        ($test:ident, $packet:ident) => (
+            encode_decode_test!(
+                $test,
+                $packet {
+                    pk: gen_keypair().0,
+                    nonce: gen_nonce(),
+                    payload: vec![42; 123],
+                }
+            );
+        )
+    );
+
+    dht_packet_encode_decode!(ping_request_encode_decode, PingRequest);
+
+    dht_packet_encode_decode!(ping_response_encode_decode, PingResponse);
+
+    dht_packet_encode_decode!(nodes_request_encode_decode, NodesRequest);
+
+    dht_packet_encode_decode!(nodes_response_encode_decode, NodesResponse);
+
+    encode_decode_test!(
+        nat_ping_request_payload_encode_decode,
+        DhtRequestPayload::NatPingRequest(NatPingRequest { id: 42 })
+    );
+
+    encode_decode_test!(
+        nat_ping_response_payload_encode_decode,
+        DhtRequestPayload::NatPingResponse(NatPingResponse { id: 42 })
+    );
+
+    encode_decode_test!(
+        dht_request_encode_decode,
+        DhtRequest {
+            rpk: gen_keypair().0,
+            spk: gen_keypair().0,
+            nonce: gen_nonce(),
+            payload: vec![42; 123],
+        }
+    );
+
+    macro_rules! dht_packet_encrypt_decrypt (
         ($test:ident, $packet:ident, $payload:expr) => (
             #[test]
             fn $test() {
@@ -1094,54 +1157,38 @@ mod test {
                 let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
                 let payload = $payload;
                 // encode payload with shared secret
-                let dht_packet_value = $packet::new(&shared_secret, &alice_pk, payload.clone());
-                // create dht_packet
-                let dht_packet = DhtPacket::$packet(dht_packet_value.clone());
-                // serialize dht packet to bytes
-                let mut buf = [0; MAX_DHT_PACKET_SIZE];
-                let (_, size) = dht_packet.to_bytes((&mut buf, 0)).unwrap();
-                // deserialize dht packet from bytes
-                let (_, decoded_dht_packet) = DhtPacket::from_bytes(&buf[..size]).unwrap();
-                // packets should be equal
-                assert_eq!(decoded_dht_packet, dht_packet);
-                // get exact packet value from packet enum
-                let decoded_dht_packet_value = match decoded_dht_packet {
-                    DhtPacket::$packet(decoded_dht_packet_value) => decoded_dht_packet_value,
-                    _ => unreachable!("should be {}", stringify!($packet))
-                };
-                // packets should be equal
-                assert_eq!(decoded_dht_packet_value, dht_packet_value);
+                let dht_packet = $packet::new(&shared_secret, &alice_pk, payload.clone());
                 // try to decode payload with eve's secret key
-                let decoded_payload = decoded_dht_packet_value.get_payload(&eve_sk);
+                let decoded_payload = dht_packet.get_payload(&eve_sk);
                 assert!(decoded_payload.is_err());
                 // decode payload with bob's secret key
-                let decoded_payload = decoded_dht_packet_value.get_payload(&bob_sk).unwrap();
+                let decoded_payload = dht_packet.get_payload(&bob_sk).unwrap();
                 // payloads should be equal
                 assert_eq!(decoded_payload, payload);
             }
         )
     );
 
-    dht_packet_encode_decode!(
-        ping_request_encode_decode,
+    dht_packet_encrypt_decrypt!(
+        ping_request_payload_encrypt_decrypt,
         PingRequest,
         PingRequestPayload { id: 42 }
     );
 
-    dht_packet_encode_decode!(
-        ping_response_encode_decode,
+    dht_packet_encrypt_decrypt!(
+        ping_response_payload_encrypt_decrypt,
         PingResponse,
         PingResponsePayload { id: 42 }
     );
 
-    dht_packet_encode_decode!(
-        nodes_request_encode_decode,
+    dht_packet_encrypt_decrypt!(
+        nodes_request_payload_encrypt_decrypt,
         NodesRequest,
         NodesRequestPayload { pk: gen_keypair().0, id: 42 }
     );
 
-    dht_packet_encode_decode!(
-        nodes_response_encode_decode,
+    dht_packet_encrypt_decrypt!(
+        nodes_response_payload_encrypt_decrypt,
         NodesResponse,
         NodesResponsePayload { nodes: vec![
             PackedNode::new(false, SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
@@ -1149,7 +1196,7 @@ mod test {
     );
 
     #[test]
-    fn dht_request_encode_decode() {
+    fn dht_request_payload_encrypt_decrypt() {
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, bob_sk) = gen_keypair();
         let (_eve_pk, eve_sk) = gen_keypair();
@@ -1161,27 +1208,11 @@ mod test {
         for payload in test_payloads {
             // encode payload with shared secret
             let dht_request = DhtRequest::new(&shared_secret, &bob_pk, &alice_pk, payload.clone());
-            // create dht_packet
-            let dht_packet = DhtPacket::DhtRequest(dht_request.clone());
-            // serialize dht packet to bytes
-            let mut buf = [0; MAX_DHT_PACKET_SIZE];
-            let (_, size) = dht_packet.to_bytes((&mut buf, 0)).unwrap();
-            // deserialize dht packet from bytes
-            let (_, decoded_dht_packet) = DhtPacket::from_bytes(&buf[..size]).unwrap();
-            // packets should be equal
-            assert_eq!(decoded_dht_packet, dht_packet);
-            // get exact packet value from packet enum
-            let decoded_dht_request = match decoded_dht_packet {
-                DhtPacket::DhtRequest(decoded_dht_request) => decoded_dht_request,
-                _ => unreachable!("should be DhtRequest")
-            };
-            // requests should be equal
-            assert_eq!(decoded_dht_request, dht_request);
             // try to decode payload with eve's secret key
-            let decoded_payload = decoded_dht_request.get_payload(&eve_sk);
+            let decoded_payload = dht_request.get_payload(&eve_sk);
             assert!(decoded_payload.is_err());
             // decode payload with bob's secret key
-            let decoded_payload = decoded_dht_request.get_payload(&bob_sk).unwrap();
+            let decoded_payload = dht_request.get_payload(&bob_sk).unwrap();
             // payloads should be equal
             assert_eq!(decoded_payload, payload);
         }

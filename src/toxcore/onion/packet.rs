@@ -134,21 +134,45 @@ impl ToBytes for OnionReturn {
 }
 
 impl OnionReturn {
+    fn inner_to_bytes<'a>(ip_port: &IpPort, inner: Option<&OnionReturn>, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_call!(|buf, ip_port| IpPort::to_bytes(ip_port, buf), ip_port) >>
+            gen_call!(|buf, inner| match inner {
+                Some(inner) => OnionReturn::to_bytes(inner, buf),
+                None => Ok(buf)
+            }, inner)
+        )
+    }
+
     named!(inner_from_bytes<(IpPort, Option<OnionReturn>)>, do_parse!(
-        ip_addr: call!(IpPort::from_bytes) >>
+        ip_port: call!(IpPort::from_bytes) >>
         rest_len: rest_len >>
         inner: cond!(rest_len > 0, OnionReturn::from_bytes) >>
-        (ip_addr, inner)
+        (ip_port, inner)
     ));
-    /** Decrypt payload and try to parse it as `IpPort` with possibly inner `OnionReturn`.
+
+    /// Create new `OnionReturn` object using symmetric key for encryption.
+    pub fn new(symmetric_key: &PrecomputedKey, ip_port: &IpPort, inner: Option<&OnionReturn>) -> OnionReturn {
+        let nonce = gen_nonce();
+        let mut buf = [0; ONION_RETURN_2_SIZE + SIZE_IPPORT];
+        let (_, size) = OnionReturn::inner_to_bytes(ip_port, inner, (&mut buf, 0)).unwrap();
+        let payload = seal_precomputed(&buf[..size], &nonce, symmetric_key);
+
+        OnionReturn {
+            nonce: nonce,
+            payload: payload,
+        }
+    }
+
+    /** Decrypt payload with symmetric key and try to parse it as `IpPort` with possibly inner `OnionReturn`.
 
     Returns `Error` in case of failure:
 
     - fails to decrypt
     - fails to parse as `IpPort` with possibly inner `OnionReturn`
     */
-    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<(IpPort, Option<OnionReturn>), Error> {
-        let decrypted = open_precomputed(&self.payload, &self.nonce, &shared_secret)
+    pub fn get_payload(&self, symmetric_key: &PrecomputedKey) -> Result<(IpPort, Option<OnionReturn>), Error> {
+        let decrypted = open_precomputed(&self.payload, &self.nonce, &symmetric_key)
             .map_err(|e| {
                 debug!("Decrypting OnionReturn failed!");
                 Error::new(ErrorKind::Other,
@@ -735,5 +759,218 @@ impl ToBytes for OnionResponse1 {
             gen_call!(|buf, onion_return| OnionReturn::to_bytes(onion_return, buf), &self.onion_return) >>
             gen_slice!(self.payload)
         )
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - NONCEBYTES;
+    const ONION_RETURN_2_PAYLOAD_SIZE: usize = ONION_RETURN_2_SIZE - NONCEBYTES;
+    const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - NONCEBYTES;
+
+    encode_decode_test!(
+        ip_port_encode_decode,
+        IpPort {
+            ip_addr: "5.6.7.8".parse().unwrap(),
+            port: 12345
+        }
+    );
+
+    encode_decode_test!(
+        onion_return_encode_decode,
+        OnionReturn {
+            nonce: gen_nonce(),
+            payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
+        }
+    );
+
+    encode_decode_test!(
+        onion_request_0_encode_decode,
+        OnionRequest0 {
+            nonce: gen_nonce(),
+            temporary_pk: gen_keypair().0,
+            payload: vec![42, 123]
+        }
+    );
+
+    encode_decode_test!(
+        onion_request_1_encode_decode,
+        OnionRequest1 {
+            nonce: gen_nonce(),
+            temporary_pk: gen_keypair().0,
+            payload: vec![42, 123],
+            onion_return: OnionReturn {
+                nonce: gen_nonce(),
+                payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
+            }
+        }
+    );
+
+    encode_decode_test!(
+        onion_request_2_encode_decode,
+        OnionRequest2 {
+            nonce: gen_nonce(),
+            temporary_pk: gen_keypair().0,
+            payload: vec![42, 123],
+            onion_return: OnionReturn {
+                nonce: gen_nonce(),
+                payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
+            }
+        }
+    );
+
+    encode_decode_test!(
+        inner_announce_request_encode_decode,
+        InnerAnnounceRequest {
+            nonce: gen_nonce(),
+            pk: gen_keypair().0,
+            payload: vec![42, 123]
+        }
+    );
+
+    encode_decode_test!(
+        announce_request_encode_decode,
+        AnnounceRequest {
+            inner: InnerAnnounceRequest {
+                nonce: gen_nonce(),
+                pk: gen_keypair().0,
+                payload: vec![42, 123]
+            },
+            onion_return: OnionReturn {
+                nonce: gen_nonce(),
+                payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
+            }
+        }
+    );
+
+    encode_decode_test!(
+        inner_onion_data_request_encode_decode,
+        InnerOnionDataRequest {
+            destination_pk: gen_keypair().0,
+            nonce: gen_nonce(),
+            temporary_pk: gen_keypair().0,
+            payload: vec![42, 123]
+        }
+    );
+
+    encode_decode_test!(
+        onion_data_request_encode_decode,
+        OnionDataRequest {
+            inner: InnerOnionDataRequest {
+                destination_pk: gen_keypair().0,
+                nonce: gen_nonce(),
+                temporary_pk: gen_keypair().0,
+                payload: vec![42, 123]
+            },
+            onion_return: OnionReturn {
+                nonce: gen_nonce(),
+                payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
+            }
+        }
+    );
+
+    encode_decode_test!(
+        onion_data_response_encode_decode,
+        OnionDataResponse {
+            nonce: gen_nonce(),
+            temporary_pk: gen_keypair().0,
+            payload: vec![42, 123]
+        }
+    );
+
+    encode_decode_test!(
+        announce_response_encode_decode,
+        AnnounceResponse {
+            sendback_data: 12345,
+            nonce: gen_nonce(),
+            payload: vec![42, 123]
+        }
+    );
+
+    encode_decode_test!(
+        onion_response_3_encode_decode,
+        OnionResponse3 {
+            onion_return: OnionReturn {
+                nonce: gen_nonce(),
+                payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
+            },
+            payload: vec![42, 123]
+        }
+    );
+
+    encode_decode_test!(
+        onion_response_2_encode_decode,
+        OnionResponse2 {
+            onion_return: OnionReturn {
+                nonce: gen_nonce(),
+                payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
+            },
+            payload: vec![42, 123]
+        }
+    );
+
+    encode_decode_test!(
+        onion_response_1_encode_decode,
+        OnionResponse1 {
+            onion_return: OnionReturn {
+                nonce: gen_nonce(),
+                payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
+            },
+            payload: vec![42, 123]
+        }
+    );
+
+    #[test]
+    fn onion_return_encrypt_decrypt() {
+        let alice_symmetric_key = new_symmetric_key();
+        let bob_symmetric_key = new_symmetric_key();
+        let eve_symmetric_key = new_symmetric_key();
+        // alice encrypt
+        let ip_port_1 = IpPort {
+            ip_addr: "5.6.7.8".parse().unwrap(),
+            port: 12345
+        };
+        let onion_return_1 = OnionReturn::new(&alice_symmetric_key, &ip_port_1, None);
+        // bob encrypt
+        let ip_port_2 = IpPort {
+            ip_addr: "7.8.5.6".parse().unwrap(),
+            port: 54321
+        };
+        let onion_return_2 = OnionReturn::new(&bob_symmetric_key, &ip_port_2, Some(&onion_return_1));
+        // eve can't decrypt return addresses
+        assert!(onion_return_1.get_payload(&eve_symmetric_key).is_err());
+        assert!(onion_return_2.get_payload(&eve_symmetric_key).is_err());
+        // bob can decrypt it's return address
+        let (decrypted_ip_port_2, decrypted_onion_return_1) = onion_return_2.get_payload(&bob_symmetric_key).unwrap();
+        assert_eq!(decrypted_ip_port_2, ip_port_2);
+        assert_eq!(decrypted_onion_return_1.unwrap(), onion_return_1);
+        // alice can decrypt it's return address
+        let (decrypted_ip_port_1, none) = onion_return_1.get_payload(&alice_symmetric_key).unwrap();
+        assert_eq!(decrypted_ip_port_1, ip_port_1);
+        assert!(none.is_none());
+    }
+
+    #[test]
+    fn onion_return_decrypt_invalid() {
+        let symmetric_key = new_symmetric_key();
+        let nonce = gen_nonce();
+        // Try long invalid array
+        let invalid_payload = [42; 123];
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_onion_return = OnionReturn {
+            nonce: nonce,
+            payload: invalid_payload_encoded
+        };
+        assert!(invalid_onion_return.get_payload(&symmetric_key).is_err());
+        // Try short incomplete
+        let invalid_payload = [2];
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_onion_return = OnionReturn {
+            nonce: nonce,
+            payload: invalid_payload_encoded
+        };
+        assert!(invalid_onion_return.get_payload(&symmetric_key).is_err());
     }
 }

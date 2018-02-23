@@ -110,6 +110,7 @@ Length     | Content
 variable   | Encrypted payload
 
 */
+#[derive(Debug, PartialEq, Clone)]
 pub struct EncryptedPacket {
     /// Encrypted payload
     pub payload: Vec<u8>
@@ -606,4 +607,100 @@ impl ToBytes for Data {
             gen_slice!(self.data)
         )
     }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    encode_decode_test!(
+        encrypted_packet_encode_decode,
+        EncryptedPacket {
+            payload: vec![42, 123]
+        }
+    );
+
+    encode_decode_test!(
+        route_request_encode_decode,
+        RouteRequest {
+            pk: gen_keypair().0
+        }
+    );
+
+    encode_decode_test!(
+        route_response_encode_decode,
+        RouteResponse {
+            connection_id: 17,
+            pk: gen_keypair().0
+        }
+    );
+
+    encode_decode_test!(
+        connect_notification_encode_decode,
+        ConnectNotification {
+            connection_id: 17
+        }
+    );
+
+    encode_decode_test!(
+        disconnect_notification_encode_decode,
+        DisconnectNotification {
+            connection_id: 17
+        }
+    );
+
+    encode_decode_test!(
+        ping_request_encode_decode,
+        PingRequest {
+            ping_id: 12345
+        }
+    );
+
+    encode_decode_test!(
+        pong_response_encode_decode,
+        PongResponse {
+            ping_id: 12345
+        }
+    );
+
+    encode_decode_test!(
+        oob_send_encode_decode,
+        OobSend {
+            destination_pk: gen_keypair().0,
+            data: vec![42, 123]
+        }
+    );
+
+    encode_decode_test!(
+        oob_receive_encode_decode,
+        OobReceive {
+            sender_pk: gen_keypair().0,
+            data: vec![42, 123]
+        }
+    );
+
+    encode_decode_test!(
+        onion_request_encode_decode,
+        OnionRequest {
+            nonce: gen_nonce(),
+            addr: "5.6.7.8".parse().unwrap(),
+            port: 12345,
+            data: vec![42, 123]
+        }
+    );
+
+    encode_decode_test!(
+        onion_response_encode_decode,
+        OnionResponse {
+            data: vec![42, 123]
+        }
+    );
+
+    encode_decode_test!(
+        data_encode_decode,
+        Data {
+            connection_id: 17,
+            data: vec![42, 123]
+        }
+    );
 }
