@@ -46,6 +46,13 @@ pub const ONION_RETURN_2_SIZE: usize = NONCEBYTES + SIZE_IPPORT + MACBYTES + ONI
 /// Size of third `OnionReturn` struct with two inner `OnionReturn`s.
 pub const ONION_RETURN_3_SIZE: usize = NONCEBYTES + SIZE_IPPORT + MACBYTES + ONION_RETURN_2_SIZE; // 177
 
+/// The minimum size of onion encrypted payload together with temporary public key.
+pub const ONION_SEND_BASE_SIZE: usize = PUBLICKEYBYTES + SIZE_IPPORT + MACBYTES; // 67
+
+/// The maximum size of onion packet including public key, nonce, packet kind
+/// byte, onion return.
+pub const ONION_MAX_PACKET_SIZE: usize = 1400;
+
 /// Parser that returns the length of the remaining input.
 pub fn rest_len(input: &[u8]) -> IResult<&[u8], usize> {
     IResult::Done(input, input.len())
