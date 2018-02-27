@@ -81,6 +81,7 @@ fn section_kind_parse_bytes_test() {
     quickcheck(with_bytes as fn(Vec<u8>) -> TestResult);
 
     // correct
+    with_bytes(vec![]);
     with_bytes(vec![1, 0]);
     with_bytes(vec![2, 0]);
     with_bytes(vec![3, 0]);
