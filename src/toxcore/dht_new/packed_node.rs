@@ -153,7 +153,7 @@ impl PackedNode {
 
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use std::net::{SocketAddrV4, SocketAddrV6};
 

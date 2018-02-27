@@ -88,7 +88,7 @@ impl UdpCodec for DhtCodec {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use tokio_core::net::UdpCodec;
     use std::net::SocketAddr;
 

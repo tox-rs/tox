@@ -770,7 +770,7 @@ impl ToBytes for OnionResponse1 {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - NONCEBYTES;
