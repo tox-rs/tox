@@ -25,6 +25,7 @@
 
 use toxcore::binary_io_new::*;
 use toxcore::crypto_core::*;
+use toxcore::onion::packet::IPV4_PADDING_SIZE;
 
 use nom::{be_u8, be_u16, be_u64, le_u8, rest};
 use std::net::{
@@ -466,10 +467,6 @@ impl ToBytes for OobReceive {
         )
     }
 }
-
-/// IPv4 is padded with 12 bytes of zeroes so that both IPv4 and
-/// IPv6 have the same stored size.
-pub const IPV4_PADDING_SIZE: usize = 12;
 
 /** Sent by client to server.
 The server will pack data from this request to `Onion Request 1` packet and send
