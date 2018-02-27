@@ -2,6 +2,7 @@
     Copyright (C) 2013 Tox project All Rights Reserved.
     Copyright © 2016-2017 Zetok Zalbavar <zexavexxe@gmail.com>
     Copyright © 2018 Namsoo CHO <nscho66@gmail.com>
+    Copyright © 2018 Evgeny Kurnevsky <kurnevsky@gmail.com>
 
     This file is part of Tox.
 
