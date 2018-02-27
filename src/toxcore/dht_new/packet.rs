@@ -785,7 +785,7 @@ impl ToBytes for NatPingResponse {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use std::net::SocketAddr;
     use toxcore::dht_new::codec::*;

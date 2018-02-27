@@ -502,7 +502,7 @@ impl<'a> Iterator for KbucketIter<'a> {
 #[cfg(test)]
 extern crate rand;
 #[cfg(test)]
-mod test {
+mod tests {
     use super::rand::chacha::ChaChaRng;
     use super::*;
     use quickcheck::{Arbitrary, Gen, quickcheck, StdGen, TestResult};
