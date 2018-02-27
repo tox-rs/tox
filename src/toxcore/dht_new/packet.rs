@@ -791,6 +791,10 @@ mod tests {
     use std::net::SocketAddr;
     use toxcore::dht_new::codec::*;
 
+    const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - NONCEBYTES;
+    const ONION_RETURN_2_PAYLOAD_SIZE: usize = ONION_RETURN_2_SIZE - NONCEBYTES;
+    const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - NONCEBYTES;
+
     use quickcheck::{Arbitrary, Gen, quickcheck};
 
     impl PingRequest {
@@ -1111,11 +1115,11 @@ mod tests {
         ($test:ident, $packet:ident) => (
             encode_decode_test!(
                 $test,
-                $packet {
+                DhtPacket::$packet($packet {
                     pk: gen_keypair().0,
                     nonce: gen_nonce(),
                     payload: vec![42; 123],
-                }
+                })
             );
         )
     );
@@ -1140,12 +1144,129 @@ mod tests {
 
     encode_decode_test!(
         dht_request_encode_decode,
-        DhtRequest {
+        DhtPacket::DhtRequest(DhtRequest {
             rpk: gen_keypair().0,
             spk: gen_keypair().0,
             nonce: gen_nonce(),
             payload: vec![42; 123],
-        }
+        })
+    );
+
+    encode_decode_test!(
+        onion_request_0_encode_decode,
+        DhtPacket::OnionRequest0(OnionRequest0 {
+            nonce: gen_nonce(),
+            temporary_pk: gen_keypair().0,
+            payload: vec![42, 123]
+        })
+    );
+
+    encode_decode_test!(
+        onion_request_1_encode_decode,
+        DhtPacket::OnionRequest1(OnionRequest1 {
+            nonce: gen_nonce(),
+            temporary_pk: gen_keypair().0,
+            payload: vec![42, 123],
+            onion_return: OnionReturn {
+                nonce: gen_nonce(),
+                payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
+            }
+        })
+    );
+
+    encode_decode_test!(
+        onion_request_2_encode_decode,
+        DhtPacket::OnionRequest2(OnionRequest2 {
+            nonce: gen_nonce(),
+            temporary_pk: gen_keypair().0,
+            payload: vec![42, 123],
+            onion_return: OnionReturn {
+                nonce: gen_nonce(),
+                payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
+            }
+        })
+    );
+
+    encode_decode_test!(
+        announce_request_encode_decode,
+        DhtPacket::AnnounceRequest(AnnounceRequest {
+            inner: InnerAnnounceRequest {
+                nonce: gen_nonce(),
+                pk: gen_keypair().0,
+                payload: vec![42, 123]
+            },
+            onion_return: OnionReturn {
+                nonce: gen_nonce(),
+                payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
+            }
+        })
+    );
+
+    encode_decode_test!(
+        onion_data_request_encode_decode,
+        DhtPacket::OnionDataRequest(OnionDataRequest {
+            inner: InnerOnionDataRequest {
+                destination_pk: gen_keypair().0,
+                nonce: gen_nonce(),
+                temporary_pk: gen_keypair().0,
+                payload: vec![42, 123]
+            },
+            onion_return: OnionReturn {
+                nonce: gen_nonce(),
+                payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
+            }
+        })
+    );
+
+    encode_decode_test!(
+        onion_data_response_encode_decode,
+        DhtPacket::OnionDataResponse(OnionDataResponse {
+            nonce: gen_nonce(),
+            temporary_pk: gen_keypair().0,
+            payload: vec![42, 123]
+        })
+    );
+
+    encode_decode_test!(
+        announce_response_encode_decode,
+        DhtPacket::AnnounceResponse(AnnounceResponse {
+            sendback_data: 12345,
+            nonce: gen_nonce(),
+            payload: vec![42, 123]
+        })
+    );
+
+    encode_decode_test!(
+        onion_response_3_encode_decode,
+        DhtPacket::OnionResponse3(OnionResponse3 {
+            onion_return: OnionReturn {
+                nonce: gen_nonce(),
+                payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
+            },
+            payload: vec![42, 123]
+        })
+    );
+
+    encode_decode_test!(
+        onion_response_2_encode_decode,
+        DhtPacket::OnionResponse2(OnionResponse2 {
+            onion_return: OnionReturn {
+                nonce: gen_nonce(),
+                payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
+            },
+            payload: vec![42, 123]
+        })
+    );
+
+    encode_decode_test!(
+        onion_response_1_encode_decode,
+        DhtPacket::OnionResponse1(OnionResponse1 {
+            onion_return: OnionReturn {
+                nonce: gen_nonce(),
+                payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
+            },
+            payload: vec![42, 123]
+        })
     );
 
     macro_rules! dht_packet_encrypt_decrypt (
