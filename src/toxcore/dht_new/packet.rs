@@ -654,9 +654,9 @@ impl FromBytes for DhtRequest {
         nonce: call!(Nonce::from_bytes) >>
         payload: map!(rest, |bytes| bytes.to_vec() ) >>
         (DhtRequest {
-            rpk: rpk, 
-            spk: spk, 
-            nonce: nonce, 
+            rpk: rpk,
+            spk: spk,
+            nonce: nonce,
             payload: payload
         })
     ));

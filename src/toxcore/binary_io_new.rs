@@ -64,7 +64,7 @@ impl ToBytes for IpAddr {
 }
 
 impl FromBytes for Ipv4Addr {
-    named!(from_bytes<Ipv4Addr>, map!(count!(le_u8, 4), 
+    named!(from_bytes<Ipv4Addr>, map!(count!(le_u8, 4),
         |v| Ipv4Addr::new(v[0], v[1], v[2], v[3])
     ));
 }
@@ -76,13 +76,13 @@ impl ToBytes for Ipv4Addr {
             gen_be_u8!(o[0]) >>
             gen_be_u8!(o[1]) >>
             gen_be_u8!(o[2]) >>
-            gen_be_u8!(o[3]) 
+            gen_be_u8!(o[3])
         )
     }
 }
 
 impl FromBytes for Ipv6Addr {
-    named!(from_bytes<Ipv6Addr>, map!(count!(le_u16, 8), 
+    named!(from_bytes<Ipv6Addr>, map!(count!(le_u16, 8),
         |v| Ipv6Addr::new(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7])
     ));
 }
@@ -98,7 +98,7 @@ impl ToBytes for Ipv6Addr {
             gen_le_u16!(s[4]) >>
             gen_le_u16!(s[5]) >>
             gen_le_u16!(s[6]) >>
-            gen_le_u16!(s[7]) 
+            gen_le_u16!(s[7])
         )
     }
 }
