@@ -987,6 +987,46 @@ mod tests {
         assert!(handle_res.is_err());
     }
     #[test]
+    fn handle_onion_request_not_enough_data() {
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
+
+        let (client_1, _rx_1) = create_random_client();
+        let client_pk_1 = client_1.pk();
+        server.insert(client_1);
+
+        let request = OnionRequest {
+            nonce: gen_nonce(),
+            addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            port: 12345,
+            data: [13; 100].to_vec()
+        };
+        let handle_res = server
+            .handle_packet(&client_pk_1, Packet::OnionRequest(request.clone()))
+            .wait();
+        assert!(handle_res.is_err());
+    }
+    #[test]
+    fn handle_onion_request_loooong_data() {
+        let (tcp_onion_sink, _) = mpsc::unbounded();
+        let server = Server::new(tcp_onion_sink);
+
+        let (client_1, _rx_1) = create_random_client();
+        let client_pk_1 = client_1.pk();
+        server.insert(client_1);
+
+        let request = OnionRequest {
+            nonce: gen_nonce(),
+            addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            port: 12345,
+            data: [13; 1500].to_vec()
+        };
+        let handle_res = server
+            .handle_packet(&client_pk_1, Packet::OnionRequest(request.clone()))
+            .wait();
+        assert!(handle_res.is_err());
+    }
+    #[test]
     fn handle_onion_response() {
         let (tcp_onion_sink, _) = mpsc::unbounded();
         let server = Server::new(tcp_onion_sink);
