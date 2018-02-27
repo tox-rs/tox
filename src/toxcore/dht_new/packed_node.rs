@@ -21,7 +21,7 @@
 
 // ↓ FIXME expand doc
 /*! DHT part of the toxcore.
-    * takes care of the PackedNode 
+    * takes care of the PackedNode
 */
 
 use nom::{le_u8, be_u16};
