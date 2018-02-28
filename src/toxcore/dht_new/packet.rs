@@ -3,6 +3,7 @@
     Copyright © 2016-2017 Zetok Zalbavar <zexavexxe@gmail.com>
     Copyright © 2018 Namsoo CHO <nscho66@gmail.com>
     Copyright © 2018 Evgeny Kurnevsky <kurnevsky@gmail.com>
+    Copyright © 2018 Roman Proskuryakov <humbug@deeptown.org>
 
     This file is part of Tox.
 
@@ -55,7 +56,8 @@ pub enum DhtPacket {
     // TODO: CryptoData
     /// [`DhtRequest`](./struct.DhtRequest.html) structure.
     DhtRequest(DhtRequest),
-    // TODO: LanDiscovery
+    /// [`LanDiscovery`](./struct.LanDiscovery.html) structure.
+    LanDiscovery(LanDiscovery),
     /// [`OnionRequest0`](../onion/struct.OnionRequest0.html) structure.
     OnionRequest0(OnionRequest0),
     /// [`OnionRequest1`](../onion/struct.OnionRequest1.html) structure.
@@ -87,6 +89,7 @@ impl ToBytes for DhtPacket {
             DhtPacket::NodesRequest(ref p) => p.to_bytes(buf),
             DhtPacket::NodesResponse(ref p) => p.to_bytes(buf),
             DhtPacket::DhtRequest(ref p) => p.to_bytes(buf),
+            DhtPacket::LanDiscovery(ref p) => p.to_bytes(buf),
             DhtPacket::OnionRequest0(ref p) => p.to_bytes(buf),
             DhtPacket::OnionRequest1(ref p) => p.to_bytes(buf),
             DhtPacket::OnionRequest2(ref p) => p.to_bytes(buf),
@@ -108,6 +111,7 @@ impl FromBytes for DhtPacket {
         map!(NodesRequest::from_bytes, DhtPacket::NodesRequest) |
         map!(NodesResponse::from_bytes, DhtPacket::NodesResponse) |
         map!(DhtRequest::from_bytes, DhtPacket::DhtRequest) |
+        map!(LanDiscovery::from_bytes, DhtPacket::LanDiscovery) |
         map!(OnionRequest0::from_bytes, DhtPacket::OnionRequest0) |
         map!(OnionRequest1::from_bytes, DhtPacket::OnionRequest1) |
         map!(OnionRequest2::from_bytes, DhtPacket::OnionRequest2) |
@@ -761,6 +765,45 @@ impl ToBytes for NatPingResponse {
     }
 }
 
+/** LanDiscovery packet struct.
+LanDiscovery packets contain the DHT public key of the sender. When a LanDiscovery packet
+is received, a NodesRequest packet will be sent to the sender of the packet. This means that
+the DHT instance will bootstrap itself to every peer from which it receives one of these packet.
+Through this mechanism, Tox clients will bootstrap themselve
+ automatically from other Tox clients running on the local network.
+
+
+Serialized form:
+
+Length | Content
+------ | ------
+`1`    | `0x21`
+`32`   | Public Key
+
+*/
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LanDiscovery {
+    /// DHT public key of the sender
+    pub pk: PublicKey,
+}
+
+impl ToBytes for LanDiscovery {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_be_u8!(0x21) >>
+            gen_slice!(self.pk.as_ref())
+        )
+    }
+}
+
+impl FromBytes for LanDiscovery {
+    named!(from_bytes<LanDiscovery>, do_parse!(
+        tag!("\x21") >>
+        pk: call!(PublicKey::from_bytes) >>
+        (LanDiscovery { pk })
+    ));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1125,6 +1168,13 @@ mod tests {
             spk: gen_keypair().0,
             nonce: gen_nonce(),
             payload: vec![42; 123],
+        })
+    );
+
+    encode_decode_test!(
+        lan_discovery_encode_decode,
+        DhtPacket::LanDiscovery(LanDiscovery {
+            pk: gen_keypair().0
         })
     );
 
