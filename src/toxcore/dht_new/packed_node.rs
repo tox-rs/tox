@@ -102,7 +102,7 @@ impl FromBytes for PackedNode {
         port: be_u16 >>
         saddr: value!(SocketAddr::new(addr, port)) >>
         pk: call!(PublicKey::from_bytes) >>
-        (PackedNode { saddr: saddr, pk: pk })
+        (PackedNode { saddr, pk })
     ));
 }
 
@@ -118,10 +118,7 @@ impl PackedNode {
         trace!(target: "PackedNode", "With args: udp: {}, saddr: {:?}, PK: {:?}",
             udp, &saddr, pk);
 
-        PackedNode {
-            saddr: saddr,
-            pk: *pk,
-        }
+        PackedNode { saddr, pk: *pk }
     }
 
     /// Get an IP type from the `PackedNode`.

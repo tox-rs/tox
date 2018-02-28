@@ -66,7 +66,7 @@ impl Server {
         Server {
             connected_clients: Rc::new(RefCell::new(HashMap::new())),
             keys_by_addr: Rc::new(RefCell::new(HashMap::new())),
-            onion_sink: onion_sink
+            onion_sink
         }
     }
     /** Insert the client into connected_clients. Do nothing else.

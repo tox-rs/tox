@@ -38,7 +38,7 @@ pub struct Codec {
 impl Codec {
     /// create a new Codec with the given Channel
     pub fn new(channel: Channel) -> Codec {
-        Codec { channel: channel }
+        Codec { channel }
     }
 }
 

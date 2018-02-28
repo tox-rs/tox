@@ -190,11 +190,8 @@ impl ToxId {
     */
     pub fn new(pk: PublicKey) -> Self {
         let nospam = NoSpam::new();
-        ToxId {
-            pk: pk,
-            nospam: nospam,
-            checksum: Self::checksum(&pk, &nospam),
-        }
+        let checksum = Self::checksum(&pk, &nospam);
+        ToxId { pk, nospam, checksum }
     }
 
     /** Change `NoSpam`. If provided, change to provided value. If not provided
@@ -258,11 +255,7 @@ from_bytes!(ToxId, do_parse!(
     pk: call!(PublicKey::parse_bytes) >>
     nospam: call!(NoSpam::parse_bytes) >>
     checksum: map!(take!(CHECKSUMBYTES), |bytes| { [bytes[0], bytes[1]] }) >>
-    (ToxId {
-        pk: pk,
-        nospam: nospam,
-        checksum: checksum
-    })
+    (ToxId { pk, nospam, checksum })
 ));
 
 /** E.g.

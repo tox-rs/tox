@@ -482,7 +482,7 @@ impl<'a> Iterator for KbucketIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.pos_b < self.buckets.len() {
-            match self.buckets[self.pos_b].nodes.iter().nth(self.pos_pn) {
+            match self.buckets[self.pos_b].nodes.get(self.pos_pn) {
                 Some(s) => {
                     self.pos_pn += 1;
                     Some(s)

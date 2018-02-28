@@ -95,7 +95,7 @@ impl Session {
     pub fn new() -> Session {
         let (pk, sk) = gen_keypair();
         let nonce = gen_nonce();
-        Session { pk: pk, sk: sk, nonce: nonce }
+        Session { pk, sk, nonce }
     }
 
     /// Get the PK of the Session

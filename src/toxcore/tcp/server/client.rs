@@ -66,9 +66,9 @@ impl Client {
     pub fn new(tx: mpsc::UnboundedSender<Packet>, pk: &PublicKey, ip_addr: IpAddr, port: u16) -> Client {
         Client {
             pk: *pk,
-            ip_addr: ip_addr,
-            port: port,
-            tx: tx,
+            ip_addr,
+            port,
+            tx,
             links: [None; 240],
             ping_id: 0
         }
@@ -177,66 +177,49 @@ impl Client {
     */
     pub fn send_route_response(&self, pk: &PublicKey, connection_id: u8) -> IoFuture<()> {
         self.send(
-            Packet::RouteResponse(RouteResponse {
-                connection_id: connection_id,
-                pk: *pk
-            })
+            Packet::RouteResponse(RouteResponse { connection_id, pk: *pk })
         )
     }
     /** Construct ConnectNotification and send it to Client ignoring IO error
     */
     pub fn send_connect_notification(&self, connection_id: u8) -> IoFuture<()> {
         self.send_ignore_error(
-            Packet::ConnectNotification(ConnectNotification {
-                connection_id: connection_id
-            })
+            Packet::ConnectNotification(ConnectNotification { connection_id })
         )
     }
     /** Construct DisconnectNotification and send it to Client ignoring IO error
     */
     pub fn send_disconnect_notification(&self, connection_id: u8) -> IoFuture<()> {
         self.send_ignore_error(
-            Packet::DisconnectNotification(DisconnectNotification {
-                connection_id: connection_id
-            })
+            Packet::DisconnectNotification(DisconnectNotification { connection_id })
         )
     }
     /** Construct PongResponse and send it to Client
     */
     pub fn send_pong_response(&self, ping_id: u64) -> IoFuture<()> {
         self.send(
-            Packet::PongResponse(PongResponse {
-                ping_id: ping_id
-            })
+            Packet::PongResponse(PongResponse { ping_id })
         )
     }
     /** Construct OobReceive and send it to Client ignoring IO error
     */
     pub fn send_oob(&self, sender_pk: &PublicKey, data: Vec<u8>) -> IoFuture<()> {
         self.send_ignore_error(
-            Packet::OobReceive(OobReceive {
-                sender_pk: *sender_pk,
-                data: data
-            })
+            Packet::OobReceive(OobReceive { sender_pk: *sender_pk, data })
         )
     }
     /** Construct OnionResponse and send it to Client
     */
     pub fn send_onion_response(&self, data: Vec<u8>) -> IoFuture<()> {
         self.send(
-            Packet::OnionResponse(OnionResponse {
-                data: data
-            })
+            Packet::OnionResponse(OnionResponse { data })
         )
     }
     /** Construct Data and send it to Client
     */
     pub fn send_data(&self, connection_id: u8, data: Vec<u8>) -> IoFuture<()> {
         self.send(
-            Packet::Data(Data {
-                connection_id: connection_id,
-                data: data
-            })
+            Packet::Data(Data { connection_id, data })
         )
     }
 }
