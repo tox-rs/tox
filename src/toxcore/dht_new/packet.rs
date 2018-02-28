@@ -157,11 +157,7 @@ impl FromBytes for PingRequest {
         pk: call!(PublicKey::from_bytes) >>
         nonce: call!(Nonce::from_bytes) >>
         payload: map!(rest, |bytes| bytes.to_vec() ) >>
-        (PingRequest {
-            pk: pk,
-            nonce: nonce,
-            payload: payload
-        })
+        (PingRequest { pk, nonce, payload })
     ));
 }
 
@@ -234,7 +230,7 @@ impl FromBytes for PingRequestPayload {
         tag!("\x00") >>
         id: be_u64 >>
         eof!() >>
-        (PingRequestPayload { id: id})
+        (PingRequestPayload { id })
     ));
 }
 
@@ -280,11 +276,7 @@ impl FromBytes for PingResponse {
         pk: call!(PublicKey::from_bytes) >>
         nonce: call!(Nonce::from_bytes) >>
         payload: map!(rest, |bytes| bytes.to_vec() ) >>
-        (PingResponse {
-            pk: pk,
-            nonce: nonce,
-            payload: payload
-        })
+        (PingResponse { pk, nonce, payload })
     ));
 }
 
@@ -357,7 +349,7 @@ impl FromBytes for PingResponsePayload {
         tag!("\x01") >>
         id: be_u64 >>
         eof!() >>
-        (PingResponsePayload { id: id })
+        (PingResponsePayload { id })
     ));
 }
 
@@ -403,11 +395,7 @@ impl FromBytes for NodesRequest {
         pk: call!(PublicKey::from_bytes) >>
         nonce: call!(Nonce::from_bytes) >>
         payload: map!(rest, |bytes| bytes.to_vec() ) >>
-        (NodesRequest {
-            pk: pk,
-            nonce: nonce,
-            payload: payload
-        })
+        (NodesRequest { pk, nonce, payload })
     ));
 }
 
@@ -481,7 +469,7 @@ impl FromBytes for NodesRequestPayload {
         pk: call!(PublicKey::from_bytes) >>
         id: be_u64 >>
         eof!() >>
-        (NodesRequestPayload { pk: pk, id: id })
+        (NodesRequestPayload { pk, id })
     ));
 }
 
@@ -518,11 +506,7 @@ impl FromBytes for NodesResponse {
         pk: call!(PublicKey::from_bytes) >>
         nonce: call!(Nonce::from_bytes) >>
         payload: map!(rest, |bytes| bytes.to_vec() ) >>
-        (NodesResponse {
-            pk: pk,
-            nonce: nonce,
-            payload: payload
-        })
+        (NodesResponse { pk, nonce, payload })
     ));
 }
 
@@ -612,10 +596,7 @@ impl FromBytes for NodesResponsePayload {
         ) >>
         id: be_u64 >>
         eof!() >>
-        (NodesResponsePayload {
-            nodes: nodes,
-            id: id,
-        })
+        (NodesResponsePayload { nodes, id })
     ));
 }
 
@@ -654,12 +635,7 @@ impl FromBytes for DhtRequest {
         spk: call!(PublicKey::from_bytes) >>
         nonce: call!(Nonce::from_bytes) >>
         payload: map!(rest, |bytes| bytes.to_vec() ) >>
-        (DhtRequest {
-            rpk: rpk,
-            spk: spk,
-            nonce: nonce,
-            payload: payload
-        })
+        (DhtRequest { rpk, spk, nonce, payload })
     ));
 }
 
@@ -744,7 +720,7 @@ impl FromBytes for NatPingRequest {
         tag!(&[0xfe][..]) >>
         tag!("\x00") >>
         id: be_u64 >>
-        (NatPingRequest { id: id})
+        (NatPingRequest { id })
     ));
 }
 
@@ -771,7 +747,7 @@ impl FromBytes for NatPingResponse {
         tag!(&[0xfe][..]) >>
         tag!("\x01") >>
         id: be_u64 >>
-        (NatPingResponse { id: id})
+        (NatPingResponse { id })
     ));
 }
 

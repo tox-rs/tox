@@ -1067,10 +1067,7 @@ from_bytes!(SectionData, do_parse!(
     kind: call!(SectionKind::parse_bytes) >>
     tag!(SECTION_MAGIC) >>
     data: take!(data_len) >>
-    (SectionData {
-        kind: kind,
-        data: data.to_vec()
-    })
+    (SectionData { kind, data: data.to_vec() })
 ));
 
 

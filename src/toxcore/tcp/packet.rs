@@ -160,7 +160,7 @@ impl FromBytes for RouteRequest {
     named!(from_bytes<RouteRequest>, do_parse!(
         tag!("\x00") >>
         pk: call!(PublicKey::from_bytes) >>
-        (RouteRequest { pk: pk })
+        (RouteRequest { pk })
     ));
 }
 
@@ -203,7 +203,7 @@ impl FromBytes for RouteResponse {
         tag!("\x01") >>
         connection_id: be_u8 >>
         pk: call!(PublicKey::from_bytes) >>
-        (RouteResponse { connection_id: connection_id, pk: pk })
+        (RouteResponse { connection_id, pk })
     ));
 }
 
@@ -239,7 +239,7 @@ impl FromBytes for ConnectNotification {
     named!(from_bytes<ConnectNotification>, do_parse!(
         tag!("\x02") >>
         connection_id: be_u8 >>
-        (ConnectNotification { connection_id: connection_id })
+        (ConnectNotification { connection_id })
     ));
 }
 
@@ -284,7 +284,7 @@ impl FromBytes for DisconnectNotification {
     named!(from_bytes<DisconnectNotification>, do_parse!(
         tag!("\x03") >>
         connection_id: be_u8 >>
-        (DisconnectNotification { connection_id: connection_id })
+        (DisconnectNotification { connection_id })
     ));
 }
 
@@ -328,7 +328,7 @@ impl FromBytes for PingRequest {
     named!(from_bytes<PingRequest>, do_parse!(
         tag!("\x04") >>
         ping_id: be_u64 >>
-        (PingRequest { ping_id: ping_id })
+        (PingRequest { ping_id })
     ));
 }
 
@@ -364,7 +364,7 @@ impl FromBytes for PongResponse {
     named!(from_bytes<PongResponse>, do_parse!(
         tag!("\x05") >>
         ping_id: be_u64 >>
-        (PongResponse { ping_id: ping_id })
+        (PongResponse {  ping_id })
     ));
 }
 
@@ -413,7 +413,7 @@ impl FromBytes for OobSend {
         tag!("\x06") >>
         destination_pk: call!(PublicKey::from_bytes) >>
         data: rest >>
-        (OobSend { destination_pk: destination_pk, data: data.to_vec() })
+        (OobSend { destination_pk, data: data.to_vec() })
     ));
 }
 
@@ -453,7 +453,7 @@ impl FromBytes for OobReceive {
         tag!("\x07") >>
         sender_pk: call!(PublicKey::from_bytes) >>
         data: rest >>
-        (OobReceive { sender_pk: sender_pk, data: data.to_vec() })
+        (OobReceive { sender_pk, data: data.to_vec() })
     ));
 }
 
@@ -514,7 +514,7 @@ impl FromBytes for OnionRequest {
         ) >>
         port: be_u16 >>
         data: rest >>
-        (OnionRequest { nonce: nonce, addr: addr, port: port, data: data.to_vec() })
+        (OnionRequest { nonce, addr, port, data: data.to_vec() })
     ));
 }
 
@@ -592,7 +592,7 @@ impl FromBytes for Data {
         connection_id: be_u8 >>
         verify!(value!(connection_id), |id| id >= 0x10 && id < 0xF0) >>
         data: rest >>
-        (Data { connection_id: connection_id, data: data.to_vec() })
+        (Data { connection_id, data: data.to_vec() })
     ));
 }
 

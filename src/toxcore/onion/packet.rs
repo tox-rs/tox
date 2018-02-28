@@ -89,7 +89,7 @@ impl FromBytes for IpPort {
             10 => map!(Ipv6Addr::from_bytes, IpAddr::V6)
         ) >>
         port: be_u16 >>
-        (IpPort { ip_addr: ip_addr, port: port })
+        (IpPort { ip_addr, port })
     ));
 }
 
@@ -127,7 +127,7 @@ impl FromBytes for OnionReturn {
     named!(from_bytes<OnionReturn>, do_parse!(
         nonce: call!(Nonce::from_bytes) >>
         payload: rest >>
-        (OnionReturn { nonce: nonce, payload: payload.to_vec() })
+        (OnionReturn { nonce, payload: payload.to_vec() })
     ));
 }
 
@@ -165,10 +165,7 @@ impl OnionReturn {
         let (_, size) = OnionReturn::inner_to_bytes(ip_port, inner, (&mut buf, 0)).unwrap();
         let payload = seal_precomputed(&buf[..size], &nonce, symmetric_key);
 
-        OnionReturn {
-            nonce: nonce,
-            payload: payload,
-        }
+        OnionReturn { nonce, payload }
     }
 
     /** Decrypt payload with symmetric key and try to parse it as `IpPort` with possibly inner `OnionReturn`.
@@ -179,7 +176,7 @@ impl OnionReturn {
     - fails to parse as `IpPort` with possibly inner `OnionReturn`
     */
     pub fn get_payload(&self, symmetric_key: &PrecomputedKey) -> Result<(IpPort, Option<OnionReturn>), Error> {
-        let decrypted = open_precomputed(&self.payload, &self.nonce, &symmetric_key)
+        let decrypted = open_precomputed(&self.payload, &self.nonce, symmetric_key)
             .map_err(|e| {
                 debug!("Decrypting OnionReturn failed!");
                 Error::new(ErrorKind::Other,
@@ -234,8 +231,8 @@ impl FromBytes for OnionRequest0 {
         temporary_pk: call!(PublicKey::from_bytes) >>
         payload: rest >>
         (OnionRequest0 {
-            nonce: nonce,
-            temporary_pk: temporary_pk,
+            nonce,
+            temporary_pk,
             payload: payload.to_vec()
         })
     ));
@@ -291,10 +288,10 @@ impl FromBytes for OnionRequest1 {
         ) >>
         onion_return: call!(OnionReturn::from_bytes) >>
         (OnionRequest1 {
-            nonce: nonce,
-            temporary_pk: temporary_pk,
+            nonce,
+            temporary_pk,
             payload: payload.to_vec(),
-            onion_return: onion_return
+            onion_return
         })
     ));
 }
@@ -350,10 +347,10 @@ impl FromBytes for OnionRequest2 {
         ) >>
         onion_return: call!(OnionReturn::from_bytes) >>
         (OnionRequest2 {
-            nonce: nonce,
-            temporary_pk: temporary_pk,
+            nonce,
+            temporary_pk,
             payload: payload.to_vec(),
-            onion_return: onion_return
+            onion_return
         })
     ));
 }
@@ -397,8 +394,8 @@ impl FromBytes for InnerAnnounceRequest {
         pk: call!(PublicKey::from_bytes) >>
         payload: rest >>
         (InnerAnnounceRequest {
-            nonce: nonce,
-            pk: pk,
+            nonce,
+            pk,
             payload: payload.to_vec()
         })
     ));
@@ -445,7 +442,7 @@ impl FromBytes for AnnounceRequest {
             flat_map!(take!(rest_len - ONION_RETURN_3_SIZE), InnerAnnounceRequest::from_bytes)
         ) >>
         onion_return: call!(OnionReturn::from_bytes) >>
-        (AnnounceRequest { inner: inner, onion_return: onion_return })
+        (AnnounceRequest { inner, onion_return })
     ));
 }
 
@@ -489,9 +486,9 @@ impl FromBytes for InnerOnionDataRequest {
         temporary_pk: call!(PublicKey::from_bytes) >>
         payload: rest >>
         (InnerOnionDataRequest {
-            destination_pk: destination_pk,
-            nonce: nonce,
-            temporary_pk: temporary_pk,
+            destination_pk,
+            nonce,
+            temporary_pk,
             payload: payload.to_vec()
         })
     ));
@@ -540,7 +537,7 @@ impl FromBytes for OnionDataRequest {
             flat_map!(take!(rest_len - ONION_RETURN_3_SIZE), InnerOnionDataRequest::from_bytes)
         ) >>
         onion_return: call!(OnionReturn::from_bytes) >>
-        (OnionDataRequest { inner: inner, onion_return: onion_return })
+        (OnionDataRequest { inner, onion_return })
     ));
 }
 
@@ -580,8 +577,8 @@ impl FromBytes for OnionDataResponse {
         temporary_pk: call!(PublicKey::from_bytes) >>
         payload: rest >>
         (OnionDataResponse {
-            nonce: nonce,
-            temporary_pk: temporary_pk,
+            nonce,
+            temporary_pk,
             payload: payload.to_vec()
         })
     ));
@@ -625,8 +622,8 @@ impl FromBytes for AnnounceResponse {
         nonce: call!(Nonce::from_bytes) >>
         payload: rest >>
         (AnnounceResponse {
-            sendback_data: sendback_data,
-            nonce: nonce,
+            sendback_data,
+            nonce,
             payload: payload.to_vec()
         })
     ));
@@ -668,10 +665,7 @@ impl FromBytes for OnionResponse3 {
         tag!(&[0x8c][..]) >>
         onion_return: flat_map!(take!(ONION_RETURN_3_SIZE), OnionReturn::from_bytes) >>
         payload: rest >>
-        (OnionResponse3 {
-            onion_return: onion_return,
-            payload: payload.to_vec()
-        })
+        (OnionResponse3 { onion_return, payload: payload.to_vec() })
     ));
 }
 
@@ -710,10 +704,7 @@ impl FromBytes for OnionResponse2 {
         tag!(&[0x8d][..]) >>
         onion_return: flat_map!(take!(ONION_RETURN_2_SIZE), OnionReturn::from_bytes) >>
         payload: rest >>
-        (OnionResponse2 {
-            onion_return: onion_return,
-            payload: payload.to_vec()
-        })
+        (OnionResponse2 { onion_return, payload: payload.to_vec() })
     ));
 }
 
@@ -752,10 +743,7 @@ impl FromBytes for OnionResponse1 {
         tag!(&[0x8e][..]) >>
         onion_return: flat_map!(take!(ONION_RETURN_1_SIZE), OnionReturn::from_bytes) >>
         payload: rest >>
-        (OnionResponse1 {
-            onion_return: onion_return,
-            payload: payload.to_vec()
-        })
+        (OnionResponse1 { onion_return, payload: payload.to_vec() })
     ));
 }
 

@@ -60,7 +60,7 @@ impl FromBytes for ClientHandshake {
         pk: call!(PublicKey::from_bytes) >>
         nonce: call!(Nonce::from_bytes) >>
         payload: take!(ENC_PAYLOAD_SIZE) >>
-        (ClientHandshake { pk: pk, nonce: nonce, payload: payload.to_vec() })
+        (ClientHandshake { pk, nonce, payload: payload.to_vec() })
     ));
 }
 
@@ -104,7 +104,7 @@ impl FromBytes for ServerHandshake {
     named!(from_bytes<ServerHandshake>, do_parse!(
         nonce: call!(Nonce::from_bytes) >>
         payload: take!(ENC_PAYLOAD_SIZE) >>
-        (ServerHandshake { nonce: nonce, payload: payload.to_vec() })
+        (ServerHandshake { nonce, payload: payload.to_vec() })
     ));
 }
 

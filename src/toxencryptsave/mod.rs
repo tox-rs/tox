@@ -170,7 +170,7 @@ impl PassKey {
         let salt = Box::new(salt);
         let key = Box::new(try!(maybe_key.ok_or(KeyDerivationError::Failed)));
 
-        Ok(PassKey { salt: salt, key: key })
+        Ok(PassKey { salt, key })
     }
 
     /**
