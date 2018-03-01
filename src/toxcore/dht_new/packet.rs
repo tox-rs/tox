@@ -50,7 +50,8 @@ pub enum DhtPacket {
     NodesRequest(NodesRequest),
     /// [`NodesResponse`](./struct.NodesResponse.html) structure.
     NodesResponse(NodesResponse),
-    // TODO: CookieRequest
+    /// [`CookieRequest`](./struct.CookieRequest.html) structure.
+    CookieRequest(CookieRequest),
     // TODO: CookieResponse
     // TODO: CryptoHandshake
     // TODO: CryptoData
@@ -89,6 +90,7 @@ impl ToBytes for DhtPacket {
             DhtPacket::PingResponse(ref p) => p.to_bytes(buf),
             DhtPacket::NodesRequest(ref p) => p.to_bytes(buf),
             DhtPacket::NodesResponse(ref p) => p.to_bytes(buf),
+            DhtPacket::CookieRequest(ref p) => p.to_bytes(buf),
             DhtPacket::DhtRequest(ref p) => p.to_bytes(buf),
             DhtPacket::LanDiscovery(ref p) => p.to_bytes(buf),
             DhtPacket::OnionRequest0(ref p) => p.to_bytes(buf),
@@ -112,6 +114,7 @@ impl FromBytes for DhtPacket {
         map!(PingResponse::from_bytes, DhtPacket::PingResponse) |
         map!(NodesRequest::from_bytes, DhtPacket::NodesRequest) |
         map!(NodesResponse::from_bytes, DhtPacket::NodesResponse) |
+        map!(CookieRequest::from_bytes, DhtPacket::CookieRequest) |
         map!(DhtRequest::from_bytes, DhtPacket::DhtRequest) |
         map!(LanDiscovery::from_bytes, DhtPacket::LanDiscovery) |
         map!(OnionRequest0::from_bytes, DhtPacket::OnionRequest0) |
@@ -604,6 +607,147 @@ impl FromBytes for NodesResponsePayload {
         id: be_u64 >>
         eof!() >>
         (NodesResponsePayload { nodes, id })
+    ));
+}
+
+/** CookieRequest packet struct.
+According to https://zetok.github.io/tox-spec/#net-crypto
+
+CookieRequest packet (145 bytes):
+
+[uint8_t 24]
+[Sender's DHT Public key (32 bytes)]
+[Random nonce (24 bytes)]
+[Encrypted message containing:
+    [Sender's real public key (32 bytes)]
+    [padding (32 bytes)]
+    [uint64_t echo id (must be sent back untouched in cookie response)]
+]
+
+Serialized form:
+
+Length | Content
+------ | ------
+`1`    | `0x18`
+`32`   | DHT Public Key
+`24`   | Random nonce
+`88`   | Encrypted CookieRequestPayload
+
+*/
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CookieRequest {
+    /// DHT public key
+    pub pk: PublicKey,
+    /// Random nonce
+    pub nonce: Nonce,
+    /// Encrypted payload of CookieRequest
+    pub payload: Vec<u8>,
+}
+
+impl ToBytes for CookieRequest {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_be_u8!(0x18) >>
+            gen_slice!(self.pk.as_ref()) >>
+            gen_slice!(self.nonce.as_ref()) >>
+            gen_slice!(self.payload.as_slice())
+        )
+    }
+}
+
+impl FromBytes for CookieRequest {
+    named!(from_bytes<CookieRequest>, do_parse!(
+        tag!("\x18") >>
+        pk: call!(PublicKey::from_bytes) >>
+        nonce: call!(Nonce::from_bytes) >>
+        payload: take!(88) >>
+        (CookieRequest { pk, nonce, payload: payload.to_vec() })
+    ));
+}
+
+impl CookieRequest {
+    /// Create `CookieRequest` from `CookieRequestPayload` encrypting in with `shared_key`
+    pub fn new(shared_secret: &PrecomputedKey, pk: &PublicKey, payload: CookieRequestPayload) -> CookieRequest {
+        let nonce = &gen_nonce();
+        let mut buf = [0; 88];
+        let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
+        let payload = seal_precomputed(&buf[..size] , nonce, shared_secret);
+
+        CookieRequest {
+            pk: *pk,
+            nonce: *nonce,
+            payload: payload,
+        }
+    }
+    /** Decrypt payload with symmetric key and try to parse it as `CookieRequestPayload`.
+
+    Returns `Error` in case of failure:
+
+    - fails to decrypt
+    - fails to parse `CookieRequestPayload`
+    */
+    pub fn get_payload(&self, own_secret_key: &SecretKey) -> Result<CookieRequestPayload, Error> {
+        let decrypted = open(&self.payload, &self.nonce, &self.pk, own_secret_key)
+            .map_err(|e| {
+                debug!("Decrypting CookieRequest failed!");
+                Error::new(ErrorKind::Other,
+                    format!("CookieRequest decrypt error: {:?}", e))
+            })?;
+        match CookieRequestPayload::from_bytes(&decrypted) {
+            IResult::Incomplete(e) => {
+                error!(target: "Dht", "CookieRequestPayload return deserialize error: {:?}", e);
+                Err(Error::new(ErrorKind::Other,
+                    format!("CookieRequestPayload return deserialize error: {:?}", e)))
+            },
+            IResult::Error(e) => {
+                error!(target: "Dht", "CookieRequestPayload return deserialize error: {:?}", e);
+                Err(Error::new(ErrorKind::Other,
+                    format!("CookieRequestPayload return deserialize error: {:?}", e)))
+            },
+            IResult::Done(_, payload) => {
+                Ok(payload)
+            }
+        }
+    }
+}
+
+/** CookieRequestPayload packet struct.
+
+Serialized form:
+
+Length      | Contents
+----------- | --------
+`32`        | Sender's real public key
+`32`        | Padding (zeros)
+`8`         | Request ID in BigEndian
+
+Serialized form should be put in the encrypted part of `CookieRequest` packet.
+*/
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CookieRequestPayload {
+    /// Sender's real public key
+    pub pk: PublicKey,
+    /// Request id
+    pub id: u64,
+}
+
+impl ToBytes for CookieRequestPayload {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_slice!(self.pk.as_ref()) >>
+            gen_slice!(&[0; 32]) >> // padding
+            gen_be_u64!(self.id)
+        )
+    }
+}
+
+impl FromBytes for CookieRequestPayload {
+    named!(from_bytes<CookieRequestPayload>, do_parse!(
+        pk: call!(PublicKey::from_bytes) >>
+        take!(32) >> // padding
+        id: be_u64 >>
+        eof!() >>
+        (CookieRequestPayload { pk, id })
     ));
 }
 
@@ -1211,6 +1355,15 @@ mod tests {
     dht_packet_encode_decode!(nodes_response_encode_decode, NodesResponse);
 
     encode_decode_test!(
+        cookie_request_encode_decode,
+        DhtPacket::CookieRequest(CookieRequest {
+            pk: gen_keypair().0,
+            nonce: gen_nonce(),
+            payload: vec![42; 88],
+        })
+    );
+
+    encode_decode_test!(
         nat_ping_request_payload_encode_decode,
         DhtRequestPayload::NatPingRequest(NatPingRequest { id: 42 })
     );
@@ -1410,6 +1563,12 @@ mod tests {
         ], id: 42 }
     );
 
+    dht_packet_encrypt_decrypt!(
+        cookie_request_payload_encrypt_decrypt,
+        CookieRequest,
+        CookieRequestPayload { pk: gen_keypair().0, id: 42 }
+    );
+
     #[test]
     fn dht_request_payload_encrypt_decrypt() {
         let (alice_pk, alice_sk) = gen_keypair();
@@ -1472,6 +1631,8 @@ mod tests {
     dht_packet_decode_invalid!(nodes_request_decode_invalid, NodesRequest);
 
     dht_packet_decode_invalid!(nodes_response_decode_invalid, NodesResponse);
+
+    dht_packet_decode_invalid!(cookie_request_decode_invalid, CookieRequest);
 
     #[test]
     fn dht_request_decode_invalid() {
