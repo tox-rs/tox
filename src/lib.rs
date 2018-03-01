@@ -180,7 +180,6 @@ pub mod toxcore {
     pub mod binary_io_new;
     pub mod crypto_core;
     pub mod dht;
-    pub mod dht_node;
     pub mod hole_punching;
     pub mod network;
     pub mod packet_kind;
