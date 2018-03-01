@@ -181,7 +181,6 @@ pub mod toxcore {
     pub mod crypto_core;
     pub mod dht;
     pub mod hole_punching;
-    pub mod network;
     pub mod packet_kind;
     pub mod state_format;
     pub mod toxid;
