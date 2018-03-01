@@ -68,15 +68,16 @@ pub mod toxcore_tests {
     extern crate rustc_serialize;
 
     // Helper macros for testing, no tests
-    #[warn(missing_docs)]
-    #[macro_use]
-    pub mod test_macros;
+    // #[warn(missing_docs)]
+    // #[macro_use]
+    // FIXME: use new dht code instead of old
+    // pub mod test_macros;
 
     // tests
     mod binary_io_tests;
     mod crypto_core_tests;
-    mod dht_tests;
-    mod state_format_old_tests;
+    // FIXME: use new dht code instead of old
+    // mod state_format_old_tests;
     mod toxid_tests;
 }
 
@@ -91,7 +92,6 @@ pub mod toxcore {
     #[macro_use]
     pub mod binary_io_new;
     pub mod crypto_core;
-    pub mod dht;
     pub mod packet_kind;
     pub mod state_format;
     pub mod toxid;
