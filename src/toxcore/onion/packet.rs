@@ -23,6 +23,7 @@
 
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
+use toxcore::dht::packed_node::PackedNode;
 
 use nom::{be_u16, le_u8, le_u64, rest};
 use std::net::{
@@ -119,6 +120,8 @@ Length                | Content
 --------              | ------
 `24`                  | `Nonce`
 `35` or `94` or `153` | Payload
+
+where payload is encrypted inner `OnionReturn`
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -219,6 +222,8 @@ Length   | Content
 `32`     | `PublicKey` of sender
 variable | Payload
 
+where payload is encrypted [`OnionRequest0Payload`](./struct.OnionRequest0Payload.html)
+
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OnionRequest0 {
@@ -255,6 +260,97 @@ impl ToBytes for OnionRequest0 {
     }
 }
 
+impl OnionRequest0 {
+    /// Create new `OnionRequest0` object.
+    pub fn new(shared_secret: &PrecomputedKey, temporary_pk: &PublicKey, payload: OnionRequest0Payload) -> OnionRequest0 {
+        let nonce = gen_nonce();
+        let mut buf = [0; ONION_MAX_PACKET_SIZE];
+        let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
+        let payload = seal_precomputed(&buf[..size], &nonce, shared_secret);
+
+        OnionRequest0 { nonce, temporary_pk: *temporary_pk, payload }
+    }
+
+    /** Decrypt payload and try to parse it as `OnionRequest0Payload`.
+
+    Returns `Error` in case of failure:
+
+    - fails to decrypt
+    - fails to parse as `OnionRequest0Payload`
+    */
+    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<OnionRequest0Payload, Error> {
+        let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
+            .map_err(|e| {
+                debug!("Decrypting OnionRequest0 failed!");
+                Error::new(ErrorKind::Other,
+                    format!("OnionRequest0 decrypt error: {:?}", e))
+            })?;
+        match OnionRequest0Payload::from_bytes(&decrypted) {
+            IResult::Incomplete(e) => {
+                error!(target: "Onion", "OnionRequest0Payload deserialize error: {:?}", e);
+                Err(Error::new(ErrorKind::Other,
+                    format!("OnionRequest0Payload deserialize error: {:?}", e)))
+            },
+            IResult::Error(e) => {
+                error!(target: "Onion", "OnionRequest0Payload deserialize error: {:?}", e);
+                Err(Error::new(ErrorKind::Other,
+                    format!("OnionRequest0Payload deserialize error: {:?}", e)))
+            },
+            IResult::Done(_, inner) => {
+                Ok(inner)
+            }
+        }
+    }
+}
+
+/** Unencrypted payload of `OnionRequest0` packet.
+
+Inner payload should be sent to the next node with address from `ip_port` field.
+
+Serialized form:
+
+Length   | Content
+-------- | ------
+`19`     | `IpPort` of the next node
+`32`     | Temporary `PublicKey`
+variable | Payload
+
+where payload is encrypted [`OnionRequest1Payload`](./struct.OnionRequest1Payload.html)
+
+*/
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OnionRequest0Payload {
+    /// Address of the next node in the onion path
+    pub ip_port: IpPort,
+    /// Temporary `PublicKey` for the current encrypted payload
+    pub temporary_pk: PublicKey,
+    /// Inner onion payload
+    pub inner: Vec<u8>
+}
+
+impl FromBytes for OnionRequest0Payload{
+    named!(from_bytes<OnionRequest0Payload>, do_parse!(
+        ip_port: call!(IpPort::from_bytes) >>
+        temporary_pk: call!(PublicKey::from_bytes) >>
+        inner: rest >>
+        (OnionRequest0Payload {
+            ip_port,
+            temporary_pk,
+            inner: inner.to_vec()
+        })
+    ));
+}
+
+impl ToBytes for OnionRequest0Payload {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_call!(|buf, ip_port| IpPort::to_bytes(ip_port, buf), &self.ip_port) >>
+            gen_slice!(self.temporary_pk.as_ref()) >>
+            gen_slice!(self.inner)
+        )
+    }
+}
+
 /** Second onion request packet. It's sent from the first to the second node from
 onion chain. Payload should be encrypted with temporary generated `SecretKey` and
 with DHT `PublicKey` of receiver.
@@ -268,6 +364,8 @@ Length   | Content
 `32`     | Temporary `PublicKey`
 variable | Payload
 `59`     | `OnionReturn`
+
+where payload is encrypted [`OnionRequest1Payload`](./struct.OnionRequest1Payload.html)
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -314,6 +412,97 @@ impl ToBytes for OnionRequest1 {
     }
 }
 
+impl OnionRequest1 {
+    /// Create new `OnionRequest1` object.
+    pub fn new(shared_secret: &PrecomputedKey, temporary_pk: &PublicKey, payload: OnionRequest1Payload, onion_return: OnionReturn) -> OnionRequest1 {
+        let nonce = gen_nonce();
+        let mut buf = [0; ONION_MAX_PACKET_SIZE];
+        let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
+        let payload = seal_precomputed(&buf[..size], &nonce, shared_secret);
+
+        OnionRequest1 { nonce, temporary_pk: *temporary_pk, payload, onion_return }
+    }
+
+    /** Decrypt payload and try to parse it as `OnionRequest1Payload`.
+
+    Returns `Error` in case of failure:
+
+    - fails to decrypt
+    - fails to parse as `OnionRequest1Payload`
+    */
+    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<OnionRequest1Payload, Error> {
+        let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
+            .map_err(|e| {
+                debug!("Decrypting OnionRequest1 failed!");
+                Error::new(ErrorKind::Other,
+                    format!("OnionRequest1 decrypt error: {:?}", e))
+            })?;
+        match OnionRequest1Payload::from_bytes(&decrypted) {
+            IResult::Incomplete(e) => {
+                error!(target: "Onion", "OnionRequest1Payload deserialize error: {:?}", e);
+                Err(Error::new(ErrorKind::Other,
+                    format!("OnionRequest1Payload deserialize error: {:?}", e)))
+            },
+            IResult::Error(e) => {
+                error!(target: "Onion", "OnionRequest1Payload deserialize error: {:?}", e);
+                Err(Error::new(ErrorKind::Other,
+                    format!("OnionRequest1Payload deserialize error: {:?}", e)))
+            },
+            IResult::Done(_, inner) => {
+                Ok(inner)
+            }
+        }
+    }
+}
+
+/** Unencrypted payload of `OnionRequest1` packet.
+
+Inner payload should be sent to the next node with address from `ip_port` field.
+
+Serialized form:
+
+Length   | Content
+-------- | ------
+`19`     | `IpPort` of the next node
+`32`     | Temporary `PublicKey`
+variable | Payload
+
+where payload is encrypted [`OnionRequest2Payload`](./struct.OnionRequest2Payload.html)
+
+*/
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OnionRequest1Payload {
+    /// Address of the next node in the onion path
+    pub ip_port: IpPort,
+    /// Temporary `PublicKey` for the current encrypted payload
+    pub temporary_pk: PublicKey,
+    /// Inner onion payload
+    pub inner: Vec<u8>
+}
+
+impl FromBytes for OnionRequest1Payload {
+    named!(from_bytes<OnionRequest1Payload>, do_parse!(
+        ip_port: call!(IpPort::from_bytes) >>
+        temporary_pk: call!(PublicKey::from_bytes) >>
+        inner: rest >>
+        (OnionRequest1Payload {
+            ip_port,
+            temporary_pk,
+            inner: inner.to_vec()
+        })
+    ));
+}
+
+impl ToBytes for OnionRequest1Payload {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_call!(|buf, ip_port| IpPort::to_bytes(ip_port, buf), &self.ip_port) >>
+            gen_slice!(self.temporary_pk.as_ref()) >>
+            gen_slice!(self.inner)
+        )
+    }
+}
+
 /** Third onion request packet. It's sent from the second to the third node from
 onion chain. Payload should be encrypted with temporary generated `SecretKey` and
 with DHT `PublicKey` of receiver.
@@ -327,6 +516,8 @@ Length   | Content
 `32`     | Temporary `PublicKey`
 variable | Payload
 `118`    | `OnionReturn`
+
+where payload is encrypted [`OnionRequest2Payload`](./struct.OnionRequest2Payload.html)
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -373,6 +564,124 @@ impl ToBytes for OnionRequest2 {
     }
 }
 
+impl OnionRequest2 {
+    /// Create new `OnionRequest2` object.
+    pub fn new(shared_secret: &PrecomputedKey, temporary_pk: &PublicKey, payload: OnionRequest2Payload, onion_return: OnionReturn) -> OnionRequest2 {
+        let nonce = gen_nonce();
+        let mut buf = [0; ONION_MAX_PACKET_SIZE];
+        let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
+        let payload = seal_precomputed(&buf[..size], &nonce, shared_secret);
+
+        OnionRequest2 { nonce, temporary_pk: *temporary_pk, payload, onion_return }
+    }
+
+    /** Decrypt payload and try to parse it as `OnionRequest2Payload`.
+
+    Returns `Error` in case of failure:
+
+    - fails to decrypt
+    - fails to parse as `OnionRequest2Payload`
+    */
+    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<OnionRequest2Payload, Error> {
+        let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
+            .map_err(|e| {
+                debug!("Decrypting OnionRequest2 failed!");
+                Error::new(ErrorKind::Other,
+                    format!("OnionRequest2 decrypt error: {:?}", e))
+            })?;
+        match OnionRequest2Payload::from_bytes(&decrypted) {
+            IResult::Incomplete(e) => {
+                error!(target: "Onion", "OnionRequest2Payload deserialize error: {:?}", e);
+                Err(Error::new(ErrorKind::Other,
+                    format!("OnionRequest2Payload deserialize error: {:?}", e)))
+            },
+            IResult::Error(e) => {
+                error!(target: "Onion", "OnionRequest2Payload deserialize error: {:?}", e);
+                Err(Error::new(ErrorKind::Other,
+                    format!("OnionRequest2Payload deserialize error: {:?}", e)))
+            },
+            IResult::Done(_, inner) => {
+                Ok(inner)
+            }
+        }
+    }
+}
+
+/** Unencrypted payload of `OnionRequest1` packet.
+
+Inner payload should be sent as DHT packet to the next node with address from
+`ip_port` field.
+
+Serialized form:
+
+Length   | Content
+-------- | ------
+`19`     | `IpPort` of the next node
+`32`     | Temporary `PublicKey`
+variable | Payload
+
+where payload is encrypted [`InnerOnionRequest`](./struct.InnerOnionRequest.html)
+
+*/
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OnionRequest2Payload {
+    /// Address of the next node in the onion path
+    pub ip_port: IpPort,
+    /// Inner onion request
+    pub inner: InnerOnionRequest
+}
+
+impl FromBytes for OnionRequest2Payload {
+    named!(from_bytes<OnionRequest2Payload>, do_parse!(
+        ip_port: call!(IpPort::from_bytes) >>
+        inner: call!(InnerOnionRequest::from_bytes) >>
+        eof!() >>
+        (OnionRequest2Payload {
+            ip_port,
+            inner
+        })
+    ));
+}
+
+impl ToBytes for OnionRequest2Payload {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_call!(|buf, ip_port| IpPort::to_bytes(ip_port, buf), &self.ip_port) >>
+            gen_call!(|buf, inner| InnerOnionRequest::to_bytes(inner, buf), &self.inner)
+        )
+    }
+}
+
+/** Onion requests that can be enclosed in onion packets and sent through onion
+path.
+
+Onion allows only two types of packets to be sent as a request through onion
+paths: `AnnounceRequest` and `OnionDataRequest`.
+*/
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum InnerOnionRequest {
+    /// [`InnerAnnounceRequest`](./struct.InnerAnnounceRequest.html) structure.
+    InnerAnnounceRequest(InnerAnnounceRequest),
+    /// [`InnerOnionDataRequest`](./struct.InnerOnionDataRequest.html) structure.
+    InnerOnionDataRequest(InnerOnionDataRequest)
+}
+
+impl ToBytes for InnerOnionRequest {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        match *self {
+            InnerOnionRequest::InnerAnnounceRequest(ref inner) => inner.to_bytes(buf),
+            InnerOnionRequest::InnerOnionDataRequest(ref inner) => inner.to_bytes(buf),
+        }
+    }
+}
+
+impl FromBytes for InnerOnionRequest {
+    named!(from_bytes<InnerOnionRequest>, alt!(
+        map!(InnerAnnounceRequest::from_bytes, InnerOnionRequest::InnerAnnounceRequest) |
+        map!(InnerOnionDataRequest::from_bytes, InnerOnionRequest::InnerOnionDataRequest)
+    ));
+}
+
 /** It's used for announcing ourselves to onion node and for looking for other
 announced nodes.
 
@@ -394,6 +703,8 @@ Length   | Content
 `24`     | `Nonce`
 `32`     | Temporary or real `PublicKey`
 variable | Payload
+
+where payload is encrypted [`AnnounceRequestPayload`](./struct.AnnounceRequestPayload.html)
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -431,6 +742,49 @@ impl ToBytes for InnerAnnounceRequest {
     }
 }
 
+impl InnerAnnounceRequest {
+    /// Create new `InnerAnnounceRequest` object.
+    pub fn new(shared_secret: &PrecomputedKey, pk: &PublicKey, payload: AnnounceRequestPayload) -> InnerAnnounceRequest {
+        let nonce = gen_nonce();
+        let mut buf = [0; ONION_MAX_PACKET_SIZE];
+        let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
+        let payload = seal_precomputed(&buf[..size], &nonce, shared_secret);
+
+        InnerAnnounceRequest { nonce, pk: *pk, payload }
+    }
+
+    /** Decrypt payload and try to parse it as `AnnounceRequestPayload`.
+
+    Returns `Error` in case of failure:
+
+    - fails to decrypt
+    - fails to parse as `AnnounceRequestPayload`
+    */
+    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<AnnounceRequestPayload, Error> {
+        let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
+            .map_err(|e| {
+                debug!("Decrypting AnnounceRequest failed!");
+                Error::new(ErrorKind::Other,
+                    format!("AnnounceRequest decrypt error: {:?}", e))
+            })?;
+        match AnnounceRequestPayload::from_bytes(&decrypted) {
+            IResult::Incomplete(e) => {
+                error!(target: "Onion", "AnnounceRequestPayload deserialize error: {:?}", e);
+                Err(Error::new(ErrorKind::Other,
+                    format!("AnnounceRequestPayload deserialize error: {:?}", e)))
+            },
+            IResult::Error(e) => {
+                error!(target: "Onion", "AnnounceRequestPayload deserialize error: {:?}", e);
+                Err(Error::new(ErrorKind::Other,
+                    format!("AnnounceRequestPayload deserialize error: {:?}", e)))
+            },
+            IResult::Done(_, inner) => {
+                Ok(inner)
+            }
+        }
+    }
+}
+
 /** Same as `InnerAnnounceRequest` but with `OnionReturn` addresses. It's sent
 from the third node from onion chain to the destination node.
 
@@ -445,6 +799,8 @@ Length   | Content
 `32`     | Temporary or real `PublicKey`
 variable | Payload
 `177`    | `OnionReturn`
+
+where payload is encrypted [`AnnounceRequestPayload`](./struct.AnnounceRequestPayload.html)
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -472,6 +828,52 @@ impl ToBytes for AnnounceRequest {
         do_gen!(buf,
             gen_call!(|buf, inner| InnerAnnounceRequest::to_bytes(inner, buf), &self.inner) >>
             gen_call!(|buf, onion_return| OnionReturn::to_bytes(onion_return, buf), &self.onion_return)
+        )
+    }
+}
+
+/** Unencrypted payload of `AnnounceRequest` packet.
+
+Serialized form:
+
+Length   | Content
+-------- | ------
+`32`     | Onion ping id
+`32`     | `PublicKey` we are searching for
+`32`     | `PublicKey` that should be used for sending data packets
+`8`      | Data to send back in the response
+
+*/
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AnnounceRequestPayload {
+    /// Onion ping id
+    pub ping_id: Digest,
+    /// `PublicKey` we are searching for
+    pub search_pk: PublicKey,
+    /// `PublicKey` that should be used for sending data packets
+    pub data_pk: PublicKey,
+    /// Data to send back in the response
+    pub sendback_data: u64
+}
+
+impl FromBytes for AnnounceRequestPayload {
+    named!(from_bytes<AnnounceRequestPayload>, do_parse!(
+        ping_id: call!(Digest::from_bytes) >>
+        search_pk: call!(PublicKey::from_bytes) >>
+        data_pk: call!(PublicKey::from_bytes) >>
+        sendback_data: le_u64 >>
+        eof!() >>
+        (AnnounceRequestPayload { ping_id, search_pk, data_pk, sendback_data })
+    ));
+}
+
+impl ToBytes for AnnounceRequestPayload {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_slice!(self.ping_id.as_ref()) >>
+            gen_slice!(self.search_pk.as_ref()) >>
+            gen_slice!(self.data_pk.as_ref()) >>
+            gen_le_u64!(self.sendback_data)
         )
     }
 }
@@ -636,16 +1038,6 @@ sendback_data is the data from `AnnounceRequest` that should be sent in the
 response as is. It's used in onion client to match onion response with sent
 request.
 
-is_stored variable from payload contains the result of sent request. It might
-have values:
-- 0: failed to announce ourselves of find requested node
-- 1: requested node is found by it's real PublicKey
-- 2: we successfully announces ourselves
-
-In case of is_stored is equal to 1 ping_id from payload will contain pk that
-should be used to send data packets to the requested node. In other cases it
-will contain ping id that should be used for announcing ourselves.
-
 Serialized form:
 
 Length   | Content
@@ -654,6 +1046,8 @@ Length   | Content
 `8`      | Data to send back in response
 `24`     | `Nonce`
 variable | Payload
+
+where payload is encrypted [`AnnounceResponsePayload`](./struct.AnnounceResponsePayload.html)
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -691,6 +1085,109 @@ impl ToBytes for AnnounceResponse {
     }
 }
 
+impl AnnounceResponse {
+    /// Create new `AnnounceResponse` object.
+    pub fn new(shared_secret: &PrecomputedKey, sendback_data: u64, payload: AnnounceResponsePayload) -> AnnounceResponse {
+        let nonce = gen_nonce();
+        let mut buf = [0; ONION_MAX_PACKET_SIZE];
+        let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
+        let payload = seal_precomputed(&buf[..size], &nonce, shared_secret);
+
+        AnnounceResponse { sendback_data, nonce, payload }
+    }
+
+    /** Decrypt payload and try to parse it as `AnnounceResponsePayload`.
+
+    Returns `Error` in case of failure:
+
+    - fails to decrypt
+    - fails to parse as `AnnounceResponsePayload`
+    */
+    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<AnnounceResponsePayload, Error> {
+        let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
+            .map_err(|e| {
+                debug!("Decrypting AnnounceResponse failed!");
+                Error::new(ErrorKind::Other,
+                    format!("AnnounceResponse decrypt error: {:?}", e))
+            })?;
+        match AnnounceResponsePayload::from_bytes(&decrypted) {
+            IResult::Incomplete(e) => {
+                error!(target: "Onion", "AnnounceResponsePayload deserialize error: {:?}", e);
+                Err(Error::new(ErrorKind::Other,
+                    format!("AnnounceResponsePayload deserialize error: {:?}", e)))
+            },
+            IResult::Error(e) => {
+                error!(target: "Onion", "AnnounceResponsePayload deserialize error: {:?}", e);
+                Err(Error::new(ErrorKind::Other,
+                    format!("AnnounceResponsePayload deserialize error: {:?}", e)))
+            },
+            IResult::Done(_, inner) => {
+                Ok(inner)
+            }
+        }
+    }
+}
+
+/** Unencrypted payload of `AnnounceResponse` packet.
+
+is_stored variable from payload contains the result of sent request. It might
+have values:
+
+* 0: failed to announce ourselves of find requested node
+* 1: requested node is found by it's long term PublicKey
+* 2: we successfully announces ourselves
+
+In case of is_stored is equal to 1 ping_id will contain `PublicKey` that
+should be used to send data packets to the requested node. In other cases it
+will contain ping id that should be used for announcing ourselves.
+
+Serialized form:
+
+Length   | Content
+-------- | ------
+`1`      | `is_stored`
+`32`     | Onion ping id or `PublicKey`
+`[0, 204]` | Nodes in packed format
+
+*/
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AnnounceResponsePayload {
+    /// Variable that represents result of sent `AnnounceRequest`
+    pub is_stored: u8,
+    /// Onion ping id or PublicKey that should be used to send data packets
+    pub ping_id_or_pk: Digest,
+    /// Up to 4 closest to the requested PublicKey DHT nodes
+    pub nodes: Vec<PackedNode>
+}
+
+#[allow(unused_comparisons)]
+impl FromBytes for AnnounceResponsePayload {
+    named!(from_bytes<AnnounceResponsePayload>, do_parse!(
+        is_stored: le_u8 >>
+        ping_id_or_pk: call!(Digest::from_bytes) >>
+        nodes: many_m_n!(0, 4, PackedNode::from_bytes) >>
+        eof!() >>
+        (AnnounceResponsePayload {
+            is_stored,
+            ping_id_or_pk,
+            nodes
+        })
+    ));
+}
+
+impl ToBytes for AnnounceResponsePayload {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_be_u8!(self.is_stored) >>
+            gen_slice!(self.ping_id_or_pk.as_ref()) >>
+            gen_cond!(
+                self.nodes.len() <= 4,
+                gen_many_ref!(&self.nodes, |buf, node| PackedNode::to_bytes(node, buf))
+            )
+        )
+    }
+}
+
 /** Third onion response packet. It's sent back from the destination node to the
 third node from onion chain.
 
@@ -701,6 +1198,9 @@ Length   | Content
 `1`      | `0x8c`
 `177`    | `OnionReturn`
 variable | Payload
+
+where payload is encrypted [`AnnounceResponse`](./struct.AnnounceResponse.html) or
+[`OnionDataResponse`](./struct.OnionDataResponse.html)
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -741,6 +1241,9 @@ Length   | Content
 `118`    | `OnionReturn`
 variable | Payload
 
+where payload is encrypted [`AnnounceResponse`](./struct.AnnounceResponse.html) or
+[`OnionDataResponse`](./struct.OnionDataResponse.html)
+
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OnionResponse2 {
@@ -779,6 +1282,9 @@ Length   | Content
 `1`      | `0x8e`
 `59`     | `OnionReturn`
 variable | Payload
+
+where payload is encrypted [`AnnounceResponse`](./struct.AnnounceResponse.html) or
+[`OnionDataResponse`](./struct.OnionDataResponse.html)
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
