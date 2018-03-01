@@ -164,7 +164,6 @@ pub mod toxcore_tests {
     mod binary_io_tests;
     mod crypto_core_tests;
     mod dht_tests;
-    mod packet_kind_tests;
     mod state_format_old_tests;
     mod toxid_tests;
 }
