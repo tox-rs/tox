@@ -272,7 +272,7 @@ impl Bucket {
 Equivalent to calling [`Bucket::new()`] with `None`:
 
 ```
-# use tox::toxcore::dht::Bucket;
+# use tox::toxcore::dht_new::kbucket::Bucket;
 assert_eq!(Bucket::new(None), Bucket::default());
 ```
 

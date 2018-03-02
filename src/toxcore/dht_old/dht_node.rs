@@ -43,7 +43,7 @@ use toxcore::binary_io::{FromBytes, ToBytes};
 use toxcore::crypto_core::*;
 use toxcore::dht::*;
 use toxcore::packet_kind::PacketKind;
-use toxcore::timeout::*;
+//use toxcore::timeout::*;
 
 
 /// Type for sending `SplitSink` with `ToxCodec`.
@@ -105,11 +105,11 @@ pub struct DhtNode {
     dht_public_key: Box<PublicKey>,
     /// Close List (contains nodes close to own DHT PK)
     kbucket: Box<Kbucket>,
-    getn_timeout: TimeoutQueue,
-    /// timeouts for requests that check whether a node is online before
-    /// adding it to the Close List
+    //getn_timeout: TimeoutQueue,
+    // timeouts for requests that check whether a node is online before
+    // adding it to the Close List
     // TODO: rename
-    to_close_tout: TimeoutQueue,
+    //to_close_tout: TimeoutQueue,
     /// list of nodes that are checked for being online before adding
     /// to the Close List
     // TODO: rename
@@ -145,8 +145,8 @@ impl DhtNode {
             dht_secret_key: Box::new(sk),
             dht_public_key: Box::new(pk),
             kbucket: Box::new(kbucket),
-            getn_timeout: Default::default(),
-            to_close_tout: Default::default(),
+            //getn_timeout: Default::default(),
+            //to_close_tout: Default::default(),
             to_close_nodes: Default::default(),
         })
     }
@@ -180,10 +180,10 @@ impl DhtNode {
     // TODO: test
     // TODO: add fn for ping/getn req timeouts with hardcoded consts?
     pub fn remove_timed_out(&mut self, secs: u64) {
-        for pk in self.getn_timeout.get_timed_out(secs) {
+        /*for pk in self.getn_timeout.get_timed_out(secs) {
             debug!("Removing timed out node");
             self.kbucket.remove(&pk);
-        }
+        }*/
     }
 
     /**
@@ -310,7 +310,7 @@ impl DhtNode {
             .map(|pn| {
                 let (id, packet) = self.request_nodes(pn);
                 // add to timeout queue
-                self.getn_timeout.add(pn.pk(), id);
+                // self.getn_timeout.add(pn.pk(), id);
                 packet
             })
             .collect()
@@ -380,14 +380,14 @@ impl DhtNode {
     fn handle_packet_sendn(&mut self, packet: &DhtPacket) {
         match packet.get_payload::<SendNodes>(self.sk()) {
             Some(sn) => {
-                if self.getn_timeout.remove(sn.id) {
+                /*if self.getn_timeout.remove(sn.id) {
                     debug!("Received SendN is a valid response");
                     // received SendNodes packet is a response to our request
                     trace!("Adding nodes from SendNodes to DhtNode's Kbucket");
                     for node in &sn.nodes {
                         self.try_add(node);
                     }
-                }
+                }*/
             },
             None =>
                 debug!("Wrong DhtPacket; should have contained SendNodes"),
@@ -874,8 +874,8 @@ mod test {
 
             for (n, node) in dnode.kbucket.iter().enumerate() {
                 // each request creates a response timeout
-                assert_eq!(dnode.getn_timeout.get(n).unwrap().pk(),
-                           node.pk());
+                //assert_eq!(dnode.getn_timeout.get(n).unwrap().pk(),
+                //           node.pk());
                 let (req_addr, ref _req_packet) = requests[n];
                 assert_eq!(node.socket_addr(), req_addr);
             }
@@ -986,6 +986,7 @@ mod test {
 
     // DhtNode::handle_packet_sendn()
 
+    /*
     quickcheck! {
         fn dht_node_handle_packet_sendn_test(sn: SendNodes,
                                              gn: GetNodes,
@@ -1030,9 +1031,10 @@ mod test {
             assert_eq!(kbuc, *alice.kbucket);
         }
     }
+    */
 
     // DhtNode::handle_packet()
-
+    /*
     quickcheck! {
         fn dht_node_handle_packet(pq: PingReq,
                                   pr: PingResp,
@@ -1086,6 +1088,7 @@ mod test {
             }
         }
     }
+    */
 
 
     // ToxCodec::
