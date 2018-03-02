@@ -92,7 +92,6 @@ pub mod toxcore {
     #[macro_use]
     pub mod binary_io_new;
     pub mod crypto_core;
-    pub mod packet_kind;
     pub mod state_format;
     pub mod toxid;
     pub mod tcp;
