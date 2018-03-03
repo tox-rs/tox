@@ -24,7 +24,7 @@
 use std::str::FromStr;
 use std::thread;
 
-use toxcore::binary_io_new::*;
+use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 
 use quickcheck::quickcheck;

@@ -29,7 +29,7 @@ use nom::{le_u8, be_u32, be_u64, rest};
 
 use std::io::{Error, ErrorKind};
 
-use toxcore::binary_io_new::*;
+use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 use toxcore::dht_new::packed_node::PackedNode;
 use toxcore::onion::packet::*;

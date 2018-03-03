@@ -22,7 +22,7 @@
     to [Tox spec](https://zetok.github.io/tox-spec/#encrypted-payload-types)
 */
 
-use toxcore::binary_io_new::*;
+use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 use toxcore::onion::packet::IPV4_PADDING_SIZE;
 

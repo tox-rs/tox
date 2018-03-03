@@ -29,7 +29,7 @@
 use std::default::Default;
 use std::fmt;
 
-use toxcore::binary_io_new::*;
+use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 
 /** Calculate XOR checksum for 2 [u8; 2].
@@ -336,7 +336,6 @@ mod tests {
 
     use quickcheck::quickcheck;
 
-    use ::toxcore::binary_io_new::*;
     use ::toxcore::crypto_core::*;
     use ::toxcore::toxid::*;
 

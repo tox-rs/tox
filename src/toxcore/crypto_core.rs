@@ -27,7 +27,7 @@ pub use sodiumoxide::crypto::box_::*;
 use std::sync::{Once, ONCE_INIT};
 use byteorder::{ByteOrder, NativeEndian};
 
-use toxcore::binary_io_new::*;
+use toxcore::binary_io::*;
 
 // TODO: check if `#[inline]` is actually useful
 
