@@ -22,8 +22,6 @@
 /*! Encoding/decoding traits
 */
 
-use toxcore::crypto_core::*;
-
 pub use nom::IResult;
 pub use cookie_factory::GenError;
 
@@ -44,14 +42,6 @@ pub trait FromBytes : Sized {
 pub trait ToBytes : Sized {
     /// Serialize struct into raw bytes using `cookie_factory`
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError>;
-}
-
-impl FromBytes for PublicKey {
-    named!(from_bytes<PublicKey>, map_opt!(take!(PUBLICKEYBYTES), PublicKey::from_slice));
-}
-
-impl FromBytes for Nonce {
-    named!(from_bytes<Nonce>, map_opt!(take!(NONCEBYTES), Nonce::from_slice));
 }
 
 impl ToBytes for IpAddr {

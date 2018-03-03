@@ -73,11 +73,9 @@ pub mod toxcore_tests {
     // pub mod test_macros;
 
     // tests
-    mod binary_io_tests;
     mod crypto_core_tests;
     // FIXME: use new dht code instead of old
     // mod state_format_old_tests;
-    mod toxid_tests;
 }
 
 
@@ -86,8 +84,6 @@ pub mod toxcore_tests {
 */
 #[warn(missing_docs)]
 pub mod toxcore {
-    #[macro_use]
-    pub mod binary_io;
     #[macro_use]
     pub mod binary_io_new;
     pub mod crypto_core;

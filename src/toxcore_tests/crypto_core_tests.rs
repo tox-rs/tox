@@ -24,7 +24,7 @@
 use std::str::FromStr;
 use std::thread;
 
-use toxcore::binary_io::*;
+use toxcore::binary_io_new::*;
 use toxcore::crypto_core::*;
 
 use quickcheck::quickcheck;
@@ -303,13 +303,11 @@ fn increment_nonce_number_test_0xff0000_plus_0x011000() {
 fn public_key_parse_bytes_test() {
     fn with_bytes(bytes: Vec<u8>) {
         if bytes.len() < PUBLICKEYBYTES {
-            assert!(PublicKey::parse_bytes(&bytes).is_incomplete());
+            assert!(PublicKey::from_bytes(&bytes).is_incomplete());
             return
         }
 
-        let (rest, PublicKey(pk_bytes)) =
-            PublicKey::parse_bytes(&bytes)
-                .expect("PublicKey::parse_bytes should parse any long enough input.");
+        let (rest, PublicKey(pk_bytes)) = PublicKey::from_bytes(&bytes).unwrap();
 
         assert_eq!(pk_bytes, &bytes[..PUBLICKEYBYTES]);
         assert_eq!(rest, &bytes[PUBLICKEYBYTES..]);
@@ -325,13 +323,11 @@ fn public_key_parse_bytes_test() {
 fn secret_key_parse_bytes_test() {
     fn with_bytes(bytes: Vec<u8>) {
         if bytes.len() < SECRETKEYBYTES {
-            assert!(SecretKey::parse_bytes(&bytes).is_incomplete());
+            assert!(SecretKey::from_bytes(&bytes).is_incomplete());
             return
         }
 
-        let (rest, SecretKey(sk_bytes)) =
-            SecretKey::parse_bytes(&bytes)
-                .expect("SecretKey::parse_bytes should parse any long enough input.");
+        let (rest, SecretKey(sk_bytes)) = SecretKey::from_bytes(&bytes).unwrap();
 
         assert_eq!(sk_bytes, &bytes[..SECRETKEYBYTES]);
         assert_eq!(rest, &bytes[SECRETKEYBYTES..]);
@@ -346,13 +342,11 @@ fn secret_key_parse_bytes_test() {
 fn nonce_parse_bytes_test() {
     fn with_bytes(bytes: Vec<u8>) {
         if bytes.len() < NONCEBYTES {
-            assert!(Nonce::parse_bytes(&bytes).is_incomplete());
+            assert!(Nonce::from_bytes(&bytes).is_incomplete());
             return
         }
 
-        let (rest, Nonce(sk_bytes)) =
-            Nonce::parse_bytes(&bytes)
-                .expect("Nonce::parse_bytes should parse any long enough input.");
+        let (rest, Nonce(sk_bytes)) = Nonce::from_bytes(&bytes).unwrap();
 
         assert_eq!(sk_bytes, &bytes[..NONCEBYTES]);
         assert_eq!(rest, &bytes[NONCEBYTES..]);

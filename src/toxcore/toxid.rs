@@ -1,5 +1,6 @@
 /*
     Copyright © 2016 Zetok Zalbavar <zexavexxe@gmail.com>
+    Copyright © 2018 Roman Proskuryakov <humbug@deeptown.org>
 
     This file is part of Tox.
 
@@ -28,9 +29,18 @@
 use std::default::Default;
 use std::fmt;
 
-use super::binary_io::*;
-use super::crypto_core::*;
+use toxcore::binary_io_new::*;
+use toxcore::crypto_core::*;
 
+/** Calculate XOR checksum for 2 [u8; 2].
+
+    Used for calculating checksum of ToxId.
+
+    https://zetok.github.io/tox-spec/#tox-id , 4th paragraph.
+*/
+pub fn xor_checksum(lhs: &[u8; 2], rhs: &[u8; 2]) -> [u8; 2] {
+    [lhs[0] ^ rhs[0], lhs[1] ^ rhs[1]]
+}
 
 /** `NoSpam` used in [`ToxId`](./struct.ToxId.html).
 
@@ -109,8 +119,19 @@ impl fmt::Display for NoSpam {
     }
 }
 
-from_bytes!(NoSpam, map!(take!(NOSPAMBYTES), |bytes| NoSpam([bytes[0], bytes[1], bytes[2], bytes[3]])));
+impl FromBytes for NoSpam {
+    named!(from_bytes<NoSpam>, map!(take!(NOSPAMBYTES), |bytes| {
+        NoSpam([bytes[0], bytes[1], bytes[2], bytes[3]])
+    }));
+}
 
+impl ToBytes for NoSpam {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_slice!(&self.0)
+        )
+    }
+}
 
 /** `Tox ID`.
 
@@ -233,60 +254,22 @@ impl ToxId {
     }
 }
 
-/** Should always work, provided that there are supplied at least
-[`TOXIDBYTES`](./constant.TOXIDBYTES.html).
+impl FromBytes for ToxId {
+    named!(from_bytes<ToxId>, do_parse!(
+        pk: call!(PublicKey::from_bytes) >>
+        nospam: call!(NoSpam::from_bytes) >>
+        checksum: map!(take!(CHECKSUMBYTES), |bytes| { [bytes[0], bytes[1]] }) >>
+        (ToxId { pk, nospam, checksum })
+    ));
+}
 
-Note that `ToxId` might not have a valid [`NoSpam`](./struct.NoSpam.html) from
-provided bytes.
-
-E.g.
-
-```
-use self::tox::toxcore::binary_io::FromBytes;
-use self::tox::toxcore::toxid::{ToxId, TOXIDBYTES};
-
-let bytes = [0; TOXIDBYTES + 10];
-
-assert_eq!(None, ToxId::from_bytes(&bytes[..TOXIDBYTES - 11]));
-let _toxid = ToxId::from_bytes(&bytes).expect("Failed to get ToxId from bytes!");
-```
-*/
-from_bytes!(ToxId, do_parse!(
-    pk: call!(PublicKey::parse_bytes) >>
-    nospam: call!(NoSpam::parse_bytes) >>
-    checksum: map!(take!(CHECKSUMBYTES), |bytes| { [bytes[0], bytes[1]] }) >>
-    (ToxId { pk, nospam, checksum })
-));
-
-/** E.g.
-
-```
-use self::tox::toxcore::binary_io::ToBytes;
-use self::tox::toxcore::crypto_core::{gen_keypair, PublicKey, PUBLICKEYBYTES};
-use self::tox::toxcore::toxid::{NoSpam, NOSPAMBYTES, ToxId, TOXIDBYTES};
-
-// create a `0` Tox ID
-let mut toxid = ToxId::new(PublicKey([0; PUBLICKEYBYTES]));
-toxid.new_nospam(Some(NoSpam([0; NOSPAMBYTES])));
-let toxid_bytes = toxid.to_bytes();
-assert_eq!([0; TOXIDBYTES].to_vec(), toxid_bytes);
-
-
-// and a random one
-let (pk, _) = gen_keypair();
-let PublicKey(ref pk_bytes) = pk;
-let toxid_bytes = ToxId::new(pk).to_bytes();
-assert_eq!(pk_bytes, &toxid_bytes[..PUBLICKEYBYTES]);
-```
-*/
 impl ToBytes for ToxId {
-    fn to_bytes(&self) -> Vec<u8> {
-        let mut result = Vec::with_capacity(TOXIDBYTES);
-        let PublicKey(pk) = self.pk;
-        result.extend_from_slice(&pk);
-        result.extend_from_slice(&self.nospam.0);
-        result.extend_from_slice(&self.checksum);
-        result
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_slice!(self.pk.as_ref()) >>
+            gen_slice!(&self.nospam.0) >>
+            gen_slice!(&self.checksum)
+        )
     }
 }
 
@@ -344,4 +327,134 @@ impl fmt::Display for ToxId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:X}", self)
     }
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate rand;
+    extern crate rustc_serialize;
+
+    use quickcheck::quickcheck;
+
+    use ::toxcore::binary_io_new::*;
+    use ::toxcore::crypto_core::*;
+    use ::toxcore::toxid::*;
+
+    fn test_is_hexdump_uppercase(s: &str) -> bool {
+        fn test_is_hexdump_uppercase_b(b: u8) -> bool {
+            if let b'A' ... b'F' = b {
+                true
+            } else if let b'0' ... b'9' = b {
+                true
+            } else {
+                false
+            }
+        }
+        s.bytes().all(test_is_hexdump_uppercase_b)
+    }
+
+    // NoSpam::
+
+    #[cfg(test)]
+    fn no_spam_no_empty(ns: &NoSpam) {
+        // shouldn't be empty, unless your PRNG is crappy
+        assert!(ns.0 != [0; NOSPAMBYTES])
+    }
+
+    // NoSpam::new()
+
+    #[test]
+    fn no_spam_new_test() {
+        let ns = NoSpam::new();
+        no_spam_no_empty(&ns);
+    }
+
+    // NoSpam::default()
+
+    #[test]
+    fn no_spam_default_test() {
+        let ns = NoSpam::default();
+        no_spam_no_empty(&ns);
+    }
+
+    // NoSpam::fmt()
+
+    #[test]
+    fn no_spam_fmt_test() {
+        // check if formatted NoSpam is always upper-case hexadecimal with matching
+        // length
+        let nospam = NoSpam::new();
+        assert_eq!(false, test_is_hexdump_uppercase("Not HexDump"));
+        assert_eq!(true, test_is_hexdump_uppercase(&format!("{:X}", nospam)));
+        assert_eq!(true, test_is_hexdump_uppercase(&format!("{}", nospam)));
+        assert_eq!(true, test_is_hexdump_uppercase(&format!("{:X}", NoSpam([0, 0, 0, 0]))));
+        assert_eq!(true, test_is_hexdump_uppercase(&format!("{}", NoSpam([0, 0, 0, 0]))));
+        assert_eq!(true, test_is_hexdump_uppercase(&format!("{:X}", NoSpam([15, 15, 15, 15]))));
+        assert_eq!(true, test_is_hexdump_uppercase(&format!("{}", NoSpam([15, 15, 15, 15]))));
+    }
+
+    // NoSpam::from_bytes()
+
+    #[test]
+    fn no_spam_from_bytes_test() {
+        fn with_bytes(bytes: Vec<u8>) {
+            if bytes.len() < NOSPAMBYTES {
+                assert!(NoSpam::from_bytes(&bytes).is_incomplete());
+            } else {
+                let nospam = NoSpam::from_bytes(&bytes)
+                                .to_result()
+                                .expect("Failed to get NoSpam!");
+                assert_eq!(bytes[0], nospam.0[0]);
+                assert_eq!(bytes[1], nospam.0[1]);
+                assert_eq!(bytes[2], nospam.0[2]);
+                assert_eq!(bytes[3], nospam.0[3]);
+            }
+        }
+        quickcheck(with_bytes as fn(Vec<u8>));
+    }
+
+    encode_decode_test!(
+        no_spam_encode_decode,
+        NoSpam::new()
+    );
+
+    // ToxId::
+
+    // ToxId::new_nospam
+
+    #[test]
+    fn tox_id_new_nospam_test() {
+        let (pk, _) = gen_keypair();
+        let toxid = ToxId::new(pk);
+        let mut toxid2 = toxid;
+        toxid2.new_nospam(None);
+
+        assert!(toxid != toxid2);
+        assert_eq!(toxid.pk, toxid2.pk);
+
+        let mut toxid3 = toxid;
+
+        // with same `NoSpam` IDs are identical
+        let nospam = NoSpam::new();
+        toxid2.new_nospam(Some(nospam));
+        toxid3.new_nospam(Some(nospam));
+        assert_eq!(toxid2, toxid3);
+    }
+
+    // ToxId::fmt()
+
+    #[test]
+    fn tox_id_fmt_test() {
+        // check if formatted ToxId is always upper-case hexadecimal with matching
+        // length
+        let (pk, _) = gen_keypair();
+        let toxid = ToxId::new(pk);
+        assert_eq!(true, test_is_hexdump_uppercase(&format!("{:X}", toxid)));
+        assert_eq!(true, test_is_hexdump_uppercase(&format!("{}", toxid)));
+    }
+
+    encode_decode_test!(
+        toxid_encode_decode,
+        ToxId::new(gen_keypair().0)
+    );
 }

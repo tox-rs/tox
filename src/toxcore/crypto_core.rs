@@ -27,7 +27,7 @@ pub use sodiumoxide::crypto::box_::*;
 use std::sync::{Once, ONCE_INIT};
 use byteorder::{ByteOrder, NativeEndian};
 
-use super::binary_io::*;
+use toxcore::binary_io_new::*;
 
 // TODO: check if `#[inline]` is actually useful
 
@@ -193,8 +193,14 @@ pub fn new_symmetric_key() -> PrecomputedKey {
     PrecomputedKey::from_slice(&buf).unwrap()
 }
 
-from_bytes!(PublicKey, map_opt!(take!(PUBLICKEYBYTES), PublicKey::from_slice));
+impl FromBytes for PublicKey {
+    named!(from_bytes<PublicKey>, map_opt!(take!(PUBLICKEYBYTES), PublicKey::from_slice));
+}
 
-from_bytes!(SecretKey, map_opt!(take!(SECRETKEYBYTES), SecretKey::from_slice));
+impl FromBytes for SecretKey {
+    named!(from_bytes<SecretKey>, map_opt!(take!(SECRETKEYBYTES), SecretKey::from_slice));
+}
 
-from_bytes!(Nonce, map_opt!(take!(NONCEBYTES), Nonce::from_slice));
+impl FromBytes for Nonce {
+    named!(from_bytes<Nonce>, map_opt!(take!(NONCEBYTES), Nonce::from_slice));
+}
