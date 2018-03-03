@@ -33,7 +33,7 @@ use std::net::{
     SocketAddr,
 };
 
-use toxcore::binary_io_new::*;
+use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 
 /** `PackedNode` format is a way to store the node info in a small yet easy to

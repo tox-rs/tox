@@ -85,7 +85,7 @@ pub mod toxcore_tests {
 #[warn(missing_docs)]
 pub mod toxcore {
     #[macro_use]
-    pub mod binary_io_new;
+    pub mod binary_io;
     pub mod crypto_core;
     pub mod state_format;
     pub mod toxid;

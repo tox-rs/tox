@@ -22,7 +22,7 @@
 
 */
 
-use toxcore::binary_io_new::*;
+use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 
 pub mod handshake;

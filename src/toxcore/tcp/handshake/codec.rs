@@ -22,7 +22,7 @@
 
 */
 
-use toxcore::binary_io_new::*;
+use toxcore::binary_io::*;
 use toxcore::tcp::handshake::packet::*;
 
 use nom::Offset;

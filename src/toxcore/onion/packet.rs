@@ -21,7 +21,7 @@
 /*! Onion UDP Packets
 */
 
-use toxcore::binary_io_new::*;
+use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 
 use nom::{be_u16, le_u8, le_u64, rest};

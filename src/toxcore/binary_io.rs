@@ -1,7 +1,7 @@
 /*
     Copyright (C) 2013 Tox project All Rights Reserved.
     Copyright © 2017 Zetok Zalbavar <zexavexxe@gmail.com>
-    Copyright © 2017 Roman Proskuryakov <humbug@deeptown.org>
+    Copyright © 2018 Roman Proskuryakov <humbug@deeptown.org>
 
     This file is part of Tox.
 
