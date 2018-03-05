@@ -13,57 +13,113 @@ cache:
     - $HOME/.cargo
     - cargo/
     - target/
-  
+    - apt-cache/
+    - kcov/
 
-.install_libsodium_template: &install_libsodium
+############################################
+# TEMPLATES
+
+.before_install_template: &before_install
+  - export TRAVIS_JOB_ID=$CI_BUILD_ID
+  - export APT_CACHE_DIR=`pwd`/apt-cache && mkdir -pv $APT_CACHE_DIR
+  - export KCOV_DIR=`pwd`/kcov && mkdir -pv $KCOV_DIR
+  - export ROOT_DIR=`pwd`
+  - rm -rf target/kcov || echo 'target/kcov not exist'
+  ### linux
+  - (if [[ "${CI_OS_NAME}" == "linux" ]]; then
+      ./scripts/verify-commit-messages.sh "$CI_COMMIT_BEFORE_SHA..$CI_COMMIT_SHA";
+    fi)
+  ### osx
+  - (if [[ "${CI_OS_NAME}" == "osx" ]]; then
+      ./scripts/bootstrap-osx.sh &&
+      export PKG_CONFIG_PATH=$HOME/installed_libsodium/lib/pkgconfig:$PKG_CONFIG_PATH;
+      export LD_LIBRARY_PATH=$HOME/installed_libsodium/lib:$LD_LIBRARY_PATH;
+    fi)
+  ### libsodium install
   - curl --location --output libsodium18_1.0.13-1_amd64.deb http://archive.ubuntu.com/ubuntu/pool/universe/libs/libsodium/libsodium18_1.0.13-1_amd64.deb
   - curl --location --output libsodium-dev_1.0.13-1_amd64.deb http://archive.ubuntu.com/ubuntu/pool/universe/libs/libsodium/libsodium-dev_1.0.13-1_amd64.deb
   - sudo dpkg -i libsodium-dev_1.0.13-1_amd64.deb libsodium18_1.0.13-1_amd64.deb
+  ### build kcov for stable
+  - (if [[ "${CI_OS_NAME}" == "linux" ]] && [[ "${build_version}" == "stable" ]]; then
+      sudo apt-get -o dir::cache::archives="$APT_CACHE_DIR" install build-essential;
+      sudo apt-get remove kcov -y || echo 'ok';
+      sudo apt-get -o dir::cache::archives="$APT_CACHE_DIR" update -yq &&
+      sudo apt-get -o dir::cache::archives="$APT_CACHE_DIR" install libcurl4-openssl-dev libelf-dev libdw-dev cmake gcc binutils-dev libiberty-dev zlib1g-dev cmake -y;
+      cd $KCOV_DIR && git clone https://github.com/SimonKagstrom/kcov || echo 'kcov exist';
+      cd kcov && cmake . && make && make install || echo 'kcov exist';
+      cd $ROOT_DIR;
+    fi)
 
 .cargo_build_template: &cargo_build
   stage: build
-  before_script: *install_libsodium
+  before_script: *before_install
   script:
-    - cargo test --verbose --jobs 1
-    - cargo build --verbose --jobs 1
+    - (if [[ "${build_version}" == "nightly" ]]; then
+        cargo test --verbose --features "clippy" --jobs 1;
+      else
+        cargo test --verbose --jobs 1;
+      fi)
     - cargo doc
+    # measure code coverage and upload to coveralls.io
+    - (if [[ "${CI_OS_NAME}" == "linux" ]] && [[ "${build_version}" == stable ]]; then
+        CARGO_TARGET_DIR=target/ cargo install --force cargo-travis || echo "cargo-travis has been already installed";
+        export PATH=$HOME/.cargo/bin:$PATH;
+        cargo coveralls;
+      fi)
   artifacts:
     paths:
     - target/debug
     - target/doc
+    - target/kcov
     name: "${CI_JOB_STAGE}-${CI_BUILD_NAME}"
     expire_in: 1 week
   tags:
     - docker
     - linux
-  only:
-    - master
   except:
     - /test.*/
+
+############################################
+# JOBS - STAGE: BUILD
 
 # linux start
 1.21.0:tox:
   image: rustdocker/rust:1.21.0
   <<: *cargo_build
+  variables:
+    build_version: "1.21.0"
+    CI_OS_NAME: linux
+
 
 stable:tox:
   image: rustdocker/rust:stable
   <<: *cargo_build
+  variables:
+    build_version: stable
+    CI_OS_NAME: linux
 
 beta:tox:
   image: rustdocker/rust:beta
   <<: *cargo_build
+  variables:
+    build_version: beta
+    CI_OS_NAME: linux
+
 
 nightly:tox:
   image: rustdocker/rust:nightly
   <<: *cargo_build
+  variables:
+    build_version: nightly
+    CI_OS_NAME: linux
+
 
 ### linux end
 
-### windows start 
+### windows start
 
 ### windows end
 
-### osx start 
+### osx start
 
 ### osx end
