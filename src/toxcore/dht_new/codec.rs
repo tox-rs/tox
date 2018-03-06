@@ -54,6 +54,7 @@ Because size of SendNodes is largest in DHT related packets
 pub const MAX_DHT_PACKET_SIZE: usize = 512;
 
 /// Struct to use for {de-,}serializing DHT UDP packets.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DhtCodec;
 
 impl UdpCodec for DhtCodec {
