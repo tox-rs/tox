@@ -17,7 +17,7 @@ documentation = "https://docs.rs/tox/"
 repository = "https://github.com/tox-rs/tox/"
 keywords = ["p2p", "instant-messaging", "tox", "toxcore", "networking"]
 categories = ["multimedia"]
-license = "GPL-3.0-or-later"
+license = "GPL-3.0+"
 
 [badges]
 travis-ci = { repository = "tox-rs/tox" }
