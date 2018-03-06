@@ -63,7 +63,7 @@ solely on the UDP.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct PackedNode {
     /// Socket addr of node.
-    saddr: SocketAddr,
+    pub saddr: SocketAddr,
     /// Public Key of the node.
     pub pk: PublicKey,
 }
@@ -154,7 +154,7 @@ mod tests {
     use super::*;
     use std::net::{SocketAddrV4, SocketAddrV6};
 
-    use quickcheck::{Arbitrary, Gen};
+    use quickcheck::{Arbitrary, Gen, quickcheck};
 
     // PackedNode::
     /// Valid, random `PackedNode`.
@@ -179,5 +179,52 @@ mod tests {
                 PackedNode::new(g.gen(), SocketAddr::V6(saddr), &pk)
             }
         }
+    }
+
+    #[test]
+    fn packed_node_new_test() {
+        fn with_params(saddr: SocketAddr) {
+            let (pk, _sk) = gen_keypair();
+
+            let a = PackedNode::new(true, saddr.clone(), &pk.clone());
+            let b = PackedNode {
+                saddr: saddr,
+                pk: pk,
+            };
+            assert_eq!(a, b);
+        }
+        quickcheck(with_params as fn(SocketAddr));
+    }
+    #[test]
+    fn packed_node_ip_type_test() {
+        fn with_packed_node(pnode: PackedNode) {
+            let a = pnode.ip_type();
+            let b = 
+                if pnode.saddr.is_ipv4() {
+                    2
+                } else {
+                    10
+                };
+            assert_eq!(a, b);
+        }
+        quickcheck(with_packed_node as fn(PackedNode));
+    }
+    #[test]
+    fn packed_node_ip_test() {
+        fn with_packed_node(pnode: PackedNode) {
+            let a = pnode.ip();
+            let b = pnode.saddr.ip();
+            assert_eq!(a, b);
+        }
+        quickcheck(with_packed_node as fn(PackedNode));
+    }
+    #[test]
+    fn packed_node_socket_addr_test() {
+        fn with_packed_node(pnode: PackedNode) {
+            let a = pnode.socket_addr();
+            let b = pnode.saddr;
+            assert_eq!(a, b);
+        }
+        quickcheck(with_packed_node as fn(PackedNode));
     }
 }
