@@ -20,7 +20,6 @@
 
 
 /*!
-Hold peer info. connected.
 The object of this struct is an object per a peer.
 */
 
