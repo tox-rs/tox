@@ -1,0 +1,6 @@
+[package]
+name = "tox-node"
+version = "0.0.1"
+authors = ["Roman Proskuryakov <humbug@deeptown.org>"]
+
+[dependencies]
