@@ -90,7 +90,7 @@ pub mod toxcore {
     pub mod state_format;
     pub mod toxid;
     pub mod tcp;
-    pub mod dht_new;
+    pub mod dht;
     pub mod onion;
 }
 

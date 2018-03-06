@@ -40,7 +40,7 @@ PK; and additionally used to store nodes closest to friends.
     * takes care of the K-Bucket
 */
 use toxcore::crypto_core::*;
-use toxcore::dht_new::packed_node::PackedNode;
+use toxcore::dht::packed_node::PackedNode;
 use std::cmp::{Ord, Ordering};
 use std::net::SocketAddr;
 
@@ -272,7 +272,7 @@ impl Bucket {
 Equivalent to calling [`Bucket::new()`] with `None`:
 
 ```
-# use tox::toxcore::dht_new::kbucket::Bucket;
+# use tox::toxcore::dht::kbucket::Bucket;
 assert_eq!(Bucket::new(None), Bucket::default());
 ```
 

@@ -32,8 +32,8 @@ use std::io::{ErrorKind, Error};
 use std::net::SocketAddr;
 
 use toxcore::crypto_core::*;
-use toxcore::dht_new::packet::*;
-use toxcore::dht_new::codec::*;
+use toxcore::dht::packet::*;
+use toxcore::dht::codec::*;
 
 /// Shorthand for the transmit half of the message channel.
 type Tx = mpsc::UnboundedSender<DhtUdpPacket>;
@@ -118,7 +118,7 @@ mod tests {
     use futures::*;
 
     use std::net::SocketAddr;
-    use toxcore::dht_new::packed_node::*;
+    use toxcore::dht::packed_node::*;
 
     fn create_client() -> (Client, SecretKey, mpsc::UnboundedReceiver<DhtUdpPacket>) {
         let addr: SocketAddr = "127.0.0.1:12345".parse().unwrap();
@@ -136,7 +136,7 @@ mod tests {
         let payload = PingRequestPayload { id: random_u64() };
         let packet = DhtPacket::PingRequest(PingRequest::new(&client.precomputed_key.clone(), &client.pk, payload));
         client.send(packet.clone()).wait().unwrap();
-        let rx = 
+        let rx =
         if let (Some((_addr, received_packet)), rx1) = rx.into_future().wait().unwrap() {
             assert_eq!(packet, received_packet);
             rx1

@@ -23,7 +23,7 @@
 /*! Codec for encoding/decoding DHT Packets & DHT Request packets using tokio-io
 */
 
-use toxcore::dht_new::packet::*;
+use toxcore::dht::packet::*;
 use toxcore::binary_io::*;
 
 use std::io;
