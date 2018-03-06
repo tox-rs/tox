@@ -42,6 +42,7 @@ PK; and additionally used to store nodes closest to friends.
 use toxcore::crypto_core::*;
 use toxcore::dht_new::packed_node::PackedNode;
 use std::cmp::{Ord, Ordering};
+use std::net::SocketAddr;
 
 /** Calculate the [`k-bucket`](./struct.Kbucket.html) index of a PK compared
 to "own" PK.
@@ -108,9 +109,9 @@ PK; and additionally used to store nodes closest to friends.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Bucket {
     /// Amount of nodes it can hold.
-    capacity: u8,
+    pub capacity: u8,
     /// Nodes that bucket has, sorted by distance to PK.
-    nodes: Vec<PackedNode>
+    pub nodes: Vec<PackedNode>
 }
 
 /// Default number of nodes that bucket can hold.
@@ -145,7 +146,6 @@ impl Bucket {
         }
     }
 
-    #[cfg(test)]
     fn find(&self, pk: &PublicKey) -> Option<usize> {
         for (n, node) in self.nodes.iter().enumerate() {
             if &node.pk == pk {
@@ -301,7 +301,7 @@ pub struct Kbucket {
     pk: PublicKey,
 
     /// List of [`Bucket`](./struct.Bucket.html)s.
-    buckets: Vec<Box<Bucket>>,
+    pub buckets: Vec<Box<Bucket>>,
 }
 
 /** Maximum number of [`Bucket`](./struct.Bucket.html)s that [`Kbucket`]
@@ -335,12 +335,24 @@ impl Kbucket {
         self.buckets.len() as u8
     }
 
+    /// find peer which has pk
     #[cfg(test)]
     fn find(&self, pk: &PublicKey) -> Option<(usize, usize)> {
         for (bucket_index, bucket) in self.buckets.iter().enumerate() {
             match bucket.find(pk) {
                 None => {},
                 Some(node_index) => return Some((bucket_index, node_index))
+            }
+        }
+        None
+    }
+
+    /// find peer which has pk
+    pub fn get_node(&self, pk: &PublicKey) -> Option<SocketAddr> {
+        for (_, bucket) in self.buckets.iter().enumerate() {
+            match bucket.find(pk) {
+                None => {},
+                Some(node_index) => return Some((*bucket).nodes[node_index].saddr.clone())
             }
         }
         None

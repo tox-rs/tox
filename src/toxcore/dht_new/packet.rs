@@ -33,6 +33,7 @@ use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 use toxcore::dht_new::packed_node::PackedNode;
 use toxcore::onion::packet::*;
+use toxcore::dht_new::codec::*;
 
 /// Length in bytes of [`PingRequest`](./struct.PingRequest.html) and
 /// [`PingResponse`](./struct.PingResponse.html) when serialized into bytes.
@@ -172,6 +173,19 @@ impl FromBytes for PingRequest {
 }
 
 impl PingRequest {
+    /// create new PingRequest object
+    pub fn new(shared_secret: &PrecomputedKey, pk: &PublicKey, payload: PingRequestPayload) -> PingRequest {
+        let nonce = &gen_nonce();
+        let mut buf = [0; MAX_DHT_PACKET_SIZE];
+        let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
+        let payload = seal_precomputed(&buf[..size] , nonce, shared_secret);
+
+        PingRequest {
+            pk: *pk,
+            nonce: *nonce,
+            payload: payload,
+        }
+    }
     /** Decrypt payload and try to parse it as `PingRequestPayload`.
 
     Returns `Error` in case of failure:
@@ -291,6 +305,19 @@ impl FromBytes for PingResponse {
 }
 
 impl PingResponse {
+    /// create new PingResponse object
+    pub fn new(shared_secret: &PrecomputedKey, pk: &PublicKey, payload: PingResponsePayload) -> PingResponse {
+        let nonce = &gen_nonce();
+        let mut buf = [0; MAX_DHT_PACKET_SIZE];
+        let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
+        let payload = seal_precomputed(&buf[..size] , nonce, shared_secret);
+
+        PingResponse {
+            pk: *pk,
+            nonce: *nonce,
+            payload: payload,
+        }
+    }
     /** Decrypt payload and try to parse it as `PingResponsePayload`.
 
     Returns `Error` in case of failure:
@@ -410,6 +437,19 @@ impl FromBytes for NodesRequest {
 }
 
 impl NodesRequest {
+    /// create new NodesRequest object
+    pub fn new(shared_secret: &PrecomputedKey, pk: &PublicKey, payload: NodesRequestPayload) -> NodesRequest {
+        let nonce = &gen_nonce();
+        let mut buf = [0; MAX_DHT_PACKET_SIZE];
+        let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
+        let payload = seal_precomputed(&buf[..size] , nonce, shared_secret);
+
+        NodesRequest {
+            pk: *pk,
+            nonce: *nonce,
+            payload: payload,
+        }
+    }
     /** Decrypt payload and try to parse it as `NodesRequestPayload`.
 
     Returns `Error` in case of failure:
@@ -521,6 +561,19 @@ impl FromBytes for NodesResponse {
 }
 
 impl NodesResponse {
+    /// create new NodesResponse object
+    pub fn new(shared_secret: &PrecomputedKey, pk: &PublicKey, payload: NodesResponsePayload) -> NodesResponse {
+        let nonce = &gen_nonce();
+        let mut buf = [0; MAX_DHT_PACKET_SIZE];
+        let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
+        let payload = seal_precomputed(&buf[..size] , nonce, shared_secret);
+
+        NodesResponse {
+            pk: *pk,
+            nonce: *nonce,
+            payload: payload,
+        }
+    }
     /** Decrypt payload and try to parse it as `NodesResponsePayload`.
 
     Returns `Error` in case of failure:
@@ -791,6 +844,21 @@ impl FromBytes for DhtRequest {
 }
 
 impl DhtRequest {
+    /// create new DhtRequest object
+    pub fn new(shared_secret: &PrecomputedKey, rpk: &PublicKey, spk: &PublicKey, dp: DhtRequestPayload) -> DhtRequest {
+        let nonce = &gen_nonce();
+
+        let mut buf = [0; MAX_DHT_PACKET_SIZE];
+        let (_, size) = dp.to_bytes((&mut buf, 0)).unwrap();
+        let payload = seal_precomputed(&buf[..size], nonce, shared_secret);
+
+        DhtRequest {
+            rpk: *rpk,
+            spk: *spk,
+            nonce: *nonce,
+            payload: payload,
+        }
+    }
     /**
     Decrypt payload and try to parse it as packet type.
 
@@ -859,6 +927,12 @@ impl FromBytes for DhtRequestPayload {
 }
 
 /** NatPing request of DHT Request packet.
+
+size    | description
+1       | nat ping req (0xfe)
+1       | Request or Response flag
+8       | Request Id (Ping Id)
+
 */
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct NatPingRequest {
@@ -1007,140 +1081,48 @@ impl FromBytes for BootstrapInfo {
 }
 
 
+impl PingRequestPayload {
+    /// Create new ping request with a randomly generated `request id`.
+    pub fn new() -> Self {
+        trace!("Creating new Ping.");
+        PingRequestPayload { id: random_u64() }
+    }
+
+    /// An ID of the request / response.
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+}
+
+impl PingResponsePayload {
+    /// An ID of the request / response.
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+}
+
+impl NatPingRequest {
+    /// Create new ping request with a randomly generated `request id`.
+    pub fn new() -> Self {
+        trace!("Creating new Ping.");
+        NatPingRequest { id: random_u64() }
+    }
+
+    /// An ID of the request / response.
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::net::SocketAddr;
-    use toxcore::dht_new::codec::*;
+    use quickcheck::{Arbitrary, Gen, quickcheck};
 
     const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - NONCEBYTES;
     const ONION_RETURN_2_PAYLOAD_SIZE: usize = ONION_RETURN_2_SIZE - NONCEBYTES;
     const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - NONCEBYTES;
-
-    use quickcheck::{Arbitrary, Gen, quickcheck};
-
-    impl PingRequest {
-        pub fn new(shared_secret: &PrecomputedKey, pk: &PublicKey, payload: PingRequestPayload) -> PingRequest {
-            let nonce = &gen_nonce();
-            let mut buf = [0; MAX_DHT_PACKET_SIZE];
-            let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
-            let payload = seal_precomputed(&buf[..size] , nonce, shared_secret);
-
-            PingRequest {
-                pk: *pk,
-                nonce: *nonce,
-                payload: payload,
-            }
-        }
-    }
-
-    impl PingResponse {
-        pub fn new(shared_secret: &PrecomputedKey, pk: &PublicKey, payload: PingResponsePayload) -> PingResponse {
-            let nonce = &gen_nonce();
-            let mut buf = [0; MAX_DHT_PACKET_SIZE];
-            let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
-            let payload = seal_precomputed(&buf[..size] , nonce, shared_secret);
-
-            PingResponse {
-                pk: *pk,
-                nonce: *nonce,
-                payload: payload,
-            }
-        }
-    }
-
-    impl NodesRequest {
-        pub fn new(shared_secret: &PrecomputedKey, pk: &PublicKey, payload: NodesRequestPayload) -> NodesRequest {
-            let nonce = &gen_nonce();
-            let mut buf = [0; MAX_DHT_PACKET_SIZE];
-            let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
-            let payload = seal_precomputed(&buf[..size] , nonce, shared_secret);
-
-            NodesRequest {
-                pk: *pk,
-                nonce: *nonce,
-                payload: payload,
-            }
-        }
-    }
-
-    impl NodesResponse {
-        pub fn new(shared_secret: &PrecomputedKey, pk: &PublicKey, payload: NodesResponsePayload) -> NodesResponse {
-            let nonce = &gen_nonce();
-            let mut buf = [0; MAX_DHT_PACKET_SIZE];
-            let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
-            let payload = seal_precomputed(&buf[..size] , nonce, shared_secret);
-
-            NodesResponse {
-                pk: *pk,
-                nonce: *nonce,
-                payload: payload,
-            }
-        }
-    }
-
-    impl DhtRequest {
-        /// create new DhtRequest object
-        pub fn new(shared_secret: &PrecomputedKey, rpk: &PublicKey, spk: &PublicKey, dp: DhtRequestPayload) -> DhtRequest {
-            let nonce = &gen_nonce();
-
-            let mut buf = [0; MAX_DHT_PACKET_SIZE];
-            let (_, size) = dp.to_bytes((&mut buf, 0)).unwrap();
-            let payload = seal_precomputed(&buf[..size], nonce, shared_secret);
-
-            DhtRequest {
-                rpk: *rpk,
-                spk: *spk,
-                nonce: *nonce,
-                payload: payload,
-            }
-        }
-    }
-
-    impl PingRequestPayload {
-        /// Create new ping request with a randomly generated `request id`.
-        pub fn new() -> Self {
-            trace!("Creating new Ping.");
-            PingRequestPayload { id: random_u64() }
-        }
-
-        /// An ID of the request / response.
-        pub fn id(&self) -> u64 {
-            self.id
-        }
-    }
-
-    impl PingResponsePayload {
-        /// An ID of the request / response.
-        pub fn id(&self) -> u64 {
-            self.id
-        }
-    }
-
-    impl NatPingRequest {
-        /// Create new ping request with a randomly generated `request id`.
-        pub fn new() -> Self {
-            trace!("Creating new Ping.");
-            NatPingRequest { id: random_u64() }
-        }
-
-        /// An ID of the request / response.
-        pub fn id(&self) -> u64 {
-            self.id
-        }
-    }
-
-    impl From<PingRequestPayload> for PingResponsePayload {
-        fn from(p: PingRequestPayload) -> Self {
-            PingResponsePayload { id: p.id }
-        }
-    }
-
-    impl From<NatPingRequest> for NatPingResponse {
-        fn from(p: NatPingRequest) -> Self {
-            NatPingResponse { id: p.id }
-        }
-    }
 
     impl Arbitrary for DhtPacket {
         fn arbitrary<G: Gen>(g: &mut G) -> Self {
