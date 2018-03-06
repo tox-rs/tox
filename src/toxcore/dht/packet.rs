@@ -31,9 +31,9 @@ use std::io::{Error, ErrorKind};
 
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
-use toxcore::dht_new::packed_node::PackedNode;
+use toxcore::dht::packed_node::PackedNode;
 use toxcore::onion::packet::*;
-use toxcore::dht_new::codec::*;
+use toxcore::dht::codec::*;
 
 /// Length in bytes of [`PingRequest`](./struct.PingRequest.html) and
 /// [`PingResponse`](./struct.PingResponse.html) when serialized into bytes.

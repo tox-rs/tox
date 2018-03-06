@@ -33,11 +33,11 @@ use std::net::SocketAddr;
 use std::collections::HashMap;
 
 use toxcore::crypto_core::*;
-use toxcore::dht_new::packet::*;
-use toxcore::dht_new::packed_node::*;
-use toxcore::dht_new::kbucket::*;
-use toxcore::dht_new::client::*;
-use toxcore::dht_new::codec::*;
+use toxcore::dht::packet::*;
+use toxcore::dht::packed_node::*;
+use toxcore::dht::kbucket::*;
+use toxcore::dht::client::*;
+use toxcore::dht::codec::*;
 
 /// Type representing Dht UDP packets.
 //pub type DhtUdpPacket = (SocketAddr, DhtPacket);
@@ -369,10 +369,10 @@ mod tests {
 
         let (pk, sk) = gen_keypair();
         let (tx, rx) = mpsc::unbounded::<DhtUdpPacket>();
-        let alice = Server::new(tx, pk, sk);            
+        let alice = Server::new(tx, pk, sk);
         let (bob_pk, bob_sk) = gen_keypair();
         let precomp = precompute(&alice.pk, &bob_sk);
-        
+
         let addr: SocketAddr = "127.0.0.1:12346".parse().unwrap();
         (alice, precomp, bob_pk, rx, addr)
     }
@@ -461,7 +461,7 @@ mod tests {
             // alice.kbucket.try_add(&packed_node);
             // let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(&precomp, &bob_pk, nrq));
             // alice.handle_packet((addr, nodes_req)).wait().unwrap();
-            // let rx = 
+            // let rx =
             // if let (Some((_addr, packet)), rx1) = rx.into_future().wait().unwrap() {
             //     debug!("received packet {:?}", packet);
             //     if let DhtPacket::NodesResponse(packet) = packet {

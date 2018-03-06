@@ -43,8 +43,8 @@ use std::rc::Rc;
 use std::io::{ErrorKind, Error};
 use std::time;
 
-use tox::toxcore::dht_new::codec::*;
-use tox::toxcore::dht_new::server::*;
+use tox::toxcore::dht::codec::*;
+use tox::toxcore::dht::server::*;
 use tox::toxcore::crypto_core::*;
 
 fn main() {
