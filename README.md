@@ -47,7 +47,6 @@ cargo build
 To run tests:
 ```bash
 cargo test
-
 ```
 To build docs:
 ```bash
@@ -83,13 +82,33 @@ cargo test --features "clippy"
 consider helping :wink:
 
  - [ ] implementing toxcore
-    - [ ] DHT
+    - [ ] DHT Node
         - [x] ping requests & responses
         - [x] nodes requests & responses
+        - [ ] CookieRequest (parsed but ignored)
+        - [ ] CookieResponse
+        - [ ] CryptoHandshake
+        - [ ] CryptoData
+        - [ ] LanDiscovery (parsed but ignored)
+        - [ ] OnionRequest[0,1,2] (parsed but ignored)
+        - [ ] OnionResponse[3,2,1] (parsed but ignored)
+        - [ ] Other onion packets (parsed but ignored)
+        - [ ] BootstrapInfo (parsed but ignored)
         - [x] NAT ping requests & responses
+    - [ ] TCP Relay
+        - [x] Handshake
+        - [x] RouteRequest
+        - [x] RouteResponse
+        - [x] ConnectNotification
+        - [x] DisconnectNotification
+        - [x] PingRequest
+        - [x] PongResponse
+        - [x] OobSend
+        - [x] OobReceive
+        - [ ] OnionRequest (parsed but ignored)
+        - [ ] OnionResponse (parsed but ignored)
+        - [x] Data
     - [x] toxencryptsave (aka TES)
- - [ ] C API – [CAPI]
-    - [x] toxencryptsave
  - [x] Rust API
 
    It will be a subject to changes, and most likely parts that are currently
