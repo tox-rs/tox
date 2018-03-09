@@ -107,6 +107,12 @@ impl ToBytes for IpPort {
 /** Encrypted onion return addresses. Payload contains encrypted with symmetric
 key `IpPort` and possibly inner `OnionReturn`.
 
+When DHT node receives OnionRequest packet it appends `OnionReturn` to the end
+of the next request packet it will send. So when DHT node receives OnionResponse
+packet it will know where to send the next response packet by decrypting
+`OnionReturn` from received packet. If node can't decrypt `OnionReturn` that
+means that onion path is expired and packet should be dropped.
+
 Serialized form:
 
 Length                | Content
@@ -367,7 +373,20 @@ impl ToBytes for OnionRequest2 {
     }
 }
 
-/** Serialized form:
+/** It's used for announcing ourselves to onion node and for looking for other
+announced nodes.
+
+If we want to announce ourselves we should send one `AnnounceRequest` packet with
+PingId set to 0 to acquire correct PingId of onion node. Then using this PingId
+we can send another `AnnounceRequest` to be added to onion nodes list. If
+`AnnounceRequest` succeed we will get `AnnounceResponse` with is_stored set to 2.
+Otherwise is_stored will be set to 0.
+
+If we are looking for another node we should send `AnnounceRequest` packet with
+PingId set to 0 and with `PublicKey` of this node. If node is found we will get
+`AnnounceResponse` with is_stored set to 1. Otherwise is_stored will be set to 0.
+
+Serialized form:
 
 Length   | Content
 -------- | ------
@@ -415,6 +434,8 @@ impl ToBytes for InnerAnnounceRequest {
 /** Same as `InnerAnnounceRequest` but with `OnionReturn` addresses. It's sent
 from the third node from onion chain to the destination node.
 
+See [`InnerAnnounceRequest`](./struct.InnerAnnounceRequest.html) for additional docs.
+
 Serialized form:
 
 Length   | Content
@@ -455,7 +476,15 @@ impl ToBytes for AnnounceRequest {
     }
 }
 
-/** Serialized form:
+/** It's used to send data requests to dht node using onion paths.
+
+When DHT node receives `OnionDataRequest` it sends `OnionDataResponse` to
+destination node for which data request is intended. Thus, data request will
+go through 7 intermediate nodes until destination node gets it - 3 nodes with
+OnionRequests, onion node that handles `OnionDataRequest` and 3 nodes with
+OnionResponses.
+
+Serialized form:
 
 Length   | Content
 -------- | ------
@@ -509,6 +538,8 @@ impl ToBytes for InnerOnionDataRequest {
 /** Same as `InnerOnionDataRequest` but with `OnionReturn` addresses. It's sent
 from the third node from onion chain to the destination node.
 
+See [`InnerOnionDataRequest`](./struct.InnerOnionDataRequest.html) for additional docs.
+
 Serialized form:
 
 Length   | Content
@@ -550,7 +581,11 @@ impl ToBytes for OnionDataRequest {
     }
 }
 
-/** Serialized form:
+/** When onion node receives `OnionDataRequest` packet it converts it to
+`OnionDataResponse` and sends to destination node if it announced itself
+and is contained in onion nodes list.
+
+Serialized form:
 
 Length   | Content
 -------- | ------
@@ -595,7 +630,23 @@ impl ToBytes for OnionDataResponse {
     }
 }
 
-/** Serialized form:
+/** It's used to respond to AnnounceRequest packet.
+
+sendback_data is the data from `AnnounceRequest` that should be sent in the
+response as is. It's used in onion client to match onion response with sent
+request.
+
+is_stored variable from payload contains the result of sent request. It might
+have values:
+- 0: failed to announce ourselves of find requested node
+- 1: requested node is found by it's real PublicKey
+- 2: we successfully announces ourselves
+
+In case of is_stored is equal to 1 ping_id from payload will contain pk that
+should be used to send data packets to the requested node. In other cases it
+will contain ping id that should be used for announcing ourselves.
+
+Serialized form:
 
 Length   | Content
 -------- | ------
