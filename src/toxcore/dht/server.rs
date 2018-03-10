@@ -37,12 +37,9 @@ use toxcore::dht::packet::*;
 use toxcore::dht::packed_node::*;
 use toxcore::dht::kbucket::*;
 use toxcore::dht::client::*;
-use toxcore::dht::codec::*;
 
-/// Type representing Dht UDP packets.
-//pub type DhtUdpPacket = (SocketAddr, DhtPacket);
 /// Shorthand for the transmit half of the message channel.
-type Tx = mpsc::UnboundedSender<DhtUdpPacket>;
+type Tx = mpsc::UnboundedSender<(DhtPacket, SocketAddr)>;
 
 /**
 Own DHT node data.
@@ -126,7 +123,7 @@ impl Server {
     Function to handle incoming packets. If there is a response packet,
     send back it to the peer.
     */
-    pub fn handle_packet(&mut self, (addr, packet): DhtUdpPacket) -> IoFuture<()>
+    pub fn handle_packet(&mut self, (packet, addr): (DhtPacket, SocketAddr)) -> IoFuture<()>
     {
         match packet {
             DhtPacket::PingRequest(packet) => {
@@ -361,14 +358,14 @@ mod tests {
     use std::net::SocketAddr;
 
     fn create_node() -> (Server, PrecomputedKey, PublicKey,
-            mpsc::UnboundedReceiver<DhtUdpPacket>, SocketAddr) {
+            mpsc::UnboundedReceiver<(DhtPacket, SocketAddr)>, SocketAddr) {
         if !crypto_init() {
             error!("Crypto initialization failed.");
             assert!(false);
         }
 
         let (pk, sk) = gen_keypair();
-        let (tx, rx) = mpsc::unbounded::<DhtUdpPacket>();
+        let (tx, rx) = mpsc::unbounded();
         let alice = Server::new(tx, pk, sk);
         let (bob_pk, bob_sk) = gen_keypair();
         let precomp = precompute(&alice.pk, &bob_sk);
@@ -432,8 +429,8 @@ mod tests {
             let (mut alice, precomp, bob_pk, rx, addr) = create_node();
             // handle ping request, request from bob peer
             let ping_req = DhtPacket::PingRequest(PingRequest::new(&precomp, &bob_pk, prq));
-            alice.handle_packet((addr, ping_req)).wait().unwrap();
-            if let (Some((_addr, packet)), _rx) = rx.into_future().wait().unwrap() {
+            alice.handle_packet((ping_req, addr)).wait().unwrap();
+            if let (Some((packet, _addr)), _rx) = rx.into_future().wait().unwrap() {
                 debug!("received packet {:?}", packet);
                 if let DhtPacket::PingResponse(packet) = packet {
                     let ping_resp_payload = packet.get_payload(&alice.sk).unwrap();
@@ -534,7 +531,7 @@ mod tests {
         let ping_req = PingRequest::new(&precomp, &bob_pk, prq);
         let client = alice.create_client(&addr, bob_pk);
         alice.handle_ping_req(client, ping_req).wait().unwrap();
-        if let (Some((_addr, packet)), _rx1) = rx.into_future().wait().unwrap() {
+        if let (Some((packet, _addr)), _rx1) = rx.into_future().wait().unwrap() {
             debug!("received packet {:?}", packet);
             if let DhtPacket::PingResponse(packet) = packet {
                 let ping_resp_payload = packet.get_payload(&alice.sk).unwrap();
@@ -590,7 +587,7 @@ mod tests {
         let nodes_req = NodesRequest::new(&precomp, &bob_pk, nrq.clone());
         let client = alice.create_client(&addr, bob_pk);
         alice.handle_nodes_req(client, nodes_req).wait().unwrap();
-        if let (Some((_addr, packet)), _rx1) = rx.into_future().wait().unwrap() {
+        if let (Some((packet, _addr)), _rx1) = rx.into_future().wait().unwrap() {
             debug!("received packet {:?}", packet);
             if let DhtPacket::NodesResponse(packet) = packet {
                 let nodes_resp_payload = packet.get_payload(&alice.sk).unwrap();
@@ -649,7 +646,7 @@ mod tests {
         let dht_req = DhtRequest::new(&precomp, &alice.pk, &bob_pk, nat_payload.clone());
         let client = alice.create_client(&addr.clone(), bob_pk);
         alice.handle_nat_ping_req(client, dht_req, nat_req).wait().unwrap();
-        if let (Some((_addr, packet)), _rx1) = rx.into_future().wait().unwrap() {
+        if let (Some((packet, _addr)), _rx1) = rx.into_future().wait().unwrap() {
             debug!("received packet {:?}", packet);
             if let DhtPacket::DhtRequest(packet) = packet {
                 if let DhtRequestPayload::NatPingResponse(nat_ping_resp_payload) = packet.get_payload(&alice.sk).unwrap() {
