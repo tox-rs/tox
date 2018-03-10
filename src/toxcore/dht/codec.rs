@@ -3,6 +3,7 @@
     Copyright © 2016-2017 Zetok Zalbavar <zexavexxe@gmail.com>
     Copyright © 2018 Namsoo CHO <nscho66@gmail.com>
     Copyright © 2018 Evgeny Kurnevsky <kurnevsky@gmail.com>
+    Copyright © 2018 Roman Proskuryakov <humbug@deeptown.org>
 
     This file is part of Tox.
 
@@ -26,16 +27,9 @@
 use toxcore::dht::packet::*;
 use toxcore::binary_io::*;
 
-use std::io;
 use std::io::{Error, ErrorKind};
-use tokio_core::net::UdpCodec;
-use std::net::SocketAddr;
-
-/// Type representing Dht UDP packets.
-pub type DhtUdpPacket = (SocketAddr, DhtPacket);
-
-/// Type representing received Dht UDP packets.
-pub type DhtRecvUdpPacket = (SocketAddr, Option<DhtPacket>);
+use bytes::BytesMut;
+use tokio_io::codec::{Decoder, Encoder};
 
 /**
 SendNodes
@@ -57,85 +51,59 @@ pub const MAX_DHT_PACKET_SIZE: usize = 512;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DhtCodec;
 
-impl UdpCodec for DhtCodec {
-    type In = DhtRecvUdpPacket;
-    type Out = DhtUdpPacket;
+impl Decoder for DhtCodec {
+    type Item = DhtPacket;
+    type Error = Error;
 
-    fn decode(&mut self, src: &SocketAddr, buf: &[u8]) -> io::Result<Self::In> {
+    fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         match DhtPacket::from_bytes(buf) {
             IResult::Incomplete(_) => {
                 Err(Error::new(ErrorKind::Other,
-                    "DhtPacket packet should not be incomplete"))
+                    "DhtPacket should not be incomplete"))
             },
             IResult::Error(e) => {
                 Err(Error::new(ErrorKind::Other,
-                    format!("deserialize DhtPacket packet error: {:?}", e)))
+                    format!("Deserialize DhtPacket error: {:?}", e)))
             },
             IResult::Done(_, encrypted_packet) => {
-                Ok((*src, Some(encrypted_packet)))
+                Ok(Some(encrypted_packet))
             }
         }
     }
+}
 
-    fn encode(&mut self, (addr, dp): Self::Out, into: &mut Vec<u8>) -> SocketAddr {
-        let mut buf = [0; MAX_DHT_PACKET_SIZE];
-        if let Ok((_, size)) = dp.to_bytes((&mut buf, 0)) {
-            into.extend(&buf[..size]);
-        } else {
-            // TODO: move from tokio-core to tokio and return error instead of panic
-            panic!("DhtPacket to_bytes error {:?}", dp);
-        }
-        addr
+impl Encoder for DhtCodec {
+    type Item = DhtPacket;
+    type Error = Error;
+
+    fn encode(&mut self, packet: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
+        let mut packet_buf = [0; MAX_DHT_PACKET_SIZE];
+        packet.to_bytes((&mut packet_buf, 0))
+            .map(|(packet_buf, size)| {
+                buf.extend(&packet_buf[..size]);
+            })
+            .map_err(|e|
+                Error::new(ErrorKind::Other,
+                    format!("DhtPacket serialize error: {:?}", e))
+            )?;
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use tokio_core::net::UdpCodec;
-    use std::net::SocketAddr;
-
-    use super::*;
-
+    use toxcore::dht::codec::*;
     use quickcheck::quickcheck;
 
     #[test]
-    fn dht_codec_decode_test() {
+    fn encode_decode() {
         fn with_packet(packet: DhtPacket) {
-            // TODO: random SocketAddr
-            let addr = SocketAddr::V4("0.1.2.3:4".parse().unwrap());
-            let mut tc = DhtCodec;
+            let mut codec = DhtCodec;
+            let mut buf = BytesMut::new();
 
-            let mut buf = [0; MAX_DHT_PACKET_SIZE];
-            let (bytes, len) = packet.to_bytes((&mut buf, 0)).unwrap();
-
-            let (decoded_a, decoded_packet) = tc.decode(&addr, &bytes[..len])
-                .unwrap();
-            // it did have correct packet
-            let decoded_packet = decoded_packet.unwrap();
-
-            assert_eq!(addr, decoded_a);
-            assert_eq!(packet, decoded_packet);
-
-            // make it error
-            bytes[0] = 0x03;
-            assert!(tc.decode(&addr, &bytes[..len]).is_err());
-        }
-        quickcheck(with_packet as fn(DhtPacket));
-    }
-
-    #[test]
-    fn dht_codec_encode_test() {
-        fn with_packet(packet: DhtPacket) {
-            // TODO: random SocketAddr
-            let addr = SocketAddr::V4("5.6.7.8:9".parse().unwrap());
-            let mut buf = Vec::new();
-            let mut tc = DhtCodec;
-
-            let socket = tc.encode((addr, packet.clone()), &mut buf);
-            assert_eq!(addr, socket);
-            let mut enc_buf = [0; MAX_DHT_PACKET_SIZE];
-            let (_, size) = packet.to_bytes((&mut enc_buf, 0)).unwrap();
-            assert_eq!(buf, enc_buf[..size].to_vec());
+            codec.encode(packet.clone(), &mut buf).expect("Codec should encode");
+            let res = codec.decode(&mut buf).unwrap().expect("Codec should decode");
+            assert_eq!(packet, res);
         }
         quickcheck(with_packet as fn(DhtPacket));
     }

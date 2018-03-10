@@ -2,6 +2,7 @@
     Copyright (C) 2013 Tox project All Rights Reserved.
     Copyright © 2017 Zetok Zalbavar <zexavexxe@gmail.com>
     Copyright © 2018 Namsoo CHO <nscho66@gmail.com>
+    Copyright © 2018 Roman Proskuryakov <humbug@deeptown.org>
 
     This file is part of Tox.
 
@@ -23,6 +24,7 @@
 //
 extern crate tox;
 extern crate futures;
+extern crate tokio;
 extern crate tokio_core;
 extern crate tokio_io;
 extern crate tokio_timer;
@@ -34,7 +36,7 @@ extern crate env_logger;
 use futures::*;
 use futures::sync::mpsc;
 use tokio_core::reactor::Core;
-use tokio_core::net::UdpSocket;
+use tokio::net::{UdpSocket, UdpFramed};
 //use tokio_timer;
 
 use std::cell::RefCell;
@@ -43,6 +45,7 @@ use std::rc::Rc;
 use std::io::{ErrorKind, Error};
 use std::time;
 
+use tox::toxcore::dht::packet::*;
 use tox::toxcore::dht::codec::*;
 use tox::toxcore::dht::server::*;
 use tox::toxcore::crypto_core::*;
@@ -60,20 +63,19 @@ fn main() {
     let local: SocketAddr = "127.0.0.1:12345".parse().unwrap();
 
     let mut core = Core::new().unwrap();
-    let handle = core.handle();
 
     // Bind a UDP listener to the socket address.
-    let listener = UdpSocket::bind(&local, &handle).unwrap();
+    let socket = UdpSocket::bind(&local).unwrap();
 
     // Create a channel for this socket
-    let (tx, rx) = mpsc::unbounded::<DhtUdpPacket>();
+    let (tx, rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
     let server = Rc::new(RefCell::new(Server::new(tx, pk, sk)));
 
-    let (sink, stream) = listener.framed(DhtCodec).split();
+    let (sink, stream) = UdpFramed::new(socket, DhtCodec).split();
     // The server task asynchronously iterates over and processes each
     // incoming packet.
-    let handler = stream.for_each(move |(addr, packet)| {
-        let _ = server.borrow_mut().handle_packet((addr, packet.unwrap()));
+    let handler = stream.for_each(move |(packet, addr)| {
+        let _ = server.borrow_mut().handle_packet((packet, addr));
         Ok(())
     })
     .map_err(|err| {
