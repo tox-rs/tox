@@ -1318,6 +1318,8 @@ impl ToBytes for OnionResponse1 {
 mod tests {
     use super::*;
 
+    use std::net::SocketAddr;
+
     const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - NONCEBYTES;
     const ONION_RETURN_2_PAYLOAD_SIZE: usize = ONION_RETURN_2_SIZE - NONCEBYTES;
     const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - NONCEBYTES;
@@ -1348,6 +1350,18 @@ mod tests {
     );
 
     encode_decode_test!(
+        onion_request_0_payload_encode_decode,
+        OnionRequest0Payload {
+            ip_port: IpPort {
+                ip_addr: "5.6.7.8".parse().unwrap(),
+                port: 12345
+            },
+            temporary_pk: gen_keypair().0,
+            inner: vec![42, 123]
+        }
+    );
+
+    encode_decode_test!(
         onion_request_1_encode_decode,
         OnionRequest1 {
             nonce: gen_nonce(),
@@ -1357,6 +1371,18 @@ mod tests {
                 nonce: gen_nonce(),
                 payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
             }
+        }
+    );
+
+    encode_decode_test!(
+        onion_request_1_payload_encode_decode,
+        OnionRequest1Payload {
+            ip_port: IpPort {
+                ip_addr: "5.6.7.8".parse().unwrap(),
+                port: 12345
+            },
+            temporary_pk: gen_keypair().0,
+            inner: vec![42, 123]
         }
     );
 
@@ -1374,12 +1400,28 @@ mod tests {
     );
 
     encode_decode_test!(
+        onion_request_2_payload_encode_decode,
+        OnionRequest2Payload {
+            ip_port: IpPort {
+                ip_addr: "5.6.7.8".parse().unwrap(),
+                port: 12345
+            },
+            inner: InnerOnionRequest::InnerOnionDataRequest(InnerOnionDataRequest {
+                destination_pk: gen_keypair().0,
+                nonce: gen_nonce(),
+                temporary_pk: gen_keypair().0,
+                payload: vec![42, 123]
+            })
+        }
+    );
+
+    encode_decode_test!(
         inner_announce_request_encode_decode,
-        InnerAnnounceRequest {
+        InnerOnionRequest::InnerAnnounceRequest(InnerAnnounceRequest {
             nonce: gen_nonce(),
             pk: gen_keypair().0,
             payload: vec![42, 123]
-        }
+        })
     );
 
     encode_decode_test!(
@@ -1398,13 +1440,23 @@ mod tests {
     );
 
     encode_decode_test!(
+        announce_request_payload_encode_decode,
+        AnnounceRequestPayload {
+            ping_id: hash(&[1, 2, 3]),
+            search_pk: gen_keypair().0,
+            data_pk: gen_keypair().0,
+            sendback_data: 12345
+        }
+    );
+
+    encode_decode_test!(
         inner_onion_data_request_encode_decode,
-        InnerOnionDataRequest {
+        InnerOnionRequest::InnerOnionDataRequest(InnerOnionDataRequest {
             destination_pk: gen_keypair().0,
             nonce: gen_nonce(),
             temporary_pk: gen_keypair().0,
             payload: vec![42, 123]
-        }
+        })
     );
 
     encode_decode_test!(
@@ -1438,6 +1490,17 @@ mod tests {
             sendback_data: 12345,
             nonce: gen_nonce(),
             payload: vec![42, 123]
+        }
+    );
+
+    encode_decode_test!(
+        announce_response_payload_encode_decode,
+        AnnounceResponsePayload {
+            is_stored: 1,
+            ping_id_or_pk: hash(&[1, 2, 3]),
+            nodes: vec![
+                PackedNode::new(false, SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
+            ]
         }
     );
 
