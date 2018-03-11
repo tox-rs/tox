@@ -118,6 +118,7 @@ mod tests {
 
     use std::net::SocketAddr;
     use toxcore::dht::packed_node::*;
+    use toxcore::binary_io::*;
 
     fn create_client() -> (Client, SecretKey, mpsc::UnboundedReceiver<(DhtPacket, SocketAddr)>) {
         let addr: SocketAddr = "127.0.0.1:12345".parse().unwrap();
@@ -135,13 +136,11 @@ mod tests {
         let payload = PingRequestPayload { id: random_u64() };
         let packet = DhtPacket::PingRequest(PingRequest::new(&client.precomputed_key.clone(), &client.pk, payload));
         client.send(packet.clone()).wait().unwrap();
-        let rx =
-        if let (Some((received_packet, _addr)), rx1) = rx.into_future().wait().unwrap() {
-            assert_eq!(packet, received_packet);
-            rx1
-        } else {
-            unreachable!("can not occur");
-        };
+        let (received, rx) = rx.into_future().wait().unwrap();
+        debug!("received packet {:?}", received.clone().unwrap().0);
+        let (received_packet, _addr) = received.unwrap();
+        assert_eq!(packet, received_packet);
+
         drop(rx);
         assert!(!client.send(packet).wait().is_ok());
     }
@@ -152,11 +151,10 @@ mod tests {
         let payload = PingRequestPayload { id: random_u64() };
         let packet = DhtPacket::PingRequest(PingRequest::new(&client.precomputed_key.clone(), &client.pk, payload));
         client.send_to(client.addr, packet.clone()).wait().unwrap();
-        if let (Some((received_packet, _addr)), _rx) = rx.into_future().wait().unwrap() {
-            assert_eq!(packet, received_packet);
-        } else {
-            unreachable!("can not occur");
-        }
+        let (received, _rx) = rx.into_future().wait().unwrap();
+        debug!("received packet {:?}", received.clone().unwrap().0);
+        let (received_packet, _addr) = received.unwrap();
+        assert_eq!(packet, received_packet);
     }
     // send_ping_response()
     #[test]
@@ -164,16 +162,14 @@ mod tests {
         let (client, sk, rx) = create_client();
         let payload = PingResponsePayload { id: random_u64() };
         client.send_ping_response(payload).wait().unwrap();
-        if let (Some((received_packet, _addr)), _rx) = rx.into_future().wait().unwrap() {
-            if let DhtPacket::PingResponse(packet) = received_packet {
-                let ping_resp_payload = packet.get_payload(&sk).unwrap();
-                assert_eq!(ping_resp_payload.id, payload.id);
-            } else {
-                unreachable!("can not occur");
-            }
-        } else {
-            unreachable!("can not occur");
-        }
+        let (received, _rx) = rx.into_future().wait().unwrap();
+        debug!("received packet {:?}", received.clone().unwrap().0);
+        let (packet, _addr) = received.unwrap();
+        let mut buf = [0; 512];
+        let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
+        let (_, ping_res) = PingResponse::from_bytes(&buf[..size]).unwrap();
+        let ping_resp_payload = ping_res.get_payload(&sk).unwrap();
+        assert_eq!(ping_resp_payload.id, payload.id);
     }
     // send_nodes_response()
     #[test]
@@ -183,17 +179,15 @@ mod tests {
             PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &gen_keypair().0)
         ], id: 38 };
         client.send_nodes_response(payload.clone()).wait().unwrap();
-        if let (Some((received_packet, _addr)), _rx) = rx.into_future().wait().unwrap() {
-            if let DhtPacket::NodesResponse(packet) = received_packet {
-                let nodes_resp_payload = packet.get_payload(&sk).unwrap();
-                assert_eq!(nodes_resp_payload.id, payload.id);
-                assert_eq!(nodes_resp_payload.nodes, payload.nodes);
-            } else {
-                unreachable!("can not occur");
-            }
-        } else {
-            unreachable!("can not occur");
-        }
+        let (received, _rx) = rx.into_future().wait().unwrap();
+        debug!("received packet {:?}", received.clone().unwrap().1);
+        let (packet, _addr) = received.unwrap();
+        let mut buf = [0; 512];
+        let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
+        let (_, node_res) = NodesResponse::from_bytes(&buf[..size]).unwrap();
+        let nodes_resp_payload = node_res.get_payload(&sk).unwrap();
+        assert_eq!(nodes_resp_payload.id, payload.id);
+        assert_eq!(nodes_resp_payload.nodes, payload.nodes);
     }
     // send_nat_ping_response()
     #[test]
@@ -201,19 +195,16 @@ mod tests {
         let (client, sk, rx) = create_client();
         let payload = NatPingResponse { id: random_u64() };
         client.send_nat_ping_response(&client.pk, payload).wait().unwrap();
-        if let (Some((received_packet, _addr)), _rx) = rx.into_future().wait().unwrap() {
-            if let DhtPacket::DhtRequest(packet) = received_packet {
-                if let DhtRequestPayload::NatPingResponse(nat_ping_resp_payload) = packet.get_payload(&sk).unwrap() {
-                    assert_eq!(nat_ping_resp_payload.id, payload.id);
-                } else {
-                    unreachable!("can not occur");
-                }
-            } else {
-                unreachable!("can not occur");
-            }
-        } else {
-            unreachable!("can not occur");
-        }
+        let (received, _rx) = rx.into_future().wait().unwrap();
+        debug!("received packet {:?}", received.clone().unwrap().1);
+        let (packet, _addr) = received.unwrap();
+        let mut buf = [0; 512];
+        let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
+        let (_, dht_req) = DhtRequest::from_bytes(&buf[..size]).unwrap();
+        let dht_payload = dht_req.get_payload(&sk).unwrap();
+        let (_, size) = dht_payload.to_bytes((&mut buf, 0)).unwrap();
+        let (_, nat_ping_resp_payload) = NatPingResponse::from_bytes(&buf[..size]).unwrap();
+        assert_eq!(nat_ping_resp_payload.id, payload.id);
     }
     // send_nat_ping_packet()
     #[test]
@@ -223,34 +214,29 @@ mod tests {
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
         let dht_req = DhtRequest::new(&client.precomputed_key, &client.pk, &client.pk, nat_payload.clone());
         client.send_nat_ping_packet(&client.addr, dht_req).wait().unwrap();
-        if let (Some((received_packet, _addr)), _rx) = rx.into_future().wait().unwrap() {
-            if let DhtPacket::DhtRequest(packet) = received_packet {
-                if let DhtRequestPayload::NatPingResponse(nat_ping_resp_payload) = packet.get_payload(&sk).unwrap() {
-                    assert_eq!(nat_ping_resp_payload.id, nat_res.id);
-                } else {
-                    unreachable!("can not occur");
-                }
-            } else {
-                unreachable!("can not occur");
-            }
-        } else {
-            unreachable!("can not occur");
-        }
+        let (received, _rx) = rx.into_future().wait().unwrap();
+        debug!("received packet {:?}", received.clone().unwrap().1);
+        let (packet, _addr) = received.unwrap();
+        let mut buf = [0; 512];
+        let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
+        let (_, dht_req) = DhtRequest::from_bytes(&buf[..size]).unwrap();
+        let dht_payload = dht_req.get_payload(&sk).unwrap();
+        let (_, size) = dht_payload.to_bytes((&mut buf, 0)).unwrap();
+        let (_, nat_ping_resp_payload) = NatPingResponse::from_bytes(&buf[..size]).unwrap();
+        assert_eq!(nat_ping_resp_payload.id, nat_res.id);
     }
     // send_ping_request()
     #[test]
     fn client_send_ping_request_test() {
         let (mut client, sk, rx) = create_client();
         client.send_ping_request().wait().unwrap();
-        if let (Some((received_packet, _addr)), _rx) = rx.into_future().wait().unwrap() {
-            if let DhtPacket::PingRequest(packet) = received_packet {
-                let ping_req_payload = packet.get_payload(&sk).unwrap();
-                assert_eq!(ping_req_payload.id, client.ping_id);
-            } else {
-                unreachable!("can not occur");
-            }
-        } else {
-            unreachable!("can not occur");
-        }
+        let (received, _rx) = rx.into_future().wait().unwrap();
+        debug!("received packet {:?}", received.clone().unwrap().1);
+        let (packet, _addr) = received.unwrap();
+        let mut buf = [0; 512];
+        let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
+        let (_, ping_req) = PingRequest::from_bytes(&buf[..size]).unwrap();
+        let ping_req_payload = ping_req.get_payload(&sk).unwrap();
+        assert_eq!(ping_req_payload.id, client.ping_id);
     }
 }
