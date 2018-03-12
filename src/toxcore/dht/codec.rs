@@ -93,18 +93,171 @@ impl Encoder for DhtCodec {
 #[cfg(test)]
 mod tests {
     use toxcore::dht::codec::*;
-    use quickcheck::quickcheck;
+    use toxcore::onion::packet::*;
+    use toxcore::crypto_core::*;
+
+    const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - NONCEBYTES;
+    const ONION_RETURN_2_PAYLOAD_SIZE: usize = ONION_RETURN_2_SIZE - NONCEBYTES;
+    const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - NONCEBYTES;
 
     #[test]
     fn encode_decode() {
-        fn with_packet(packet: DhtPacket) {
-            let mut codec = DhtCodec;
-            let mut buf = BytesMut::new();
+        let test_packets = vec![
+            DhtPacket::PingRequest(PingRequest {
+                pk: gen_keypair().0,
+                nonce: gen_nonce(),
+                payload: vec![42; 88],
+            }),
+            DhtPacket::PingResponse(PingResponse {
+                pk: gen_keypair().0,
+                nonce: gen_nonce(),
+                payload: vec![42; 88],
+            }),
+            DhtPacket::NodesRequest(NodesRequest {
+                pk: gen_keypair().0,
+                nonce: gen_nonce(),
+                payload: vec![42; 88],
+            }),
+            DhtPacket::NodesResponse(NodesResponse {
+                pk: gen_keypair().0,
+                nonce: gen_nonce(),
+                payload: vec![42; 188],
+            }),
+            DhtPacket::DhtRequest(DhtRequest {
+                rpk: gen_keypair().0,
+                spk: gen_keypair().0,
+                nonce: gen_nonce(),
+                payload: vec![42; 123],
+            }),
+            DhtPacket::CookieRequest(CookieRequest {
+                pk: gen_keypair().0,
+                nonce: gen_nonce(),
+                payload: vec![42; 88],
+            }),
+            DhtPacket::LanDiscovery(LanDiscovery {
+                pk: gen_keypair().0
+            }),
+            DhtPacket::OnionRequest0(OnionRequest0 {
+                nonce: gen_nonce(),
+                temporary_pk: gen_keypair().0,
+                payload: vec![42, 123]
+            }),
+            DhtPacket::OnionRequest1(OnionRequest1 {
+                nonce: gen_nonce(),
+                temporary_pk: gen_keypair().0,
+                payload: vec![42, 123],
+                onion_return: OnionReturn {
+                    nonce: gen_nonce(),
+                    payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
+                }
+            }),
+            DhtPacket::OnionRequest2(OnionRequest2 {
+                nonce: gen_nonce(),
+                temporary_pk: gen_keypair().0,
+                payload: vec![42, 123],
+                onion_return: OnionReturn {
+                    nonce: gen_nonce(),
+                    payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
+                }
+            }),
+            DhtPacket::AnnounceRequest(AnnounceRequest {
+                inner: InnerAnnounceRequest {
+                    nonce: gen_nonce(),
+                    pk: gen_keypair().0,
+                    payload: vec![42, 123]
+                },
+                onion_return: OnionReturn {
+                    nonce: gen_nonce(),
+                    payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
+                }
+            }),
+            DhtPacket::OnionDataRequest(OnionDataRequest {
+                inner: InnerOnionDataRequest {
+                    destination_pk: gen_keypair().0,
+                    nonce: gen_nonce(),
+                    temporary_pk: gen_keypair().0,
+                    payload: vec![42, 123]
+                },
+                onion_return: OnionReturn {
+                    nonce: gen_nonce(),
+                    payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
+                }
+            }),
+            DhtPacket::OnionDataResponse(OnionDataResponse {
+                nonce: gen_nonce(),
+                temporary_pk: gen_keypair().0,
+                payload: vec![42, 123]
+            }),
+            DhtPacket::AnnounceResponse(AnnounceResponse {
+                sendback_data: 12345,
+                nonce: gen_nonce(),
+                payload: vec![42, 123]
+            }),
+            DhtPacket::OnionResponse3(OnionResponse3 {
+                onion_return: OnionReturn {
+                    nonce: gen_nonce(),
+                    payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
+                },
+                payload: vec![42, 123]
+            }),
+            DhtPacket::OnionResponse2(OnionResponse2 {
+                onion_return: OnionReturn {
+                    nonce: gen_nonce(),
+                    payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
+                },
+                payload: vec![42, 123]
+            }),
+            DhtPacket::OnionResponse1(OnionResponse1 {
+                onion_return: OnionReturn {
+                    nonce: gen_nonce(),
+                    payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
+                },
+                payload: vec![42, 123]
+            }),
+            DhtPacket::BootstrapInfo(BootstrapInfo {
+                version: 42,
+                motd: vec![1, 2, 3, 4]
+            }),
+        ];
 
+        let mut codec = DhtCodec;
+        let mut buf = BytesMut::new();
+        for packet in test_packets {
+            buf.clear();
             codec.encode(packet.clone(), &mut buf).expect("Codec should encode");
             let res = codec.decode(&mut buf).unwrap().expect("Codec should decode");
             assert_eq!(packet, res);
         }
-        quickcheck(with_packet as fn(DhtPacket));
+    }
+
+    #[test]
+    fn decode_encrypted_packet_incomplete() {
+        let mut codec = DhtCodec;
+        let mut buf = BytesMut::new();
+        buf.extend_from_slice(b"\x00");
+
+        // not enought bytes to decode EncryptedPacket
+        assert!(codec.decode(&mut buf).is_err());
+    }
+
+    #[test]
+    fn decode_encrypted_packet_zero_length() {
+        let mut codec = DhtCodec;
+        let mut buf = BytesMut::new();
+
+        // not enought bytes to decode EncryptedPacket
+        assert!(codec.decode(&mut buf).is_err());
+    }
+    #[test]
+    fn encode_packet_too_big() {
+        let mut codec = DhtCodec;
+        let mut buf = BytesMut::new();
+        let (pk, _) = gen_keypair();
+        let nonce = gen_nonce();
+        let payload = [0x01; 1024].to_vec();
+        let packet = DhtPacket::PingRequest( PingRequest { pk: pk, nonce: nonce, payload: payload } );
+
+        // Codec cannot serialize Packet because it is too long
+        assert!(codec.encode(packet, &mut buf).is_err());
     }
 }
