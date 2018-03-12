@@ -375,10 +375,10 @@ mod tests {
 
         let (pk, sk) = gen_keypair();
         let (tx, rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
-        let alice = Server::new(tx, pk, sk);            
+        let alice = Server::new(tx, pk, sk);
         let (bob_pk, bob_sk) = gen_keypair();
         let precomp = precompute(&alice.pk, &bob_sk);
-        
+
         let addr: SocketAddr = "127.0.0.1:12346".parse().unwrap();
         (alice, precomp, bob_pk, rx, addr)
     }
