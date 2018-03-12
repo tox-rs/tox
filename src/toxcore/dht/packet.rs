@@ -618,7 +618,7 @@ Serialized form:
 Length      | Contents
 ----------- | --------
 `1`         | Number of packed nodes (maximum 4)
-`[39, 204]` | Nodes in packed format
+`[0, 204]`  | Nodes in packed format
 `8`         | Request ID
 
 An IPv4 node is 39 bytes, an IPv6 node is 51 bytes, so the maximum size is
@@ -630,7 +630,7 @@ Serialized form should be put in the encrypted part of `NodesResponse` packet.
 pub struct NodesResponsePayload {
     /** Nodes sent in response to [`NodesRequest`](./struct.NodesRequest.html) request.
 
-    There can be only 1 to 4 nodes in `NodesResponsePayload`.
+    There can be up to 4 nodes in `NodesResponsePayload`.
     */
     pub nodes: Vec<PackedNode>,
     /// request id
@@ -641,7 +641,7 @@ impl ToBytes for NodesResponsePayload {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_cond!(
-                !self.nodes.is_empty() && self.nodes.len() <= 4,
+                self.nodes.len() <= 4,
                 gen_be_u8!(self.nodes.len() as u8)
             ) >>
             gen_many_ref!(&self.nodes, |buf, node| PackedNode::to_bytes(node, buf)) >>
@@ -654,7 +654,7 @@ impl FromBytes for NodesResponsePayload {
     named!(from_bytes<NodesResponsePayload>, do_parse!(
         nodes_number: le_u8 >>
         nodes: cond_reduce!(
-            nodes_number > 0 && nodes_number <= 4,
+            nodes_number <= 4,
             count!(PackedNode::from_bytes, nodes_number as usize)
         ) >>
         id: be_u64 >>
