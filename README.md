@@ -55,7 +55,7 @@ cargo doc
 They will be located under `target/doc/`
 
 ### With clippy
-To build with support for [clippy](https://github.com/Manishearth/rust-clippy)
+To build with support for [clippy](https://github.com/rust-lang-nursery/rust-clippy)
 (linting), you need nightly Rust. Usually the latest available version is
 required.
 
@@ -126,4 +126,4 @@ Licensed under GPLv3+. For details, see [COPYING](/COPYING).
 [libsodium]: https://github.com/jedisct1/libsodium
 [Reference source repository]: https://github.com/zetok/tox-spec
 [Rust]: https://www.rust-lang.org/
-[toxcore]: https://github.com/irungentoo/toxcore
+[toxcore]: https://github.com/TokTok/c-toxcore
