@@ -19,9 +19,10 @@
     along with Tox.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-// ↓ FIXME expand doc
-/*! DHT part of the toxcore.
-    * takes care of the PackedNode
+/*! A pair of Socket address & PublicKey.
+This struct object is inserted into KBucket.
+Socket address is something complex, because Ipv4, Ipv6, tcp and udp infomations are all contained
+in this type.
 */
 
 use nom::{le_u8, be_u16};

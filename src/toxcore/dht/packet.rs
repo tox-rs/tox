@@ -21,8 +21,8 @@
     along with Tox.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-/*! DHT packet part of the toxcore.
-    * takes care of the serializing and de-serializing DHT packets
+/*! Top-level DHT udp packets according
+    to [Tox spec](https://zetok.github.io/tox-spec/#packet-kind)
 */
 
 use nom::{le_u8, be_u32, be_u64, rest};
@@ -140,6 +140,14 @@ doesn't arrive for 122 seconds the DHT node removes peer from kbucket and marks
 it as offline if the peer is known friend.
 
 https://zetok.github.io/tox-spec/#dht-packet
+
+Length  | Content
+------- | -------------------------
+`1`     | `0x00`
+`32`    | Public Key
+`24`    | Nonce
+`9`     | Payload
+
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PingRequest {
@@ -272,6 +280,14 @@ respond with `PingResponse` that contains the same ping id inside it's encrypted
 payload as it got from `PingRequest`.
 
 https://zetok.github.io/tox-spec/#dht-packet
+
+Length  | Content
+------- | -------------------------
+`1`     | `0x01`
+`32`    | Public Key
+`24`    | Nonce
+`9`     | Payload
+
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PingResponse {
@@ -367,7 +383,7 @@ Response ID must match ID of the request, otherwise ping is invalid.
 
 Length      | Contents
 ----------- | --------
-`1`         | 0x01
+`1`         | `0x01`
 `8`         | Ping ID
 
 Serialized form should be put in the encrypted part of `PingResponse` packet.
@@ -404,6 +420,14 @@ requested public key. Every 20 seconds DHT node sends `NodesRequest` packet to
 a random node in kbucket and its known friends list.
 
 https://zetok.github.io/tox-spec/#dht-packet
+
+Length  | Content
+------- | -------------------------
+`1`     | `0x02`
+`32`    | Public Key
+`24`    | Nonce
+`40`    | Payload
+
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NodesRequest {
@@ -528,6 +552,15 @@ should respond with `NodesResponse` that contains up to to 4 closest nodes to
 requested public key. Ping id should be the same as it was in `NodesRequest`.
 
 https://zetok.github.io/tox-spec/#dht-packet
+
+Length    | Content
+--------- | -------------------------
+`1`       | `0x04`
+`32`      | Public Key
+`24`      | Nonce
+`1`       | Number of Response Nodes
+`[47,212]`| Payload
+
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NodesResponse {
@@ -805,8 +838,24 @@ impl FromBytes for CookieRequestPayload {
 }
 
 /** DHT Request packet struct.
+DHT Request packet consists of NatPingRequest and NatPingResponse.
+When my known friend is not connected directly, send NatPingRequest to peers
+which is in Kbucket. When NatPingResponse arrives to me, 
+it means that my known friend is also searching me, and running behind NAT, 
+so start hole-punching.
 
 https://zetok.github.io/tox-spec/#dht-request-packets
+
+Length    | Content
+--------- | -------------------------
+`1`       | `0x20`
+`32`      | Receiver's Public Key
+`32`      | Sender's Public Key
+`24`      | Nonce
+`1`       | `0xFE`
+`1`       | Request(`0x00`) or Response(`0x01`) flag
+`8`       | Request Id (Ping Id)
+
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DhtRequest {
@@ -928,10 +977,11 @@ impl FromBytes for DhtRequestPayload {
 
 /** NatPing request of DHT Request packet.
 
-size    | description
-1       | nat ping req (0xfe)
-1       | Request or Response flag
-8       | Request Id (Ping Id)
+Length    | Content
+--------- | -------------------------
+`1`       | `0xFE`
+`1`       | `0x00`
+`8`       | Request Id (Ping Id)
 
 */
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -960,6 +1010,13 @@ impl ToBytes for NatPingRequest {
 }
 
 /** NatPing response of DHT Request packet.
+
+Length    | Content
+--------- | -------------------------
+`1`       | `0xFE`
+`1`       | `0x01`
+`8`       | Request Id (Ping Id)
+
 */
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct NatPingResponse {

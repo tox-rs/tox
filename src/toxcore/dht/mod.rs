@@ -19,8 +19,7 @@
     along with Tox.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-/*! DhtPacket handling
-
+/*! The implementaion of dht module functionalities.
 */
 
 pub mod packet;

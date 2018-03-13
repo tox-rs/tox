@@ -19,7 +19,7 @@
     along with Tox.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-/*
+/*!
 Structure for holding nodes.
 
 Number of nodes it can contain is set during creation. If not set (aka `None`
@@ -35,10 +35,6 @@ PK; and additionally used to store nodes closest to friends.
 [Spec definition](https://zetok.github.io/tox-spec#updating-k-buckets).
 */
 
-// ↓ FIXME expand doc
-/*! DHT part of the toxcore.
-    * takes care of the K-Bucket
-*/
 use toxcore::crypto_core::*;
 use toxcore::dht::packed_node::PackedNode;
 use std::cmp::{Ord, Ordering};

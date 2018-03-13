@@ -20,7 +20,8 @@
 
 
 /*!
-The object of this struct is an object per a peer.
+Hold infomation of a peer.
+The object of this struct is one per a peer.
 */
 
 use futures::{Sink, Future};
