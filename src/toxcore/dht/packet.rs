@@ -1087,7 +1087,6 @@ impl PingRequestPayload {
         trace!("Creating new Ping.");
         PingRequestPayload { id: random_u64() }
     }
-
     /// An ID of the request / response.
     pub fn id(&self) -> u64 {
         self.id
@@ -1107,7 +1106,6 @@ impl NatPingRequest {
         trace!("Creating new Ping.");
         NatPingRequest { id: random_u64() }
     }
-
     /// An ID of the request / response.
     pub fn id(&self) -> u64 {
         self.id
