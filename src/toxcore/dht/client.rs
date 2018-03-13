@@ -109,6 +109,21 @@ impl Client {
         let ping_req = DhtPacket::PingRequest(PingRequest::new(&self.precomputed_key.clone(), &self.pk, payload));
         self.send(ping_req)
     }
+    /// create and send NodesRequest packet
+    pub fn send_nodes_request(&mut self, friend_pk: PublicKey) -> IoFuture<()> {
+        let payload = NodesRequestPayload{ pk: friend_pk, id: random_u64(), };
+        self.ping_id = payload.id;
+        let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(&self.precomputed_key.clone(), &self.pk, payload));
+        self.send(nodes_req)
+    }
+    /// create and send NatPingRequest packet
+    pub fn send_nat_ping_request(&mut self, friend_pk: PublicKey) -> IoFuture<()> {
+        let payload = NatPingRequest{ id: random_u64(), };
+        self.ping_id = payload.id;
+        let payload = DhtRequestPayload::NatPingRequest(payload);
+        let nat_ping_req = DhtPacket::DhtRequest(DhtRequest::new(&self.precomputed_key.clone(), &friend_pk, &self.pk, payload));
+        self.send(nat_ping_req)
+    }
 }
 
 #[cfg(test)]
@@ -238,5 +253,37 @@ mod tests {
         let (_, ping_req) = PingRequest::from_bytes(&buf[..size]).unwrap();
         let ping_req_payload = ping_req.get_payload(&sk).unwrap();
         assert_eq!(ping_req_payload.id, client.ping_id);
+    }
+    // send_nodes_request()
+    #[test]
+    fn client_send_nodes_request_test() {
+        let (mut client, sk, rx) = create_client();
+        let pk = client.pk.clone();
+        client.send_nodes_request(pk).wait().unwrap();
+        let (received, _rx) = rx.into_future().wait().unwrap();
+        debug!("received packet {:?}", received.clone().unwrap().1);
+        let (packet, _addr) = received.unwrap();
+        let mut buf = [0; 512];
+        let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
+        let (_, nodes_req) = NodesRequest::from_bytes(&buf[..size]).unwrap();
+        let nodes_req_payload = nodes_req.get_payload(&sk).unwrap();
+        assert_eq!(nodes_req_payload.id, client.ping_id);
+    }
+    // send_nat_ping_request()
+    #[test]
+    fn client_send_nat_ping_request_test() {
+        let (mut client, sk, rx) = create_client();
+        let pk = client.pk.clone();
+        client.send_nat_ping_request(pk).wait().unwrap();
+        let (received, _rx) = rx.into_future().wait().unwrap();
+        debug!("received packet {:?}", received.clone().unwrap().1);
+        let (packet, _addr) = received.unwrap();
+        let mut buf = [0; 512];
+        let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
+        let (_, dht_req) = DhtRequest::from_bytes(&buf[..size]).unwrap();
+        let dht_payload = dht_req.get_payload(&sk).unwrap();
+        let (_, size) = dht_payload.to_bytes((&mut buf, 0)).unwrap();
+        let (_, nat_ping_req_payload) = NatPingRequest::from_bytes(&buf[..size]).unwrap();
+        assert_eq!(nat_ping_req_payload.id, client.ping_id);
     }
 }
