@@ -234,12 +234,28 @@ mod tests {
     fn decode_encrypted_packet_incomplete() {
         let mut codec = DhtCodec;
         let mut buf = BytesMut::new();
-        buf.extend_from_slice(b"\x00");
+        let packet = DhtPacket::PingRequest(PingRequest {
+                pk: gen_keypair().0,
+                nonce: gen_nonce(),
+                payload: vec![42; 88],
+            });
+        let mut packet_buf = [0;256];
+        let (_, size) = packet.to_bytes((&mut packet_buf, 0)).unwrap();
+        buf.extend_from_slice(&packet_buf[..(size-90)]);
 
         // not enought bytes to decode EncryptedPacket
         assert!(codec.decode(&mut buf).is_err());
     }
 
+    #[test]
+    fn decode_encrypted_packet_error() {
+        let mut codec = DhtCodec;
+        let mut buf = BytesMut::new();
+
+        buf.extend_from_slice(b"\xFF");
+        // not enought bytes to decode EncryptedPacket
+        assert!(codec.decode(&mut buf).is_err());
+    }
     #[test]
     fn decode_encrypted_packet_zero_length() {
         let mut codec = DhtCodec;
@@ -259,5 +275,10 @@ mod tests {
 
         // Codec cannot serialize Packet because it is too long
         assert!(codec.encode(packet, &mut buf).is_err());
+    }
+    #[test]
+    fn codec_is_clonable() {
+        let codec = DhtCodec;
+        let _codec_c = codec.clone();
     }
 }

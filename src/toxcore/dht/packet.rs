@@ -1437,8 +1437,18 @@ mod tests {
                 };
                 let decoded_payload = invalid_packet.get_payload(&bob_sk);
                 assert!(decoded_payload.is_err());
-                // Try short incomplete
+                // Try short incomplete for *Requests
                 let invalid_payload = [0x00];
+                let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
+                let invalid_packet = $packet {
+                    pk: alice_pk,
+                    nonce: nonce,
+                    payload: invalid_payload_encoded
+                };
+                let decoded_payload = invalid_packet.get_payload(&bob_sk);
+                assert!(decoded_payload.is_err());
+                // Try short incomplete for *Responses
+                let invalid_payload = [0x01];
                 let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
                 let invalid_packet = $packet {
                     pk: alice_pk,
