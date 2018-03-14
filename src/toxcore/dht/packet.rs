@@ -1348,14 +1348,10 @@ mod tests {
             fn $test() {
                 let (alice_pk, alice_sk) = gen_keypair();
                 let (bob_pk, bob_sk) = gen_keypair();
-                let (_eve_pk, eve_sk) = gen_keypair();
                 let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
                 let payload = $payload;
                 // encode payload with shared secret
                 let dht_packet = $packet::new(&shared_secret, &alice_pk, payload.clone());
-                // try to decode payload with eve's secret key
-                let decoded_payload = dht_packet.get_payload(&eve_sk);
-                assert!(decoded_payload.is_err());
                 // decode payload with bob's secret key
                 let decoded_payload = dht_packet.get_payload(&bob_sk).unwrap();
                 // payloads should be equal
@@ -1396,10 +1392,79 @@ mod tests {
         CookieRequestPayload { pk: gen_keypair().0, id: 42 }
     );
 
+    macro_rules! dht_packet_encrypt_decrypt_invalid_key (
+        ($test:ident, $packet:ident, $payload:expr) => (
+            #[test]
+            fn $test() {
+                let (alice_pk, alice_sk) = gen_keypair();
+                let (bob_pk, _bob_sk) = gen_keypair();
+                let (_eve_pk, eve_sk) = gen_keypair();
+                let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
+                let payload = $payload;
+                // encode payload with shared secret
+                let dht_packet = $packet::new(&shared_secret, &alice_pk, payload.clone());
+                // try to decode payload with eve's secret key
+                let decoded_payload = dht_packet.get_payload(&eve_sk);
+                assert!(decoded_payload.is_err());
+            }
+        )
+    );
+
+    dht_packet_encrypt_decrypt_invalid_key!(
+        ping_request_payload_encrypt_decrypt_invalid_key,
+        PingRequest,
+        PingRequestPayload { id: 42 }
+    );
+
+    dht_packet_encrypt_decrypt_invalid_key!(
+        ping_response_payload_encrypt_decrypt_invalid_key,
+        PingResponse,
+        PingResponsePayload { id: 42 }
+    );
+
+    dht_packet_encrypt_decrypt_invalid_key!(
+        nodes_request_payload_encrypt_decrypt_invalid_key,
+        NodesRequest,
+        NodesRequestPayload { pk: gen_keypair().0, id: 42 }
+    );
+
+    dht_packet_encrypt_decrypt_invalid_key!(
+        nodes_response_payload_encrypt_decrypt_invalid_key,
+        NodesResponse,
+        NodesResponsePayload { nodes: vec![
+            PackedNode::new(false, SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
+        ], id: 42 }
+    );
+
+    dht_packet_encrypt_decrypt_invalid_key!(
+        cookie_request_payload_encrypt_decrypt_invalid_key,
+        CookieRequest,
+        CookieRequestPayload { pk: gen_keypair().0, id: 42 }
+    );
+
     #[test]
     fn dht_request_payload_encrypt_decrypt() {
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, bob_sk) = gen_keypair();
+        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
+        let test_payloads = vec![
+            DhtRequestPayload::NatPingRequest(NatPingRequest { id: 42 }),
+            DhtRequestPayload::NatPingResponse(NatPingResponse { id: 42 })
+        ];
+        for payload in test_payloads {
+            // encode payload with shared secret
+            let dht_request = DhtRequest::new(&shared_secret, &bob_pk, &alice_pk, payload.clone());
+            // decode payload with bob's secret key
+            let decoded_payload = dht_request.get_payload(&bob_sk).unwrap();
+            // payloads should be equal
+            assert_eq!(decoded_payload, payload);
+        }
+    }
+
+    #[test]
+    fn dht_request_payload_encrypt_decrypt_invalid_key() {
+        let (alice_pk, alice_sk) = gen_keypair();
+        let (bob_pk, _bob_sk) = gen_keypair();
         let (_eve_pk, eve_sk) = gen_keypair();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
         let test_payloads = vec![
@@ -1412,10 +1477,6 @@ mod tests {
             // try to decode payload with eve's secret key
             let decoded_payload = dht_request.get_payload(&eve_sk);
             assert!(decoded_payload.is_err());
-            // decode payload with bob's secret key
-            let decoded_payload = dht_request.get_payload(&bob_sk).unwrap();
-            // payloads should be equal
-            assert_eq!(decoded_payload, payload);
         }
     }
 

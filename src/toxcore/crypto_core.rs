@@ -23,6 +23,7 @@
 
 pub use sodiumoxide::randombytes::randombytes_into;
 pub use sodiumoxide::crypto::box_::*;
+pub use sodiumoxide::crypto::hash::sha256::*;
 
 use std::sync::{Once, ONCE_INIT};
 use byteorder::{ByteOrder, NativeEndian};
@@ -203,4 +204,8 @@ impl FromBytes for SecretKey {
 
 impl FromBytes for Nonce {
     named!(from_bytes<Nonce>, map_opt!(take!(NONCEBYTES), Nonce::from_slice));
+}
+
+impl FromBytes for Digest {
+    named!(from_bytes<Digest>, map_opt!(take!(DIGESTBYTES), Digest::from_slice));
 }
