@@ -1568,28 +1568,6 @@ mod tests {
     }
 
     #[test]
-    fn onion_return_decrypt_invalid() {
-        let symmetric_key = new_symmetric_key();
-        let nonce = gen_nonce();
-        // Try long invalid array
-        let invalid_payload = [42; 123];
-        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
-        let invalid_onion_return = OnionReturn {
-            nonce: nonce,
-            payload: invalid_payload_encoded
-        };
-        assert!(invalid_onion_return.get_payload(&symmetric_key).is_err());
-        // Try short incomplete
-        let invalid_payload = [2];
-        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
-        let invalid_onion_return = OnionReturn {
-            nonce: nonce,
-            payload: invalid_payload_encoded
-        };
-        assert!(invalid_onion_return.get_payload(&symmetric_key).is_err());
-    }
-
-    #[test]
     fn onion_request_0_payload_encrypt_decrypt() {
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
@@ -1726,5 +1704,167 @@ mod tests {
         let decoded_payload = onion_packet.get_payload(&shared_secret).unwrap();
         // payloads should be equal
         assert_eq!(decoded_payload, payload);
+    }
+
+    #[test]
+    fn onion_return_decrypt_invalid() {
+        let symmetric_key = new_symmetric_key();
+        let nonce = gen_nonce();
+        // Try long invalid array
+        let invalid_payload = [42; 123];
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_onion_return = OnionReturn {
+            nonce,
+            payload: invalid_payload_encoded
+        };
+        assert!(invalid_onion_return.get_payload(&symmetric_key).is_err());
+        // Try short incomplete array
+        let invalid_payload = [];
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_onion_return = OnionReturn {
+            nonce,
+            payload: invalid_payload_encoded
+        };
+        assert!(invalid_onion_return.get_payload(&symmetric_key).is_err());
+    }
+
+    #[test]
+    fn onion_request_0_decrypt_invalid() {
+        let symmetric_key = new_symmetric_key();
+        let nonce = gen_nonce();
+        let temporary_pk = gen_keypair().0;
+        // Try long invalid array
+        let invalid_payload = [42; 123];
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_onion_request_0 = OnionRequest0 {
+            nonce,
+            temporary_pk,
+            payload: invalid_payload_encoded
+        };
+        assert!(invalid_onion_request_0.get_payload(&symmetric_key).is_err());
+        // Try short incomplete array
+        let invalid_payload = [];
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_onion_request_0 = OnionRequest0 {
+            nonce,
+            temporary_pk,
+            payload: invalid_payload_encoded
+        };
+        assert!(invalid_onion_request_0.get_payload(&symmetric_key).is_err());
+    }
+
+    #[test]
+    fn onion_request_1_decrypt_invalid() {
+        let symmetric_key = new_symmetric_key();
+        let nonce = gen_nonce();
+        let temporary_pk = gen_keypair().0;
+        // Try long invalid array
+        let invalid_payload = [42; 123];
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_onion_request_1 = OnionRequest1 {
+            nonce,
+            temporary_pk,
+            payload: invalid_payload_encoded,
+            onion_return: OnionReturn {
+                nonce: gen_nonce(),
+                payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
+            }
+        };
+        assert!(invalid_onion_request_1.get_payload(&symmetric_key).is_err());
+        // Try short incomplete array
+        let invalid_payload = [];
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_onion_request_1 = OnionRequest1 {
+            nonce,
+            temporary_pk,
+            payload: invalid_payload_encoded,
+            onion_return: OnionReturn {
+                nonce: gen_nonce(),
+                payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
+            }
+        };
+        assert!(invalid_onion_request_1.get_payload(&symmetric_key).is_err());
+    }
+
+    #[test]
+    fn onion_request_2_decrypt_invalid() {
+        let symmetric_key = new_symmetric_key();
+        let nonce = gen_nonce();
+        let temporary_pk = gen_keypair().0;
+        // Try long invalid array
+        let invalid_payload = [42; 123];
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_onion_request_2 = OnionRequest2 {
+            nonce,
+            temporary_pk,
+            payload: invalid_payload_encoded,
+            onion_return: OnionReturn {
+                nonce: gen_nonce(),
+                payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
+            }
+        };
+        assert!(invalid_onion_request_2.get_payload(&symmetric_key).is_err());
+        // Try short incomplete array
+        let invalid_payload = [];
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_onion_request_2 = OnionRequest2 {
+            nonce,
+            temporary_pk,
+            payload: invalid_payload_encoded,
+            onion_return: OnionReturn {
+                nonce: gen_nonce(),
+                payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
+            }
+        };
+        assert!(invalid_onion_request_2.get_payload(&symmetric_key).is_err());
+    }
+
+    #[test]
+    fn announce_request_decrypt_invalid() {
+        let symmetric_key = new_symmetric_key();
+        let nonce = gen_nonce();
+        let pk = gen_keypair().0;
+        // Try long invalid array
+        let invalid_payload = [42; 123];
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_announce_request = InnerAnnounceRequest {
+            nonce,
+            pk,
+            payload: invalid_payload_encoded
+        };
+        assert!(invalid_announce_request.get_payload(&symmetric_key).is_err());
+        // Try short incomplete array
+        let invalid_payload = [];
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_announce_request = InnerAnnounceRequest {
+            nonce,
+            pk,
+            payload: invalid_payload_encoded
+        };
+        assert!(invalid_announce_request.get_payload(&symmetric_key).is_err());
+    }
+
+    #[test]
+    fn announce_response_decrypt_invalid() {
+        let symmetric_key = new_symmetric_key();
+        let nonce = gen_nonce();
+        // Try long invalid array
+        let invalid_payload = [42; 123];
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_announce_response = AnnounceResponse {
+            sendback_data: 12345,
+            nonce,
+            payload: invalid_payload_encoded
+        };
+        assert!(invalid_announce_response.get_payload(&symmetric_key).is_err());
+        // Try short incomplete array
+        let invalid_payload = [];
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_announce_response = AnnounceResponse {
+            sendback_data: 12345,
+            nonce,
+            payload: invalid_payload_encoded
+        };
+        assert!(invalid_announce_response.get_payload(&symmetric_key).is_err());
     }
 }
