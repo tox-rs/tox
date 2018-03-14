@@ -1541,6 +1541,146 @@ mod tests {
     fn onion_return_encrypt_decrypt() {
         let alice_symmetric_key = new_symmetric_key();
         let bob_symmetric_key = new_symmetric_key();
+        // alice encrypt
+        let ip_port_1 = IpPort {
+            ip_addr: "5.6.7.8".parse().unwrap(),
+            port: 12345
+        };
+        let onion_return_1 = OnionReturn::new(&alice_symmetric_key, &ip_port_1, None);
+        // bob encrypt
+        let ip_port_2 = IpPort {
+            ip_addr: "7.8.5.6".parse().unwrap(),
+            port: 54321
+        };
+        let onion_return_2 = OnionReturn::new(&bob_symmetric_key, &ip_port_2, Some(&onion_return_1));
+        // bob can decrypt it's return address
+        let (decrypted_ip_port_2, decrypted_onion_return_1) = onion_return_2.get_payload(&bob_symmetric_key).unwrap();
+        assert_eq!(decrypted_ip_port_2, ip_port_2);
+        assert_eq!(decrypted_onion_return_1.unwrap(), onion_return_1);
+        // alice can decrypt it's return address
+        let (decrypted_ip_port_1, none) = onion_return_1.get_payload(&alice_symmetric_key).unwrap();
+        assert_eq!(decrypted_ip_port_1, ip_port_1);
+        assert!(none.is_none());
+    }
+
+    #[test]
+    fn onion_request_0_payload_encrypt_decrypt() {
+        let (alice_pk, alice_sk) = gen_keypair();
+        let (bob_pk, _bob_sk) = gen_keypair();
+        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
+        let payload = OnionRequest0Payload {
+            ip_port: IpPort {
+                ip_addr: "5.6.7.8".parse().unwrap(),
+                port: 12345
+            },
+            temporary_pk: gen_keypair().0,
+            inner: vec![42, 123]
+        };
+        // encode payload with shared secret
+        let onion_packet = OnionRequest0::new(&shared_secret, &alice_pk, payload.clone());
+        // decode payload with bob's secret key
+        let decoded_payload = onion_packet.get_payload(&shared_secret).unwrap();
+        // payloads should be equal
+        assert_eq!(decoded_payload, payload);
+    }
+
+    #[test]
+    fn onion_request_1_payload_encrypt_decrypt() {
+        let (alice_pk, alice_sk) = gen_keypair();
+        let (bob_pk, _bob_sk) = gen_keypair();
+        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
+        let payload = OnionRequest1Payload {
+            ip_port: IpPort {
+                ip_addr: "5.6.7.8".parse().unwrap(),
+                port: 12345
+            },
+            temporary_pk: gen_keypair().0,
+            inner: vec![42, 123]
+        };
+        let onion_return = OnionReturn {
+            nonce: gen_nonce(),
+            payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
+        };
+        // encode payload with shared secret
+        let onion_packet = OnionRequest1::new(&shared_secret, &alice_pk, payload.clone(), onion_return);
+        // decode payload with bob's secret key
+        let decoded_payload = onion_packet.get_payload(&shared_secret).unwrap();
+        // payloads should be equal
+        assert_eq!(decoded_payload, payload);
+    }
+
+    #[test]
+    fn onion_request_2_payload_encrypt_decrypt() {
+        let (alice_pk, alice_sk) = gen_keypair();
+        let (bob_pk, _bob_sk) = gen_keypair();
+        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
+        let payload = OnionRequest2Payload {
+            ip_port: IpPort {
+                ip_addr: "5.6.7.8".parse().unwrap(),
+                port: 12345
+            },
+            inner: InnerOnionRequest::InnerOnionDataRequest(InnerOnionDataRequest {
+                destination_pk: gen_keypair().0,
+                nonce: gen_nonce(),
+                temporary_pk: gen_keypair().0,
+                payload: vec![42, 123]
+            })
+        };
+        let onion_return = OnionReturn {
+            nonce: gen_nonce(),
+            payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
+        };
+        // encode payload with shared secret
+        let onion_packet = OnionRequest2::new(&shared_secret, &alice_pk, payload.clone(), onion_return);
+        // decode payload with bob's secret key
+        let decoded_payload = onion_packet.get_payload(&shared_secret).unwrap();
+        // payloads should be equal
+        assert_eq!(decoded_payload, payload);
+    }
+
+    #[test]
+    fn announce_request_payload_encrypt_decrypt() {
+        let (alice_pk, alice_sk) = gen_keypair();
+        let (bob_pk, _bob_sk) = gen_keypair();
+        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
+        let payload = AnnounceRequestPayload {
+            ping_id: hash(&[1, 2, 3]),
+            search_pk: gen_keypair().0,
+            data_pk: gen_keypair().0,
+            sendback_data: 12345
+        };
+        // encode payload with shared secret
+        let onion_packet = InnerAnnounceRequest::new(&shared_secret, &alice_pk, payload.clone());
+        // decode payload with bob's secret key
+        let decoded_payload = onion_packet.get_payload(&shared_secret).unwrap();
+        // payloads should be equal
+        assert_eq!(decoded_payload, payload);
+    }
+
+    #[test]
+    fn announce_response_payload_encrypt_decrypt() {
+        let (_alice_pk, alice_sk) = gen_keypair();
+        let (bob_pk, _bob_sk) = gen_keypair();
+        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
+        let payload = AnnounceResponsePayload {
+            is_stored: 1,
+            ping_id_or_pk: hash(&[1, 2, 3]),
+            nodes: vec![
+                PackedNode::new(false, SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
+            ]
+        };
+        // encode payload with shared secret
+        let onion_packet = AnnounceResponse::new(&shared_secret, 12345, payload.clone());
+        // decode payload with bob's secret key
+        let decoded_payload = onion_packet.get_payload(&shared_secret).unwrap();
+        // payloads should be equal
+        assert_eq!(decoded_payload, payload);
+    }
+
+    #[test]
+    fn onion_return_encrypt_decrypt_invalid_key() {
+        let alice_symmetric_key = new_symmetric_key();
+        let bob_symmetric_key = new_symmetric_key();
         let eve_symmetric_key = new_symmetric_key();
         // alice encrypt
         let ip_port_1 = IpPort {
@@ -1557,18 +1697,10 @@ mod tests {
         // eve can't decrypt return addresses
         assert!(onion_return_1.get_payload(&eve_symmetric_key).is_err());
         assert!(onion_return_2.get_payload(&eve_symmetric_key).is_err());
-        // bob can decrypt it's return address
-        let (decrypted_ip_port_2, decrypted_onion_return_1) = onion_return_2.get_payload(&bob_symmetric_key).unwrap();
-        assert_eq!(decrypted_ip_port_2, ip_port_2);
-        assert_eq!(decrypted_onion_return_1.unwrap(), onion_return_1);
-        // alice can decrypt it's return address
-        let (decrypted_ip_port_1, none) = onion_return_1.get_payload(&alice_symmetric_key).unwrap();
-        assert_eq!(decrypted_ip_port_1, ip_port_1);
-        assert!(none.is_none());
     }
 
     #[test]
-    fn onion_request_0_payload_encrypt_decrypt() {
+    fn onion_request_0_payload_encrypt_decrypt_invalid_key() {
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let (_eve_pk, eve_sk) = gen_keypair();
@@ -1587,14 +1719,10 @@ mod tests {
         let eve_shared_secret = encrypt_precompute(&bob_pk, &eve_sk);
         let decoded_payload = onion_packet.get_payload(&eve_shared_secret);
         assert!(decoded_payload.is_err());
-        // decode payload with bob's secret key
-        let decoded_payload = onion_packet.get_payload(&shared_secret).unwrap();
-        // payloads should be equal
-        assert_eq!(decoded_payload, payload);
     }
 
     #[test]
-    fn onion_request_1_payload_encrypt_decrypt() {
+    fn onion_request_1_payload_encrypt_decrypt_invalid_key() {
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let (_eve_pk, eve_sk) = gen_keypair();
@@ -1617,14 +1745,10 @@ mod tests {
         let eve_shared_secret = encrypt_precompute(&bob_pk, &eve_sk);
         let decoded_payload = onion_packet.get_payload(&eve_shared_secret);
         assert!(decoded_payload.is_err());
-        // decode payload with bob's secret key
-        let decoded_payload = onion_packet.get_payload(&shared_secret).unwrap();
-        // payloads should be equal
-        assert_eq!(decoded_payload, payload);
     }
 
     #[test]
-    fn onion_request_2_payload_encrypt_decrypt() {
+    fn onion_request_2_payload_encrypt_decrypt_invalid_key() {
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let (_eve_pk, eve_sk) = gen_keypair();
@@ -1651,14 +1775,10 @@ mod tests {
         let eve_shared_secret = encrypt_precompute(&bob_pk, &eve_sk);
         let decoded_payload = onion_packet.get_payload(&eve_shared_secret);
         assert!(decoded_payload.is_err());
-        // decode payload with bob's secret key
-        let decoded_payload = onion_packet.get_payload(&shared_secret).unwrap();
-        // payloads should be equal
-        assert_eq!(decoded_payload, payload);
     }
 
     #[test]
-    fn announce_request_payload_encrypt_decrypt() {
+    fn announce_request_payload_encrypt_decrypt_invalid_key() {
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let (_eve_pk, eve_sk) = gen_keypair();
@@ -1675,14 +1795,10 @@ mod tests {
         let eve_shared_secret = encrypt_precompute(&bob_pk, &eve_sk);
         let decoded_payload = onion_packet.get_payload(&eve_shared_secret);
         assert!(decoded_payload.is_err());
-        // decode payload with bob's secret key
-        let decoded_payload = onion_packet.get_payload(&shared_secret).unwrap();
-        // payloads should be equal
-        assert_eq!(decoded_payload, payload);
     }
 
     #[test]
-    fn announce_response_payload_encrypt_decrypt() {
+    fn announce_response_payload_encrypt_decrypt_invalid_key() {
         let (_alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let (_eve_pk, eve_sk) = gen_keypair();
@@ -1700,10 +1816,6 @@ mod tests {
         let eve_shared_secret = encrypt_precompute(&bob_pk, &eve_sk);
         let decoded_payload = onion_packet.get_payload(&eve_shared_secret);
         assert!(decoded_payload.is_err());
-        // decode payload with bob's secret key
-        let decoded_payload = onion_packet.get_payload(&shared_secret).unwrap();
-        // payloads should be equal
-        assert_eq!(decoded_payload, payload);
     }
 
     #[test]
