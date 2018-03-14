@@ -43,7 +43,8 @@ use std::cell::RefCell;
 use std::net::SocketAddr;
 use std::rc::Rc;
 use std::io::{ErrorKind, Error};
-use std::time::{self,*};
+use std::time::{self};
+use std::time::*;
 
 use tox::toxcore::dht::packet::*;
 use tox::toxcore::dht::codec::*;
