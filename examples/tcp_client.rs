@@ -20,7 +20,7 @@
 
 extern crate tox;
 extern crate futures;
-extern crate tokio_core;
+extern crate tokio;
 extern crate tokio_io;
 
 #[macro_use]
@@ -40,8 +40,7 @@ use futures::future;
 use futures::sync::mpsc;
 
 use tokio_io::{AsyncRead, IoFuture};
-use tokio_core::reactor::{Core, Handle};
-use tokio_core::net::TcpStream;
+use tokio::net::TcpStream;
 
 use std::{thread, time};
 use std::io::{Error, ErrorKind};
@@ -50,7 +49,7 @@ use std::io::{Error, ErrorKind};
 //  The future will live untill all copies of tx is dropped or there is a IO error
 //  Since we pass a copy of tx as arg (to send PongResponses), the client will live untill IO error
 //  Comment out pong responser and client will be destroyed when there will be no messages to send
-fn create_client(rx: mpsc::Receiver<Packet>, tx: mpsc::Sender<Packet>, handle: &Handle) -> IoFuture<()> {
+fn create_client(rx: mpsc::Receiver<Packet>, tx: mpsc::Sender<Packet>) -> IoFuture<()> {
     // Use `gen_keypair` to generate random keys
     // Client constant keypair for examples/tests
     let client_pk = PublicKey([252, 72, 40, 127, 213, 13, 0, 95,
@@ -92,7 +91,7 @@ fn create_client(rx: mpsc::Receiver<Packet>, tx: mpsc::Sender<Packet>, handle: &
         }
     };
 
-    let client = TcpStream::connect(&addr, &handle)
+    let client = TcpStream::connect(&addr)
         .and_then(move |socket| {
             make_client_handshake(socket, client_pk, client_sk, server_pk)
         })
@@ -201,26 +200,36 @@ fn main() {
 
     let (tx, rx) = mpsc::channel(1);
 
-    let mut core = Core::new().unwrap();
-    let handle = core.handle();
-    let client = create_client(rx, tx.clone(), &handle);
+    let client = create_client(rx, tx.clone())
+        .map_err(|_| ());
 
     // variant 1. send packets in the same thread, combine with select(...)
+    let mut i = 0u64;
     let packet_sender = future::loop_fn(tx.clone(), move |tx| {
+        if i % 10000 == 0 {
+            println!("i = {}", i);
+        }
+        i = i + 1;
         // Client friend constant PK for examples/tests
         let friend_pk = PublicKey([15, 107, 126, 130, 81, 55, 154, 157,
                                 192, 117, 0, 225, 119, 43, 48, 117,
                                 84, 109, 112, 57, 243, 216, 4, 171,
                                 185, 111, 33, 146, 221, 31, 77, 118]);
 
-        tx.send(Packet::RouteRequest(RouteRequest {pk: friend_pk } ))
+        let request = if i == 1 {
+            tx.send(Packet::RouteRequest(RouteRequest {pk: friend_pk } ))
+        } else {
+            tx.send(Packet::Data(Data { connection_id: 16, data: vec![42; 42] } ))
+        };
+
+        request
             .and_then(|tx| Ok(future::Loop::Continue(tx)) )
             .or_else(|e| Ok(future::Loop::Break(e)) )
     }).map(|_| ());
-    let client = client.select(packet_sender).map_err(|_| ());
+    let client = client.select(packet_sender).map(|_| ()).map_err(|_| ());
 
     // variant 2. send packets in a separate thread
     //thread::spawn(move || send_packets(tx));
 
-    core.run( client ).unwrap();
+    tokio::run( client );
 }
