@@ -56,17 +56,27 @@ to clients via network.
 pub struct Server {
     connected_clients: Rc<RefCell<HashMap<PublicKey, Client>>>,
     keys_by_addr: Rc<RefCell<HashMap<(IpAddr, /*port*/ u16), PublicKey>>>,
-    onion_sink: mpsc::UnboundedSender<OnionRequest>,
+    // None if the server is not responsible to handle OnionRequests
+    onion_sink: Option<mpsc::UnboundedSender<OnionRequest>>,
 }
 
 impl Server {
-    /** Create a new `Server`
+    /** Create a new `Server` without onion
     */
-    pub fn new(onion_sink: mpsc::UnboundedSender<OnionRequest>) -> Server {
+    pub fn new() -> Server {
         Server {
             connected_clients: Rc::new(RefCell::new(HashMap::new())),
             keys_by_addr: Rc::new(RefCell::new(HashMap::new())),
-            onion_sink
+            onion_sink: None
+        }
+    }
+    /** Create a new `Server` with onion
+    */
+    pub fn new_with_onion(onion_sink: mpsc::UnboundedSender<OnionRequest>) -> Server {
+        Server {
+            connected_clients: Rc::new(RefCell::new(HashMap::new())),
+            keys_by_addr: Rc::new(RefCell::new(HashMap::new())),
+            onion_sink: Some(onion_sink)
         }
     }
     /** Insert the client into connected_clients. Do nothing else.
@@ -314,22 +324,27 @@ impl Server {
         )))
     }
     fn handle_onion_request(&self, _pk: &PublicKey, packet: OnionRequest) -> IoFuture<()> {
-        if packet.data.len() <= ONION_SEND_BASE_SIZE * 2 ||
-            packet.data.len() > ONION_MAX_PACKET_SIZE - (1 + NONCEBYTES + ONION_RETURN_1_SIZE) {
-            return Box::new( future::err(
-                Error::new(ErrorKind::Other,
-                    "OnionRequest wrong data length"
-            )))
+        if let Some(ref onion_sink) = self.onion_sink {
+            if packet.data.len() <= ONION_SEND_BASE_SIZE * 2 ||
+                packet.data.len() > ONION_MAX_PACKET_SIZE - (1 + NONCEBYTES + ONION_RETURN_1_SIZE) {
+                return Box::new( future::err(
+                    Error::new(ErrorKind::Other,
+                        "OnionRequest wrong data length"
+                )))
+            }
+            Box::new(onion_sink.clone() // clone sink for 1 send only
+                .send(packet)
+                .map(|_sink| ()) // ignore sink because it was cloned
+                .map_err(|_| {
+                    // This may only happen if sink is gone
+                    // So cast SendError<T> to a corresponding std::io::Error
+                    Error::from(ErrorKind::UnexpectedEof)
+                })
+            )
+        } else {
+            // Ignore OnionRequest as the server is not connected to onion subsystem
+            Box::new( future::ok(()) )
         }
-        Box::new(self.onion_sink.clone() // clone sink for 1 send only
-            .send(packet)
-            .map(|_sink| ()) // ignore sink because it was cloned
-            .map_err(|_| {
-                // This may only happen if sink is gone
-                // So cast SendError<T> to a corresponding std::io::Error
-                Error::from(ErrorKind::UnexpectedEof)
-            })
-        )
     }
     fn handle_onion_response(&self, _pk: &PublicKey, _packet: OnionResponse) -> IoFuture<()> {
         Box::new( future::err(
@@ -391,8 +406,7 @@ mod tests {
 
     #[test]
     fn server_is_clonable() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
         let (client_1, _rx_1) = create_random_client();
         server.insert(client_1);
         let _cloned = server.clone();
@@ -413,8 +427,7 @@ mod tests {
 
     #[test]
     fn normal_communication_scenario() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
 
         let (client_1, rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
@@ -494,8 +507,7 @@ mod tests {
     }
     #[test]
     fn handle_route_request() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
 
         let (client_1, rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
@@ -518,8 +530,7 @@ mod tests {
     }
     #[test]
     fn handle_route_request_to_itself() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
 
         let (client_1, rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
@@ -538,8 +549,7 @@ mod tests {
     }
     #[test]
     fn handle_route_request_too_many_connections() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
 
         let (client_1, mut rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
@@ -580,8 +590,7 @@ mod tests {
     }
     #[test]
     fn handle_connect_notification() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
 
         let (client_1, _rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
@@ -595,8 +604,7 @@ mod tests {
     }
     #[test]
     fn handle_disconnect_notification() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
 
         let (client_1, rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
@@ -653,8 +661,7 @@ mod tests {
     }
     #[test]
     fn handle_disconnect_notification_other_not_linked() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
 
         let (client_1, _rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
@@ -677,8 +684,7 @@ mod tests {
     }
     #[test]
     fn handle_ping_request() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
 
         let (client_1, rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
@@ -697,8 +703,7 @@ mod tests {
     }
     #[test]
     fn handle_oob_send() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
 
         let (client_1, _rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
@@ -722,7 +727,7 @@ mod tests {
     #[test]
     fn handle_onion_request() {
         let (tcp_onion_sink, tcp_onion_stream) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new_with_onion(tcp_onion_sink);
 
         let (client_1, _rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
@@ -744,8 +749,7 @@ mod tests {
     }
     #[test]
     fn handle_udp_onion_response() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
 
         let (client_1, rx_1) = create_random_client();
         let client_addr_1 = client_1.ip_addr();
@@ -765,8 +769,7 @@ mod tests {
     }
     #[test]
     fn shutdown_other_not_linked() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
 
         let (client_1, rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
@@ -793,8 +796,7 @@ mod tests {
     }
     #[test]
     fn handle_data_other_not_linked() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
 
         let (client_1, rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
@@ -826,8 +828,7 @@ mod tests {
     // Here be all handle_* tests with wrong args
     #[test]
     fn handle_route_response() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
 
         let (client_1, _rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
@@ -841,8 +842,7 @@ mod tests {
     }
     #[test]
     fn handle_disconnect_notification_0() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
 
         let (client_1, _rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
@@ -856,8 +856,7 @@ mod tests {
     }
     #[test]
     fn handle_disconnect_notification_not_linked() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
 
         let (client_1, _rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
@@ -871,8 +870,7 @@ mod tests {
     }
     #[test]
     fn handle_ping_request_0() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
 
         let (client_1, _rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
@@ -886,8 +884,7 @@ mod tests {
     }
     #[test]
     fn handle_pong_response_0() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
 
         let (client_1, _rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
@@ -901,8 +898,7 @@ mod tests {
     }
     #[test]
     fn handle_oob_send_empty_data() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
 
         let (client_1, _rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
@@ -920,8 +916,7 @@ mod tests {
     }
     #[test]
     fn handle_data_0() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
 
         let (client_1, _rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
@@ -935,8 +930,7 @@ mod tests {
     }
     #[test]
     fn handle_data_self_not_linked() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
 
         let (client_1, _rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
@@ -950,8 +944,7 @@ mod tests {
     }
     #[test]
     fn handle_oob_send_to_loooong_data() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
 
         let (client_1, _rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
@@ -969,8 +962,7 @@ mod tests {
     }
     #[test]
     fn handle_oob_recv() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
 
         let (client_1, _rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
@@ -989,7 +981,7 @@ mod tests {
     #[test]
     fn handle_onion_request_not_enough_data() {
         let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new_with_onion(tcp_onion_sink);
 
         let (client_1, _rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
@@ -1009,7 +1001,7 @@ mod tests {
     #[test]
     fn handle_onion_request_loooong_data() {
         let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new_with_onion(tcp_onion_sink);
 
         let (client_1, _rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
@@ -1027,9 +1019,27 @@ mod tests {
         assert!(handle_res.is_err());
     }
     #[test]
+    fn handle_onion_request_disabled_onion_loooong_data() {
+        let server = Server::new();
+
+        let (client_1, _rx_1) = create_random_client();
+        let client_pk_1 = client_1.pk();
+        server.insert(client_1);
+
+        let request = OnionRequest {
+            nonce: gen_nonce(),
+            addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            port: 12345,
+            data: [13; 1500].to_vec()
+        };
+        let handle_res = server
+            .handle_packet(&client_pk_1, Packet::OnionRequest(request.clone()))
+            .wait();
+        assert!(handle_res.is_ok());
+    }
+    #[test]
     fn handle_onion_response() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
 
         let (client_1, _rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
@@ -1043,7 +1053,7 @@ mod tests {
     #[test]
     fn handle_udp_onion_response_for_unknown_client() {
         let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new_with_onion(tcp_onion_sink);
 
         let client_addr_1 = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
         let client_port_1 = 12345u16;
@@ -1066,8 +1076,7 @@ mod tests {
     // Here be all handle_* tests from PK or to PK not in connected clients list
     #[test]
     fn handle_route_request_not_connected() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
         let (client_pk_1, _) = gen_keypair();
         let (client_pk_2, _) = gen_keypair();
 
@@ -1079,8 +1088,7 @@ mod tests {
     }
     #[test]
     fn handle_disconnect_notification_not_connected() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
         let (client_pk_1, _) = gen_keypair();
 
         // emulate send DisconnectNotification from client_1
@@ -1091,8 +1099,7 @@ mod tests {
     }
     #[test]
     fn handle_disconnect_notification_other_not_connected() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
 
         let (client_1, _rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
@@ -1113,8 +1120,7 @@ mod tests {
     }
     #[test]
     fn handle_ping_request_not_connected() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
         let (client_pk_1, _) = gen_keypair();
 
         // emulate send PingRequest from client_1
@@ -1125,8 +1131,7 @@ mod tests {
     }
     #[test]
     fn handle_pong_response_not_connected() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
         let (client_pk_1, _) = gen_keypair();
 
         // emulate send PongResponse from client_1
@@ -1137,8 +1142,7 @@ mod tests {
     }
     #[test]
     fn handle_oob_send_not_connected() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
         let (client_pk_1, _) = gen_keypair();
         let (client_pk_2, _) = gen_keypair();
 
@@ -1150,8 +1154,7 @@ mod tests {
     }
     #[test]
     fn handle_data_not_connected() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
         let (client_pk_1, _) = gen_keypair();
 
         // emulate send Data from client_1
@@ -1162,8 +1165,7 @@ mod tests {
     }
     #[test]
     fn handle_data_other_not_connected() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
 
         let (client_1, rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
@@ -1190,8 +1192,7 @@ mod tests {
     }
     #[test]
     fn shutdown_not_connected() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
         let (client_pk, _) = gen_keypair();
 
         // emulate shutdown
@@ -1200,8 +1201,7 @@ mod tests {
     }
     #[test]
     fn shutdown_other_not_connected() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
 
         let (client_1, rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
@@ -1226,8 +1226,7 @@ mod tests {
     }
     #[test]
     fn send_anything_to_dropped_client() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new();
 
         let (client_1, rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
@@ -1248,7 +1247,7 @@ mod tests {
     #[test]
     fn send_onion_request_to_dropped_stream() {
         let (tcp_onion_sink, tcp_onion_stream) = mpsc::unbounded();
-        let server = Server::new(tcp_onion_sink);
+        let server = Server::new_with_onion(tcp_onion_sink);
 
         let (client_1, _rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
