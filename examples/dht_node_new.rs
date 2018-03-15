@@ -28,6 +28,7 @@ extern crate tokio;
 extern crate tokio_core;
 extern crate tokio_io;
 extern crate tokio_timer;
+extern crate rustc_serialize;
 
 #[macro_use]
 extern crate log;
@@ -45,6 +46,7 @@ use std::rc::Rc;
 use std::io::{ErrorKind, Error};
 use std::time::{self};
 use std::time::*;
+use rustc_serialize::hex::FromHex;
 
 use tox::toxcore::dht::packet::*;
 use tox::toxcore::dht::codec::*;
@@ -63,7 +65,7 @@ fn main() {
 
     let (pk, sk) = gen_keypair();
 
-    let local: SocketAddr = "127.0.0.1:12345".parse().unwrap();
+    let local: SocketAddr = "0.0.0.0:33445".parse().unwrap();
 
     let mut core = Core::new().unwrap();
     let handle = core.handle();
@@ -75,13 +77,16 @@ fn main() {
     let (tx, rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
     let server_obj = Rc::new(RefCell::new(Server::new(tx, pk, sk)));
 
-    let bootstrap_pk = PublicKey([177, 185, 54, 250, 10, 168, 174,
-                            148, 0, 93, 99, 13, 131, 131, 239,
-                            193, 129, 141, 80, 158, 50, 133, 100,
-                            182, 179, 183, 234, 116, 142, 102, 53, 38]);
-    let saddr: SocketAddr = "51.15.37.145:33445".parse().unwrap();
-    let bootstrap_pn = PackedNode::new(true, saddr, &bootstrap_pk);
+    // get PK bytes of some "random" bootstrap node (Impyy's)
+    let bootstrap_pk_bytes = FromHex::from_hex(
+        "A179B09749AC826FF01F37A9613F6B57118AE014D4196A0E1105A98F93A54702")
+        .unwrap();
+    // create PK from bytes
+    let bootstrap_pk = PublicKey::from_slice(&bootstrap_pk_bytes).unwrap();
 
+                 //"51.15.37.145:33445".parse().unwrap()
+    let saddr: SocketAddr = "127.0.0.1:33445".parse().unwrap();
+    let bootstrap_pn = PackedNode::new(true, saddr, &bootstrap_pk);
     assert!(server_obj.borrow_mut().kbucket.try_add(&bootstrap_pn));
 
     let (sink, stream) = UdpFramed::new(socket, DhtCodec).split();
@@ -89,6 +94,7 @@ fn main() {
     // incoming packet.
     let server_obj_c = server_obj.clone();
     let handler = stream.for_each(move |(packet, addr)| {
+        println!("recv = {:?}", packet.clone());
         let _ = server_obj_c.borrow_mut().handle_packet((packet, addr));
         Ok(())
         })
@@ -108,9 +114,10 @@ fn main() {
     let writer = rx
         .map_err(|_| Error::new(ErrorKind::Other, "rx error"))
         .fold(sink, move |sink, packet| {
+            println!("send = {:?}", packet.clone());
             debug!("Send {:?} => {:?}", packet.0, packet.1);
             let sending_future = sink.send(packet);
-            let duration = time::Duration::from_secs(30);
+            let duration = time::Duration::from_secs(10);
             let timeout = writer_timer.timeout(sending_future, duration);
             timeout
         })
@@ -158,6 +165,11 @@ fn main() {
     let duration = Duration::new(20, 0); // 20 seconds for NodesRequest
     let nodes_wakeups = timer.interval(duration);
     let server_obj_c = server_obj.clone();
+    let friend_pk = PublicKey([15, 107, 126, 130, 81, 55, 154, 157,
+                            192, 117, 0, 225, 119, 43, 48, 117,
+                            84, 109, 112, 57, 243, 216, 4, 171,
+                            185, 111, 33, 146, 221, 31, 77, 118]);
+    server_obj_c.borrow_mut().send_nodes_req(friend_pk);
     let nodes_sender = nodes_wakeups.for_each(move |()| {
         let friend_pk = PublicKey([15, 107, 126, 130, 81, 55, 154, 157,
                                 192, 117, 0, 225, 119, 43, 48, 117,
@@ -173,7 +185,7 @@ fn main() {
     let server_obj_c = server_obj.clone();
     let nat_sender = nat_wakeups.for_each(move |()| {
         let peer_pk = gen_keypair().0;
-        let node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &peer_pk.clone());
+        let node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:33445".parse().unwrap()), &peer_pk.clone());
         let friend_pk = PublicKey([15, 107, 126, 130, 81, 55, 154, 157,
                                 192, 117, 0, 225, 119, 43, 48, 117,
                                 84, 109, 112, 57, 243, 216, 4, 171,
