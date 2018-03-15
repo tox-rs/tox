@@ -148,6 +148,8 @@ Length  | Content
 `24`    | Nonce
 `9`     | Payload
 
+where Payload is encrypted [`PingRequestPayload`](./struct.PingRequestPayload.html)
+
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PingRequest {
@@ -287,6 +289,8 @@ Length  | Content
 `32`    | Public Key
 `24`    | Nonce
 `9`     | Payload
+
+where Payload is encrypted [`PingResponsePayload`](./struct.PingResponsePayload.html)
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -428,6 +432,8 @@ Length  | Content
 `24`    | Nonce
 `40`    | Payload
 
+where Payload is encrypted [`NodesRequestPayload`](./struct.NodesRequestPayload.html)
+
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NodesRequest {
@@ -560,6 +566,8 @@ Length    | Content
 `24`      | Nonce
 `1`       | Number of Response Nodes
 `[47,212]`| Payload
+
+where Payload is encrypted [`NodesResponsePayload`](./struct.NodesResponsePayload.html)
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -717,7 +725,9 @@ Length | Content
 `1`    | `0x18`
 `32`   | DHT Public Key
 `24`   | Random nonce
-`88`   | Encrypted CookieRequestPayload
+`88`   | Payload
+
+where Payload is encrypted [`CookieRequestPayload`](./struct.CookieRequestPayload.html)
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -852,9 +862,9 @@ Length    | Content
 `32`      | Receiver's Public Key
 `32`      | Sender's Public Key
 `24`      | Nonce
-`1`       | `0xFE`
-`1`       | Request(`0x00`) or Response(`0x01`) flag
-`8`       | Request Id (Ping Id)
+`10`      | Payload
+
+where Payload is encrypted [`DhtRequestPayload`](./struct.DhtRequestPayload.html)
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
