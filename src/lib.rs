@@ -57,13 +57,14 @@ extern crate quickcheck;
 
 extern crate tokio_core;
 extern crate tokio_io;
+extern crate rand;
+extern crate tokio_timer;
 
 
 // TODO: refactor macros
 #[cfg(test)]
 #[macro_use]
 pub mod toxcore_tests {
-    extern crate rand;
     extern crate rustc_serialize;
 
     // Helper macros for testing, no tests
@@ -103,7 +104,5 @@ pub mod toxencryptsave;
 
 #[cfg(test)]
 mod toxencryptsave_tests {
-    extern crate rand;
-
     mod encryptsave_tests;
 }

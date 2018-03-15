@@ -196,8 +196,10 @@ impl PingRequest {
     pub fn get_payload(&self, own_secret_key: &SecretKey) -> Result<PingRequestPayload, Error> {
         debug!(target: "PingRequest", "Getting packet data from PingRequest.");
         trace!(target: "PingRequest", "With PingRequest: {:?}", self);
+        println!("packet = {:?}, sk = {:?}", self.clone(), own_secret_key.clone());
         let decrypted = open(&self.payload, &self.nonce, &self.pk, own_secret_key)
             .map_err(|e| {
+                println!("Decrypting PingRequest failed! {:?}", e);
                 debug!("Decrypting PingRequest failed!");
                 Error::new(ErrorKind::Other,
                     format!("PingRequest decrypt error: {:?}", e))
@@ -205,11 +207,13 @@ impl PingRequest {
 
         match PingRequestPayload::from_bytes(&decrypted) {
             IResult::Incomplete(e) => {
+                println!("PingRequestPayload deserialize incomplete error: {:?}", e);
                 error!(target: "PingRequest", "PingRequestPayload deserialize error: {:?}", e);
                 Err(Error::new(ErrorKind::Other,
                     format!("PingRequestPayload deserialize error: {:?}", e)))
             },
             IResult::Error(e) => {
+                println!("PingRequestPayload deserialize error: {:?}", e);
                 error!(target: "PingRequest", "PingRequestPayload deserialize error: {:?}", e);
                 Err(Error::new(ErrorKind::Other,
                     format!("PingRequestPayload deserialize error: {:?}", e)))
@@ -1087,7 +1091,6 @@ impl PingRequestPayload {
         trace!("Creating new Ping.");
         PingRequestPayload { id: random_u64() }
     }
-
     /// An ID of the request / response.
     pub fn id(&self) -> u64 {
         self.id
@@ -1107,7 +1110,6 @@ impl NatPingRequest {
         trace!("Creating new Ping.");
         NatPingRequest { id: random_u64() }
     }
-
     /// An ID of the request / response.
     pub fn id(&self) -> u64 {
         self.id
