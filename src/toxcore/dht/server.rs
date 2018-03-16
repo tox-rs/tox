@@ -21,7 +21,7 @@
 
 /*!
 Functionality needed to work as a DHT node.
-This module works as a coordinator of other modules.
+This module works on top of other modules.
 */
 
 use futures::sync::mpsc;
@@ -49,9 +49,6 @@ Contains:
 - DHT public key
 - DHT secret key
 - Close List ([`Kbucket`] with nodes close to own DHT public key)
-- ping timeout lists ([`TimeoutQueue`])
-
-# Adding node to Close List
 
 Before a [`PackedNode`] is added to the Close List, it needs to be
 checked whether:
@@ -79,17 +76,13 @@ pub struct Server {
     pub kbucket: Kbucket,
     /// tx split of channel to send packet to this peer via udp socket
     pub tx: Tx,
-    /// store client object which has send request to peer
+    /// store client object which has sent request packet to peer
     pub peers_cache: HashMap<PublicKey, Client>,
 }
 
 impl Server {
     /**
     Create new `Server` instance.
-
-    Note: a new instance generates new DHT public and secret keys.
-
-    DHT `PublicKey` and `SecretKey` are supposed to be ephemeral.
     */
     pub fn new(tx: Tx, pk: PublicKey, sk: SecretKey) -> Server {
         let kbucket = Kbucket::new(KBUCKET_BUCKETS, &pk);
@@ -175,7 +168,6 @@ impl Server {
                         }
                     },
                     _p => {
-                        // error!("received packet are not handled {:?}", p);
                         Box::new( future::err(
                             Error::new(ErrorKind::Other,
                                 "received packet are not handled"
