@@ -20,7 +20,7 @@
 
 extern crate tox;
 extern crate futures;
-extern crate tokio_core;
+extern crate tokio;
 extern crate tokio_io;
 extern crate tokio_timer;
 
@@ -37,8 +37,7 @@ use futures::prelude::*;
 use futures::sync::mpsc;
 
 use tokio_io::AsyncRead;
-use tokio_core::reactor::Core;
-use tokio_core::net::TcpListener;
+use tokio::net::TcpListener;
 
 use std::time;
 
@@ -55,9 +54,7 @@ fn main() {
                             140, 147, 14, 176, 106, 255, 54, 249,
                             159, 12, 18, 39, 123, 29, 125, 230]);
     let addr = "0.0.0.0:12345".parse().unwrap();
-    let mut core = Core::new().unwrap();
-    let handle = core.handle();
-    let listener = TcpListener::bind(&addr, &handle).unwrap();
+    let listener = TcpListener::bind(&addr).unwrap();
 
     info!("Listening on addr={}, {:?}", addr, &server_pk);
 
@@ -65,7 +62,12 @@ fn main() {
     let server_inner = Server::new();
 
     // TODO move this processing future into a standalone library function
-    let server = listener.incoming().for_each(|(socket, addr)| {
+    let server = listener.incoming().for_each(move |socket| {
+        let addr = socket.peer_addr()
+            .map_err(|e| {
+                error!("could not get peer addr: {}", e);
+                e
+            })?;
         debug!("A new client connected from {}", addr);
 
         let server_inner_c = server_inner.clone();
@@ -126,12 +128,19 @@ fn main() {
                             .then(move |r_shutdown| r_processing.and(r_shutdown))
                     })
             });
-        handle.spawn(process_connection.then(|r| {
+        tokio::spawn(process_connection.then(|r| {
             debug!("end of processing with result {:?}", r);
             Ok(())
         }));
 
         Ok(())
+    })
+    .map_err(|err| {
+            // All tasks must have an `Error` type of `()`. This forces error
+            // handling and helps avoid silencing failures.
+            //
+            // In our example, we are only going to log the error to STDOUT.
+            println!("listener.incoming() error = {:?}", err);
     });
-    core.run(server).unwrap();
+    tokio::run(server);
 }

@@ -32,9 +32,8 @@ use toxcore::tcp::packet::*;
 
 use std::io::{Error, ErrorKind};
 use std::collections::HashMap;
-use std::cell::RefCell;
 use std::net::IpAddr;
-use std::rc::Rc;
+use std::sync::{Arc, RwLock};
 
 use futures::{Sink, Stream, Future, future, stream};
 use futures::sync::mpsc;
@@ -52,39 +51,41 @@ responses from UPD socket and send them to `Server::handle_udp_onion_response`, 
 channels, take packets from `futures::sync::mpsc::UnboundedReceiver<Packet>` send them back
 to clients via network.
 */
-#[derive(Clone)]
+#[derive(Default, Clone)]
 pub struct Server {
-    connected_clients: Rc<RefCell<HashMap<PublicKey, Client>>>,
-    keys_by_addr: Rc<RefCell<HashMap<(IpAddr, /*port*/ u16), PublicKey>>>,
+    state: Arc<RwLock<ServerState>>,
     // None if the server is not responsible to handle OnionRequests
     onion_sink: Option<mpsc::UnboundedSender<OnionRequest>>,
 }
+
+#[derive(Default)]
+struct ServerState {
+    pub connected_clients: HashMap<PublicKey, Client>,
+    pub keys_by_addr: HashMap<(IpAddr, /*port*/ u16), PublicKey>,
+}
+
 
 impl Server {
     /** Create a new `Server` without onion
     */
     pub fn new() -> Server {
-        Server {
-            connected_clients: Rc::new(RefCell::new(HashMap::new())),
-            keys_by_addr: Rc::new(RefCell::new(HashMap::new())),
-            onion_sink: None
-        }
+        Server::default()
     }
     /** Create a new `Server` with onion
     */
     pub fn new_with_onion(onion_sink: mpsc::UnboundedSender<OnionRequest>) -> Server {
         Server {
-            connected_clients: Rc::new(RefCell::new(HashMap::new())),
-            keys_by_addr: Rc::new(RefCell::new(HashMap::new())),
-            onion_sink: Some(onion_sink)
+            state: Default::default(),
+            onion_sink: Some(onion_sink),
         }
     }
     /** Insert the client into connected_clients. Do nothing else.
     */
     pub fn insert(&self, client: Client) {
-        self.keys_by_addr.borrow_mut()
+        let mut state = self.state.write().expect("Failed to obtain ServerState lock");
+        state.keys_by_addr
             .insert((client.ip_addr(), client.port()), client.pk());
-        self.connected_clients.borrow_mut()
+        state.connected_clients
             .insert(client.pk(), client);
     }
     /**The main processing function. Call in on each incoming packet from connected and
@@ -108,8 +109,8 @@ impl Server {
     /** Send `OnionResponse` packet to the client by it's `std::net::IpAddr`.
     */
     pub fn handle_udp_onion_response(&self, ip_addr: IpAddr, port: u16, data: Vec<u8>) -> IoFuture<()> {
-        let connected_clients = self.connected_clients.borrow();
-        if let Some(client) = self.keys_by_addr.borrow().get(&(ip_addr, port)).and_then(|pk| connected_clients.get(pk)) {
+        let state = self.state.read().expect("Failed to obtain ServerState lock");
+        if let Some(client) = state.keys_by_addr.get(&(ip_addr, port)).and_then(|pk| state.connected_clients.get(pk)) {
             client.send_onion_response(data)
         } else {
             Box::new( future::err(
@@ -123,7 +124,8 @@ impl Server {
     DisconnectNotification.
     */
     pub fn shutdown_client(&self, pk: &PublicKey) -> IoFuture<()> {
-        let client_a = if let Some(client_a) = self.connected_clients.borrow_mut().remove(pk) {
+        let mut state = self.state.write().expect("Failed to obtain ServerState lock");
+        let client_a = if let Some(client_a) = state.connected_clients.remove(pk) {
             client_a
         } else {
             return Box::new( future::err(
@@ -131,13 +133,12 @@ impl Server {
                     "Cannot find client by pk to shutdown it"
             )))
         };
-        self.keys_by_addr.borrow_mut()
-            .remove(&(client_a.ip_addr(), client_a.port()));
+        state.keys_by_addr.remove(&(client_a.ip_addr(), client_a.port()));
         let notifications = client_a.iter_links()
             // foreach link that is Some(client_b_pk)
             .filter_map(|&client_b_pk| client_b_pk)
             .map(|client_b_pk| {
-                if let Some(client_b) = self.connected_clients.borrow().get(&client_b_pk) {
+                if let Some(client_b) = state.connected_clients.get(&client_b_pk) {
                     // check if client_a is linked in client_b
                     if let Some(a_id_in_client_b) = client_b.get_connection_id(pk) {
                         // it is linked, we should notify client_b
@@ -157,10 +158,10 @@ impl Server {
     // Here start the impl of `handle_***` methods
 
     fn handle_route_request(&self, pk: &PublicKey, packet: RouteRequest) -> IoFuture<()> {
+        let mut state = self.state.write().expect("Failed to obtain ServerState lock");
         let b_id_in_client_a = {
             // check if client was already linked to pk
-            let mut clients = self.connected_clients.borrow_mut();
-            if let Some(client_a) = clients.get_mut(pk) {
+            if let Some(client_a) = state.connected_clients.get_mut(pk) {
                 if pk == &packet.pk {
                     // send RouteResponse(0) if client requests its own pk
                     return client_a.send_route_response(pk, 0)
@@ -182,9 +183,8 @@ impl Server {
                 )))
             }
         };
-        let clients = self.connected_clients.borrow();
-        let client_a = clients.get(pk).unwrap(); // can not fail
-        if let Some(client_b) = clients.get(&packet.pk) {
+        let client_a = state.connected_clients.get(pk).unwrap(); // can not fail
+        if let Some(client_b) = state.connected_clients.get(&packet.pk) {
             // check if current pk is linked inside other_client
             if let Some(a_id_in_client_b) = client_b.get_connection_id(pk) {
                 // the are both linked, send RouteResponse and
@@ -226,9 +226,9 @@ impl Server {
                     "DisconnectNotification.connection_id < 16"
             )))
         }
-        let mut clients = self.connected_clients.borrow_mut();
+        let mut state = self.state.write().expect("Failed to obtain ServerState lock");
         let client_b_pk = {
-            if let Some(client_a) = clients.get_mut(pk) {
+            if let Some(client_a) = state.connected_clients.get_mut(pk) {
                 // unlink other_pk from client.links if any
                 // and return previous value
                 if let Some(client_b_pk) = client_a.take_link(packet.connection_id) {
@@ -247,7 +247,7 @@ impl Server {
             }
         };
 
-        if let Some(client_b) = clients.get_mut(&client_b_pk) {
+        if let Some(client_b) = state.connected_clients.get_mut(&client_b_pk) {
             if let Some(a_id_in_client_b) = client_b.get_connection_id(pk) {
                 // unlink pk from client_b it and send notification
                 client_b.take_link(a_id_in_client_b);
@@ -269,8 +269,8 @@ impl Server {
                     "PingRequest.ping_id == 0"
             )))
         }
-        let clients = self.connected_clients.borrow();
-        if let Some(client_a) = clients.get(pk) {
+        let state = self.state.read().expect("Failed to obtain ServerState lock");
+        if let Some(client_a) = state.connected_clients.get(pk) {
             client_a.send_pong_response(packet.ping_id)
         } else {
             Box::new( future::err(
@@ -286,8 +286,8 @@ impl Server {
                     "PongResponse.ping_id == 0"
             )))
         }
-        let clients = self.connected_clients.borrow();
-        if let Some(client_a) = clients.get(pk) {
+        let state = self.state.read().expect("Failed to obtain ServerState lock");
+        if let Some(client_a) = state.connected_clients.get(pk) {
             if packet.ping_id == client_a.ping_id() {
                 Box::new( future::ok(()) )
             } else {
@@ -309,8 +309,8 @@ impl Server {
                     "OobSend wrong data length"
             )))
         }
-        let clients = self.connected_clients.borrow();
-        if let Some(client_b) = clients.get(&packet.destination_pk) {
+        let state = self.state.read().expect("Failed to obtain ServerState lock");
+        if let Some(client_b) = state.connected_clients.get(&packet.destination_pk) {
             client_b.send_oob(pk, packet.data)
         } else {
             // Do nothing because client_b is not connected to server
@@ -359,9 +359,9 @@ impl Server {
                     "Data.connection_id < 16"
             )))
         }
-        let clients = self.connected_clients.borrow();
+        let state = self.state.read().expect("Failed to obtain ServerState lock");
         let client_b_pk = {
-            if let Some(client_a) = clients.get(pk) {
+            if let Some(client_a) = state.connected_clients.get(pk) {
                 if let Some(client_b_pk) = client_a.get_link(packet.connection_id) {
                     client_b_pk
                 } else {
@@ -377,7 +377,7 @@ impl Server {
                 )))
             }
         };
-        if let Some(client_b) = clients.get(&client_b_pk) {
+        if let Some(client_b) = state.connected_clients.get(&client_b_pk) {
             if let Some(a_id_in_client_b) = client_b.get_connection_id(pk) {
                 client_b.send_data(a_id_in_client_b, packet.data)
             } else {

@@ -36,7 +36,7 @@ use self::handshake::*;
 use futures::{self, Stream, Sink, Future};
 use std::io::{Error, ErrorKind};
 use tokio_io::{IoFuture, AsyncRead};
-use tokio_core::net::TcpStream;
+use tokio::net::TcpStream;
 
 /// Create a handshake from client to server
 pub fn create_client_handshake(client_pk: PublicKey,
@@ -328,28 +328,30 @@ mod tests {
     fn network_handshake() {
         use futures::{Stream, Future};
 
-        use tokio_core::reactor::Core;
-        use tokio_core::net::{TcpListener, TcpStream};
+        use tokio;
+        use tokio::net::{TcpListener, TcpStream};
 
         let (client_pk, client_sk) = gen_keypair();
         let (server_pk, server_sk) = gen_keypair();
 
-        let mut core = Core::new().unwrap();
-        let handle = core.handle();
-
         let addr = "127.0.0.1:12345".parse().unwrap();
-        let server = TcpListener::bind(&addr, &handle).unwrap().incoming()
+        let server = TcpListener::bind(&addr).unwrap().incoming()
             .into_future() // take the first connection
             .map_err(|(e, _other_incomings)| e)
             .map(|(connection, _other_incomings)| connection.unwrap())
-            .and_then(|(socket, _addr)| {
+            .and_then(move |socket| {
                 make_server_handshake(socket, server_sk.clone())
             });
-        let client = TcpStream::connect(&addr, &handle)
-            .and_then(|socket| {
+        let client = TcpStream::connect(&addr)
+            .and_then(move |socket| {
                 make_client_handshake(socket, client_pk, client_sk, server_pk)
             });
-        let both = server.join(client);
-        assert!(core.run(both).is_ok());
+        let both = server.join(client)
+            .then(|r| {
+                assert!(r.is_ok());
+                r
+            })
+            .map(|_| ()).map_err(|_| ());
+        tokio::run(both);
     }
 }
