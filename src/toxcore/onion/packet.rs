@@ -1128,14 +1128,38 @@ impl AnnounceResponse {
     }
 }
 
+/// Represents the result of sent `AnnounceRequest`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum IsStored {
+    /// Failed to announce ourselves or find requested node
+    Failed = 0,
+    /// Requested node is found by its long term `PublicKey`
+    Found = 1,
+    /// We successfully announced ourselves
+    Announced = 2
+}
+
+impl FromBytes for IsStored {
+    named!(from_bytes<IsStored>, switch!(le_u8,
+        0 => value!(IsStored::Failed) |
+        1 => value!(IsStored::Found) |
+        2 => value!(IsStored::Announced)
+    ));
+}
+
+impl ToBytes for IsStored {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        gen_be_u8!(buf, *self as u8)
+    }
+}
+
 /** Unencrypted payload of `AnnounceResponse` packet.
 
-is_stored variable from payload contains the result of sent request. It might
-have values:
+is_stored variable contains the result of sent request. It might have values:
 
-* 0: failed to announce ourselves of find requested node
-* 1: requested node is found by it's long term PublicKey
-* 2: we successfully announces ourselves
+* 0: failed to announce ourselves or find requested node
+* 1: requested node is found by its long term `PublicKey`
+* 2: we successfully announced ourselves
 
 In case of is_stored is equal to 1 ping_id will contain `PublicKey` that
 should be used to send data packets to the requested node. In other cases it
@@ -1153,7 +1177,7 @@ Length   | Content
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AnnounceResponsePayload {
     /// Variable that represents result of sent `AnnounceRequest`
-    pub is_stored: u8,
+    pub is_stored: IsStored,
     /// Onion ping id or PublicKey that should be used to send data packets
     pub ping_id_or_pk: Digest,
     /// Up to 4 closest to the requested PublicKey DHT nodes
@@ -1163,7 +1187,7 @@ pub struct AnnounceResponsePayload {
 #[allow(unused_comparisons)]
 impl FromBytes for AnnounceResponsePayload {
     named!(from_bytes<AnnounceResponsePayload>, do_parse!(
-        is_stored: le_u8 >>
+        is_stored: call!(IsStored::from_bytes) >>
         ping_id_or_pk: call!(Digest::from_bytes) >>
         nodes: many_m_n!(0, 4, PackedNode::from_bytes) >>
         eof!() >>
@@ -1178,7 +1202,7 @@ impl FromBytes for AnnounceResponsePayload {
 impl ToBytes for AnnounceResponsePayload {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
-            gen_be_u8!(self.is_stored) >>
+            gen_call!(|buf, is_stored| IsStored::to_bytes(is_stored, buf), &self.is_stored) >>
             gen_slice!(self.ping_id_or_pk.as_ref()) >>
             gen_cond!(
                 self.nodes.len() <= 4,
@@ -1496,7 +1520,7 @@ mod tests {
     encode_decode_test!(
         announce_response_payload_encode_decode,
         AnnounceResponsePayload {
-            is_stored: 1,
+            is_stored: IsStored::Found,
             ping_id_or_pk: hash(&[1, 2, 3]),
             nodes: vec![
                 PackedNode::new(false, SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
@@ -1536,6 +1560,12 @@ mod tests {
             payload: vec![42, 123]
         }
     );
+
+    encode_decode_test!(is_stored_failed, IsStored::Failed);
+
+    encode_decode_test!(is_stored_found, IsStored::Found);
+
+    encode_decode_test!(is_stored_accounced, IsStored::Announced);
 
     #[test]
     fn onion_return_encrypt_decrypt() {
@@ -1663,7 +1693,7 @@ mod tests {
         let (bob_pk, _bob_sk) = gen_keypair();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
         let payload = AnnounceResponsePayload {
-            is_stored: 1,
+            is_stored: IsStored::Found,
             ping_id_or_pk: hash(&[1, 2, 3]),
             nodes: vec![
                 PackedNode::new(false, SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
@@ -1804,7 +1834,7 @@ mod tests {
         let (_eve_pk, eve_sk) = gen_keypair();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
         let payload = AnnounceResponsePayload {
-            is_stored: 1,
+            is_stored: IsStored::Found,
             ping_id_or_pk: hash(&[1, 2, 3]),
             nodes: vec![
                 PackedNode::new(false, SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
