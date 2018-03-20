@@ -297,7 +297,7 @@ pub struct Kbucket {
     pk: PublicKey,
 
     /// List of [`Bucket`](./struct.Bucket.html)s.
-    pub buckets: Vec<Box<Bucket>>,
+    pub buckets: Vec<Bucket>,
 }
 
 /** Maximum number of [`Bucket`](./struct.Bucket.html)s that [`Kbucket`]
@@ -322,7 +322,7 @@ impl Kbucket {
                {:?}", n, pk);
         Kbucket {
             pk: *pk,
-            buckets: vec![Box::new(Bucket::new(None)); n as usize]
+            buckets: vec![Bucket::new(None); n as usize]
         }
     }
 
@@ -354,6 +354,18 @@ impl Kbucket {
         None
     }
 
+    /// get random node to select peer to send NodesRequest
+    pub fn get_random_node(&self) -> Option<PackedNode> {
+        if self.is_empty() {
+            return None
+        }
+        let mut num_k = random_u64() % self.size() as u64;
+        while self.buckets[num_k as usize].nodes.len() == 0 {
+            num_k = random_u64() % self.size() as u64;
+        }
+        let num = random_u64() % self.buckets[num_k as usize].nodes.len() as u64;
+        Some(self.buckets[num_k as usize].nodes[num as usize])
+    }
    /** Return the possible internal index of [`Bucket`](./struct.Bucket.html)
         where the key could be inserted/removed.
 
@@ -473,42 +485,43 @@ impl Kbucket {
         KbucketIter {
             pos_b: 0,
             pos_pn: 0,
-            buckets: self.buckets.as_slice(),
+            buckets: self.clone().buckets,
         }
     }
 }
 
 /// Iterator over `PackedNode`s in `Kbucket`.
-pub struct KbucketIter<'a> {
+pub struct KbucketIter {
     pos_b: usize,
     pos_pn: usize,
-    buckets: &'a [Box<Bucket>],
+    buckets: Vec<Bucket>,
 }
 
-impl<'a> Iterator for KbucketIter<'a> {
-    type Item = &'a PackedNode;
+impl Iterator for KbucketIter {
+    type Item = PackedNode;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.pos_b < self.buckets.len() {
             match self.buckets[self.pos_b].nodes.get(self.pos_pn) {
                 Some(s) => {
                     self.pos_pn += 1;
-                    Some(s)
+                    return Some(s.clone());
                 },
                 None => {
                     self.pos_b += 1;
                     self.pos_pn = 0;
-                    self.next()
                 },
-            }
+            };
         } else {
-            None
+            return None;
         }
+        self.next()
     }
 }
 
 #[cfg(test)]
 extern crate rand;
+
 #[cfg(test)]
 mod tests {
     use super::rand::chacha::ChaChaRng;
@@ -994,7 +1007,7 @@ mod tests {
 
             let mut kbucket = Kbucket {
                 pk: pk,
-                buckets: vec![Box::new(Bucket::new(Some(1))); n as usize],
+                buckets: vec![Bucket::new(Some(1)); n as usize],
             };
 
             for node in &pns {
@@ -1036,9 +1049,13 @@ mod tests {
             let mut k_iter = kbucket.iter();
             loop {
                 let enext = e_iter.next();
-                let knext = k_iter.next();
-                assert_eq!(enext, knext);
-                if enext.is_none() {
+                if let Some(knext) = k_iter.next() {
+                    let knext = Some(&knext);
+                    assert_eq!(enext, knext);
+                    if enext.is_none() {
+                        break;
+                    }
+                } else {
                     break;
                 }
             }
