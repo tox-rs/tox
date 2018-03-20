@@ -401,13 +401,13 @@ mod tests {
         let alice = Server::new(tx, pk, sk);
         let (bob_pk, bob_sk) = gen_keypair();
         let precomp = precompute(&alice.pk, &bob_sk);
-        
+
         let addr: SocketAddr = "127.0.0.1:12346".parse().unwrap();
         (alice, precomp, bob_pk, bob_sk, rx, addr)
     }
     #[test]
     fn server_is_clonable() {
-        let (alice, _precomp, _bob_pk, _, _rx, _addr) = create_node();
+        let (alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
         let _ = alice.clone();
     }
     // new()
@@ -443,7 +443,7 @@ mod tests {
     // get_client()
     #[test]
     fn server_get_client_test() {
-        let (mut alice, _precomp, bob_pk, _, _rx, addr) = create_node();
+        let (mut alice, _precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
         // Try to get client on empty hash table
         assert!(alice.get_client(&bob_pk).is_none());
         // Now test with entry
@@ -587,7 +587,7 @@ mod tests {
     // handle_ping_req()
     #[test]
     fn server_handle_ping_req_test() {
-        let (mut alice, precomp, bob_pk, _, rx, addr) = create_node();
+        let (mut alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
         // handle ping request, request from bob peer
         let prq = PingRequestPayload { id: random_u64() };
         let ping_req = PingRequest::new(&precomp, &bob_pk, prq);
@@ -612,7 +612,7 @@ mod tests {
     // handle_ping_resp()
     #[test]
     fn server_handle_ping_resp_test() {
-        let (mut alice, precomp, bob_pk, _, _rx, addr) = create_node();
+        let (mut alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
         // handle ping response, request from bob peer
         let prs = PingResponsePayload { id: random_u64() };
         let ping_resp = PingResponse::new(&precomp, &bob_pk, prs);
@@ -673,7 +673,7 @@ mod tests {
     // handle_nodes_resp()
     #[test]
     fn server_handle_nodes_resp_test() {
-        let (mut alice, precomp, bob_pk, _, _rx, addr) = create_node();
+        let (mut alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
         // handle nodes response, request from bob peer
         let nrs = NodesResponsePayload { nodes: vec![
             PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &gen_keypair().0)
@@ -715,7 +715,7 @@ mod tests {
     // handle nat ping request
     #[test]
     fn server_handle_nat_ping_req_test() {
-        let (mut alice, precomp, bob_pk, _, rx, addr) = create_node();
+        let (mut alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
         let nat_req = NatPingRequest { id: random_u64() };
         let nat_payload = DhtRequestPayload::NatPingRequest(nat_req);
         let dht_req = DhtRequest::new(&precomp, &alice.pk, &alice.pk.clone(), nat_payload.clone());
@@ -753,7 +753,7 @@ mod tests {
     // handle nat ping response
     #[test]
     fn server_handle_nat_ping_resp_test() {
-        let (mut alice, precomp, bob_pk, _, _rx, addr) = create_node();
+        let (mut alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
         // if receiver' pk != node's pk just returns ok()
         let nat_res = NatPingResponse { id: random_u64() };
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
@@ -822,7 +822,7 @@ mod tests {
     // send_ping_req()
     #[test]
     fn server_send_ping_req_test() {
-        let (mut alice, _precomp, _bob_pk, _, rx, _addr) = create_node();
+        let (mut alice, _precomp, _bob_pk, _bob_sk, rx, _addr) = create_node();
         let node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &alice.pk.clone());
 
         alice.kbucket.try_add(&node);
@@ -864,7 +864,7 @@ mod tests {
     // send_nat_ping_req()
     #[test]
     fn server_send_nat_ping_req_test() {
-        let (mut alice, _precomp, bob_pk, _, rx, _addr) = create_node();
+        let (mut alice, _precomp, bob_pk, _bob_sk, rx, _addr) = create_node();
         let node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &alice.pk.clone());
         alice.kbucket.try_add(&node);
 

@@ -359,11 +359,11 @@ impl Kbucket {
         if self.is_empty() {
             return None
         }
-        let mut num_k = random_u32() % self.size() as u32;
+        let mut num_k = random_u64() % self.size() as u64;
         while self.buckets[num_k as usize].nodes.len() == 0 {
-            num_k = random_u32() % self.size() as u32;
+            num_k = random_u64() % self.size() as u64;
         }
-        let num = random_u32() % self.buckets[num_k as usize].nodes.len() as u32;
+        let num = random_u64() % self.buckets[num_k as usize].nodes.len() as u64;
         Some(self.buckets[num_k as usize].nodes[num as usize])
     }
    /** Return the possible internal index of [`Bucket`](./struct.Bucket.html)
