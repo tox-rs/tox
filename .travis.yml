@@ -67,7 +67,7 @@ script:
 after_success:
   # measure code coverage and upload to coveralls.io
   - |
-    if [[ "$TRAVIS_OS_NAME" == "linux" ]] && [[ "$TRAVIS_RUST_VERSION" == stable ]]
+    if [[ "$TRAVIS_OS_NAME" == "linux" ]] && [[ "$TRAVIS_RUST_VERSION" == 1.21.0 ]]
     then
       cargo install cargo-travis || echo "cargo-travis has been already installed"
       export PATH=$HOME/.cargo/bin:$PATH
