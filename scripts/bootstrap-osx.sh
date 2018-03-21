@@ -5,7 +5,7 @@
 
 git clone https://github.com/jedisct1/libsodium.git
 cd libsodium
-git checkout tags/1.0.13
+git checkout tags/1.0.16
 ./autogen.sh
 ./configure --prefix=$HOME/installed_libsodium && \
     make -j$(nproc) && \
