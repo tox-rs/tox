@@ -183,7 +183,7 @@ impl Server {
                 )))
             }
         };
-        let client_a = state.connected_clients.get(pk).unwrap(); // can not fail
+        let client_a = &state.connected_clients[pk];
         if let Some(client_b) = state.connected_clients.get(&packet.pk) {
             // check if current pk is linked inside other_client
             if let Some(a_id_in_client_b) = client_b.get_connection_id(pk) {
@@ -764,7 +764,7 @@ mod tests {
 
         let (packet, _) = rx_1.into_future().wait().unwrap();
         assert_eq!(packet.unwrap(), Packet::OnionResponse(
-            OnionResponse { data: data }
+            OnionResponse { data }
         ));
     }
     #[test]

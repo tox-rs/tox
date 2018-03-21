@@ -42,7 +42,7 @@ mod tests {
         let nonce = gen_nonce();
         let mut buf = BytesMut::new();
         let mut codec = ClientHandshakeCodec { };
-        let handshake = ClientHandshake { pk: pk, nonce: nonce, payload: vec![42; ENC_PAYLOAD_SIZE] };
+        let handshake = ClientHandshake { pk, nonce, payload: vec![42; ENC_PAYLOAD_SIZE] };
         codec.encode(handshake.clone(), &mut buf).expect("should encode");
         let res = codec.decode(&mut buf).unwrap().expect("should decode");
         assert_eq!(handshake, res);
@@ -58,7 +58,7 @@ mod tests {
     fn client_encode_too_big() {
         let nonce = gen_nonce();
         let (pk, _) = gen_keypair();
-        let handshake = ClientHandshake { pk: pk, nonce: nonce, payload: vec![42; ENC_PAYLOAD_SIZE + 1] };
+        let handshake = ClientHandshake { pk, nonce, payload: vec![42; ENC_PAYLOAD_SIZE + 1] };
         let mut buf = BytesMut::new();
         let mut codec = ClientHandshakeCodec { };
         assert!(codec.encode(handshake, &mut buf).is_err());
@@ -68,7 +68,7 @@ mod tests {
         let nonce = gen_nonce();
         let mut buf = BytesMut::new();
         let mut codec = ServerHandshakeCodec { };
-        let handshake = ServerHandshake { nonce: nonce, payload: vec![42; ENC_PAYLOAD_SIZE] };
+        let handshake = ServerHandshake { nonce, payload: vec![42; ENC_PAYLOAD_SIZE] };
         codec.encode(handshake.clone(), &mut buf).expect("should encode");
         let res = codec.decode(&mut buf).unwrap().expect("should decode");
         assert_eq!(handshake, res);
@@ -85,7 +85,7 @@ mod tests {
         let nonce = gen_nonce();
         let mut buf = BytesMut::new();
         let mut codec = ServerHandshakeCodec { };
-        let handshake = ServerHandshake { nonce: nonce, payload: vec![42; ENC_PAYLOAD_SIZE + 1] };
+        let handshake = ServerHandshake { nonce, payload: vec![42; ENC_PAYLOAD_SIZE + 1] };
         assert!(codec.encode(handshake, &mut buf).is_err());
     }
 }

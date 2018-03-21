@@ -297,7 +297,7 @@ mod tests {
             // bad payload [1,2,3]
             let encrypted_payload = encrypt_data_symmetric(&common_key, &nonce, &[1, 2, 3]);
 
-            ClientHandshake { pk: *client_pk, nonce: nonce, payload: encrypted_payload }
+            ClientHandshake { pk: *client_pk, nonce, payload: encrypted_payload }
         }
 
         let client_handshake = create_bad_client_handshake(&client_pk, &client_sk, &server_pk);
@@ -316,9 +316,9 @@ mod tests {
         {
             let nonce = gen_nonce();
             // bad payload [1,2,3]
-            let server_encrypted_payload = encrypt_data_symmetric(&common_key, &nonce, &[1, 2, 3]);
+            let server_encrypted_payload = encrypt_data_symmetric(common_key, &nonce, &[1, 2, 3]);
 
-            ServerHandshake { nonce: nonce, payload: server_encrypted_payload }
+            ServerHandshake { nonce, payload: server_encrypted_payload }
         }
 
         let server_handshake = create_bad_server_handshake(&common_key);
