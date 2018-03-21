@@ -154,8 +154,8 @@ mod tests {
         let mut bob_codec = Codec::new(bob_channel);
 
         let test_packets = vec![
-            Packet::RouteRequest( RouteRequest { pk: pk } ),
-            Packet::RouteResponse( RouteResponse { connection_id: 42, pk: pk } ),
+            Packet::RouteRequest( RouteRequest { pk } ),
+            Packet::RouteResponse( RouteResponse { connection_id: 42, pk } ),
             Packet::ConnectNotification( ConnectNotification { connection_id: 42 } ),
             Packet::DisconnectNotification( DisconnectNotification { connection_id: 42 } ),
             Packet::PingRequest( PingRequest { ping_id: 4242 } ),
