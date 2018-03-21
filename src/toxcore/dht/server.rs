@@ -89,10 +89,10 @@ impl Server {
 
         debug!("Created new Server instance");
         Server {
-            sk: sk,
-            pk: pk,
-            kbucket: kbucket,
-            tx: tx,
+            sk,
+            pk,
+            kbucket,
+            tx,
             peers_cache: HashMap::new(),
         }
     }
@@ -100,7 +100,7 @@ impl Server {
     /// create new client
     pub fn create_client(&mut self, addr: &SocketAddr, pk: PublicKey) -> Client {
         let precomputed_key = encrypt_precompute(&pk, &self.sk);
-        Client::new(precomputed_key, self.pk.clone(), addr.clone(), self.tx.clone())
+        Client::new(precomputed_key, self.pk, *addr, self.tx.clone())
     }
     /// get client from cache
     pub fn get_client(&self, pk: &PublicKey) -> Option<Client> {
@@ -254,8 +254,8 @@ impl Server {
             }
             if client.ping_id == payload.id {
                 let packed_node = PackedNode {
-                    saddr: client.addr.clone(),
-                    pk: request.pk.clone(),
+                    saddr: client.addr,
+                    pk: request.pk,
                 };
                 self.kbucket.try_add(&packed_node);
                 Box::new( future::ok(()) )
@@ -343,13 +343,12 @@ impl Server {
                 id: payload.id,
             };
             client.send_nat_ping_response(&request.spk, resp_payload)
-        } else { // search kbucket to find target peer
-            if let Some(addr) = self.kbucket.get_node(&request.rpk) {
-                client.send_nat_ping_packet(&addr, request.clone())
-            }
-            else { // do nothing
-                Box::new( future::ok(()) )
-            }
+        // search kbucket to find target peer
+        } else if let Some(addr) = self.kbucket.get_node(&request.rpk) {
+            client.send_nat_ping_packet(&addr, request.clone())
+        }
+        else { // do nothing
+            Box::new( future::ok(()) )
         }
     }
 
@@ -373,13 +372,12 @@ impl Server {
                     Error::new(ErrorKind::Other, "NatPingResponse.ping_id does not match")
                 ))
             }
-        } else { // search kbucket to find target peer
-            if let Some(addr) = self.kbucket.get_node(&request.rpk) {
-                client.send_nat_ping_packet(&addr, request.clone())
-            }
-            else { // do nothing
-                Box::new( future::ok(()) )
-            }
+        // search kbucket to find target peer
+        } else if let Some(addr) = self.kbucket.get_node(&request.rpk) {
+            client.send_nat_ping_packet(&addr, request.clone())
+        }
+        else { // do nothing
+            Box::new( future::ok(()) )
         }
     }
 }
@@ -428,9 +426,9 @@ mod tests {
             let(tx, _) = mpsc::unbounded();
             let mut alice = Server::new(tx, pk, sk);
             let addr1: SocketAddr = "127.0.0.1:12345".parse().unwrap();
-            let client1 = alice.create_client(&addr1.clone(), packet.pk.clone());
+            let client1 = alice.create_client(&addr1, packet.pk);
             // try one more time
-            let client2 = alice.create_client(&addr1, packet.pk.clone());
+            let client2 = alice.create_client(&addr1, packet.pk);
             assert_eq!(client1.pk, client2.pk);
             assert_eq!(client1.precomputed_key, client2.precomputed_key);
             let addr2: SocketAddr = "127.0.0.2:54321".parse().unwrap();
@@ -462,7 +460,7 @@ mod tests {
         {
             let (mut alice, precomp, bob_pk, bob_sk, rx, addr) = create_node();
             // handle ping request, request from bob peer
-            let ping_req = DhtPacket::PingRequest(PingRequest::new(&precomp, &bob_pk.clone(), prq));
+            let ping_req = DhtPacket::PingRequest(PingRequest::new(&precomp, &bob_pk, prq));
             alice.handle_packet((ping_req, addr)).wait().unwrap();
             let (received, rx) = rx.into_future().wait().unwrap();
             debug!("received packet {:?}", received.clone().unwrap().1);
@@ -475,20 +473,20 @@ mod tests {
 
             // handle ping response
             alice.peers_cache.clear();
-            let ping_res = DhtPacket::PingResponse(PingResponse::new(&precomp, &bob_pk.clone(), prs));
+            let ping_res = DhtPacket::PingResponse(PingResponse::new(&precomp, &bob_pk, prs));
             alice.kbucket = Kbucket::new(KBUCKET_BUCKETS, &alice.pk);
             // Try to handle_packet() without registered client, it just returns ok()
             assert!(alice.handle_packet((ping_res.clone(), addr)).wait().is_ok());
             // Now, test with client
             let mut client = alice.create_client(&addr, bob_pk);
             client.ping_id = prs.id;
-            alice.peers_cache.insert(bob_pk.clone(), client);
+            alice.peers_cache.insert(bob_pk, client);
             alice.handle_packet((ping_res, addr)).wait().unwrap();
             assert!(alice.kbucket.contains(&bob_pk));
 
             // handle nodes request from bob
             alice.peers_cache.clear();
-            let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(&precomp, &bob_pk.clone(), nrq));
+            let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(&precomp, &bob_pk, nrq));
             alice.handle_packet((nodes_req, addr)).wait().unwrap();
             let (received, rx) = rx.into_future().wait().unwrap();
             debug!("received packet {:?}", received.clone().unwrap().0);
@@ -501,13 +499,13 @@ mod tests {
 
             // handle nodes response
             alice.peers_cache.clear();
-            let nodes_res = DhtPacket::NodesResponse(NodesResponse::new(&precomp, &bob_pk.clone(), nrs.clone()));
+            let nodes_res = DhtPacket::NodesResponse(NodesResponse::new(&precomp, &bob_pk, nrs.clone()));
             // Try to handle_packet() without registered client, it just returns ok()
             assert!(alice.handle_packet((nodes_res.clone(), addr)).wait().is_ok());
             // Now, test with client
             let mut client = alice.create_client(&addr, bob_pk);
             client.ping_id = nrs.id;
-            alice.peers_cache.insert(bob_pk.clone(), client);
+            alice.peers_cache.insert(bob_pk, client);
             alice.kbucket = Kbucket::new(KBUCKET_BUCKETS, &alice.pk);
             let mut kbuc = Kbucket::new(KBUCKET_BUCKETS, &alice.pk);
             for pn in &nrs.nodes {
@@ -519,7 +517,7 @@ mod tests {
             // handle nat ping request
             alice.peers_cache.clear();
             let nat_payload = DhtRequestPayload::NatPingRequest(nat_req);
-            let nat_ping_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk.clone(), nat_payload.clone()));
+            let nat_ping_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, nat_payload.clone()));
             alice.handle_packet((nat_ping_req, addr)).wait().unwrap();
             let (received, _rx) = rx.into_future().wait().unwrap();
             debug!("received packet {:?}", received.clone().unwrap().0);
@@ -538,13 +536,13 @@ mod tests {
             // handle nat ping response
             alice.peers_cache.clear();
             let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
-            let nat_ping_res = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk.clone(), nat_payload.clone()));
+            let nat_ping_res = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, nat_payload.clone()));
             // Try to handle_packet() without registered client, it just returns ok()
             assert!(alice.handle_packet((nat_ping_res.clone(), addr)).wait().is_ok());
             // Now, test with client
             let mut client = alice.create_client(&addr, bob_pk);
             client.ping_id = nat_res.id;
-            alice.peers_cache.insert(bob_pk.clone(), client);
+            alice.peers_cache.insert(bob_pk, client);
             assert!(alice.handle_packet((nat_ping_res, addr)).wait().is_ok());
 
             let nat_ping_res = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &alice.pk, nat_payload));
@@ -559,7 +557,7 @@ mod tests {
         let (mut alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
         let packet = DhtPacket::BootstrapInfo(BootstrapInfo {
             version: 00,
-            motd: "Hello".as_bytes().to_owned(),
+            motd: b"Hello".to_owned().to_vec(),
         });
         assert!(alice.handle_packet((packet, addr)).wait().is_err());
     }
@@ -576,7 +574,7 @@ mod tests {
         let invalid_packet = DhtPacket::DhtRequest( DhtRequest {
             rpk: bob_pk,
             spk: alice_pk,
-            nonce: nonce,
+            nonce,
             payload: invalid_payload_encoded
         } );
         let addr: SocketAddr = "127.0.0.1:12346".parse().unwrap();
@@ -591,7 +589,7 @@ mod tests {
         // handle ping request, request from bob peer
         let prq = PingRequestPayload { id: random_u64() };
         let ping_req = PingRequest::new(&precomp, &bob_pk, prq);
-        let pk = alice.pk.clone();
+        let pk = alice.pk;
         let client = alice.create_client(&addr, pk);
         alice.handle_ping_req(client, ping_req).wait().unwrap();
         let (received, _rx) = rx.into_future().wait().unwrap();
@@ -646,14 +644,14 @@ mod tests {
         let (mut alice, precomp, bob_pk, bob_sk, rx, addr) = create_node();
         // error case, empty kbucket
         let nrq = NodesRequestPayload { pk: bob_pk, id: random_u64() };
-        let nodes_req = NodesRequest::new(&precomp, &bob_pk.clone(), nrq.clone());
+        let nodes_req = NodesRequest::new(&precomp, &bob_pk, nrq);
         let client = alice.create_client(&addr, bob_pk);
         assert!(alice.handle_nodes_req(client, nodes_req).wait().is_err());
         // success case
         let packed_node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &bob_pk);
         alice.kbucket.try_add(&packed_node);
         let nrq = NodesRequestPayload { pk: bob_pk, id: random_u64() };
-        let nodes_req = NodesRequest::new(&precomp, &bob_pk.clone(), nrq.clone());
+        let nodes_req = NodesRequest::new(&precomp, &bob_pk, nrq);
         let client = alice.create_client(&addr, bob_pk);
         alice.handle_nodes_req(client, nodes_req).wait().unwrap();
         let (received, _rx) = rx.into_future().wait().unwrap();
@@ -690,7 +688,7 @@ mod tests {
         assert_eq!(alice.kbucket, kbuc);
         // error case, can't decrypt
         let nodes_resp = NodesResponse::new(&precomp, &alice.pk, nrs.clone());
-        let pk = alice.pk.clone();
+        let pk = alice.pk;
         let mut client = alice.create_client(&addr, pk);
         client.ping_id = 38;
         assert!(alice.handle_nodes_resp(client, nodes_resp).wait().is_err());
@@ -718,9 +716,9 @@ mod tests {
         let (mut alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
         let nat_req = NatPingRequest { id: random_u64() };
         let nat_payload = DhtRequestPayload::NatPingRequest(nat_req);
-        let dht_req = DhtRequest::new(&precomp, &alice.pk, &alice.pk.clone(), nat_payload.clone());
-        let alice_pk = alice.pk.clone();
-        let client = alice.create_client(&addr.clone(), alice_pk);
+        let dht_req = DhtRequest::new(&precomp, &alice.pk, &alice.pk, nat_payload.clone());
+        let alice_pk = alice.pk;
+        let client = alice.create_client(&addr, alice_pk);
         alice.handle_nat_ping_req(client, dht_req, nat_req).wait().unwrap();
         let (received, _rx) = rx.into_future().wait().unwrap();
         debug!("received packet {:?}", received.clone().unwrap().1);
@@ -735,18 +733,18 @@ mod tests {
         // if receiver' pk != node's pk just returns ok()
         let nat_req = NatPingRequest { id: random_u64() };
         let nat_payload = DhtRequestPayload::NatPingRequest(nat_req);
-        let dht_req = DhtRequest::new(&precomp, &bob_pk.clone(), &bob_pk.clone(), nat_payload.clone());
-        let alice_pk = alice.pk.clone();
-        let client = alice.create_client(&addr.clone(), alice_pk);
+        let dht_req = DhtRequest::new(&precomp, &bob_pk, &bob_pk, nat_payload.clone());
+        let alice_pk = alice.pk;
+        let client = alice.create_client(&addr, alice_pk);
         assert!(alice.handle_nat_ping_req(client, dht_req, nat_req).wait().is_ok());
         // if receiver' pk != node's pk and receiver's pk exists in kbucket, returns ok()
-        let pn = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &bob_pk.clone());
+        let pn = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &bob_pk);
         alice.kbucket.try_add(&pn);
         let nat_req = NatPingRequest { id: random_u64() };
         let nat_payload = DhtRequestPayload::NatPingRequest(nat_req);
-        let dht_req = DhtRequest::new(&precomp, &bob_pk.clone(), &bob_pk.clone(), nat_payload.clone());
-        let alice_pk = alice.pk.clone();
-        let client = alice.create_client(&addr.clone(), alice_pk);
+        let dht_req = DhtRequest::new(&precomp, &bob_pk, &bob_pk, nat_payload.clone());
+        let alice_pk = alice.pk;
+        let client = alice.create_client(&addr, alice_pk);
         assert!(alice.handle_nat_ping_req(client, dht_req, nat_req).wait().is_ok());
     }
 
@@ -757,36 +755,36 @@ mod tests {
         // if receiver' pk != node's pk just returns ok()
         let nat_res = NatPingResponse { id: random_u64() };
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
-        let dht_req = DhtRequest::new(&precomp, &bob_pk.clone(), &bob_pk.clone(), nat_payload.clone());
-        let client = alice.create_client(&addr.clone(), bob_pk);
+        let dht_req = DhtRequest::new(&precomp, &bob_pk, &bob_pk, nat_payload.clone());
+        let client = alice.create_client(&addr, bob_pk);
         assert!(alice.handle_nat_ping_resp(client, dht_req, nat_res).wait().is_ok());
         // if receiver' pk != node's pk and receiver's pk exists in kbucket, returns ok()
-        let pn = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &bob_pk.clone());
+        let pn = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &bob_pk);
         alice.kbucket.try_add(&pn);
         let nat_res = NatPingResponse { id: random_u64() };
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
-        let dht_req = DhtRequest::new(&precomp, &bob_pk.clone(), &bob_pk.clone(), nat_payload.clone());
-        let client = alice.create_client(&addr.clone(), bob_pk);
+        let dht_req = DhtRequest::new(&precomp, &bob_pk, &bob_pk, nat_payload.clone());
+        let client = alice.create_client(&addr, bob_pk);
         assert!(alice.handle_nat_ping_resp(client, dht_req, nat_res).wait().is_ok());
         // success case
         let nat_res = NatPingResponse { id: random_u64() };
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
         let dht_req = DhtRequest::new(&precomp, &alice.pk, &bob_pk, nat_payload.clone());
-        let mut client = alice.create_client(&addr.clone(), bob_pk);
+        let mut client = alice.create_client(&addr, bob_pk);
         client.ping_id = nat_res.id;
-        assert!(alice.handle_nat_ping_resp(client, dht_req, nat_res.clone()).wait().is_ok());
+        assert!(alice.handle_nat_ping_resp(client, dht_req, nat_res).wait().is_ok());
         // error case, incorrect ping_id
         let nat_res = NatPingResponse { id: random_u64() };
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
         let dht_req = DhtRequest::new(&precomp, &alice.pk, &bob_pk, nat_payload.clone());
-        let mut client = alice.create_client(&addr.clone(), bob_pk);
+        let mut client = alice.create_client(&addr, bob_pk);
         client.ping_id = nat_res.id + 1;
         assert!(alice.handle_nat_ping_resp(client.clone(), dht_req, nat_res).wait().is_err());
         // error case, ping_id = 0
         let nat_res = NatPingResponse { id: 0 };
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
         let dht_req = DhtRequest::new(&precomp, &alice.pk, &bob_pk, nat_payload.clone());
-        let mut client = alice.create_client(&addr.clone(), bob_pk);
+        let mut client = alice.create_client(&addr, bob_pk);
         client.ping_id = 0;
         assert!(alice.handle_nat_ping_resp(client, dht_req, nat_res).wait().is_err());
     }
@@ -795,10 +793,10 @@ mod tests {
     fn server_send_pings_test() {
         let (mut alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         let (ping_pk, ping_sk) = gen_keypair();
-        let node = PackedNode::new(false, SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &ping_pk.clone());
+        let node = PackedNode::new(false, SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &ping_pk);
         alice.kbucket.try_add(&node);
 
-        let node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:33445".parse().unwrap()), &bob_pk.clone());
+        let node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:33445".parse().unwrap()), &bob_pk);
         alice.kbucket.try_add(&node);
 
         alice.send_pings().wait().unwrap();
@@ -823,7 +821,7 @@ mod tests {
     #[test]
     fn server_send_ping_req_test() {
         let (mut alice, _precomp, _bob_pk, _bob_sk, rx, _addr) = create_node();
-        let node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &alice.pk.clone());
+        let node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &alice.pk);
 
         alice.kbucket.try_add(&node);
         alice.send_ping_req(node).wait().unwrap();
@@ -843,12 +841,12 @@ mod tests {
     fn server_send_nodes_req_test() {
         let (mut alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         // If there is no entry in kbucket, then it returns just ok()
-        let alice_pk = alice.pk.clone();
+        let alice_pk = alice.pk;
         assert!(alice.send_nodes_req(alice_pk).wait().is_ok());
         // Now, test with kbucket entry
-        let node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &bob_pk.clone());
+        let node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &bob_pk);
 
-        let alice_pk = alice.pk.clone();
+        let alice_pk = alice.pk;
         alice.kbucket.try_add(&node);
         alice.send_nodes_req(alice_pk).wait().unwrap();
 
@@ -865,7 +863,7 @@ mod tests {
     #[test]
     fn server_send_nat_ping_req_test() {
         let (mut alice, _precomp, bob_pk, _bob_sk, rx, _addr) = create_node();
-        let node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &alice.pk.clone());
+        let node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &alice.pk);
         alice.kbucket.try_add(&node);
 
         alice.send_nat_ping_req(node, bob_pk).wait().unwrap();

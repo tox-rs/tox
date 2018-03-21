@@ -193,7 +193,7 @@ impl PingRequest {
         PingRequest {
             pk: *pk,
             nonce: *nonce,
-            payload: payload,
+            payload,
         }
     }
     /** Decrypt payload and try to parse it as `PingRequestPayload`.
@@ -335,7 +335,7 @@ impl PingResponse {
         PingResponse {
             pk: *pk,
             nonce: *nonce,
-            payload: payload,
+            payload,
         }
     }
     /** Decrypt payload and try to parse it as `PingResponsePayload`.
@@ -477,7 +477,7 @@ impl NodesRequest {
         NodesRequest {
             pk: *pk,
             nonce: *nonce,
-            payload: payload,
+            payload,
         }
     }
     /** Decrypt payload and try to parse it as `NodesRequestPayload`.
@@ -612,7 +612,7 @@ impl NodesResponse {
         NodesResponse {
             pk: *pk,
             nonce: *nonce,
-            payload: payload,
+            payload,
         }
     }
     /** Decrypt payload and try to parse it as `NodesResponsePayload`.
@@ -772,7 +772,7 @@ impl CookieRequest {
         CookieRequest {
             pk: *pk,
             nonce: *nonce,
-            payload: payload,
+            payload,
         }
     }
     /** Decrypt payload with symmetric key and try to parse it as `CookieRequestPayload`.
@@ -915,7 +915,7 @@ impl DhtRequest {
             rpk: *rpk,
             spk: *spk,
             nonce: *nonce,
-            payload: payload,
+            payload,
         }
     }
     /**
@@ -1268,7 +1268,7 @@ mod tests {
         fn arbitrary<G: Gen>(g: &mut G) -> Self {
             let nodes = vec![Arbitrary::arbitrary(g); g.gen_range(1, 4)];
             let id = g.gen();
-            NodesResponsePayload { nodes: nodes, id: id }
+            NodesResponsePayload { nodes, id }
         }
     }
 
@@ -1609,7 +1609,7 @@ mod tests {
         let invalid_packet = DhtRequest {
             rpk: bob_pk,
             spk: alice_pk,
-            nonce: nonce,
+            nonce,
             payload: invalid_payload_encoded
         };
         let decoded_payload = invalid_packet.get_payload(&bob_sk);
@@ -1620,7 +1620,7 @@ mod tests {
         let invalid_packet = DhtRequest {
             rpk: bob_pk,
             spk: alice_pk,
-            nonce: nonce,
+            nonce,
             payload: invalid_payload_encoded
         };
         let decoded_payload = invalid_packet.get_payload(&bob_sk);
