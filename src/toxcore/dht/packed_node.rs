@@ -187,10 +187,10 @@ mod tests {
         fn with_params(saddr: SocketAddr) {
             let (pk, _sk) = gen_keypair();
 
-            let a = PackedNode::new(true, saddr.clone(), &pk.clone());
+            let a = PackedNode::new(true, saddr, &pk);
             let b = PackedNode {
-                saddr: saddr,
-                pk: pk,
+                saddr,
+                pk,
             };
             assert_eq!(a, b);
         }

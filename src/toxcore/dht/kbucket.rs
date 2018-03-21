@@ -348,7 +348,7 @@ impl Kbucket {
         for (_, bucket) in self.buckets.iter().enumerate() {
             match bucket.find(pk) {
                 None => {},
-                Some(node_index) => return Some((*bucket).nodes[node_index].saddr.clone())
+                Some(node_index) => return Some((*bucket).nodes[node_index].saddr)
             }
         }
         None
@@ -359,9 +359,9 @@ impl Kbucket {
         if self.is_empty() {
             return None
         }
-        let mut num_k = random_u64() % self.size() as u64;
-        while self.buckets[num_k as usize].nodes.len() == 0 {
-            num_k = random_u64() % self.size() as u64;
+        let mut num_k = random_u64() % u64::from(self.size());
+        while self.buckets[num_k as usize].nodes.is_empty() {
+            num_k = random_u64() % u64::from(self.size());
         }
         let num = random_u64() % self.buckets[num_k as usize].nodes.len() as u64;
         Some(self.buckets[num_k as usize].nodes[num as usize])
@@ -505,7 +505,7 @@ impl Iterator for KbucketIter {
             match self.buckets[self.pos_b].nodes.get(self.pos_pn) {
                 Some(s) => {
                     self.pos_pn += 1;
-                    return Some(s.clone());
+                    return Some(*s);
                 },
                 None => {
                     self.pos_b += 1;
@@ -1006,7 +1006,7 @@ mod tests {
             }
 
             let mut kbucket = Kbucket {
-                pk: pk,
+                pk,
                 buckets: vec![Bucket::new(Some(1)); n as usize],
             };
 
@@ -1040,7 +1040,7 @@ mod tests {
 
             let mut expect = Vec::new();
             for bucket in &kbucket.buckets {
-                for node in bucket.nodes.iter() {
+                for node in &bucket.nodes {
                     expect.push(*node);
                 }
             }

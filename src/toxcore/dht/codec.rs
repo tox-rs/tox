@@ -271,7 +271,7 @@ mod tests {
         let (pk, _) = gen_keypair();
         let nonce = gen_nonce();
         let payload = [0x01; 1024].to_vec();
-        let packet = DhtPacket::PingRequest( PingRequest { pk: pk, nonce: nonce, payload: payload } );
+        let packet = DhtPacket::PingRequest( PingRequest { pk, nonce, payload } );
 
         // Codec cannot serialize Packet because it is too long
         assert!(codec.encode(packet, &mut buf).is_err());

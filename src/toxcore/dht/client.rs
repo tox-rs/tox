@@ -57,11 +57,11 @@ impl Client {
     /// create Client object
     pub fn new(precomputed_key: PrecomputedKey, pk: PublicKey, addr: SocketAddr, tx: Tx) -> Client {
         Client {
-            pk: pk,
-            addr: addr,
-            precomputed_key: precomputed_key,
+            pk,
+            addr,
+            precomputed_key,
             ping_id: 0,
-            tx: tx,
+            tx,
         }
     }
     /// actual send method
@@ -78,7 +78,7 @@ impl Client {
         )
     }
     fn send(&self, packet: DhtPacket) -> IoFuture<()> {
-        self.send_to(self.addr.clone(), packet)
+        self.send_to(self.addr, packet)
     }
     /// respond with PingResponse to peer
     pub fn send_ping_response(&self, resp_payload: PingResponsePayload) -> IoFuture<()> {
@@ -264,7 +264,7 @@ mod tests {
     #[test]
     fn client_send_nodes_request_test() {
         let (mut client, sk, rx) = create_client();
-        let pk = client.pk.clone();
+        let pk = client.pk;
         client.send_nodes_request(pk).wait().unwrap();
         let (received, _rx) = rx.into_future().wait().unwrap();
         debug!("received packet {:?}", received.clone().unwrap().1);
@@ -279,7 +279,7 @@ mod tests {
     #[test]
     fn client_send_nat_ping_request_test() {
         let (mut client, sk, rx) = create_client();
-        let pk = client.pk.clone();
+        let pk = client.pk;
         client.send_nat_ping_request(pk).wait().unwrap();
         let (received, _rx) = rx.into_future().wait().unwrap();
         debug!("received packet {:?}", received.clone().unwrap().1);
