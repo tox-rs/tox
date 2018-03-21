@@ -1,13 +1,6 @@
 #!/usr/bin/env bash
 
-# used in travis to:
-#  - build libsodium
+# used in travis to download & install libsodium
 
-git clone https://github.com/jedisct1/libsodium.git
-cd libsodium
-git checkout tags/1.0.16
-./autogen.sh
-./configure --prefix=$HOME/installed_libsodium && \
-    make -j$(nproc) && \
-    make install
-cd ..
+brew update
+brew install libsodium
