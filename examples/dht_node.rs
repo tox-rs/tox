@@ -26,7 +26,6 @@ extern crate tox;
 extern crate futures;
 extern crate futures_timer;
 extern crate tokio;
-extern crate tokio_core;
 extern crate tokio_io;
 extern crate rustc_serialize;
 
@@ -37,12 +36,9 @@ extern crate env_logger;
 use futures::*;
 use futures::sync::mpsc;
 use futures_timer::Interval;
-use tokio_core::reactor::Core;
 use tokio::net::{UdpSocket, UdpFramed};
 
-use std::cell::RefCell;
 use std::net::SocketAddr;
-use std::rc::Rc;
 use std::io::{ErrorKind, Error};
 use std::time::*;
 use rustc_serialize::hex::FromHex;
@@ -65,14 +61,12 @@ fn main() {
 
     let local: SocketAddr = "0.0.0.0:33445".parse().unwrap();
 
-    let mut core = Core::new().unwrap();
-
     // Bind a UDP listener to the socket address.
     let socket = UdpSocket::bind(&local).unwrap();
 
     // Create a channel for this socket
     let (tx, rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
-    let server_obj = Rc::new(RefCell::new(Server::new(tx, pk, sk)));
+    let server_obj = Server::new(tx, pk, sk);
 
     // get PK bytes of some "random" bootstrap node (Impyy's)
     let bootstrap_pk_bytes = FromHex::from_hex(
@@ -81,10 +75,9 @@ fn main() {
     // create PK from bytes
     let bootstrap_pk = PublicKey::from_slice(&bootstrap_pk_bytes).unwrap();
 
-                 //"51.15.37.145:33445".parse().unwrap()
     let saddr: SocketAddr = "198.98.51.198:33445".parse().unwrap();
     let bootstrap_pn = PackedNode::new(true, saddr, &bootstrap_pk);
-    assert!(server_obj.borrow_mut().kbucket.try_add(&bootstrap_pn));
+    assert!(server_obj.try_add_to_kbucket(&bootstrap_pn));
 
     let (sink, stream) = UdpFramed::new(socket, DhtCodec).split();
     // The server task asynchronously iterates over and processes each
@@ -92,7 +85,7 @@ fn main() {
     let server_obj_c = server_obj.clone();
     let handler = stream.for_each(move |(packet, addr)| {
         println!("recv = {:?}", packet.clone());
-        let _ = server_obj_c.borrow_mut().handle_packet((packet, addr));
+        let _ = server_obj_c.handle_packet((packet, addr));
         Ok(())
         })
         .map_err(|err| {
@@ -126,7 +119,8 @@ fn main() {
 
     let server_obj_c = server_obj.clone();
     let ping_sender = ping_wakeups.for_each(move |()| {
-            server_obj_c.borrow_mut().send_pings()
+            println!("ping_wakeup");
+            server_obj_c.send_pings()
         })
         .map_err(|_err| Error::new(ErrorKind::Other, "Ping timer error"));
 
@@ -134,11 +128,12 @@ fn main() {
     let nodes_wakeups = Interval::new(Duration::from_secs(20));
     let server_obj_c = server_obj.clone();
     let nodes_sender = nodes_wakeups.for_each(move |()| {
+            println!("nodes_wakeup");
             let friend_pk = PublicKey([15, 107, 126, 130, 81, 55, 154, 157,
                                     192, 117, 0, 225, 119, 43, 48, 117,
                                     84, 109, 112, 57, 243, 216, 4, 171,
                                     185, 111, 33, 146, 221, 31, 77, 118]);
-            server_obj_c.borrow_mut().send_nodes_req(friend_pk)
+            server_obj_c.send_nodes_req(friend_pk)
         })
         .map_err(|_err| Error::new(ErrorKind::Other, "Nodes timer error"));
 
@@ -146,13 +141,14 @@ fn main() {
     let nat_wakeups = Interval::new(Duration::from_secs(3));
     let server_obj_c = server_obj.clone();
     let nat_sender = nat_wakeups.for_each(move |()| {
+            println!("nat_wakeup");
             let peer_pk = gen_keypair().0;
             let node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:33445".parse().unwrap()), &peer_pk.clone());
             let friend_pk = PublicKey([15, 107, 126, 130, 81, 55, 154, 157,
                                     192, 117, 0, 225, 119, 43, 48, 117,
                                     84, 109, 112, 57, 243, 216, 4, 171,
                                     185, 111, 33, 146, 221, 31, 77, 118]);
-            server_obj_c.borrow_mut().send_nat_ping_req(node, friend_pk)
+            server_obj_c.send_nat_ping_req(node, friend_pk)
         })
         .map_err(|_err| Error::new(ErrorKind::Other, "NatPing timer error"));
 
@@ -173,9 +169,9 @@ fn main() {
         .map(|_| ())
         .map_err(move |(err, _select_next)| {
             error!("Processing ended with error: {:?}", err);
-            err
+            ()
         });
 
     info!("server running on localhost:12345");
-    core.run(server).unwrap();
+    tokio::run(server);
 }
