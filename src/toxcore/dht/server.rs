@@ -228,6 +228,11 @@ impl Server {
                     },
                 }
             },
+            DhtPacket::LanDiscovery(packet) => {
+                debug!("Received LanDiscovery");
+                let client = self.create_client(&addr, packet.pk);
+                self.handle_lan_discovery(client, packet)
+            },
             ref p => {
                 error!("received packet are not handled {:?}", p);
                 Box::new( future::err(
@@ -237,7 +242,6 @@ impl Server {
             }
         }
     }
-
     /**
     handle received PingRequest packet, then create PingResponse packet
     and send back it to the peer.
@@ -406,6 +410,25 @@ impl Server {
                 Box::new( future::ok(()) )
             }
         }
+    }
+    /**
+    handle received LanDiscovery packet, then create NodesRequest packet
+    and send back it to the peer.
+    */
+    fn handle_lan_discovery(&self, mut client: Client, packet: LanDiscovery) -> IoFuture<()> {
+        let mut state = self.state.write().expect("Failed to obtain ServerState lock");
+        let result = client.send_nodes_request(packet.pk);
+        state.peers_cache.insert(packet.pk, client);
+        result
+    }
+    /**
+    send LanDiscovery packet to all broadcast addresses
+    */
+    pub fn send_lan_discovery(&self) -> IoFuture<()> {
+        // addr is dummy, actual lan discovery packet sending logic exists in client
+        let addr: SocketAddr = "127.0.0.1:33445".parse().unwrap();
+        let client = self.create_client(&addr, self.pk);
+        client.send_lan_discovery()
     }
     /// add PackedNode object to kbucket as a thread-safe manner
     pub fn try_add_to_kbucket(&self, pn: &PackedNode) -> bool {
@@ -936,5 +959,32 @@ mod tests {
         let (_, size) = nat_ping_req_payload.to_bytes((&mut buf, 0)).unwrap();
         let (_, nat_ping_req_payload) = NatPingRequest::from_bytes(&buf[..size]).unwrap();
         assert_eq!(nat_ping_req_payload.id, client.ping_id);
+    }
+    #[test]
+    fn server_handle_lan_discovery_test() {
+        let (alice, _precomp, bob_pk, bob_sk, rx, addr) = create_node();
+
+        let lan = LanDiscovery { pk: bob_pk };
+        let client = alice.create_client(&addr, bob_pk);
+        alice.handle_lan_discovery(client.clone(), lan).wait().unwrap();
+        let (received, _rx) = rx.into_future().wait().unwrap();
+        debug!("received packet {:?}", received.clone().unwrap().0);
+        let (packet, _addr) = received.unwrap();
+        let mut buf = [0; 512];
+        let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
+        let (_, nodes_req) = NodesRequest::from_bytes(&buf[..size]).unwrap();
+        let _nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
+        assert_eq!(nodes_req.pk, client.pk);
+    }
+    #[test]
+    fn server_send_lan_discovery_test() {
+        let (alice, _precomp, _bob_pk, _bob_sk, rx, _addr) = create_node();
+        alice.send_lan_discovery().wait().unwrap();
+        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (packet, _addr) = received.unwrap();
+        let mut buf = [0; 512];
+        let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
+        let (_, lan_discovery) = LanDiscovery::from_bytes(&buf[..size]).unwrap();
+        assert_eq!(alice.pk, lan_discovery.pk);
     }
 }
