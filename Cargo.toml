@@ -32,6 +32,7 @@ clippy = { version = "<= 0.1.0", optional = true }
 bytes = "0.4"
 byteorder = "1"
 futures = "0.1"
+futures-timer = "0.1"
 log = "0.4"
 sodiumoxide = "0.0.16"
 tokio = "0.1"
@@ -39,7 +40,6 @@ tokio-core = "0.1"
 tokio-io = "0.1"
 nom = "3.2"
 cookie-factory = "0.2.2"
-futures-timer = "0.1"
 
 [dev-dependencies]
 env_logger = "0.5"

@@ -20,9 +20,9 @@
 
 extern crate tox;
 extern crate futures;
+extern crate futures_timer;
 extern crate tokio;
 extern crate tokio_io;
-extern crate tokio_timer;
 
 #[macro_use]
 extern crate log;
@@ -31,15 +31,16 @@ extern crate env_logger;
 use tox::toxcore::crypto_core::*;
 use tox::toxcore::tcp::make_server_handshake;
 use tox::toxcore::tcp::codec;
-use tox::toxcore::tcp::server::{Server, Client};
+use tox::toxcore::tcp::server::{Server, ServerProcessor};
 
 use futures::prelude::*;
-use futures::sync::mpsc;
+use futures_timer::ext::FutureExt;
 
 use tokio_io::AsyncRead;
 use tokio::net::TcpListener;
 
 use std::time;
+use std::io::{Error, ErrorKind};
 
 fn main() {
     env_logger::init();
@@ -70,68 +71,70 @@ fn main() {
             })?;
         debug!("A new client connected from {}", addr);
 
-        let server_inner_c = server_inner.clone();
         let register_client = make_server_handshake(socket, server_sk.clone())
-            .map_err(|e| {
-                error!("handshake error: {}", e);
-                e
-            })
-            .and_then(move |(socket, channel, client_pk)| {
+            .map_err(|e|
+                Error::new(ErrorKind::Other,
+                    format!("Handshake error {:?}", e))
+            )
+            .map(|(socket, channel, client_pk)| {
                 debug!("Handshake for client {:?} complited", &client_pk);
-                let (tx, rx) = mpsc::unbounded();
-                server_inner_c.insert(Client::new(tx, &client_pk, addr.ip(), addr.port()));
-
-                Ok((socket, channel, client_pk, rx))
+                (socket, channel, client_pk)
             });
 
         let server_inner_c = server_inner.clone();
-        let process_connection = register_client
-            .and_then(move |(socket, channel, client_pk, rx)| {
-                let server_inner_c_c = server_inner_c.clone();
-                let secure_socket = socket.framed(codec::Codec::new(channel));
-                let (to_client, from_client) = secure_socket.split();
+        let process = register_client.and_then(move |(socket, channel, client_pk)| {
+            let secure_socket = socket.framed(codec::Codec::new(channel));
+            let (to_client, from_client) = secure_socket.split();
+            let ServerProcessor { to_server_tx, to_client_rx, processor } =
+                ServerProcessor::create(
+                    server_inner_c,
+                    client_pk.clone(),
+                    addr.ip(),
+                    addr.port()
+                );
 
-                // reader = for each Packet from client process it
-                let reader = from_client.for_each(move |packet| {
-                    debug!("Handle {:?} => {:?}", client_pk, packet);
-                    server_inner_c.handle_packet(&client_pk, packet)
-                });
+            // writer = for each Packet from to_client_rx send it to client
+            let writer = to_client_rx
+                .map_err(|()| Error::from(ErrorKind::UnexpectedEof))
+                .fold(to_client, move |to_client, packet| {
+                    debug!("Send {:?} => {:?}", client_pk, packet);
+                    to_client.send(packet)
+                        .timeout(time::Duration::from_secs(30))
+                })
+                // drop to_client when to_client_rx stream is exhausted
+                .map(|_to_client| ())
+                .map_err(|_|
+                    Error::new(ErrorKind::Other,
+                        format!("Writer ended with error"))
+                );
 
-                let writer_timer = tokio_timer::wheel()
-                    .tick_duration(time::Duration::from_secs(1))
-                    .build()
-                ;
-                // writer = for each Packet from rx send it to client
-                let writer = rx
-                    .map_err(|()| unreachable!("rx can't fail"))
-                    .fold(to_client, move |to_client, packet| {
-                        debug!("Send {:?} => {:?}", client_pk, packet);
-                        let sending_future = to_client.send(packet);
-                        let duration = time::Duration::from_secs(30);
-                        let timeout = writer_timer.timeout(sending_future, duration);
-                        timeout
-                    })
-                    // drop to_client when rx stream is exhausted
-                    .map(|_to_client| ());
+            // reader = for each Packet from client send it to server processor
+            let reader = from_client
+                .forward(to_server_tx
+                    .sink_map_err(|e|
+                        Error::new(ErrorKind::Other,
+                            format!("Could not forward message from client to server {:?}", e))
+                    )
+                )
+                .map(|(_from_client, _sink_err)| ())
+                .map_err(|_|
+                    Error::new(ErrorKind::Other,
+                        format!("Reader ended with error"))
+                );
 
-                // TODO ping request = each 30s send PingRequest to client
-
-                reader.select(writer)
-                    .map(|_| ())
+            processor
+                .select(reader)
                     .map_err(move |(err, _select_next)| {
-                        error!("Processing client {:?} ended with error: {:?}", &client_pk, err);
                         err
                     })
-                    .then(move |r_processing| {
-                        debug!("shutdown PK {:?}", &client_pk);
-                        server_inner_c_c.shutdown_client(&client_pk)
-                            .then(move |r_shutdown| r_processing.and(r_shutdown))
+                    .map(|_| ())
+                .select(writer)
+                    .map_err(move |(err, _select_next)| {
+                        err
                     })
-            });
-        tokio::spawn(process_connection.then(|r| {
-            debug!("end of processing with result {:?}", r);
-            Ok(())
-        }));
+        });
+
+        tokio::spawn( process.map(|_| ()).map_err(|_| ()) );
 
         Ok(())
     })

@@ -43,6 +43,7 @@ Repo: https://github.com/tox-rs/tox
 extern crate bytes;
 extern crate byteorder;
 extern crate futures;
+extern crate futures_timer;
 #[macro_use]
 extern crate log;
 #[macro_use]
