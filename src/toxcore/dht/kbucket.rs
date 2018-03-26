@@ -366,7 +366,8 @@ impl Kbucket {
         let num = random_u64() % self.buckets[num_k as usize].nodes.len() as u64;
         Some(self.buckets[num_k as usize].nodes[num as usize])
     }
-   /** Return the possible internal index of [`Bucket`](./struct.Bucket.html)
+
+    /** Return the possible internal index of [`Bucket`](./struct.Bucket.html)
         where the key could be inserted/removed.
 
     Returns `Some(index)` if [`kbucket index`](./fn.kbucket_index.html) is
