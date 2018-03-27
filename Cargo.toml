@@ -1,6 +1,6 @@
 [package]
 name = "tox"
-version = "0.0.2"
+version = "0.0.3"
 authors = [
   "Zetok Zalbavar <zetok@openmailbox.org>",
   "Roman Proskuryakov <humbug@deeptown.org>",
@@ -36,7 +36,6 @@ futures-timer = "0.1"
 log = "0.4"
 sodiumoxide = "0.0.16"
 tokio = "0.1"
-tokio-core = "0.1"
 tokio-io = "0.1"
 nom = "3.2"
 cookie-factory = "0.2.2"
