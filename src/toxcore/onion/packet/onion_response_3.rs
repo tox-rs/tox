@@ -1,0 +1,88 @@
+/*
+    Copyright (C) 2013 Tox project All Rights Reserved.
+    Copyright © 2018 Evgeny Kurnevsky <kurnevsky@gmail.com>
+
+    This file is part of Tox.
+
+    Tox is libre software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    Tox is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with Tox.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
+/*! OnionResponse3 packet
+*/
+
+use super::*;
+
+use toxcore::binary_io::*;
+
+use nom::rest;
+
+/** Third onion response packet. It's sent back from the destination node to the
+third node from onion chain.
+
+Serialized form:
+
+Length   | Content
+-------- | ------
+`1`      | `0x8c`
+`177`    | `OnionReturn`
+variable | Payload
+
+where payload is encrypted [`AnnounceResponse`](./struct.AnnounceResponse.html) or
+[`OnionDataResponse`](./struct.OnionDataResponse.html)
+
+*/
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OnionResponse3 {
+    /// Return address encrypted by the third node from onion chain
+    pub onion_return: OnionReturn,
+    /// Encrypted payload
+    pub payload: Vec<u8>
+}
+
+impl FromBytes for OnionResponse3 {
+    named!(from_bytes<OnionResponse3>, do_parse!(
+        tag!(&[0x8c][..]) >>
+        onion_return: flat_map!(take!(ONION_RETURN_3_SIZE), OnionReturn::from_bytes) >>
+        payload: rest >>
+        (OnionResponse3 { onion_return, payload: payload.to_vec() })
+    ));
+}
+
+impl ToBytes for OnionResponse3 {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_be_u8!(0x8c) >>
+            gen_call!(|buf, onion_return| OnionReturn::to_bytes(onion_return, buf), &self.onion_return) >>
+            gen_slice!(self.payload)
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - NONCEBYTES;
+
+    encode_decode_test!(
+        onion_response_3_encode_decode,
+        OnionResponse3 {
+            onion_return: OnionReturn {
+                nonce: gen_nonce(),
+                payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
+            },
+            payload: vec![42, 123]
+        }
+    );
+}
