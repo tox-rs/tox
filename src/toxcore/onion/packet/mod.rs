@@ -231,9 +231,13 @@ impl OnionReturn {
     }
 }
 
-/// Represents the result of sent `AnnounceRequest`.
+/** Represents the result of sent `AnnounceRequest`.
+
+Also known as `is_stored` number.
+
+*/
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum IsStored {
+pub enum AnnounceStatus {
     /// Failed to announce ourselves or find requested node
     Failed = 0,
     /// Requested node is found by its long term `PublicKey`
@@ -242,15 +246,15 @@ pub enum IsStored {
     Announced = 2
 }
 
-impl FromBytes for IsStored {
-    named!(from_bytes<IsStored>, switch!(le_u8,
-        0 => value!(IsStored::Failed) |
-        1 => value!(IsStored::Found) |
-        2 => value!(IsStored::Announced)
+impl FromBytes for AnnounceStatus {
+    named!(from_bytes<AnnounceStatus>, switch!(le_u8,
+        0 => value!(AnnounceStatus::Failed) |
+        1 => value!(AnnounceStatus::Found) |
+        2 => value!(AnnounceStatus::Announced)
     ));
 }
 
-impl ToBytes for IsStored {
+impl ToBytes for AnnounceStatus {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         gen_be_u8!(buf, *self as u8)
     }
@@ -278,11 +282,11 @@ mod tests {
         }
     );
 
-    encode_decode_test!(is_stored_failed, IsStored::Failed);
+    encode_decode_test!(announce_status_failed, AnnounceStatus::Failed);
 
-    encode_decode_test!(is_stored_found, IsStored::Found);
+    encode_decode_test!(announce_status_found, AnnounceStatus::Found);
 
-    encode_decode_test!(is_stored_accounced, IsStored::Announced);
+    encode_decode_test!(announce_status_accounced, AnnounceStatus::Announced);
 
     #[test]
     fn onion_return_encrypt_decrypt() {

@@ -127,13 +127,14 @@ impl AnnounceResponse {
 
 /** Unencrypted payload of `AnnounceResponse` packet.
 
-is_stored variable contains the result of sent request. It might have values:
+`announce_status` variable contains the result of sent request. It might have
+values:
 
 * 0: failed to announce ourselves or find requested node
 * 1: requested node is found by its long term `PublicKey`
 * 2: we successfully announced ourselves
 
-In case of is_stored is equal to 1 ping_id will contain `PublicKey` that
+In case of announce_status is equal to 1 ping_id will contain `PublicKey` that
 should be used to send data packets to the requested node. In other cases it
 will contain ping id that should be used for announcing ourselves.
 
@@ -141,15 +142,16 @@ Serialized form:
 
 Length   | Content
 -------- | ------
-`1`      | `is_stored`
+`1`      | `announce_status` (aka `is_stored`)
 `32`     | Onion ping id or `PublicKey`
 `[0, 204]` | Nodes in packed format
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AnnounceResponsePayload {
-    /// Variable that represents result of sent `AnnounceRequest`
-    pub is_stored: IsStored,
+    /// Variable that represents result of sent `AnnounceRequest`. Also known
+    /// as `is_stored` variable
+    pub announce_status: AnnounceStatus,
     /// Onion ping id or PublicKey that should be used to send data packets
     pub ping_id_or_pk: Digest,
     /// Up to 4 closest to the requested PublicKey DHT nodes
@@ -159,12 +161,12 @@ pub struct AnnounceResponsePayload {
 #[allow(unused_comparisons)]
 impl FromBytes for AnnounceResponsePayload {
     named!(from_bytes<AnnounceResponsePayload>, do_parse!(
-        is_stored: call!(IsStored::from_bytes) >>
+        announce_status: call!(AnnounceStatus::from_bytes) >>
         ping_id_or_pk: call!(Digest::from_bytes) >>
         nodes: many_m_n!(0, 4, PackedNode::from_bytes) >>
         eof!() >>
         (AnnounceResponsePayload {
-            is_stored,
+            announce_status,
             ping_id_or_pk,
             nodes
         })
@@ -174,7 +176,7 @@ impl FromBytes for AnnounceResponsePayload {
 impl ToBytes for AnnounceResponsePayload {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
-            gen_call!(|buf, is_stored| IsStored::to_bytes(is_stored, buf), &self.is_stored) >>
+            gen_call!(|buf, announce_status| AnnounceStatus::to_bytes(announce_status, buf), &self.announce_status) >>
             gen_slice!(self.ping_id_or_pk.as_ref()) >>
             gen_cond!(
                 self.nodes.len() <= 4,
@@ -202,7 +204,7 @@ mod tests {
     encode_decode_test!(
         announce_response_payload_encode_decode,
         AnnounceResponsePayload {
-            is_stored: IsStored::Found,
+            announce_status: AnnounceStatus::Found,
             ping_id_or_pk: hash(&[1, 2, 3]),
             nodes: vec![
                 PackedNode::new(false, SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
@@ -216,7 +218,7 @@ mod tests {
         let (bob_pk, _bob_sk) = gen_keypair();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
         let payload = AnnounceResponsePayload {
-            is_stored: IsStored::Found,
+            announce_status: AnnounceStatus::Found,
             ping_id_or_pk: hash(&[1, 2, 3]),
             nodes: vec![
                 PackedNode::new(false, SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
@@ -237,7 +239,7 @@ mod tests {
         let (_eve_pk, eve_sk) = gen_keypair();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
         let payload = AnnounceResponsePayload {
-            is_stored: IsStored::Found,
+            announce_status: AnnounceStatus::Found,
             ping_id_or_pk: hash(&[1, 2, 3]),
             nodes: vec![
                 PackedNode::new(false, SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
