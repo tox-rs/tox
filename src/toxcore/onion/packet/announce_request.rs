@@ -35,12 +35,13 @@ announced nodes.
 If we want to announce ourselves we should send one `AnnounceRequest` packet with
 PingId set to 0 to acquire correct PingId of onion node. Then using this PingId
 we can send another `AnnounceRequest` to be added to onion nodes list. If
-`AnnounceRequest` succeed we will get `AnnounceResponse` with is_stored set to 2.
-Otherwise is_stored will be set to 0.
+`AnnounceRequest` succeed we will get `AnnounceResponse` with announce_status
+set to 2. Otherwise announce_status will be set to 0.
 
 If we are looking for another node we should send `AnnounceRequest` packet with
 PingId set to 0 and with `PublicKey` of this node. If node is found we will get
-`AnnounceResponse` with is_stored set to 1. Otherwise is_stored will be set to 0.
+`AnnounceResponse` with announce_status set to 1. Otherwise announce_status will
+be set to 0.
 
 Serialized form:
 
