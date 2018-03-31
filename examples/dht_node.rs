@@ -152,6 +152,15 @@ fn main() {
         })
         .map_err(|_err| Error::new(ErrorKind::Other, "NatPing timer error"));
 
+    // 10 seconds for LanDiscovery
+    let lan_wakeups = Interval::new(Duration::from_secs(10));
+    let server_obj_c = server_obj.clone();
+    let lan_sender = lan_wakeups.for_each(move |()| {
+            println!("lan_wakeup");
+            server_obj_c.send_lan_discovery()
+        })
+        .map_err(|_err| Error::new(ErrorKind::Other, "LanDiscovery timer error"));
+
     let packet_sender = ping_sender.select(nodes_sender)
         .map(|_| ())
         .map_err(move |(err, _select_next)| {
@@ -159,6 +168,12 @@ fn main() {
             err
         });
     let packet_sender = packet_sender.select(nat_sender)
+        .map(|_| ())
+        .map_err(move |(err, _select_next)| {
+            error!("Processing ended with error: {:?}", err);
+            err
+        });
+    let packet_sender = packet_sender.select(lan_sender)
         .map(|_| ())
         .map_err(move |(err, _select_next)| {
             error!("Processing ended with error: {:?}", err);

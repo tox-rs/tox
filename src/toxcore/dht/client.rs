@@ -24,13 +24,15 @@ Hold infomation of a peer.
 The object of this struct is one per a peer.
 */
 
-use futures::{Sink, Future};
+use futures::{Sink, Future, stream, Stream};
 use futures::sync::mpsc;
 use tokio_io::IoFuture;
+use get_if_addrs;
+use get_if_addrs::IfAddr;
 
 //use std::collections::VecDeque;
 use std::io::{ErrorKind, Error};
-use std::net::SocketAddr;
+use std::net::{SocketAddr, IpAddr};
 
 use toxcore::crypto_core::*;
 use toxcore::dht::packet::*;
@@ -125,12 +127,53 @@ impl Client {
         let nat_ping_req = DhtPacket::DhtRequest(DhtRequest::new(&self.precomputed_key.clone(), &friend_pk, &self.pk, payload));
         self.send(nat_ping_req)
     }
+    // get broadcast addresses for host's network interfaces
+    fn get_ipv4_broadcast_addrs() -> Vec<IpAddr> {
+        let ifs = get_if_addrs::get_if_addrs().expect("no network interface");
+        ifs.iter().filter_map(|interface|
+            match interface.addr {
+                IfAddr::V4(ref addr) => addr.broadcast,
+                _ => None,
+        })
+        .map(|ipv4|
+            IpAddr::V4(ipv4)
+        ).collect()
+    }
+    // get broadcast addresses for Ipv4 and Ipv6
+    fn get_broadcast_addresses() -> Vec<IpAddr> {
+        let mut res = Vec::new();
+        let ipv4s = Client::get_ipv4_broadcast_addrs();
+
+        res.extend(ipv4s.iter());
+
+        // Ipv4 global broadcast address
+        res.push(
+            ("255.255.255.255").parse().unwrap()
+        );
+        // Ipv6 broadcast address
+        res.push(
+            ("FF02::1").parse().unwrap()
+        );
+        res
+    }
+    /// send LanDiscovery packets to broadcast addresses
+    pub fn send_lan_discovery(&self) -> IoFuture<()> {
+        let ip_addrs = Client::get_broadcast_addresses();
+        let lan_packet = DhtPacket::LanDiscovery(LanDiscovery {
+            pk: self.pk,
+        });
+        let lan_sender = ip_addrs.iter().map(|&addr|
+            self.send_to(SocketAddr::new(addr, 33445), lan_packet.clone())
+        );
+
+        let lan_stream = stream::futures_unordered(lan_sender).then(|_| Ok(()));
+        Box::new(lan_stream.for_each(|()| Ok(())))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures::*;
 
     use std::net::SocketAddr;
     use toxcore::dht::packed_node::*;
@@ -291,5 +334,31 @@ mod tests {
         let (_, size) = dht_payload.to_bytes((&mut buf, 0)).unwrap();
         let (_, nat_ping_req_payload) = NatPingRequest::from_bytes(&buf[..size]).unwrap();
         assert_eq!(nat_ping_req_payload.id, client.ping_id);
+    }
+    // send_lan_discovery()
+    #[test]
+    fn client_send_lan_discovery_test() {
+        let (client, _sk, mut rx) = create_client();
+        client.send_lan_discovery().wait().unwrap();
+
+        let ifs = get_if_addrs::get_if_addrs().expect("no network interface");
+        let broad_vec: Vec<SocketAddr> = ifs.iter().filter_map(|interface| 
+            match interface.addr {
+                IfAddr::V4(ref addr) => addr.broadcast,
+                _ => None,
+            })
+            .map(|ipv4|
+                SocketAddr::new(IpAddr::V4(ipv4), 33445)
+            ).collect();
+        for _i in 0..(broad_vec.len() + 2) { // `+2` are one for 255.255.255.255 and one for FF02::1
+            let (received, rx1) = rx.into_future().wait().unwrap();
+            debug!("received packet {:?}", received.clone().unwrap().1);
+            let (packet, _addr) = received.unwrap();
+            let mut buf = [0; 512];
+            let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
+            let (_, lan_discovery) = LanDiscovery::from_bytes(&buf[..size]).unwrap();
+            assert_eq!(lan_discovery.pk, client.pk);
+            rx = rx1;
+        }
     }
 }

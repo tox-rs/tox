@@ -58,6 +58,7 @@ extern crate quickcheck;
 
 extern crate tokio;
 extern crate tokio_io;
+extern crate get_if_addrs;
 
 
 // TODO: refactor macros
