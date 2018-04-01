@@ -21,7 +21,7 @@ license = "GPL-3.0+"
 
 [badges]
 travis-ci = { repository = "tox-rs/tox" }
-appveyor = { repository = "kpp/tox" }
+appveyor = { repository = "kpp/tox", id = "y3y2hi6552qgmfr0" }
 coveralls = { repository = "tox-rs/tox" }
 # Available options are `actively-developed`, `passively-maintained`,
 # `as-is`, `none`, `experimental`, `looking-for-maintainer`, `deprecated`.
