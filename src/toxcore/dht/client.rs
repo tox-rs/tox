@@ -135,35 +135,44 @@ impl Client {
                 IfAddr::V4(ref addr) => addr.broadcast,
                 _ => None,
         })
-        .map(|ipv4|
-            IpAddr::V4(ipv4)
-        ).collect()
+        .map(|addr|
+            IpAddr::V4(addr)
+        )
+        .collect()
     }
-    // get broadcast addresses for Ipv4 and Ipv6
-    fn get_broadcast_addresses() -> Vec<IpAddr> {
-        let mut res = Vec::new();
-        let ipv4s = Client::get_ipv4_broadcast_addrs();
-
-        res.extend(ipv4s.iter());
-
+    /// send LanDiscovery packets to broadcast addresses when dht_node runs as Ipv4 mode
+    pub fn send_lan_discovery_ipv4(&self) -> IoFuture<()> {
+        let mut ip_addrs = Client::get_ipv4_broadcast_addrs();
         // Ipv4 global broadcast address
-        res.push(
-            ("255.255.255.255").parse().unwrap()
+        ip_addrs.push(
+            "255.255.255.255".parse().unwrap()
         );
-        // Ipv6 broadcast address
-        res.push(
-            ("FF02::1").parse().unwrap()
-        );
-        res
-    }
-    /// send LanDiscovery packets to broadcast addresses
-    pub fn send_lan_discovery(&self) -> IoFuture<()> {
-        let ip_addrs = Client::get_broadcast_addresses();
         let lan_packet = DhtPacket::LanDiscovery(LanDiscovery {
             pk: self.pk,
         });
         let lan_sender = ip_addrs.iter().map(|&addr|
-            self.send_to(SocketAddr::new(addr, 33445), lan_packet.clone())
+            self.send_to(SocketAddr::new(addr, 33445), lan_packet.clone()) // 33445 is default port for tox
+        );
+
+        let lan_stream = stream::futures_unordered(lan_sender).then(|_| Ok(()));
+        Box::new(lan_stream.for_each(|()| Ok(())))
+    }
+    /// send LanDiscovery packets to broadcast addresses when dht_node runs as Ipv6 mode
+    pub fn send_lan_discovery_ipv6(&self) -> IoFuture<()> {
+        let mut ip_addrs = Client::get_ipv4_broadcast_addrs();
+        // Ipv6 broadcast address
+        ip_addrs.push(
+            "::1".parse().unwrap() // TODO: it should be FF02::1, but for now, my LAN config has no route to address of FF02::1
+        );
+        // Ipv4 global broadcast address
+        ip_addrs.push(
+            "::ffff:255.255.255.255".parse().unwrap()
+        );
+        let lan_packet = DhtPacket::LanDiscovery(LanDiscovery {
+            pk: self.pk,
+        });
+        let lan_sender = ip_addrs.iter().map(|&addr|
+            self.send_to(SocketAddr::new(addr, 33445), lan_packet.clone()) // 33445 is default port for tox
         );
 
         let lan_stream = stream::futures_unordered(lan_sender).then(|_| Ok(()));
@@ -335,11 +344,11 @@ mod tests {
         let (_, nat_ping_req_payload) = NatPingRequest::from_bytes(&buf[..size]).unwrap();
         assert_eq!(nat_ping_req_payload.id, client.ping_id);
     }
-    // send_lan_discovery()
+    // send_lan_discovery_ipv4()
     #[test]
-    fn client_send_lan_discovery_test() {
+    fn client_send_lan_discovery_ipv4_test() {
         let (client, _sk, mut rx) = create_client();
-        client.send_lan_discovery().wait().unwrap();
+        client.send_lan_discovery_ipv4().wait().unwrap();
 
         let ifs = get_if_addrs::get_if_addrs().expect("no network interface");
         let broad_vec: Vec<SocketAddr> = ifs.iter().filter_map(|interface| 
@@ -350,7 +359,33 @@ mod tests {
             .map(|ipv4|
                 SocketAddr::new(IpAddr::V4(ipv4), 33445)
             ).collect();
-        for _i in 0..(broad_vec.len() + 2) { // `+2` are one for 255.255.255.255 and one for FF02::1
+        for _i in 0..(broad_vec.len() + 1) { // `+1` are for 255.255.255.255
+            let (received, rx1) = rx.into_future().wait().unwrap();
+            debug!("received packet {:?}", received.clone().unwrap().1);
+            let (packet, _addr) = received.unwrap();
+            let mut buf = [0; 512];
+            let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
+            let (_, lan_discovery) = LanDiscovery::from_bytes(&buf[..size]).unwrap();
+            assert_eq!(lan_discovery.pk, client.pk);
+            rx = rx1;
+        }
+    }
+    // send_lan_discovery_ipv6()
+    #[test]
+    fn client_send_lan_discovery_ipv6_test() {
+        let (client, _sk, mut rx) = create_client();
+        client.send_lan_discovery_ipv6().wait().unwrap();
+
+        let ifs = get_if_addrs::get_if_addrs().expect("no network interface");
+        let broad_vec: Vec<SocketAddr> = ifs.iter().filter_map(|interface| 
+            match interface.addr {
+                IfAddr::V4(ref addr) => addr.broadcast,
+                _ => None,
+            })
+            .map(|ipv4|
+                SocketAddr::new(IpAddr::V4(ipv4), 33445)
+            ).collect();
+        for _i in 0..(broad_vec.len() + 1) { // `+1` are for ::1
             let (received, rx1) = rx.into_future().wait().unwrap();
             debug!("received packet {:?}", received.clone().unwrap().1);
             let (packet, _addr) = received.unwrap();
