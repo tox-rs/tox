@@ -194,6 +194,18 @@ pub fn new_symmetric_key() -> PrecomputedKey {
     PrecomputedKey::from_slice(&buf).unwrap()
 }
 
+/// Convert `PublicKey` to sha256 `Digest` type.
+pub fn pk_as_digest(pk: PublicKey) -> Digest {
+    // can not fail since PublicKey has the same length as sha256 Digest
+    Digest::from_slice(pk.as_ref()).unwrap()
+}
+
+/// Convert sha256 `Digest` to `PublicKey` type.
+pub fn digest_as_pk(d: Digest) -> PublicKey {
+    // can not fail since sha256 Digest has the same length as PublicKey
+    PublicKey::from_slice(d.as_ref()).unwrap()
+}
+
 impl FromBytes for PublicKey {
     named!(from_bytes<PublicKey>, map_opt!(take!(PUBLICKEYBYTES), PublicKey::from_slice));
 }

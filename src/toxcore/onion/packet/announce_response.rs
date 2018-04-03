@@ -158,13 +158,12 @@ pub struct AnnounceResponsePayload {
     pub nodes: Vec<PackedNode>
 }
 
-#[allow(unused_comparisons)]
 impl FromBytes for AnnounceResponsePayload {
     named!(from_bytes<AnnounceResponsePayload>, do_parse!(
         announce_status: call!(AnnounceStatus::from_bytes) >>
         ping_id_or_pk: call!(Digest::from_bytes) >>
-        nodes: many_m_n!(0, 4, PackedNode::from_bytes) >>
-        eof!() >>
+        nodes: many0!(PackedNode::from_bytes) >>
+        cond_reduce!(nodes.len() <= 4, eof!()) >>
         (AnnounceResponsePayload {
             announce_status,
             ping_id_or_pk,
