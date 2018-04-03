@@ -38,7 +38,7 @@ use futures::sync::mpsc;
 use futures_timer::Interval;
 use tokio::net::{UdpSocket, UdpFramed};
 
-use std::net::SocketAddr;
+use std::net::{SocketAddr, IpAddr};
 use std::io::{ErrorKind, Error};
 use std::time::*;
 use rustc_serialize::hex::FromHex;
@@ -59,10 +59,15 @@ fn main() {
 
     let (pk, sk) = gen_keypair();
 
-    let local: SocketAddr = "0.0.0.0:33445".parse().unwrap();
+    let local: SocketAddr = "0.0.0.0:33445".parse().unwrap(); // 0.0.0.0 for ipv4, [::] for ipv6
+    // let local: SocketAddr = "[::]:33445".parse().unwrap(); // 0.0.0.0 for ipv4, [::] for ipv6
 
     // Bind a UDP listener to the socket address.
     let socket = UdpSocket::bind(&local).unwrap();
+    socket.set_broadcast(true).expect("set_broadcast call failed");
+    if local.is_ipv6() {
+        socket.set_multicast_loop_v6(true).expect("set_multicast_loop_v6 call failed");
+    }
 
     // Create a channel for this socket
     let (tx, rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
@@ -98,10 +103,19 @@ fn main() {
 
     let writer = rx
         .map_err(|_| Error::new(ErrorKind::Other, "rx error"))
-        .fold(sink, move |sink, packet| {
-            // println!("send = {:?}", packet.clone());
-            debug!("Send {:?} => {:?}", packet.0, packet.1);
-            sink.send(packet)
+         // filtering ipv6 peer address is temporary fix,
+         // dht_node may run as ipv4 only
+         // or may run as having two socket (ipv4 socket and ipv6 socket)
+        .filter(move |&(ref _packet, addr)| !(local.is_ipv4() && addr.is_ipv6()))
+        .fold(sink, move |sink, (packet, mut addr)| {
+            debug!("Send {:?} => {:?}", packet, addr);
+            println!("send = {:?} {:?}", packet.clone(), addr.clone());
+            if local.is_ipv6() {
+                if let IpAddr::V4(ip) = addr.ip() {
+                    addr = SocketAddr::new(IpAddr::V6(ip.to_ipv6_mapped()), addr.port());
+                }
+            }
+            sink.send((packet, addr))
         })
         // drop sink when rx stream is exhausted
         .map(|_sink| ())
@@ -157,28 +171,32 @@ fn main() {
     let server_obj_c = server_obj.clone();
     let lan_sender = lan_wakeups.for_each(move |()| {
             println!("lan_wakeup");
-            server_obj_c.send_lan_discovery()
+            if local.is_ipv4() {
+                server_obj_c.send_lan_discovery_ipv4()
+            } else {
+                server_obj_c.send_lan_discovery_ipv6()
+            }
         })
         .map_err(|_err| Error::new(ErrorKind::Other, "LanDiscovery timer error"));
 
     let packet_sender = ping_sender.select(nodes_sender)
-        .map(|_| ())
-        .map_err(move |(err, _select_next)| {
-            error!("Processing ended with error: {:?}", err);
-            err
-        });
-    let packet_sender = packet_sender.select(nat_sender)
-        .map(|_| ())
-        .map_err(move |(err, _select_next)| {
-            error!("Processing ended with error: {:?}", err);
-            err
-        });
-    let packet_sender = packet_sender.select(lan_sender)
-        .map(|_| ())
-        .map_err(move |(err, _select_next)| {
-            error!("Processing ended with error: {:?}", err);
-            err
-        });
+            .map(|_| ())
+            .map_err(move |(err, _select_next)| {
+                error!("Processing ended with error: {:?}", err);
+                err
+            })
+        .select(nat_sender)
+            .map(|_| ())
+            .map_err(move |(err, _select_next)| {
+                error!("Processing ended with error: {:?}", err);
+                err
+            })
+        .select(lan_sender)
+            .map(|_| ())
+            .map_err(move |(err, _select_next)| {
+                error!("Processing ended with error: {:?}", err);
+                err
+            });
 
     let server = server.select(packet_sender)
         .map(|_| ())

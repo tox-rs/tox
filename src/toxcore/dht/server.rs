@@ -125,24 +125,19 @@ impl Server {
     }
     /// send PingRequest to all peer in kbucket    
     pub fn send_pings(&self) -> IoFuture<()> {
-        let kbucket_c = {
-            let state = self.state.read().expect("Failed to obtain ServerState lock");
-            state.kbucket.iter()
-        };
-        let ping_sender = kbucket_c.map(|peer| 
-            self.send_ping_req(peer));
+        let mut state = self.state.write().expect("Failed to obtain ServerState lock");
+        let kbucket_c = state.kbucket.iter();
+
+        let ping_sender = kbucket_c.map(move |peer| {
+            let mut client = self.create_client(&peer.saddr, peer.pk);
+            let result = client.send_ping_request();
+            state.peers_cache.insert(peer.pk, client);
+            result
+        });
 
         let pings_stream = stream::futures_unordered(ping_sender).then(|_| Ok(()));
 
         Box::new(pings_stream.for_each(|()| Ok(())))
-    }
-    /// send PingRequests to peers at every 60 seconds
-    pub fn send_ping_req(&self, peer: PackedNode) -> IoFuture<()> {
-        let mut client = self.create_client(&peer.saddr, peer.pk);
-        let result = client.send_ping_request();
-        let mut state = self.state.write().expect("Failed to obtain ServerState lock");
-        state.peers_cache.insert(peer.pk, client);
-        result
     }
     /// send NodesRequest to random peer at every 20 seconds
     pub fn send_nodes_req(&self, friend_pk: PublicKey) -> IoFuture<()> {
@@ -422,13 +417,22 @@ impl Server {
         result
     }
     /**
-    send LanDiscovery packet to all broadcast addresses
+    send LanDiscovery packet to all broadcast addresses when dht_node runs as ipv4 mode
     */
-    pub fn send_lan_discovery(&self) -> IoFuture<()> {
+    pub fn send_lan_discovery_ipv4(&self) -> IoFuture<()> {
         // addr is dummy, actual lan discovery packet sending logic exists in client
         let addr: SocketAddr = "127.0.0.1:33445".parse().unwrap();
         let client = self.create_client(&addr, self.pk);
-        client.send_lan_discovery()
+        client.send_lan_discovery_ipv4()
+    }
+    /**
+    send LanDiscovery packet to all broadcast addresses when dht_node runs as ipv6 mode
+    */
+    pub fn send_lan_discovery_ipv6(&self) -> IoFuture<()> {
+        // addr is dummy, actual lan discovery packet sending logic exists in client
+        let addr: SocketAddr = "[::1]:33445".parse().unwrap(); // 33445 is default port for tox
+        let client = self.create_client(&addr, self.pk);
+        client.send_lan_discovery_ipv6()
     }
     /// add PackedNode object to kbucket as a thread-safe manner
     pub fn try_add_to_kbucket(&self, pn: &PackedNode) -> bool {
@@ -896,26 +900,6 @@ mod tests {
             }
         }).collect().wait().unwrap();
     }
-    // send_ping_req()
-    #[test]
-    fn server_send_ping_req_test() {
-        let (alice, _precomp, _bob_pk, _bob_sk, rx, _addr) = create_node();
-        let node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &alice.pk);
-
-        alice.try_add_to_kbucket(&node);
-
-        alice.send_ping_req(node).wait().unwrap();
-
-        let client = alice.get_client(&alice.pk).unwrap();
-        let (received, _rx) = rx.into_future().wait().unwrap();
-        debug!("received packet {:?}", received.clone().unwrap().1);
-        let (packet, _addr) = received.unwrap();
-        let mut buf = [0; 512];
-        let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
-        let (_, ping_req) = PingRequest::from_bytes(&buf[..size]).unwrap();
-        let ping_req_payload = ping_req.get_payload(&alice.sk).unwrap();
-        assert_eq!(ping_req_payload.id, client.ping_id);
-    }
     // send_nodes_req()
     #[test]
     fn server_send_nodes_req_test() {
@@ -977,9 +961,20 @@ mod tests {
         assert_eq!(nodes_req.pk, client.pk);
     }
     #[test]
-    fn server_send_lan_discovery_test() {
+    fn server_send_lan_discovery_ipv4_test() {
         let (alice, _precomp, _bob_pk, _bob_sk, rx, _addr) = create_node();
-        alice.send_lan_discovery().wait().unwrap();
+        alice.send_lan_discovery_ipv6().wait().unwrap();
+        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (packet, _addr) = received.unwrap();
+        let mut buf = [0; 512];
+        let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
+        let (_, lan_discovery) = LanDiscovery::from_bytes(&buf[..size]).unwrap();
+        assert_eq!(alice.pk, lan_discovery.pk);
+    }
+    #[test]
+    fn server_send_lan_discovery_ipv6_test() {
+        let (alice, _precomp, _bob_pk, _bob_sk, rx, _addr) = create_node();
+        alice.send_lan_discovery_ipv6().wait().unwrap();
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, _addr) = received.unwrap();
         let mut buf = [0; 512];
