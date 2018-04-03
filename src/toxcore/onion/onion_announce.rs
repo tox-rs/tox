@@ -21,7 +21,6 @@
 /*! The implementation of onion announce
 */
 
-use std::cmp::Ordering;
 use std::io::Error;
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -237,27 +236,27 @@ impl OnionAnnounce {
 
     */
     fn add_to_entries(&mut self, entry: OnionAnnounceEntry) -> Option<&OnionAnnounceEntry> {
-        let dht_pk = &self.dht_pk;
         self.entries.retain(|e| !e.is_timed_out());
-        //TODO: replace with `self.entries.iter_mut().find(|e| e.pk == entry.pk` when NLL get stabilized
-        if let Some(i) = self.entries.iter().position(|e| e.pk == entry.pk) {
-            // node with such pk already announced - just update the entry
-            self.entries[i].clone_from(&entry);
-            self.entries.get(i)
-        } else if self.entries.len() < ONION_ANNOUNCE_MAX_ENTRIES {
-            // adding new entry does not exceed the limit - just add it
-            let pk = entry.pk;
-            self.entries.push(entry);
-            self.entries.sort_by(|e1, e2| dht_pk.distance(&e1.pk, &e2.pk));
-            self.entries.iter().find(|e| e.pk == pk)
-        } else if dht_pk.distance(&entry.pk, &self.entries.last().unwrap().pk) == Ordering::Less {
-            // the farthest entry is farther than new entry - replace it
-            // unwrap can not fail due to previous branch
-            self.entries.last_mut().unwrap().clone_from(&entry);
-            self.entries.sort_by(|e1, e2| dht_pk.distance(&e1.pk, &e2.pk));
-            self.entries.iter().find(|e| e.pk == entry.pk)
-        } else {
-            None
+        match self.entries.binary_search_by(|e| self.dht_pk.distance(&e.pk, &entry.pk)) {
+            Ok(idx) => {
+                // node with such pk already announced - just update the entry
+                self.entries[idx].clone_from(&entry);
+                self.entries.get(idx)
+            },
+            Err(idx) => {
+                if self.entries.len() < ONION_ANNOUNCE_MAX_ENTRIES {
+                    // adding new entry does not exceed the limit - just add it
+                    self.entries.insert(idx, entry);
+                    self.entries.get(idx)
+                } else if idx < ONION_ANNOUNCE_MAX_ENTRIES {
+                    // the farthest entry is farther than new entry - replace it
+                    self.entries.pop();
+                    self.entries.insert(idx, entry);
+                    self.entries.get(idx)
+                } else {
+                    None
+                }
+            }
         }
     }
 
@@ -486,6 +485,8 @@ mod tests {
         for pk in pks {
             assert!(onion_announce.find_in_entries(pk).is_some());
         }
+
+        assert_eq!(onion_announce.entries.len(), ONION_ANNOUNCE_MAX_ENTRIES);
     }
 
     #[test]
@@ -517,6 +518,8 @@ mod tests {
         for pk in pks {
             assert!(onion_announce.find_in_entries(pk).is_some());
         }
+
+        assert_eq!(onion_announce.entries.len(), ONION_ANNOUNCE_MAX_ENTRIES);
     }
 
     #[test]
@@ -547,6 +550,8 @@ mod tests {
         for pk in pks.into_iter().filter(|&pk| pk != timed_out_pk) {
             assert!(onion_announce.find_in_entries(pk).is_some());
         }
+
+        assert_eq!(onion_announce.entries.len(), ONION_ANNOUNCE_MAX_ENTRIES);
     }
 
     #[test]
@@ -579,6 +584,8 @@ mod tests {
         for pk in pks {
             assert!(onion_announce.find_in_entries(pk).is_some());
         }
+
+        assert_eq!(onion_announce.entries.len(), ONION_ANNOUNCE_MAX_ENTRIES);
     }
 
     #[test]
@@ -607,6 +614,8 @@ mod tests {
         for pk in pks {
             assert!(onion_announce.find_in_entries(pk).is_some());
         }
+
+        assert_eq!(onion_announce.entries.len(), ONION_ANNOUNCE_MAX_ENTRIES);
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////
