@@ -218,7 +218,11 @@ impl OnionAnnounce {
 
     /// Find entry by its `PublicKey` ignoring timed out entries
     fn find_in_entries(&self, pk: PublicKey) -> Option<&OnionAnnounceEntry> {
-        self.entries.iter().find(|e| !e.is_timed_out() && e.pk == pk)
+        match self.entries.binary_search_by(|e| self.dht_pk.distance(&e.pk, &pk)) {
+            //TODO: use Option::filter when it's stabilized
+            Ok(idx) => if self.entries[idx].is_timed_out() { None } else { self.entries.get(idx) },
+            Err(_) => None
+        }
     }
 
     /** Try to add announce entry to onion announce list.
@@ -236,6 +240,7 @@ impl OnionAnnounce {
 
     */
     fn add_to_entries(&mut self, entry: OnionAnnounceEntry) -> Option<&OnionAnnounceEntry> {
+        //TODO: remove timed out entries by timer?
         self.entries.retain(|e| !e.is_timed_out());
         match self.entries.binary_search_by(|e| self.dht_pk.distance(&e.pk, &entry.pk)) {
             Ok(idx) => {
