@@ -336,3 +336,459 @@ impl OnionAnnounce {
         Ok(response)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    extern crate rand;
+
+    use super::*;
+
+    use quickcheck::{Arbitrary, StdGen};
+
+    use toxcore::dht::kbucket::KBUCKET_BUCKETS;
+
+    const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - NONCEBYTES;
+
+    #[test]
+    fn announce_entry_valid() {
+        let entry = OnionAnnounceEntry::new(
+            PublicKey::from_slice(&[1; 32]).unwrap(),
+            "1.2.3.4".parse().unwrap(),
+            12345,
+            OnionReturn {
+                nonce: gen_nonce(),
+                payload: vec![42; 42]
+            },
+            gen_keypair().0
+        );
+        assert!(!entry.is_timed_out());
+    }
+
+    #[test]
+    fn announce_entry_expired() {
+        let mut entry = OnionAnnounceEntry::new(
+            PublicKey::from_slice(&[1; 32]).unwrap(),
+            "1.2.3.4".parse().unwrap(),
+            12345,
+            OnionReturn {
+                nonce: gen_nonce(),
+                payload: vec![42; 42]
+            },
+            gen_keypair().0
+        );
+        entry.time -= Duration::from_secs(ONION_ANNOUNCE_TIMEOUT + 1);
+        assert!(entry.is_timed_out());
+    }
+
+    #[test]
+    fn ping_id_respects_timeout_gap() {
+        let onion_announce = OnionAnnounce::new(gen_keypair().0);
+
+        let time = SystemTime::now();
+        let time_1 = time - Duration::from_secs(OnionPingData::unix_time(time) % PING_ID_TIMEOUT);
+        let time_2 = time_1 + Duration::from_secs(PING_ID_TIMEOUT - 1);
+        let pk = gen_keypair().0;
+        let ip_addr = "1.2.3.4".parse().unwrap();
+        let port = 12345;
+
+        let ping_id_1 = onion_announce.ping_id(time_1, pk, ip_addr, port);
+        let ping_id_2 = onion_announce.ping_id(time_2, pk, ip_addr, port);
+
+        assert_eq!(ping_id_1, ping_id_2);
+    }
+
+    #[test]
+    fn ping_id_depends_on_all_args() {
+        let onion_announce = OnionAnnounce::new(gen_keypair().0);
+
+        let time_1 = SystemTime::now();
+        let time_2 = time_1 + Duration::from_secs(PING_ID_TIMEOUT);
+
+        let pk_1 = gen_keypair().0;
+        let pk_2 = gen_keypair().0;
+
+        let ip_addr_1 = "1.2.3.4".parse().unwrap();
+        let ip_addr_2 = "3.4.5.6".parse().unwrap();
+
+        let port_1 = 12345;
+        let port_2 = 54321;
+
+        let ping_id = onion_announce.ping_id(time_1, pk_1, ip_addr_1, port_1);
+
+        let ping_id_1 = onion_announce.ping_id(time_1, pk_1, ip_addr_1, port_1);
+        let ping_id_2 = onion_announce.ping_id(time_2, pk_1, ip_addr_1, port_1);
+        let ping_id_3 = onion_announce.ping_id(time_1, pk_2, ip_addr_1, port_1);
+        let ping_id_4 = onion_announce.ping_id(time_1, pk_1, ip_addr_2, port_1);
+        let ping_id_5 = onion_announce.ping_id(time_1, pk_1, ip_addr_1, port_2);
+
+        assert_eq!(ping_id, ping_id_1);
+        assert!(ping_id != ping_id_2);
+        assert!(ping_id != ping_id_3);
+        assert!(ping_id != ping_id_4);
+        assert!(ping_id != ping_id_5);
+    }
+
+    fn create_random_entry() -> OnionAnnounceEntry {
+        let mut gen = StdGen::new(rand::thread_rng(), 1024);
+        OnionAnnounceEntry::new(
+            gen_keypair().0,
+            IpAddr::arbitrary(&mut gen),
+            u16::arbitrary(&mut gen),
+            OnionReturn {
+                nonce: gen_nonce(),
+                payload: vec![42; 42]
+            },
+            gen_keypair().0
+        )
+    }
+
+    #[test]
+    fn onion_announce_is_clonable() {
+        let dht_pk = gen_keypair().0;
+        let mut onion_announce = OnionAnnounce::new(dht_pk);
+        let entry = create_random_entry();
+        onion_announce.add_to_entries(entry);
+        let _cloned = onion_announce.clone();
+        // that's all.
+    }
+
+    #[test]
+    fn expired_entry_not_in_entries() {
+        let dht_pk = gen_keypair().0;
+        let mut onion_announce = OnionAnnounce::new(dht_pk);
+
+        let mut entry = create_random_entry();
+        let entry_pk = entry.pk;
+
+        // make entry timed out
+        entry.time -= Duration::from_secs(ONION_ANNOUNCE_TIMEOUT + 1);
+        onion_announce.entries.push(entry);
+
+        assert!(onion_announce.find_in_entries(entry_pk).is_none());
+    }
+
+    ////////////////////////////////////////////////////////////////////////////////////////
+    // Tests for OnionAnnounce::add_to_entries
+    #[test]
+    fn add_to_entries_when_limit_is_not_reached() {
+        let dht_pk = gen_keypair().0;
+        let mut onion_announce = OnionAnnounce::new(dht_pk);
+
+        let mut pks = Vec::new();
+
+        for _ in 0..ONION_ANNOUNCE_MAX_ENTRIES {
+            let entry = create_random_entry();
+            pks.push(entry.pk);
+            assert!(onion_announce.add_to_entries(entry).is_some());
+        }
+
+        // check that announce list contains all added entries
+        for pk in pks {
+            assert!(onion_announce.find_in_entries(pk).is_some());
+        }
+    }
+
+    #[test]
+    fn add_to_entries_should_update_existent_entry() {
+        let dht_pk = gen_keypair().0;
+        let mut onion_announce = OnionAnnounce::new(dht_pk);
+
+        let mut pks = Vec::new();
+
+        for _ in 0..ONION_ANNOUNCE_MAX_ENTRIES {
+            let entry = create_random_entry();
+            pks.push(entry.pk);
+            assert!(onion_announce.add_to_entries(entry).is_some());
+        }
+
+        // choose one of entries to update
+        let mut entry_to_update = onion_announce.entries[ONION_ANNOUNCE_MAX_ENTRIES / 2].clone();
+
+        entry_to_update.time += Duration::from_secs(7);
+        entry_to_update.ip_addr = "1.2.3.4".parse().unwrap();
+        entry_to_update.port = 12345;
+
+        // update entry
+        assert!(onion_announce.add_to_entries(entry_to_update.clone()).is_some());
+
+        assert_eq!(onion_announce.find_in_entries(entry_to_update.pk), Some(&entry_to_update));
+
+        // check that announce list contains all added entries
+        for pk in pks {
+            assert!(onion_announce.find_in_entries(pk).is_some());
+        }
+    }
+
+    #[test]
+    fn add_to_entries_should_replace_timed_out_entries() {
+        let dht_pk = gen_keypair().0;
+        let mut onion_announce = OnionAnnounce::new(dht_pk);
+
+        let mut pks = Vec::new();
+
+        for _ in 0..ONION_ANNOUNCE_MAX_ENTRIES {
+            let entry = create_random_entry();
+            pks.push(entry.pk);
+            assert!(onion_announce.add_to_entries(entry).is_some());
+        }
+
+        // make one of entries timed out
+        let timed_out_pk = onion_announce.entries[ONION_ANNOUNCE_MAX_ENTRIES / 2].pk;
+        onion_announce.entries[ONION_ANNOUNCE_MAX_ENTRIES / 2].time -= Duration::from_secs(ONION_ANNOUNCE_TIMEOUT + 1);
+
+        let entry = create_random_entry();
+        let entry_pk = entry.pk;
+        assert!(onion_announce.add_to_entries(entry).is_some());
+
+        // check that announce list contains new entry
+        assert!(onion_announce.find_in_entries(entry_pk).is_some());
+
+        // check that announce list contains all old entries except timed out
+        for pk in pks.into_iter().filter(|&pk| pk != timed_out_pk) {
+            assert!(onion_announce.find_in_entries(pk).is_some());
+        }
+    }
+
+    #[test]
+    fn add_to_entries_should_replace_the_farthest_entry() {
+        let dht_pk = PublicKey::from_slice(&[0; 32]).unwrap();
+        let mut onion_announce = OnionAnnounce::new(dht_pk);
+
+        // add one entry with farthest pk
+        let mut entry = create_random_entry();
+        entry.pk = PublicKey::from_slice(&[255; 32]).unwrap();
+        assert!(onion_announce.add_to_entries(entry).is_some());
+
+        let mut pks = Vec::new();
+
+        for _ in 0..ONION_ANNOUNCE_MAX_ENTRIES - 1 {
+            let entry = create_random_entry();
+            pks.push(entry.pk);
+            assert!(onion_announce.add_to_entries(entry).is_some());
+        }
+
+        // add new entry that should replace the farthest one
+        let entry = create_random_entry();
+        let entry_pk = entry.pk;
+        assert!(onion_announce.add_to_entries(entry).is_some());
+
+        // check that announce list contains new entry
+        assert!(onion_announce.find_in_entries(entry_pk).is_some());
+
+        // check that announce list contains all old entries except farthest
+        for pk in pks {
+            assert!(onion_announce.find_in_entries(pk).is_some());
+        }
+    }
+
+    #[test]
+    fn add_to_entries_should_should_not_add_the_farthest_entry() {
+        let dht_pk = PublicKey::from_slice(&[0; 32]).unwrap();
+        let mut onion_announce = OnionAnnounce::new(dht_pk);
+
+        let mut pks = Vec::new();
+
+        for _ in 0..ONION_ANNOUNCE_MAX_ENTRIES {
+            let entry = create_random_entry();
+            pks.push(entry.pk);
+            assert!(onion_announce.add_to_entries(entry).is_some());
+        }
+
+        // try to add new farthest entry
+        let mut entry = create_random_entry();
+        let entry_pk = PublicKey::from_slice(&[255; 32]).unwrap();
+        entry.pk = entry_pk;
+        assert!(onion_announce.add_to_entries(entry).is_none());
+
+        // check that announce list does not contain new entry
+        assert!(onion_announce.find_in_entries(entry_pk).is_none());
+
+        // check that announce list contains all old entries
+        for pk in pks {
+            assert!(onion_announce.find_in_entries(pk).is_some());
+        }
+    }
+
+    ////////////////////////////////////////////////////////////////////////////////////////
+    // Tests for OnionAnnounce::handle_announce_request
+    #[test]
+    fn handle_announce_failed_to_find_node() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let search_pk = gen_keypair().0;
+        let data_pk = gen_keypair().0;
+        let (packet_pk, packet_sk) = gen_keypair();
+        let shared_secret = precompute(&dht_pk, &packet_sk);
+
+        let mut onion_announce = OnionAnnounce::new(dht_pk);
+
+        // insert random entry
+        let entry = create_random_entry();
+        assert!(onion_announce.add_to_entries(entry).is_some());
+
+        // create request packet
+        let sendback_data = 42;
+        let payload = AnnounceRequestPayload {
+            ping_id: initial_ping_id(),
+            search_pk,
+            data_pk,
+            sendback_data
+        };
+        let inner = InnerAnnounceRequest::new(&shared_secret, &packet_pk, payload);
+        let onion_return = OnionReturn {
+            nonce: gen_nonce(),
+            payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
+        };
+        let request = AnnounceRequest {
+            inner,
+            onion_return
+        };
+
+        let kbucket = Kbucket::new(KBUCKET_BUCKETS, &dht_pk);
+
+        let addr = "127.0.0.1:12345".parse().unwrap();
+
+        let response = onion_announce.handle_announce_request(request, &dht_sk, &kbucket, addr).unwrap();
+
+        let response_payload = response.get_payload(&shared_secret).unwrap();
+
+        assert_eq!(response.sendback_data, sendback_data);
+        assert_eq!(response_payload.announce_status, AnnounceStatus::Failed);
+    }
+
+    #[test]
+    fn handle_announce_node_is_found() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let data_pk = gen_keypair().0;
+        let (packet_pk, packet_sk) = gen_keypair();
+        let shared_secret = precompute(&dht_pk, &packet_sk);
+
+        let mut onion_announce = OnionAnnounce::new(dht_pk);
+
+        // insert random entry
+        let entry = create_random_entry();
+        let search_pk = entry.pk;
+        let entry_data_pk = entry.data_pk;
+        assert!(onion_announce.add_to_entries(entry).is_some());
+
+        // create request packet
+        let sendback_data = 42;
+        let payload = AnnounceRequestPayload {
+            ping_id: initial_ping_id(),
+            search_pk,
+            data_pk,
+            sendback_data
+        };
+        let inner = InnerAnnounceRequest::new(&shared_secret, &packet_pk, payload);
+        let onion_return = OnionReturn {
+            nonce: gen_nonce(),
+            payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
+        };
+        let request = AnnounceRequest {
+            inner,
+            onion_return
+        };
+
+        let kbucket = Kbucket::new(KBUCKET_BUCKETS, &dht_pk);
+
+        let addr = "127.0.0.1:12345".parse().unwrap();
+
+        let response = onion_announce.handle_announce_request(request, &dht_sk, &kbucket, addr).unwrap();
+
+        let response_payload = response.get_payload(&shared_secret).unwrap();
+
+        assert_eq!(response.sendback_data, sendback_data);
+        assert_eq!(response_payload.announce_status, AnnounceStatus::Found);
+        assert_eq!(digest_as_pk(response_payload.ping_id_or_pk), entry_data_pk);
+    }
+
+    #[test]
+    fn handle_announce_successfully_announced() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let search_pk = gen_keypair().0;
+        let data_pk = gen_keypair().0;
+        let (packet_pk, packet_sk) = gen_keypair();
+        let shared_secret = precompute(&dht_pk, &packet_sk);
+
+        let mut onion_announce = OnionAnnounce::new(dht_pk);
+
+        // insert random entry
+        let entry = create_random_entry();
+        assert!(onion_announce.add_to_entries(entry).is_some());
+
+        let addr: SocketAddr = "127.0.0.1:12345".parse().unwrap();
+        let time = SystemTime::now();
+        let ping_id = onion_announce.ping_id(time, packet_pk, addr.ip(), addr.port());
+
+        // create request packet
+        let sendback_data = 42;
+        let payload = AnnounceRequestPayload {
+            ping_id,
+            search_pk,
+            data_pk,
+            sendback_data
+        };
+        let inner = InnerAnnounceRequest::new(&shared_secret, &packet_pk, payload);
+        let onion_return = OnionReturn {
+            nonce: gen_nonce(),
+            payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
+        };
+        let request = AnnounceRequest {
+            inner,
+            onion_return
+        };
+
+        let kbucket = Kbucket::new(KBUCKET_BUCKETS, &dht_pk);
+
+        let response = onion_announce.handle_announce_request(request, &dht_sk, &kbucket, addr).unwrap();
+
+        let response_payload = response.get_payload(&shared_secret).unwrap();
+
+        assert_eq!(response.sendback_data, sendback_data);
+        assert_eq!(response_payload.announce_status, AnnounceStatus::Announced);
+        assert!(onion_announce.find_in_entries(packet_pk).is_some());
+    }
+
+    #[test]
+    fn handle_announce_failed_to_find_ourselves_with_different_data_pk() { // weird case, should we remove it?
+        let (dht_pk, dht_sk) = gen_keypair();
+        let data_pk = gen_keypair().0;
+        let (packet_pk, packet_sk) = gen_keypair();
+        let shared_secret = precompute(&dht_pk, &packet_sk);
+
+        let mut onion_announce = OnionAnnounce::new(dht_pk);
+
+        // insert ourselves
+        let mut entry = create_random_entry();
+        entry.pk = packet_pk;
+        assert!(onion_announce.add_to_entries(entry).is_some());
+
+        // create request packet
+        let sendback_data = 42;
+        let payload = AnnounceRequestPayload {
+            ping_id: initial_ping_id(),
+            search_pk: packet_pk,
+            data_pk,
+            sendback_data
+        };
+        let inner = InnerAnnounceRequest::new(&shared_secret, &packet_pk, payload);
+        let onion_return = OnionReturn {
+            nonce: gen_nonce(),
+            payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
+        };
+        let request = AnnounceRequest {
+            inner,
+            onion_return
+        };
+
+        let kbucket = Kbucket::new(KBUCKET_BUCKETS, &dht_pk);
+
+        let addr = "127.0.0.1:12345".parse().unwrap();
+
+        let response = onion_announce.handle_announce_request(request, &dht_sk, &kbucket, addr).unwrap();
+
+        let response_payload = response.get_payload(&shared_secret).unwrap();
+
+        assert_eq!(response.sendback_data, sendback_data);
+        assert_eq!(response_payload.announce_status, AnnounceStatus::Failed);
+    }
+}
