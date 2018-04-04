@@ -27,11 +27,12 @@ This module works on top of other modules.
 use futures::{Stream, future, stream};
 use futures::sync::mpsc;
 use tokio_io::IoFuture;
+use parking_lot::RwLock;
 
 use std::io::{ErrorKind, Error};
 use std::net::SocketAddr;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use toxcore::crypto_core::*;
 use toxcore::dht::packet::*;
@@ -114,7 +115,7 @@ impl Server {
     }
     /// get client from cache
     pub fn get_client(&self, pk: &PublicKey) -> Option<Client> {
-        let state = self.state.read().expect("Failed to obtain ServerState lock");
+        let state = self.state.read();
         // Client entry is inserted before sending *Request.
         if let Some(client) = state.peers_cache.get(pk) {
             Some(client.clone())
@@ -125,7 +126,7 @@ impl Server {
     }
     /// send PingRequest to all peer in kbucket    
     pub fn send_pings(&self) -> IoFuture<()> {
-        let mut state = self.state.write().expect("Failed to obtain ServerState lock");
+        let mut state = self.state.write();
         let kbucket_c = state.kbucket.iter();
 
         let ping_sender = kbucket_c.map(move |peer| {
@@ -141,7 +142,7 @@ impl Server {
     }
     /// send NodesRequest to random peer at every 20 seconds
     pub fn send_nodes_req(&self, friend_pk: PublicKey) -> IoFuture<()> {
-        let mut state = self.state.write().expect("Failed to obtain ServerState lock");
+        let mut state = self.state.write();
         if let Some(peer) = state.kbucket.get_random_node() {
             let mut client = self.create_client(&peer.saddr, peer.pk);
             let result = client.send_nodes_request(friend_pk);
@@ -156,7 +157,7 @@ impl Server {
     pub fn send_nat_ping_req(&self, peer: PackedNode, friend_pk: PublicKey) -> IoFuture<()> {
         let mut client = self.create_client(&peer.saddr, peer.pk);
         let result = client.send_nat_ping_request(friend_pk);
-        let mut state = self.state.write().expect("Failed to obtain ServerState lock");
+        let mut state = self.state.write();
         state.peers_cache.insert(peer.pk, client);
         result
     }
@@ -274,7 +275,7 @@ impl Server {
                     saddr: client.addr,
                     pk: request.pk,
                 };
-                let mut state = self.state.write().expect("Failed to obtain ServerState lock");
+                let mut state = self.state.write();
                 state.kbucket.try_add(&packed_node);
                 Box::new( future::ok(()) )
             }
@@ -297,7 +298,7 @@ impl Server {
     */
     fn handle_nodes_req(&self, client: Client, request: NodesRequest) -> IoFuture<()> {
         if let Ok(payload) = request.get_payload(&self.sk) {
-            let state = self.state.read().expect("Failed to obtain ServerState lock");
+            let state = self.state.read();
             let close_nodes = state.kbucket.get_closest(&self.pk);
             if !close_nodes.is_empty() {
                 let resp_payload = NodesResponsePayload {
@@ -333,7 +334,7 @@ impl Server {
                 )))
             }
             if client.ping_id == payload.id {
-                let mut state = self.state.write().expect("Failed to obtain ServerState lock");
+                let mut state = self.state.write();
                 for node in &payload.nodes {
                     state.kbucket.try_add(node);
                 }
@@ -365,7 +366,7 @@ impl Server {
             client.send_nat_ping_response(&request.spk, resp_payload)
         // search kbucket to find target peer
         } else {
-            let state = self.state.read().expect("Failed to obtain ServerState lock");
+            let state = self.state.read();
             if let Some(addr) = state.kbucket.get_node(&request.rpk) {
                 client.send_nat_ping_packet(&addr, request.clone())
             }
@@ -397,7 +398,7 @@ impl Server {
             }
         // search kbucket to find target peer
         } else {
-            let state = self.state.read().expect("Failed to obtain ServerState lock");
+            let state = self.state.read();
             if let Some(addr) = state.kbucket.get_node(&request.rpk) {
                 client.send_nat_ping_packet(&addr, request.clone())
             }
@@ -411,7 +412,7 @@ impl Server {
     and send back it to the peer.
     */
     fn handle_lan_discovery(&self, mut client: Client, packet: LanDiscovery) -> IoFuture<()> {
-        let mut state = self.state.write().expect("Failed to obtain ServerState lock");
+        let mut state = self.state.write();
         let result = client.send_nodes_request(packet.pk);
         state.peers_cache.insert(packet.pk, client);
         result
@@ -436,7 +437,7 @@ impl Server {
     }
     /// add PackedNode object to kbucket as a thread-safe manner
     pub fn try_add_to_kbucket(&self, pn: &PackedNode) -> bool {
-        let mut state = self.state.write().expect("Failed to obtain ServerState lock");
+        let mut state = self.state.write();
         state.kbucket.try_add(pn)
     }
 }
@@ -464,23 +465,23 @@ mod tests {
         (alice, precomp, bob_pk, bob_sk, rx, addr)
     }
     fn clear_kbucket(alice: &Server) {
-        let mut state = alice.state.write().expect("Failed to obtain ServerState lock");
+        let mut state = alice.state.write();
         state.kbucket = Kbucket::new(KBUCKET_BUCKETS, &alice.pk);
     }
     fn clear_peers_cache(alice: &Server) {
-        let mut state = alice.state.write().expect("Failed to obtain ServerState lock");
+        let mut state = alice.state.write();
         state.peers_cache.clear();
     }
     fn add_to_peers_cache(alice: &Server, pk: PublicKey, client: &Client) {
-        let mut state = alice.state.write().expect("Failed to obtain ServerState lock");
+        let mut state = alice.state.write();
         state.peers_cache.insert(pk, client.clone());
     }
     fn is_pk_in_kbucket(alice: &Server, pk: PublicKey) -> bool {
-        let state = alice.state.read().expect("Failed to obtain ServerState lock");
+        let state = alice.state.read();
         state.kbucket.contains(&pk)
     }
     fn is_kbucket_eq(alice: &Server, kbuc: Kbucket) {
-        let state = alice.state.read().expect("Failed to obtain ServerState lock");
+        let state = alice.state.read();
         assert_eq!(state.kbucket, kbuc);
     }
     #[test]

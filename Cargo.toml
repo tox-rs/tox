@@ -40,6 +40,7 @@ tokio-io = "0.1"
 nom = "3.2"
 cookie-factory = "0.2.2"
 get_if_addrs = "0.5"
+parking_lot = "0.5"
 
 [dev-dependencies]
 env_logger = "0.5"
