@@ -33,10 +33,11 @@ use toxcore::tcp::packet::*;
 use std::io::{Error, ErrorKind};
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use futures::{Sink, Stream, Future, future, stream};
 use futures::sync::mpsc;
+use parking_lot::RwLock;
 
 use tokio_io::IoFuture;
 
@@ -82,7 +83,7 @@ impl Server {
     /** Insert the client into connected_clients. Do nothing else.
     */
     pub fn insert(&self, client: Client) {
-        let mut state = self.state.write().expect("Failed to obtain ServerState lock");
+        let mut state = self.state.write();
         state.keys_by_addr
             .insert((client.ip_addr(), client.port()), client.pk());
         state.connected_clients
@@ -109,7 +110,7 @@ impl Server {
     /** Send `OnionResponse` packet to the client by it's `std::net::IpAddr`.
     */
     pub fn handle_udp_onion_response(&self, ip_addr: IpAddr, port: u16, data: Vec<u8>) -> IoFuture<()> {
-        let state = self.state.read().expect("Failed to obtain ServerState lock");
+        let state = self.state.read();
         if let Some(client) = state.keys_by_addr.get(&(ip_addr, port)).and_then(|pk| state.connected_clients.get(pk)) {
             client.send_onion_response(data)
         } else {
@@ -124,7 +125,7 @@ impl Server {
     DisconnectNotification.
     */
     pub fn shutdown_client(&self, pk: &PublicKey) -> IoFuture<()> {
-        let mut state = self.state.write().expect("Failed to obtain ServerState lock");
+        let mut state = self.state.write();
         let client_a = if let Some(client_a) = state.connected_clients.remove(pk) {
             client_a
         } else {
@@ -158,7 +159,7 @@ impl Server {
     // Here start the impl of `handle_***` methods
 
     fn handle_route_request(&self, pk: &PublicKey, packet: RouteRequest) -> IoFuture<()> {
-        let mut state = self.state.write().expect("Failed to obtain ServerState lock");
+        let mut state = self.state.write();
         let b_id_in_client_a = {
             // check if client was already linked to pk
             if let Some(client_a) = state.connected_clients.get_mut(pk) {
@@ -226,7 +227,7 @@ impl Server {
                     "DisconnectNotification.connection_id < 16"
             )))
         }
-        let mut state = self.state.write().expect("Failed to obtain ServerState lock");
+        let mut state = self.state.write();
         let client_b_pk = {
             if let Some(client_a) = state.connected_clients.get_mut(pk) {
                 // unlink other_pk from client.links if any
@@ -269,7 +270,7 @@ impl Server {
                     "PingRequest.ping_id == 0"
             )))
         }
-        let state = self.state.read().expect("Failed to obtain ServerState lock");
+        let state = self.state.read();
         if let Some(client_a) = state.connected_clients.get(pk) {
             client_a.send_pong_response(packet.ping_id)
         } else {
@@ -286,7 +287,7 @@ impl Server {
                     "PongResponse.ping_id == 0"
             )))
         }
-        let state = self.state.read().expect("Failed to obtain ServerState lock");
+        let state = self.state.read();
         if let Some(client_a) = state.connected_clients.get(pk) {
             if packet.ping_id == client_a.ping_id() {
                 Box::new( future::ok(()) )
@@ -309,7 +310,7 @@ impl Server {
                     "OobSend wrong data length"
             )))
         }
-        let state = self.state.read().expect("Failed to obtain ServerState lock");
+        let state = self.state.read();
         if let Some(client_b) = state.connected_clients.get(&packet.destination_pk) {
             client_b.send_oob(pk, packet.data)
         } else {
@@ -359,7 +360,7 @@ impl Server {
                     "Data.connection_id < 16"
             )))
         }
-        let state = self.state.read().expect("Failed to obtain ServerState lock");
+        let state = self.state.read();
         let client_b_pk = {
             if let Some(client_a) = state.connected_clients.get(pk) {
                 if let Some(client_b_pk) = client_a.get_link(packet.connection_id) {
