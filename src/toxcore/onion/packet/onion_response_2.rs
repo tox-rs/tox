@@ -25,8 +25,6 @@ use super::*;
 
 use toxcore::binary_io::*;
 
-use nom::rest;
-
 /** Second onion response packet. It's sent back from the third to the second node
 from onion chain.
 
@@ -47,15 +45,15 @@ pub struct OnionResponse2 {
     /// Return address encrypted by the second node from onion chain
     pub onion_return: OnionReturn,
     /// Encrypted payload
-    pub payload: Vec<u8>
+    pub payload: InnerOnionResponse
 }
 
 impl FromBytes for OnionResponse2 {
     named!(from_bytes<OnionResponse2>, do_parse!(
         tag!(&[0x8d][..]) >>
         onion_return: flat_map!(take!(ONION_RETURN_2_SIZE), OnionReturn::from_bytes) >>
-        payload: rest >>
-        (OnionResponse2 { onion_return, payload: payload.to_vec() })
+        payload: call!(InnerOnionResponse::from_bytes) >>
+        (OnionResponse2 { onion_return, payload })
     ));
 }
 
@@ -64,7 +62,7 @@ impl ToBytes for OnionResponse2 {
         do_gen!(buf,
             gen_be_u8!(0x8d) >>
             gen_call!(|buf, onion_return| OnionReturn::to_bytes(onion_return, buf), &self.onion_return) >>
-            gen_slice!(self.payload)
+            gen_call!(|buf, payload| InnerOnionResponse::to_bytes(payload, buf), &self.payload)
         )
     }
 }
@@ -82,7 +80,11 @@ mod tests {
                 nonce: gen_nonce(),
                 payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
             },
-            payload: vec![42, 123]
+            payload: InnerOnionResponse::AnnounceResponse(AnnounceResponse {
+                sendback_data: 12345,
+                nonce: gen_nonce(),
+                payload: vec![42, 123]
+            })
         }
     );
 }
