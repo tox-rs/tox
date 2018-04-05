@@ -90,16 +90,16 @@ fn main() {
     let server_obj_c = server_obj.clone();
     let handler = stream.for_each(move |(packet, addr)| {
         println!("recv = {:?}", packet.clone());
-        let _ = server_obj_c.handle_packet((packet, addr));
-        Ok(())
+        server_obj_c.handle_packet((packet, addr)).or_else(|err| {
+            error!("failed to handle packet: {:?}", err);
+            future::ok(())
         })
-        .map_err(|err| {
-            // All tasks must have an `Error` type of `()`. This forces error
-            // handling and helps avoid silencing failures.
-            //
-            error!("packet receive error = {:?}", err);
-            Error::new(ErrorKind::Other, "udp receive error")
-        });
+    }).map_err(|err| {
+        // All tasks must have an `Error` type of `()`. This forces error
+        // handling and helps avoid silencing failures.
+        error!("packet receive error = {:?}", err);
+        Error::new(ErrorKind::Other, "udp receive error")
+    });
 
     let writer = rx
         .map_err(|_| Error::new(ErrorKind::Other, "rx error"))
