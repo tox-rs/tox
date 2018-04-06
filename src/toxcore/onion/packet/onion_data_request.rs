@@ -114,7 +114,7 @@ pub struct OnionDataRequest {
 
 impl FromBytes for OnionDataRequest {
     named!(from_bytes<OnionDataRequest>, do_parse!(
-        rest_len: rest_len >>
+        rest_len: verify!(rest_len, |len| len <= ONION_MAX_PACKET_SIZE) >>
         inner: cond_reduce!(
             rest_len >= ONION_RETURN_3_SIZE,
             flat_map!(take!(rest_len - ONION_RETURN_3_SIZE), InnerOnionDataRequest::from_bytes)

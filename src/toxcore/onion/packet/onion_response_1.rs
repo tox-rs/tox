@@ -50,6 +50,7 @@ pub struct OnionResponse1 {
 
 impl FromBytes for OnionResponse1 {
     named!(from_bytes<OnionResponse1>, do_parse!(
+        verify!(rest_len, |len| len <= ONION_MAX_PACKET_SIZE) >>
         tag!(&[0x8e][..]) >>
         onion_return: flat_map!(take!(ONION_RETURN_1_SIZE), OnionReturn::from_bytes) >>
         payload: call!(InnerOnionResponse::from_bytes) >>
