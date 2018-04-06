@@ -23,6 +23,8 @@
 
 mod announce_request;
 mod announce_response;
+mod inner_onion_request;
+mod inner_onion_response;
 mod onion_data_request;
 mod onion_data_response;
 mod onion_request_0;
@@ -34,6 +36,8 @@ mod onion_response_3;
 
 pub use self::announce_request::*;
 pub use self::announce_response::*;
+pub use self::inner_onion_request::*;
+pub use self::inner_onion_response::*;
 pub use self::onion_data_request::*;
 pub use self::onion_data_response::*;
 pub use self::onion_request_0::*;

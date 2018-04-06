@@ -198,21 +198,33 @@ mod tests {
                     nonce: gen_nonce(),
                     payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
                 },
-                payload: vec![42, 123]
+                payload: InnerOnionResponse::AnnounceResponse(AnnounceResponse {
+                    sendback_data: 12345,
+                    nonce: gen_nonce(),
+                    payload: vec![42, 123]
+                })
             }),
             DhtPacket::OnionResponse2(OnionResponse2 {
                 onion_return: OnionReturn {
                     nonce: gen_nonce(),
                     payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
                 },
-                payload: vec![42, 123]
+                payload: InnerOnionResponse::AnnounceResponse(AnnounceResponse {
+                    sendback_data: 12345,
+                    nonce: gen_nonce(),
+                    payload: vec![42, 123]
+                })
             }),
             DhtPacket::OnionResponse1(OnionResponse1 {
                 onion_return: OnionReturn {
                     nonce: gen_nonce(),
                     payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
                 },
-                payload: vec![42, 123]
+                payload: InnerOnionResponse::AnnounceResponse(AnnounceResponse {
+                    sendback_data: 12345,
+                    nonce: gen_nonce(),
+                    payload: vec![42, 123]
+                })
             }),
             DhtPacket::BootstrapInfo(BootstrapInfo {
                 version: 42,

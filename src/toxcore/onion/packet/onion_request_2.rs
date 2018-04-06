@@ -25,8 +25,6 @@ use super::*;
 
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
-use toxcore::onion::packet::announce_request::*;
-use toxcore::onion::packet::onion_data_request::*;
 
 use std::io::{Error, ErrorKind};
 
@@ -179,36 +177,6 @@ impl ToBytes for OnionRequest2Payload {
     }
 }
 
-/** Onion requests that can be enclosed in onion packets and sent through onion
-path.
-
-Onion allows only two types of packets to be sent as a request through onion
-paths: `AnnounceRequest` and `OnionDataRequest`.
-*/
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum InnerOnionRequest {
-    /// [`InnerAnnounceRequest`](./struct.InnerAnnounceRequest.html) structure.
-    InnerAnnounceRequest(InnerAnnounceRequest),
-    /// [`InnerOnionDataRequest`](./struct.InnerOnionDataRequest.html) structure.
-    InnerOnionDataRequest(InnerOnionDataRequest)
-}
-
-impl ToBytes for InnerOnionRequest {
-    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        match *self {
-            InnerOnionRequest::InnerAnnounceRequest(ref inner) => inner.to_bytes(buf),
-            InnerOnionRequest::InnerOnionDataRequest(ref inner) => inner.to_bytes(buf),
-        }
-    }
-}
-
-impl FromBytes for InnerOnionRequest {
-    named!(from_bytes<InnerOnionRequest>, alt!(
-        map!(InnerAnnounceRequest::from_bytes, InnerOnionRequest::InnerAnnounceRequest) |
-        map!(InnerOnionDataRequest::from_bytes, InnerOnionRequest::InnerOnionDataRequest)
-    ));
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,25 +210,6 @@ mod tests {
                 payload: vec![42, 123]
             })
         }
-    );
-
-    encode_decode_test!(
-        inner_announce_request_encode_decode,
-        InnerOnionRequest::InnerAnnounceRequest(InnerAnnounceRequest {
-            nonce: gen_nonce(),
-            pk: gen_keypair().0,
-            payload: vec![42, 123]
-        })
-    );
-
-    encode_decode_test!(
-        inner_onion_data_request_encode_decode,
-        InnerOnionRequest::InnerOnionDataRequest(InnerOnionDataRequest {
-            destination_pk: gen_keypair().0,
-            nonce: gen_nonce(),
-            temporary_pk: gen_keypair().0,
-            payload: vec![42, 123]
-        })
     );
 
     #[test]
