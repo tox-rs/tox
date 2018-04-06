@@ -39,6 +39,7 @@ use toxcore::dht::packet::*;
 use toxcore::dht::packed_node::*;
 use toxcore::dht::kbucket::*;
 use toxcore::dht::client::*;
+use toxcore::onion::packet::*;
 
 /// Shorthand for the transmit half of the message channel.
 type Tx = mpsc::UnboundedSender<(DhtPacket, SocketAddr)>;
@@ -231,6 +232,18 @@ impl Server {
                 debug!("Received LanDiscovery");
                 let client = self.create_client(&addr, packet.pk);
                 self.handle_lan_discovery(client, packet)
+            },
+            DhtPacket::OnionRequest0(packet) => {
+                debug!("Received OnionRequest0");
+                self.handle_onion_request_0(packet, addr)
+            },
+            DhtPacket::OnionRequest1(packet) => {
+                debug!("Received OnionRequest1");
+                self.handle_onion_request_1(packet, addr)
+            },
+            DhtPacket::OnionRequest2(packet) => {
+                debug!("Received OnionRequest2");
+                self.handle_onion_request_2(packet, addr)
             },
             ref p => {
                 error!("received packet are not handled {:?}", p);
@@ -437,6 +450,94 @@ impl Server {
         let addr: SocketAddr = "[::1]:33445".parse().unwrap(); // 33445 is default port for tox
         let client = self.create_client(&addr, self.pk);
         client.send_lan_discovery_ipv6()
+    }
+    /**
+    handle received OnionRequest0 packet, then create OnionRequest1 packet
+    and send it to the next peer.
+    */
+    pub fn handle_onion_request_0(&self, packet: OnionRequest0, addr: SocketAddr) -> IoFuture<()> {
+        let onion_symmetric_key = self.onion_symmetric_key.read();
+        let shared_secret = precompute(&packet.temporary_pk, &self.sk);
+        if let Ok(payload) = packet.get_payload(&shared_secret) {
+            let onion_return = OnionReturn::new(
+                &onion_symmetric_key,
+                &IpPort::from_saddr(addr),
+                None // no previous onion return
+            );
+            let next_packet = DhtPacket::OnionRequest1(OnionRequest1 {
+                nonce: packet.nonce,
+                temporary_pk: payload.temporary_pk,
+                payload: payload.inner,
+                onion_return
+            });
+            // TODO: get rid of this client
+            self.create_client(&addr, packet.temporary_pk).send_to(payload.ip_port.to_saddr(), next_packet)
+        } else {
+            Box::new( future::err(
+                Error::new(ErrorKind::Other,
+                    "get_payload() fail upon OnionRequest0"
+            )))
+        }
+    }
+    /**
+    handle received OnionRequest1 packet, then create OnionRequest2 packet
+    and send it to the next peer.
+    */
+    pub fn handle_onion_request_1(&self, packet: OnionRequest1, addr: SocketAddr) -> IoFuture<()> {
+        let onion_symmetric_key = self.onion_symmetric_key.read();
+        let shared_secret = precompute(&packet.temporary_pk, &self.sk);
+        if let Ok(payload) = packet.get_payload(&shared_secret) {
+            let onion_return = OnionReturn::new(
+                &onion_symmetric_key,
+                &IpPort::from_saddr(addr),
+                Some(&packet.onion_return)
+            );
+            let next_packet = DhtPacket::OnionRequest2(OnionRequest2 {
+                nonce: packet.nonce,
+                temporary_pk: payload.temporary_pk,
+                payload: payload.inner,
+                onion_return
+            });
+            // TODO: get rid of this client
+            self.create_client(&addr, packet.temporary_pk).send_to(payload.ip_port.to_saddr(), next_packet)
+        } else {
+            Box::new( future::err(
+                Error::new(ErrorKind::Other,
+                    "get_payload() fail upon OnionRequest1"
+            )))
+        }
+    }
+    /**
+    handle received OnionRequest2 packet, then create AnnounceRequest
+    or OnionDataRequest packet and send it to the next peer.
+    */
+    pub fn handle_onion_request_2(&self, packet: OnionRequest2, addr: SocketAddr) -> IoFuture<()> {
+        let onion_symmetric_key = self.onion_symmetric_key.read();
+        let shared_secret = precompute(&packet.temporary_pk, &self.sk);
+        if let Ok(payload) = packet.get_payload(&shared_secret) {
+            let onion_return = OnionReturn::new(
+                &onion_symmetric_key,
+                &IpPort::from_saddr(addr),
+                Some(&packet.onion_return)
+            );
+            let next_packet = match payload.inner {
+                InnerOnionRequest::InnerAnnounceRequest(inner) => DhtPacket::AnnounceRequest(AnnounceRequest {
+                    inner,
+                    onion_return
+                }),
+                InnerOnionRequest::InnerOnionDataRequest(inner) => DhtPacket::OnionDataRequest(OnionDataRequest {
+                    inner,
+                    onion_return
+                }),
+            };
+            // TODO: get rid of this client
+            self.create_client(&addr, packet.temporary_pk).send_to(payload.ip_port.to_saddr(), next_packet)
+        } else {
+            Box::new( future::err(
+                Error::new(ErrorKind::Other,
+                    "get_payload() fail upon OnionRequest2"
+            )))
+        }
     }
     /// refresh onion symmetric key to enforce onion paths expiration
     pub fn refresh_onion_key(&self) {
