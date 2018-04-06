@@ -26,8 +26,8 @@ This module works on top of other modules.
 
 use futures::{Stream, future, stream};
 use futures::sync::mpsc;
-use tokio_io::IoFuture;
 use parking_lot::RwLock;
+use tokio_io::IoFuture;
 
 use std::io::{ErrorKind, Error};
 use std::net::SocketAddr;
@@ -78,6 +78,8 @@ pub struct Server {
     pub tx: Tx,
     // struct to hold info of server states.
     state: Arc<RwLock<ServerState>>,
+    // symmetric key used for onion return encryption
+    onion_symmetric_key: Arc<RwLock<PrecomputedKey>>,
 }
 
 #[derive(Debug)]
@@ -105,6 +107,7 @@ impl Server {
                 peers_cache: HashMap::new(),
                 kbucket,
             })),
+            onion_symmetric_key: Arc::new(RwLock::new(new_symmetric_key())),
         }
     }
 
@@ -434,6 +437,10 @@ impl Server {
         let addr: SocketAddr = "[::1]:33445".parse().unwrap(); // 33445 is default port for tox
         let client = self.create_client(&addr, self.pk);
         client.send_lan_discovery_ipv6()
+    }
+    /// refresh onion symmetric key to enforce onion paths expiration
+    pub fn refresh_onion_key(&self) {
+        *self.onion_symmetric_key.write() = new_symmetric_key();
     }
     /// add PackedNode object to kbucket as a thread-safe manner
     pub fn try_add_to_kbucket(&self, pn: &PackedNode) -> bool {
