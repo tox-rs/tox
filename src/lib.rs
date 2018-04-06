@@ -43,7 +43,6 @@ Repo: https://github.com/tox-rs/tox
 extern crate bytes;
 extern crate byteorder;
 extern crate futures;
-extern crate futures_timer;
 #[macro_use]
 extern crate log;
 #[macro_use]
@@ -60,7 +59,6 @@ extern crate tokio;
 extern crate tokio_io;
 extern crate get_if_addrs;
 extern crate parking_lot;
-
 
 // TODO: refactor macros
 #[cfg(test)]
