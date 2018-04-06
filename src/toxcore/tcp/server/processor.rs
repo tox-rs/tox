@@ -37,21 +37,21 @@ use std::io::{Error, ErrorKind};
     and shutdown the connection gracefully
 */
 pub struct ServerProcessor {
-    /// Push all `Packet`'s received via network from client into this channel
-    pub to_server_tx: mpsc::UnboundedSender<Packet>,
-    /// Send all `Packet`'s from this channel to client via network
+    /// Send all `Packet`'s received from client to server
+    pub from_client_tx: mpsc::UnboundedSender<Packet>,
+    /// Client is notified with each packets of type `Packet`
     pub to_client_rx: mpsc::UnboundedReceiver<Packet>,
+
     /// Run this future to process connection
     pub processor: IoFuture<()>
 }
+
 
 impl ServerProcessor {
     /** Create `ServerProcessor` for the given server and connection
     */
     pub fn create(server: Server, client_pk: PublicKey, addr: IpAddr, port: u16) -> ServerProcessor {
-        // Push all `Packet`'s received via network from client into this channel
-        let (to_server_tx, to_server_rx) = mpsc::unbounded();
-        // Send all `Packet`'s from this channel to client via network
+        let (from_client_tx, from_client_rx) = mpsc::unbounded();
         let (to_client_tx, to_client_rx) = mpsc::unbounded();
 
         server.insert(Client::new(to_client_tx, &client_pk, addr, port));
@@ -59,7 +59,7 @@ impl ServerProcessor {
         let client_pk_c = client_pk.clone();
         let server_c = server.clone();
         // processor = for each Packet from client process it
-        let processor = to_server_rx
+        let processor = from_client_rx
             .map_err(|()| Error::from(ErrorKind::UnexpectedEof))
             .for_each(move |packet| {
                 debug!("Handle {:?} => {:?}", client_pk_c, packet);
@@ -78,6 +78,6 @@ impl ServerProcessor {
             });
 
         let processor = Box::new(processor);
-        ServerProcessor { to_server_tx, to_client_rx, processor }
+        ServerProcessor { from_client_tx, to_client_rx, processor }
     }
 }

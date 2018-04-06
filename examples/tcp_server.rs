@@ -85,7 +85,7 @@ fn main() {
         let process = register_client.and_then(move |(socket, channel, client_pk)| {
             let secure_socket = socket.framed(codec::Codec::new(channel));
             let (to_client, from_client) = secure_socket.split();
-            let ServerProcessor { to_server_tx, to_client_rx, processor } =
+            let ServerProcessor { from_client_tx, to_client_rx, processor } =
                 ServerProcessor::create(
                     server_inner_c,
                     client_pk.clone(),
@@ -110,7 +110,7 @@ fn main() {
 
             // reader = for each Packet from client send it to server processor
             let reader = from_client
-                .forward(to_server_tx
+                .forward(from_client_tx
                     .sink_map_err(|e|
                         Error::new(ErrorKind::Other,
                             format!("Could not forward message from client to server {:?}", e))
