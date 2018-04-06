@@ -245,6 +245,18 @@ impl Server {
                 debug!("Received OnionRequest2");
                 self.handle_onion_request_2(packet, addr)
             },
+            DhtPacket::OnionResponse3(packet) => {
+                debug!("Received OnionResponse3");
+                self.handle_onion_response_3(packet)
+            },
+            DhtPacket::OnionResponse2(packet) => {
+                debug!("Received OnionResponse2");
+                self.handle_onion_response_2(packet)
+            },
+            DhtPacket::OnionResponse1(packet) => {
+                debug!("Received OnionResponse1");
+                self.handle_onion_response_1(packet)
+            },
             ref p => {
                 error!("received packet are not handled {:?}", p);
                 Box::new( future::err(
@@ -536,6 +548,67 @@ impl Server {
             Box::new( future::err(
                 Error::new(ErrorKind::Other,
                     "get_payload() fail upon OnionRequest2"
+            )))
+        }
+    }
+    /**
+    handle received OnionResponse3 packet, then create OnionResponse2 packet
+    and send it to the next peer which address is stored in encrypted onion return.
+    */
+    pub fn handle_onion_response_3(&self, packet: OnionResponse3) -> IoFuture<()> {
+        let onion_symmetric_key = self.onion_symmetric_key.read();
+        if let Ok((ip_port, Some(next_onion_return))) = packet.onion_return.get_payload(&onion_symmetric_key) {
+            let next_packet = DhtPacket::OnionResponse2(OnionResponse2 {
+                onion_return: next_onion_return,
+                payload: packet.payload
+            });
+            // TODO: get rid of this client
+            self.create_client(&ip_port.to_saddr(), gen_keypair().0).send_to(ip_port.to_saddr(), next_packet)
+        } else {
+            Box::new( future::err(
+                Error::new(ErrorKind::Other,
+                    "get_payload() fail upon OnionResponse3"
+            )))
+        }
+    }
+    /**
+    handle received OnionResponse2 packet, then create OnionResponse1 packet
+    and send it to the next peer which address is stored in encrypted onion return.
+    */
+    pub fn handle_onion_response_2(&self, packet: OnionResponse2) -> IoFuture<()> {
+        let onion_symmetric_key = self.onion_symmetric_key.read();
+        if let Ok((ip_port, Some(next_onion_return))) = packet.onion_return.get_payload(&onion_symmetric_key) {
+            let next_packet = DhtPacket::OnionResponse1(OnionResponse1 {
+                onion_return: next_onion_return,
+                payload: packet.payload
+            });
+            // TODO: get rid of this client
+            self.create_client(&ip_port.to_saddr(), gen_keypair().0).send_to(ip_port.to_saddr(), next_packet)
+        } else {
+            Box::new( future::err(
+                Error::new(ErrorKind::Other,
+                    "get_payload() fail upon OnionResponse2"
+            )))
+        }
+    }
+    /**
+    handle received OnionResponse1 packet, then create AnnounceResponse
+    or OnionDataResponse packet and send it to the next peer which address
+    is stored in encrypted onion return.
+    */
+    pub fn handle_onion_response_1(&self, packet: OnionResponse1) -> IoFuture<()> {
+        let onion_symmetric_key = self.onion_symmetric_key.read();
+        if let Ok((ip_port, None)) = packet.onion_return.get_payload(&onion_symmetric_key) {
+            let next_packet = match packet.payload {
+                InnerOnionResponse::AnnounceResponse(inner) => DhtPacket::AnnounceResponse(inner),
+                InnerOnionResponse::OnionDataResponse(inner) => DhtPacket::OnionDataResponse(inner),
+            };
+            // TODO: get rid of this client
+            self.create_client(&ip_port.to_saddr(), gen_keypair().0).send_to(ip_port.to_saddr(), next_packet)
+        } else {
+            Box::new( future::err(
+                Error::new(ErrorKind::Other,
+                    "get_payload() fail upon OnionResponse1"
             )))
         }
     }
