@@ -26,8 +26,8 @@ This module works on top of other modules.
 
 use futures::{Stream, future, stream};
 use futures::sync::mpsc;
-use tokio_io::IoFuture;
 use parking_lot::RwLock;
+use tokio_io::IoFuture;
 
 use std::io::{ErrorKind, Error};
 use std::net::SocketAddr;
@@ -39,6 +39,7 @@ use toxcore::dht::packet::*;
 use toxcore::dht::packed_node::*;
 use toxcore::dht::kbucket::*;
 use toxcore::dht::client::*;
+use toxcore::onion::packet::*;
 
 /// Shorthand for the transmit half of the message channel.
 type Tx = mpsc::UnboundedSender<(DhtPacket, SocketAddr)>;
@@ -78,6 +79,8 @@ pub struct Server {
     pub tx: Tx,
     // struct to hold info of server states.
     state: Arc<RwLock<ServerState>>,
+    // symmetric key used for onion return encryption
+    onion_symmetric_key: Arc<RwLock<PrecomputedKey>>,
 }
 
 #[derive(Debug)]
@@ -105,6 +108,7 @@ impl Server {
                 peers_cache: HashMap::new(),
                 kbucket,
             })),
+            onion_symmetric_key: Arc::new(RwLock::new(new_symmetric_key())),
         }
     }
 
@@ -228,6 +232,30 @@ impl Server {
                 debug!("Received LanDiscovery");
                 let client = self.create_client(&addr, packet.pk);
                 self.handle_lan_discovery(client, packet)
+            },
+            DhtPacket::OnionRequest0(packet) => {
+                debug!("Received OnionRequest0");
+                self.handle_onion_request_0(packet, addr)
+            },
+            DhtPacket::OnionRequest1(packet) => {
+                debug!("Received OnionRequest1");
+                self.handle_onion_request_1(packet, addr)
+            },
+            DhtPacket::OnionRequest2(packet) => {
+                debug!("Received OnionRequest2");
+                self.handle_onion_request_2(packet, addr)
+            },
+            DhtPacket::OnionResponse3(packet) => {
+                debug!("Received OnionResponse3");
+                self.handle_onion_response_3(packet)
+            },
+            DhtPacket::OnionResponse2(packet) => {
+                debug!("Received OnionResponse2");
+                self.handle_onion_response_2(packet)
+            },
+            DhtPacket::OnionResponse1(packet) => {
+                debug!("Received OnionResponse1");
+                self.handle_onion_response_1(packet)
             },
             ref p => {
                 error!("received packet are not handled {:?}", p);
@@ -435,6 +463,159 @@ impl Server {
         let client = self.create_client(&addr, self.pk);
         client.send_lan_discovery_ipv6()
     }
+    /**
+    handle received OnionRequest0 packet, then create OnionRequest1 packet
+    and send it to the next peer.
+    */
+    pub fn handle_onion_request_0(&self, packet: OnionRequest0, addr: SocketAddr) -> IoFuture<()> {
+        let onion_symmetric_key = self.onion_symmetric_key.read();
+        let shared_secret = precompute(&packet.temporary_pk, &self.sk);
+        if let Ok(payload) = packet.get_payload(&shared_secret) {
+            let onion_return = OnionReturn::new(
+                &onion_symmetric_key,
+                &IpPort::from_saddr(addr),
+                None // no previous onion return
+            );
+            let next_packet = DhtPacket::OnionRequest1(OnionRequest1 {
+                nonce: packet.nonce,
+                temporary_pk: payload.temporary_pk,
+                payload: payload.inner,
+                onion_return
+            });
+            // TODO: get rid of this client
+            self.create_client(&addr, packet.temporary_pk).send_to(payload.ip_port.to_saddr(), next_packet)
+        } else {
+            Box::new( future::err(
+                Error::new(ErrorKind::Other,
+                    "get_payload() fail upon OnionRequest0"
+            )))
+        }
+    }
+    /**
+    handle received OnionRequest1 packet, then create OnionRequest2 packet
+    and send it to the next peer.
+    */
+    pub fn handle_onion_request_1(&self, packet: OnionRequest1, addr: SocketAddr) -> IoFuture<()> {
+        let onion_symmetric_key = self.onion_symmetric_key.read();
+        let shared_secret = precompute(&packet.temporary_pk, &self.sk);
+        if let Ok(payload) = packet.get_payload(&shared_secret) {
+            let onion_return = OnionReturn::new(
+                &onion_symmetric_key,
+                &IpPort::from_saddr(addr),
+                Some(&packet.onion_return)
+            );
+            let next_packet = DhtPacket::OnionRequest2(OnionRequest2 {
+                nonce: packet.nonce,
+                temporary_pk: payload.temporary_pk,
+                payload: payload.inner,
+                onion_return
+            });
+            // TODO: get rid of this client
+            self.create_client(&addr, packet.temporary_pk).send_to(payload.ip_port.to_saddr(), next_packet)
+        } else {
+            Box::new( future::err(
+                Error::new(ErrorKind::Other,
+                    "get_payload() fail upon OnionRequest1"
+            )))
+        }
+    }
+    /**
+    handle received OnionRequest2 packet, then create AnnounceRequest
+    or OnionDataRequest packet and send it to the next peer.
+    */
+    pub fn handle_onion_request_2(&self, packet: OnionRequest2, addr: SocketAddr) -> IoFuture<()> {
+        let onion_symmetric_key = self.onion_symmetric_key.read();
+        let shared_secret = precompute(&packet.temporary_pk, &self.sk);
+        if let Ok(payload) = packet.get_payload(&shared_secret) {
+            let onion_return = OnionReturn::new(
+                &onion_symmetric_key,
+                &IpPort::from_saddr(addr),
+                Some(&packet.onion_return)
+            );
+            let next_packet = match payload.inner {
+                InnerOnionRequest::InnerAnnounceRequest(inner) => DhtPacket::AnnounceRequest(AnnounceRequest {
+                    inner,
+                    onion_return
+                }),
+                InnerOnionRequest::InnerOnionDataRequest(inner) => DhtPacket::OnionDataRequest(OnionDataRequest {
+                    inner,
+                    onion_return
+                }),
+            };
+            // TODO: get rid of this client
+            self.create_client(&addr, packet.temporary_pk).send_to(payload.ip_port.to_saddr(), next_packet)
+        } else {
+            Box::new( future::err(
+                Error::new(ErrorKind::Other,
+                    "get_payload() fail upon OnionRequest2"
+            )))
+        }
+    }
+    /**
+    handle received OnionResponse3 packet, then create OnionResponse2 packet
+    and send it to the next peer which address is stored in encrypted onion return.
+    */
+    pub fn handle_onion_response_3(&self, packet: OnionResponse3) -> IoFuture<()> {
+        let onion_symmetric_key = self.onion_symmetric_key.read();
+        if let Ok((ip_port, Some(next_onion_return))) = packet.onion_return.get_payload(&onion_symmetric_key) {
+            let next_packet = DhtPacket::OnionResponse2(OnionResponse2 {
+                onion_return: next_onion_return,
+                payload: packet.payload
+            });
+            // TODO: get rid of this client
+            self.create_client(&ip_port.to_saddr(), gen_keypair().0).send_to(ip_port.to_saddr(), next_packet)
+        } else {
+            Box::new( future::err(
+                Error::new(ErrorKind::Other,
+                    "get_payload() fail upon OnionResponse3"
+            )))
+        }
+    }
+    /**
+    handle received OnionResponse2 packet, then create OnionResponse1 packet
+    and send it to the next peer which address is stored in encrypted onion return.
+    */
+    pub fn handle_onion_response_2(&self, packet: OnionResponse2) -> IoFuture<()> {
+        let onion_symmetric_key = self.onion_symmetric_key.read();
+        if let Ok((ip_port, Some(next_onion_return))) = packet.onion_return.get_payload(&onion_symmetric_key) {
+            let next_packet = DhtPacket::OnionResponse1(OnionResponse1 {
+                onion_return: next_onion_return,
+                payload: packet.payload
+            });
+            // TODO: get rid of this client
+            self.create_client(&ip_port.to_saddr(), gen_keypair().0).send_to(ip_port.to_saddr(), next_packet)
+        } else {
+            Box::new( future::err(
+                Error::new(ErrorKind::Other,
+                    "get_payload() fail upon OnionResponse2"
+            )))
+        }
+    }
+    /**
+    handle received OnionResponse1 packet, then create AnnounceResponse
+    or OnionDataResponse packet and send it to the next peer which address
+    is stored in encrypted onion return.
+    */
+    pub fn handle_onion_response_1(&self, packet: OnionResponse1) -> IoFuture<()> {
+        let onion_symmetric_key = self.onion_symmetric_key.read();
+        if let Ok((ip_port, None)) = packet.onion_return.get_payload(&onion_symmetric_key) {
+            let next_packet = match packet.payload {
+                InnerOnionResponse::AnnounceResponse(inner) => DhtPacket::AnnounceResponse(inner),
+                InnerOnionResponse::OnionDataResponse(inner) => DhtPacket::OnionDataResponse(inner),
+            };
+            // TODO: get rid of this client
+            self.create_client(&ip_port.to_saddr(), gen_keypair().0).send_to(ip_port.to_saddr(), next_packet)
+        } else {
+            Box::new( future::err(
+                Error::new(ErrorKind::Other,
+                    "get_payload() fail upon OnionResponse1"
+            )))
+        }
+    }
+    /// refresh onion symmetric key to enforce onion paths expiration
+    pub fn refresh_onion_key(&self) {
+        *self.onion_symmetric_key.write() = new_symmetric_key();
+    }
     /// add PackedNode object to kbucket as a thread-safe manner
     pub fn try_add_to_kbucket(&self, pn: &PackedNode) -> bool {
         let mut state = self.state.write();
@@ -450,6 +631,10 @@ mod tests {
     use futures::Future;
     use std::net::SocketAddr;
     use toxcore::binary_io::*;
+
+    const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - NONCEBYTES;
+    const ONION_RETURN_2_PAYLOAD_SIZE: usize = ONION_RETURN_2_SIZE - NONCEBYTES;
+    const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - NONCEBYTES;
 
     fn create_node() -> (Server, PrecomputedKey, PublicKey, SecretKey,
             mpsc::UnboundedReceiver<(DhtPacket, SocketAddr)>, SocketAddr) {
@@ -872,6 +1057,410 @@ mod tests {
         client.ping_id = 0;
         assert!(alice.handle_nat_ping_resp(client, dht_req, nat_res).wait().is_err());
     }
+
+    #[test]
+    fn server_handle_onion_request_0_test() {
+        let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
+
+        let temporary_pk = gen_keypair().0;
+        let inner = vec![42, 123];
+        let ip_port = IpPort {
+          ip_addr: "5.6.7.8".parse().unwrap(),
+          port: 12345
+        };
+        let payload = OnionRequest0Payload {
+            ip_port: ip_port.clone(),
+            temporary_pk,
+            inner: inner.clone()
+        };
+        let packet = DhtPacket::OnionRequest0(OnionRequest0::new(&precomp, &bob_pk, payload));
+
+        assert!(alice.handle_packet((packet, addr)).wait().is_ok());
+
+        let (packet, _rx) = rx.into_future().wait().unwrap();
+
+        let (next, addr_to_send) = match packet {
+            Some((DhtPacket::OnionRequest1(next), addr_to_send)) => (next, addr_to_send),
+            p => panic!("Expected OnionRequest1 but got {:?}", p)
+        };
+
+        assert_eq!(addr_to_send, ip_port.to_saddr());
+        assert_eq!(next.temporary_pk, temporary_pk);
+        assert_eq!(next.payload, inner);
+        let onion_symmetric_key = alice.onion_symmetric_key.read();
+        assert_eq!(next.onion_return.get_payload(&onion_symmetric_key).unwrap().0, IpPort::from_saddr(addr));
+    }
+
+    #[test]
+    fn server_handle_onion_request_0_invalid_payload_test() {
+        let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
+
+        let packet = DhtPacket::OnionRequest0(OnionRequest0 {
+            nonce: gen_nonce(),
+            temporary_pk: gen_keypair().0,
+            payload: vec![42, 123] // not encrypted with dht pk
+        });
+
+        assert!(alice.handle_packet((packet, addr)).wait().is_err());
+    }
+
+    #[test]
+    fn server_handle_onion_request_1_test() {
+        let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
+
+        let temporary_pk = gen_keypair().0;
+        let inner = vec![42, 123];
+        let ip_port = IpPort {
+          ip_addr: "5.6.7.8".parse().unwrap(),
+          port: 12345
+        };
+        let payload = OnionRequest1Payload {
+            ip_port: ip_port.clone(),
+            temporary_pk,
+            inner: inner.clone()
+        };
+        let onion_return = OnionReturn {
+            nonce: gen_nonce(),
+            payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
+        };
+        let packet = DhtPacket::OnionRequest1(OnionRequest1::new(&precomp, &bob_pk, payload, onion_return));
+
+        assert!(alice.handle_packet((packet, addr)).wait().is_ok());
+
+        let (packet, _rx) = rx.into_future().wait().unwrap();
+
+        let (next, addr_to_send) = match packet {
+            Some((DhtPacket::OnionRequest2(next), addr_to_send)) => (next, addr_to_send),
+            p => panic!("Expected OnionRequest2 but got {:?}", p)
+        };
+
+        assert_eq!(addr_to_send, ip_port.to_saddr());
+        assert_eq!(next.temporary_pk, temporary_pk);
+        assert_eq!(next.payload, inner);
+        let onion_symmetric_key = alice.onion_symmetric_key.read();
+        assert_eq!(next.onion_return.get_payload(&onion_symmetric_key).unwrap().0, IpPort::from_saddr(addr));
+    }
+
+    #[test]
+    fn server_handle_onion_request_1_invalid_payload_test() {
+        let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
+
+        let packet = DhtPacket::OnionRequest1(OnionRequest1 {
+            nonce: gen_nonce(),
+            temporary_pk: gen_keypair().0,
+            payload: vec![42, 123], // not encrypted with dht pk
+            onion_return: OnionReturn {
+                nonce: gen_nonce(),
+                payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
+            }
+        });
+
+        assert!(alice.handle_packet((packet, addr)).wait().is_err());
+    }
+
+    #[test]
+    fn server_handle_onion_request_2_with_announce_request_test() {
+        let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
+
+        let inner = InnerAnnounceRequest {
+            nonce: gen_nonce(),
+            pk: gen_keypair().0,
+            payload: vec![42, 123]
+        };
+        let ip_port = IpPort {
+          ip_addr: "5.6.7.8".parse().unwrap(),
+          port: 12345
+        };
+        let payload = OnionRequest2Payload {
+            ip_port: ip_port.clone(),
+            inner: InnerOnionRequest::InnerAnnounceRequest(inner.clone())
+        };
+        let onion_return = OnionReturn {
+            nonce: gen_nonce(),
+            payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
+        };
+        let packet = DhtPacket::OnionRequest2(OnionRequest2::new(&precomp, &bob_pk, payload, onion_return));
+
+        assert!(alice.handle_packet((packet, addr)).wait().is_ok());
+
+        let (packet, _rx) = rx.into_future().wait().unwrap();
+
+        let (next, addr_to_send) = match packet {
+            Some((DhtPacket::AnnounceRequest(next), addr_to_send)) => (next, addr_to_send),
+            p => panic!("Expected OnionDataRequest but got {:?}", p)
+        };
+
+        assert_eq!(addr_to_send, ip_port.to_saddr());
+        assert_eq!(next.inner, inner);
+        let onion_symmetric_key = alice.onion_symmetric_key.read();
+        assert_eq!(next.onion_return.get_payload(&onion_symmetric_key).unwrap().0, IpPort::from_saddr(addr));
+    }
+
+    #[test]
+    fn server_handle_onion_request_2_with_onion_data_request_test() {
+        let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
+
+        let inner = InnerOnionDataRequest {
+            destination_pk: gen_keypair().0,
+            nonce: gen_nonce(),
+            temporary_pk: gen_keypair().0,
+            payload: vec![42, 123]
+        };
+        let ip_port = IpPort {
+          ip_addr: "5.6.7.8".parse().unwrap(),
+          port: 12345
+        };
+        let payload = OnionRequest2Payload {
+            ip_port: ip_port.clone(),
+            inner: InnerOnionRequest::InnerOnionDataRequest(inner.clone())
+        };
+        let onion_return = OnionReturn {
+            nonce: gen_nonce(),
+            payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
+        };
+        let packet = DhtPacket::OnionRequest2(OnionRequest2::new(&precomp, &bob_pk, payload, onion_return));
+
+        assert!(alice.handle_packet((packet, addr)).wait().is_ok());
+
+        let (packet, _rx) = rx.into_future().wait().unwrap();
+
+        let (next, addr_to_send) = match packet {
+            Some((DhtPacket::OnionDataRequest(next), addr_to_send)) => (next, addr_to_send),
+            p => panic!("Expected OnionDataRequest but got {:?}", p)
+        };
+
+        assert_eq!(addr_to_send, ip_port.to_saddr());
+        assert_eq!(next.inner, inner);
+        let onion_symmetric_key = alice.onion_symmetric_key.read();
+        assert_eq!(next.onion_return.get_payload(&onion_symmetric_key).unwrap().0, IpPort::from_saddr(addr));
+    }
+
+    #[test]
+    fn server_handle_onion_request_2_invalid_payload_test() {
+        let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
+
+        let packet = DhtPacket::OnionRequest2(OnionRequest2 {
+            nonce: gen_nonce(),
+            temporary_pk: gen_keypair().0,
+            payload: vec![42, 123], // not encrypted with dht pk
+            onion_return: OnionReturn {
+                nonce: gen_nonce(),
+                payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
+            }
+        });
+
+        assert!(alice.handle_packet((packet, addr)).wait().is_err());
+    }
+
+    #[test]
+    fn server_handle_onion_response_3_test() {
+        let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
+
+        let onion_symmetric_key = alice.onion_symmetric_key.read();
+
+        let ip_port = IpPort {
+          ip_addr: "5.6.7.8".parse().unwrap(),
+          port: 12345
+        };
+        let next_onion_return = OnionReturn {
+            nonce: gen_nonce(),
+            payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
+        };
+        let onion_return = OnionReturn::new(&onion_symmetric_key, &ip_port, Some(&next_onion_return));
+        let payload = InnerOnionResponse::AnnounceResponse(AnnounceResponse {
+            sendback_data: 12345,
+            nonce: gen_nonce(),
+            payload: vec![42, 123]
+        });
+        let packet = DhtPacket::OnionResponse3(OnionResponse3 {
+            onion_return,
+            payload: payload.clone()
+        });
+
+        assert!(alice.handle_packet((packet, addr)).wait().is_ok());
+
+        let (packet, _rx) = rx.into_future().wait().unwrap();
+
+        let (next, addr_to_send) = match packet {
+            Some((DhtPacket::OnionResponse2(next), addr_to_send)) => (next, addr_to_send),
+            p => panic!("Expected OnionResponse2 but got {:?}", p)
+        };
+
+        assert_eq!(addr_to_send, ip_port.to_saddr());
+        assert_eq!(next.payload, payload);
+        assert_eq!(next.onion_return, next_onion_return);
+    }
+
+    #[test]
+    fn server_handle_onion_response_3_invalid_onion_return_test() {
+        let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
+
+        let onion_return = OnionReturn {
+            nonce: gen_nonce(),
+            payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE] // not encrypted with onion_symmetric_key
+        };
+        let payload = InnerOnionResponse::AnnounceResponse(AnnounceResponse {
+            sendback_data: 12345,
+            nonce: gen_nonce(),
+            payload: vec![42, 123]
+        });
+        let packet = DhtPacket::OnionResponse3(OnionResponse3 {
+            onion_return,
+            payload: payload.clone()
+        });
+
+        assert!(alice.handle_packet((packet, addr)).wait().is_err());
+    }
+
+    #[test]
+    fn server_handle_onion_response_2_test() {
+        let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
+
+        let onion_symmetric_key = alice.onion_symmetric_key.read();
+
+        let ip_port = IpPort {
+          ip_addr: "5.6.7.8".parse().unwrap(),
+          port: 12345
+        };
+        let next_onion_return = OnionReturn {
+            nonce: gen_nonce(),
+            payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE] // not encrypted with onion_symmetric_key
+        };
+        let onion_return = OnionReturn::new(&onion_symmetric_key, &ip_port, Some(&next_onion_return));
+        let payload = InnerOnionResponse::AnnounceResponse(AnnounceResponse {
+            sendback_data: 12345,
+            nonce: gen_nonce(),
+            payload: vec![42, 123]
+        });
+        let packet = DhtPacket::OnionResponse2(OnionResponse2 {
+            onion_return,
+            payload: payload.clone()
+        });
+
+        assert!(alice.handle_packet((packet, addr)).wait().is_ok());
+
+        let (packet, _rx) = rx.into_future().wait().unwrap();
+
+        let (next, addr_to_send) = match packet {
+            Some((DhtPacket::OnionResponse1(next), addr_to_send)) => (next, addr_to_send),
+            p => panic!("Expected OnionResponse1 but got {:?}", p)
+        };
+
+        assert_eq!(addr_to_send, ip_port.to_saddr());
+        assert_eq!(next.payload, payload);
+        assert_eq!(next.onion_return, next_onion_return);
+    }
+
+    #[test]
+    fn server_handle_onion_response_2_invalid_onion_return_test() {
+        let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
+
+        let onion_return = OnionReturn {
+            nonce: gen_nonce(),
+            payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
+        };
+        let payload = InnerOnionResponse::AnnounceResponse(AnnounceResponse {
+            sendback_data: 12345,
+            nonce: gen_nonce(),
+            payload: vec![42, 123]
+        });
+        let packet = DhtPacket::OnionResponse2(OnionResponse2 {
+            onion_return,
+            payload: payload.clone()
+        });
+
+        assert!(alice.handle_packet((packet, addr)).wait().is_err());
+    }
+
+    #[test]
+    fn server_handle_onion_response_1_with_announce_response_test() {
+        let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
+
+        let onion_symmetric_key = alice.onion_symmetric_key.read();
+
+        let ip_port = IpPort {
+          ip_addr: "5.6.7.8".parse().unwrap(),
+          port: 12345
+        };
+        let onion_return = OnionReturn::new(&onion_symmetric_key, &ip_port, None);
+        let inner = AnnounceResponse {
+            sendback_data: 12345,
+            nonce: gen_nonce(),
+            payload: vec![42, 123]
+        };
+        let packet = DhtPacket::OnionResponse1(OnionResponse1 {
+            onion_return,
+            payload: InnerOnionResponse::AnnounceResponse(inner.clone())
+        });
+
+        assert!(alice.handle_packet((packet, addr)).wait().is_ok());
+
+        let (packet, _rx) = rx.into_future().wait().unwrap();
+
+        let (next, addr_to_send) = match packet {
+            Some((DhtPacket::AnnounceResponse(next), addr_to_send)) => (next, addr_to_send),
+            p => panic!("Expected AnnounceResponse but got {:?}", p)
+        };
+
+        assert_eq!(addr_to_send, ip_port.to_saddr());
+        assert_eq!(next, inner);
+    }
+
+    #[test]
+    fn server_handle_onion_response_1_with_onion_data_response_test() {
+        let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
+
+        let onion_symmetric_key = alice.onion_symmetric_key.read();
+
+        let ip_port = IpPort {
+          ip_addr: "5.6.7.8".parse().unwrap(),
+          port: 12345
+        };
+        let onion_return = OnionReturn::new(&onion_symmetric_key, &ip_port, None);
+        let inner = OnionDataResponse {
+            nonce: gen_nonce(),
+            temporary_pk: gen_keypair().0,
+            payload: vec![42, 123]
+        };
+        let packet = DhtPacket::OnionResponse1(OnionResponse1 {
+            onion_return,
+            payload: InnerOnionResponse::OnionDataResponse(inner.clone())
+        });
+
+        assert!(alice.handle_packet((packet, addr)).wait().is_ok());
+
+        let (packet, _rx) = rx.into_future().wait().unwrap();
+
+        let (next, addr_to_send) = match packet {
+            Some((DhtPacket::OnionDataResponse(next), addr_to_send)) => (next, addr_to_send),
+            p => panic!("Expected OnionDataResponse but got {:?}", p)
+        };
+
+        assert_eq!(addr_to_send, ip_port.to_saddr());
+        assert_eq!(next, inner);
+    }
+
+    #[test]
+    fn server_handle_onion_response_1_invalid_onion_return_test() {
+        let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
+
+        let onion_return = OnionReturn {
+            nonce: gen_nonce(),
+            payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE] // not encrypted with onion_symmetric_key
+        };
+        let payload = InnerOnionResponse::AnnounceResponse(AnnounceResponse {
+            sendback_data: 12345,
+            nonce: gen_nonce(),
+            payload: vec![42, 123]
+        });
+        let packet = DhtPacket::OnionResponse1(OnionResponse1 {
+            onion_return,
+            payload: payload.clone()
+        });
+
+        assert!(alice.handle_packet((packet, addr)).wait().is_err());
+    }
+
     // send_pings()
     #[test]
     fn server_send_pings_test() {

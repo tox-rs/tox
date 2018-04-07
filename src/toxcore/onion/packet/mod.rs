@@ -56,6 +56,7 @@ use std::net::{
     IpAddr,
     Ipv4Addr,
     Ipv6Addr,
+    SocketAddr,
 };
 use std::io::{Error, ErrorKind};
 
@@ -101,9 +102,9 @@ Length      | Content
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct IpPort {
     /// IP address
-    ip_addr: IpAddr,
+    pub ip_addr: IpAddr,
     /// Port number
-    port: u16
+    pub port: u16
 }
 
 impl FromBytes for IpPort {
@@ -128,6 +129,21 @@ impl ToBytes for IpPort {
             gen_cond!(self.ip_addr.is_ipv4(), gen_slice!(&[0; IPV4_PADDING_SIZE])) >>
             gen_be_u16!(self.port)
         )
+    }
+}
+
+impl IpPort {
+    /// Create new `IpPort` from `SocketAddr`.
+    pub fn from_saddr(saddr: SocketAddr) -> IpPort {
+        IpPort {
+            ip_addr: saddr.ip(),
+            port: saddr.port()
+        }
+    }
+
+    /// Convert `IpPort` to `SocketAddr`.
+    pub fn to_saddr(&self) -> SocketAddr {
+        SocketAddr::new(self.ip_addr, self.port)
     }
 }
 
@@ -291,6 +307,16 @@ mod tests {
     encode_decode_test!(announce_status_found, AnnounceStatus::Found);
 
     encode_decode_test!(announce_status_accounced, AnnounceStatus::Announced);
+
+    #[test]
+    fn ip_port_from_to_saddr() {
+        let ip_port_1 = IpPort {
+            ip_addr: "5.6.7.8".parse().unwrap(),
+            port: 12345
+        };
+        let ip_port_2 = IpPort::from_saddr(ip_port_1.to_saddr());
+        assert_eq!(ip_port_2, ip_port_1);
+    }
 
     #[test]
     fn onion_return_encrypt_decrypt() {

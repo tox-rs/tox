@@ -179,6 +179,16 @@ fn main() {
         })
         .map_err(|_err| Error::new(ErrorKind::Other, "LanDiscovery timer error"));
 
+    // Refresh onion symmetric key every 2 hours. This enforces onion paths expiration.
+    let refresh_onion_key_wakeups = Interval::new(Duration::from_secs(7200));
+    let server_obj_c = server_obj.clone();
+    let onion_key_updater = refresh_onion_key_wakeups.for_each(move |()| {
+            println!("refresh_onion_key_wakeup");
+            server_obj_c.refresh_onion_key();
+            future::ok(())
+        })
+        .map_err(|_err| Error::new(ErrorKind::Other, "Refresh onion key timer error"));
+
     let packet_sender = ping_sender.select(nodes_sender)
             .map(|_| ())
             .map_err(move |(err, _select_next)| {
@@ -192,6 +202,12 @@ fn main() {
                 err
             })
         .select(lan_sender)
+            .map(|_| ())
+            .map_err(move |(err, _select_next)| {
+                error!("Processing ended with error: {:?}", err);
+                err
+            })
+        .select(onion_key_updater)
             .map(|_| ())
             .map_err(move |(err, _select_next)| {
                 error!("Processing ended with error: {:?}", err);

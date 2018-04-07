@@ -59,6 +59,7 @@ pub struct OnionRequest2 {
 
 impl FromBytes for OnionRequest2 {
     named!(from_bytes<OnionRequest2>, do_parse!(
+        verify!(rest_len, |len| len <= ONION_MAX_PACKET_SIZE) >>
         tag!(&[0x82][..]) >>
         nonce: call!(Nonce::from_bytes) >>
         temporary_pk: call!(PublicKey::from_bytes) >>

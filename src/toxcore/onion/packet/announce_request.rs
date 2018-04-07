@@ -161,7 +161,7 @@ pub struct AnnounceRequest {
 
 impl FromBytes for AnnounceRequest {
     named!(from_bytes<AnnounceRequest>, do_parse!(
-        rest_len: rest_len >>
+        rest_len: verify!(rest_len, |len| len <= ONION_MAX_PACKET_SIZE) >>
         inner: cond_reduce!(
             rest_len >= ONION_RETURN_3_SIZE,
             flat_map!(take!(rest_len - ONION_RETURN_3_SIZE), InnerAnnounceRequest::from_bytes)
