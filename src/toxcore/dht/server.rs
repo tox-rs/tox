@@ -36,6 +36,7 @@ use std::io::{ErrorKind, Error};
 use std::net::SocketAddr;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use toxcore::crypto_core::*;
 use toxcore::dht::packet::*;
@@ -133,6 +134,20 @@ impl Server {
         else {
             None
         }
+    }
+    /// remove timed-out clients, also remove node from kbucket
+    pub fn remove_timedout_clients(&self, timeout: Duration) -> IoFuture<()> {
+        let mut state = self.state.write();
+        let timeout_peers = state.peers_cache.iter()
+            .filter(|&(_pk, ref client)| client.last_resp_time.elapsed() > timeout)
+            .map(|(pk, _client)| *pk)
+            .collect::<Vec<_>>();
+
+        timeout_peers.into_iter().for_each(|pk| state.kbucket.remove(&pk));
+
+        state.peers_cache.retain(|&_pk, ref client|
+            client.last_resp_time.elapsed() <= timeout);
+        Box::new(future::ok(()))
     }
     /// send PingRequest to all peers in kbucket
     pub fn send_pings(&self) -> IoFuture<()> {
@@ -282,7 +297,7 @@ impl Server {
     */
     fn handle_ping_resp(&self, packet: PingResponse) -> IoFuture<()>
     {
-        let state = self.state.read();
+        let mut state = self.state.write();
         let payload = packet.get_payload(&self.sk);
         let payload = match payload {
             Err(e) => {
@@ -301,7 +316,7 @@ impl Server {
             )))
         }
         let client = self.get_client(&packet.pk, &state.peers_cache);
-        let client = match client {
+        let mut client = match client {
             None => {
                 return Box::new( future::err(
                     Error::new(ErrorKind::Other,
@@ -312,6 +327,8 @@ impl Server {
         };
 
         if client.ping_id == payload.id {
+            client.last_resp_time = Instant::now();
+            state.peers_cache.insert(packet.pk, client);
             Box::new( future::ok(()) )
         }
         else {
@@ -381,7 +398,7 @@ impl Server {
             None => {
                 return Box::new( future::err(
                     Error::new(ErrorKind::Other,
-                        "get_client() fail upon NodesResponse"
+                        "get_client() failed in handle_nodes_resp()"
                 )))
             },
             Some(client) => client,
@@ -433,7 +450,7 @@ impl Server {
             None => {
                 return Box::new( future::err(
                     Error::new(ErrorKind::Other,
-                        "get_client() fail upon NatPingResponse"
+                        "get_client() failed in handle_nat_ping_resp()"
                 )))
             },
             Some(client) => client,
@@ -1676,5 +1693,43 @@ mod tests {
         let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
         let (_, lan_discovery) = LanDiscovery::from_bytes(&buf[..size]).unwrap();
         assert_eq!(alice.pk, lan_discovery.pk);
+    }
+    // remove_timedout_clients(), case of client removed
+    #[test]
+    fn server_remove_timedout_clients_removed_test() {
+        let (alice, _precomp, bob_pk, _bob_sk, _rx, _addr) = create_node();
+        let node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &bob_pk);
+
+        alice.try_add_to_kbucket(&node);
+
+        alice.send_pings().wait().unwrap();
+
+        let dur = Duration::from_secs(0);
+        alice.remove_timedout_clients(dur).wait().unwrap();
+        let state = alice.state.read();
+        // after client be removed
+        assert!(alice.get_client(&bob_pk, &state.peers_cache).is_none());
+        // peer should be removed from kbucket
+        let state = alice.state.read();
+        assert!(!state.kbucket.contains(&bob_pk));
+    }
+    // remove_timedout_clients(), case of client remained
+    #[test]
+    fn server_remove_timedout_clients_remained_test() {
+        let (alice, _precomp, bob_pk, _bob_sk, _rx, _addr) = create_node();
+        let node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &bob_pk);
+
+        alice.try_add_to_kbucket(&node);
+
+        alice.send_pings().wait().unwrap();
+
+        let dur = Duration::from_secs(1);
+        alice.remove_timedout_clients(dur).wait().unwrap();
+        let state = alice.state.read();
+        // client should be remained
+        assert!(!alice.get_client(&bob_pk, &state.peers_cache).is_none());
+        // peer should be remained in kbucket
+        let state = alice.state.read();
+        assert!(state.kbucket.contains(&bob_pk));
     }
 }
