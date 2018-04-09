@@ -30,6 +30,7 @@ pub mod secure;
 pub mod packet;
 pub mod codec;
 pub mod server;
+pub mod client;
 
 use self::handshake::*;
 
@@ -353,5 +354,109 @@ mod tests {
             })
             .map(|_| ()).map_err(|_| ());
         tokio::run(both);
+    }
+    #[test]
+    fn client_server_processor() {
+        use toxcore::tcp::server::Server;
+        use toxcore::tcp::server::ServerProcessor;
+        use toxcore::tcp::client::ClientProcessor;
+        use toxcore::tcp::client::{IncomingPacket, OutgoingPacket};
+        use toxcore::tcp::packet::*;
+
+        use tokio;
+
+        let (client_pk, _sk) = gen_keypair();
+
+        // Create ClientProcessor
+        let ClientProcessor {
+            from_client_tx,
+            to_client_rx,
+            from_server_tx,
+            to_server_rx,
+            processor
+        } = ClientProcessor::new();
+        let client_processor = processor;
+        let outgoing_packets = from_client_tx;
+        let incoming_packets = to_client_rx;
+
+        // Create Server with no onion
+        let server = Server::new();
+
+        // Create ServerProcessor
+        let ServerProcessor {
+            from_client_tx,
+            to_client_rx,
+            processor
+        } = ServerProcessor::create(
+            server,
+            client_pk,
+            "0.0.0.0".parse().unwrap(),
+            0
+        );
+        let server_processor = processor;
+
+        let from_client_to_server = to_server_rx
+            .map_err(|()| Error::from(ErrorKind::UnexpectedEof))
+            .forward(
+                from_client_tx.sink_map_err(|e|
+                    Error::new(ErrorKind::Other,
+                        format!("Could not forward message from client to server {:?}", e))
+                )
+            )
+            .map(|_| ());
+
+        let from_server_to_client = to_client_rx
+            .map_err(|()| Error::from(ErrorKind::UnexpectedEof))
+            .forward(
+                from_server_tx.sink_map_err(|e|
+                    Error::new(ErrorKind::Other,
+                        format!("Could not forward message from server to client {:?}", e))
+                )
+            )
+            .map(|_| ());
+
+        let forwarders = from_client_to_server.select(from_server_to_client)
+            .map(|_|()).map_err(|(err, _select_next)| err);
+
+        let processors = client_processor.select(server_processor)
+            .map(|_|()).map_err(|(err, _select_next)| err);
+
+        let network = forwarders.select(processors)
+            .map(|_|()).map_err(|(err, _select_next)| err);
+
+        let friend_pk = PublicKey([15, 107, 126, 130, 81, 55, 154, 157,
+                                192, 117, 0, 225, 119, 43, 48, 117,
+                                84, 109, 112, 57, 243, 216, 4, 171,
+                                185, 111, 33, 146, 221, 31, 77, 118]);
+
+        let sender = outgoing_packets.clone()
+            .send(OutgoingPacket::RouteRequest(
+                RouteRequest { pk: friend_pk.clone() }
+            )).map(|_| ()).map_err(|e|
+                Error::new(ErrorKind::Other,
+                    format!("Could not forward message from server to client {:?}", e))
+            );
+
+        let receiver = incoming_packets
+            .into_future().and_then(move |(packet, _tail)| {
+                assert_eq!(packet.unwrap(), IncomingPacket::RouteResponse(RouteResponse {
+                    connection_id: 16, pk: friend_pk
+                }));
+                Ok(())
+            }).map(|_| ()).map_err(|e|
+                Error::new(ErrorKind::Other,
+                    format!("Could not forward message from server to client {:?}", e))
+            );
+
+        let sender_receiver = sender.select(receiver)
+            .map(|_|()).map_err(|(err, _select_next)| err);
+
+        let test = sender_receiver.select(network)
+            .map(|_| ())
+            .map_err(|(err, _select_next)| {
+                println!("Error: {:?}", err);
+            });
+
+        tokio::run(test);
     }
 }
