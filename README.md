@@ -89,7 +89,7 @@ consider helping :wink:
         - [ ] CookieResponse
         - [ ] CryptoHandshake
         - [ ] CryptoData
-        - [ ] LanDiscovery (parsed but ignored)
+        - [x] LanDiscovery
         - [ ] OnionRequest[0,1,2] (parsed but ignored)
         - [ ] OnionResponse[3,2,1] (parsed but ignored)
         - [ ] Other onion packets (parsed but ignored)
