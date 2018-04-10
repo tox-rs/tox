@@ -23,8 +23,7 @@
 Structure for holding nodes.
 
 Number of nodes it can contain is set during creation. If not set (aka `None`
-is supplied), number of nodes defaults to [`BUCKET_DEFAULT_SIZE`]
-(./constant.BUCKET_DEFAULT_SIZE.html).
+is supplied), number of nodes defaults to [`BUCKET_DEFAULT_SIZE`].
 
 Nodes stored in `Bucket` are in [`PackedNode`](./struct.PackedNode.html)
 format.
@@ -33,6 +32,8 @@ Used in [`Kbucket`](./struct.Kbucket.html) for storing nodes close to given
 PK; and additionally used to store nodes closest to friends.
 
 [Spec definition](https://zetok.github.io/tox-spec#updating-k-buckets).
+
+[`BUCKET_DEFAULT_SIZE`]: ./constant.BUCKET_DEFAULT_SIZE.html
 */
 
 use toxcore::crypto_core::*;
@@ -91,8 +92,7 @@ impl Distance for PublicKey {
 Structure for holding nodes.
 
 Number of nodes it can contain is set during creation. If not set (aka `None`
-is supplied), number of nodes defaults to [`BUCKET_DEFAULT_SIZE`]
-(./constant.BUCKET_DEFAULT_SIZE.html).
+is supplied), number of nodes defaults to [`BUCKET_DEFAULT_SIZE`].
 
 Nodes stored in `Bucket` are in [`PackedNode`](./struct.PackedNode.html)
 format.
@@ -101,6 +101,8 @@ Used in [`Kbucket`](./struct.Kbucket.html) for storing nodes close to given
 PK; and additionally used to store nodes closest to friends.
 
 [Spec definition](https://zetok.github.io/tox-spec#updating-k-buckets).
+
+[`BUCKET_DEFAULT_SIZE`]: ./constant.BUCKET_DEFAULT_SIZE.html
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Bucket {
@@ -117,9 +119,10 @@ impl Bucket {
     /** Create a new `Bucket` to store nodes close to the `PublicKey`.
 
     Can hold up to `num` nodes if number is supplied. If `None` is
-    supplied, holds up to [`BUCKET_DEFAULT_SIZE`]
-    (./constant.BUCKET_DEFAULT_SIZE.html) nodes. If `Some(0)` is
-    supplied, it is treated as `None`.
+    supplied, holds up to [`BUCKET_DEFAULT_SIZE`] nodes. If `Some(0)`
+    is supplied, it is treated as `None`.
+
+    [`BUCKET_DEFAULT_SIZE`]: ./constant.BUCKET_DEFAULT_SIZE.html
     */
     pub fn new(num: Option<u8>) -> Self {
         trace!(target: "Bucket", "Creating a new Bucket.");
@@ -168,7 +171,7 @@ impl Bucket {
 
     Returns `true` if node was added, `false` otherwise.
 
-    [`PackedNode`]: ./struct.PackedNode.html
+    [`PackedNode`]: ../packed_node/struct.PackedNode.html
     */
     pub fn try_add(&mut self, base_pk: &PublicKey, new_node: &PackedNode)
         -> bool
@@ -301,15 +304,19 @@ pub struct Kbucket {
 }
 
 /** Maximum number of [`Bucket`](./struct.Bucket.html)s that [`Kbucket`]
-(./struct.Kbucket.html) can hold.
+can hold.
 
 Realistically, not even half of that will be ever used, given how
 [index calculation](./fn.kbucket_index.html) works.
+
+[`Kbucket`]: ./struct.Kbucket.html
 */
 pub const KBUCKET_MAX_ENTRIES: u8 = ::std::u8::MAX;
 
 /** Default number of [`Bucket`](./struct.Bucket.html)s that [`Kbucket`]
-(./struct.Kbucket.html) holds.
+holds.
+
+[`Kbucket`]: ./struct.Kbucket.html
 */
 pub const KBUCKET_BUCKETS: u8 = 128;
 
