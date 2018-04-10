@@ -1,6 +1,9 @@
 /*
+    Copyright (C) 2013 Tox project All Rights Reserved.
     Copyright © 2017 Zetok Zalbavar <zexavexxe@gmail.com>
     Copyright © 2018 Namsoo CHO <nscho66@gmail.com>
+    Copyright © 2018 Evgeny Kurnevsky <kurnevsky@gmail.com>
+    Copyright © 2018 Roman Proskuryakov <humbug@deeptown.org>
 
     This file is part of Tox.
 
@@ -113,28 +116,29 @@ impl Server {
     }
 
     /// create new client
-    pub fn create_client(&self, addr: &SocketAddr, pk: PublicKey) -> Client {
-        let precomputed_key = encrypt_precompute(&pk, &self.sk);
-        Client::new(precomputed_key, self.pk, *addr, self.tx.clone())
+    pub fn create_client(&self, addr: &SocketAddr, pk: PublicKey, peers_cache: &HashMap<PublicKey, Client>) -> Client {
+        if let Some(client) = self.get_client(&pk, peers_cache) {
+            client
+        } else {
+            let precomputed_key = encrypt_precompute(&pk, &self.sk);
+            Client::new(precomputed_key, self.pk, *addr, self.tx.clone())
+        }
     }
     /// get client from cache
-    pub fn get_client(&self, pk: &PublicKey) -> Option<Client> {
-        let state = self.state.read();
+    pub fn get_client(&self, pk: &PublicKey, peers_cache: &HashMap<PublicKey, Client>) -> Option<Client> {
         // Client entry is inserted before sending *Request.
-        if let Some(client) = state.peers_cache.get(pk) {
+        if let Some(client) = peers_cache.get(pk) {
             Some(client.clone())
         }
         else {
             None
         }
     }
-    /// send PingRequest to all peer in kbucket    
+    /// send PingRequest to all peers in kbucket
     pub fn send_pings(&self) -> IoFuture<()> {
         let mut state = self.state.write();
-        let kbucket_c = state.kbucket.iter();
-
-        let ping_sender = kbucket_c.map(move |peer| {
-            let mut client = self.create_client(&peer.saddr, peer.pk);
+        let ping_sender = state.kbucket.iter().map(move |peer| {
+            let mut client = self.create_client(&peer.saddr, peer.pk, &state.peers_cache);
             let result = client.send_ping_request();
             state.peers_cache.insert(peer.pk, client);
             result
@@ -144,11 +148,11 @@ impl Server {
 
         Box::new(pings_stream.for_each(|()| Ok(())))
     }
-    /// send NodesRequest to random peer at every 20 seconds
+    /// send NodesRequest to random peer every 20 seconds
     pub fn send_nodes_req(&self, friend_pk: PublicKey) -> IoFuture<()> {
         let mut state = self.state.write();
         if let Some(peer) = state.kbucket.get_random_node() {
-            let mut client = self.create_client(&peer.saddr, peer.pk);
+            let mut client = self.create_client(&peer.saddr, peer.pk, &state.peers_cache);
             let result = client.send_nodes_request(friend_pk);
             state.peers_cache.insert(peer.pk, client);
             result
@@ -157,11 +161,11 @@ impl Server {
             return Box::new(future::ok(()));
         }
     }
-    /// send NatPingRequests to peers at every 3 seconds
+    /// send NatPingRequests to peers every 3 seconds
     pub fn send_nat_ping_req(&self, peer: PackedNode, friend_pk: PublicKey) -> IoFuture<()> {
-        let mut client = self.create_client(&peer.saddr, peer.pk);
-        let result = client.send_nat_ping_request(friend_pk);
         let mut state = self.state.write();
+        let mut client = self.create_client(&peer.saddr, peer.pk, &state.peers_cache);
+        let result = client.send_nat_ping_request(friend_pk);
         state.peers_cache.insert(peer.pk, client);
         result
     }
@@ -174,64 +178,48 @@ impl Server {
         match packet {
             DhtPacket::PingRequest(packet) => {
                 debug!("Received ping request");
-                let client = self.create_client(&addr, packet.pk);
-                self.handle_ping_req(client, packet)
+                self.handle_ping_req(packet, addr)
             },
             DhtPacket::PingResponse(packet) => {
                 debug!("Received ping response");
-                if let Some(client) = self.get_client(&packet.pk) {
-                    self.handle_ping_resp(client, packet)
-                } else { // If there doesn't exist client in hash, then the PingRequest sent is not from me. Do nothing.
-                    Box::new(future::ok(()))
-                }
+                self.handle_ping_resp(packet)
             },
             DhtPacket::NodesRequest(packet) => {
                 debug!("Received NodesRequest");
-                let client = self.create_client(&addr, packet.pk);
-                self.handle_nodes_req(client, packet)
+                self.handle_nodes_req(packet, addr)
             },
             DhtPacket::NodesResponse(packet) => {
                 debug!("Received NodesResponse");
-                if let Some(client) = self.get_client(&packet.pk) {
-                    self.handle_nodes_resp(client, packet)
-                } else { // If there doesn't exist client in hash, then the NodesRequest sent is not from me. Do nothing.
-                    Box::new(future::ok(()))
-                }
+                self.handle_nodes_resp(packet)
             },
-            DhtPacket::DhtRequest(dr) => {
+            DhtPacket::DhtRequest(packet) => {
                 // The packet kind of DhtRequest is in encrypted payload,
                 // so decrypting is needed first.
-                let payload = dr.get_payload(&self.sk)
-                    .map(|p| p)
-                    .map_err(|e| {
-                        e
-                    });
-                match payload {
-                    Ok(DhtRequestPayload::NatPingRequest(pl)) => {
-                        debug!("Received nat ping request");
-                        let client = self.create_client(&addr, dr.spk);
-                        self.handle_nat_ping_req(client, dr, pl)
-                    },
-                    Ok(DhtRequestPayload::NatPingResponse(pl)) => {
-                        debug!("Received nat ping response");
-                        if let Some(client) = self.get_client(&dr.spk) {
-                            self.handle_nat_ping_resp(client, dr, pl)
-                        } else { // If there doesn't exist client in hash, then the PingRequest sent is not from me. Do nothing.
-                            Box::new(future::ok(()))
-                        }
-                    },
-                    _p => {
-                        Box::new( future::err(
+                let payload = packet.get_payload(&self.sk);
+                let payload = match payload {
+                    Err(err) => {
+                        return Box::new( future::err(
                             Error::new(ErrorKind::Other,
-                                "received packet are not handled"
+                                format!("DhtRequest::get_payload failed with: {:?}", err)
                         )))
+                    },
+                    Ok(payload) => payload,
+                };
+
+                match payload {
+                    DhtRequestPayload::NatPingRequest(nat_payload) => {
+                        debug!("Received nat ping request");
+                        self.handle_nat_ping_req(packet, nat_payload, addr)
+                    },
+                    DhtRequestPayload::NatPingResponse(nat_payload) => {
+                        debug!("Received nat ping response");
+                        self.handle_nat_ping_resp(packet, nat_payload)
                     },
                 }
             },
             DhtPacket::LanDiscovery(packet) => {
                 debug!("Received LanDiscovery");
-                let client = self.create_client(&addr, packet.pk);
-                self.handle_lan_discovery(client, packet)
+                self.handle_lan_discovery(packet, addr)
             },
             DhtPacket::OnionRequest0(packet) => {
                 debug!("Received OnionRequest0");
@@ -258,10 +246,9 @@ impl Server {
                 self.handle_onion_response_1(packet)
             },
             ref p => {
-                error!("received packet are not handled {:?}", p);
                 Box::new( future::err(
                     Error::new(ErrorKind::Other,
-                        "received packet are not handled"
+                        format!("DhtPacket is not handled {:?}", p)
                 )))
             }
         }
@@ -270,133 +257,165 @@ impl Server {
     handle received PingRequest packet, then create PingResponse packet
     and send back it to the peer.
     */
-    fn handle_ping_req(&self, client: Client, request: PingRequest) -> IoFuture<()>
+    fn handle_ping_req(&self, packet: PingRequest, addr: SocketAddr) -> IoFuture<()>
     {
-        if let Ok(payload) = request.get_payload(&self.sk) {
-            let resp_payload = PingResponsePayload {
-                id: payload.id,
-            };
-            client.send_ping_response(resp_payload)
-        }
-        else {
-            error!("get_payload() fail upon PingRequest");
-            Box::new( future::err(
-                Error::new(ErrorKind::Other,
-                    "get_payload() fail upon PingRequest"
-            )))
-        }
+        let state = self.state.read();
+        let payload = packet.get_payload(&self.sk);
+        let payload = match payload {
+            Err(e) => {
+                return Box::new( future::err(
+                    Error::new(ErrorKind::Other,
+                        format!("PingRequest::get_payload() failed: {:?}", e)
+                )))
+            },
+            Ok(payload) => payload,
+        };
+
+        let resp_payload = PingResponsePayload {
+            id: payload.id,
+        };
+        let client = self.create_client(&addr, packet.pk, &state.peers_cache);
+        client.send_ping_response(resp_payload)
     }
     /**
     handle received PingResponse packet. If ping_id is correct, try_add peer to kbucket.
     */
-    fn handle_ping_resp(&self, client: Client, request: PingResponse) -> IoFuture<()>
+    fn handle_ping_resp(&self, packet: PingResponse) -> IoFuture<()>
     {
-        if let Ok(payload) = request.get_payload(&self.sk) {
-            if payload.id == 0 {
+        let state = self.state.read();
+        let payload = packet.get_payload(&self.sk);
+        let payload = match payload {
+            Err(e) => {
                 return Box::new( future::err(
                     Error::new(ErrorKind::Other,
-                        "PingResponse.ping_id == 0"
+                        format!("PingResponse::get_payload() failed: {:?}", e)
                 )))
-            }
-            if client.ping_id == payload.id {
-                let packed_node = PackedNode {
-                    saddr: client.addr,
-                    pk: request.pk,
-                };
-                let mut state = self.state.write();
-                state.kbucket.try_add(&packed_node);
-                Box::new( future::ok(()) )
-            }
-            else {
-                Box::new( future::err(
-                    Error::new(ErrorKind::Other, "PingResponse.ping_id does not match")
-                ))
-            }
+            },
+            Ok(payload) => payload,
+        };
+
+        if payload.id == 0u64 {
+            return Box::new( future::err(
+                Error::new(ErrorKind::Other,
+                    "PingResponse.ping_id == 0"
+            )))
+        }
+        let client = self.get_client(&packet.pk, &state.peers_cache);
+        let client = match client {
+            None => {
+                return Box::new( future::err(
+                    Error::new(ErrorKind::Other,
+                        "get_client() failed in handle_ping_resp()"
+                )))
+            },
+            Some(client) => client,
+        };
+
+        if client.ping_id == payload.id {
+            Box::new( future::ok(()) )
         }
         else {
-            error!("get_payload() fail upon PingResponse");
             Box::new( future::err(
-                Error::new(ErrorKind::Other,
-                    "get_payload() fail upon PingResponse"
-            )))
+                Error::new(ErrorKind::Other, "PingResponse.ping_id does not match")
+            ))
         }
     }
     /**
     handle received NodesRequest packet, responds with NodesResponse
     */
-    fn handle_nodes_req(&self, client: Client, request: NodesRequest) -> IoFuture<()> {
-        if let Ok(payload) = request.get_payload(&self.sk) {
-            let state = self.state.read();
-            let close_nodes = state.kbucket.get_closest(&self.pk);
-            if !close_nodes.is_empty() {
-                let resp_payload = NodesResponsePayload {
-                    nodes: close_nodes,
-                    id: payload.id,
-                };
-                client.send_nodes_response(resp_payload)
-            } else {
-                error!("get_closest() return nothing");
-                Box::new( future::err(
+    fn handle_nodes_req(&self, packet: NodesRequest, addr: SocketAddr) -> IoFuture<()> {
+        let state = self.state.read();
+        let client = self.create_client(&addr, packet.pk, &state.peers_cache);
+
+        let payload = packet.get_payload(&self.sk);
+        let payload = match payload {
+            Err(e) => {
+                return Box::new( future::err(
                     Error::new(ErrorKind::Other,
-                        "get_closest() return nothing"
+                        format!("NodesRequest::get_payload() failed: {:?}", e)
                 )))
-            }
-        }
-        else {
-            error!("get_payload() fail upon NodesRequest");
+            },
+            Ok(payload) => payload,
+        };
+
+        let close_nodes = state.kbucket.get_closest(&self.pk);
+        if !close_nodes.is_empty() {
+            let resp_payload = NodesResponsePayload {
+                nodes: close_nodes,
+                id: payload.id,
+            };
+            client.send_nodes_response(resp_payload)
+        } else {
+            error!("get_closest() return nothing");
             Box::new( future::err(
                 Error::new(ErrorKind::Other,
-                    "get_payload() fail upon NodesRequest"
+                    "get_closest() return nothing"
             )))
         }
     }
     /**
     handle received NodesResponse from peer.
     */
-    fn handle_nodes_resp(&self, client: Client, request: NodesResponse) -> IoFuture<()> {
-        if let Ok(payload) = request.get_payload(&self.sk) {
-            if payload.id == 0 {
+    fn handle_nodes_resp(&self, packet: NodesResponse) -> IoFuture<()> {
+        let mut state = self.state.write();
+        let payload = packet.get_payload(&self.sk);
+        let payload = match payload {
+            Err(e) => {
                 return Box::new( future::err(
                     Error::new(ErrorKind::Other,
-                        "NodesResponse.ping_id == 0"
+                        format!("NodesResponse::get_payload() failed: {:?}", e)
                 )))
+            },
+            Ok(payload) => payload,
+        };
+
+        if payload.id == 0 {
+            return Box::new( future::err(
+                Error::new(ErrorKind::Other,
+                    "NodesResponse.ping_id == 0"
+            )))
+        }
+
+        let client = self.get_client(&packet.pk, &state.peers_cache);
+        let client = match client {
+            None => {
+                return Box::new( future::err(
+                    Error::new(ErrorKind::Other,
+                        "get_client() fail upon NodesResponse"
+                )))
+            },
+            Some(client) => client,
+        };
+
+        if client.ping_id == payload.id {
+            for node in &payload.nodes {
+                state.kbucket.try_add(node);
             }
-            if client.ping_id == payload.id {
-                let mut state = self.state.write();
-                for node in &payload.nodes {
-                    state.kbucket.try_add(node);
-                }
-                Box::new( future::ok(()) )
-            }
-            else {
-                Box::new( future::err(
-                    Error::new(ErrorKind::Other, "NodesResponse.ping_id does not match")
-                ))
-            }
+            Box::new( future::ok(()) )
         }
         else {
-            error!("get_payload() fail upon NodesResponse");
             Box::new( future::err(
-                Error::new(ErrorKind::Other,
-                    "get_payload() fail upon NodesResponse"
-            )))
+                Error::new(ErrorKind::Other, "NodesResponse.ping_id does not match")
+            ))
         }
     }
 
     /**
     handle received NatPingRequest packet, respond with NatPingResponse
     */
-    pub fn handle_nat_ping_req(&self, client: Client, request: DhtRequest, payload: NatPingRequest) -> IoFuture<()> {
-        if request.rpk == self.pk { // the target peer is me
+    fn handle_nat_ping_req(&self, packet: DhtRequest, payload: NatPingRequest, addr: SocketAddr) -> IoFuture<()> {
+        let state = self.state.read();
+        let client = self.create_client(&addr, packet.spk, &state.peers_cache);
+
+        if packet.rpk == self.pk { // the target peer is me
             let resp_payload = NatPingResponse {
                 id: payload.id,
             };
-            client.send_nat_ping_response(&request.spk, resp_payload)
+            client.send_nat_ping_response(&packet.spk, resp_payload)
         // search kbucket to find target peer
         } else {
-            let state = self.state.read();
-            if let Some(addr) = state.kbucket.get_node(&request.rpk) {
-                client.send_nat_ping_packet(&addr, request.clone())
+            if let Some(addr) = state.kbucket.get_node(&packet.rpk) {
+                client.send_nat_ping_packet(&addr, packet.clone())
             }
             else { // do nothing
                 Box::new( future::ok(()) )
@@ -407,8 +426,20 @@ impl Server {
     /**
     handle received NatPingResponse packet, start hole-punching
     */
-    pub fn handle_nat_ping_resp(&self, client: Client, request: DhtRequest, payload: NatPingResponse) -> IoFuture<()> {
-        if request.rpk == self.pk { // the target peer is me
+    fn handle_nat_ping_resp(&self, packet: DhtRequest, payload: NatPingResponse) -> IoFuture<()> {
+        let state = self.state.read();
+        let client = self.get_client(&packet.spk, &state.peers_cache);
+        let client = match client {
+            None => {
+                return Box::new( future::err(
+                    Error::new(ErrorKind::Other,
+                        "get_client() fail upon NatPingResponse"
+                )))
+            },
+            Some(client) => client,
+        };
+
+        if packet.rpk == self.pk { // the target peer is me
             if payload.id == 0 {
                 return Box::new( future::err(
                     Error::new(ErrorKind::Other,
@@ -426,9 +457,8 @@ impl Server {
             }
         // search kbucket to find target peer
         } else {
-            let state = self.state.read();
-            if let Some(addr) = state.kbucket.get_node(&request.rpk) {
-                client.send_nat_ping_packet(&addr, request.clone())
+            if let Some(addr) = state.kbucket.get_node(&packet.rpk) {
+                client.send_nat_ping_packet(&addr, packet.clone())
             }
             else { // do nothing
                 Box::new( future::ok(()) )
@@ -439,8 +469,14 @@ impl Server {
     handle received LanDiscovery packet, then create NodesRequest packet
     and send back it to the peer.
     */
-    fn handle_lan_discovery(&self, mut client: Client, packet: LanDiscovery) -> IoFuture<()> {
+    fn handle_lan_discovery(&self, packet: LanDiscovery, addr: SocketAddr) -> IoFuture<()> {
+        // if Lan Discovery packet has my PK, then it is sent by myself.
+        if packet.pk == self.pk {
+            return Box::new(future::ok(()));
+        }
         let mut state = self.state.write();
+
+        let mut client = self.create_client(&addr, packet.pk, &state.peers_cache);
         let result = client.send_nodes_request(packet.pk);
         state.peers_cache.insert(packet.pk, client);
         result
@@ -449,18 +485,20 @@ impl Server {
     send LanDiscovery packet to all broadcast addresses when dht_node runs as ipv4 mode
     */
     pub fn send_lan_discovery_ipv4(&self) -> IoFuture<()> {
+        let state = self.state.read();
         // addr is dummy, actual lan discovery packet sending logic exists in client
         let addr: SocketAddr = "127.0.0.1:33445".parse().unwrap();
-        let client = self.create_client(&addr, self.pk);
+        let client = self.create_client(&addr, self.pk, &state.peers_cache);
         client.send_lan_discovery_ipv4()
     }
     /**
     send LanDiscovery packet to all broadcast addresses when dht_node runs as ipv6 mode
     */
     pub fn send_lan_discovery_ipv6(&self) -> IoFuture<()> {
+        let state = self.state.read();
         // addr is dummy, actual lan discovery packet sending logic exists in client
         let addr: SocketAddr = "[::1]:33445".parse().unwrap(); // 33445 is default port for tox
-        let client = self.create_client(&addr, self.pk);
+        let client = self.create_client(&addr, self.pk, &state.peers_cache);
         client.send_lan_discovery_ipv6()
     }
     /**
@@ -470,26 +508,31 @@ impl Server {
     pub fn handle_onion_request_0(&self, packet: OnionRequest0, addr: SocketAddr) -> IoFuture<()> {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let shared_secret = precompute(&packet.temporary_pk, &self.sk);
-        if let Ok(payload) = packet.get_payload(&shared_secret) {
-            let onion_return = OnionReturn::new(
-                &onion_symmetric_key,
-                &IpPort::from_saddr(addr),
-                None // no previous onion return
-            );
-            let next_packet = DhtPacket::OnionRequest1(OnionRequest1 {
-                nonce: packet.nonce,
-                temporary_pk: payload.temporary_pk,
-                payload: payload.inner,
-                onion_return
-            });
-            // TODO: get rid of this client
-            self.create_client(&addr, packet.temporary_pk).send_to(payload.ip_port.to_saddr(), next_packet)
-        } else {
-            Box::new( future::err(
-                Error::new(ErrorKind::Other,
-                    "get_payload() fail upon OnionRequest0"
-            )))
-        }
+        let payload = packet.get_payload(&shared_secret);
+        let payload = match payload {
+            Err(e) => {
+                return Box::new( future::err(
+                    Error::new(ErrorKind::Other,
+                        format!("OnionRequest0::get_payload() failed: {:?}", e)
+                )))
+            },
+            Ok(payload) => payload,
+        };
+
+        let onion_return = OnionReturn::new(
+            &onion_symmetric_key,
+            &IpPort::from_saddr(addr),
+            None // no previous onion return
+        );
+        let next_packet = DhtPacket::OnionRequest1(OnionRequest1 {
+            nonce: packet.nonce,
+            temporary_pk: payload.temporary_pk,
+            payload: payload.inner,
+            onion_return
+        });
+        // TODO: get rid of this client
+        let state = self.state.read();
+        self.create_client(&addr, packet.temporary_pk, &state.peers_cache).send_to(payload.ip_port.to_saddr(), next_packet)
     }
     /**
     handle received OnionRequest1 packet, then create OnionRequest2 packet
@@ -498,26 +541,31 @@ impl Server {
     pub fn handle_onion_request_1(&self, packet: OnionRequest1, addr: SocketAddr) -> IoFuture<()> {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let shared_secret = precompute(&packet.temporary_pk, &self.sk);
-        if let Ok(payload) = packet.get_payload(&shared_secret) {
-            let onion_return = OnionReturn::new(
-                &onion_symmetric_key,
-                &IpPort::from_saddr(addr),
-                Some(&packet.onion_return)
-            );
-            let next_packet = DhtPacket::OnionRequest2(OnionRequest2 {
-                nonce: packet.nonce,
-                temporary_pk: payload.temporary_pk,
-                payload: payload.inner,
-                onion_return
-            });
-            // TODO: get rid of this client
-            self.create_client(&addr, packet.temporary_pk).send_to(payload.ip_port.to_saddr(), next_packet)
-        } else {
-            Box::new( future::err(
-                Error::new(ErrorKind::Other,
-                    "get_payload() fail upon OnionRequest1"
-            )))
-        }
+        let payload = packet.get_payload(&shared_secret);
+        let payload = match payload {
+            Err(e) => {
+                return Box::new( future::err(
+                    Error::new(ErrorKind::Other,
+                        format!("OnionRequest1::get_payload() failed: {:?}", e)
+                )))
+            },
+            Ok(payload) => payload,
+        };
+
+        let onion_return = OnionReturn::new(
+            &onion_symmetric_key,
+            &IpPort::from_saddr(addr),
+            Some(&packet.onion_return)
+        );
+        let next_packet = DhtPacket::OnionRequest2(OnionRequest2 {
+            nonce: packet.nonce,
+            temporary_pk: payload.temporary_pk,
+            payload: payload.inner,
+            onion_return
+        });
+        // TODO: get rid of this client
+        let state = self.state.read();
+        self.create_client(&addr, packet.temporary_pk, &state.peers_cache).send_to(payload.ip_port.to_saddr(), next_packet)
     }
     /**
     handle received OnionRequest2 packet, then create AnnounceRequest
@@ -526,30 +574,35 @@ impl Server {
     pub fn handle_onion_request_2(&self, packet: OnionRequest2, addr: SocketAddr) -> IoFuture<()> {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let shared_secret = precompute(&packet.temporary_pk, &self.sk);
-        if let Ok(payload) = packet.get_payload(&shared_secret) {
-            let onion_return = OnionReturn::new(
-                &onion_symmetric_key,
-                &IpPort::from_saddr(addr),
-                Some(&packet.onion_return)
-            );
-            let next_packet = match payload.inner {
-                InnerOnionRequest::InnerAnnounceRequest(inner) => DhtPacket::AnnounceRequest(AnnounceRequest {
-                    inner,
-                    onion_return
-                }),
-                InnerOnionRequest::InnerOnionDataRequest(inner) => DhtPacket::OnionDataRequest(OnionDataRequest {
-                    inner,
-                    onion_return
-                }),
-            };
-            // TODO: get rid of this client
-            self.create_client(&addr, packet.temporary_pk).send_to(payload.ip_port.to_saddr(), next_packet)
-        } else {
-            Box::new( future::err(
-                Error::new(ErrorKind::Other,
-                    "get_payload() fail upon OnionRequest2"
-            )))
-        }
+        let payload = packet.get_payload(&shared_secret);
+        let payload = match payload {
+            Err(e) => {
+                return Box::new( future::err(
+                    Error::new(ErrorKind::Other,
+                        format!("OnionRequest2::get_payload() failed: {:?}", e)
+                )))
+            },
+            Ok(payload) => payload,
+        };
+
+        let onion_return = OnionReturn::new(
+            &onion_symmetric_key,
+            &IpPort::from_saddr(addr),
+            Some(&packet.onion_return)
+        );
+        let next_packet = match payload.inner {
+            InnerOnionRequest::InnerAnnounceRequest(inner) => DhtPacket::AnnounceRequest(AnnounceRequest {
+                inner,
+                onion_return
+            }),
+            InnerOnionRequest::InnerOnionDataRequest(inner) => DhtPacket::OnionDataRequest(OnionDataRequest {
+                inner,
+                onion_return
+            }),
+        };
+        // TODO: get rid of this client
+        let state = self.state.read();
+        self.create_client(&addr, packet.temporary_pk, &state.peers_cache).send_to(payload.ip_port.to_saddr(), next_packet)
     }
     /**
     handle received OnionResponse3 packet, then create OnionResponse2 packet
@@ -557,17 +610,29 @@ impl Server {
     */
     pub fn handle_onion_response_3(&self, packet: OnionResponse3) -> IoFuture<()> {
         let onion_symmetric_key = self.onion_symmetric_key.read();
-        if let Ok((ip_port, Some(next_onion_return))) = packet.onion_return.get_payload(&onion_symmetric_key) {
+        let payload = packet.onion_return.get_payload(&onion_symmetric_key);
+        let payload = match payload {
+            Err(e) => {
+                return Box::new( future::err(
+                    Error::new(ErrorKind::Other,
+                        format!("OnionResponse3::get_payload() failed: {:?}", e)
+                )))
+            },
+            Ok(payload) => payload,
+        };
+
+        if let (ip_port, Some(next_onion_return)) = payload {
             let next_packet = DhtPacket::OnionResponse2(OnionResponse2 {
                 onion_return: next_onion_return,
                 payload: packet.payload
             });
             // TODO: get rid of this client
-            self.create_client(&ip_port.to_saddr(), gen_keypair().0).send_to(ip_port.to_saddr(), next_packet)
+            let state = self.state.read();
+            self.create_client(&ip_port.to_saddr(), gen_keypair().0, &state.peers_cache).send_to(ip_port.to_saddr(), next_packet)
         } else {
-            Box::new( future::err(
+            return Box::new( future::err(
                 Error::new(ErrorKind::Other,
-                    "get_payload() fail upon OnionResponse3"
+                    format!("OnionResponse3 next_onion_return is none")
             )))
         }
     }
@@ -577,17 +642,29 @@ impl Server {
     */
     pub fn handle_onion_response_2(&self, packet: OnionResponse2) -> IoFuture<()> {
         let onion_symmetric_key = self.onion_symmetric_key.read();
-        if let Ok((ip_port, Some(next_onion_return))) = packet.onion_return.get_payload(&onion_symmetric_key) {
+        let payload = packet.onion_return.get_payload(&onion_symmetric_key);
+        let payload = match payload {
+            Err(e) => {
+                return Box::new( future::err(
+                    Error::new(ErrorKind::Other,
+                        format!("OnionResponse2::get_payload() failed: {:?}", e)
+                )))
+            },
+            Ok(payload) => payload,
+        };
+
+        if let (ip_port, Some(next_onion_return)) = payload {
             let next_packet = DhtPacket::OnionResponse1(OnionResponse1 {
                 onion_return: next_onion_return,
                 payload: packet.payload
             });
             // TODO: get rid of this client
-            self.create_client(&ip_port.to_saddr(), gen_keypair().0).send_to(ip_port.to_saddr(), next_packet)
+            let state = self.state.read();
+            self.create_client(&ip_port.to_saddr(), gen_keypair().0, &state.peers_cache).send_to(ip_port.to_saddr(), next_packet)
         } else {
-            Box::new( future::err(
+            return Box::new( future::err(
                 Error::new(ErrorKind::Other,
-                    "get_payload() fail upon OnionResponse2"
+                    format!("OnionResponse2 next_onion_return is none")
             )))
         }
     }
@@ -598,17 +675,29 @@ impl Server {
     */
     pub fn handle_onion_response_1(&self, packet: OnionResponse1) -> IoFuture<()> {
         let onion_symmetric_key = self.onion_symmetric_key.read();
-        if let Ok((ip_port, None)) = packet.onion_return.get_payload(&onion_symmetric_key) {
+        let payload = packet.onion_return.get_payload(&onion_symmetric_key);
+        let payload = match payload {
+            Err(e) => {
+                return Box::new( future::err(
+                    Error::new(ErrorKind::Other,
+                        format!("OnionResponse1::get_payload() failed: {:?}", e)
+                )))
+            },
+            Ok(payload) => payload,
+        };
+
+        if let (ip_port, None) = payload {
             let next_packet = match packet.payload {
                 InnerOnionResponse::AnnounceResponse(inner) => DhtPacket::AnnounceResponse(inner),
                 InnerOnionResponse::OnionDataResponse(inner) => DhtPacket::OnionDataResponse(inner),
             };
             // TODO: get rid of this client
-            self.create_client(&ip_port.to_saddr(), gen_keypair().0).send_to(ip_port.to_saddr(), next_packet)
+            let state = self.state.read();
+            self.create_client(&ip_port.to_saddr(), gen_keypair().0, &state.peers_cache).send_to(ip_port.to_saddr(), next_packet)
         } else {
-            Box::new( future::err(
+            return Box::new( future::err(
                 Error::new(ErrorKind::Other,
-                    "get_payload() fail upon OnionResponse1"
+                    format!("OnionResponse1 next_onion_return is some")
             )))
         }
     }
@@ -661,9 +750,9 @@ mod tests {
         let mut state = alice.state.write();
         state.peers_cache.insert(pk, client.clone());
     }
-    fn is_pk_in_kbucket(alice: &Server, pk: PublicKey) -> bool {
+    fn create_client(alice: &Server, addr: SocketAddr, pk: PublicKey) -> Client {
         let state = alice.state.read();
-        state.kbucket.contains(&pk)
+        alice.create_client(&addr, pk, &state.peers_cache)
     }
     fn is_kbucket_eq(alice: &Server, kbuc: Kbucket) {
         let state = alice.state.read();
@@ -691,14 +780,15 @@ mod tests {
             let (pk, sk) = gen_keypair();
             let(tx, _) = mpsc::unbounded();
             let alice = Server::new(tx, pk, sk);
+            let state = alice.state.read();
             let addr1: SocketAddr = "127.0.0.1:12345".parse().unwrap();
-            let client1 = alice.create_client(&addr1, packet.pk);
+            let client1 = alice.create_client(&addr1, packet.pk, &state.peers_cache);
             // try one more time
-            let client2 = alice.create_client(&addr1, packet.pk);
+            let client2 = alice.create_client(&addr1, packet.pk, &state.peers_cache);
             assert_eq!(client1.pk, client2.pk);
             assert_eq!(client1.precomputed_key, client2.precomputed_key);
             let addr2: SocketAddr = "127.0.0.2:54321".parse().unwrap();
-            let client3 = alice.create_client(&addr2, packet.pk);
+            let client3 = alice.create_client(&addr2, packet.pk, &state.peers_cache);
             assert_eq!(client1.precomputed_key, client3.precomputed_key);
             assert_ne!(client1.addr, client3.addr);
             TestResult::passed()
@@ -709,11 +799,12 @@ mod tests {
     fn server_get_client_test() {
         let (alice, _precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
         // Try to get client on empty hash table
-        assert!(alice.get_client(&bob_pk).is_none());
+        let mut state = alice.state.write();
+        assert!(alice.get_client(&bob_pk, &state.peers_cache).is_none());
         // Now test with entry
-        let client = alice.create_client(&addr, bob_pk);
-        add_to_peers_cache(&alice, bob_pk, &client);
-        assert_eq!(client.pk, alice.get_client(&bob_pk).unwrap().pk);
+        let client = alice.create_client(&addr, bob_pk, &state.peers_cache);
+        state.peers_cache.insert(bob_pk, client.clone());
+        assert_eq!(client.pk, alice.get_client(&bob_pk, &state.peers_cache).unwrap().pk);
     }
     // handle_packet()
     quickcheck! {
@@ -740,17 +831,19 @@ mod tests {
             // handle ping response
             clear_peers_cache(&alice);
             let ping_res = DhtPacket::PingResponse(PingResponse::new(&precomp, &bob_pk, prs));
-            // Try to handle_packet() without registered client, it just returns ok()
-            assert!(alice.handle_packet((ping_res.clone(), addr)).wait().is_ok());
+            // Try to handle_packet() without registered client, it fail
+            assert!(alice.handle_packet((ping_res.clone(), addr)).wait().is_err());
             // Now, test with client
-            let mut client = alice.create_client(&addr, bob_pk);
+            let mut client = create_client(&alice, addr, bob_pk);
             client.ping_id = prs.id;
             add_to_peers_cache(&alice, bob_pk, &client);
-            alice.handle_packet((ping_res, addr)).wait().unwrap();
-            assert!(is_pk_in_kbucket(&alice, bob_pk));
+            assert!(alice.handle_packet((ping_res, addr)).wait().is_ok());
 
             // handle nodes request from bob
             let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(&precomp, &bob_pk, nrq));
+            let packed_node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &bob_pk);
+            assert!(alice.try_add_to_kbucket(&packed_node));
+
             alice.handle_packet((nodes_req, addr)).wait().unwrap();
             let (received, rx) = rx.into_future().wait().unwrap();
             debug!("received packet {:?}", received.clone().unwrap().0);
@@ -764,10 +857,10 @@ mod tests {
             // handle nodes response
             clear_peers_cache(&alice);
             let nodes_res = DhtPacket::NodesResponse(NodesResponse::new(&precomp, &bob_pk, nrs.clone()));
-            // Try to handle_packet() without registered client, it just returns ok()
-            assert!(alice.handle_packet((nodes_res.clone(), addr)).wait().is_ok());
+            // Try to handle_packet() without registered client, it fail
+            assert!(alice.handle_packet((nodes_res.clone(), addr)).wait().is_err());
             // Now, test with client
-            let mut client = alice.create_client(&addr, bob_pk);
+            let mut client = create_client(&alice, addr, bob_pk);
             client.ping_id = nrs.id;
             clear_kbucket(&alice);
             add_to_peers_cache(&alice, bob_pk, &client);
@@ -800,10 +893,10 @@ mod tests {
             clear_peers_cache(&alice);
             let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
             let nat_ping_res = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, nat_payload.clone()));
-            // Try to handle_packet() without registered client, it just returns ok()
-            assert!(alice.handle_packet((nat_ping_res.clone(), addr)).wait().is_ok());
+            // Try to handle_packet() without registered client, it fail
+            assert!(alice.handle_packet((nat_ping_res.clone(), addr)).wait().is_err());
             // Now, test with client
-            let mut client = alice.create_client(&addr, bob_pk);
+            let mut client = create_client(&alice, addr, bob_pk);
             client.ping_id = nat_res.id;
             add_to_peers_cache(&alice, bob_pk, &client);
             assert!(alice.handle_packet((nat_ping_res, addr)).wait().is_ok());
@@ -848,26 +941,24 @@ mod tests {
     // handle_ping_req()
     #[test]
     fn server_handle_ping_req_test() {
-        let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
+        let (alice, precomp, bob_pk, bob_sk, rx, addr) = create_node();
         // handle ping request, request from bob peer
         let prq = PingRequestPayload { id: random_u64() };
-        let ping_req = PingRequest::new(&precomp, &bob_pk, prq);
-        let pk = alice.pk;
-        let client = alice.create_client(&addr, pk);
-        alice.handle_ping_req(client, ping_req).wait().unwrap();
+        let ping_req = DhtPacket::PingRequest(PingRequest::new(&precomp, &bob_pk, prq));
+        alice.handle_packet((ping_req, addr)).wait().unwrap();
         let (received, _rx) = rx.into_future().wait().unwrap();
         debug!("received packet {:?}", received.clone().unwrap().1);
         let (packet, _addr) = received.unwrap();
         let mut buf = [0; 512];
         let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
         let (_, ping_res) = PingResponse::from_bytes(&buf[..size]).unwrap();
-        let ping_resp_payload = ping_res.get_payload(&alice.sk).unwrap();
+        let ping_resp_payload = ping_res.get_payload(&bob_sk).unwrap();
         assert_eq!(ping_resp_payload.id, prq.id);
+
         // error case: can't decrypt
         let prq = PingRequestPayload { id: random_u64() };
-        let ping_req = PingRequest::new(&precomp, &alice.pk, prq);
-        let client = alice.create_client(&addr, bob_pk);
-        assert!(!alice.handle_ping_req(client, ping_req).wait().is_ok());
+        let ping_req = DhtPacket::PingRequest(PingRequest::new(&precomp, &alice.pk, prq));
+        assert!(!alice.handle_packet((ping_req, addr)).wait().is_ok());
     }
 
     // handle_ping_resp()
@@ -875,30 +966,37 @@ mod tests {
     fn server_handle_ping_resp_test() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
         // handle ping response, request from bob peer
+        // success case
         let prs = PingResponsePayload { id: random_u64() };
-        let ping_resp = PingResponse::new(&precomp, &bob_pk, prs);
-        let mut client = alice.create_client(&addr, bob_pk);
+        let ping_resp = DhtPacket::PingResponse(PingResponse::new(&precomp, &bob_pk, prs));
+        let mut client = create_client(&alice, addr, bob_pk);
         client.ping_id = prs.id;
-        assert!(alice.handle_ping_resp(client, ping_resp).wait().is_ok());
+        add_to_peers_cache(&alice, bob_pk, &client);
+        assert!(alice.handle_packet((ping_resp, addr)).wait().is_ok());
 
+        // wrong PK, decrypt fail
         let prs = PingResponsePayload { id: random_u64() };
-        let ping_resp = PingResponse::new(&precomp, &alice.pk, prs);
-        let mut client = alice.create_client(&addr, bob_pk);
+        let ping_resp = DhtPacket::PingResponse(PingResponse::new(&precomp, &alice.pk, prs));
+        let mut client = create_client(&alice, addr, bob_pk);
         client.ping_id = prs.id;
-        assert!(alice.handle_ping_resp(client, ping_resp).wait().is_err());
+        add_to_peers_cache(&alice, bob_pk, &client);
+        assert!(alice.handle_packet((ping_resp, addr)).wait().is_err());
 
-        // ping_id = 0
+        // ping_id = 0, fail
         let prs = PingResponsePayload { id: 0 };
-        let ping_resp = PingResponse::new(&precomp, &bob_pk, prs);
-        let mut client = alice.create_client(&addr, bob_pk);
+        let ping_resp = DhtPacket::PingResponse(PingResponse::new(&precomp, &bob_pk, prs));
+        let mut client = create_client(&alice, addr, bob_pk);
         client.ping_id = 0;
-        assert!(alice.handle_ping_resp(client.clone(), ping_resp.clone()).wait().is_err());
-        // incorrect ping_id
+        add_to_peers_cache(&alice, bob_pk, &client);
+        assert!(alice.handle_packet((ping_resp, addr)).wait().is_err());
+
+        // incorrect ping_id, fail
         let prs = PingResponsePayload { id: random_u64() };
-        let ping_resp = PingResponse::new(&precomp, &bob_pk, prs);
-        let mut client = alice.create_client(&addr, bob_pk);
-        client.ping_id = prs.id + 1;
-        assert!(alice.handle_ping_resp(client, ping_resp).wait().is_err());
+        let ping_resp = DhtPacket::PingResponse(PingResponse::new(&precomp, &bob_pk, prs));
+        let mut client = create_client(&alice, addr, bob_pk);
+        client.ping_id = prs.id+1;
+        add_to_peers_cache(&alice, bob_pk, &client);
+        assert!(alice.handle_packet((ping_resp, addr)).wait().is_err());
     }
 
     // handle_nodes_req()
@@ -907,18 +1005,16 @@ mod tests {
         let (alice, precomp, bob_pk, bob_sk, rx, addr) = create_node();
         // error case, empty kbucket
         let nrq = NodesRequestPayload { pk: bob_pk, id: random_u64() };
-        let nodes_req = NodesRequest::new(&precomp, &bob_pk, nrq);
-        let client = alice.create_client(&addr, bob_pk);
-        assert!(alice.handle_nodes_req(client, nodes_req).wait().is_err());
+        let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(&precomp, &bob_pk, nrq));
+        assert!(alice.handle_packet((nodes_req, addr)).wait().is_err());
         // success case
         let packed_node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &bob_pk);
 
-        alice.try_add_to_kbucket(&packed_node);
+        assert!(alice.try_add_to_kbucket(&packed_node));
 
         let nrq = NodesRequestPayload { pk: bob_pk, id: random_u64() };
-        let nodes_req = NodesRequest::new(&precomp, &bob_pk, nrq);
-        let client = alice.create_client(&addr, bob_pk);
-        alice.handle_nodes_req(client, nodes_req).wait().unwrap();
+        let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(&precomp, &bob_pk, nrq));
+        alice.handle_packet((nodes_req, addr)).wait().unwrap();
         let (received, _rx) = rx.into_future().wait().unwrap();
         debug!("received packet {:?}", received.clone().unwrap().0);
         let (packet, _addr) = received.unwrap();
@@ -927,10 +1023,10 @@ mod tests {
         let (_, nodes_res) = NodesResponse::from_bytes(&buf[..size]).unwrap();
         let nodes_resp_payload = nodes_res.get_payload(&bob_sk).unwrap();
         assert_eq!(nodes_resp_payload.id, nrq.id);
+
         // error case, can't decrypt
-        let nodes_req = NodesRequest::new(&precomp, &alice.pk, nrq);
-        let client = alice.create_client(&addr, bob_pk);
-        assert!(alice.handle_nodes_req(client, nodes_req).wait().is_err());
+        let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(&precomp, &alice.pk, nrq));
+        assert!(alice.handle_packet((nodes_req, addr)).wait().is_err());
     }
 
     // handle_nodes_resp()
@@ -942,10 +1038,11 @@ mod tests {
             PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &gen_keypair().0)
         ], id: 38 };
 
-        let nodes_resp = NodesResponse::new(&precomp, &bob_pk, nrs.clone());
-        let mut client = alice.create_client(&addr, bob_pk);
+        let nodes_resp = DhtPacket::NodesResponse(NodesResponse::new(&precomp, &bob_pk, nrs.clone()));
+        let mut client = create_client(&alice, addr, bob_pk);
         client.ping_id = 38;
-        alice.handle_nodes_resp(client, nodes_resp).wait().unwrap();
+        add_to_peers_cache(&alice, bob_pk, &client);
+        alice.handle_packet((nodes_resp, addr)).wait().unwrap();
         let mut kbuc = Kbucket::new(KBUCKET_BUCKETS, &alice.pk);
         for pn in &nrs.nodes {
             kbuc.try_add(pn);
@@ -954,66 +1051,67 @@ mod tests {
         is_kbucket_eq(&alice, kbuc);
 
         // error case, can't decrypt
-        let nodes_resp = NodesResponse::new(&precomp, &alice.pk, nrs.clone());
+        let nodes_resp = DhtPacket::NodesResponse(NodesResponse::new(&precomp, &alice.pk, nrs.clone()));
         let pk = alice.pk;
-        let mut client = alice.create_client(&addr, pk);
+        let mut client = create_client(&alice, addr, pk);
         client.ping_id = 38;
-        assert!(alice.handle_nodes_resp(client, nodes_resp).wait().is_err());
+        add_to_peers_cache(&alice, pk, &client);
+        assert!(alice.handle_packet((nodes_resp, addr)).wait().is_err());
+
         // ping_id = 0
         let nrs = NodesResponsePayload { nodes: vec![
             PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &gen_keypair().0)
         ], id: 0 };
-        let nodes_resp = NodesResponse::new(&precomp, &bob_pk, nrs.clone());
-        let mut client = alice.create_client(&addr, bob_pk);
+        let nodes_resp = DhtPacket::NodesResponse(NodesResponse::new(&precomp, &bob_pk, nrs.clone()));
+        let mut client = create_client(&alice, addr, bob_pk);
         client.ping_id = 0;
-        assert!(alice.handle_nodes_resp(client.clone(), nodes_resp.clone()).wait().is_err());
+        add_to_peers_cache(&alice, bob_pk, &client);
+        assert!(alice.handle_packet((nodes_resp, addr)).wait().is_err());
+
         // incorrect ping_id
         let nrs = NodesResponsePayload { nodes: vec![
             PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &gen_keypair().0)
-        ], id: 38 };
-        let nodes_resp = NodesResponse::new(&precomp, &bob_pk, nrs.clone());
-        let mut client = alice.create_client(&addr, bob_pk);
+                ], id: 38 };
+        let nodes_resp = DhtPacket::NodesResponse(NodesResponse::new(&precomp, &bob_pk, nrs.clone()));
+        let mut client = create_client(&alice, addr, bob_pk);
         client.ping_id = 38 + 1;
-        assert!(alice.handle_nodes_resp(client, nodes_resp).wait().is_err());
+        add_to_peers_cache(&alice, bob_pk, &client);
+        assert!(alice.handle_packet((nodes_resp, addr)).wait().is_err());
     }
 
     // handle nat ping request
     #[test]
     fn server_handle_nat_ping_req_test() {
-        let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
+        let (alice, precomp, bob_pk, bob_sk, rx, addr) = create_node();
         let nat_req = NatPingRequest { id: random_u64() };
         let nat_payload = DhtRequestPayload::NatPingRequest(nat_req);
-        let dht_req = DhtRequest::new(&precomp, &alice.pk, &alice.pk, nat_payload.clone());
-        let alice_pk = alice.pk;
-        let client = alice.create_client(&addr, alice_pk);
-        alice.handle_nat_ping_req(client, dht_req, nat_req).wait().unwrap();
+        let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, nat_payload.clone()));
+        alice.handle_packet((dht_req, addr)).wait().unwrap();
         let (received, _rx) = rx.into_future().wait().unwrap();
         debug!("received packet {:?}", received.clone().unwrap().1);
         let (packet, _addr) = received.unwrap();
         let mut buf = [0; 512];
         let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
         let (_, dht_req) = DhtRequest::from_bytes(&buf[..size]).unwrap();
-        let dht_payload = dht_req.get_payload(&alice.sk).unwrap();
+        let dht_payload = dht_req.get_payload(&bob_sk).unwrap();
         let (_, size) = dht_payload.to_bytes((&mut buf, 0)).unwrap();
         let (_, nat_ping_resp_payload) = NatPingResponse::from_bytes(&buf[..size]).unwrap();
         assert_eq!(nat_ping_resp_payload.id, nat_req.id);
+
         // if receiver' pk != node's pk just returns ok()
         let nat_req = NatPingRequest { id: random_u64() };
         let nat_payload = DhtRequestPayload::NatPingRequest(nat_req);
-        let dht_req = DhtRequest::new(&precomp, &bob_pk, &bob_pk, nat_payload.clone());
-        let alice_pk = alice.pk;
-        let client = alice.create_client(&addr, alice_pk);
-        assert!(alice.handle_nat_ping_req(client, dht_req, nat_req).wait().is_ok());
+        let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &bob_pk, &bob_pk, nat_payload.clone()));
+        assert!(alice.handle_packet((dht_req, addr)).wait().is_ok());
+
         // if receiver' pk != node's pk and receiver's pk exists in kbucket, returns ok()
         let pn = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &bob_pk);
 
         alice.try_add_to_kbucket(&pn);
         let nat_req = NatPingRequest { id: random_u64() };
         let nat_payload = DhtRequestPayload::NatPingRequest(nat_req);
-        let dht_req = DhtRequest::new(&precomp, &bob_pk, &bob_pk, nat_payload.clone());
-        let alice_pk = alice.pk;
-        let client = alice.create_client(&addr, alice_pk);
-        assert!(alice.handle_nat_ping_req(client, dht_req, nat_req).wait().is_ok());
+        let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &bob_pk, &bob_pk, nat_payload.clone()));
+        assert!(alice.handle_packet((dht_req, addr)).wait().is_ok());
     }
 
     // handle nat ping response
@@ -1023,39 +1121,44 @@ mod tests {
         // if receiver' pk != node's pk just returns ok()
         let nat_res = NatPingResponse { id: random_u64() };
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
-        let dht_req = DhtRequest::new(&precomp, &bob_pk, &bob_pk, nat_payload.clone());
-        let client = alice.create_client(&addr, bob_pk);
-        assert!(alice.handle_nat_ping_resp(client, dht_req, nat_res).wait().is_ok());
+        let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &bob_pk, &bob_pk, nat_payload.clone()));
+        let client = create_client(&alice, addr, bob_pk);
+        add_to_peers_cache(&alice, bob_pk, &client);
+        assert!(alice.handle_packet((dht_req, addr)).wait().is_ok());
         // if receiver' pk != node's pk and receiver's pk exists in kbucket, returns ok()
         let pn = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &bob_pk);
 
         alice.try_add_to_kbucket(&pn);
         let nat_res = NatPingResponse { id: random_u64() };
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
-        let dht_req = DhtRequest::new(&precomp, &bob_pk, &bob_pk, nat_payload.clone());
-        let client = alice.create_client(&addr, bob_pk);
-        assert!(alice.handle_nat_ping_resp(client, dht_req, nat_res).wait().is_ok());
+        let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &bob_pk, &bob_pk, nat_payload.clone()));
+        let client = create_client(&alice, addr, bob_pk);
+        add_to_peers_cache(&alice, bob_pk, &client);
+        assert!(alice.handle_packet((dht_req, addr)).wait().is_ok());
         // success case
         let nat_res = NatPingResponse { id: random_u64() };
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
-        let dht_req = DhtRequest::new(&precomp, &alice.pk, &bob_pk, nat_payload.clone());
-        let mut client = alice.create_client(&addr, bob_pk);
+        let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, nat_payload.clone()));
+        let mut client = create_client(&alice, addr, bob_pk);
         client.ping_id = nat_res.id;
-        assert!(alice.handle_nat_ping_resp(client, dht_req, nat_res).wait().is_ok());
+        add_to_peers_cache(&alice, bob_pk, &client);
+        assert!(alice.handle_packet((dht_req, addr)).wait().is_ok());
         // error case, incorrect ping_id
         let nat_res = NatPingResponse { id: random_u64() };
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
-        let dht_req = DhtRequest::new(&precomp, &alice.pk, &bob_pk, nat_payload.clone());
-        let mut client = alice.create_client(&addr, bob_pk);
-        client.ping_id = nat_res.id + 1;
-        assert!(alice.handle_nat_ping_resp(client.clone(), dht_req, nat_res).wait().is_err());
+        let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, nat_payload.clone()));
+        let mut client = create_client(&alice, addr, bob_pk);
+        client.ping_id = nat_res.id+1;
+        add_to_peers_cache(&alice, bob_pk, &client);
+        assert!(alice.handle_packet((dht_req, addr)).wait().is_err());
         // error case, ping_id = 0
         let nat_res = NatPingResponse { id: 0 };
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
-        let dht_req = DhtRequest::new(&precomp, &alice.pk, &bob_pk, nat_payload.clone());
-        let mut client = alice.create_client(&addr, bob_pk);
+        let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, nat_payload.clone()));
+        let mut client = create_client(&alice, addr, bob_pk);
         client.ping_id = 0;
-        assert!(alice.handle_nat_ping_resp(client, dht_req, nat_res).wait().is_err());
+        add_to_peers_cache(&alice, bob_pk, &client);
+        assert!(alice.handle_packet((dht_req, addr)).wait().is_err());
     }
 
     #[test]
@@ -1468,23 +1571,24 @@ mod tests {
         let (ping_pk, ping_sk) = gen_keypair();
 
         let pn = PackedNode::new(false, SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &ping_pk);
-        alice.try_add_to_kbucket(&pn);
+        assert!(alice.try_add_to_kbucket(&pn));
         let pn = PackedNode::new(false, SocketAddr::V4("127.0.0.1:33445".parse().unwrap()), &bob_pk);
-        alice.try_add_to_kbucket(&pn);
+        assert!(alice.try_add_to_kbucket(&pn));
 
         alice.send_pings().wait().unwrap();
 
+        let state = alice.state.read();
         rx.take(2).map(|received| {
             let (packet, addr) = received;
             let mut buf = [0; 512];
             let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
             let (_, ping_req) = PingRequest::from_bytes(&buf[..size]).unwrap();
             if addr == SocketAddr::V4("127.0.0.1:33445".parse().unwrap()) {
-                let client = alice.get_client(&bob_pk).unwrap();
+                let client = alice.get_client(&bob_pk, &state.peers_cache).unwrap();
                 let ping_req_payload = ping_req.get_payload(&bob_sk).unwrap();
-                assert_eq!(ping_req_payload.id, client.ping_id);                
+                assert_eq!(ping_req_payload.id, client.ping_id);
             } else {
-                let client = alice.get_client(&ping_pk).unwrap();
+                let client = alice.get_client(&ping_pk, &state.peers_cache).unwrap();
                 let ping_req_payload = ping_req.get_payload(&ping_sk).unwrap();
                 assert_eq!(ping_req_payload.id, client.ping_id);
             }
@@ -1505,7 +1609,8 @@ mod tests {
 
         alice.send_nodes_req(alice_pk).wait().unwrap();
 
-        let client = alice.get_client(&bob_pk).unwrap();
+        let state = alice.state.read();
+        let client = alice.get_client(&bob_pk, &state.peers_cache).unwrap();
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, _addr) = received.unwrap();
         let mut buf = [0; 512];
@@ -1523,7 +1628,8 @@ mod tests {
 
         alice.send_nat_ping_req(node, bob_pk).wait().unwrap();
 
-        let client = alice.get_client(&alice.pk).unwrap();
+        let state = alice.state.read();
+        let client = alice.get_client(&alice.pk, &state.peers_cache).unwrap();
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, _addr) = received.unwrap();
         let mut buf = [0; 512];
@@ -1539,8 +1645,7 @@ mod tests {
         let (alice, _precomp, bob_pk, bob_sk, rx, addr) = create_node();
 
         let lan = LanDiscovery { pk: bob_pk };
-        let client = alice.create_client(&addr, bob_pk);
-        alice.handle_lan_discovery(client.clone(), lan).wait().unwrap();
+        alice.handle_lan_discovery(lan, addr).wait().unwrap();
         let (received, _rx) = rx.into_future().wait().unwrap();
         debug!("received packet {:?}", received.clone().unwrap().0);
         let (packet, _addr) = received.unwrap();
@@ -1548,7 +1653,7 @@ mod tests {
         let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
         let (_, nodes_req) = NodesRequest::from_bytes(&buf[..size]).unwrap();
         let _nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
-        assert_eq!(nodes_req.pk, client.pk);
+        assert_eq!(nodes_req.pk, alice.pk);
     }
     #[test]
     fn server_send_lan_discovery_ipv4_test() {
