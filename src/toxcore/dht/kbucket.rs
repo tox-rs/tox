@@ -145,13 +145,8 @@ impl Bucket {
         }
     }
 
-    fn find(&self, pk: &PublicKey) -> Option<usize> {
-        for (n, node) in self.nodes.iter().enumerate() {
-            if &node.pk == pk {
-                return Some(n)
-            }
-        }
-        None
+    fn find(&self, base_pk: &PublicKey, pk: &PublicKey) -> Option<usize> {
+        self.nodes.binary_search_by(|n| base_pk.distance(&n.pk, &pk)).ok()
     }
 
     /**
@@ -184,8 +179,7 @@ impl Bucket {
             Ok(index) => {
                 debug!(target: "Bucket",
                     "Updated: the node was already in the bucket.");
-                self.nodes.remove(index);
-                self.nodes.insert(index, *new_node);
+                self.nodes[index] = *new_node;
                 true
             },
             Err(index) if index == self.nodes.len() => {
@@ -341,24 +335,20 @@ impl Kbucket {
     /// find peer which has pk
     #[cfg(test)]
     fn find(&self, pk: &PublicKey) -> Option<(usize, usize)> {
-        for (bucket_index, bucket) in self.buckets.iter().enumerate() {
-            match bucket.find(pk) {
-                None => {},
-                Some(node_index) => return Some((bucket_index, node_index))
-            }
-        }
-        None
+        self.bucket_index(pk).and_then(|index|
+            self.buckets[index]
+                .find(&self.pk, pk)
+                .map(|node_index| (index, node_index))
+        )
     }
 
     /// find peer which has pk
     pub fn get_node(&self, pk: &PublicKey) -> Option<SocketAddr> {
-        for (_, bucket) in self.buckets.iter().enumerate() {
-            match bucket.find(pk) {
-                None => {},
-                Some(node_index) => return Some((*bucket).nodes[node_index].saddr)
-            }
-        }
-        None
+        self.bucket_index(pk).and_then(|index|
+            self.buckets[index]
+                .find(&self.pk, pk)
+                .map(|node_index| self.buckets[index].nodes[node_index].saddr)
+        )
     }
 
     /// get random node to select peer to send NodesRequest
@@ -382,8 +372,8 @@ impl Kbucket {
 
     Returns `None` otherwise.
     */
-    fn bucket_index(&self, pubkey: &PublicKey) -> Option<usize> {
-        match kbucket_index(&self.pk, pubkey) {
+    fn bucket_index(&self, pk: &PublicKey) -> Option<usize> {
+        match kbucket_index(&self.pk, pk) {
             Some(index) if index < self.size() => Some(index as usize),
             _ => None
         }
