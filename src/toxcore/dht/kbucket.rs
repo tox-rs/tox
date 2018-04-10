@@ -46,7 +46,7 @@ to "own" PK.
 
 According to the [spec](https://zetok.github.io/tox-spec#bucket-index).
 
-Fails (returns `None`) if supplied keys are the same.
+Fails (returns `None`) only if supplied keys are the same.
 */
 pub fn kbucket_index(&PublicKey(ref own_pk): &PublicKey,
                      &PublicKey(ref other_pk): &PublicKey) -> Option<u8> {
@@ -283,8 +283,8 @@ impl Default for Bucket {
 [`BUCKET_DEFAULT_SIZE`](./constant.BUCKET_DEFAULT_SIZE.html) nodes close to
 own PK.
 
-Nodes in bucket are sorted by closeness to the PK; closest node is the first,
-while furthest is last.
+Nodes in bucket are sorted by closeness to the PK; closest node is the last
+one, while furthest is the first one.
 
 Further reading: [Tox spec](https://zetok.github.io/tox-spec#k-buckets).
 */
@@ -307,29 +307,14 @@ Realistically, not even half of that will be ever used, given how
 */
 pub const KBUCKET_MAX_ENTRIES: u8 = ::std::u8::MAX;
 
-/** Default number of [`Bucket`](./struct.Bucket.html)s that [`Kbucket`]
-holds.
-
-[`Kbucket`]: ./struct.Kbucket.html
-*/
-pub const KBUCKET_BUCKETS: u8 = 128;
-
 impl Kbucket {
     /// Create a new `Kbucket`.
-    ///
-    /// `n` – number of [`Bucket`](./struct.Bucket.html)s held.
-    pub fn new(n: u8, pk: &PublicKey) -> Self {
-        trace!(target: "Kbucket", "Creating new Kbucket with k: {:?} and PK:
-               {:?}", n, pk);
+    pub fn new(pk: &PublicKey) -> Self {
+        trace!(target: "Kbucket", "Creating new Kbucket with PK: {:?}", pk);
         Kbucket {
             pk: *pk,
-            buckets: vec![Bucket::new(None); n as usize]
+            buckets: vec![Bucket::new(None); KBUCKET_MAX_ENTRIES as usize]
         }
-    }
-
-    /// Number of [`Bucket`](./struct.Bucket.html)s held.
-    pub fn size(&self) -> u8 {
-        self.buckets.len() as u8
     }
 
     /// find peer which has pk
@@ -356,9 +341,9 @@ impl Kbucket {
         if self.is_empty() {
             return None
         }
-        let mut num_k = random_u64() % u64::from(self.size());
+        let mut num_k = random_u64() % u64::from(KBUCKET_MAX_ENTRIES);
         while self.buckets[num_k as usize].nodes.is_empty() {
-            num_k = random_u64() % u64::from(self.size());
+            num_k = random_u64() % u64::from(KBUCKET_MAX_ENTRIES);
         }
         let num = random_u64() % self.buckets[num_k as usize].nodes.len() as u64;
         Some(self.buckets[num_k as usize].nodes[num as usize])
@@ -367,16 +352,13 @@ impl Kbucket {
     /** Return the possible internal index of [`Bucket`](./struct.Bucket.html)
         where the key could be inserted/removed.
 
-    Returns `Some(index)` if [`kbucket index`](./fn.kbucket_index.html) is
-    defined and it is lower than the number of buckets.
+    Same as [`kbucket index`](./fn.kbucket_index.html) but uses stored in
+    `Kbucket` public key.
 
-    Returns `None` otherwise.
+    Returns `None` only if supplied key is the same as stored in `Kbucket` key.
     */
     fn bucket_index(&self, pk: &PublicKey) -> Option<usize> {
-        match kbucket_index(&self.pk, pk) {
-            Some(index) if index < self.size() => Some(index as usize),
-            _ => None
-        }
+        kbucket_index(&self.pk, pk).map(|index| index as usize)
     }
 
     /** Add [`PackedNode`](./struct.PackedNode.html) to `Kbucket`.
@@ -723,7 +705,7 @@ mod tests {
             g.fill_bytes(&mut pk);
             let pk = PublicKey([0; PUBLICKEYBYTES]);
 
-            let mut kbucket = Kbucket::new(g.gen(), &pk);
+            let mut kbucket = Kbucket::new(&pk);
 
             // might want to add some buckets
             for _ in 0..(g.gen_range(0, KBUCKET_MAX_ENTRIES as usize *
@@ -738,45 +720,28 @@ mod tests {
 
     #[test]
     fn dht_kbucket_new_test() {
-        fn with_pk(a: u64, b: u64, c: u64, d: u64, buckets: u8) {
+        fn with_pk(a: u64, b: u64, c: u64, d: u64) {
             let pk = nums_to_pk(a, b, c, d);
-            let kbucket = Kbucket::new(buckets, &pk);
-            assert_eq!(buckets, kbucket.size());
+            let kbucket = Kbucket::new(&pk);
             assert_eq!(pk, kbucket.pk);
         }
-        quickcheck(with_pk as fn(u64, u64, u64, u64, u8));
-    }
-
-    // Kbucket::size()
-
-    #[test]
-    fn dht_kbucket_size_test() {
-        let pk = PublicKey([0; PUBLICKEYBYTES]);
-
-        let k0 = Kbucket::new(0, &pk);
-        assert_eq!(0, k0.size());
-
-        let k1 = Kbucket::new(1, &pk);
-        assert_eq!(1, k1.size());
-
-        let k255 = Kbucket::new(255, &pk);
-        assert_eq!(255, k255.size());
+        quickcheck(with_pk as fn(u64, u64, u64, u64));
     }
 
     // Kbucket::try_add()
 
     #[test]
     fn dht_kbucket_try_add_test() {
-        fn with_pns(pns: Vec<PackedNode>, n: u8, p1: u64, p2: u64, p3: u64, p4: u64) {
+        fn with_pns(pns: Vec<PackedNode>, p1: u64, p2: u64, p3: u64, p4: u64) {
             let pk = nums_to_pk(p1, p2, p3, p4);
-            let mut kbucket = Kbucket::new(n, &pk);
+            let mut kbucket = Kbucket::new(&pk);
             for node in pns {
                 // result may vary, so discard it
                 // TODO: can be done better?
                 kbucket.try_add(&node);
             }
         }
-        quickcheck(with_pns as fn(Vec<PackedNode>, u8, u64, u64, u64, u64));
+        quickcheck(with_pns as fn(Vec<PackedNode>, u64, u64, u64, u64));
     }
 
     // Kbucket::remove()
@@ -793,7 +758,7 @@ mod tests {
             let pk = nums_to_pk(random_u64(), random_u64(), random_u64(),
                     random_u64());
 
-            let mut kbucket = Kbucket::new(KBUCKET_MAX_ENTRIES, &pk);
+            let mut kbucket = Kbucket::new(&pk);
 
             // Fill Kbucked with nodes
             for node in &nodes {
@@ -829,7 +794,7 @@ mod tests {
                         n4: PackedNode, a: u64, b: u64, c: u64, d: u64) {
 
             let pk = nums_to_pk(a, b, c, d);
-            let mut kbucket = Kbucket::new(::std::u8::MAX, &pk);
+            let mut kbucket = Kbucket::new(&pk);
 
             // check whether number of correct nodes that are returned is right
             let correctness = |should, kbc: &Kbucket| {
@@ -875,7 +840,7 @@ mod tests {
             pk_bytes[0] = 1;
             let base_pk = PublicKey(pk_bytes);
 
-            let mut kbucket = Kbucket::new(KBUCKET_MAX_ENTRIES, &base_pk);
+            let mut kbucket = Kbucket::new(&base_pk);
 
             let addr = Ipv4Addr::new(0, 0, 0, 0);
             let saddr = SocketAddrV4::new(addr, 0);
@@ -968,11 +933,11 @@ mod tests {
     // Kbucket::contains()
 
     quickcheck! {
-        fn kbucket_contains_test(n: u8, pns: Vec<PackedNode>) -> TestResult {
+        fn kbucket_contains_test(pns: Vec<PackedNode>) -> TestResult {
             if pns.is_empty() { return TestResult::discard() }
 
             let (pk, _) = gen_keypair();
-            let mut kbucket = Kbucket::new(n, &pk);
+            let mut kbucket = Kbucket::new(&pk);
             assert!(!kbucket.contains(&pk));
             assert!(pns.iter().all(|pn| !kbucket.contains(&pn.pk)));
 
@@ -986,10 +951,10 @@ mod tests {
         }
     }
 
-   // Kbucket::can_add()
+    // Kbucket::can_add()
 
     quickcheck! {
-        fn kbucket_can_add_test(n: u8, pns: Vec<PackedNode>) -> TestResult {
+        fn kbucket_can_add_test(pns: Vec<PackedNode>) -> TestResult {
             if pns.len() < 2 { return TestResult::discard() }
 
             let (pk, _) = gen_keypair();
@@ -1005,7 +970,7 @@ mod tests {
 
             let mut kbucket = Kbucket {
                 pk,
-                buckets: vec![Bucket::new(Some(1)); n as usize],
+                buckets: vec![Bucket::new(Some(1)); KBUCKET_MAX_ENTRIES as usize],
             };
 
             for node in &pns {
@@ -1026,9 +991,9 @@ mod tests {
     // KbucketIter::next()
 
     quickcheck! {
-        fn kbucket_iter_next_test(n: u8, pns: Vec<PackedNode>) -> () {
+        fn kbucket_iter_next_test(pns: Vec<PackedNode>) -> () {
             let (pk, _) = gen_keypair();
-            let mut kbucket = Kbucket::new(n, &pk);
+            let mut kbucket = Kbucket::new(&pk);
             // empty always returns None
             assert!(kbucket.iter().next().is_none());
 
