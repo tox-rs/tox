@@ -37,6 +37,7 @@ use futures::*;
 use futures::sync::mpsc;
 use futures_timer::Interval;
 use tokio::net::{UdpSocket, UdpFramed};
+use tokio_io::IoFuture;
 
 use std::net::{SocketAddr, IpAddr};
 use std::io::{ErrorKind, Error};
@@ -128,16 +129,67 @@ fn main() {
             err
         });
 
+    let server: IoFuture<()> = Box::new(server); 
+    let server = add_ping_sender(server, &server_obj);
+    let server = add_nat_sender(server, &server_obj, pk);
+    let server = add_lan_sender(server, &server_obj, local);
+    let server = add_nodes_sender(server, &server_obj);
+    let server = add_onion_key_refresher(server, &server_obj);
+
+    let server = server
+        .map(|_| ())
+        .map_err(move |err| {
+            error!("Processing ended with error: {:?}", err);
+            ()
+        });
+
+    info!("server running on localhost:12345");
+    tokio::run(server);
+}
+
+fn add_ping_sender(base_selector: IoFuture<()>, server_obj: &Server) -> IoFuture<()> {
     // 60 seconds for PingRequests
     let ping_wakeups = Interval::new(Duration::from_secs(60));
 
     let server_obj_c = server_obj.clone();
+    
     let ping_sender = ping_wakeups.for_each(move |()| {
             println!("ping_wakeup");
             server_obj_c.send_pings()
         })
         .map_err(|_err| Error::new(ErrorKind::Other, "Ping timer error"));
-
+    
+    Box::new(base_selector.select(Box::new(ping_sender))
+        .map(|_| ())
+        .map_err(move |(err, _select_next)| {
+            error!("Processing ended with error: {:?}", err);
+            err
+        }))
+}
+fn add_nat_sender(base_selector: IoFuture<()>, server_obj: &Server, pk: PublicKey) -> IoFuture<()> {
+    // 3 seconds for NatPingRequest
+    let nat_wakeups = Interval::new(Duration::from_secs(3));
+    let server_obj_c = server_obj.clone();
+    let nat_sender = nat_wakeups.for_each(move |()| {
+            println!("nat_wakeup");
+            // for now loopback nat_request, the sender's pk is dht_node's pk
+            let node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:33445".parse().unwrap()), &pk);
+            let friend_pk = PublicKey([15, 107, 126, 130, 81, 55, 154, 157,
+                                    192, 117, 0, 225, 119, 43, 48, 117,
+                                    84, 109, 112, 57, 243, 216, 4, 171,
+                                    185, 111, 33, 146, 221, 31, 77, 118]);
+            server_obj_c.send_nat_ping_req(node, friend_pk)
+        })
+        .map_err(|_err| Error::new(ErrorKind::Other, "NatPing timer error"));
+    
+    Box::new(base_selector.select(Box::new(nat_sender))
+        .map(|_| ())
+        .map_err(move |(err, _select_next)| {
+            error!("Processing ended with error: {:?}", err);
+            err
+        }))
+}
+fn add_nodes_sender(base_selector: IoFuture<()>, server_obj: &Server) -> IoFuture<()> {
     // 20 seconds for NodesRequest
     let nodes_wakeups = Interval::new(Duration::from_secs(20));
     let server_obj_c = server_obj.clone();
@@ -151,21 +203,14 @@ fn main() {
         })
         .map_err(|_err| Error::new(ErrorKind::Other, "Nodes timer error"));
 
-    // 3 seconds for NatPingRequest
-    let nat_wakeups = Interval::new(Duration::from_secs(3));
-    let server_obj_c = server_obj.clone();
-    let nat_sender = nat_wakeups.for_each(move |()| {
-            println!("nat_wakeup");
-            let peer_pk = gen_keypair().0;
-            let node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:33445".parse().unwrap()), &peer_pk.clone());
-            let friend_pk = PublicKey([15, 107, 126, 130, 81, 55, 154, 157,
-                                    192, 117, 0, 225, 119, 43, 48, 117,
-                                    84, 109, 112, 57, 243, 216, 4, 171,
-                                    185, 111, 33, 146, 221, 31, 77, 118]);
-            server_obj_c.send_nat_ping_req(node, friend_pk)
-        })
-        .map_err(|_err| Error::new(ErrorKind::Other, "NatPing timer error"));
-
+    Box::new(base_selector.select(Box::new(nodes_sender))
+        .map(|_| ())
+        .map_err(move |(err, _select_next)| {
+            error!("Processing ended with error: {:?}", err);
+            err
+        }))
+}
+fn add_lan_sender(base_selector: IoFuture<()>, server_obj: &Server, local: SocketAddr) -> IoFuture<()> {
     // 10 seconds for LanDiscovery
     let lan_wakeups = Interval::new(Duration::from_secs(10));
     let server_obj_c = server_obj.clone();
@@ -178,7 +223,15 @@ fn main() {
             }
         })
         .map_err(|_err| Error::new(ErrorKind::Other, "LanDiscovery timer error"));
-
+    
+    Box::new(base_selector.select(Box::new(lan_sender))
+        .map(|_| ())
+        .map_err(move |(err, _select_next)| {
+            error!("Processing ended with error: {:?}", err);
+            err
+        }))
+}
+fn add_onion_key_refresher(base_selector: IoFuture<()>, server_obj: &Server) -> IoFuture<()> {
     // Refresh onion symmetric key every 2 hours. This enforces onion paths expiration.
     let refresh_onion_key_wakeups = Interval::new(Duration::from_secs(7200));
     let server_obj_c = server_obj.clone();
@@ -189,38 +242,10 @@ fn main() {
         })
         .map_err(|_err| Error::new(ErrorKind::Other, "Refresh onion key timer error"));
 
-    let packet_sender = ping_sender.select(nodes_sender)
-            .map(|_| ())
-            .map_err(move |(err, _select_next)| {
-                error!("Processing ended with error: {:?}", err);
-                err
-            })
-        .select(nat_sender)
-            .map(|_| ())
-            .map_err(move |(err, _select_next)| {
-                error!("Processing ended with error: {:?}", err);
-                err
-            })
-        .select(lan_sender)
-            .map(|_| ())
-            .map_err(move |(err, _select_next)| {
-                error!("Processing ended with error: {:?}", err);
-                err
-            })
-        .select(onion_key_updater)
-            .map(|_| ())
-            .map_err(move |(err, _select_next)| {
-                error!("Processing ended with error: {:?}", err);
-                err
-            });
-
-    let server = server.select(packet_sender)
+    Box::new(base_selector.select(Box::new(onion_key_updater))
         .map(|_| ())
         .map_err(move |(err, _select_next)| {
             error!("Processing ended with error: {:?}", err);
-            ()
-        });
-
-    info!("server running on localhost:12345");
-    tokio::run(server);
+            err
+        }))
 }
