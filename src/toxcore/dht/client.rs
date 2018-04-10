@@ -33,6 +33,7 @@ use get_if_addrs::IfAddr;
 //use std::collections::VecDeque;
 use std::io::{ErrorKind, Error};
 use std::net::{SocketAddr, IpAddr};
+use std::time::Instant;
 
 use toxcore::crypto_core::*;
 use toxcore::dht::packet::*;
@@ -53,6 +54,8 @@ pub struct Client {
     pub precomputed_key: PrecomputedKey,
     /// shaed mpsc tx part
     pub tx: Tx,
+    /// last received ping-response time
+    pub last_resp_time: Instant
 }
 
 impl Client {
@@ -64,6 +67,7 @@ impl Client {
             precomputed_key,
             ping_id: 0,
             tx,
+            last_resp_time: Instant::now(),
         }
     }
     /// actual send method

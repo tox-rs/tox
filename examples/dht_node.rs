@@ -135,6 +135,7 @@ fn main() {
     let server = add_lan_sender(server, &server_obj, local);
     let server = add_nodes_sender(server, &server_obj);
     let server = add_onion_key_refresher(server, &server_obj);
+    let server = add_timedout_remover(server, &server_obj);
 
     let server = server
         .map(|_| ())
@@ -225,6 +226,26 @@ fn add_lan_sender(base_selector: IoFuture<()>, server_obj: &Server, local: Socke
         .map_err(|_err| Error::new(ErrorKind::Other, "LanDiscovery timer error"));
     
     Box::new(base_selector.select(Box::new(lan_sender))
+        .map(|_| ())
+        .map_err(move |(err, _select_next)| {
+            error!("Processing ended with error: {:?}", err);
+            err
+        }))
+}
+fn add_timedout_remover(base_selector: IoFuture<()>, server_obj: &Server) -> IoFuture<()> {
+    // 1 seconds for timed-out clients remover
+    const PING_TIMEDOUT_DURATION: u64 = 182;
+    let timeout_dur = Duration::from_secs(PING_TIMEDOUT_DURATION);
+
+    let timeout_wakeups = Interval::new(Duration::from_secs(1));
+    let server_obj_c = server_obj.clone();
+    let timeout_remover = timeout_wakeups.for_each(move |()| {
+            println!("timeout_wakeups");
+            server_obj_c.remove_timedout_clients(timeout_dur)
+        })
+        .map_err(|_err| Error::new(ErrorKind::Other, "Timedout clients remover timer error"));
+    
+    Box::new(base_selector.select(Box::new(timeout_remover))
         .map(|_| ())
         .map_err(move |(err, _select_next)| {
             error!("Processing ended with error: {:?}", err);
