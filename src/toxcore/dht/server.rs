@@ -356,19 +356,11 @@ impl Server {
         };
 
         let close_nodes = state.kbucket.get_closest(&self.pk);
-        if !close_nodes.is_empty() {
-            let resp_payload = NodesResponsePayload {
-                nodes: close_nodes,
-                id: payload.id,
-            };
-            client.send_nodes_response(resp_payload)
-        } else {
-            error!("get_closest() return nothing");
-            Box::new( future::err(
-                Error::new(ErrorKind::Other,
-                    "get_closest() return nothing"
-            )))
-        }
+        let resp_payload = NodesResponsePayload {
+            nodes: close_nodes,
+            id: payload.id,
+        };
+        client.send_nodes_response(resp_payload)
     }
     /**
     handle received NodesResponse from peer.
@@ -1020,10 +1012,6 @@ mod tests {
     #[test]
     fn server_handle_nodes_req_test() {
         let (alice, precomp, bob_pk, bob_sk, rx, addr) = create_node();
-        // error case, empty kbucket
-        let nrq = NodesRequestPayload { pk: bob_pk, id: random_u64() };
-        let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(&precomp, &bob_pk, nrq));
-        assert!(alice.handle_packet((nodes_req, addr)).wait().is_err());
         // success case
         let packed_node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &bob_pk);
 
