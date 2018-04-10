@@ -129,25 +129,16 @@ fn main() {
             err
         });
 
-    // Refresh onion symmetric key every 2 hours. This enforces onion paths expiration.
-    let refresh_onion_key_wakeups = Interval::new(Duration::from_secs(7200));
-    let server_obj_c = server_obj.clone();
-    let onion_key_updater = refresh_onion_key_wakeups.for_each(move |()| {
-            println!("refresh_onion_key_wakeup");
-            server_obj_c.refresh_onion_key();
-            future::ok(())
-        })
-        .map_err(|_err| Error::new(ErrorKind::Other, "Refresh onion key timer error"));
-
     let server: IoFuture<()> = Box::new(server); 
     let server = add_ping_sender(server, &server_obj);
     let server = add_nat_sender(server, &server_obj, pk);
     let server = add_lan_sender(server, &server_obj, local);
     let server = add_nodes_sender(server, &server_obj);
+    let server = add_onion_key_refresher(server, &server_obj);
 
-    let server = server.select(onion_key_updater)
+    let server = server
         .map(|_| ())
-        .map_err(move |(err, _select_next)| {
+        .map_err(move |err| {
             error!("Processing ended with error: {:?}", err);
             ()
         });
@@ -234,6 +225,24 @@ fn add_lan_sender(base_selector: IoFuture<()>, server_obj: &Server, local: Socke
         .map_err(|_err| Error::new(ErrorKind::Other, "LanDiscovery timer error"));
     
     Box::new(base_selector.select(Box::new(lan_sender))
+        .map(|_| ())
+        .map_err(move |(err, _select_next)| {
+            error!("Processing ended with error: {:?}", err);
+            err
+        }))
+}
+fn add_onion_key_refresher(base_selector: IoFuture<()>, server_obj: &Server) -> IoFuture<()> {
+    // Refresh onion symmetric key every 2 hours. This enforces onion paths expiration.
+    let refresh_onion_key_wakeups = Interval::new(Duration::from_secs(7200));
+    let server_obj_c = server_obj.clone();
+    let onion_key_updater = refresh_onion_key_wakeups.for_each(move |()| {
+            println!("refresh_onion_key_wakeup");
+            server_obj_c.refresh_onion_key();
+            future::ok(())
+        })
+        .map_err(|_err| Error::new(ErrorKind::Other, "Refresh onion key timer error"));
+
+    Box::new(base_selector.select(Box::new(onion_key_updater))
         .map(|_| ())
         .map_err(move |(err, _select_next)| {
             error!("Processing ended with error: {:?}", err);
