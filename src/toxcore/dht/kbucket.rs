@@ -146,7 +146,7 @@ impl Bucket {
     }
 
     fn find(&self, base_pk: &PublicKey, pk: &PublicKey) -> Option<usize> {
-        self.nodes.binary_search_by(|n| base_pk.distance(&n.pk, &pk)).ok()
+        self.nodes.binary_search_by(|n| base_pk.distance(&n.pk, pk)).ok()
     }
 
     /**

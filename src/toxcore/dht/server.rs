@@ -122,7 +122,7 @@ impl Server {
     pub fn remove_timedout_clients(&self, timeout: Duration) -> IoFuture<()> {
         let mut state = self.state.write();
         let timeout_peers = state.peers_cache.iter()
-            .filter(|&(_pk, ref client)| client.last_resp_time.elapsed() > timeout)
+            .filter(|&(_pk, client)| client.last_resp_time.elapsed() > timeout)
             .map(|(pk, _client)| *pk)
             .collect::<Vec<_>>();
 
@@ -169,9 +169,8 @@ impl Server {
                 payload
             ));
             self.send_to(peer.saddr, nodes_req)
-        }
-        else {
-            return Box::new(future::ok(()));
+        } else {
+            Box::new(future::ok(()))
         }
     }
     /// send NatPingRequests to peers every 3 seconds
@@ -195,8 +194,7 @@ impl Server {
     Function to handle incoming packets. If there is a response packet,
     send back it to the peer.
     */
-    pub fn handle_packet(&self, (packet, addr): (DhtPacket, SocketAddr)) -> IoFuture<()>
-    {
+    pub fn handle_packet(&self, (packet, addr): (DhtPacket, SocketAddr)) -> IoFuture<()> {
         match packet {
             DhtPacket::PingRequest(packet) => {
                 debug!("Received ping request");
@@ -467,14 +465,11 @@ impl Server {
                 resp_payload
             ));
             self.send_to(addr, nat_ping_resp)
-        } else { // search kbucket to find target peer
-            if let Some(addr) = state.kbucket.get_node(&packet.rpk) {
-                let packet = DhtPacket::DhtRequest(packet);
-                self.send_to(addr, packet)
-            }
-            else { // do nothing
-                Box::new( future::ok(()) )
-            }
+        } else if let Some(addr) = state.kbucket.get_node(&packet.rpk) { // search kbucket to find target peer
+            let packet = DhtPacket::DhtRequest(packet);
+            self.send_to(addr, packet)
+        } else { // do nothing
+            Box::new( future::ok(()) )
         }
     }
 
@@ -504,21 +499,17 @@ impl Server {
             if client.ping_id == payload.id {
                 // TODO: start hole-punching
                 Box::new( future::ok(()) )
-            }
-            else {
+            } else {
                 Box::new( future::err(
                     Error::new(ErrorKind::Other, "NatPingResponse.ping_id does not match")
                 ))
             }
         // search kbucket to find target peer
-        } else {
-            if let Some(addr) = state.kbucket.get_node(&packet.rpk) {
-                let packet = DhtPacket::DhtRequest(packet);
-                self.send_to(addr, packet)
-            }
-            else { // do nothing
-                Box::new( future::ok(()) )
-            }
+        } else if let Some(addr) = state.kbucket.get_node(&packet.rpk) {
+            let packet = DhtPacket::DhtRequest(packet);
+            self.send_to(addr, packet)
+        } else { // do nothing
+            Box::new( future::ok(()) )
         }
     }
     /**
@@ -1620,11 +1611,11 @@ mod tests {
             let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
             let (_, ping_req) = PingRequest::from_bytes(&buf[..size]).unwrap();
             if addr == SocketAddr::V4("127.0.0.1:33445".parse().unwrap()) {
-                let client = state.peers_cache.get(&bob_pk).unwrap();
+                let client = &state.peers_cache[&bob_pk];
                 let ping_req_payload = ping_req.get_payload(&bob_sk).unwrap();
                 assert_eq!(ping_req_payload.id, client.ping_id);
             } else {
-                let client = state.peers_cache.get(&ping_pk).unwrap();
+                let client = &state.peers_cache[&ping_pk];
                 let ping_req_payload = ping_req.get_payload(&ping_sk).unwrap();
                 assert_eq!(ping_req_payload.id, client.ping_id);
             }
@@ -1646,7 +1637,7 @@ mod tests {
         alice.send_nodes_req(alice_pk).wait().unwrap();
 
         let state = alice.state.read();
-        let client = state.peers_cache.get(&bob_pk).unwrap();
+        let client = &state.peers_cache[&bob_pk];
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, _addr) = received.unwrap();
         let mut buf = [0; 512];
@@ -1665,7 +1656,7 @@ mod tests {
         alice.send_nat_ping_req(node, bob_pk).wait().unwrap();
 
         let state = alice.state.read();
-        let client = state.peers_cache.get(&alice.pk).unwrap();
+        let client = &state.peers_cache[&alice.pk];
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, _addr) = received.unwrap();
         let mut buf = [0; 512];
