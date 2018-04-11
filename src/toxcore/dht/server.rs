@@ -27,13 +27,15 @@ Functionality needed to work as a DHT node.
 This module works on top of other modules.
 */
 
-use futures::{Stream, future, stream};
+use futures::{Future, Sink, Stream, future, stream};
 use futures::sync::mpsc;
+use get_if_addrs;
+use get_if_addrs::IfAddr;
 use parking_lot::RwLock;
 use tokio_io::IoFuture;
 
 use std::io::{ErrorKind, Error};
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -122,7 +124,7 @@ impl Server {
             client
         } else {
             let precomputed_key = encrypt_precompute(&pk, &self.sk);
-            Client::new(precomputed_key, self.pk, *addr, self.tx.clone())
+            Client::new(precomputed_key, self.pk, *addr)
         }
     }
     /// get client from cache
@@ -152,10 +154,21 @@ impl Server {
     /// send PingRequest to all peers in kbucket
     pub fn send_pings(&self) -> IoFuture<()> {
         let mut state = self.state.write();
-        let ping_sender = state.kbucket.iter().map(move |peer| {
+        let ping_sender = state.kbucket.iter().map(|peer| {
             let mut client = self.create_client(&peer.saddr, peer.pk, &state.peers_cache);
-            let result = client.send_ping_request();
+
+            let payload = PingRequestPayload {
+                id: client.new_ping_id(),
+            };
+            let ping_req = DhtPacket::PingRequest(PingRequest::new(
+                &precompute(&peer.pk, &self.sk),
+                &self.pk,
+                payload
+            ));
+            let result = self.send_to(peer.saddr, ping_req);
+
             state.peers_cache.insert(peer.pk, client);
+
             result
         });
 
@@ -168,8 +181,20 @@ impl Server {
         let mut state = self.state.write();
         if let Some(peer) = state.kbucket.get_random_node() {
             let mut client = self.create_client(&peer.saddr, peer.pk, &state.peers_cache);
-            let result = client.send_nodes_request(friend_pk);
+
+            let payload = NodesRequestPayload {
+                pk: friend_pk,
+                id: client.new_ping_id(),
+            };
+            let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(
+                &precompute(&peer.pk, &self.sk),
+                &self.pk,
+                payload
+            ));
+            let result = self.send_to(peer.saddr, nodes_req);
+
             state.peers_cache.insert(peer.pk, client);
+
             result
         }
         else {
@@ -179,9 +204,22 @@ impl Server {
     /// send NatPingRequests to peers every 3 seconds
     pub fn send_nat_ping_req(&self, peer: PackedNode, friend_pk: PublicKey) -> IoFuture<()> {
         let mut state = self.state.write();
+
         let mut client = self.create_client(&peer.saddr, peer.pk, &state.peers_cache);
-        let result = client.send_nat_ping_request(friend_pk);
+
+        let payload = DhtRequestPayload::NatPingRequest(NatPingRequest {
+            id: client.new_ping_id(),
+        });
+        let nat_ping_req = DhtPacket::DhtRequest(DhtRequest::new(
+            &precompute(&peer.pk, &self.sk),
+            &friend_pk,
+            &self.pk,
+            payload
+        ));
+        let result = self.send_to(peer.saddr, nat_ping_req);
+
         state.peers_cache.insert(peer.pk, client);
+
         result
     }
     /**
@@ -268,13 +306,40 @@ impl Server {
             }
         }
     }
+
+    /// actual send method
+    fn send_to(&self, addr: SocketAddr, packet: DhtPacket) -> IoFuture<()> {
+        Box::new(self.tx.clone() // clone tx sender for 1 send only
+            .send((packet, addr))
+            .map(|_tx| ()) // ignore tx because it was cloned
+            .map_err(|e| {
+                // This may only happen if rx is gone
+                // So cast SendError<T> to a corresponding std::io::Error
+                error!("send to peer error {:?}", e);
+                Error::from(ErrorKind::UnexpectedEof)
+            })
+        )
+    }
+
+    /// get broadcast addresses for host's network interfaces
+    fn get_ipv4_broadcast_addrs() -> Vec<IpAddr> {
+        let ifs = get_if_addrs::get_if_addrs().expect("no network interface");
+        ifs.iter().filter_map(|interface|
+            match interface.addr {
+                IfAddr::V4(ref addr) => addr.broadcast,
+                _ => None,
+        })
+        .map(|addr|
+            IpAddr::V4(addr)
+        )
+        .collect()
+    }
+
     /**
     handle received PingRequest packet, then create PingResponse packet
     and send back it to the peer.
     */
-    fn handle_ping_req(&self, packet: PingRequest, addr: SocketAddr) -> IoFuture<()>
-    {
-        let state = self.state.read();
+    fn handle_ping_req(&self, packet: PingRequest, addr: SocketAddr) -> IoFuture<()> {
         let payload = packet.get_payload(&self.sk);
         let payload = match payload {
             Err(e) => {
@@ -289,14 +354,17 @@ impl Server {
         let resp_payload = PingResponsePayload {
             id: payload.id,
         };
-        let client = self.create_client(&addr, packet.pk, &state.peers_cache);
-        client.send_ping_response(resp_payload)
+        let ping_resp = DhtPacket::PingResponse(PingResponse::new(
+            &precompute(&packet.pk, &self.sk),
+            &self.pk,
+            resp_payload
+        ));
+        self.send_to(addr, ping_resp)
     }
     /**
     handle received PingResponse packet. If ping_id is correct, try_add peer to kbucket.
     */
-    fn handle_ping_resp(&self, packet: PingResponse) -> IoFuture<()>
-    {
+    fn handle_ping_resp(&self, packet: PingResponse) -> IoFuture<()> {
         let mut state = self.state.write();
         let payload = packet.get_payload(&self.sk);
         let payload = match payload {
@@ -342,7 +410,6 @@ impl Server {
     */
     fn handle_nodes_req(&self, packet: NodesRequest, addr: SocketAddr) -> IoFuture<()> {
         let state = self.state.read();
-        let client = self.create_client(&addr, packet.pk, &state.peers_cache);
 
         let payload = packet.get_payload(&self.sk);
         let payload = match payload {
@@ -360,7 +427,12 @@ impl Server {
             nodes: close_nodes,
             id: payload.id,
         };
-        client.send_nodes_response(resp_payload)
+        let nodes_resp = DhtPacket::NodesResponse(NodesResponse::new(
+            &precompute(&packet.pk, &self.sk),
+            &self.pk,
+            resp_payload
+        ));
+        self.send_to(addr, nodes_resp)
     }
     /**
     handle received NodesResponse from peer.
@@ -414,17 +486,22 @@ impl Server {
     */
     fn handle_nat_ping_req(&self, packet: DhtRequest, payload: NatPingRequest, addr: SocketAddr) -> IoFuture<()> {
         let state = self.state.read();
-        let client = self.create_client(&addr, packet.spk, &state.peers_cache);
 
         if packet.rpk == self.pk { // the target peer is me
-            let resp_payload = NatPingResponse {
+            let resp_payload = DhtRequestPayload::NatPingResponse(NatPingResponse {
                 id: payload.id,
-            };
-            client.send_nat_ping_response(&packet.spk, resp_payload)
-        // search kbucket to find target peer
-        } else {
+            });
+            let nat_ping_resp = DhtPacket::DhtRequest(DhtRequest::new(
+                &precompute(&packet.spk, &self.sk),
+                &packet.spk,
+                &self.pk,
+                resp_payload
+            ));
+            self.send_to(addr, nat_ping_resp)
+        } else { // search kbucket to find target peer
             if let Some(addr) = state.kbucket.get_node(&packet.rpk) {
-                client.send_nat_ping_packet(&addr, packet.clone())
+                let packet = DhtPacket::DhtRequest(packet);
+                self.send_to(addr, packet)
             }
             else { // do nothing
                 Box::new( future::ok(()) )
@@ -467,7 +544,8 @@ impl Server {
         // search kbucket to find target peer
         } else {
             if let Some(addr) = state.kbucket.get_node(&packet.rpk) {
-                client.send_nat_ping_packet(&addr, packet.clone())
+                let packet = DhtPacket::DhtRequest(packet);
+                self.send_to(addr, packet)
             }
             else { // do nothing
                 Box::new( future::ok(()) )
@@ -486,29 +564,63 @@ impl Server {
         let mut state = self.state.write();
 
         let mut client = self.create_client(&addr, packet.pk, &state.peers_cache);
-        let result = client.send_nodes_request(packet.pk);
+
+        let payload = NodesRequestPayload {
+            pk: packet.pk,
+            id: client.new_ping_id(),
+        };
+        let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(
+            &precompute(&packet.pk, &self.sk),
+            &self.pk,
+            payload
+        ));
+        let result = self.send_to(addr, nodes_req);
+
         state.peers_cache.insert(packet.pk, client);
+
         result
     }
     /**
     send LanDiscovery packet to all broadcast addresses when dht_node runs as ipv4 mode
     */
     pub fn send_lan_discovery_ipv4(&self) -> IoFuture<()> {
-        let state = self.state.read();
-        // addr is dummy, actual lan discovery packet sending logic exists in client
-        let addr: SocketAddr = "127.0.0.1:33445".parse().unwrap();
-        let client = self.create_client(&addr, self.pk, &state.peers_cache);
-        client.send_lan_discovery_ipv4()
+        let mut ip_addrs = Server::get_ipv4_broadcast_addrs();
+        // Ipv4 global broadcast address
+        ip_addrs.push(
+            "255.255.255.255".parse().unwrap()
+        );
+        let lan_packet = DhtPacket::LanDiscovery(LanDiscovery {
+            pk: self.pk,
+        });
+        let lan_sender = ip_addrs.iter().map(|&addr|
+            self.send_to(SocketAddr::new(addr, 33445), lan_packet.clone()) // 33445 is default port for tox
+        );
+
+        let lan_stream = stream::futures_unordered(lan_sender).then(|_| Ok(()));
+        Box::new(lan_stream.for_each(|()| Ok(())))
     }
     /**
     send LanDiscovery packet to all broadcast addresses when dht_node runs as ipv6 mode
     */
     pub fn send_lan_discovery_ipv6(&self) -> IoFuture<()> {
-        let state = self.state.read();
-        // addr is dummy, actual lan discovery packet sending logic exists in client
-        let addr: SocketAddr = "[::1]:33445".parse().unwrap(); // 33445 is default port for tox
-        let client = self.create_client(&addr, self.pk, &state.peers_cache);
-        client.send_lan_discovery_ipv6()
+        let mut ip_addrs = Server::get_ipv4_broadcast_addrs();
+        // Ipv6 broadcast address
+        ip_addrs.push(
+            "::1".parse().unwrap() // TODO: it should be FF02::1, but for now, my LAN config has no route to address of FF02::1
+        );
+        // Ipv4 global broadcast address
+        ip_addrs.push(
+            "::ffff:255.255.255.255".parse().unwrap()
+        );
+        let lan_packet = DhtPacket::LanDiscovery(LanDiscovery {
+            pk: self.pk,
+        });
+        let lan_sender = ip_addrs.iter().map(|&addr|
+            self.send_to(SocketAddr::new(addr, 33445), lan_packet.clone()) // 33445 is default port for tox
+        );
+
+        let lan_stream = stream::futures_unordered(lan_sender).then(|_| Ok(()));
+        Box::new(lan_stream.for_each(|()| Ok(())))
     }
     /**
     handle received OnionRequest0 packet, then create OnionRequest1 packet
@@ -539,9 +651,7 @@ impl Server {
             payload: payload.inner,
             onion_return
         });
-        // TODO: get rid of this client
-        let state = self.state.read();
-        self.create_client(&addr, packet.temporary_pk, &state.peers_cache).send_to(payload.ip_port.to_saddr(), next_packet)
+        self.send_to(payload.ip_port.to_saddr(), next_packet)
     }
     /**
     handle received OnionRequest1 packet, then create OnionRequest2 packet
@@ -572,9 +682,7 @@ impl Server {
             payload: payload.inner,
             onion_return
         });
-        // TODO: get rid of this client
-        let state = self.state.read();
-        self.create_client(&addr, packet.temporary_pk, &state.peers_cache).send_to(payload.ip_port.to_saddr(), next_packet)
+        self.send_to(payload.ip_port.to_saddr(), next_packet)
     }
     /**
     handle received OnionRequest2 packet, then create AnnounceRequest
@@ -609,9 +717,7 @@ impl Server {
                 onion_return
             }),
         };
-        // TODO: get rid of this client
-        let state = self.state.read();
-        self.create_client(&addr, packet.temporary_pk, &state.peers_cache).send_to(payload.ip_port.to_saddr(), next_packet)
+        self.send_to(payload.ip_port.to_saddr(), next_packet)
     }
     /**
     handle received OnionResponse3 packet, then create OnionResponse2 packet
@@ -635,9 +741,7 @@ impl Server {
                 onion_return: next_onion_return,
                 payload: packet.payload
             });
-            // TODO: get rid of this client
-            let state = self.state.read();
-            self.create_client(&ip_port.to_saddr(), gen_keypair().0, &state.peers_cache).send_to(ip_port.to_saddr(), next_packet)
+            self.send_to(ip_port.to_saddr(), next_packet)
         } else {
             return Box::new( future::err(
                 Error::new(ErrorKind::Other,
@@ -667,9 +771,7 @@ impl Server {
                 onion_return: next_onion_return,
                 payload: packet.payload
             });
-            // TODO: get rid of this client
-            let state = self.state.read();
-            self.create_client(&ip_port.to_saddr(), gen_keypair().0, &state.peers_cache).send_to(ip_port.to_saddr(), next_packet)
+            self.send_to(ip_port.to_saddr(), next_packet)
         } else {
             return Box::new( future::err(
                 Error::new(ErrorKind::Other,
@@ -700,9 +802,7 @@ impl Server {
                 InnerOnionResponse::AnnounceResponse(inner) => DhtPacket::AnnounceResponse(inner),
                 InnerOnionResponse::OnionDataResponse(inner) => DhtPacket::OnionDataResponse(inner),
             };
-            // TODO: get rid of this client
-            let state = self.state.read();
-            self.create_client(&ip_port.to_saddr(), gen_keypair().0, &state.peers_cache).send_to(ip_port.to_saddr(), next_packet)
+            self.send_to(ip_port.to_saddr(), next_packet)
         } else {
             return Box::new( future::err(
                 Error::new(ErrorKind::Other,
@@ -1662,25 +1762,53 @@ mod tests {
     }
     #[test]
     fn server_send_lan_discovery_ipv4_test() {
-        let (alice, _precomp, _bob_pk, _bob_sk, rx, _addr) = create_node();
+        let (alice, _precomp, _bob_pk, _bob_sk, mut rx, _addr) = create_node();
         alice.send_lan_discovery_ipv6().wait().unwrap();
-        let (received, _rx) = rx.into_future().wait().unwrap();
-        let (packet, _addr) = received.unwrap();
-        let mut buf = [0; 512];
-        let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
-        let (_, lan_discovery) = LanDiscovery::from_bytes(&buf[..size]).unwrap();
-        assert_eq!(alice.pk, lan_discovery.pk);
+
+        let ifs = get_if_addrs::get_if_addrs().expect("no network interface");
+        let broad_vec: Vec<SocketAddr> = ifs.iter().filter_map(|interface| 
+            match interface.addr {
+                IfAddr::V4(ref addr) => addr.broadcast,
+                _ => None,
+            })
+            .map(|ipv4|
+                SocketAddr::new(IpAddr::V4(ipv4), 33445)
+            ).collect();
+        for _i in 0..broad_vec.len() + 1 { // `+1` for 255.255.255.255
+            let (received, rx1) = rx.into_future().wait().unwrap();
+            debug!("received packet {:?}", received.clone().unwrap().1);
+            let (packet, _addr) = received.unwrap();
+            let mut buf = [0; 512];
+            let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
+            let (_, lan_discovery) = LanDiscovery::from_bytes(&buf[..size]).unwrap();
+            assert_eq!(lan_discovery.pk, alice.pk);
+            rx = rx1;
+        }
     }
     #[test]
     fn server_send_lan_discovery_ipv6_test() {
-        let (alice, _precomp, _bob_pk, _bob_sk, rx, _addr) = create_node();
+        let (alice, _precomp, _bob_pk, _bob_sk, mut rx, _addr) = create_node();
         alice.send_lan_discovery_ipv6().wait().unwrap();
-        let (received, _rx) = rx.into_future().wait().unwrap();
-        let (packet, _addr) = received.unwrap();
-        let mut buf = [0; 512];
-        let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
-        let (_, lan_discovery) = LanDiscovery::from_bytes(&buf[..size]).unwrap();
-        assert_eq!(alice.pk, lan_discovery.pk);
+
+        let ifs = get_if_addrs::get_if_addrs().expect("no network interface");
+        let broad_vec: Vec<SocketAddr> = ifs.iter().filter_map(|interface| 
+            match interface.addr {
+                IfAddr::V4(ref addr) => addr.broadcast,
+                _ => None,
+            })
+            .map(|ipv4|
+                SocketAddr::new(IpAddr::V4(ipv4), 33445)
+            ).collect();
+        for _i in 0..broad_vec.len() + 2 { // `+2` for ::1 and ::ffff:255.255.255.255
+            let (received, rx1) = rx.into_future().wait().unwrap();
+            debug!("received packet {:?}", received.clone().unwrap().1);
+            let (packet, _addr) = received.unwrap();
+            let mut buf = [0; 512];
+            let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
+            let (_, lan_discovery) = LanDiscovery::from_bytes(&buf[..size]).unwrap();
+            assert_eq!(lan_discovery.pk, alice.pk);
+            rx = rx1;
+        }
     }
     // remove_timedout_clients(), case of client removed
     #[test]
