@@ -45,7 +45,6 @@ use toxcore::crypto_core::*;
 use toxcore::dht::packet::*;
 use toxcore::dht::packed_node::*;
 use toxcore::dht::kbucket::*;
-use toxcore::dht::client::*;
 use toxcore::onion::packet::*;
 
 /// Shorthand for the transmit half of the message channel.
@@ -97,6 +96,34 @@ struct ServerState {
     pub peers_cache: HashMap<PublicKey, Client>,
     /// Close List (contains nodes close to own DHT PK)
     pub kbucket: Kbucket,
+}
+
+/// peer info.
+#[derive(Clone, Debug)]
+struct Client {
+    /// last sent ping_id to check PingResponse is correct
+    pub ping_id: u64,
+    /// last received ping-response time
+    pub last_resp_time: Instant
+}
+
+impl Client {
+    /// create Client object
+    pub fn new() -> Client {
+        Client {
+            ping_id: 0,
+            last_resp_time: Instant::now(),
+        }
+    }
+    /// set new random ping id to the client and return it
+    pub fn new_ping_id(&mut self) -> u64 {
+        loop {
+            self.ping_id = random_u64();
+            if self.ping_id != 0 {
+                return self.ping_id;
+            }
+        }
+    }
 }
 
 impl Server {
@@ -789,6 +816,12 @@ mod tests {
     const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - NONCEBYTES;
     const ONION_RETURN_2_PAYLOAD_SIZE: usize = ONION_RETURN_2_SIZE - NONCEBYTES;
     const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - NONCEBYTES;
+
+    #[test]
+    fn client_is_clonable() {
+        let client = Client::new();
+        let _ = client.clone();
+    }
 
     fn create_node() -> (Server, PrecomputedKey, PublicKey, SecretKey,
             mpsc::UnboundedReceiver<(DhtPacket, SocketAddr)>, SocketAddr) {
