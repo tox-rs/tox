@@ -117,7 +117,25 @@ nightly:tox:
 ### linux end
 
 ### windows start
+windows:v1-21-0:
+  script:
+    ### init variables
+    - |
+      set SODIUM_STATIC=1
+      set SODIUM_LIB_DIR=C:\GitLab-Runner\libsodium
 
+    ### set rustup version
+    - rustup default 1.21.0
+
+    ### run build, test and doc
+    - |
+      cargo build --verbose
+      cargo test --verbose
+      cargo doc
+  stage: build
+  tags:
+    - tox
+    - windows
 ### windows end
 
 ### osx start
