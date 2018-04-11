@@ -47,8 +47,12 @@ impl Client {
     }
     /// set new random ping id to the client and return it
     pub fn new_ping_id(&mut self) -> u64 {
-        self.ping_id = random_u64();
-        self.ping_id
+        loop {
+            self.ping_id = random_u64();
+            if self.ping_id != 0 {
+                return self.ping_id;
+            }
+        }
     }
 }
 
