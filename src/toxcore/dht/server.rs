@@ -101,7 +101,7 @@ impl Server {
     Create new `Server` instance.
     */
     pub fn new(tx: Tx, pk: PublicKey, sk: SecretKey) -> Server {
-        let kbucket = Kbucket::new(KBUCKET_BUCKETS, &pk);
+        let kbucket = Kbucket::new(&pk);
 
         debug!("Created new Server instance");
         Server {
@@ -749,7 +749,7 @@ mod tests {
     }
     fn clear_kbucket(alice: &Server) {
         let mut state = alice.state.write();
-        state.kbucket = Kbucket::new(KBUCKET_BUCKETS, &alice.pk);
+        state.kbucket = Kbucket::new(&alice.pk);
     }
     fn clear_peers_cache(alice: &Server) {
         let mut state = alice.state.write();
@@ -873,7 +873,7 @@ mod tests {
             client.ping_id = nrs.id;
             clear_kbucket(&alice);
             add_to_peers_cache(&alice, bob_pk, &client);
-            let mut kbuc = Kbucket::new(KBUCKET_BUCKETS, &alice.pk);
+            let mut kbuc = Kbucket::new(&alice.pk);
             for pn in &nrs.nodes {
                 kbuc.try_add(pn);
             }
@@ -1048,7 +1048,7 @@ mod tests {
         client.ping_id = 38;
         add_to_peers_cache(&alice, bob_pk, &client);
         alice.handle_packet((nodes_resp, addr)).wait().unwrap();
-        let mut kbuc = Kbucket::new(KBUCKET_BUCKETS, &alice.pk);
+        let mut kbuc = Kbucket::new(&alice.pk);
         for pn in &nrs.nodes {
             kbuc.try_add(pn);
         }

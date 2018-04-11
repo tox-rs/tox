@@ -349,8 +349,6 @@ mod tests {
 
     use quickcheck::{Arbitrary, StdGen};
 
-    use toxcore::dht::kbucket::KBUCKET_BUCKETS;
-
     const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - NONCEBYTES;
 
     #[test]
@@ -657,7 +655,7 @@ mod tests {
             onion_return
         };
 
-        let kbucket = Kbucket::new(KBUCKET_BUCKETS, &dht_pk);
+        let kbucket = Kbucket::new(&dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
 
@@ -702,7 +700,7 @@ mod tests {
             onion_return
         };
 
-        let kbucket = Kbucket::new(KBUCKET_BUCKETS, &dht_pk);
+        let kbucket = Kbucket::new(&dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
 
@@ -751,7 +749,7 @@ mod tests {
             onion_return
         };
 
-        let kbucket = Kbucket::new(KBUCKET_BUCKETS, &dht_pk);
+        let kbucket = Kbucket::new(&dht_pk);
 
         let response = onion_announce.handle_announce_request(request, &dht_sk, &kbucket, addr).unwrap();
 
@@ -794,7 +792,7 @@ mod tests {
             onion_return
         };
 
-        let kbucket = Kbucket::new(KBUCKET_BUCKETS, &dht_pk);
+        let kbucket = Kbucket::new(&dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
 
