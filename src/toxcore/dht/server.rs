@@ -123,7 +123,7 @@ impl Server {
         if let Some(client) = self.get_client(&pk, peers_cache) {
             client
         } else {
-            Client::new(self.pk)
+            Client::new()
         }
     }
     /// get client from cache
@@ -880,22 +880,6 @@ mod tests {
         let tx: Tx = mpsc::unbounded().0;
         let _ = Server::new(tx, pk, sk);
     }
-    // create_client()
-    quickcheck! {
-        fn server_create_client_test(packet: PingRequest) -> TestResult {
-            crypto_init();
-
-            let (pk, sk) = gen_keypair();
-            let(tx, _) = mpsc::unbounded();
-            let alice = Server::new(tx, pk, sk);
-            let state = alice.state.read();
-            let client1 = alice.create_client(packet.pk, &state.peers_cache);
-            // try one more time
-            let client2 = alice.create_client(packet.pk, &state.peers_cache);
-            assert_eq!(client1.pk, client2.pk);
-            TestResult::passed()
-        }
-    }
     // get_client()
     #[test]
     fn server_get_client_test() {
@@ -906,7 +890,7 @@ mod tests {
         // Now test with entry
         let client = alice.create_client(bob_pk, &state.peers_cache);
         state.peers_cache.insert(bob_pk, client.clone());
-        assert_eq!(client.pk, alice.get_client(&bob_pk, &state.peers_cache).unwrap().pk);
+        assert!(alice.get_client(&bob_pk, &state.peers_cache).is_some());
     }
     // handle_packet()
     quickcheck! {

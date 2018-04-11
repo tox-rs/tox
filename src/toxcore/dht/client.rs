@@ -31,8 +31,6 @@ use toxcore::crypto_core::*;
 /// peer info.
 #[derive(Clone, Debug)]
 pub struct Client {
-    /// Public key of dht node
-    pub pk: PublicKey,
     /// last sent ping_id to check PingResponse is correct
     pub ping_id: u64,
     /// last received ping-response time
@@ -41,9 +39,8 @@ pub struct Client {
 
 impl Client {
     /// create Client object
-    pub fn new(pk: PublicKey) -> Client {
+    pub fn new() -> Client {
         Client {
-            pk,
             ping_id: 0,
             last_resp_time: Instant::now(),
         }
@@ -61,8 +58,7 @@ mod tests {
 
     #[test]
     fn client_is_clonable() {
-        let (alice_pk, _alice_sk) = gen_keypair();
-        let client = Client::new(alice_pk);
+        let client = Client::new();
         let _ = client.clone();
     }
 }
