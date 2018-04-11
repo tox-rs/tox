@@ -37,6 +37,7 @@ use tokio_io::IoFuture;
 use std::io::{ErrorKind, Error};
 use std::net::{IpAddr, SocketAddr};
 use std::collections::HashMap;
+use std::ops::DerefMut;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -120,20 +121,10 @@ impl Server {
 
     /// create new client
     pub fn create_client(&self, pk: PublicKey, peers_cache: &HashMap<PublicKey, Client>) -> Client {
-        if let Some(client) = self.get_client(&pk, peers_cache) {
-            client
+        if let Some(client) = peers_cache.get(&pk) {
+            client.clone()
         } else {
             Client::new()
-        }
-    }
-    /// get client from cache
-    pub fn get_client(&self, pk: &PublicKey, peers_cache: &HashMap<PublicKey, Client>) -> Option<Client> {
-        // Client entry is inserted before sending *Request.
-        if let Some(client) = peers_cache.get(pk) {
-            Some(client.clone())
-        }
-        else {
-            None
         }
     }
     /// remove timed-out clients, also remove node from kbucket
@@ -382,8 +373,9 @@ impl Server {
                     "PingResponse.ping_id == 0"
             )))
         }
-        let client = self.get_client(&packet.pk, &state.peers_cache);
-        let mut client = match client {
+
+        let client = state.peers_cache.get_mut(&packet.pk);
+        let client = match client {
             None => {
                 return Box::new( future::err(
                     Error::new(ErrorKind::Other,
@@ -395,10 +387,8 @@ impl Server {
 
         if client.ping_id == payload.id {
             client.last_resp_time = Instant::now();
-            state.peers_cache.insert(packet.pk, client);
             Box::new( future::ok(()) )
-        }
-        else {
+        } else {
             Box::new( future::err(
                 Error::new(ErrorKind::Other, "PingResponse.ping_id does not match")
             ))
@@ -438,6 +428,8 @@ impl Server {
     */
     fn handle_nodes_resp(&self, packet: NodesResponse) -> IoFuture<()> {
         let mut state = self.state.write();
+        let state = state.deref_mut();
+
         let payload = packet.get_payload(&self.sk);
         let payload = match payload {
             Err(e) => {
@@ -456,7 +448,7 @@ impl Server {
             )))
         }
 
-        let client = self.get_client(&packet.pk, &state.peers_cache);
+        let client = state.peers_cache.get(&packet.pk);
         let client = match client {
             None => {
                 return Box::new( future::err(
@@ -472,8 +464,7 @@ impl Server {
                 state.kbucket.try_add(node);
             }
             Box::new( future::ok(()) )
-        }
-        else {
+        } else {
             Box::new( future::err(
                 Error::new(ErrorKind::Other, "NodesResponse.ping_id does not match")
             ))
@@ -513,7 +504,7 @@ impl Server {
     */
     fn handle_nat_ping_resp(&self, packet: DhtRequest, payload: NatPingResponse) -> IoFuture<()> {
         let state = self.state.read();
-        let client = self.get_client(&packet.spk, &state.peers_cache);
+        let client = state.peers_cache.get(&packet.spk);
         let client = match client {
             None => {
                 return Box::new( future::err(
@@ -879,18 +870,6 @@ mod tests {
         let (pk, sk) = gen_keypair();
         let tx: Tx = mpsc::unbounded().0;
         let _ = Server::new(tx, pk, sk);
-    }
-    // get_client()
-    #[test]
-    fn server_get_client_test() {
-        let (alice, _precomp, bob_pk, _bob_sk, _rx, _addr) = create_node();
-        // Try to get client on empty hash table
-        let mut state = alice.state.write();
-        assert!(alice.get_client(&bob_pk, &state.peers_cache).is_none());
-        // Now test with entry
-        let client = alice.create_client(bob_pk, &state.peers_cache);
-        state.peers_cache.insert(bob_pk, client.clone());
-        assert!(alice.get_client(&bob_pk, &state.peers_cache).is_some());
     }
     // handle_packet()
     quickcheck! {
@@ -1666,11 +1645,11 @@ mod tests {
             let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
             let (_, ping_req) = PingRequest::from_bytes(&buf[..size]).unwrap();
             if addr == SocketAddr::V4("127.0.0.1:33445".parse().unwrap()) {
-                let client = alice.get_client(&bob_pk, &state.peers_cache).unwrap();
+                let client = state.peers_cache.get(&bob_pk).unwrap();
                 let ping_req_payload = ping_req.get_payload(&bob_sk).unwrap();
                 assert_eq!(ping_req_payload.id, client.ping_id);
             } else {
-                let client = alice.get_client(&ping_pk, &state.peers_cache).unwrap();
+                let client = state.peers_cache.get(&ping_pk).unwrap();
                 let ping_req_payload = ping_req.get_payload(&ping_sk).unwrap();
                 assert_eq!(ping_req_payload.id, client.ping_id);
             }
@@ -1692,7 +1671,7 @@ mod tests {
         alice.send_nodes_req(alice_pk).wait().unwrap();
 
         let state = alice.state.read();
-        let client = alice.get_client(&bob_pk, &state.peers_cache).unwrap();
+        let client = state.peers_cache.get(&bob_pk).unwrap();
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, _addr) = received.unwrap();
         let mut buf = [0; 512];
@@ -1711,7 +1690,7 @@ mod tests {
         alice.send_nat_ping_req(node, bob_pk).wait().unwrap();
 
         let state = alice.state.read();
-        let client = alice.get_client(&alice.pk, &state.peers_cache).unwrap();
+        let client = state.peers_cache.get(&alice.pk).unwrap();
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, _addr) = received.unwrap();
         let mut buf = [0; 512];
@@ -1801,7 +1780,7 @@ mod tests {
         alice.remove_timedout_clients(dur).wait().unwrap();
         let state = alice.state.read();
         // after client be removed
-        assert!(alice.get_client(&bob_pk, &state.peers_cache).is_none());
+        assert!(state.peers_cache.get(&bob_pk).is_none());
         // peer should be removed from kbucket
         let state = alice.state.read();
         assert!(!state.kbucket.contains(&bob_pk));
@@ -1820,7 +1799,7 @@ mod tests {
         alice.remove_timedout_clients(dur).wait().unwrap();
         let state = alice.state.read();
         // client should be remained
-        assert!(!alice.get_client(&bob_pk, &state.peers_cache).is_none());
+        assert!(!state.peers_cache.get(&bob_pk).is_none());
         // peer should be remained in kbucket
         let state = alice.state.read();
         assert!(state.kbucket.contains(&bob_pk));
