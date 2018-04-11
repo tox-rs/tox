@@ -38,19 +38,16 @@ pub struct Client {
     pub addr: SocketAddr,
     /// last sent ping_id to check PingResponse is correct
     pub ping_id: u64,
-    /// precomputed key for this peer
-    pub precomputed_key: PrecomputedKey,
     /// last received ping-response time
     pub last_resp_time: Instant
 }
 
 impl Client {
     /// create Client object
-    pub fn new(precomputed_key: PrecomputedKey, pk: PublicKey, addr: SocketAddr) -> Client {
+    pub fn new(pk: PublicKey, addr: SocketAddr) -> Client {
         Client {
             pk,
             addr,
-            precomputed_key,
             ping_id: 0,
             last_resp_time: Instant::now(),
         }
@@ -70,9 +67,7 @@ mod tests {
     fn client_is_clonable() {
         let addr = "127.0.0.1:12345".parse().unwrap();
         let (alice_pk, _alice_sk) = gen_keypair();
-        let (bob_pk, bob_sk) = gen_keypair();
-        let precomp = precompute(&alice_pk, &bob_sk);
-        let client = Client::new(precomp, bob_pk, addr);
+        let client = Client::new(alice_pk, addr);
         let _ = client.clone();
     }
 }

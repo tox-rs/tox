@@ -123,8 +123,7 @@ impl Server {
         if let Some(client) = self.get_client(&pk, peers_cache) {
             client
         } else {
-            let precomputed_key = encrypt_precompute(&pk, &self.sk);
-            Client::new(precomputed_key, self.pk, *addr)
+            Client::new(self.pk, *addr)
         }
     }
     /// get client from cache
@@ -895,10 +894,8 @@ mod tests {
             // try one more time
             let client2 = alice.create_client(&addr1, packet.pk, &state.peers_cache);
             assert_eq!(client1.pk, client2.pk);
-            assert_eq!(client1.precomputed_key, client2.precomputed_key);
             let addr2: SocketAddr = "127.0.0.2:54321".parse().unwrap();
             let client3 = alice.create_client(&addr2, packet.pk, &state.peers_cache);
-            assert_eq!(client1.precomputed_key, client3.precomputed_key);
             assert_ne!(client1.addr, client3.addr);
             TestResult::passed()
         }
