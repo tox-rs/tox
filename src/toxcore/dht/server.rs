@@ -465,6 +465,9 @@ impl Server {
 
         if client.ping_id == payload.id {
             for node in &payload.nodes {
+                // not worried about removing evicted nodes from peers_cache
+                // they will be removed by timeout eventually since we won't
+                // ping them anymore
                 state.kbucket.try_add(node);
             }
             Box::new( future::ok(()) )
