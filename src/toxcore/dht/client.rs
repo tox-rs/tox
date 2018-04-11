@@ -24,7 +24,6 @@ Hold infomation of a peer.
 The object of this struct is one per a peer.
 */
 
-use std::net::SocketAddr;
 use std::time::Instant;
 
 use toxcore::crypto_core::*;
@@ -34,8 +33,6 @@ use toxcore::crypto_core::*;
 pub struct Client {
     /// Public key of dht node
     pub pk: PublicKey,
-    /// socket address of peer
-    pub addr: SocketAddr,
     /// last sent ping_id to check PingResponse is correct
     pub ping_id: u64,
     /// last received ping-response time
@@ -44,10 +41,9 @@ pub struct Client {
 
 impl Client {
     /// create Client object
-    pub fn new(pk: PublicKey, addr: SocketAddr) -> Client {
+    pub fn new(pk: PublicKey) -> Client {
         Client {
             pk,
-            addr,
             ping_id: 0,
             last_resp_time: Instant::now(),
         }
@@ -65,9 +61,8 @@ mod tests {
 
     #[test]
     fn client_is_clonable() {
-        let addr = "127.0.0.1:12345".parse().unwrap();
         let (alice_pk, _alice_sk) = gen_keypair();
-        let client = Client::new(alice_pk, addr);
+        let client = Client::new(alice_pk);
         let _ = client.clone();
     }
 }
