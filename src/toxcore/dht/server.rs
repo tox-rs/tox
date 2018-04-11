@@ -118,15 +118,6 @@ impl Server {
             onion_symmetric_key: Arc::new(RwLock::new(new_symmetric_key())),
         }
     }
-
-    /// create new client
-    pub fn create_client(&self, pk: PublicKey, peers_cache: &HashMap<PublicKey, Client>) -> Client {
-        if let Some(client) = peers_cache.get(&pk) {
-            client.clone()
-        } else {
-            Client::new()
-        }
-    }
     /// remove timed-out clients, also remove node from kbucket
     pub fn remove_timedout_clients(&self, timeout: Duration) -> IoFuture<()> {
         let mut state = self.state.write();
@@ -145,7 +136,7 @@ impl Server {
     pub fn send_pings(&self) -> IoFuture<()> {
         let mut state = self.state.write();
         let ping_sender = state.kbucket.iter().map(|peer| {
-            let mut client = self.create_client(peer.pk, &state.peers_cache);
+            let client = state.peers_cache.entry(peer.pk).or_insert_with(Client::new);
 
             let payload = PingRequestPayload {
                 id: client.new_ping_id(),
@@ -155,11 +146,7 @@ impl Server {
                 &self.pk,
                 payload
             ));
-            let result = self.send_to(peer.saddr, ping_req);
-
-            state.peers_cache.insert(peer.pk, client);
-
-            result
+            self.send_to(peer.saddr, ping_req)
         });
 
         let pings_stream = stream::futures_unordered(ping_sender).then(|_| Ok(()));
@@ -170,7 +157,7 @@ impl Server {
     pub fn send_nodes_req(&self, friend_pk: PublicKey) -> IoFuture<()> {
         let mut state = self.state.write();
         if let Some(peer) = state.kbucket.get_random_node() {
-            let mut client = self.create_client(peer.pk, &state.peers_cache);
+            let client = state.peers_cache.entry(peer.pk).or_insert_with(Client::new);
 
             let payload = NodesRequestPayload {
                 pk: friend_pk,
@@ -181,11 +168,7 @@ impl Server {
                 &self.pk,
                 payload
             ));
-            let result = self.send_to(peer.saddr, nodes_req);
-
-            state.peers_cache.insert(peer.pk, client);
-
-            result
+            self.send_to(peer.saddr, nodes_req)
         }
         else {
             return Box::new(future::ok(()));
@@ -195,7 +178,7 @@ impl Server {
     pub fn send_nat_ping_req(&self, peer: PackedNode, friend_pk: PublicKey) -> IoFuture<()> {
         let mut state = self.state.write();
 
-        let mut client = self.create_client(peer.pk, &state.peers_cache);
+        let client = state.peers_cache.entry(peer.pk).or_insert_with(Client::new);
 
         let payload = DhtRequestPayload::NatPingRequest(NatPingRequest {
             id: client.new_ping_id(),
@@ -206,11 +189,7 @@ impl Server {
             &self.pk,
             payload
         ));
-        let result = self.send_to(peer.saddr, nat_ping_req);
-
-        state.peers_cache.insert(peer.pk, client);
-
-        result
+        self.send_to(peer.saddr, nat_ping_req)
     }
     /**
     Function to handle incoming packets. If there is a response packet,
@@ -553,7 +532,7 @@ impl Server {
         }
         let mut state = self.state.write();
 
-        let mut client = self.create_client(packet.pk, &state.peers_cache);
+        let client = state.peers_cache.entry(packet.pk).or_insert_with(Client::new);
 
         let payload = NodesRequestPayload {
             pk: packet.pk,
@@ -564,11 +543,7 @@ impl Server {
             &self.pk,
             payload
         ));
-        let result = self.send_to(addr, nodes_req);
-
-        state.peers_cache.insert(packet.pk, client);
-
-        result
+        self.send_to(addr, nodes_req)
     }
     /**
     send LanDiscovery packet to all broadcast addresses when dht_node runs as ipv4 mode
@@ -851,7 +826,7 @@ mod tests {
     }
     fn create_client(alice: &Server, pk: PublicKey) -> Client {
         let state = alice.state.read();
-        alice.create_client(pk, &state.peers_cache)
+        state.peers_cache.get(&pk).cloned().unwrap_or_else(Client::new)
     }
     fn is_kbucket_eq(alice: &Server, kbuc: Kbucket) {
         let state = alice.state.read();
