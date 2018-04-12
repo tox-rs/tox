@@ -93,24 +93,24 @@ pub struct Server {
 // hold client object connected and kbucket object, this struct object is shared by threads
 struct ServerState {
     /// store client object which has sent request packet to peer
-    pub peers_cache: HashMap<PublicKey, Client>,
+    pub peers_cache: HashMap<PublicKey, ClientData>,
     /// Close List (contains nodes close to own DHT PK)
     pub kbucket: Kbucket,
 }
 
 /// peer info.
 #[derive(Clone, Debug)]
-struct Client {
+struct ClientData {
     /// last sent ping_id to check PingResponse is correct
     pub ping_id: u64,
     /// last received ping-response time
     pub last_resp_time: Instant
 }
 
-impl Client {
-    /// create Client object
-    pub fn new() -> Client {
-        Client {
+impl ClientData {
+    /// create ClientData object
+    pub fn new() -> ClientData {
+        ClientData {
             ping_id: 0,
             last_resp_time: Instant::now(),
         }
@@ -163,7 +163,7 @@ impl Server {
     pub fn send_pings(&self) -> IoFuture<()> {
         let mut state = self.state.write();
         let ping_sender = state.kbucket.iter().map(|peer| {
-            let client = state.peers_cache.entry(peer.pk).or_insert_with(Client::new);
+            let client = state.peers_cache.entry(peer.pk).or_insert_with(ClientData::new);
 
             let payload = PingRequestPayload {
                 id: client.new_ping_id(),
@@ -184,7 +184,7 @@ impl Server {
     pub fn send_nodes_req(&self, friend_pk: PublicKey) -> IoFuture<()> {
         let mut state = self.state.write();
         if let Some(peer) = state.kbucket.get_random_node() {
-            let client = state.peers_cache.entry(peer.pk).or_insert_with(Client::new);
+            let client = state.peers_cache.entry(peer.pk).or_insert_with(ClientData::new);
 
             let payload = NodesRequestPayload {
                 pk: friend_pk,
@@ -204,7 +204,7 @@ impl Server {
     pub fn send_nat_ping_req(&self, peer: PackedNode, friend_pk: PublicKey) -> IoFuture<()> {
         let mut state = self.state.write();
 
-        let client = state.peers_cache.entry(peer.pk).or_insert_with(Client::new);
+        let client = state.peers_cache.entry(peer.pk).or_insert_with(ClientData::new);
 
         let payload = DhtRequestPayload::NatPingRequest(NatPingRequest {
             id: client.new_ping_id(),
@@ -553,7 +553,7 @@ impl Server {
         }
         let mut state = self.state.write();
 
-        let client = state.peers_cache.entry(packet.pk).or_insert_with(Client::new);
+        let client = state.peers_cache.entry(packet.pk).or_insert_with(ClientData::new);
 
         let payload = NodesRequestPayload {
             pk: packet.pk,
@@ -821,8 +821,8 @@ mod tests {
     const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - NONCEBYTES;
 
     #[test]
-    fn client_is_clonable() {
-        let client = Client::new();
+    fn client_data_is_clonable() {
+        let client = ClientData::new();
         let _ = client.clone();
     }
 
@@ -847,13 +847,13 @@ mod tests {
         let mut state = alice.state.write();
         state.peers_cache.clear();
     }
-    fn add_to_peers_cache(alice: &Server, pk: PublicKey, client: &Client) {
+    fn add_to_peers_cache(alice: &Server, pk: PublicKey, client: &ClientData) {
         let mut state = alice.state.write();
         state.peers_cache.insert(pk, client.clone());
     }
-    fn create_client(alice: &Server, pk: PublicKey) -> Client {
+    fn create_client(alice: &Server, pk: PublicKey) -> ClientData {
         let state = alice.state.read();
-        state.peers_cache.get(&pk).cloned().unwrap_or_else(Client::new)
+        state.peers_cache.get(&pk).cloned().unwrap_or_else(ClientData::new)
     }
     fn is_kbucket_eq(alice: &Server, kbuc: Kbucket) {
         let state = alice.state.read();
