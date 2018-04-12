@@ -58,38 +58,61 @@ fn main() {
         return;
     }
 
+    // gen some random keypair
     let (pk, sk) = gen_keypair();
-
-    let local: SocketAddr = "0.0.0.0:33445".parse().unwrap(); // 0.0.0.0 for ipv4, [::] for ipv6
-    // let local: SocketAddr = "[::]:33445".parse().unwrap(); // 0.0.0.0 for ipv4, [::] for ipv6
-
-    // Bind a UDP listener to the socket address.
-    let socket = UdpSocket::bind(&local).unwrap();
-    socket.set_broadcast(true).expect("set_broadcast call failed");
-    if local.is_ipv6() {
-        socket.set_multicast_loop_v6(true).expect("set_multicast_loop_v6 call failed");
-    }
-
-    // Create a channel for this socket
+    // Create a channel for server to communicate with network
     let (tx, rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
+
     let server_obj = Server::new(tx, pk, sk);
 
-    // get PK bytes of some "random" bootstrap node (Impyy's)
-    let bootstrap_pk_bytes = FromHex::from_hex(
-        "1D5A5F2F5D6233058BF0259B09622FB40B482E4FA0931EB8FD3AB8E7BF7DAF6F")
-        .unwrap();
-    // create PK from bytes
-    let bootstrap_pk = PublicKey::from_slice(&bootstrap_pk_bytes).unwrap();
+    // Bootstrap from nodes
+    for &(pk, saddr) in &[
+        // Impyy
+        ("1D5A5F2F5D6233058BF0259B09622FB40B482E4FA0931EB8FD3AB8E7BF7DAF6F", "198.98.51.198:33445"),
+        // nurupo
+        ("F404ABAA1C99A9D37D61AB54898F56793E1DEF8BD46B1038B9D822E8460FAB67", "67.215.253.85:33445"),
+        // Manolis
+        ("461FA3776EF0FA655F1A05477DF1B3B614F7D6B124F7DB1DD4FE3C08B03B640F", "130.133.110.14:33445"),
+        // Busindre
+        ("A179B09749AC826FF01F37A9613F6B57118AE014D4196A0E1105A98F93A54702", "205.185.116.116:33445"),
+        // ray65536
+        ("8E7D0B859922EF569298B4D261A8CCB5FEA14FB91ED412A7603A585A25698832", "85.172.30.117:33445"),
+        // fluke571
+        ("3CEE1F054081E7A011234883BC4FC39F661A55B73637A5AC293DDF1251D9432B", "194.249.212.109:33445"),
+        // MAH69K
+        ("DA4E4ED4B697F2E9B000EEFE3A34B554ACD3F45F5C96EAEA2516DD7FF9AF7B43", "185.25.116.107:33445"),
+        // clearmartin
+        ("CD133B521159541FB1D326DE9850F5E56A6C724B5B8E5EB5CD8D950408E95707", "46.101.197.175:443"),
+        // tastytea
+        ("2B2137E094F743AC8BD44652C55F41DFACC502F125E99E4FE24D40537489E32F", "5.189.176.217:5190"),
 
-    let saddr: SocketAddr = "198.98.51.198:33445".parse().unwrap();
-    let bootstrap_pn = PackedNode::new(true, saddr, &bootstrap_pk);
-    assert!(server_obj.try_add_to_kbucket(&bootstrap_pn));
+    ]
+    {
+        // get PK bytes of the bootstrap node
+        let bootstrap_pk_bytes = FromHex::from_hex(pk).unwrap();
+        // create PK from bytes
+        let bootstrap_pk = PublicKey::from_slice(&bootstrap_pk_bytes).unwrap();
+
+        let saddr: SocketAddr = saddr.parse().unwrap();
+        let bootstrap_pn = PackedNode::new(true, saddr, &bootstrap_pk);
+        assert!(server_obj.try_add_to_kbucket(&bootstrap_pn));
+    }
+
+    let local_addr: SocketAddr = "0.0.0.0:33445".parse().unwrap(); // 0.0.0.0 for ipv4
+    // let local_addr: SocketAddr = "[::]:33445".parse().unwrap(); // [::] for ipv6
+
+    // Bind a UDP listener to the socket address.
+    let socket = UdpSocket::bind(&local_addr).unwrap();
+    socket.set_broadcast(true).expect("set_broadcast call failed");
+    if local_addr.is_ipv6() {
+        socket.set_multicast_loop_v6(true).expect("set_multicast_loop_v6 call failed");
+    }
 
     let (sink, stream) = UdpFramed::new(socket, DhtCodec).split();
     // The server task asynchronously iterates over and processes each
     // incoming packet.
     let server_obj_c = server_obj.clone();
-    let handler = stream.for_each(move |(packet, addr)| {
+    let network_reader = stream.for_each(move |(packet, addr)| {
         println!("recv = {:?}", packet.clone());
         server_obj_c.handle_packet((packet, addr)).or_else(|err| {
             error!("failed to handle packet: {:?}", err);
@@ -102,16 +125,16 @@ fn main() {
         Error::new(ErrorKind::Other, "udp receive error")
     });
 
-    let writer = rx
+    let network_writer = rx
         .map_err(|_| Error::new(ErrorKind::Other, "rx error"))
          // filtering ipv6 peer address is temporary fix,
          // dht_node may run as ipv4 only
          // or may run as having two socket (ipv4 socket and ipv6 socket)
-        .filter(move |&(ref _packet, addr)| !(local.is_ipv4() && addr.is_ipv6()))
+        .filter(move |&(ref _packet, addr)| !(local_addr.is_ipv4() && addr.is_ipv6()))
         .fold(sink, move |sink, (packet, mut addr)| {
             debug!("Send {:?} => {:?}", packet, addr);
             println!("send = {:?} {:?}", packet.clone(), addr.clone());
-            if local.is_ipv6() {
+            if local_addr.is_ipv6() {
                 if let IpAddr::V4(ip) = addr.ip() {
                     addr = SocketAddr::new(IpAddr::V6(ip.to_ipv6_mapped()), addr.port());
                 }
@@ -122,17 +145,17 @@ fn main() {
         .map(|_sink| ())
     ;
 
-    let server = writer.select(handler)
+    let network = network_writer.select(network_reader)
         .map(|_| ())
         .map_err(move |(err, _select_next)| {
             error!("Processing ended with error: {:?}", err);
             err
         });
 
-    let server: IoFuture<()> = Box::new(server); 
+    let server: IoFuture<()> = Box::new(network);
     let server = add_ping_sender(server, &server_obj);
     let server = add_nat_sender(server, &server_obj, pk);
-    let server = add_lan_sender(server, &server_obj, local);
+    let server = add_lan_sender(server, &server_obj, local_addr);
     let server = add_nodes_sender(server, &server_obj);
     let server = add_onion_key_refresher(server, &server_obj);
     let server = add_timedout_remover(server, &server_obj);
@@ -153,13 +176,13 @@ fn add_ping_sender(base_selector: IoFuture<()>, server_obj: &Server) -> IoFuture
     let ping_wakeups = Interval::new(Duration::from_secs(60));
 
     let server_obj_c = server_obj.clone();
-    
+
     let ping_sender = ping_wakeups.for_each(move |()| {
             println!("ping_wakeup");
             server_obj_c.send_pings()
         })
         .map_err(|_err| Error::new(ErrorKind::Other, "Ping timer error"));
-    
+
     Box::new(base_selector.select(Box::new(ping_sender))
         .map(|_| ())
         .map_err(move |(err, _select_next)| {
@@ -182,7 +205,7 @@ fn add_nat_sender(base_selector: IoFuture<()>, server_obj: &Server, pk: PublicKe
             server_obj_c.send_nat_ping_req(node, friend_pk)
         })
         .map_err(|_err| Error::new(ErrorKind::Other, "NatPing timer error"));
-    
+
     Box::new(base_selector.select(Box::new(nat_sender))
         .map(|_| ())
         .map_err(move |(err, _select_next)| {
@@ -211,20 +234,20 @@ fn add_nodes_sender(base_selector: IoFuture<()>, server_obj: &Server) -> IoFutur
             err
         }))
 }
-fn add_lan_sender(base_selector: IoFuture<()>, server_obj: &Server, local: SocketAddr) -> IoFuture<()> {
+fn add_lan_sender(base_selector: IoFuture<()>, server_obj: &Server, local_addr: SocketAddr) -> IoFuture<()> {
     // 10 seconds for LanDiscovery
     let lan_wakeups = Interval::new(Duration::from_secs(10));
     let server_obj_c = server_obj.clone();
     let lan_sender = lan_wakeups.for_each(move |()| {
             println!("lan_wakeup");
-            if local.is_ipv4() {
+            if local_addr.is_ipv4() {
                 server_obj_c.send_lan_discovery_ipv4()
             } else {
                 server_obj_c.send_lan_discovery_ipv6()
             }
         })
         .map_err(|_err| Error::new(ErrorKind::Other, "LanDiscovery timer error"));
-    
+
     Box::new(base_selector.select(Box::new(lan_sender))
         .map(|_| ())
         .map_err(move |(err, _select_next)| {
@@ -244,7 +267,7 @@ fn add_timedout_remover(base_selector: IoFuture<()>, server_obj: &Server) -> IoF
             server_obj_c.remove_timedout_clients(timeout_dur)
         })
         .map_err(|_err| Error::new(ErrorKind::Other, "Timedout clients remover timer error"));
-    
+
     Box::new(base_selector.select(Box::new(timeout_remover))
         .map(|_| ())
         .map_err(move |(err, _select_next)| {
