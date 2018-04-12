@@ -80,7 +80,7 @@ impl Connection {
     */
     pub fn new(server_tx: mpsc::UnboundedSender<Packet>,
             callback_tx: mpsc::UnboundedSender<IncomingPacket>) -> Connection {
-        Connection { server_tx: server_tx, callback_tx: callback_tx }
+        Connection { server_tx, callback_tx }
     }
     pub(super) fn handle_from_server(&self, packet: Packet) -> IoFuture<()> {
         match packet {
@@ -118,7 +118,7 @@ impl Connection {
             },
             Packet::PongResponse(_packet) => {
                 // TODO check ping_id
-                return Box::new( future::ok(()) )
+                Box::new( future::ok(()) )
             },
             _ => unimplemented!() // TODO onion
         }

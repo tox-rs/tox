@@ -431,7 +431,7 @@ mod tests {
 
         let sender = outgoing_packets.clone()
             .send(OutgoingPacket::RouteRequest(
-                RouteRequest { pk: friend_pk.clone() }
+                RouteRequest { pk: friend_pk }
             )).map(|_| ()).map_err(|e|
                 Error::new(ErrorKind::Other,
                     format!("Could not forward message from server to client {:?}", e))

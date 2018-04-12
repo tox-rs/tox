@@ -56,24 +56,22 @@ impl ServerProcessor {
 
         server.insert(Client::new(to_client_tx, &client_pk, addr, port));
 
-        let client_pk_c = client_pk.clone();
         let server_c = server.clone();
         // processor = for each Packet from client process it
         let processor = from_client_rx
             .map_err(|()| Error::from(ErrorKind::UnexpectedEof))
             .for_each(move |packet| {
-                debug!("Handle {:?} => {:?}", client_pk_c, packet);
+                debug!("Handle {:?} => {:?}", client_pk, packet);
                 server_c.handle_packet(&client_pk, packet)
             });
 
         // TODO ping request = each 30s send PingRequest to client
 
-        let client_pk_c = client_pk.clone();
         let server_c = server.clone();
         let processor = processor
             .then(move |r_processing| {
-                debug!("shutdown PK {:?}", &client_pk_c);
-                server_c.shutdown_client(&client_pk_c)
+                debug!("shutdown PK {:?}", &client_pk);
+                server_c.shutdown_client(&client_pk)
                     .then(move |r_shutdown| r_processing.and(r_shutdown))
             });
 
