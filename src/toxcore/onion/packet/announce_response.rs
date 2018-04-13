@@ -109,12 +109,12 @@ impl AnnounceResponse {
             })?;
         match AnnounceResponsePayload::from_bytes(&decrypted) {
             IResult::Incomplete(e) => {
-                error!(target: "Onion", "AnnounceResponsePayload deserialize error: {:?}", e);
+                debug!(target: "Onion", "AnnounceResponsePayload deserialize error: {:?}", e);
                 Err(Error::new(ErrorKind::Other,
                     format!("AnnounceResponsePayload deserialize error: {:?}", e)))
             },
             IResult::Error(e) => {
-                error!(target: "Onion", "AnnounceResponsePayload deserialize error: {:?}", e);
+                debug!(target: "Onion", "AnnounceResponsePayload deserialize error: {:?}", e);
                 Err(Error::new(ErrorKind::Other,
                     format!("AnnounceResponsePayload deserialize error: {:?}", e)))
             },

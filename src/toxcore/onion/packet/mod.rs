@@ -235,12 +235,12 @@ impl OnionReturn {
             })?;
         match OnionReturn::inner_from_bytes(&decrypted) {
             IResult::Incomplete(e) => {
-                error!(target: "Onion", "Inner onion return deserialize error: {:?}", e);
+                debug!(target: "Onion", "Inner onion return deserialize error: {:?}", e);
                 Err(Error::new(ErrorKind::Other,
                     format!("Inner onion return deserialize error: {:?}", e)))
             },
             IResult::Error(e) => {
-                error!(target: "Onion", "Inner onion return deserialize error: {:?}", e);
+                debug!(target: "Onion", "Inner onion return deserialize error: {:?}", e);
                 Err(Error::new(ErrorKind::Other,
                     format!("Inner onion return deserialize error: {:?}", e)))
             },

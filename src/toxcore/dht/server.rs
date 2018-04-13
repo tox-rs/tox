@@ -309,7 +309,7 @@ impl Server {
             .map_err(|e| {
                 // This may only happen if rx is gone
                 // So cast SendError<T> to a corresponding std::io::Error
-                error!("send to peer error {:?}", e);
+                debug!("send to peer error {:?}", e);
                 Error::from(ErrorKind::UnexpectedEof)
             })
         )

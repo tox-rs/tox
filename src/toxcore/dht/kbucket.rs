@@ -135,7 +135,7 @@ impl Bucket {
                 }
             },
             Some(0) => {
-                error!("Treating Some(0) as None");
+                debug!("Treating Some(0) as None");
                 Bucket::new(None)
             },
             Some(n) => {

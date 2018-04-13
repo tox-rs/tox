@@ -118,12 +118,12 @@ impl OnionRequest1 {
             })?;
         match OnionRequest1Payload::from_bytes(&decrypted) {
             IResult::Incomplete(e) => {
-                error!(target: "Onion", "OnionRequest1Payload deserialize error: {:?}", e);
+                debug!(target: "Onion", "OnionRequest1Payload deserialize error: {:?}", e);
                 Err(Error::new(ErrorKind::Other,
                     format!("OnionRequest1Payload deserialize error: {:?}", e)))
             },
             IResult::Error(e) => {
-                error!(target: "Onion", "OnionRequest1Payload deserialize error: {:?}", e);
+                debug!(target: "Onion", "OnionRequest1Payload deserialize error: {:?}", e);
                 Err(Error::new(ErrorKind::Other,
                     format!("OnionRequest1Payload deserialize error: {:?}", e)))
             },
