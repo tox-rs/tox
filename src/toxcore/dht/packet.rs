@@ -215,12 +215,12 @@ impl PingRequest {
 
         match PingRequestPayload::from_bytes(&decrypted) {
             IResult::Incomplete(e) => {
-                error!(target: "PingRequest", "PingRequestPayload deserialize error: {:?}", e);
+                debug!(target: "PingRequest", "PingRequestPayload deserialize error: {:?}", e);
                 Err(Error::new(ErrorKind::Other,
                     format!("PingRequestPayload deserialize error: {:?}", e)))
             },
             IResult::Error(e) => {
-                error!(target: "PingRequest", "PingRequestPayload deserialize error: {:?}", e);
+                debug!(target: "PingRequest", "PingRequestPayload deserialize error: {:?}", e);
                 Err(Error::new(ErrorKind::Other,
                     format!("PingRequestPayload deserialize error: {:?}", e)))
             },
@@ -357,12 +357,12 @@ impl PingResponse {
 
         match PingResponsePayload::from_bytes(&decrypted) {
             IResult::Incomplete(e) => {
-                error!(target: "PingResponse", "PingResponsePayload deserialize error: {:?}", e);
+                debug!(target: "PingResponse", "PingResponsePayload deserialize error: {:?}", e);
                 Err(Error::new(ErrorKind::Other,
                     format!("PingResponsePayload deserialize error: {:?}", e)))
             },
             IResult::Error(e) => {
-                error!(target: "PingResponse", "PingRequestPayload deserialize error: {:?}", e);
+                debug!(target: "PingResponse", "PingRequestPayload deserialize error: {:?}", e);
                 Err(Error::new(ErrorKind::Other,
                     format!("PingResponsePayload deserialize error: {:?}", e)))
             },
@@ -499,12 +499,12 @@ impl NodesRequest {
 
         match NodesRequestPayload::from_bytes(&decrypted) {
             IResult::Incomplete(e) => {
-                error!(target: "NodesRequest", "NodesRequestPayload deserialize error: {:?}", e);
+                debug!(target: "NodesRequest", "NodesRequestPayload deserialize error: {:?}", e);
                 Err(Error::new(ErrorKind::Other,
                     format!("NodesRequestPayload deserialize error: {:?}", e)))
             },
             IResult::Error(e) => {
-                error!(target: "NodesRequest", "PingRequestPayload deserialize error: {:?}", e);
+                debug!(target: "NodesRequest", "PingRequestPayload deserialize error: {:?}", e);
                 Err(Error::new(ErrorKind::Other,
                     format!("NodesRequestPayload deserialize error: {:?}", e)))
             },
@@ -634,12 +634,12 @@ impl NodesResponse {
 
         match NodesResponsePayload::from_bytes(&decrypted) {
             IResult::Incomplete(e) => {
-                error!(target: "NodesResponse", "NodesResponsePayload deserialize error: {:?}", e);
+                debug!(target: "NodesResponse", "NodesResponsePayload deserialize error: {:?}", e);
                 Err(Error::new(ErrorKind::Other,
                     format!("NodesResponsePayload deserialize error: {:?}", e)))
             },
             IResult::Error(e) => {
-                error!(target: "NodesResponse", "PingRequestPayload deserialize error: {:?}", e);
+                debug!(target: "NodesResponse", "PingRequestPayload deserialize error: {:?}", e);
                 Err(Error::new(ErrorKind::Other,
                     format!("NodesResponsePayload deserialize error: {:?}", e)))
             },
@@ -791,12 +791,12 @@ impl CookieRequest {
             })?;
         match CookieRequestPayload::from_bytes(&decrypted) {
             IResult::Incomplete(e) => {
-                error!(target: "Dht", "CookieRequestPayload return deserialize error: {:?}", e);
+                debug!(target: "Dht", "CookieRequestPayload return deserialize error: {:?}", e);
                 Err(Error::new(ErrorKind::Other,
                     format!("CookieRequestPayload return deserialize error: {:?}", e)))
             },
             IResult::Error(e) => {
-                error!(target: "Dht", "CookieRequestPayload return deserialize error: {:?}", e);
+                debug!(target: "Dht", "CookieRequestPayload return deserialize error: {:?}", e);
                 Err(Error::new(ErrorKind::Other,
                     format!("CookieRequestPayload return deserialize error: {:?}", e)))
             },
@@ -940,12 +940,12 @@ impl DhtRequest {
 
         match DhtRequestPayload::from_bytes(&decrypted?) {
             IResult::Incomplete(e) => {
-                error!(target: "DhtRequest", "DhtRequest deserialize error: {:?}", e);
+                debug!(target: "DhtRequest", "DhtRequest deserialize error: {:?}", e);
                 Err(Error::new(ErrorKind::Other,
                     format!("DhtRequest deserialize error: {:?}", e)))
             },
             IResult::Error(e) => {
-                error!(target: "DhtRequest", "DhtRequest deserialize error: {:?}", e);
+                debug!(target: "DhtRequest", "DhtRequest deserialize error: {:?}", e);
                 Err(Error::new(ErrorKind::Other,
                     format!("DhtRequest deserialize error: {:?}", e)))
             },
