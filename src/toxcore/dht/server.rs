@@ -240,29 +240,8 @@ impl Server {
                 self.handle_nodes_resp(packet)
             },
             DhtPacket::DhtRequest(packet) => {
-                // The packet kind of DhtRequest is in encrypted payload,
-                // so decrypting is needed first.
-                let payload = packet.get_payload(&self.sk);
-                let payload = match payload {
-                    Err(err) => {
-                        return Box::new( future::err(
-                            Error::new(ErrorKind::Other,
-                                format!("DhtRequest::get_payload failed with: {:?}", err)
-                        )))
-                    },
-                    Ok(payload) => payload,
-                };
-
-                match payload {
-                    DhtRequestPayload::NatPingRequest(nat_payload) => {
-                        debug!("Received nat ping request");
-                        self.handle_nat_ping_req(packet, nat_payload, addr)
-                    },
-                    DhtRequestPayload::NatPingResponse(nat_payload) => {
-                        debug!("Received nat ping response");
-                        self.handle_nat_ping_resp(packet, nat_payload)
-                    },
-                }
+                debug!("Received DhtRequest");
+                self.handle_dht_req(packet, addr)
             },
             DhtPacket::LanDiscovery(packet) => {
                 debug!("Received LanDiscovery");
@@ -479,36 +458,66 @@ impl Server {
     }
 
     /**
+    handle received DhtRequest, resend if it's sent for someone else, parse and
+    handle payload if it's sent for us
+    */
+    fn handle_dht_req(&self, packet: DhtRequest, addr: SocketAddr) -> IoFuture<()> {
+        if packet.rpk == self.pk { // the target peer is me
+            let payload = packet.get_payload(&self.sk);
+            let payload = match payload {
+                Err(err) => {
+                    return Box::new( future::err(
+                        Error::new(ErrorKind::Other,
+                            format!("DhtRequest::get_payload failed with: {:?}", err)
+                    )))
+                },
+                Ok(payload) => payload,
+            };
+
+            match payload {
+                DhtRequestPayload::NatPingRequest(nat_payload) => {
+                    debug!("Received nat ping request");
+                    self.handle_nat_ping_req(nat_payload, &packet.spk, addr)
+                },
+                DhtRequestPayload::NatPingResponse(nat_payload) => {
+                    debug!("Received nat ping response");
+                    self.handle_nat_ping_resp(nat_payload, &packet.spk)
+                },
+            }
+        } else {
+            let state = self.state.read();
+            if let Some(addr) = state.kbucket.get_node(&packet.rpk) { // search kbucket to find target peer
+                let packet = DhtPacket::DhtRequest(packet);
+                self.send_to(addr, packet)
+            } else { // do nothing
+                Box::new( future::ok(()) )
+            }
+        }
+    }
+
+    /**
     handle received NatPingRequest packet, respond with NatPingResponse
     */
-    fn handle_nat_ping_req(&self, packet: DhtRequest, payload: NatPingRequest, addr: SocketAddr) -> IoFuture<()> {
-        let state = self.state.read();
-
-        if packet.rpk == self.pk { // the target peer is me
-            let resp_payload = DhtRequestPayload::NatPingResponse(NatPingResponse {
-                id: payload.id,
-            });
-            let nat_ping_resp = DhtPacket::DhtRequest(DhtRequest::new(
-                &precompute(&packet.spk, &self.sk),
-                &packet.spk,
-                &self.pk,
-                resp_payload
-            ));
-            self.send_to(addr, nat_ping_resp)
-        } else if let Some(addr) = state.kbucket.get_node(&packet.rpk) { // search kbucket to find target peer
-            let packet = DhtPacket::DhtRequest(packet);
-            self.send_to(addr, packet)
-        } else { // do nothing
-            Box::new( future::ok(()) )
-        }
+    fn handle_nat_ping_req(&self, payload: NatPingRequest, spk: &PublicKey, addr: SocketAddr) -> IoFuture<()> {
+        let resp_payload = DhtRequestPayload::NatPingResponse(NatPingResponse {
+            id: payload.id,
+        });
+        let nat_ping_resp = DhtPacket::DhtRequest(DhtRequest::new(
+            &precompute(spk, &self.sk),
+            spk,
+            &self.pk,
+            resp_payload
+        ));
+        self.send_to(addr, nat_ping_resp)
     }
 
     /**
     handle received NatPingResponse packet, start hole-punching
     */
-    fn handle_nat_ping_resp(&self, packet: DhtRequest, payload: NatPingResponse) -> IoFuture<()> {
+    fn handle_nat_ping_resp(&self, payload: NatPingResponse, spk: &PublicKey) -> IoFuture<()> {
         let state = self.state.read();
-        let client = state.peers_cache.get(&packet.spk);
+
+        let client = state.peers_cache.get(spk);
         let client = match client {
             None => {
                 return Box::new( future::err(
@@ -519,27 +528,20 @@ impl Server {
             Some(client) => client,
         };
 
-        if packet.rpk == self.pk { // the target peer is me
-            if payload.id == 0 {
-                return Box::new( future::err(
-                    Error::new(ErrorKind::Other,
-                        "NodesResponse.ping_id == 0"
-                )))
-            }
-            if client.ping_id == payload.id {
-                // TODO: start hole-punching
-                Box::new( future::ok(()) )
-            } else {
-                Box::new( future::err(
-                    Error::new(ErrorKind::Other, "NatPingResponse.ping_id does not match")
-                ))
-            }
-        // search kbucket to find target peer
-        } else if let Some(addr) = state.kbucket.get_node(&packet.rpk) {
-            let packet = DhtPacket::DhtRequest(packet);
-            self.send_to(addr, packet)
-        } else { // do nothing
+        if payload.id == 0 {
+            return Box::new( future::err(
+                Error::new(ErrorKind::Other,
+                    "NodesResponse.ping_id == 0"
+            )))
+        }
+
+        if client.ping_id == payload.id {
+            // TODO: start hole-punching
             Box::new( future::ok(()) )
+        } else {
+            Box::new( future::err(
+                Error::new(ErrorKind::Other, "NatPingResponse.ping_id does not match")
+            ))
         }
     }
     /**
@@ -880,28 +882,6 @@ mod tests {
         assert!(alice.handle_packet((packet, addr)).wait().is_err());
     }
 
-    // test handle_packet() with invlid DhtRequest packet payload
-    #[test]
-    fn server_handle_packet_with_invalid_payload_test() {
-        let (alice_pk, alice_sk) = gen_keypair();
-        let (bob_pk, _bob_sk) = gen_keypair();
-        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
-        let nonce = gen_nonce();
-        // Try long invalid array
-        let invalid_payload = [42; 123];
-        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
-        let invalid_packet = DhtPacket::DhtRequest( DhtRequest {
-            rpk: bob_pk,
-            spk: alice_pk,
-            nonce,
-            payload: invalid_payload_encoded
-        } );
-        let addr: SocketAddr = "127.0.0.1:12346".parse().unwrap();
-        let (tx, _rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
-        let alice = Server::new(tx, alice_pk, alice_sk);
-        assert!(alice.handle_packet((invalid_packet, addr)).wait().is_err());
-    }
-
     // handle_ping_req()
     #[test]
     fn server_handle_ping_req_test() {
@@ -1107,6 +1087,54 @@ mod tests {
         assert!(alice.handle_packet((nodes_resp, addr)).wait().is_err());
     }
 
+    // handle_dht_req
+    #[test]
+    fn server_handle_dht_req_for_unknown_node_test() {
+        let (alice, _precomp, bob_pk, bob_sk, _rx, addr) = create_node();
+
+        let (charlie_pk, _charlie_sk) = gen_keypair();
+        let precomp = precompute(&charlie_pk, &bob_sk);
+
+        // if receiver' pk != node's pk just returns ok()
+        let nat_req = NatPingRequest { id: 42 };
+        let nat_payload = DhtRequestPayload::NatPingRequest(nat_req);
+        let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &charlie_pk, &bob_pk, nat_payload));
+
+        assert!(alice.handle_packet((dht_req, addr)).wait().is_ok());
+    }
+
+    #[test]
+    fn server_handle_dht_req_for_known_node_test() {
+        let (alice, _precomp, bob_pk, bob_sk, _rx, addr) = create_node();
+
+        let (charlie_pk, _charlie_sk) = gen_keypair();
+        let precomp = precompute(&charlie_pk, &bob_sk);
+
+        // if receiver' pk != node's pk and receiver's pk exists in kbucket, returns ok()
+        let pn = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &charlie_pk);
+        alice.try_add_to_kbucket(&pn);
+
+        let nat_req = NatPingRequest { id: 42 };
+        let nat_payload = DhtRequestPayload::NatPingRequest(nat_req);
+        let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &charlie_pk, &bob_pk, nat_payload));
+
+        assert!(alice.handle_packet((dht_req, addr)).wait().is_ok());
+    }
+
+    #[test]
+    fn server_handle_dht_req_invalid_payload() {
+        let (alice, _precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
+
+        let dht_req = DhtPacket::DhtRequest(DhtRequest {
+            rpk: alice.pk,
+            spk: bob_pk,
+            nonce: gen_nonce(),
+            payload: vec![42, 123]
+        });
+
+        assert!(alice.handle_packet((dht_req, addr)).wait().is_err());
+    }
+
     // handle nat ping request
     #[test]
     fn server_handle_nat_ping_req_test() {
@@ -1130,33 +1158,6 @@ mod tests {
         assert_eq!(nat_ping_resp_payload.id, nat_req.id);
     }
 
-    #[test]
-    fn server_handle_nat_ping_req_for_unknown_node_test() {
-        let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
-
-        // if receiver' pk != node's pk just returns ok()
-        let nat_req = NatPingRequest { id: 42 };
-        let nat_payload = DhtRequestPayload::NatPingRequest(nat_req);
-        let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &bob_pk, &bob_pk, nat_payload));
-
-        assert!(alice.handle_packet((dht_req, addr)).wait().is_ok());
-    }
-
-    #[test]
-    fn server_handle_nat_ping_req_for_known_node_test() {
-        let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
-
-        // if receiver' pk != node's pk and receiver's pk exists in kbucket, returns ok()
-        let pn = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &bob_pk);
-        alice.try_add_to_kbucket(&pn);
-
-        let nat_req = NatPingRequest { id: 42 };
-        let nat_payload = DhtRequestPayload::NatPingRequest(nat_req);
-        let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &bob_pk, &bob_pk, nat_payload));
-
-        assert!(alice.handle_packet((dht_req, addr)).wait().is_ok());
-    }
-
     // handle nat ping response
     #[test]
     fn server_handle_nat_ping_resp_test() {
@@ -1169,39 +1170,6 @@ mod tests {
 
         let mut client = ClientData::new();
         client.ping_id = nat_res.id;
-        add_to_peers_cache(&alice, bob_pk, client);
-
-        assert!(alice.handle_packet((dht_req, addr)).wait().is_ok());
-    }
-
-    #[test]
-    fn server_handle_nat_ping_resp_test_for_unknown_node() {
-        let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
-
-        // if receiver' pk != node's pk just returns ok()
-        let nat_res = NatPingResponse { id: 42 };
-        let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
-        let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &bob_pk, &bob_pk, nat_payload));
-
-        let client = ClientData::new();
-        add_to_peers_cache(&alice, bob_pk, client);
-
-        assert!(alice.handle_packet((dht_req, addr)).wait().is_ok());
-    }
-
-    #[test]
-    fn server_handle_nat_ping_resp_test_for_known_node() {
-        let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
-
-        // if receiver' pk != node's pk and receiver's pk exists in kbucket, returns ok()
-        let pn = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &bob_pk);
-        alice.try_add_to_kbucket(&pn);
-
-        let nat_res = NatPingResponse { id: 42 };
-        let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
-        let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &bob_pk, &bob_pk, nat_payload));
-
-        let client = ClientData::new();
         add_to_peers_cache(&alice, bob_pk, client);
 
         assert!(alice.handle_packet((dht_req, addr)).wait().is_ok());
