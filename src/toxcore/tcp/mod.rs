@@ -74,32 +74,19 @@ mod tests {
 
         let from_client_to_server = to_server_rx
             .map_err(|()| Error::from(ErrorKind::UnexpectedEof))
-            .forward(
-                from_client_tx.sink_map_err(|e|
-                    Error::new(ErrorKind::Other,
-                        format!("Could not forward message from client to server {:?}", e))
-                )
-            )
+            .forward(from_client_tx.sink_map_err(|_| Error::from(ErrorKind::UnexpectedEof)))
             .map(|_| ());
 
         let from_server_to_client = to_client_rx
             .map_err(|()| Error::from(ErrorKind::UnexpectedEof))
-            .forward(
-                from_server_tx.sink_map_err(|e|
-                    Error::new(ErrorKind::Other,
-                        format!("Could not forward message from server to client {:?}", e))
-                )
-            )
+            .forward(from_server_tx.sink_map_err(|_| Error::from(ErrorKind::UnexpectedEof)))
             .map(|_| ());
 
-        let forwarders = from_client_to_server.select(from_server_to_client)
-            .map(|_|()).map_err(|(err, _select_next)| err);
+        let forwarders = from_client_to_server.join(from_server_to_client).map(|_|());
 
-        let processors = client_processor.select(server_processor)
-            .map(|_|()).map_err(|(err, _select_next)| err);
+        let processors = client_processor.join(server_processor).map(|_|());
 
-        let network = forwarders.select(processors)
-            .map(|_|()).map_err(|(err, _select_next)| err);
+        let network = forwarders.join(processors).map(|_|());
 
         let friend_pk = PublicKey([15, 107, 126, 130, 81, 55, 154, 157,
                                 192, 117, 0, 225, 119, 43, 48, 117,
@@ -109,10 +96,8 @@ mod tests {
         let sender = outgoing_packets.clone()
             .send(OutgoingPacket::RouteRequest(
                 RouteRequest { pk: friend_pk }
-            )).map(|_| ()).map_err(|e|
-                Error::new(ErrorKind::Other,
-                    format!("Could not forward message from server to client {:?}", e))
-            );
+            ))
+            .map(|_| ()).map_err(|_| Error::from(ErrorKind::UnexpectedEof));
 
         let receiver = incoming_packets
             .into_future().and_then(move |(packet, _tail)| {
@@ -120,19 +105,13 @@ mod tests {
                     connection_id: 16, pk: friend_pk
                 }));
                 Ok(())
-            }).map(|_| ()).map_err(|e|
-                Error::new(ErrorKind::Other,
-                    format!("Could not forward message from server to client {:?}", e))
-            );
+            })
+            .map(|_| ()).map_err(|_| Error::from(ErrorKind::UnexpectedEof));
 
-        let sender_receiver = sender.select(receiver)
-            .map(|_|()).map_err(|(err, _select_next)| err);
+        let sender_receiver = sender.join(receiver).map(|_|());
 
         let test = sender_receiver.select(network)
-            .map(|_| ())
-            .map_err(|(err, _select_next)| {
-                println!("Error: {:?}", err);
-            });
+            .map(|_| ()).map_err(|(_err, _select_next)| ());
 
         tokio::run(test);
     }
