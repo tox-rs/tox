@@ -29,7 +29,7 @@ extern crate log;
 extern crate env_logger;
 
 use tox::toxcore::crypto_core::*;
-use tox::toxcore::tcp::make_server_handshake;
+use tox::toxcore::tcp::handshake::make_server_handshake;
 use tox::toxcore::tcp::codec;
 use tox::toxcore::tcp::server::{Server, ServerProcessor};
 

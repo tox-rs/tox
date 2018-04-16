@@ -26,7 +26,7 @@ extern crate env_logger;
 
 use tox::toxcore::crypto_core::{PublicKey, SecretKey};
 use tox::toxcore::tcp::packet::*;
-use tox::toxcore::tcp::make_client_handshake;
+use tox::toxcore::tcp::handshake::make_client_handshake;
 use tox::toxcore::tcp::codec;
 use tox::toxcore::tcp::client::*;
 
