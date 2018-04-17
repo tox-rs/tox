@@ -99,18 +99,6 @@ impl Connection {
             Packet::DisconnectNotification(packet) => {
                 self.send_to_client( IncomingPacket::DisconnectNotification(packet) )
             },
-            Packet::OobReceive(packet) => {
-                self.send_to_client( IncomingPacket::OobReceive(packet) )
-            },
-            Packet::OobSend(_packet) => {
-                Box::new( future::err(
-                    Error::new(ErrorKind::Other,
-                        "Server must not send OobSend to client"
-                )))
-            },
-            Packet::Data(packet) => {
-                self.send_to_client( IncomingPacket::Data(packet) )
-            },
             Packet::PingRequest(packet) => {
                 self.send_to_server(Packet::PongResponse(
                     PongResponse { ping_id: packet.ping_id }
@@ -119,6 +107,18 @@ impl Connection {
             Packet::PongResponse(_packet) => {
                 // TODO check ping_id
                 Box::new( future::ok(()) )
+            },
+            Packet::OobSend(_packet) => {
+                Box::new( future::err(
+                    Error::new(ErrorKind::Other,
+                        "Server must not send OobSend to client"
+                )))
+            },
+            Packet::OobReceive(packet) => {
+                self.send_to_client( IncomingPacket::OobReceive(packet) )
+            },
+            Packet::Data(packet) => {
+                self.send_to_client( IncomingPacket::Data(packet) )
             },
             _ => unimplemented!() // TODO onion
         }
@@ -143,7 +143,7 @@ impl Connection {
         }
     }
     /// Send packet to server
-    pub(super) fn send_to_server(&self, packet: Packet) -> IoFuture<()> {
+    fn send_to_server(&self, packet: Packet) -> IoFuture<()> {
         Box::new(self.server_tx.clone() // clone tx sender for 1 send only
             .send(packet)
             .map(|_tx| ()) // ignore tx because it was cloned
@@ -155,7 +155,7 @@ impl Connection {
         )
     }
     /// Send packet back to client (to be handled as a callback)
-    pub(super) fn send_to_client(&self, packet: IncomingPacket) -> IoFuture<()> {
+    fn send_to_client(&self, packet: IncomingPacket) -> IoFuture<()> {
         Box::new(self.callback_tx.clone() // clone tx sender for 1 send only
             .send(packet)
             .map(|_tx| ()) // ignore tx because it was cloned
@@ -165,5 +165,88 @@ impl Connection {
                 Error::from(ErrorKind::UnexpectedEof)
             })
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use toxcore::crypto_core::*;
+    use toxcore::tcp::client::connection::*;
+    use futures::sync::mpsc;
+
+    fn create_connection_channels()
+        -> (Connection, mpsc::UnboundedReceiver<Packet>, mpsc::UnboundedReceiver<IncomingPacket>) {
+        let (server_tx, server_rx) = mpsc::unbounded();
+        let (callback_tx, callback_rx) = mpsc::unbounded();
+        let connection = Connection::new(server_tx, callback_tx);
+        (connection.clone(), server_rx, callback_rx)
+    }
+
+    // client tests
+    #[test]
+    fn client_route_request() {
+        let (connection, server_rx, _callback_rx) = create_connection_channels();
+
+        let friend_pk = PublicKey([15, 107, 126, 130, 81, 55, 154, 157,
+                                192, 117, 0, 225, 119, 43, 48, 117,
+                                84, 109, 112, 57, 243, 216, 4, 171,
+                                185, 111, 33, 146, 221, 31, 77, 118]);
+
+        let outgoing_packet = OutgoingPacket::RouteRequest(
+            RouteRequest { pk: friend_pk }
+        );
+        connection.handle_from_client(outgoing_packet.clone()).wait().unwrap();
+
+        let (incoming_packet, _tail) = server_rx.into_future().wait().unwrap();
+        assert_eq!(incoming_packet.unwrap(), Packet::RouteRequest(RouteRequest {
+            pk: friend_pk
+        }));
+    }
+    #[test]
+    fn client_disconnect_notification() {
+        let (connection, server_rx, _callback_rx) = create_connection_channels();
+
+        let outgoing_packet = OutgoingPacket::DisconnectNotification(
+            DisconnectNotification { connection_id: 42 }
+        );
+        connection.handle_from_client(outgoing_packet.clone()).wait().unwrap();
+
+        let (incoming_packet, _tail) = server_rx.into_future().wait().unwrap();
+        assert_eq!(incoming_packet.unwrap(), Packet::DisconnectNotification(
+            DisconnectNotification { connection_id: 42 }
+        ));
+    }
+    #[test]
+    fn client_oob_send() {
+        let (connection, server_rx, _callback_rx) = create_connection_channels();
+
+        let friend_pk = PublicKey([15, 107, 126, 130, 81, 55, 154, 157,
+                                192, 117, 0, 225, 119, 43, 48, 117,
+                                84, 109, 112, 57, 243, 216, 4, 171,
+                                185, 111, 33, 146, 221, 31, 77, 118]);
+
+        let outgoing_packet = OutgoingPacket::OobSend(
+            OobSend { destination_pk: friend_pk, data: vec![13; 42] }
+        );
+        connection.handle_from_client(outgoing_packet.clone()).wait().unwrap();
+
+        let (incoming_packet, _tail) = server_rx.into_future().wait().unwrap();
+        assert_eq!(incoming_packet.unwrap(), Packet::OobSend(
+            OobSend { destination_pk: friend_pk, data: vec![13; 42] }
+        ));
+    }
+    #[test]
+    fn client_data() {
+        let (connection, server_rx, _callback_rx) = create_connection_channels();
+
+        let outgoing_packet = OutgoingPacket::Data(
+            Data { connection_id: 42, data: vec![13; 42] }
+        );
+        connection.handle_from_client(outgoing_packet.clone()).wait().unwrap();
+
+        let (incoming_packet, _tail) = server_rx.into_future().wait().unwrap();
+        assert_eq!(incoming_packet.unwrap(), Packet::Data(
+            Data { connection_id: 42, data: vec![13; 42] }
+        ));
     }
 }
