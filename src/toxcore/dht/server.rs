@@ -1471,6 +1471,30 @@ mod tests {
         assert!(alice.handle_packet((packet, addr)).wait().is_err());
     }
 
+    #[test]
+    fn server_handle_onion_response_3_invalid_next_onion_return_test() {
+        let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
+
+        let onion_symmetric_key = alice.onion_symmetric_key.read();
+
+        let ip_port = IpPort {
+          ip_addr: "5.6.7.8".parse().unwrap(),
+          port: 12345
+        };
+        let onion_return = OnionReturn::new(&onion_symmetric_key, &ip_port, None);
+        let inner = OnionDataResponse {
+            nonce: gen_nonce(),
+            temporary_pk: gen_keypair().0,
+            payload: vec![42, 123]
+        };
+        let packet = DhtPacket::OnionResponse3(OnionResponse3 {
+            onion_return,
+            payload: InnerOnionResponse::OnionDataResponse(inner.clone())
+        });
+
+        assert!(alice.handle_packet((packet, addr)).wait().is_err());
+    }
+
     // handle_onion_response_2
     #[test]
     fn server_handle_onion_response_2_test() {
@@ -1484,7 +1508,7 @@ mod tests {
         };
         let next_onion_return = OnionReturn {
             nonce: gen_nonce(),
-            payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE] // not encrypted with onion_symmetric_key
+            payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
         };
         let onion_return = OnionReturn::new(&onion_symmetric_key, &ip_port, Some(&next_onion_return));
         let payload = InnerOnionResponse::AnnounceResponse(AnnounceResponse {
@@ -1516,7 +1540,7 @@ mod tests {
 
         let onion_return = OnionReturn {
             nonce: gen_nonce(),
-            payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
+            payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE] // not encrypted with onion_symmetric_key
         };
         let payload = InnerOnionResponse::AnnounceResponse(AnnounceResponse {
             sendback_data: 12345,
@@ -1526,6 +1550,30 @@ mod tests {
         let packet = DhtPacket::OnionResponse2(OnionResponse2 {
             onion_return,
             payload
+        });
+
+        assert!(alice.handle_packet((packet, addr)).wait().is_err());
+    }
+
+    #[test]
+    fn server_handle_onion_response_2_invalid_next_onion_return_test() {
+        let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
+
+        let onion_symmetric_key = alice.onion_symmetric_key.read();
+
+        let ip_port = IpPort {
+          ip_addr: "5.6.7.8".parse().unwrap(),
+          port: 12345
+        };
+        let onion_return = OnionReturn::new(&onion_symmetric_key, &ip_port, None);
+        let inner = OnionDataResponse {
+            nonce: gen_nonce(),
+            temporary_pk: gen_keypair().0,
+            payload: vec![42, 123]
+        };
+        let packet = DhtPacket::OnionResponse2(OnionResponse2 {
+            onion_return,
+            payload: InnerOnionResponse::OnionDataResponse(inner.clone())
         });
 
         assert!(alice.handle_packet((packet, addr)).wait().is_err());
@@ -1614,6 +1662,34 @@ mod tests {
         let packet = DhtPacket::OnionResponse1(OnionResponse1 {
             onion_return,
             payload
+        });
+
+        assert!(alice.handle_packet((packet, addr)).wait().is_err());
+    }
+
+    #[test]
+    fn server_handle_onion_response_1_invalid_next_onion_return_test() {
+        let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
+
+        let onion_symmetric_key = alice.onion_symmetric_key.read();
+
+        let ip_port = IpPort {
+          ip_addr: "5.6.7.8".parse().unwrap(),
+          port: 12345
+        };
+        let next_onion_return = OnionReturn {
+            nonce: gen_nonce(),
+            payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
+        };
+        let onion_return = OnionReturn::new(&onion_symmetric_key, &ip_port, Some(&next_onion_return));
+        let inner = OnionDataResponse {
+            nonce: gen_nonce(),
+            temporary_pk: gen_keypair().0,
+            payload: vec![42, 123]
+        };
+        let packet = DhtPacket::OnionResponse1(OnionResponse1 {
+            onion_return,
+            payload: InnerOnionResponse::OnionDataResponse(inner.clone())
         });
 
         assert!(alice.handle_packet((packet, addr)).wait().is_err());
@@ -1834,5 +1910,15 @@ mod tests {
         assert!(state.peers_cache.contains_key(&bob_pk));
         // peer should be remained in kbucket
         assert!(state.kbucket.contains(&bob_pk));
+    }
+
+    #[test]
+    fn refresh_onion_key_test() {
+        let (alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
+
+        let onion_symmetric_key = alice.onion_symmetric_key.read().clone();
+        alice.refresh_onion_key();
+
+        assert!(*alice.onion_symmetric_key.read() != onion_symmetric_key)
     }
 }
