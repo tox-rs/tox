@@ -46,6 +46,7 @@ use toxcore::dht::packet::*;
 use toxcore::dht::packed_node::*;
 use toxcore::dht::kbucket::*;
 use toxcore::onion::packet::*;
+use toxcore::onion::onion_announce::*;
 
 /// Shorthand for the transmit half of the message channel.
 type Tx = mpsc::UnboundedSender<(DhtPacket, SocketAddr)>;
@@ -87,6 +88,8 @@ pub struct Server {
     state: Arc<RwLock<ServerState>>,
     // symmetric key used for onion return encryption
     onion_symmetric_key: Arc<RwLock<PrecomputedKey>>,
+    // onion announce struct to handle onion packets
+    onion_announce: Arc<RwLock<OnionAnnounce>>
 }
 
 #[derive(Debug)]
@@ -143,6 +146,7 @@ impl Server {
                 kbucket,
             })),
             onion_symmetric_key: Arc::new(RwLock::new(new_symmetric_key())),
+            onion_announce: Arc::new(RwLock::new(OnionAnnounce::new(pk))),
         }
     }
     /// remove timed-out clients, also remove node from kbucket
@@ -258,6 +262,10 @@ impl Server {
             DhtPacket::OnionRequest2(packet) => {
                 debug!("Received OnionRequest2");
                 self.handle_onion_request_2(packet, addr)
+            },
+            DhtPacket::AnnounceRequest(packet) => {
+                debug!("Received AnnounceRequest");
+                self.handle_announce_request(packet, addr)
             },
             DhtPacket::OnionResponse3(packet) => {
                 debug!("Received OnionResponse3");
@@ -614,7 +622,7 @@ impl Server {
     handle received OnionRequest0 packet, then create OnionRequest1 packet
     and send it to the next peer.
     */
-    pub fn handle_onion_request_0(&self, packet: OnionRequest0, addr: SocketAddr) -> IoFuture<()> {
+    fn handle_onion_request_0(&self, packet: OnionRequest0, addr: SocketAddr) -> IoFuture<()> {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let shared_secret = precompute(&packet.temporary_pk, &self.sk);
         let payload = packet.get_payload(&shared_secret);
@@ -645,7 +653,7 @@ impl Server {
     handle received OnionRequest1 packet, then create OnionRequest2 packet
     and send it to the next peer.
     */
-    pub fn handle_onion_request_1(&self, packet: OnionRequest1, addr: SocketAddr) -> IoFuture<()> {
+    fn handle_onion_request_1(&self, packet: OnionRequest1, addr: SocketAddr) -> IoFuture<()> {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let shared_secret = precompute(&packet.temporary_pk, &self.sk);
         let payload = packet.get_payload(&shared_secret);
@@ -676,7 +684,7 @@ impl Server {
     handle received OnionRequest2 packet, then create AnnounceRequest
     or OnionDataRequest packet and send it to the next peer.
     */
-    pub fn handle_onion_request_2(&self, packet: OnionRequest2, addr: SocketAddr) -> IoFuture<()> {
+    fn handle_onion_request_2(&self, packet: OnionRequest2, addr: SocketAddr) -> IoFuture<()> {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let shared_secret = precompute(&packet.temporary_pk, &self.sk);
         let payload = packet.get_payload(&shared_secret);
@@ -708,10 +716,27 @@ impl Server {
         self.send_to(payload.ip_port.to_saddr(), next_packet)
     }
     /**
+    handle received AnnounceRequest packet and send AnnounceResponse packet back
+    if request succeed.
+    */
+    fn handle_announce_request(&self, packet: AnnounceRequest, addr: SocketAddr) -> IoFuture<()> {
+        let mut onion_announce = self.onion_announce.write();
+        let state = self.state.read();
+        let onion_return = packet.onion_return.clone();
+        let response = onion_announce.handle_announce_request(packet, &self.sk, &state.kbucket, addr);
+        match response {
+            Ok(response) => self.send_to(addr, DhtPacket::OnionResponse3(OnionResponse3 {
+                onion_return,
+                payload: InnerOnionResponse::AnnounceResponse(response)
+            })),
+            Err(e) => Box::new(future::err(e))
+        }
+    }
+    /**
     handle received OnionResponse3 packet, then create OnionResponse2 packet
     and send it to the next peer which address is stored in encrypted onion return.
     */
-    pub fn handle_onion_response_3(&self, packet: OnionResponse3) -> IoFuture<()> {
+    fn handle_onion_response_3(&self, packet: OnionResponse3) -> IoFuture<()> {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let payload = packet.onion_return.get_payload(&onion_symmetric_key);
         let payload = match payload {
@@ -741,7 +766,7 @@ impl Server {
     handle received OnionResponse2 packet, then create OnionResponse1 packet
     and send it to the next peer which address is stored in encrypted onion return.
     */
-    pub fn handle_onion_response_2(&self, packet: OnionResponse2) -> IoFuture<()> {
+    fn handle_onion_response_2(&self, packet: OnionResponse2) -> IoFuture<()> {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let payload = packet.onion_return.get_payload(&onion_symmetric_key);
         let payload = match payload {
@@ -772,7 +797,7 @@ impl Server {
     or OnionDataResponse packet and send it to the next peer which address
     is stored in encrypted onion return.
     */
-    pub fn handle_onion_response_1(&self, packet: OnionResponse1) -> IoFuture<()> {
+    fn handle_onion_response_1(&self, packet: OnionResponse1) -> IoFuture<()> {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let payload = packet.onion_return.get_payload(&onion_symmetric_key);
         let payload = match payload {
@@ -822,7 +847,7 @@ mod tests {
     const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - NONCEBYTES;
 
     macro_rules! unpack {
-        ($variable:ident, $variant:path) => (
+        ($variable:expr, $variant:path) => (
             match $variable {
                 $variant(inner) => inner,
                 other => panic!("Expected {} but got {:?}", stringify!($variant), other),
@@ -1409,6 +1434,48 @@ mod tests {
         });
 
         assert!(alice.handle_packet((packet, addr)).wait().is_err());
+    }
+
+    // handle_announce_request
+    #[test]
+    fn server_handle_announce_request_test() {
+        let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
+
+        let sendback_data = 42;
+        let payload = AnnounceRequestPayload {
+            ping_id: initial_ping_id(),
+            search_pk: gen_keypair().0,
+            data_pk: gen_keypair().0,
+            sendback_data
+        };
+        let inner = InnerAnnounceRequest::new(&precomp, &bob_pk, payload);
+        let onion_return = OnionReturn {
+            nonce: gen_nonce(),
+            payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
+        };
+        let packet = DhtPacket::AnnounceRequest(AnnounceRequest {
+            inner,
+            onion_return: onion_return.clone()
+        });
+
+        assert!(alice.handle_packet((packet, addr)).wait().is_ok());
+
+        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (packet, addr_to_send) = received.unwrap();
+
+        assert_eq!(addr_to_send, addr);
+
+        let response = unpack!(packet, DhtPacket::OnionResponse3);
+
+        assert_eq!(response.onion_return, onion_return);
+
+        let response = unpack!(response.payload, InnerOnionResponse::AnnounceResponse);
+
+        assert_eq!(response.sendback_data, sendback_data);
+
+        let payload = response.get_payload(&precomp).unwrap();
+
+        assert_eq!(payload.announce_status, AnnounceStatus::Failed);
     }
 
     // handle_onion_response_3
