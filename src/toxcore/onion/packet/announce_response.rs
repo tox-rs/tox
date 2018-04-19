@@ -59,6 +59,7 @@ pub struct AnnounceResponse {
 
 impl FromBytes for AnnounceResponse {
     named!(from_bytes<AnnounceResponse>, do_parse!(
+        verify!(rest_len, |len| len <= ONION_MAX_PACKET_SIZE) >>
         tag!(&[0x84][..]) >>
         sendback_data: le_u64 >>
         nonce: call!(Nonce::from_bytes) >>
@@ -77,7 +78,8 @@ impl ToBytes for AnnounceResponse {
             gen_be_u8!(0x84) >>
             gen_le_u64!(self.sendback_data) >>
             gen_slice!(self.nonce.as_ref()) >>
-            gen_slice!(self.payload)
+            gen_slice!(self.payload) >>
+            gen_len_limit(ONION_MAX_PACKET_SIZE)
         )
     }
 }

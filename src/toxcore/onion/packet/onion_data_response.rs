@@ -21,6 +21,8 @@
 /*! OnionDataResponse packet
 */
 
+use super::*;
+
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 
@@ -52,6 +54,7 @@ pub struct OnionDataResponse {
 
 impl FromBytes for OnionDataResponse {
     named!(from_bytes<OnionDataResponse>, do_parse!(
+        verify!(rest_len, |len| len <= ONION_MAX_PACKET_SIZE) >>
         tag!(&[0x86][..]) >>
         nonce: call!(Nonce::from_bytes) >>
         temporary_pk: call!(PublicKey::from_bytes) >>
@@ -70,7 +73,8 @@ impl ToBytes for OnionDataResponse {
             gen_be_u8!(0x86) >>
             gen_slice!(self.nonce.as_ref()) >>
             gen_slice!(self.temporary_pk.as_ref()) >>
-            gen_slice!(self.payload)
+            gen_slice!(self.payload) >>
+            gen_len_limit(ONION_MAX_PACKET_SIZE)
         )
     }
 }

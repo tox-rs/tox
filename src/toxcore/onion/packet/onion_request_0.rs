@@ -76,7 +76,8 @@ impl ToBytes for OnionRequest0 {
             gen_be_u8!(0x80) >>
             gen_slice!(self.nonce.as_ref()) >>
             gen_slice!(self.temporary_pk.as_ref()) >>
-            gen_slice!(self.payload)
+            gen_slice!(self.payload) >>
+            gen_len_limit(ONION_MAX_PACKET_SIZE)
         )
     }
 }
