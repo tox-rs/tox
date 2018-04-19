@@ -90,9 +90,10 @@ consider helping :wink:
         - [ ] CryptoHandshake
         - [ ] CryptoData
         - [x] LanDiscovery
-        - [ ] OnionRequest[0,1,2] (parsed but ignored)
-        - [ ] OnionResponse[3,2,1] (parsed but ignored)
-        - [ ] Other onion packets (parsed but ignored)
+        - [x] OnionRequest[0,1,2]
+        - [x] OnionResponse[3,2,1]
+        - [x] AnnounceRequest & OnionDataRequest
+        - [ ] AnnounceResponse & OnionDataResponse (parsed but ignored)
         - [ ] BootstrapInfo (parsed but ignored)
         - [x] NAT ping requests & responses
     - [ ] TCP Relay
