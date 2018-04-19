@@ -40,7 +40,7 @@ pub const ONION_ANNOUNCE_MAX_ENTRIES: usize = 160;
 /// Number of seconds when onion ping id is valid after it was generated.
 /// To be precise ping id will be valid `PING_ID_TIMEOUT` to
 /// 2 * `PING_ID_TIMEOUT` seconds.
-pub const PING_ID_TIMEOUT: u64 = 20;
+pub const PING_ID_TIMEOUT: u64 = 300;
 
 /// Number of seconds that announce entry can be stored in onion announce list
 /// without re-announcing.
