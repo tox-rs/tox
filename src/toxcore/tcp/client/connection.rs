@@ -369,4 +369,28 @@ mod tests {
             Data { connection_id: 42, data: vec![13; 42] }
         ));
     }
+
+    // test lost rx parts
+    #[test]
+    fn server_disconnected() {
+        let (connection, server_rx, _callback_rx) = create_connection_channels();
+        drop(server_rx);
+
+        let packet = OutgoingPacket::DisconnectNotification(
+            DisconnectNotification { connection_id: 42 }
+        );
+        let handle_res = connection.handle_from_client(packet).wait();
+        assert!(handle_res.is_err());
+    }
+    #[test]
+    fn client_disconnected() {
+        let (connection, _server_rx, callback_rx) = create_connection_channels();
+        drop(callback_rx);
+
+        let packet = Packet::DisconnectNotification(
+            DisconnectNotification { connection_id: 42 }
+        );
+        let handle_res = connection.handle_from_server(packet).wait();
+        assert!(handle_res.is_err());
+    }
 }
