@@ -267,6 +267,10 @@ impl Server {
                 debug!("Received AnnounceRequest");
                 self.handle_announce_request(packet, addr)
             },
+            DhtPacket::OnionDataRequest(packet) => {
+                debug!("Received OnionDataRequest");
+                self.handle_onion_data_request(packet)
+            },
             DhtPacket::OnionResponse3(packet) => {
                 debug!("Received OnionResponse3");
                 self.handle_onion_response_3(packet)
@@ -729,6 +733,17 @@ impl Server {
                 onion_return,
                 payload: InnerOnionResponse::AnnounceResponse(response)
             })),
+            Err(e) => Box::new(future::err(e))
+        }
+    }
+    /**
+    handle received OnionDataRequest packet and send OnionResponse3 with inner
+    OnionDataResponse to destination node through its onion path.
+    */
+    fn handle_onion_data_request(&self, packet: OnionDataRequest) -> IoFuture<()> {
+        let onion_announce = self.onion_announce.read();
+        match onion_announce.handle_data_request(packet) {
+            Ok((response, addr)) => self.send_to(addr, DhtPacket::OnionResponse3(response)),
             Err(e) => Box::new(future::err(e))
         }
     }
@@ -1476,6 +1491,88 @@ mod tests {
         let payload = response.get_payload(&precomp).unwrap();
 
         assert_eq!(payload.announce_status, AnnounceStatus::Failed);
+    }
+
+    // handle_onion_data_request
+    #[test]
+    fn server_handle_onion_data_request_test() {
+        let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
+
+        // get ping id
+
+        let payload = AnnounceRequestPayload {
+            ping_id: initial_ping_id(),
+            search_pk: gen_keypair().0,
+            data_pk: gen_keypair().0,
+            sendback_data: 42
+        };
+        let inner = InnerAnnounceRequest::new(&precomp, &bob_pk, payload);
+        let onion_return = OnionReturn {
+            nonce: gen_nonce(),
+            payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
+        };
+        let packet = DhtPacket::AnnounceRequest(AnnounceRequest {
+            inner,
+            onion_return: onion_return.clone()
+        });
+
+        assert!(alice.handle_packet((packet, addr)).wait().is_ok());
+
+        let (received, rx) = rx.into_future().wait().unwrap();
+        let (packet, _addr_to_send) = received.unwrap();
+        let response = unpack!(packet, DhtPacket::OnionResponse3);
+        let response = unpack!(response.payload, InnerOnionResponse::AnnounceResponse);
+        let payload = response.get_payload(&precomp).unwrap();
+        let ping_id = payload.ping_id_or_pk;
+
+        // announce node
+
+        let payload = AnnounceRequestPayload {
+            ping_id,
+            search_pk: gen_keypair().0,
+            data_pk: gen_keypair().0,
+            sendback_data: 42
+        };
+        let inner = InnerAnnounceRequest::new(&precomp, &bob_pk, payload);
+        let packet = DhtPacket::AnnounceRequest(AnnounceRequest {
+            inner,
+            onion_return: onion_return.clone()
+        });
+
+        assert!(alice.handle_packet((packet, addr)).wait().is_ok());
+
+        // send onion data request
+
+        let nonce = gen_nonce();
+        let temporary_pk = gen_keypair().0;
+        let payload = vec![42; 123];
+        let inner = InnerOnionDataRequest {
+            destination_pk: bob_pk,
+            nonce,
+            temporary_pk,
+            payload: payload.clone()
+        };
+        let packet = DhtPacket::OnionDataRequest(OnionDataRequest {
+            inner,
+            onion_return: onion_return.clone()
+        });
+
+        assert!(alice.handle_packet((packet, addr)).wait().is_ok());
+
+        let (received, _rx) = rx.skip(1).into_future().wait().unwrap();
+        let (packet, addr_to_send) = received.unwrap();
+
+        assert_eq!(addr_to_send, addr);
+
+        let response = unpack!(packet, DhtPacket::OnionResponse3);
+
+        assert_eq!(response.onion_return, onion_return);
+
+        let response = unpack!(response.payload, InnerOnionResponse::OnionDataResponse);
+
+        assert_eq!(response.nonce, nonce);
+        assert_eq!(response.temporary_pk, temporary_pk);
+        assert_eq!(response.payload, payload);
     }
 
     // handle_onion_response_3

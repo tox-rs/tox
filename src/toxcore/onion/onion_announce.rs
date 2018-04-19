@@ -21,7 +21,7 @@
 /*! The implementation of onion announce
 */
 
-use std::io::Error;
+use std::io::{ErrorKind, Error};
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -338,6 +338,35 @@ impl OnionAnnounce {
         let response = AnnounceResponse::new(&shared_secret, payload.sendback_data, response_payload);
 
         Ok(response)
+    }
+
+    /** Handle data request and build `OnionResponse3` packet that should be
+    sent to determined address.
+
+    When onion node handles `OnionDataRequest` it checks if onion entry list
+    contains destination node and when entry exists sends `OnionDataResponse`
+    to this node through its onion path.
+
+    */
+    pub fn handle_data_request(&self, request: OnionDataRequest) -> Result<(OnionResponse3, SocketAddr), Error> {
+        if let Some(entry) = self.find_in_entries(request.inner.destination_pk) {
+            let response_payload = OnionDataResponse {
+                nonce: request.inner.nonce,
+                temporary_pk: request.inner.temporary_pk,
+                payload: request.inner.payload
+            };
+            let response = OnionResponse3 {
+                onion_return: entry.onion_return.clone(),
+                payload: InnerOnionResponse::OnionDataResponse(response_payload)
+            };
+            let saddr = SocketAddr::new(entry.ip_addr, entry.port);
+            Ok((response, saddr))
+        } else {
+            Err(Error::new(
+                ErrorKind::Other,
+                format!("No announced node with public key {:?}", request.inner.destination_pk)
+            ))
+        }
     }
 }
 
@@ -802,5 +831,75 @@ mod tests {
 
         assert_eq!(response.sendback_data, sendback_data);
         assert_eq!(response_payload.announce_status, AnnounceStatus::Failed);
+    }
+
+    ////////////////////////////////////////////////////////////////////////////////////////
+    // Tests for OnionAnnounce::handle_announce_request
+    #[test]
+    fn handle_data_request() {
+        let (dht_pk, _dht_sk) = gen_keypair();
+
+        let mut onion_announce = OnionAnnounce::new(dht_pk);
+
+        // insert random entry
+        let entry = create_random_entry();
+        let entry_pk = entry.pk;
+        let entry_addr = entry.ip_addr;
+        let entry_port = entry.port;
+        let entry_onion_return = entry.onion_return.clone();
+        assert!(onion_announce.add_to_entries(entry).is_some());
+
+        let nonce = gen_nonce();
+        let temporary_pk = gen_keypair().0;
+        let payload = vec![42; 123];
+        let onion_return = OnionReturn {
+            nonce: gen_nonce(),
+            payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
+        };
+        let inner = InnerOnionDataRequest {
+            destination_pk: entry_pk,
+            nonce,
+            temporary_pk,
+            payload: payload.clone()
+        };
+        let request = OnionDataRequest {
+            inner,
+            onion_return
+        };
+
+        let (response, saddr) = onion_announce.handle_data_request(request).unwrap();
+
+        assert_eq!(saddr.ip(), entry_addr);
+        assert_eq!(saddr.port(), entry_port);
+        assert_eq!(response.onion_return, entry_onion_return);
+        assert_eq!(response.payload, InnerOnionResponse::OnionDataResponse(OnionDataResponse {
+            nonce,
+            temporary_pk,
+            payload
+        }));
+    }
+
+    #[test]
+    fn handle_data_request_unknown_destination() {
+        let (dht_pk, _dht_sk) = gen_keypair();
+
+        let onion_announce = OnionAnnounce::new(dht_pk);
+
+        let onion_return = OnionReturn {
+            nonce: gen_nonce(),
+            payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
+        };
+        let inner = InnerOnionDataRequest {
+            destination_pk: gen_keypair().0,
+            nonce: gen_nonce(),
+            temporary_pk: gen_keypair().0,
+            payload: vec![42; 123]
+        };
+        let request = OnionDataRequest {
+            inner,
+            onion_return
+        };
+
+        assert!(onion_announce.handle_data_request(request).is_err());
     }
 }
