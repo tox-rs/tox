@@ -31,21 +31,8 @@ use std::io::{Error, ErrorKind};
 use bytes::BytesMut;
 use tokio_io::codec::{Decoder, Encoder};
 
-/**
-SendNodes
-size    | description
-1       | packet type
-32      | public key
-24      | nonce
-1       | number of response nodes
-[39,204]| packed nodes
-8       | Request Id (Ping Id)
----------------------------------
-270 bytes maximun.
-Because size of SendNodes is largest in DHT related packets
-512 is enough for DhtPacket
-*/
-pub const MAX_DHT_PACKET_SIZE: usize = 512;
+/// A serialized `DhtPacket` should be not longer than 2048 bytes.
+pub const MAX_DHT_PACKET_SIZE: usize = 2048;
 
 /// Struct to use for {de-,}serializing DHT UDP packets.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -56,6 +43,11 @@ impl Decoder for DhtCodec {
     type Error = Error;
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        if buf.len() > MAX_DHT_PACKET_SIZE {
+            return Err(Error::new(ErrorKind::Other,
+                "DhtPacket should not be longer then 2048 bytes"))
+        }
+
         match DhtPacket::from_bytes(buf) {
             IResult::Incomplete(_) => {
                 Err(Error::new(ErrorKind::Other,
@@ -282,7 +274,7 @@ mod tests {
         let mut buf = BytesMut::new();
         let (pk, _) = gen_keypair();
         let nonce = gen_nonce();
-        let payload = [0x01; 1024].to_vec();
+        let payload = [0x01; MAX_DHT_PACKET_SIZE + 1].to_vec();
         let packet = DhtPacket::PingRequest( PingRequest { pk, nonce, payload } );
 
         // Codec cannot serialize Packet because it is too long

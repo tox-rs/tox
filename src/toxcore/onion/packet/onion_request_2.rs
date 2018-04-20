@@ -85,7 +85,8 @@ impl ToBytes for OnionRequest2 {
             gen_slice!(self.nonce.as_ref()) >>
             gen_slice!(self.temporary_pk.as_ref()) >>
             gen_slice!(self.payload) >>
-            gen_call!(|buf, onion_return| OnionReturn::to_bytes(onion_return, buf), &self.onion_return)
+            gen_call!(|buf, onion_return| OnionReturn::to_bytes(onion_return, buf), &self.onion_return) >>
+            gen_len_limit(ONION_MAX_PACKET_SIZE)
         )
     }
 }

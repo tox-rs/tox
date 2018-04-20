@@ -63,7 +63,8 @@ impl ToBytes for OnionResponse3 {
         do_gen!(buf,
             gen_be_u8!(0x8c) >>
             gen_call!(|buf, onion_return| OnionReturn::to_bytes(onion_return, buf), &self.onion_return) >>
-            gen_call!(|buf, payload| InnerOnionResponse::to_bytes(payload, buf), &self.payload)
+            gen_call!(|buf, payload| InnerOnionResponse::to_bytes(payload, buf), &self.payload) >>
+            gen_len_limit(ONION_MAX_PACKET_SIZE)
         )
     }
 }

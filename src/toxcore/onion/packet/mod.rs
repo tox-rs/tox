@@ -81,11 +81,6 @@ pub const ONION_SEND_BASE_SIZE: usize = PUBLICKEYBYTES + SIZE_IPPORT + MACBYTES;
 /// byte, onion return.
 pub const ONION_MAX_PACKET_SIZE: usize = 1400;
 
-/// Parser that returns the length of the remaining input.
-pub fn rest_len(input: &[u8]) -> IResult<&[u8], usize> {
-    IResult::Done(input, input.len())
-}
-
 /** `IpAddr` with a port number. IPv4 is padded with 12 bytes of zeros
 so that both IPv4 and IPv6 have the same stored size.
 
