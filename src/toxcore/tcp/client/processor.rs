@@ -95,3 +95,55 @@ impl ClientProcessor {
         ClientProcessor { to_client_rx, from_client_tx, from_server_tx, to_server_rx, processor }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use toxcore::tcp::client::*;
+
+    use futures::Future;
+    use tokio;
+
+    #[test]
+    fn client_processor_shutdown_client() {
+        // Create ClientProcessor
+        let ClientProcessor {
+            from_client_tx,
+            to_client_rx,
+            from_server_tx,
+            to_server_rx,
+            processor
+        } = ClientProcessor::new();
+        let client_processor = processor.map_err(|_| ());
+
+        // shutdown client channel = shutdown client
+        drop(from_client_tx);
+        drop(to_client_rx);
+
+        let _from_server_tx = from_server_tx;
+        let _to_server_rx = to_server_rx;
+
+        tokio::run(client_processor);
+    }
+
+    #[test]
+    fn client_processor_shutdown_server() {
+        // Create ClientProcessor
+        let ClientProcessor {
+            from_client_tx,
+            to_client_rx,
+            from_server_tx,
+            to_server_rx,
+            processor
+        } = ClientProcessor::new();
+        let client_processor = processor.map_err(|_| ());
+
+        // shutdown server channel = shutdown server
+        drop(from_server_tx);
+        drop(to_server_rx);
+
+        let _from_client_tx = from_client_tx;
+        let _to_client_rx = to_client_rx;
+
+        tokio::run(client_processor);
+    }
+}

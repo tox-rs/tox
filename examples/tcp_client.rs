@@ -32,7 +32,7 @@ use rustc_serialize::hex::FromHex;
 
 use tox::toxcore::crypto_core::*;
 use tox::toxcore::tcp::packet::*;
-use tox::toxcore::tcp::make_client_handshake;
+use tox::toxcore::tcp::handshake::make_client_handshake;
 use tox::toxcore::tcp::codec;
 
 use futures::prelude::*;

@@ -79,3 +79,84 @@ impl ServerProcessor {
         ServerProcessor { from_client_tx, to_client_rx, processor }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use toxcore::crypto_core::*;
+    use toxcore::tcp::server::*;
+
+    use futures::{Stream, Sink, Future};
+    use tokio;
+
+    #[test]
+    fn server_processor_shutdown_client() {
+        let (client_pk, _sk) = gen_keypair();
+        // Create Server with no onion
+        let server = Server::new();
+
+        // Create ServerProcessor
+        let ServerProcessor {
+            from_client_tx,
+            to_client_rx,
+            processor
+        } = ServerProcessor::create(
+            server,
+            client_pk,
+            "0.0.0.0".parse().unwrap(),
+            0
+        );
+        let server_processor = processor.map_err(|_| ());
+
+        // shutdown client channel = shutdown client
+        drop(from_client_tx);
+        drop(to_client_rx);
+
+        tokio::run(server_processor);
+    }
+    #[test]
+    fn server_processor_handle_packet() {
+        use toxcore::tcp::packet::*;
+
+        let (client_pk, _sk) = gen_keypair();
+        // Create Server with no onion
+        let server = Server::new();
+
+        // Create ServerProcessor
+        let ServerProcessor {
+            from_client_tx,
+            to_client_rx,
+            processor
+        } = ServerProcessor::create(
+            server,
+            client_pk,
+            "0.0.0.0".parse().unwrap(),
+            0
+        );
+        let server_processor = processor.map(|_| ()).map_err(|_| ());
+
+        let friend_pk = PublicKey([15, 107, 126, 130, 81, 55, 154, 157,
+                                192, 117, 0, 225, 119, 43, 48, 117,
+                                84, 109, 112, 57, 243, 216, 4, 171,
+                                185, 111, 33, 146, 221, 31, 77, 118]);
+
+        // send route request to friend
+        from_client_tx.send(Packet::RouteRequest(
+            RouteRequest { pk: friend_pk }
+        )).wait().unwrap();
+
+        // wait for route response
+        let receiver = to_client_rx.into_future()
+            .and_then(move |(packet, _tail)| {
+                let expected_packet = Packet::RouteResponse(RouteResponse {
+                    connection_id: 16, pk: friend_pk
+                });
+                assert_eq!(packet.unwrap(), expected_packet);
+                Ok(())
+            })
+            .map(|_| ()).map_err(|_| ());
+
+        // run server
+        let server = server_processor.join(receiver).map(|_| ()).map_err(|_| ());
+        tokio::run(server);
+    }
+}
