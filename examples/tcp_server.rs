@@ -20,9 +20,7 @@
 
 extern crate tox;
 extern crate futures;
-extern crate futures_timer;
 extern crate tokio;
-extern crate tokio_io;
 
 #[macro_use]
 extern crate log;
@@ -34,10 +32,10 @@ use tox::toxcore::tcp::codec;
 use tox::toxcore::tcp::server::{Server, ServerProcessor};
 
 use futures::prelude::*;
-use futures_timer::ext::FutureExt;
 
-use tokio_io::AsyncRead;
+use tokio::util::FutureExt;
 use tokio::net::TcpListener;
+use tokio::io::AsyncRead;
 
 use std::time;
 use std::io::{Error, ErrorKind};
@@ -99,7 +97,11 @@ fn main() {
                 .fold(to_client, move |to_client, packet| {
                     debug!("Send {:?} => {:?}", client_pk, packet);
                     to_client.send(packet)
-                        .timeout(time::Duration::from_secs(30))
+                        .deadline(time::Instant::now() + time::Duration::from_secs(30))
+                        .map_err(|_|
+                            Error::new(ErrorKind::Other,
+                                format!("Writer timed out"))
+                        )
                 })
                 // drop to_client when to_client_rx stream is exhausted
                 .map(|_to_client| ())
