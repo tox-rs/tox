@@ -146,7 +146,7 @@ impl Server {
         let mut state = self.state.write();
         state.peers_cache.iter_mut()
             .map(|(_pk, client)|
-                client.clear_timedout(timeout)
+                client.clear_timedout_pings(timeout)
             ).collect::<Vec<_>>();
 
         Box::new( future::ok(()) )
@@ -159,7 +159,7 @@ impl Server {
             let client = state.peers_cache.entry(peer.pk).or_insert_with(ClientData::new);
 
             let payload = PingRequestPayload {
-                id: client.add_ping_id(),
+                id: client.insert_new_ping_id(),
             };
             let ping_req = DhtPacket::PingRequest(PingRequest::new(
                 &precompute(&peer.pk, &self.sk),
@@ -208,7 +208,7 @@ impl Server {
 
         let payload = NodesRequestPayload {
             pk: target_peer.pk,
-            id: client.add_ping_id(),
+            id: client.insert_new_ping_id(),
         };
         let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(
             &precompute(&target_peer.pk, &self.sk),
@@ -225,7 +225,7 @@ impl Server {
         let client = state.peers_cache.entry(peer.pk).or_insert_with(ClientData::new);
 
         let payload = DhtRequestPayload::NatPingRequest(NatPingRequest {
-            id: client.add_ping_id(),
+            id: client.insert_new_ping_id(),
         });
         let nat_ping_req = DhtPacket::DhtRequest(DhtRequest::new(
             &precompute(&peer.pk, &self.sk),
@@ -961,7 +961,7 @@ mod tests {
         // handle ping response, request from bob peer
         // success case
         let mut client = ClientData::new();
-        let ping_id = client.add_ping_id();
+        let ping_id = client.insert_new_ping_id();
         let resp_payload = PingResponsePayload { id: ping_id };
         let ping_resp = DhtPacket::PingResponse(PingResponse::new(&precomp, &bob_pk, resp_payload));
 
@@ -976,7 +976,7 @@ mod tests {
 
         // wrong PK, decrypt fail
         let mut client = ClientData::new();
-        let ping_id = client.add_ping_id();
+        let ping_id = client.insert_new_ping_id();
         let prs = PingResponsePayload { id: ping_id };
         let ping_resp = DhtPacket::PingResponse(PingResponse::new(&precomp, &alice.pk, prs));
 
@@ -1005,7 +1005,7 @@ mod tests {
 
         // incorrect ping_id, fail
         let mut client = ClientData::new();
-        let ping_id = client.add_ping_id();
+        let ping_id = client.insert_new_ping_id();
         let prs = PingResponsePayload { id: ping_id + 1 };
         let ping_resp = DhtPacket::PingResponse(PingResponse::new(&precomp, &bob_pk, prs));
 
@@ -1061,7 +1061,7 @@ mod tests {
 
         // handle nodes response, request from bob peer
         let mut client = ClientData::new();
-        let ping_id = client.add_ping_id();
+        let ping_id = client.insert_new_ping_id();
         let resp_payload = NodesResponsePayload { nodes: node, id: ping_id };
         let nodes_resp = DhtPacket::NodesResponse(NodesResponse::new(&precomp, &bob_pk, resp_payload.clone()));
 
@@ -1114,7 +1114,7 @@ mod tests {
 
         // incorrect ping_id
         let mut client = ClientData::new();
-        let ping_id = client.add_ping_id();
+        let ping_id = client.insert_new_ping_id();
         let resp_payload = NodesResponsePayload { nodes: vec![
             PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &gen_keypair().0)
         ], id: ping_id + 1 };
@@ -1203,7 +1203,7 @@ mod tests {
 
         // success case
         let mut client = ClientData::new();
-        let ping_id = client.add_ping_id();
+        let ping_id = client.insert_new_ping_id();
         let nat_res = NatPingResponse { id: ping_id };
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
         let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, nat_payload));
@@ -1234,7 +1234,7 @@ mod tests {
 
         // error case, incorrect ping_id
         let mut client = ClientData::new();
-        let ping_id = client.add_ping_id();
+        let ping_id = client.insert_new_ping_id();
         let nat_res = NatPingResponse { id: ping_id + 1 };
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
         let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, nat_payload));

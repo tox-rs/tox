@@ -258,14 +258,14 @@ fn add_lan_sender(base_selector: IoFuture<()>, server_obj: &Server, local_addr: 
         }))
 }
 fn add_timedout_remover(base_selector: IoFuture<()>, server_obj: &Server) -> IoFuture<()> {
-    let timeout_client_duration = Duration::from_secs(182);
     // 1 seconds for timed-out clients remover
+    let interval = Duration::from_secs(1);
     const OFFLINE_TIMEDOUT_DURATION: u64 = 182;
     const PING_TIMEDOUT: u64 = 5;
     let offline_timeout_dur = Duration::from_secs(OFFLINE_TIMEDOUT_DURATION);
     let ping_timeout_dur = Duration::from_secs(PING_TIMEDOUT);
 
-    let timeout_wakeups = Interval::new(Duration::from_secs(1));
+    let timeout_wakeups = Interval::new(Instant::now() + interval, interval);
     let server_obj_c = server_obj.clone();
     let timeout_remover = timeout_wakeups
         .map_err(|e| Error::new(ErrorKind::Other, format!("Timedout clients remover timer error: {:?}", e)))

@@ -47,7 +47,7 @@ impl ClientData {
         }
     }
     /// set new random ping id to the client and return it
-    fn new_ping_id(&mut self) -> u64 {
+    fn generate_ping_id(&mut self) -> u64 {
         loop {
             let ping_id = random_u64();
             if ping_id != 0 && !self.ping_hash.contains_key(&ping_id) {
@@ -57,14 +57,14 @@ impl ClientData {
     }
 
     /// clear timed out ping_id
-    pub fn clear_timedout(&mut self, timeout: Duration) {
+    pub fn clear_timedout_pings(&mut self, timeout: Duration) {
         self.ping_hash.retain(|&_ping_id, &mut time|
             time.elapsed() <= timeout);
     }
 
     /// Add a Ping Hash Entry and return a new ping_id.
-    pub fn add_ping_id(&mut self) -> u64 {
-        let ping_id = self.new_ping_id();
+    pub fn insert_new_ping_id(&mut self) -> u64 {
+        let ping_id = self.generate_ping_id();
         self.ping_hash.insert(ping_id, Instant::now());
 
         ping_id
@@ -73,20 +73,20 @@ impl ClientData {
     /// Check if ping_id is valid and not timed out.
     pub fn check_ping_id(&mut self, ping_id: u64, timeout: Duration) -> bool {
         if ping_id == 0 {
-            error!("Given ping_id is 0");
+            debug!("Given ping_id is 0");
             return false
         }
 
         let time_ping_sent = match self.ping_hash.remove(&ping_id) {
             None => {
-                error!("Given ping_id don't exist in PingHash");
+                debug!("Given ping_id don't exist in PingHash");
                 return false
             },
             Some(time) => time,
         };
 
         if time_ping_sent.elapsed() > timeout {
-            error!("Given ping_id is timed out");
+            debug!("Given ping_id is timed out");
             return false
         }
 
@@ -105,10 +105,10 @@ mod tests {
     }
 
     #[test]
-    fn client_data_add_ping_id_test() {
+    fn client_data_insert_new_ping_id_test() {
         let mut client = ClientData::new();
 
-        let ping_id = client.add_ping_id();
+        let ping_id = client.insert_new_ping_id();
 
         assert!(client.ping_hash.contains_key(&ping_id));
     }
@@ -117,7 +117,7 @@ mod tests {
     fn client_data_check_ping_id_test() {
         let mut client = ClientData::new();
 
-        let ping_id = client.add_ping_id();
+        let ping_id = client.insert_new_ping_id();
 
         let dur = Duration::from_secs(1);
         // give incorrect ping_id
@@ -131,25 +131,25 @@ mod tests {
         // Now, timeout duration is 5 seconds
         let dur = Duration::from_secs(5);
 
-        let ping_id = client.add_ping_id();
+        let ping_id = client.insert_new_ping_id();
         assert!(client.check_ping_id(ping_id, dur));
     }
 
     #[test]
-    fn client_data_clear_timedout_test() {
+    fn client_data_clear_timedout_pings_test() {
         let mut client = ClientData::new();
 
         // ping_id should be removed
-        let ping_id = client.add_ping_id();
+        let ping_id = client.insert_new_ping_id();
         let dur = Duration::from_secs(0);
-        client.clear_timedout(dur);
+        client.clear_timedout_pings(dur);
         let dur = Duration::from_secs(1);
         assert!(!client.check_ping_id(ping_id, dur));        
 
         // ping_id should remain
-        let ping_id = client.add_ping_id();
+        let ping_id = client.insert_new_ping_id();
         let dur = Duration::from_secs(1);
-        client.clear_timedout(dur);
+        client.clear_timedout_pings(dur);
         assert!(client.check_ping_id(ping_id, dur));        
     }
 }
