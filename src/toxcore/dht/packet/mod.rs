@@ -145,21 +145,3 @@ impl FromBytes for DhtPacket {
         map!(BootstrapInfo::from_bytes, DhtPacket::BootstrapInfo)
     ));
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use quickcheck::quickcheck;
-    use toxcore::dht::codec::*;
-
-    #[test]
-    fn dht_packet_check() {
-        fn with_packet(packet: DhtPacket) {
-            let mut buf = [0; MAX_DHT_PACKET_SIZE];
-            let (_, len) = packet.to_bytes((&mut buf, 0)).ok().unwrap();
-            let (_, decoded) = DhtPacket::from_bytes(&buf[..len]).unwrap();
-            assert_eq!(decoded, packet);
-        }
-        quickcheck(with_packet as fn(DhtPacket));
-    }
-}

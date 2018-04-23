@@ -24,37 +24,6 @@
 /*! Macros for test functions
 */
 
-use super::*;
-
-use quickcheck::{Arbitrary, Gen};
-
-impl Arbitrary for DhtPacket {
-    fn arbitrary<G: Gen>(g: &mut G) -> Self {
-        let choice = g.gen_range(0, 5);
-        match choice {
-            0 => DhtPacket::PingRequest(PingRequest::arbitrary(g)),
-            1 => DhtPacket::PingResponse(PingResponse::arbitrary(g)),
-            2 => DhtPacket::NodesRequest(NodesRequest::arbitrary(g)),
-            3 => DhtPacket::NodesResponse(NodesResponse::arbitrary(g)),
-            4 => DhtPacket::DhtRequest(DhtRequest::arbitrary(g)),
-            _ => unreachable!("Arbitrary for DhtPacket - should not have happened!")
-        }
-    }
-}
-
-macro_rules! dht_packet_arbitrary (
-    ($packet:ident, $payload:ident) => (
-        impl Arbitrary for $packet {
-            fn arbitrary<G: Gen>(g: &mut G) -> Self {
-                let (pk, sk) = gen_keypair();  // "sender" keypair
-                let (r_pk, _) = gen_keypair();  // receiver PK
-                let precomputed = encrypt_precompute(&r_pk, &sk);
-                $packet::new(&precomputed, &pk, $payload::arbitrary(g))
-            }
-        }
-    )
-);
-
 macro_rules! dht_packet_encode_decode (
     ($test:ident, $packet:ident) => (
         encode_decode_test!(

@@ -24,10 +24,6 @@
 /*! NodesRequest packet
 */
 
-#![allow(warnings)]
-
-use super::*;
-
 use nom::{be_u64, rest};
 
 use std::io::{Error, ErrorKind};
@@ -173,29 +169,7 @@ impl FromBytes for NodesRequestPayload {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use quickcheck::{Arbitrary, Gen, quickcheck};
-
-    dht_packet_arbitrary!(NodesRequest, NodesRequestPayload);
-
-    impl Arbitrary for NodesRequestPayload {
-        fn arbitrary<G: Gen>(g: &mut G) -> Self {
-            let mut a: [u8; PUBLICKEYBYTES] = [0; PUBLICKEYBYTES];
-            g.fill_bytes(&mut a);
-            NodesRequestPayload { pk: PublicKey(a), id: g.gen() }
-        }
-    }
-
-    #[test]
-    fn nodes_request_payload_check() {
-        fn with_payload(payload: NodesRequestPayload) {
-            let mut buf = [0; MAX_DHT_PACKET_SIZE];
-            let (_, len) = payload.to_bytes((&mut buf, 0)).ok().unwrap();
-            let (_, decoded) = NodesRequestPayload::from_bytes(&buf[..len]).unwrap();
-            assert_eq!(decoded, payload);
-        }
-        quickcheck(with_payload as fn(NodesRequestPayload));
-    }
+    use toxcore::dht::packet::DhtPacket;
 
     encode_decode_test!(
         nodes_request_payload_encode_decode,

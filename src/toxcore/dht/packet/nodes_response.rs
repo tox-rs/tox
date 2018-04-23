@@ -24,10 +24,6 @@
 /*! NodesResponse packet
 */
 
-#![allow(warnings)]
-
-use super::*;
-
 use nom::{le_u8, be_u64, rest};
 
 use std::io::{Error, ErrorKind};
@@ -191,29 +187,8 @@ impl FromBytes for NodesResponsePayload {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use toxcore::dht::packet::DhtPacket;
     use std::net::SocketAddr;
-    use quickcheck::{Arbitrary, Gen, quickcheck};
-
-    dht_packet_arbitrary!(NodesResponse, NodesResponsePayload);
-
-    impl Arbitrary for NodesResponsePayload {
-        fn arbitrary<G: Gen>(g: &mut G) -> Self {
-            let nodes = vec![Arbitrary::arbitrary(g); g.gen_range(1, 4)];
-            let id = g.gen();
-            NodesResponsePayload { nodes, id }
-        }
-    }
-
-    #[test]
-    fn nodes_response_payload_check() {
-        fn with_payload(payload: NodesResponsePayload) {
-            let mut buf = [0; MAX_DHT_PACKET_SIZE];
-            let (_, len) = payload.to_bytes((&mut buf, 0)).ok().unwrap();
-            let (_, decoded) = NodesResponsePayload::from_bytes(&buf[..len]).unwrap();
-            assert_eq!(decoded, payload);
-        }
-        quickcheck(with_payload as fn(NodesResponsePayload));
-    }
 
     encode_decode_test!(
         nodes_response_payload_encode_decode,

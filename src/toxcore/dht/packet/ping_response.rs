@@ -24,10 +24,6 @@
 /*! PinResponse packet
 */
 
-#![allow(warnings)]
-
-use super::*;
-
 use nom::{be_u64, rest};
 
 use std::io::{Error, ErrorKind};
@@ -188,28 +184,7 @@ impl PingResponsePayload {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use quickcheck::{Arbitrary, Gen, quickcheck};
-
-    dht_packet_arbitrary!(PingResponse, PingResponsePayload);
-
-    impl Arbitrary for PingResponsePayload {
-        fn arbitrary<G: Gen>(g: &mut G) -> Self {
-            PingResponsePayload {
-                id: g.gen()
-            }
-        }
-    }
-
-    #[test]
-    fn ping_response_payload_check() {
-        fn with_payload(payload: PingResponsePayload) {
-            let mut buf = [0; MAX_DHT_PACKET_SIZE];
-            let (_, len) = payload.to_bytes((&mut buf, 0)).ok().unwrap();
-            let (_, decoded) = PingResponsePayload::from_bytes(&buf[..len]).unwrap();
-            assert_eq!(decoded, payload);
-        }
-        quickcheck(with_payload as fn(PingResponsePayload));
-    }
+    use toxcore::dht::packet::DhtPacket;
 
     encode_decode_test!(
         ping_response_payload_encode_decode,

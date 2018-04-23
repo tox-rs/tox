@@ -180,34 +180,14 @@ impl ToBytes for PingRequestPayload {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use quickcheck::{Arbitrary, Gen, quickcheck};
-
-    dht_packet_arbitrary!(PingRequest, PingRequestPayload);
-
-    impl Arbitrary for PingRequestPayload {
-        fn arbitrary<G: Gen>(g: &mut G) -> Self {
-            PingRequestPayload {
-                id: g.gen()
-            }
-        }
-    }
-
-    #[test]
-    fn ping_request_payload_check() {
-        fn with_payload(payload: PingRequestPayload) {
-            let mut buf = [0; MAX_DHT_PACKET_SIZE];
-            let (_, len) = payload.to_bytes((&mut buf, 0)).ok().unwrap();
-            let (_, decoded) = PingRequestPayload::from_bytes(&buf[..len]).unwrap();
-            assert_eq!(decoded, payload);
-        }
-        quickcheck(with_payload as fn(PingRequestPayload));
-    }
+    use toxcore::dht::packet::DhtPacket;
 
     encode_decode_test!(
         ping_request_payload_encode_decode,
         PingRequestPayload { id: 42 }
     );
 
+    dht_packet_encode_decode!(ping_request_encode_decode, PingRequest);
 
     dht_packet_encrypt_decrypt!(
         ping_request_payload_encrypt_decrypt,

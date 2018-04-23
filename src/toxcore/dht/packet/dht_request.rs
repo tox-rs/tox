@@ -254,53 +254,19 @@ impl NatPingRequest {
 mod tests {
     use super::*;
 
-    use quickcheck::{Arbitrary, Gen, quickcheck};
-
-    impl Arbitrary for DhtRequest {
-        fn arbitrary<G: Gen>(g: &mut G) -> Self {
-            let (pk, sk) = gen_keypair();  // "sender" keypair
-            let (r_pk, _) = gen_keypair();  // receiver PK
-            let precomputed = encrypt_precompute(&r_pk, &sk);
-            DhtRequest::new(&precomputed, &r_pk, &pk, DhtRequestPayload::arbitrary(g))
-        }
-    }
-
-    impl Arbitrary for DhtRequestPayload {
-        fn arbitrary<G: Gen>(g: &mut G) -> Self {
-            let choice = g.gen_range(0, 2);
-            if choice == 0 {
-                DhtRequestPayload::NatPingRequest(NatPingRequest::arbitrary(g))
-            } else {
-                DhtRequestPayload::NatPingResponse(NatPingResponse::arbitrary(g))
-            }
-        }
-    }
-
-    impl Arbitrary for NatPingRequest {
-        fn arbitrary<G: Gen>(g: &mut G) -> Self {
-            NatPingRequest {
-                id: g.gen()
-            }
-        }
-    }
-
-    impl Arbitrary for NatPingResponse {
-        fn arbitrary<G: Gen>(g: &mut G) -> Self {
-            NatPingResponse {
-                id: g.gen()
-            }
-        }
-    }
-
     #[test]
     fn dht_request_payload_check() {
-        fn with_payload(payload: DhtRequestPayload) {
+        let test_payloads = vec![
+            DhtRequestPayload::NatPingRequest(NatPingRequest { id: 42 }),
+            DhtRequestPayload::NatPingResponse(NatPingResponse { id: 42 })
+        ];
+
+        for payload in test_payloads {
             let mut buf = [0; MAX_DHT_PACKET_SIZE];
             let (_, len) = payload.to_bytes((&mut buf, 0)).ok().unwrap();
             let (_, decoded) = DhtRequestPayload::from_bytes(&buf[..len]).unwrap();
             assert_eq!(decoded, payload);
         }
-        quickcheck(with_payload as fn(DhtRequestPayload));
     }
 
     encode_decode_test!(
