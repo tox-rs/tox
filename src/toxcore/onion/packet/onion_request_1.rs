@@ -112,10 +112,9 @@ impl OnionRequest1 {
     */
     pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<OnionRequest1Payload, Error> {
         let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
-            .map_err(|e| {
+            .map_err(|()| {
                 debug!("Decrypting OnionRequest1 failed!");
-                Error::new(ErrorKind::Other,
-                    format!("OnionRequest1 decrypt error: {:?}", e))
+                Error::new(ErrorKind::Other, "OnionRequest1 decrypt error.")
             })?;
         match OnionRequest1Payload::from_bytes(&decrypted) {
             IResult::Incomplete(e) => {

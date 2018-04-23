@@ -111,10 +111,9 @@ impl CookieRequest {
     */
     pub fn get_payload(&self, own_secret_key: &SecretKey) -> Result<CookieRequestPayload, Error> {
         let decrypted = open(&self.payload, &self.nonce, &self.pk, own_secret_key)
-            .map_err(|e| {
+            .map_err(|()| {
                 debug!("Decrypting CookieRequest failed!");
-                Error::new(ErrorKind::Other,
-                    format!("CookieRequest decrypt error: {:?}", e))
+                Error::new(ErrorKind::Other, "CookieRequest decrypt error.")
             })?;
         match CookieRequestPayload::from_bytes(&decrypted) {
             IResult::Incomplete(e) => {

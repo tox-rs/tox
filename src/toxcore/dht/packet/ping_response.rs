@@ -104,10 +104,9 @@ impl PingResponse {
         debug!(target: "PingResponse", "Getting packet data from PingResponse.");
         trace!(target: "PingResponse", "With PingResponse: {:?}", self);
         let decrypted = open(&self.payload, &self.nonce, &self.pk, own_secret_key)
-            .map_err(|e| {
+            .map_err(|()| {
                 debug!("Decrypting PingResponse failed!");
-                Error::new(ErrorKind::Other,
-                    format!("PingResponse decrypt error: {:?}", e))
+                Error::new(ErrorKind::Other, "PingResponse decrypt error.")
             })?;
 
         match PingResponsePayload::from_bytes(&decrypted) {

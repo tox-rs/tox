@@ -223,10 +223,9 @@ impl OnionReturn {
     */
     pub fn get_payload(&self, symmetric_key: &PrecomputedKey) -> Result<(IpPort, Option<OnionReturn>), Error> {
         let decrypted = open_precomputed(&self.payload, &self.nonce, symmetric_key)
-            .map_err(|e| {
+            .map_err(|()| {
                 debug!("Decrypting OnionReturn failed!");
-                Error::new(ErrorKind::Other,
-                    format!("OnionReturn decrypt error: {:?}", e))
+                Error::new(ErrorKind::Other, "OnionReturn decrypt error.")
             })?;
         match OnionReturn::inner_from_bytes(&decrypted) {
             IResult::Incomplete(e) => {
