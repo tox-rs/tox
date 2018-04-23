@@ -207,7 +207,7 @@ impl Server {
         let client = state.peers_cache.entry(target_peer.pk).or_insert_with(ClientData::new);
 
         let payload = NodesRequestPayload {
-            pk: target_peer.pk,
+            pk: self.pk,
             id: client.insert_new_ping_id(),
         };
         let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(
@@ -1913,7 +1913,7 @@ mod tests {
         let nodes_req = unpack!(packet, DhtPacket::NodesRequest);
         let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
 
-        assert_eq!(nodes_req_payload.pk, node.pk);
+        assert_eq!(nodes_req_payload.pk, alice.pk);
     }
 
     // send_nat_ping_req()
