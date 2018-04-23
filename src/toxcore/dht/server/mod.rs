@@ -21,11 +21,12 @@
     along with Tox.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-
 /*!
 Functionality needed to work as a DHT node.
 This module works on top of other modules.
 */
+
+pub mod client;
 
 use futures::{Future, Sink, Stream, future, stream};
 use futures::sync::mpsc;
@@ -47,9 +48,13 @@ use toxcore::dht::packed_node::*;
 use toxcore::dht::kbucket::*;
 use toxcore::onion::packet::*;
 use toxcore::onion::onion_announce::*;
+use toxcore::dht::server::client::*;
 
 /// Shorthand for the transmit half of the message channel.
 type Tx = mpsc::UnboundedSender<(DhtPacket, SocketAddr)>;
+
+/// Ping timeout in seconds
+pub const PING_TIMEOUT: u64 = 5;
 
 /**
 Own DHT node data.
@@ -101,34 +106,6 @@ struct ServerState {
     pub kbucket: Kbucket,
 }
 
-/// peer info.
-#[derive(Clone, Debug)]
-struct ClientData {
-    /// last sent ping_id to check PingResponse is correct
-    pub ping_id: u64,
-    /// last received ping-response time
-    pub last_resp_time: Instant
-}
-
-impl ClientData {
-    /// create ClientData object
-    pub fn new() -> ClientData {
-        ClientData {
-            ping_id: 0,
-            last_resp_time: Instant::now(),
-        }
-    }
-    /// set new random ping id to the client and return it
-    pub fn new_ping_id(&mut self) -> u64 {
-        loop {
-            self.ping_id = random_u64();
-            if self.ping_id != 0 {
-                return self.ping_id;
-            }
-        }
-    }
-}
-
 impl Server {
     /**
     Create new `Server` instance.
@@ -163,6 +140,18 @@ impl Server {
             client.last_resp_time.elapsed() <= timeout);
         Box::new(future::ok(()))
     }
+
+    /// remove PING_TIMEOUT timed out ping_ids of PingHash
+    pub fn remove_timedout_ping_ids(&self, timeout: Duration) -> IoFuture<()> {
+        let mut state = self.state.write();
+        state.peers_cache.iter_mut()
+            .map(|(_pk, client)|
+                client.clear_timedout_pings(timeout)
+            ).collect::<Vec<_>>();
+
+        Box::new( future::ok(()) )
+    }
+
     /// send PingRequest to all peers in kbucket
     pub fn send_pings(&self) -> IoFuture<()> {
         let mut state = self.state.write();
@@ -170,7 +159,7 @@ impl Server {
             let client = state.peers_cache.entry(peer.pk).or_insert_with(ClientData::new);
 
             let payload = PingRequestPayload {
-                id: client.new_ping_id(),
+                id: client.insert_new_ping_id(),
             };
             let ping_req = DhtPacket::PingRequest(PingRequest::new(
                 &precompute(&peer.pk, &self.sk),
@@ -184,25 +173,50 @@ impl Server {
 
         Box::new(pings_stream.for_each(|()| Ok(())))
     }
-    /// send NodesRequest to random peer every 20 seconds
-    pub fn send_nodes_req(&self, friend_pk: PublicKey) -> IoFuture<()> {
-        let mut state = self.state.write();
-        if let Some(peer) = state.kbucket.get_random_node() {
-            let client = state.peers_cache.entry(peer.pk).or_insert_with(ClientData::new);
 
-            let payload = NodesRequestPayload {
-                pk: friend_pk,
-                id: client.new_ping_id(),
-            };
-            let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(
-                &precompute(&peer.pk, &self.sk),
-                &self.pk,
-                payload
-            ));
-            self.send_to(peer.saddr, nodes_req)
-        } else {
-            Box::new(future::ok(()))
+    /// Send NodesRequest to random peer every 20 seconds
+    pub fn periodical_nodes_req(&self) -> IoFuture<()> {
+        let peer = match self.get_random_node() {
+            None => {
+                return Box::new( future::ok(()))
+            },
+            Some(peer) => peer,
+        };
+
+        self.send_nodes_req(peer)
+    }
+    
+    // Get random node from kbucket
+    fn get_random_node(&self) -> Option<PackedNode> {
+        let state = self.state.read();
+        state.kbucket.get_random_node()
+    }
+
+    // Send NodesRequest to peer
+    fn send_nodes_req(&self, target_peer: PackedNode) -> IoFuture<()> {
+        // Check if packet is going to be sent to ourself.
+        if self.pk == target_peer.pk {
+            return Box::new(
+                future::err(
+                    Error::new(ErrorKind::Other, "friend's pk is mine")
+                )
+            )
         }
+
+        let mut state = self.state.write();
+        let client = state.peers_cache.entry(target_peer.pk).or_insert_with(ClientData::new);
+
+        let payload = NodesRequestPayload {
+            pk: self.pk,
+            id: client.insert_new_ping_id(),
+        };
+        let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(
+            &precompute(&target_peer.pk, &self.sk),
+            &self.pk,
+            payload
+        ));
+
+        self.send_to(target_peer.saddr, nodes_req)
     }
     /// send NatPingRequests to peers every 3 seconds
     pub fn send_nat_ping_req(&self, peer: PackedNode, friend_pk: PublicKey) -> IoFuture<()> {
@@ -211,7 +225,7 @@ impl Server {
         let client = state.peers_cache.entry(peer.pk).or_insert_with(ClientData::new);
 
         let payload = DhtRequestPayload::NatPingRequest(NatPingRequest {
-            id: client.new_ping_id(),
+            id: client.insert_new_ping_id(),
         });
         let nat_ping_req = DhtPacket::DhtRequest(DhtRequest::new(
             &precompute(&peer.pk, &self.sk),
@@ -380,7 +394,8 @@ impl Server {
             Some(client) => client,
         };
 
-        if client.ping_id == payload.id {
+        let timeout_dur = Duration::from_secs(PING_TIMEOUT);
+        if client.check_ping_id(payload.id, timeout_dur) {
             client.last_resp_time = Instant::now();
             Box::new( future::ok(()) )
         } else {
@@ -436,14 +451,7 @@ impl Server {
             Ok(payload) => payload,
         };
 
-        if payload.id == 0 {
-            return Box::new( future::err(
-                Error::new(ErrorKind::Other,
-                    "NodesResponse.ping_id == 0"
-            )))
-        }
-
-        let client = state.peers_cache.get(&packet.pk);
+        let client = state.peers_cache.get_mut(&packet.pk);
         let client = match client {
             None => {
                 return Box::new( future::err(
@@ -454,7 +462,9 @@ impl Server {
             Some(client) => client,
         };
 
-        if client.ping_id == payload.id {
+        let timeout_dur = Duration::from_secs(PING_TIMEOUT);
+        if client.check_ping_id(payload.id, timeout_dur) {
+            // TODO: replace it with addto_list
             for node in &payload.nodes {
                 // not worried about removing evicted nodes from peers_cache
                 // they will be removed by timeout eventually since we won't
@@ -527,9 +537,9 @@ impl Server {
     handle received NatPingResponse packet, start hole-punching
     */
     fn handle_nat_ping_resp(&self, payload: NatPingResponse, spk: &PublicKey) -> IoFuture<()> {
-        let state = self.state.read();
+        let mut state = self.state.write();
 
-        let client = state.peers_cache.get(spk);
+        let client = state.peers_cache.get_mut(spk);
         let client = match client {
             None => {
                 return Box::new( future::err(
@@ -547,7 +557,8 @@ impl Server {
             )))
         }
 
-        if client.ping_id == payload.id {
+        let timeout_dur = Duration::from_secs(PING_TIMEOUT);
+        if client.check_ping_id(payload.id, timeout_dur) {
             // TODO: start hole-punching
             Box::new( future::ok(()) )
         } else {
@@ -565,20 +576,13 @@ impl Server {
         if packet.pk == self.pk {
             return Box::new(future::ok(()));
         }
-        let mut state = self.state.write();
 
-        let client = state.peers_cache.entry(packet.pk).or_insert_with(ClientData::new);
-
-        let payload = NodesRequestPayload {
+        let target_node = PackedNode {
+            saddr: addr,
             pk: packet.pk,
-            id: client.new_ping_id(),
         };
-        let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(
-            &precompute(&packet.pk, &self.sk),
-            &self.pk,
-            payload
-        ));
-        self.send_to(addr, nodes_req)
+
+        self.send_nodes_req(target_node)
     }
     /**
     send LanDiscovery packet to all broadcast addresses when dht_node runs as ipv4 mode
@@ -870,12 +874,6 @@ mod tests {
         )
     }
 
-    #[test]
-    fn client_data_is_clonable() {
-        let client = ClientData::new();
-        let _ = client.clone();
-    }
-
     fn create_node() -> (Server, PrecomputedKey, PublicKey, SecretKey,
             mpsc::UnboundedReceiver<(DhtPacket, SocketAddr)>, SocketAddr) {
         crypto_init();
@@ -962,11 +960,11 @@ mod tests {
 
         // handle ping response, request from bob peer
         // success case
-        let resp_payload = PingResponsePayload { id: 42 };
+        let mut client = ClientData::new();
+        let ping_id = client.insert_new_ping_id();
+        let resp_payload = PingResponsePayload { id: ping_id };
         let ping_resp = DhtPacket::PingResponse(PingResponse::new(&precomp, &bob_pk, resp_payload));
 
-        let mut client = ClientData::new();
-        client.ping_id = resp_payload.id;
         add_to_peers_cache(&alice, bob_pk, client);
 
         assert!(alice.handle_packet((ping_resp, addr)).wait().is_ok());
@@ -977,11 +975,11 @@ mod tests {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         // wrong PK, decrypt fail
-        let prs = PingResponsePayload { id: 42 };
+        let mut client = ClientData::new();
+        let ping_id = client.insert_new_ping_id();
+        let prs = PingResponsePayload { id: ping_id };
         let ping_resp = DhtPacket::PingResponse(PingResponse::new(&precomp, &alice.pk, prs));
 
-        let mut client = ClientData::new();
-        client.ping_id = prs.id;
         add_to_peers_cache(&alice, bob_pk, client);
 
         assert!(alice.handle_packet((ping_resp, addr)).wait().is_err());
@@ -1006,11 +1004,11 @@ mod tests {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         // incorrect ping_id, fail
-        let prs = PingResponsePayload { id: 42 };
+        let mut client = ClientData::new();
+        let ping_id = client.insert_new_ping_id();
+        let prs = PingResponsePayload { id: ping_id + 1 };
         let ping_resp = DhtPacket::PingResponse(PingResponse::new(&precomp, &bob_pk, prs));
 
-        let mut client = ClientData::new();
-        client.ping_id = prs.id + 1;
         add_to_peers_cache(&alice, bob_pk, client);
 
         assert!(alice.handle_packet((ping_resp, addr)).wait().is_err());
@@ -1059,14 +1057,14 @@ mod tests {
     fn server_handle_nodes_resp_test() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
+        let node = vec![PackedNode::new(false, addr, &bob_pk)];
+
         // handle nodes response, request from bob peer
-        let resp_payload = NodesResponsePayload { nodes: vec![
-            PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &gen_keypair().0)
-        ], id: 38 };
+        let mut client = ClientData::new();
+        let ping_id = client.insert_new_ping_id();
+        let resp_payload = NodesResponsePayload { nodes: node, id: ping_id };
         let nodes_resp = DhtPacket::NodesResponse(NodesResponse::new(&precomp, &bob_pk, resp_payload.clone()));
 
-        let mut client = ClientData::new();
-        client.ping_id = 38;
         add_to_peers_cache(&alice, bob_pk, client);
 
         assert!(alice.handle_packet((nodes_resp, addr)).wait().is_ok());
@@ -1115,13 +1113,13 @@ mod tests {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         // incorrect ping_id
+        let mut client = ClientData::new();
+        let ping_id = client.insert_new_ping_id();
         let resp_payload = NodesResponsePayload { nodes: vec![
             PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &gen_keypair().0)
-        ], id: 38 };
+        ], id: ping_id + 1 };
         let nodes_resp = DhtPacket::NodesResponse(NodesResponse::new(&precomp, &bob_pk, resp_payload));
 
-        let mut client = ClientData::new();
-        client.ping_id = 39;
         add_to_peers_cache(&alice, bob_pk, client);
 
         assert!(alice.handle_packet((nodes_resp, addr)).wait().is_err());
@@ -1204,12 +1202,12 @@ mod tests {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         // success case
-        let nat_res = NatPingResponse { id: 42 };
+        let mut client = ClientData::new();
+        let ping_id = client.insert_new_ping_id();
+        let nat_res = NatPingResponse { id: ping_id };
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
         let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, nat_payload));
 
-        let mut client = ClientData::new();
-        client.ping_id = nat_res.id;
         add_to_peers_cache(&alice, bob_pk, client);
 
         assert!(alice.handle_packet((dht_req, addr)).wait().is_ok());
@@ -1235,12 +1233,12 @@ mod tests {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         // error case, incorrect ping_id
-        let nat_res = NatPingResponse { id: 42 };
+        let mut client = ClientData::new();
+        let ping_id = client.insert_new_ping_id();
+        let nat_res = NatPingResponse { id: ping_id + 1 };
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
         let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, nat_payload));
 
-        let mut client = ClientData::new();
-        client.ping_id = nat_res.id + 1;
         add_to_peers_cache(&alice, bob_pk, client);
 
         assert!(alice.handle_packet((dht_req, addr)).wait().is_err());
@@ -1872,44 +1870,40 @@ mod tests {
 
         alice.send_pings().wait().unwrap();
 
-        let state = alice.state.read();
+        let mut state = alice.state.write();
         rx.take(2).map(|received| {
             let (packet, addr) = received;
             let mut buf = [0; 512];
             let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
             let (_, ping_req) = PingRequest::from_bytes(&buf[..size]).unwrap();
             if addr == SocketAddr::V4("127.0.0.1:33445".parse().unwrap()) {
-                let client = &state.peers_cache[&bob_pk];
+                let client = state.peers_cache.get_mut(&bob_pk).unwrap();
                 let ping_req_payload = ping_req.get_payload(&bob_sk).unwrap();
-                assert_eq!(ping_req_payload.id, client.ping_id);
+                let dur = Duration::from_secs(PING_TIMEOUT);
+                assert!(client.check_ping_id(ping_req_payload.id, dur));
             } else {
-                let client = &state.peers_cache[&ping_pk];
+                let client = state.peers_cache.get_mut(&ping_pk).unwrap();
                 let ping_req_payload = ping_req.get_payload(&ping_sk).unwrap();
-                assert_eq!(ping_req_payload.id, client.ping_id);
+                let dur = Duration::from_secs(PING_TIMEOUT);
+                assert!(client.check_ping_id(ping_req_payload.id, dur));
             }
         }).collect().wait().unwrap();
     }
 
-    // send_nodes_req()
+    // periodical_nodes_req()
     #[test]
-    fn server_send_nodes_req_test() {
-        let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
+    fn server_periodical_nodes_req_test() {
+        let (alice, _precomp, bob_pk, bob_sk, rx, addr) = create_node();
 
         // If there is no entry in kbucket, then it returns just ok()
-        let alice_pk = alice.pk;
-        assert!(alice.send_nodes_req(alice_pk).wait().is_ok());
+        assert!(alice.periodical_nodes_req().wait().is_ok());
 
         // Now, test with kbucket entry
-        let addr = SocketAddr::V4("127.0.0.1:12345".parse().unwrap());
         let node = PackedNode::new(false, addr, &bob_pk);
 
-        let alice_pk = alice.pk;
         alice.try_add_to_kbucket(&node);
 
-        alice.send_nodes_req(alice_pk).wait().unwrap();
-
-        let state = alice.state.read();
-        let client = &state.peers_cache[&bob_pk];
+        alice.periodical_nodes_req().wait().unwrap();
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -1919,7 +1913,7 @@ mod tests {
         let nodes_req = unpack!(packet, DhtPacket::NodesRequest);
         let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
 
-        assert_eq!(nodes_req_payload.id, client.ping_id);
+        assert_eq!(nodes_req_payload.pk, alice.pk);
     }
 
     // send_nat_ping_req()
@@ -1933,8 +1927,8 @@ mod tests {
 
         assert!(alice.send_nat_ping_req(node, bob_pk).wait().is_ok());
 
-        let state = alice.state.read();
-        let client = &state.peers_cache[&alice.pk];
+        let mut state = alice.state.write();
+        let client = state.peers_cache.get_mut(&alice.pk).unwrap();
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -1945,7 +1939,8 @@ mod tests {
         let nat_ping_req_payload = nat_ping_req.get_payload(&alice.sk).unwrap();
         let nat_ping_req_payload = unpack!(nat_ping_req_payload, DhtRequestPayload::NatPingRequest);
 
-        assert_eq!(nat_ping_req_payload.id, client.ping_id);
+        let dur = Duration::from_secs(PING_TIMEOUT);
+        assert!(client.check_ping_id(nat_ping_req_payload.id, dur));
     }
 
     #[test]
