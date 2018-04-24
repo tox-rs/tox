@@ -325,8 +325,8 @@ impl Server {
     }
     fn handle_onion_request(&self, pk: &PublicKey, packet: OnionRequest) -> IoFuture<()> {
         if let Some(ref onion_sink) = self.onion_sink {
-            if packet.data.len() <= ONION_SEND_BASE_SIZE * 2 ||
-                packet.data.len() > ONION_MAX_PACKET_SIZE - (1 + NONCEBYTES + ONION_RETURN_1_SIZE) {
+            if packet.payload.len() <= ONION_SEND_BASE_SIZE * 2 - PUBLICKEYBYTES ||
+                packet.payload.len() > ONION_MAX_PACKET_SIZE - (1 + NONCEBYTES + PUBLICKEYBYTES + ONION_RETURN_1_SIZE) {
                 return Box::new( future::err(
                     Error::new(ErrorKind::Other,
                         "OnionRequest wrong data length"
@@ -749,7 +749,8 @@ mod tests {
             nonce: gen_nonce(),
             addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
             port: 12345,
-            data: [13; 170].to_vec()
+            temporary_pk: gen_keypair().0,
+            payload: vec![13; 170]
         };
         let handle_res = server
             .handle_packet(&client_pk_1, Packet::OnionRequest(request.clone()))
@@ -1007,7 +1008,8 @@ mod tests {
             nonce: gen_nonce(),
             addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
             port: 12345,
-            data: [13; 100].to_vec()
+            temporary_pk: gen_keypair().0,
+            payload: vec![13; 100]
         };
         let handle_res = server
             .handle_packet(&client_pk_1, Packet::OnionRequest(request.clone()))
@@ -1027,7 +1029,8 @@ mod tests {
             nonce: gen_nonce(),
             addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
             port: 12345,
-            data: [13; 1500].to_vec()
+            temporary_pk: gen_keypair().0,
+            payload: vec![13; 1500]
         };
         let handle_res = server
             .handle_packet(&client_pk_1, Packet::OnionRequest(request.clone()))
@@ -1046,7 +1049,8 @@ mod tests {
             nonce: gen_nonce(),
             addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
             port: 12345,
-            data: [13; 1500].to_vec()
+            temporary_pk: gen_keypair().0,
+            payload: vec![13; 1500]
         };
         let handle_res = server
             .handle_packet(&client_pk_1, Packet::OnionRequest(request.clone()))
@@ -1276,7 +1280,8 @@ mod tests {
             nonce: gen_nonce(),
             addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
             port: 12345,
-            data: [13; 170].to_vec()
+            temporary_pk: gen_keypair().0,
+            payload: vec![13; 170]
         };
         let handle_res = server
             .handle_packet(&client_pk_1, Packet::OnionRequest(request))
