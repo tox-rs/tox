@@ -749,8 +749,11 @@ mod tests {
 
         let request = OnionRequest {
             nonce: gen_nonce(),
-            addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-            port: 12345,
+            ip_port: IpPort {
+                protocol: ProtocolType::TCP,
+                ip_addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                port: 12345,
+            },
             temporary_pk: gen_keypair().0,
             payload: vec![13; 170]
         };
@@ -1012,13 +1015,16 @@ mod tests {
 
         let request = OnionRequest {
             nonce: gen_nonce(),
-            addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-            port: 12345,
+            ip_port: IpPort {
+                protocol: ProtocolType::TCP,
+                ip_addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                port: 12345,
+            },
             temporary_pk: gen_keypair().0,
             payload: vec![13; 100]
         };
         let handle_res = server
-            .handle_packet(&client_pk_1, Packet::OnionRequest(request.clone()))
+            .handle_packet(&client_pk_1, Packet::OnionRequest(request))
             .wait();
         assert!(handle_res.is_err());
     }
@@ -1033,13 +1039,16 @@ mod tests {
 
         let request = OnionRequest {
             nonce: gen_nonce(),
-            addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-            port: 12345,
+            ip_port: IpPort {
+                protocol: ProtocolType::TCP,
+                ip_addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                port: 12345,
+            },
             temporary_pk: gen_keypair().0,
             payload: vec![13; 1500]
         };
         let handle_res = server
-            .handle_packet(&client_pk_1, Packet::OnionRequest(request.clone()))
+            .handle_packet(&client_pk_1, Packet::OnionRequest(request))
             .wait();
         assert!(handle_res.is_err());
     }
@@ -1053,13 +1062,16 @@ mod tests {
 
         let request = OnionRequest {
             nonce: gen_nonce(),
-            addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-            port: 12345,
+            ip_port: IpPort {
+                protocol: ProtocolType::TCP,
+                ip_addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                port: 12345,
+            },
             temporary_pk: gen_keypair().0,
             payload: vec![13; 1500]
         };
         let handle_res = server
-            .handle_packet(&client_pk_1, Packet::OnionRequest(request.clone()))
+            .handle_packet(&client_pk_1, Packet::OnionRequest(request))
             .wait();
         assert!(handle_res.is_ok());
     }
@@ -1293,8 +1305,11 @@ mod tests {
         // emulate send OnionRequest from client_1
         let request = OnionRequest {
             nonce: gen_nonce(),
-            addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-            port: 12345,
+            ip_port: IpPort {
+                protocol: ProtocolType::TCP,
+                ip_addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                port: 12345,
+            },
             temporary_pk: gen_keypair().0,
             payload: vec![13; 170]
         };
