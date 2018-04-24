@@ -161,7 +161,7 @@ pub struct OnionRequest1Payload {
 
 impl FromBytes for OnionRequest1Payload {
     named!(from_bytes<OnionRequest1Payload>, do_parse!(
-        ip_port: call!(IpPort::from_bytes) >>
+        ip_port: call!(IpPort::from_udp_bytes) >>
         temporary_pk: call!(PublicKey::from_bytes) >>
         inner: rest >>
         (OnionRequest1Payload {
@@ -175,7 +175,7 @@ impl FromBytes for OnionRequest1Payload {
 impl ToBytes for OnionRequest1Payload {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
-            gen_call!(|buf, ip_port| IpPort::to_bytes(ip_port, buf), &self.ip_port) >>
+            gen_call!(|buf, ip_port| IpPort::to_udp_bytes(ip_port, buf), &self.ip_port) >>
             gen_slice!(self.temporary_pk.as_ref()) >>
             gen_slice!(self.inner)
         )
@@ -205,6 +205,7 @@ mod tests {
         onion_request_1_payload_encode_decode,
         OnionRequest1Payload {
             ip_port: IpPort {
+                protocol: ProtocolType::UDP,
                 ip_addr: "5.6.7.8".parse().unwrap(),
                 port: 12345
             },
@@ -220,6 +221,7 @@ mod tests {
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
         let payload = OnionRequest1Payload {
             ip_port: IpPort {
+                protocol: ProtocolType::UDP,
                 ip_addr: "5.6.7.8".parse().unwrap(),
                 port: 12345
             },
@@ -246,6 +248,7 @@ mod tests {
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
         let payload = OnionRequest1Payload {
             ip_port: IpPort {
+                protocol: ProtocolType::UDP,
                 ip_addr: "5.6.7.8".parse().unwrap(),
                 port: 12345
             },
