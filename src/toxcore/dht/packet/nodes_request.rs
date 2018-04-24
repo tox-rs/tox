@@ -168,7 +168,7 @@ impl FromBytes for NodesRequestPayload {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use toxcore::dht::packet::nodes_request::*;
     use toxcore::dht::packet::DhtPacket;
 
     encode_decode_test!(

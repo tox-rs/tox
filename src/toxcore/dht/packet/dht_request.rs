@@ -213,6 +213,7 @@ Length    | Content
 `8`       | Request Id (Ping Id)
 
 */
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct NatPingResponse {
     /// Ping id same as requested from PingRequest
@@ -238,21 +239,9 @@ impl ToBytes for NatPingResponse {
     }
 }
 
-impl NatPingRequest {
-    /// Create new ping request with a randomly generated `request id`.
-    pub fn new() -> Self {
-        trace!("Creating new Ping.");
-        NatPingRequest { id: random_u64() }
-    }
-    /// An ID of the request / response.
-    pub fn id(&self) -> u64 {
-        self.id
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use toxcore::dht::packet::dht_request::*;
 
     #[test]
     fn dht_request_payload_check() {

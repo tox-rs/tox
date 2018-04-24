@@ -176,7 +176,7 @@ impl FromBytes for CookieRequestPayload {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use toxcore::dht::packet::cookie_request::*;
 
     dht_packet_encrypt_decrypt!(
         cookie_request_payload_encrypt_decrypt,

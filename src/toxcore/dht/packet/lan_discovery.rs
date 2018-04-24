@@ -68,7 +68,7 @@ impl FromBytes for LanDiscovery {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use toxcore::dht::packet::lan_discovery::*;
 
     encode_decode_test!(
         lan_discovery_encode_decode,

@@ -85,7 +85,7 @@ impl FromBytes for BootstrapInfo {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use toxcore::dht::packet::bootstrap_info::*;
 
     encode_decode_test!(
         bootstrap_info_encode_decode,

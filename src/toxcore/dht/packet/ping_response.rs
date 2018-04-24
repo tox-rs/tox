@@ -174,16 +174,9 @@ impl ToBytes for PingResponsePayload {
     }
 }
 
-impl PingResponsePayload {
-    /// An ID of the request / response.
-    pub fn id(&self) -> u64 {
-        self.id
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use toxcore::dht::packet::ping_response::*;
     use toxcore::dht::packet::DhtPacket;
 
     encode_decode_test!(
