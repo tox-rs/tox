@@ -49,6 +49,7 @@ use toxcore::onion::packet::*;
 use toxcore::onion::onion_announce::*;
 use toxcore::dht::server::client::*;
 use toxcore::io_tokio::IoFuture;
+use toxcore::tcp::packet::OnionRequest;
 
 /// Shorthand for the transmit half of the message channel.
 type Tx = mpsc::UnboundedSender<(DhtPacket, SocketAddr)>;
@@ -850,6 +851,24 @@ impl Server {
     pub fn try_add_to_kbucket(&self, pn: &PackedNode) -> bool {
         let mut state = self.state.write();
         state.kbucket.try_add(pn)
+    }
+    /// handle OnionRequest from TCP relay and send OnionRequest1 packet
+    /// to the next node in the onion path
+    pub fn handle_tcp_onion_request(&self, packet: OnionRequest, addr: SocketAddr) -> IoFuture<()> {
+        let onion_symmetric_key = self.onion_symmetric_key.read();
+
+        let onion_return = OnionReturn::new(
+            &onion_symmetric_key,
+            &IpPort::from_tcp_saddr(addr),
+            None // no previous onion return
+        );
+        let next_packet = DhtPacket::OnionRequest1(OnionRequest1 {
+            nonce: packet.nonce,
+            temporary_pk: packet.temporary_pk,
+            payload: packet.payload,
+            onion_return
+        });
+        self.send_to(packet.ip_port.to_saddr(), next_packet)
     }
 }
 
@@ -2090,5 +2109,41 @@ mod tests {
         alice.refresh_onion_key();
 
         assert!(*alice.onion_symmetric_key.read() != onion_symmetric_key)
+    }
+
+    #[test]
+    fn server_handle_tcp_onion_request_test() {
+        let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
+
+        let temporary_pk = gen_keypair().0;
+        let payload = vec![42; 123];
+        let ip_port = IpPort {
+            protocol: ProtocolType::UDP,
+            ip_addr: "5.6.7.8".parse().unwrap(),
+            port: 12345
+        };
+        let packet = OnionRequest {
+            nonce: gen_nonce(),
+            ip_port: ip_port.clone(),
+            temporary_pk,
+            payload: payload.clone()
+        };
+
+        assert!(alice.handle_tcp_onion_request(packet, addr).wait().is_ok());
+
+        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (packet, addr_to_send) = received.unwrap();
+
+        assert_eq!(addr_to_send, ip_port.to_saddr());
+
+        let next_packet = unpack!(packet, DhtPacket::OnionRequest1);
+
+        assert_eq!(next_packet.temporary_pk, temporary_pk);
+        assert_eq!(next_packet.payload, payload);
+
+        let onion_symmetric_key = alice.onion_symmetric_key.read();
+        let onion_return_payload = next_packet.onion_return.get_payload(&onion_symmetric_key).unwrap();
+
+        assert_eq!(onion_return_payload.0, IpPort::from_tcp_saddr(addr));      
     }
 }
