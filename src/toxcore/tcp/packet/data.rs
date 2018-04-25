@@ -71,7 +71,7 @@ mod test {
         data_encode_decode,
         Data {
             connection_id: 17,
-            data: vec![42, 123]
+            data: vec![42; 123]
         }
     );
 }

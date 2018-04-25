@@ -132,12 +132,12 @@ mod tests {
             DhtPacket::OnionRequest0(OnionRequest0 {
                 nonce: gen_nonce(),
                 temporary_pk: gen_keypair().0,
-                payload: vec![42, 123]
+                payload: vec![42; 123]
             }),
             DhtPacket::OnionRequest1(OnionRequest1 {
                 nonce: gen_nonce(),
                 temporary_pk: gen_keypair().0,
-                payload: vec![42, 123],
+                payload: vec![42; 123],
                 onion_return: OnionReturn {
                     nonce: gen_nonce(),
                     payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
@@ -146,7 +146,7 @@ mod tests {
             DhtPacket::OnionRequest2(OnionRequest2 {
                 nonce: gen_nonce(),
                 temporary_pk: gen_keypair().0,
-                payload: vec![42, 123],
+                payload: vec![42; 123],
                 onion_return: OnionReturn {
                     nonce: gen_nonce(),
                     payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
@@ -156,7 +156,7 @@ mod tests {
                 inner: InnerAnnounceRequest {
                     nonce: gen_nonce(),
                     pk: gen_keypair().0,
-                    payload: vec![42, 123]
+                    payload: vec![42; 123]
                 },
                 onion_return: OnionReturn {
                     nonce: gen_nonce(),
@@ -168,7 +168,7 @@ mod tests {
                     destination_pk: gen_keypair().0,
                     nonce: gen_nonce(),
                     temporary_pk: gen_keypair().0,
-                    payload: vec![42, 123]
+                    payload: vec![42; 123]
                 },
                 onion_return: OnionReturn {
                     nonce: gen_nonce(),
@@ -178,12 +178,12 @@ mod tests {
             DhtPacket::OnionDataResponse(OnionDataResponse {
                 nonce: gen_nonce(),
                 temporary_pk: gen_keypair().0,
-                payload: vec![42, 123]
+                payload: vec![42; 123]
             }),
             DhtPacket::AnnounceResponse(AnnounceResponse {
                 sendback_data: 12345,
                 nonce: gen_nonce(),
-                payload: vec![42, 123]
+                payload: vec![42; 123]
             }),
             DhtPacket::OnionResponse3(OnionResponse3 {
                 onion_return: OnionReturn {
@@ -193,7 +193,7 @@ mod tests {
                 payload: InnerOnionResponse::AnnounceResponse(AnnounceResponse {
                     sendback_data: 12345,
                     nonce: gen_nonce(),
-                    payload: vec![42, 123]
+                    payload: vec![42; 123]
                 })
             }),
             DhtPacket::OnionResponse2(OnionResponse2 {
@@ -204,7 +204,7 @@ mod tests {
                 payload: InnerOnionResponse::AnnounceResponse(AnnounceResponse {
                     sendback_data: 12345,
                     nonce: gen_nonce(),
-                    payload: vec![42, 123]
+                    payload: vec![42; 123]
                 })
             }),
             DhtPacket::OnionResponse1(OnionResponse1 {
@@ -215,7 +215,7 @@ mod tests {
                 payload: InnerOnionResponse::AnnounceResponse(AnnounceResponse {
                     sendback_data: 12345,
                     nonce: gen_nonce(),
-                    payload: vec![42, 123]
+                    payload: vec![42; 123]
                 })
             }),
             DhtPacket::BootstrapInfo(BootstrapInfo {

@@ -23,9 +23,22 @@
 
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
-use toxcore::onion::packet::IpPort;
+use toxcore::onion::packet::{
+    IpPort,
+    ONION_MAX_PACKET_SIZE,
+    ONION_RETURN_1_SIZE,
+    SIZE_IPPORT
+};
 
 use nom::rest;
+
+/// Encrypted payload should contain `IpPort`, `PublicKey` and inner encrypted
+/// payload that should contain at least `IpPort` struct.
+const ONION_MIN_PAYLOAD_SIZE: usize = (SIZE_IPPORT + MACBYTES) * 2 + PUBLICKEYBYTES;
+
+/// `OnionRequest1` packet with encrypted payload from `OnionRequest` packet
+/// shouldn't be bigger than `ONION_MAX_PACKET_SIZE`.
+const ONION_MAX_PAYLOAD_SIZE: usize = ONION_MAX_PACKET_SIZE - (1 + NONCEBYTES + PUBLICKEYBYTES + ONION_RETURN_1_SIZE);
 
 /** Sent by client to server.
 The server will pack payload from this request to `OnionRequest1` packet and send
@@ -67,7 +80,10 @@ impl FromBytes for OnionRequest {
         nonce: call!(Nonce::from_bytes) >>
         ip_port: call!(IpPort::from_bytes) >>
         temporary_pk: call!(PublicKey::from_bytes) >>
-        payload: rest >>
+        payload: verify!(
+            rest,
+            |payload: &[u8]| payload.len() >= ONION_MIN_PAYLOAD_SIZE && payload.len() <= ONION_MAX_PAYLOAD_SIZE
+        ) >>
         (OnionRequest { nonce, ip_port, temporary_pk, payload: payload.to_vec() })
     ));
 }
@@ -75,6 +91,10 @@ impl FromBytes for OnionRequest {
 impl ToBytes for OnionRequest {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
+            gen_cond!(
+                self.payload.len() < ONION_MIN_PAYLOAD_SIZE || self.payload.len() > ONION_MAX_PAYLOAD_SIZE,
+                |buf| gen_error(buf, 0)
+            ) >>
             gen_be_u8!(0x08) >>
             gen_slice!(self.nonce.as_ref()) >>
             gen_call!(|buf, ip_port| IpPort::to_bytes(ip_port, buf), &self.ip_port) >>
@@ -100,7 +120,7 @@ mod test {
                 port: 12345,
             },
             temporary_pk: gen_keypair().0,
-            payload: vec![42; 123]
+            payload: vec![42; ONION_MIN_PAYLOAD_SIZE]
         }
     );
 }

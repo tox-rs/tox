@@ -187,14 +187,14 @@ mod tests {
                 payload: InnerOnionResponse::AnnounceResponse(AnnounceResponse {
                     sendback_data: 12345,
                     nonce: gen_nonce(),
-                    payload: vec![42, 123]
+                    payload: vec![42; 123]
                 })
             } ),
             Packet::OnionResponse( OnionResponse {
                 payload: InnerOnionResponse::OnionDataResponse(OnionDataResponse {
                     nonce: gen_nonce(),
                     temporary_pk: gen_keypair().0,
-                    payload: vec![42, 123]
+                    payload: vec![42; 123]
                 })
             } ),
             Packet::Data( Data { connection_id: 42, data: vec![13; 2031] } )

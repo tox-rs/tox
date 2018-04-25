@@ -189,7 +189,7 @@ mod tests {
         OnionRequest2 {
             nonce: gen_nonce(),
             temporary_pk: gen_keypair().0,
-            payload: vec![42, 123],
+            payload: vec![42; 123],
             onion_return: OnionReturn {
                 nonce: gen_nonce(),
                 payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
@@ -209,7 +209,7 @@ mod tests {
                 destination_pk: gen_keypair().0,
                 nonce: gen_nonce(),
                 temporary_pk: gen_keypair().0,
-                payload: vec![42, 123]
+                payload: vec![42; 123]
             })
         }
     );
@@ -229,7 +229,7 @@ mod tests {
                 destination_pk: gen_keypair().0,
                 nonce: gen_nonce(),
                 temporary_pk: gen_keypair().0,
-                payload: vec![42, 123]
+                payload: vec![42; 123]
             })
         };
         let onion_return = OnionReturn {
@@ -260,7 +260,7 @@ mod tests {
                 destination_pk: gen_keypair().0,
                 nonce: gen_nonce(),
                 temporary_pk: gen_keypair().0,
-                payload: vec![42, 123]
+                payload: vec![42; 123]
             })
         };
         let onion_return = OnionReturn {

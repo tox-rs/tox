@@ -64,7 +64,7 @@ mod tests {
         InnerOnionRequest::InnerAnnounceRequest(InnerAnnounceRequest {
             nonce: gen_nonce(),
             pk: gen_keypair().0,
-            payload: vec![42, 123]
+            payload: vec![42; 123]
         })
     );
 
@@ -74,7 +74,7 @@ mod tests {
             destination_pk: gen_keypair().0,
             nonce: gen_nonce(),
             temporary_pk: gen_keypair().0,
-            payload: vec![42, 123]
+            payload: vec![42; 123]
         })
     );
 }

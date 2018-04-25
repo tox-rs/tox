@@ -162,7 +162,7 @@ mod test {
     encode_decode_test!(
         encrypted_packet_encode_decode,
         EncryptedPacket {
-            payload: vec![42, 123]
+            payload: vec![42; 123]
         }
     );
 }

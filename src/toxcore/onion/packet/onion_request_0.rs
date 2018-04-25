@@ -29,6 +29,10 @@ use toxcore::crypto_core::*;
 use nom::rest;
 use std::io::{Error, ErrorKind};
 
+/// Encrypted payload should contain `IpPort`, `PublicKey` and inner encrypted
+/// payload that should contain at least `IpPort` struct.
+const ONION_REQUEST_0_MIN_PAYLOAD_SIZE: usize = (SIZE_IPPORT + MACBYTES) * 2 + PUBLICKEYBYTES;
+
 /** First onion request packet. It's sent from DHT node to the first node from
 onion chain. Payload can be encrypted with either temporary generated
 `SecretKey` or DHT `SecretKey` of sender and with DHT `PublicKey` of receiver.
@@ -61,7 +65,7 @@ impl FromBytes for OnionRequest0 {
         tag!(&[0x80][..]) >>
         nonce: call!(Nonce::from_bytes) >>
         temporary_pk: call!(PublicKey::from_bytes) >>
-        payload: rest >>
+        payload: verify!(rest, |payload: &[u8]| payload.len() >= ONION_REQUEST_0_MIN_PAYLOAD_SIZE) >>
         (OnionRequest0 {
             nonce,
             temporary_pk,
@@ -73,6 +77,10 @@ impl FromBytes for OnionRequest0 {
 impl ToBytes for OnionRequest0 {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
+            gen_cond!(
+                self.payload.len() < ONION_REQUEST_0_MIN_PAYLOAD_SIZE,
+                |buf| gen_error(buf, 0)
+            ) >>
             gen_be_u8!(0x80) >>
             gen_slice!(self.nonce.as_ref()) >>
             gen_slice!(self.temporary_pk.as_ref()) >>
@@ -181,7 +189,7 @@ mod tests {
         OnionRequest0 {
             nonce: gen_nonce(),
             temporary_pk: gen_keypair().0,
-            payload: vec![42, 123]
+            payload: vec![42; ONION_REQUEST_0_MIN_PAYLOAD_SIZE]
         }
     );
 
@@ -194,7 +202,7 @@ mod tests {
                 port: 12345
             },
             temporary_pk: gen_keypair().0,
-            inner: vec![42, 123]
+            inner: vec![42; ONION_REQUEST_0_MIN_PAYLOAD_SIZE]
         }
     );
 
@@ -210,7 +218,7 @@ mod tests {
                 port: 12345
             },
             temporary_pk: gen_keypair().0,
-            inner: vec![42, 123]
+            inner: vec![42; ONION_REQUEST_0_MIN_PAYLOAD_SIZE]
         };
         // encode payload with shared secret
         let onion_packet = OnionRequest0::new(&shared_secret, &alice_pk, payload.clone());
@@ -233,7 +241,7 @@ mod tests {
                 port: 12345
             },
             temporary_pk: gen_keypair().0,
-            inner: vec![42, 123]
+            inner: vec![42; ONION_REQUEST_0_MIN_PAYLOAD_SIZE]
         };
         // encode payload with shared secret
         let onion_packet = OnionRequest0::new(&shared_secret, &alice_pk, payload.clone());

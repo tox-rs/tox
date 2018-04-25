@@ -84,7 +84,7 @@ mod test {
         oob_send_encode_decode,
         OobSend {
             destination_pk: gen_keypair().0,
-            data: vec![42, 123]
+            data: vec![42; 123]
         }
     );
 }

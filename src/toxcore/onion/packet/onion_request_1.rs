@@ -29,6 +29,9 @@ use toxcore::crypto_core::*;
 use nom::rest;
 use std::io::{Error, ErrorKind};
 
+/// Encrypted payload should contain at least `IpPort` struct.
+const ONION_REQUEST_1_MIN_PAYLOAD_SIZE: usize = SIZE_IPPORT + MACBYTES;
+
 /** Second onion request packet. It's sent from the first to the second node from
 onion chain. Payload should be encrypted with temporary generated `SecretKey` and
 with DHT `PublicKey` of receiver.
@@ -66,7 +69,7 @@ impl FromBytes for OnionRequest1 {
         temporary_pk: call!(PublicKey::from_bytes) >>
         rest_len: rest_len >>
         payload: cond_reduce!(
-            rest_len >= ONION_RETURN_1_SIZE,
+            rest_len >= ONION_REQUEST_1_MIN_PAYLOAD_SIZE + ONION_RETURN_1_SIZE,
             take!(rest_len - ONION_RETURN_1_SIZE)
         ) >>
         onion_return: call!(OnionReturn::from_bytes) >>
@@ -82,6 +85,10 @@ impl FromBytes for OnionRequest1 {
 impl ToBytes for OnionRequest1 {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
+            gen_cond!(
+                self.payload.len() < ONION_REQUEST_1_MIN_PAYLOAD_SIZE,
+                |buf| gen_error(buf, 0)
+            ) >>
             gen_be_u8!(0x81) >>
             gen_slice!(self.nonce.as_ref()) >>
             gen_slice!(self.temporary_pk.as_ref()) >>
@@ -193,7 +200,7 @@ mod tests {
         OnionRequest1 {
             nonce: gen_nonce(),
             temporary_pk: gen_keypair().0,
-            payload: vec![42, 123],
+            payload: vec![42; ONION_REQUEST_1_MIN_PAYLOAD_SIZE],
             onion_return: OnionReturn {
                 nonce: gen_nonce(),
                 payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
@@ -210,7 +217,7 @@ mod tests {
                 port: 12345
             },
             temporary_pk: gen_keypair().0,
-            inner: vec![42, 123]
+            inner: vec![42; ONION_REQUEST_1_MIN_PAYLOAD_SIZE]
         }
     );
 
@@ -226,7 +233,7 @@ mod tests {
                 port: 12345
             },
             temporary_pk: gen_keypair().0,
-            inner: vec![42, 123]
+            inner: vec![42; ONION_REQUEST_1_MIN_PAYLOAD_SIZE]
         };
         let onion_return = OnionReturn {
             nonce: gen_nonce(),
@@ -253,7 +260,7 @@ mod tests {
                 port: 12345
             },
             temporary_pk: gen_keypair().0,
-            inner: vec![42, 123]
+            inner: vec![42; ONION_REQUEST_1_MIN_PAYLOAD_SIZE]
         };
         let onion_return = OnionReturn {
             nonce: gen_nonce(),
@@ -273,7 +280,7 @@ mod tests {
         let nonce = gen_nonce();
         let temporary_pk = gen_keypair().0;
         // Try long invalid array
-        let invalid_payload = [42; 123];
+        let invalid_payload = [42; ONION_REQUEST_1_MIN_PAYLOAD_SIZE];
         let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
         let invalid_onion_request_1 = OnionRequest1 {
             nonce,

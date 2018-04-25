@@ -237,7 +237,7 @@ mod tests {
         InnerAnnounceRequest {
             nonce: gen_nonce(),
             pk: gen_keypair().0,
-            payload: vec![42, 123]
+            payload: vec![42; 123]
         }
     );
 
@@ -247,7 +247,7 @@ mod tests {
             inner: InnerAnnounceRequest {
                 nonce: gen_nonce(),
                 pk: gen_keypair().0,
-                payload: vec![42, 123]
+                payload: vec![42; 123]
             },
             onion_return: OnionReturn {
                 nonce: gen_nonce(),
