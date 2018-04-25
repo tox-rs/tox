@@ -32,7 +32,7 @@ use toxcore::tcp::packet::*;
 
 use std::io::{Error, ErrorKind};
 use std::collections::HashMap;
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
 use futures::{Sink, Stream, Future, future, stream};
@@ -56,7 +56,7 @@ to clients via network.
 pub struct Server {
     state: Arc<RwLock<ServerState>>,
     // None if the server is not responsible to handle OnionRequests
-    onion_sink: Option<mpsc::UnboundedSender<OnionRequest>>,
+    onion_sink: Option<mpsc::UnboundedSender<(OnionRequest, SocketAddr)>>,
 }
 
 #[derive(Default)]
@@ -74,7 +74,7 @@ impl Server {
     }
     /** Create a new `Server` with onion
     */
-    pub fn new_with_onion(onion_sink: mpsc::UnboundedSender<OnionRequest>) -> Server {
+    pub fn new_with_onion(onion_sink: mpsc::UnboundedSender<(OnionRequest, SocketAddr)>) -> Server {
         Server {
             state: Default::default(),
             onion_sink: Some(onion_sink),
@@ -297,7 +297,7 @@ impl Server {
                 ))
             }
         } else {
-            return Box::new( future::err(
+            Box::new( future::err(
                 Error::new(ErrorKind::Other,
                     "PongResponse: no such PK"
             )) )
@@ -324,7 +324,7 @@ impl Server {
                 "Client must not send OobReceive to server"
         )))
     }
-    fn handle_onion_request(&self, _pk: &PublicKey, packet: OnionRequest) -> IoFuture<()> {
+    fn handle_onion_request(&self, pk: &PublicKey, packet: OnionRequest) -> IoFuture<()> {
         if let Some(ref onion_sink) = self.onion_sink {
             if packet.data.len() <= ONION_SEND_BASE_SIZE * 2 ||
                 packet.data.len() > ONION_MAX_PACKET_SIZE - (1 + NONCEBYTES + ONION_RETURN_1_SIZE) {
@@ -333,15 +333,25 @@ impl Server {
                         "OnionRequest wrong data length"
                 )))
             }
-            Box::new(onion_sink.clone() // clone sink for 1 send only
-                .send(packet)
-                .map(|_sink| ()) // ignore sink because it was cloned
-                .map_err(|_| {
-                    // This may only happen if sink is gone
-                    // So cast SendError<T> to a corresponding std::io::Error
-                    Error::from(ErrorKind::UnexpectedEof)
-                })
-            )
+
+            let mut state = self.state.read();
+            if let Some(client) = state.connected_clients.get(&pk) {
+                let saddr = SocketAddr::new(client.ip_addr(), client.port());
+                Box::new(onion_sink.clone() // clone sink for 1 send only
+                    .send((packet, saddr))
+                    .map(|_sink| ()) // ignore sink because it was cloned
+                    .map_err(|_| {
+                        // This may only happen if sink is gone
+                        // So cast SendError<T> to a corresponding std::io::Error
+                        Error::from(ErrorKind::UnexpectedEof)
+                    })
+                )
+            } else {
+               Box::new( future::err(
+                   Error::new(ErrorKind::Other,
+                       "PongResponse: no such PK"
+               )) )
+            }
         } else {
             // Ignore OnionRequest as the server is not connected to onion subsystem
             Box::new( future::ok(()) )
@@ -732,6 +742,8 @@ mod tests {
 
         let (client_1, _rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
+        let client_addr_1 = client_1.ip_addr();
+        let client_port_1 = client_1.port();
         server.insert(client_1);
 
         let request = OnionRequest {
@@ -746,7 +758,11 @@ mod tests {
         assert!(handle_res.is_ok());
 
         let (packet, _) = tcp_onion_stream.into_future().wait().unwrap();
-        assert_eq!(packet.unwrap(), request);
+        let (packet, saddr) = packet.unwrap();
+
+        assert_eq!(saddr.ip(), client_addr_1);
+        assert_eq!(saddr.port(), client_port_1);
+        assert_eq!(packet, request);
     }
     #[test]
     fn handle_udp_onion_response() {
