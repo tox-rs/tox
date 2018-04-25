@@ -117,10 +117,9 @@ impl DhtRequest {
         trace!(target: "DhtRequest", "With DhtRequest: {:?}", self);
         let decrypted = open(&self.payload, &self.nonce, &self.spk,
                             own_secret_key)
-            .map_err(|e| {
+            .map_err(|()| {
                 debug!("Decrypting DhtRequest failed!");
-                Error::new(ErrorKind::Other,
-                    format!("DhtRequest decrypt error: {:?}", e))
+                Error::new(ErrorKind::Other, "DhtRequest decrypt error.")
             });
 
         match DhtRequestPayload::from_bytes(&decrypted?) {

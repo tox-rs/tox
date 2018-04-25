@@ -104,10 +104,9 @@ impl AnnounceResponse {
     */
     pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<AnnounceResponsePayload, Error> {
         let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
-            .map_err(|e| {
+            .map_err(|()| {
                 debug!("Decrypting AnnounceResponse failed!");
-                Error::new(ErrorKind::Other,
-                    format!("AnnounceResponse decrypt error: {:?}", e))
+                Error::new(ErrorKind::Other, "AnnounceResponse decrypt error.")
             })?;
         match AnnounceResponsePayload::from_bytes(&decrypted) {
             IResult::Incomplete(e) => {

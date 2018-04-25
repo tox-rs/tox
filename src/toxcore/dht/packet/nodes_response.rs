@@ -106,10 +106,9 @@ impl NodesResponse {
         debug!(target: "NodesResponse", "Getting packet data from NodesResponse.");
         trace!(target: "NodesResponse", "With NodesResponse: {:?}", self);
         let decrypted = open(&self.payload, &self.nonce, &self.pk, own_secret_key)
-            .map_err(|e| {
+            .map_err(|()| {
                 debug!("Decrypting NodesResponse failed!");
-                Error::new(ErrorKind::Other,
-                    format!("NodesResponse decrypt error: {:?}", e))
+                Error::new(ErrorKind::Other, "NodesResponse decrypt error.")
             })?;
 
         match NodesResponsePayload::from_bytes(&decrypted) {

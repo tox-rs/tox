@@ -110,10 +110,9 @@ impl InnerAnnounceRequest {
     */
     pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<AnnounceRequestPayload, Error> {
         let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
-            .map_err(|e| {
+            .map_err(|()| {
                 debug!("Decrypting AnnounceRequest failed!");
-                Error::new(ErrorKind::Other,
-                    format!("AnnounceRequest decrypt error: {:?}", e))
+                Error::new(ErrorKind::Other, "AnnounceRequest decrypt error.")
             })?;
         match AnnounceRequestPayload::from_bytes(&decrypted) {
             IResult::Incomplete(e) => {
