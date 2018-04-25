@@ -23,12 +23,11 @@
 
 
 use toxcore::tcp::packet::*;
+use toxcore::io_tokio::IoFuture;
 
 use futures::prelude::*;
 use futures::sync::mpsc;
 use futures::future;
-
-use tokio_io::IoFuture;
 
 use std::io::{Error, ErrorKind};
 

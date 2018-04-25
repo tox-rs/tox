@@ -33,7 +33,6 @@ use futures::sync::mpsc;
 use get_if_addrs;
 use get_if_addrs::IfAddr;
 use parking_lot::RwLock;
-use tokio_io::IoFuture;
 
 use std::io::{ErrorKind, Error};
 use std::net::{IpAddr, SocketAddr};
@@ -49,6 +48,7 @@ use toxcore::dht::kbucket::*;
 use toxcore::onion::packet::*;
 use toxcore::onion::onion_announce::*;
 use toxcore::dht::server::client::*;
+use toxcore::io_tokio::IoFuture;
 
 /// Shorthand for the transmit half of the message channel.
 type Tx = mpsc::UnboundedSender<(DhtPacket, SocketAddr)>;
@@ -185,7 +185,7 @@ impl Server {
 
         self.send_nodes_req(peer)
     }
-    
+
     // Get random node from kbucket
     fn get_random_node(&self) -> Option<PackedNode> {
         let state = self.state.read();
@@ -1428,7 +1428,7 @@ mod tests {
 
         let onion_symmetric_key = alice.onion_symmetric_key.read();
         let onion_return_payload = next_packet.onion_return.get_payload(&onion_symmetric_key).unwrap();
-        
+
         assert_eq!(onion_return_payload.0, IpPort::from_saddr(addr));
     }
 
@@ -1978,7 +1978,7 @@ mod tests {
         assert!(alice.send_lan_discovery_ipv4().wait().is_ok());
 
         let ifs = get_if_addrs::get_if_addrs().expect("no network interface");
-        let broad_vec: Vec<SocketAddr> = ifs.iter().filter_map(|interface| 
+        let broad_vec: Vec<SocketAddr> = ifs.iter().filter_map(|interface|
             match interface.addr {
                 IfAddr::V4(ref addr) => addr.broadcast,
                 _ => None,
@@ -2006,7 +2006,7 @@ mod tests {
         assert!(alice.send_lan_discovery_ipv6().wait().is_ok());
 
         let ifs = get_if_addrs::get_if_addrs().expect("no network interface");
-        let broad_vec: Vec<SocketAddr> = ifs.iter().filter_map(|interface| 
+        let broad_vec: Vec<SocketAddr> = ifs.iter().filter_map(|interface|
             match interface.addr {
                 IfAddr::V4(ref addr) => addr.broadcast,
                 _ => None,

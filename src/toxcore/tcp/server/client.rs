@@ -23,6 +23,7 @@
 
 use toxcore::crypto_core::*;
 use toxcore::tcp::packet::*;
+use toxcore::io_tokio::IoFuture;
 
 use std::io::{Error, ErrorKind};
 use std::net::IpAddr;
@@ -30,8 +31,6 @@ use std::slice::Iter;
 
 use futures::{Sink, Future};
 use futures::sync::mpsc;
-
-use tokio_io::IoFuture;
 
 /** Structure that represents how Server keeps connected clients. A write-only socket with
 human interface. A client cannot send a message directly to another client, whereas server can.
