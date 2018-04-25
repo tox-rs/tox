@@ -34,12 +34,13 @@ use tox::toxcore::crypto_core::*;
 use tox::toxcore::tcp::packet::*;
 use tox::toxcore::tcp::handshake::make_client_handshake;
 use tox::toxcore::tcp::codec;
+use tox::toxcore::io_tokio::IoFuture;
 
 use futures::prelude::*;
 use futures::future;
 use futures::sync::mpsc;
 
-use tokio_io::{AsyncRead, IoFuture};
+use tokio_io::AsyncRead;
 use tokio::net::TcpStream;
 
 use std::{thread, time};

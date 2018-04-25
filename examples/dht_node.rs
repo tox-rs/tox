@@ -35,7 +35,6 @@ extern crate env_logger;
 use futures::*;
 use futures::sync::mpsc;
 use tokio::net::{UdpSocket, UdpFramed};
-use tokio_io::IoFuture;
 use tokio::timer::Interval;
 
 use std::net::{SocketAddr, IpAddr};
@@ -48,6 +47,7 @@ use tox::toxcore::dht::codec::*;
 use tox::toxcore::dht::server::*;
 use tox::toxcore::dht::packed_node::*;
 use tox::toxcore::crypto_core::*;
+use tox::toxcore::io_tokio::IoFuture;
 
 fn main() {
     env_logger::init();

@@ -29,6 +29,7 @@ use toxcore::onion::packet::{
 };
 use toxcore::tcp::server::client::Client;
 use toxcore::tcp::packet::*;
+use toxcore::io_tokio::IoFuture;
 
 use std::io::{Error, ErrorKind};
 use std::collections::HashMap;
@@ -38,8 +39,6 @@ use std::sync::Arc;
 use futures::{Sink, Stream, Future, future, stream};
 use futures::sync::mpsc;
 use parking_lot::RwLock;
-
-use tokio_io::IoFuture;
 
 /** A `Server` is a structure that holds connected clients, manages their links and handles
 their responses. Notice that there is no actual network code here, the `Server` accepts packets

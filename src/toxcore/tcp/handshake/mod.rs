@@ -32,10 +32,11 @@ pub use self::codec::*;
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 use toxcore::tcp::secure;
+use toxcore::io_tokio::IoFuture;
 
 use futures::{self, Stream, Sink, Future};
 use std::io::{Error, ErrorKind};
-use tokio_io::{IoFuture, AsyncRead};
+use tokio::io::AsyncRead;
 use tokio::net::TcpStream;
 
 /// Create a handshake from client to server
