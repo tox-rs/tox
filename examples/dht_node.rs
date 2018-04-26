@@ -49,6 +49,7 @@ use tox::toxcore::dht::server::*;
 use tox::toxcore::dht::packed_node::*;
 use tox::toxcore::crypto_core::*;
 use tox::toxcore::io_tokio::IoFuture;
+use tox::toxcore::dht::dht_friend::*;
 
 fn main() {
     env_logger::init();
@@ -110,8 +111,15 @@ fn main() {
 
         let saddr: SocketAddr = saddr.parse().unwrap();
         let bootstrap_pn = PackedNode::new(true, saddr, &bootstrap_pk);
-        assert!(server_obj.try_add_to_kbucket(&bootstrap_pn));
+        assert!(server_obj.try_add_to_close_nodes(&bootstrap_pn));
     }
+
+    // add example friend
+    let pk_str = "9DA18776D7A8ABED7DB67D9B41B853D099A3D4E73C5925B74759E2CFF6289643";
+    let friend_pk_bytes: [u8; 32] = FromHex::from_hex(&pk_str).unwrap();
+    // create PK from bytes
+    let friend_pk = PublicKey::from_slice(&friend_pk_bytes).unwrap();
+    server_obj.add_friend(DhtFriend::new(friend_pk, 0));
 
     let local_addr: SocketAddr = "0.0.0.0:33445".parse().unwrap(); // 0.0.0.0 for ipv4
     // let local_addr: SocketAddr = "[::]:33445".parse().unwrap(); // [::] for ipv6
@@ -171,9 +179,8 @@ fn main() {
     let server = add_ping_sender(server, &server_obj);
     let server = add_nat_sender(server, &server_obj, server_pk);
     let server = add_lan_sender(server, &server_obj, local_addr);
-    let server = add_nodes_sender(server, &server_obj);
+    let server = add_server_main_loop(server, &server_obj);
     let server = add_onion_key_refresher(server, &server_obj);
-    let server = add_timedout_remover(server, &server_obj);
 
     let server = server
         .map(|_| ())
@@ -230,16 +237,16 @@ fn add_nat_sender(base_selector: IoFuture<()>, server_obj: &Server, pk: PublicKe
             err
         }))
 }
-fn add_nodes_sender(base_selector: IoFuture<()>, server_obj: &Server) -> IoFuture<()> {
+fn add_server_main_loop(base_selector: IoFuture<()>, server_obj: &Server) -> IoFuture<()> {
     // 20 seconds for NodesRequest
-    let interval = Duration::from_secs(20);
+    let interval = Duration::from_secs(1);
     let nodes_wakeups = Interval::new(Instant::now() + interval, interval);
     let server_obj_c = server_obj.clone();
     let nodes_sender = nodes_wakeups
         .map_err(|e| Error::new(ErrorKind::Other, format!("Nodes timer error: {:?}", e)))
         .for_each(move |_instant| {
             println!("nodes_wakeup");
-            server_obj_c.periodical_nodes_req()
+            server_obj_c.dht_main_loop(KILL_NODE_TIMEOUT, PING_TIMEOUT, PING_INTERVAL, BAD_NODE_TIMEOUT, NODES_REQ_INTERVAL)
         })
         .map_err(|_err| Error::new(ErrorKind::Other, "Nodes timer error"));
 
@@ -267,32 +274,6 @@ fn add_lan_sender(base_selector: IoFuture<()>, server_obj: &Server, local_addr: 
         });
 
     Box::new(base_selector.select(Box::new(lan_sender))
-        .map(|_| ())
-        .map_err(move |(err, _select_next)| {
-            error!("Processing ended with error: {:?}", err);
-            err
-        }))
-}
-fn add_timedout_remover(base_selector: IoFuture<()>, server_obj: &Server) -> IoFuture<()> {
-    // 1 seconds for timed-out clients remover
-    let interval = Duration::from_secs(1);
-    const OFFLINE_TIMEDOUT_DURATION: u64 = 182;
-    const PING_TIMEDOUT: u64 = 5;
-    let offline_timeout_dur = Duration::from_secs(OFFLINE_TIMEDOUT_DURATION);
-    let ping_timeout_dur = Duration::from_secs(PING_TIMEDOUT);
-
-    let timeout_wakeups = Interval::new(Instant::now() + interval, interval);
-    let server_obj_c = server_obj.clone();
-    let timeout_remover = timeout_wakeups
-        .map_err(|e| Error::new(ErrorKind::Other, format!("Timedout clients remover timer error: {:?}", e)))
-        .for_each(move |_instant| {
-            println!("timeout_wakeups");
-            server_obj_c.remove_timedout_clients(offline_timeout_dur);
-            server_obj_c.remove_timedout_ping_ids(ping_timeout_dur)
-        })
-        .map_err(|_err| Error::new(ErrorKind::Other, "Timedout clients remover timer error"));
-
-    Box::new(base_selector.select(Box::new(timeout_remover))
         .map(|_| ())
         .map_err(move |(err, _select_next)| {
             error!("Processing ended with error: {:?}", err);

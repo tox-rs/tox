@@ -34,8 +34,10 @@ use toxcore::crypto_core::*;
 pub struct ClientData {
     /// hash of ping_ids to check PingResponse is correct
     ping_hash: HashMap<u64, Instant>,
-    /// last received ping-response time
-    pub last_resp_time: Instant
+    /// last received ping/nodes-response time
+    pub last_resp_time: Instant,
+    /// last sent ping-req time
+    pub last_ping_req_time: Instant,
 }
 
 impl ClientData {
@@ -44,6 +46,7 @@ impl ClientData {
         ClientData {
             ping_hash: HashMap::new(),
             last_resp_time: Instant::now(),
+            last_ping_req_time: Instant::now(),
         }
     }
     /// set new random ping id to the client and return it
