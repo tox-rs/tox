@@ -23,6 +23,7 @@
 
 use toxcore::crypto_core::*;
 use toxcore::onion::packet::{
+    InnerOnionResponse,
     ONION_MAX_PACKET_SIZE,
     ONION_RETURN_1_SIZE,
     ONION_SEND_BASE_SIZE
@@ -108,10 +109,10 @@ impl Server {
     }
     /** Send `OnionResponse` packet to the client by it's `std::net::IpAddr`.
     */
-    pub fn handle_udp_onion_response(&self, ip_addr: IpAddr, port: u16, data: Vec<u8>) -> IoFuture<()> {
+    pub fn handle_udp_onion_response(&self, ip_addr: IpAddr, port: u16, payload: InnerOnionResponse) -> IoFuture<()> {
         let state = self.state.read();
         if let Some(client) = state.keys_by_addr.get(&(ip_addr, port)).and_then(|pk| state.connected_clients.get(pk)) {
-            client.send_onion_response(data)
+            client.send_onion_response(payload)
         } else {
             Box::new( future::err(
                 Error::new(ErrorKind::Other,
@@ -407,6 +408,7 @@ mod tests {
     extern crate rand;
 
     use ::toxcore::crypto_core::*;
+    use ::toxcore::onion::packet::*;
     use ::toxcore::tcp::packet::*;
     use ::toxcore::tcp::server::{Client, Server};
     use futures::sync::mpsc;
@@ -773,15 +775,19 @@ mod tests {
         let client_port_1 = client_1.port();
         server.insert(client_1);
 
-        let data = vec![13; 100];
+        let payload = InnerOnionResponse::AnnounceResponse(AnnounceResponse {
+            sendback_data: 12345,
+            nonce: gen_nonce(),
+            payload: vec![42; 123]
+        });
         let handle_res = server
-            .handle_udp_onion_response(client_addr_1, client_port_1, data.clone())
+            .handle_udp_onion_response(client_addr_1, client_port_1, payload.clone())
             .wait();
         assert!(handle_res.is_ok());
 
         let (packet, _) = rx_1.into_future().wait().unwrap();
         assert_eq!(packet.unwrap(), Packet::OnionResponse(
-            OnionResponse { data }
+            OnionResponse { payload }
         ));
     }
     #[test]
@@ -1065,8 +1071,13 @@ mod tests {
         let client_pk_1 = client_1.pk();
         server.insert(client_1);
 
+        let payload = InnerOnionResponse::AnnounceResponse(AnnounceResponse {
+            sendback_data: 12345,
+            nonce: gen_nonce(),
+            payload: vec![42; 123]
+        });
         let handle_res = server.handle_packet(&client_pk_1, Packet::OnionResponse(
-            OnionResponse { data: vec![42; 128] }
+            OnionResponse { payload }
         )).wait();
         assert!(handle_res.is_err());
     }
@@ -1085,9 +1096,13 @@ mod tests {
         let client_addr_2 = IpAddr::V4(Ipv4Addr::new(5, 6, 7, 8));
         let client_port_2 = 54321u16;
 
-        let data = vec![13; 100];
+        let payload = InnerOnionResponse::AnnounceResponse(AnnounceResponse {
+            sendback_data: 12345,
+            nonce: gen_nonce(),
+            payload: vec![42; 123]
+        });
         let handle_res = server
-            .handle_udp_onion_response(client_addr_2, client_port_2, data.clone())
+            .handle_udp_onion_response(client_addr_2, client_port_2, payload)
             .wait();
         assert!(handle_res.is_err());
     }
