@@ -24,6 +24,7 @@
 use toxcore::crypto_core::*;
 use toxcore::tcp::packet::*;
 use toxcore::io_tokio::IoFuture;
+use toxcore::onion::packet::InnerOnionResponse;
 
 use std::io::{Error, ErrorKind};
 use std::net::IpAddr;
@@ -209,9 +210,9 @@ impl Client {
     }
     /** Construct OnionResponse and send it to Client
     */
-    pub fn send_onion_response(&self, data: Vec<u8>) -> IoFuture<()> {
+    pub fn send_onion_response(&self, payload: InnerOnionResponse) -> IoFuture<()> {
         self.send(
-            Packet::OnionResponse(OnionResponse { data })
+            Packet::OnionResponse(OnionResponse { payload })
         )
     }
     /** Construct Data and send it to Client

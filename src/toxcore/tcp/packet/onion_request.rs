@@ -34,11 +34,11 @@ use std::net::{
 };
 
 /** Sent by client to server.
-The server will pack data from this request to `Onion Request 1` packet and send
+The server will pack payload from this request to `OnionRequest1` packet and send
 it to UDP socket. The server can accept both TCP and UDP families as destination
-IP address but regardless of this it will always send `Onion Request 1` to UDP
-socket. Return address from `Onion Request 1` will contain TCP address so that
-when we get `Onion Response 2` we will know that this response should be sent to
+IP address but regardless of this it will always send `OnionRequest1` to UDP
+socket. Return address from `OnionRequest1` will contain TCP address so that
+when we get `OnionResponse2` we will know that this response should be sent to
 TCP client connected to our server.
 
 Serialized form:
@@ -51,19 +51,22 @@ Length   | Content
 `4` or `16` | IPv4 or IPv6 address
 `0` or `12` | Padding for IPv4
 `2`      | Port
-variable | Data
+`32`     | PublicKey
+variable | Payload
 
 */
 #[derive(Debug, PartialEq, Clone)]
 pub struct OnionRequest {
-    /// Nonce that was used for onion data encryption
+    /// Nonce that was used for payload encryption
     pub nonce: Nonce,
     /// IP address of the next onion node
     pub addr: IpAddr,
     /// Port of the next onion node
     pub port: u16,
-    /// Onion data packet
-    pub data: Vec<u8>
+    /// Temporary `PublicKey` for the current encrypted payload
+    pub temporary_pk: PublicKey,
+    /// Encrypted payload
+    pub payload: Vec<u8>
 }
 
 impl FromBytes for OnionRequest {
@@ -79,8 +82,9 @@ impl FromBytes for OnionRequest {
             cond_reduce!(ip_type == 10 || ip_type == 138, map!(Ipv6Addr::from_bytes, IpAddr::V6))
         ) >>
         port: be_u16 >>
-        data: rest >>
-        (OnionRequest { nonce, addr, port, data: data.to_vec() })
+        temporary_pk: call!(PublicKey::from_bytes) >>
+        payload: rest >>
+        (OnionRequest { nonce, addr, port, temporary_pk, payload: payload.to_vec() })
     ));
 }
 
@@ -93,7 +97,8 @@ impl ToBytes for OnionRequest {
             gen_call!(|buf, addr| IpAddr::to_bytes(addr, buf), &self.addr) >>
             gen_cond!(self.addr.is_ipv4(), gen_slice!(&[0; IPV4_PADDING_SIZE])) >>
             gen_be_u16!(self.port) >>
-            gen_slice!(self.data)
+            gen_slice!(self.temporary_pk.as_ref()) >>
+            gen_slice!(self.payload)
         )
     }
 }
@@ -108,7 +113,8 @@ mod test {
             nonce: gen_nonce(),
             addr: "5.6.7.8".parse().unwrap(),
             port: 12345,
-            data: vec![42, 123]
+            temporary_pk: gen_keypair().0,
+            payload: vec![42; 123]
         }
     );
 }
