@@ -646,7 +646,7 @@ impl Server {
 
         let onion_return = OnionReturn::new(
             &onion_symmetric_key,
-            &IpPort::from_saddr(addr),
+            &IpPort::from_udp_saddr(addr),
             None // no previous onion return
         );
         let next_packet = DhtPacket::OnionRequest1(OnionRequest1 {
@@ -677,7 +677,7 @@ impl Server {
 
         let onion_return = OnionReturn::new(
             &onion_symmetric_key,
-            &IpPort::from_saddr(addr),
+            &IpPort::from_udp_saddr(addr),
             Some(&packet.onion_return)
         );
         let next_packet = DhtPacket::OnionRequest2(OnionRequest2 {
@@ -708,7 +708,7 @@ impl Server {
 
         let onion_return = OnionReturn::new(
             &onion_symmetric_key,
-            &IpPort::from_saddr(addr),
+            &IpPort::from_udp_saddr(addr),
             Some(&packet.onion_return)
         );
         let next_packet = match payload.inner {
@@ -1167,7 +1167,7 @@ mod tests {
             rpk: alice.pk,
             spk: bob_pk,
             nonce: gen_nonce(),
-            payload: vec![42, 123]
+            payload: vec![42; 123]
         });
 
         assert!(alice.handle_packet((dht_req, addr)).wait().is_err());
@@ -1250,10 +1250,11 @@ mod tests {
         let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
 
         let temporary_pk = gen_keypair().0;
-        let inner = vec![42, 123];
+        let inner = vec![42; 123];
         let ip_port = IpPort {
-          ip_addr: "5.6.7.8".parse().unwrap(),
-          port: 12345
+            protocol: ProtocolType::UDP,
+            ip_addr: "5.6.7.8".parse().unwrap(),
+            port: 12345
         };
         let payload = OnionRequest0Payload {
             ip_port: ip_port.clone(),
@@ -1277,7 +1278,7 @@ mod tests {
         let onion_symmetric_key = alice.onion_symmetric_key.read();
         let onion_return_payload = next_packet.onion_return.get_payload(&onion_symmetric_key).unwrap();
 
-        assert_eq!(onion_return_payload.0, IpPort::from_saddr(addr));
+        assert_eq!(onion_return_payload.0, IpPort::from_udp_saddr(addr));
     }
 
     #[test]
@@ -1287,7 +1288,7 @@ mod tests {
         let packet = DhtPacket::OnionRequest0(OnionRequest0 {
             nonce: gen_nonce(),
             temporary_pk: gen_keypair().0,
-            payload: vec![42, 123] // not encrypted with dht pk
+            payload: vec![42; 123] // not encrypted with dht pk
         });
 
         assert!(alice.handle_packet((packet, addr)).wait().is_err());
@@ -1299,10 +1300,11 @@ mod tests {
         let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
 
         let temporary_pk = gen_keypair().0;
-        let inner = vec![42, 123];
+        let inner = vec![42; 123];
         let ip_port = IpPort {
-          ip_addr: "5.6.7.8".parse().unwrap(),
-          port: 12345
+            protocol: ProtocolType::UDP,
+            ip_addr: "5.6.7.8".parse().unwrap(),
+            port: 12345
         };
         let payload = OnionRequest1Payload {
             ip_port: ip_port.clone(),
@@ -1330,7 +1332,7 @@ mod tests {
         let onion_symmetric_key = alice.onion_symmetric_key.read();
         let onion_return_payload = next_packet.onion_return.get_payload(&onion_symmetric_key).unwrap();
 
-        assert_eq!(onion_return_payload.0, IpPort::from_saddr(addr));
+        assert_eq!(onion_return_payload.0, IpPort::from_udp_saddr(addr));
     }
 
     #[test]
@@ -1340,7 +1342,7 @@ mod tests {
         let packet = DhtPacket::OnionRequest1(OnionRequest1 {
             nonce: gen_nonce(),
             temporary_pk: gen_keypair().0,
-            payload: vec![42, 123], // not encrypted with dht pk
+            payload: vec![42; 123], // not encrypted with dht pk
             onion_return: OnionReturn {
                 nonce: gen_nonce(),
                 payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
@@ -1358,11 +1360,12 @@ mod tests {
         let inner = InnerAnnounceRequest {
             nonce: gen_nonce(),
             pk: gen_keypair().0,
-            payload: vec![42, 123]
+            payload: vec![42; 123]
         };
         let ip_port = IpPort {
-          ip_addr: "5.6.7.8".parse().unwrap(),
-          port: 12345
+            protocol: ProtocolType::UDP,
+            ip_addr: "5.6.7.8".parse().unwrap(),
+            port: 12345
         };
         let payload = OnionRequest2Payload {
             ip_port: ip_port.clone(),
@@ -1388,7 +1391,7 @@ mod tests {
         let onion_symmetric_key = alice.onion_symmetric_key.read();
         let onion_return_payload = next_packet.onion_return.get_payload(&onion_symmetric_key).unwrap();
 
-        assert_eq!(onion_return_payload.0, IpPort::from_saddr(addr));
+        assert_eq!(onion_return_payload.0, IpPort::from_udp_saddr(addr));
     }
 
     #[test]
@@ -1399,11 +1402,12 @@ mod tests {
             destination_pk: gen_keypair().0,
             nonce: gen_nonce(),
             temporary_pk: gen_keypair().0,
-            payload: vec![42, 123]
+            payload: vec![42; 123]
         };
         let ip_port = IpPort {
-          ip_addr: "5.6.7.8".parse().unwrap(),
-          port: 12345
+            protocol: ProtocolType::UDP,
+            ip_addr: "5.6.7.8".parse().unwrap(),
+            port: 12345
         };
         let payload = OnionRequest2Payload {
             ip_port: ip_port.clone(),
@@ -1429,7 +1433,7 @@ mod tests {
         let onion_symmetric_key = alice.onion_symmetric_key.read();
         let onion_return_payload = next_packet.onion_return.get_payload(&onion_symmetric_key).unwrap();
 
-        assert_eq!(onion_return_payload.0, IpPort::from_saddr(addr));
+        assert_eq!(onion_return_payload.0, IpPort::from_udp_saddr(addr));
     }
 
     #[test]
@@ -1439,7 +1443,7 @@ mod tests {
         let packet = DhtPacket::OnionRequest2(OnionRequest2 {
             nonce: gen_nonce(),
             temporary_pk: gen_keypair().0,
-            payload: vec![42, 123], // not encrypted with dht pk
+            payload: vec![42; 123], // not encrypted with dht pk
             onion_return: OnionReturn {
                 nonce: gen_nonce(),
                 payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
@@ -1581,8 +1585,9 @@ mod tests {
         let onion_symmetric_key = alice.onion_symmetric_key.read();
 
         let ip_port = IpPort {
-          ip_addr: "5.6.7.8".parse().unwrap(),
-          port: 12345
+            protocol: ProtocolType::UDP,
+            ip_addr: "5.6.7.8".parse().unwrap(),
+            port: 12345
         };
         let next_onion_return = OnionReturn {
             nonce: gen_nonce(),
@@ -1592,7 +1597,7 @@ mod tests {
         let payload = InnerOnionResponse::AnnounceResponse(AnnounceResponse {
             sendback_data: 12345,
             nonce: gen_nonce(),
-            payload: vec![42, 123]
+            payload: vec![42; 123]
         });
         let packet = DhtPacket::OnionResponse3(OnionResponse3 {
             onion_return,
@@ -1623,7 +1628,7 @@ mod tests {
         let payload = InnerOnionResponse::AnnounceResponse(AnnounceResponse {
             sendback_data: 12345,
             nonce: gen_nonce(),
-            payload: vec![42, 123]
+            payload: vec![42; 123]
         });
         let packet = DhtPacket::OnionResponse3(OnionResponse3 {
             onion_return,
@@ -1640,14 +1645,15 @@ mod tests {
         let onion_symmetric_key = alice.onion_symmetric_key.read();
 
         let ip_port = IpPort {
-          ip_addr: "5.6.7.8".parse().unwrap(),
-          port: 12345
+            protocol: ProtocolType::UDP,
+            ip_addr: "5.6.7.8".parse().unwrap(),
+            port: 12345
         };
         let onion_return = OnionReturn::new(&onion_symmetric_key, &ip_port, None);
         let inner = OnionDataResponse {
             nonce: gen_nonce(),
             temporary_pk: gen_keypair().0,
-            payload: vec![42, 123]
+            payload: vec![42; 123]
         };
         let packet = DhtPacket::OnionResponse3(OnionResponse3 {
             onion_return,
@@ -1665,8 +1671,9 @@ mod tests {
         let onion_symmetric_key = alice.onion_symmetric_key.read();
 
         let ip_port = IpPort {
-          ip_addr: "5.6.7.8".parse().unwrap(),
-          port: 12345
+            protocol: ProtocolType::UDP,
+            ip_addr: "5.6.7.8".parse().unwrap(),
+            port: 12345
         };
         let next_onion_return = OnionReturn {
             nonce: gen_nonce(),
@@ -1676,7 +1683,7 @@ mod tests {
         let payload = InnerOnionResponse::AnnounceResponse(AnnounceResponse {
             sendback_data: 12345,
             nonce: gen_nonce(),
-            payload: vec![42, 123]
+            payload: vec![42; 123]
         });
         let packet = DhtPacket::OnionResponse2(OnionResponse2 {
             onion_return,
@@ -1707,7 +1714,7 @@ mod tests {
         let payload = InnerOnionResponse::AnnounceResponse(AnnounceResponse {
             sendback_data: 12345,
             nonce: gen_nonce(),
-            payload: vec![42, 123]
+            payload: vec![42; 123]
         });
         let packet = DhtPacket::OnionResponse2(OnionResponse2 {
             onion_return,
@@ -1724,14 +1731,15 @@ mod tests {
         let onion_symmetric_key = alice.onion_symmetric_key.read();
 
         let ip_port = IpPort {
-          ip_addr: "5.6.7.8".parse().unwrap(),
-          port: 12345
+            protocol: ProtocolType::UDP,
+            ip_addr: "5.6.7.8".parse().unwrap(),
+            port: 12345
         };
         let onion_return = OnionReturn::new(&onion_symmetric_key, &ip_port, None);
         let inner = OnionDataResponse {
             nonce: gen_nonce(),
             temporary_pk: gen_keypair().0,
-            payload: vec![42, 123]
+            payload: vec![42; 123]
         };
         let packet = DhtPacket::OnionResponse2(OnionResponse2 {
             onion_return,
@@ -1749,14 +1757,15 @@ mod tests {
         let onion_symmetric_key = alice.onion_symmetric_key.read();
 
         let ip_port = IpPort {
-          ip_addr: "5.6.7.8".parse().unwrap(),
-          port: 12345
+            protocol: ProtocolType::UDP,
+            ip_addr: "5.6.7.8".parse().unwrap(),
+            port: 12345
         };
         let onion_return = OnionReturn::new(&onion_symmetric_key, &ip_port, None);
         let inner = AnnounceResponse {
             sendback_data: 12345,
             nonce: gen_nonce(),
-            payload: vec![42, 123]
+            payload: vec![42; 123]
         };
         let packet = DhtPacket::OnionResponse1(OnionResponse1 {
             onion_return,
@@ -1782,14 +1791,15 @@ mod tests {
         let onion_symmetric_key = alice.onion_symmetric_key.read();
 
         let ip_port = IpPort {
-          ip_addr: "5.6.7.8".parse().unwrap(),
-          port: 12345
+            protocol: ProtocolType::UDP,
+            ip_addr: "5.6.7.8".parse().unwrap(),
+            port: 12345
         };
         let onion_return = OnionReturn::new(&onion_symmetric_key, &ip_port, None);
         let inner = OnionDataResponse {
             nonce: gen_nonce(),
             temporary_pk: gen_keypair().0,
-            payload: vec![42, 123]
+            payload: vec![42; 123]
         };
         let packet = DhtPacket::OnionResponse1(OnionResponse1 {
             onion_return,
@@ -1819,7 +1829,7 @@ mod tests {
         let payload = InnerOnionResponse::AnnounceResponse(AnnounceResponse {
             sendback_data: 12345,
             nonce: gen_nonce(),
-            payload: vec![42, 123]
+            payload: vec![42; 123]
         });
         let packet = DhtPacket::OnionResponse1(OnionResponse1 {
             onion_return,
@@ -1836,8 +1846,9 @@ mod tests {
         let onion_symmetric_key = alice.onion_symmetric_key.read();
 
         let ip_port = IpPort {
-          ip_addr: "5.6.7.8".parse().unwrap(),
-          port: 12345
+            protocol: ProtocolType::UDP,
+            ip_addr: "5.6.7.8".parse().unwrap(),
+            port: 12345
         };
         let next_onion_return = OnionReturn {
             nonce: gen_nonce(),
@@ -1847,7 +1858,7 @@ mod tests {
         let inner = OnionDataResponse {
             nonce: gen_nonce(),
             temporary_pk: gen_keypair().0,
-            payload: vec![42, 123]
+            payload: vec![42; 123]
         };
         let packet = DhtPacket::OnionResponse1(OnionResponse1 {
             onion_return,

@@ -74,7 +74,7 @@ mod test {
         oob_receive_encode_decode,
         OobReceive {
             sender_pk: gen_keypair().0,
-            data: vec![42, 123]
+            data: vec![42; 123]
         }
     );
 }

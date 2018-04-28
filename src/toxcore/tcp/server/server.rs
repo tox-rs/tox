@@ -22,12 +22,7 @@
 */
 
 use toxcore::crypto_core::*;
-use toxcore::onion::packet::{
-    InnerOnionResponse,
-    ONION_MAX_PACKET_SIZE,
-    ONION_RETURN_1_SIZE,
-    ONION_SEND_BASE_SIZE
-};
+use toxcore::onion::packet::InnerOnionResponse;
 use toxcore::tcp::server::client::Client;
 use toxcore::tcp::packet::*;
 use toxcore::io_tokio::IoFuture;
@@ -326,14 +321,6 @@ impl Server {
     }
     fn handle_onion_request(&self, pk: &PublicKey, packet: OnionRequest) -> IoFuture<()> {
         if let Some(ref onion_sink) = self.onion_sink {
-            if packet.payload.len() <= ONION_SEND_BASE_SIZE * 2 - PUBLICKEYBYTES ||
-                packet.payload.len() > ONION_MAX_PACKET_SIZE - (1 + NONCEBYTES + PUBLICKEYBYTES + ONION_RETURN_1_SIZE) {
-                return Box::new( future::err(
-                    Error::new(ErrorKind::Other,
-                        "OnionRequest wrong data length"
-                )))
-            }
-
             let mut state = self.state.read();
             if let Some(client) = state.connected_clients.get(&pk) {
                 let saddr = SocketAddr::new(client.ip_addr(), client.port());
@@ -749,8 +736,11 @@ mod tests {
 
         let request = OnionRequest {
             nonce: gen_nonce(),
-            addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-            port: 12345,
+            ip_port: IpPort {
+                protocol: ProtocolType::TCP,
+                ip_addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                port: 12345,
+            },
             temporary_pk: gen_keypair().0,
             payload: vec![13; 170]
         };
@@ -1002,48 +992,6 @@ mod tests {
         assert!(handle_res.is_err());
     }
     #[test]
-    fn handle_onion_request_not_enough_data() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new_with_onion(tcp_onion_sink);
-
-        let (client_1, _rx_1) = create_random_client();
-        let client_pk_1 = client_1.pk();
-        server.insert(client_1);
-
-        let request = OnionRequest {
-            nonce: gen_nonce(),
-            addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-            port: 12345,
-            temporary_pk: gen_keypair().0,
-            payload: vec![13; 100]
-        };
-        let handle_res = server
-            .handle_packet(&client_pk_1, Packet::OnionRequest(request.clone()))
-            .wait();
-        assert!(handle_res.is_err());
-    }
-    #[test]
-    fn handle_onion_request_loooong_data() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new_with_onion(tcp_onion_sink);
-
-        let (client_1, _rx_1) = create_random_client();
-        let client_pk_1 = client_1.pk();
-        server.insert(client_1);
-
-        let request = OnionRequest {
-            nonce: gen_nonce(),
-            addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-            port: 12345,
-            temporary_pk: gen_keypair().0,
-            payload: vec![13; 1500]
-        };
-        let handle_res = server
-            .handle_packet(&client_pk_1, Packet::OnionRequest(request.clone()))
-            .wait();
-        assert!(handle_res.is_err());
-    }
-    #[test]
     fn handle_onion_request_disabled_onion_loooong_data() {
         let server = Server::new();
 
@@ -1053,13 +1001,16 @@ mod tests {
 
         let request = OnionRequest {
             nonce: gen_nonce(),
-            addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-            port: 12345,
+            ip_port: IpPort {
+                protocol: ProtocolType::TCP,
+                ip_addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                port: 12345,
+            },
             temporary_pk: gen_keypair().0,
             payload: vec![13; 1500]
         };
         let handle_res = server
-            .handle_packet(&client_pk_1, Packet::OnionRequest(request.clone()))
+            .handle_packet(&client_pk_1, Packet::OnionRequest(request))
             .wait();
         assert!(handle_res.is_ok());
     }
@@ -1293,8 +1244,11 @@ mod tests {
         // emulate send OnionRequest from client_1
         let request = OnionRequest {
             nonce: gen_nonce(),
-            addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-            port: 12345,
+            ip_port: IpPort {
+                protocol: ProtocolType::TCP,
+                ip_addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                port: 12345,
+            },
             temporary_pk: gen_keypair().0,
             payload: vec![13; 170]
         };

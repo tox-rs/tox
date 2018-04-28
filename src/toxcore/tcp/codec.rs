@@ -118,8 +118,8 @@ impl Encoder for Codec {
 #[cfg(test)]
 mod tests {
     use ::toxcore::crypto_core::*;
-    use ::toxcore::tcp::codec::*;
     use ::toxcore::onion::packet::*;
+    use ::toxcore::tcp::codec::*;
 
     use std::net::{
       IpAddr,
@@ -165,15 +165,21 @@ mod tests {
             Packet::OobReceive( OobReceive { sender_pk: pk, data: vec![13; 24] } ),
             Packet::OnionRequest( OnionRequest {
                 nonce: gen_nonce(),
-                addr: IpAddr::V4(Ipv4Addr::new(5, 6, 7, 8)),
-                port: 12345,
+                ip_port: IpPort {
+                    protocol: ProtocolType::TCP,
+                    ip_addr: IpAddr::V4(Ipv4Addr::new(5, 6, 7, 8)),
+                    port: 12345,
+                },
                 temporary_pk: gen_keypair().0,
                 payload: vec![13; 207]
             } ),
             Packet::OnionRequest( OnionRequest {
                 nonce: gen_nonce(),
-                addr: IpAddr::V6(Ipv6Addr::new(5, 6, 7, 8, 5, 6, 7, 8)),
-                port: 54321,
+                ip_port: IpPort {
+                    protocol: ProtocolType::TCP,
+                    ip_addr: IpAddr::V6(Ipv6Addr::new(5, 6, 7, 8, 5, 6, 7, 8)),
+                    port: 54321,
+                },
                 temporary_pk: gen_keypair().0,
                 payload: vec![13; 201]
             } ),
@@ -181,14 +187,14 @@ mod tests {
                 payload: InnerOnionResponse::AnnounceResponse(AnnounceResponse {
                     sendback_data: 12345,
                     nonce: gen_nonce(),
-                    payload: vec![42, 123]
+                    payload: vec![42; 123]
                 })
             } ),
             Packet::OnionResponse( OnionResponse {
                 payload: InnerOnionResponse::OnionDataResponse(OnionDataResponse {
                     nonce: gen_nonce(),
                     temporary_pk: gen_keypair().0,
-                    payload: vec![42, 123]
+                    payload: vec![42; 123]
                 })
             } ),
             Packet::Data( Data { connection_id: 42, data: vec![13; 2031] } )

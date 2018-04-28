@@ -85,7 +85,7 @@ mod tests {
             payload: InnerOnionResponse::AnnounceResponse(AnnounceResponse {
                 sendback_data: 12345,
                 nonce: gen_nonce(),
-                payload: vec![42, 123]
+                payload: vec![42; 123]
             })
         }
     );

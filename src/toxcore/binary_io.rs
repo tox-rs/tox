@@ -107,6 +107,11 @@ pub fn gen_len_limit(buf: (&mut [u8], usize), limit: usize) -> Result<(&mut [u8]
     }
 }
 
+/// Generator that returns specified error.
+pub fn gen_error(_buf: (&mut [u8], usize), error: u32) -> Result<(&mut [u8], usize), GenError> {
+    Err(GenError::CustomError(error))
+}
+
 /** Create test that encodes/decodes specified value and checks that result
 equals original value. Type of this value should implement `ToBytes`,
 `FromBytes`, `Clone`, `Eq` traits.

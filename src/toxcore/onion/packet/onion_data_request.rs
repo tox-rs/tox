@@ -146,7 +146,7 @@ mod tests {
             destination_pk: gen_keypair().0,
             nonce: gen_nonce(),
             temporary_pk: gen_keypair().0,
-            payload: vec![42, 123]
+            payload: vec![42; 123]
         }
     );
 
@@ -157,7 +157,7 @@ mod tests {
                 destination_pk: gen_keypair().0,
                 nonce: gen_nonce(),
                 temporary_pk: gen_keypair().0,
-                payload: vec![42, 123]
+                payload: vec![42; 123]
             },
             onion_return: OnionReturn {
                 nonce: gen_nonce(),
