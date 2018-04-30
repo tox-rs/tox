@@ -36,8 +36,8 @@ Length   | Content
 `118`    | `OnionReturn`
 variable | Payload
 
-where payload is encrypted [`AnnounceResponse`](./struct.AnnounceResponse.html) or
-[`OnionDataResponse`](./struct.OnionDataResponse.html)
+where payload is encrypted [`OnionAnnounceResponse`](./struct.OnionAnnounceResponse.html)
+or [`OnionDataResponse`](./struct.OnionDataResponse.html)
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -82,7 +82,7 @@ mod tests {
                 nonce: gen_nonce(),
                 payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
             },
-            payload: InnerOnionResponse::AnnounceResponse(AnnounceResponse {
+            payload: InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
                 sendback_data: 12345,
                 nonce: gen_nonce(),
                 payload: vec![42; 123]

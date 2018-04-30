@@ -80,10 +80,10 @@ pub enum DhtPacket {
     OnionRequest1(OnionRequest1),
     /// [`OnionRequest2`](../onion/struct.OnionRequest2.html) structure.
     OnionRequest2(OnionRequest2),
-    /// [`AnnounceRequest`](../onion/struct.AnnounceRequest.html) structure.
-    AnnounceRequest(AnnounceRequest),
-    /// [`AnnounceResponse`](../onion/struct.AnnounceResponse.html) structure.
-    AnnounceResponse(AnnounceResponse),
+    /// [`OnionAnnounceRequest`](../onion/struct.OnionAnnounceRequest.html) structure.
+    OnionAnnounceRequest(OnionAnnounceRequest),
+    /// [`OnionAnnounceResponse`](../onion/struct.OnionAnnounceResponse.html) structure.
+    OnionAnnounceResponse(OnionAnnounceResponse),
     /// [`OnionDataRequest`](../onion/struct.OnionDataRequest.html) structure.
     OnionDataRequest(OnionDataRequest),
     /// [`OnionDataResponse`](../onion/struct.OnionDataResponse.html) structure.
@@ -111,8 +111,8 @@ impl ToBytes for DhtPacket {
             DhtPacket::OnionRequest0(ref p) => p.to_bytes(buf),
             DhtPacket::OnionRequest1(ref p) => p.to_bytes(buf),
             DhtPacket::OnionRequest2(ref p) => p.to_bytes(buf),
-            DhtPacket::AnnounceRequest(ref p) => p.to_bytes(buf),
-            DhtPacket::AnnounceResponse(ref p) => p.to_bytes(buf),
+            DhtPacket::OnionAnnounceRequest(ref p) => p.to_bytes(buf),
+            DhtPacket::OnionAnnounceResponse(ref p) => p.to_bytes(buf),
             DhtPacket::OnionDataRequest(ref p) => p.to_bytes(buf),
             DhtPacket::OnionDataResponse(ref p) => p.to_bytes(buf),
             DhtPacket::OnionResponse3(ref p) => p.to_bytes(buf),
@@ -135,8 +135,8 @@ impl FromBytes for DhtPacket {
         map!(OnionRequest0::from_bytes, DhtPacket::OnionRequest0) |
         map!(OnionRequest1::from_bytes, DhtPacket::OnionRequest1) |
         map!(OnionRequest2::from_bytes, DhtPacket::OnionRequest2) |
-        map!(AnnounceRequest::from_bytes, DhtPacket::AnnounceRequest) |
-        map!(AnnounceResponse::from_bytes, DhtPacket::AnnounceResponse) |
+        map!(OnionAnnounceRequest::from_bytes, DhtPacket::OnionAnnounceRequest) |
+        map!(OnionAnnounceResponse::from_bytes, DhtPacket::OnionAnnounceResponse) |
         map!(OnionDataRequest::from_bytes, DhtPacket::OnionDataRequest) |
         map!(OnionDataResponse::from_bytes, DhtPacket::OnionDataResponse) |
         map!(OnionResponse3::from_bytes, DhtPacket::OnionResponse3) |

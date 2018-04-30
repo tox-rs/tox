@@ -184,7 +184,7 @@ mod tests {
                 payload: vec![13; 201]
             } ),
             Packet::OnionResponse( OnionResponse {
-                payload: InnerOnionResponse::AnnounceResponse(AnnounceResponse {
+                payload: InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
                     sendback_data: 12345,
                     nonce: gen_nonce(),
                     payload: vec![42; 123]

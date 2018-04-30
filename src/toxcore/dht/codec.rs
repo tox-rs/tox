@@ -152,8 +152,8 @@ mod tests {
                     payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
                 }
             }),
-            DhtPacket::AnnounceRequest(AnnounceRequest {
-                inner: InnerAnnounceRequest {
+            DhtPacket::OnionAnnounceRequest(OnionAnnounceRequest {
+                inner: InnerOnionAnnounceRequest {
                     nonce: gen_nonce(),
                     pk: gen_keypair().0,
                     payload: vec![42; 123]
@@ -180,7 +180,7 @@ mod tests {
                 temporary_pk: gen_keypair().0,
                 payload: vec![42; 123]
             }),
-            DhtPacket::AnnounceResponse(AnnounceResponse {
+            DhtPacket::OnionAnnounceResponse(OnionAnnounceResponse {
                 sendback_data: 12345,
                 nonce: gen_nonce(),
                 payload: vec![42; 123]
@@ -190,7 +190,7 @@ mod tests {
                     nonce: gen_nonce(),
                     payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
                 },
-                payload: InnerOnionResponse::AnnounceResponse(AnnounceResponse {
+                payload: InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
                     sendback_data: 12345,
                     nonce: gen_nonce(),
                     payload: vec![42; 123]
@@ -201,7 +201,7 @@ mod tests {
                     nonce: gen_nonce(),
                     payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
                 },
-                payload: InnerOnionResponse::AnnounceResponse(AnnounceResponse {
+                payload: InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
                     sendback_data: 12345,
                     nonce: gen_nonce(),
                     payload: vec![42; 123]
@@ -212,7 +212,7 @@ mod tests {
                     nonce: gen_nonce(),
                     payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
                 },
-                payload: InnerOnionResponse::AnnounceResponse(AnnounceResponse {
+                payload: InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
                     sendback_data: 12345,
                     nonce: gen_nonce(),
                     payload: vec![42; 123]

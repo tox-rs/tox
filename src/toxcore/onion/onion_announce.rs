@@ -265,15 +265,15 @@ impl OnionAnnounce {
         }
     }
 
-    /** Handle `AnnounceRequest` packet and return `AnnounceResponse`.
+    /** Handle `OnionAnnounceRequest` packet and return `OnionAnnounceResponse`.
 
-    If `AnnounceRequest` packet contains valid onion ping id it's considered as
-    announce request. Otherwise it's considered as search request. In case of
-    announce request we try to add new entry to announce list and if succeed
-    return status `AnnounceStatus::Announced`. In case of search request we try
-    to find entry by `search_pk` key from request and if succeed return status
-    `AnnounceStatus::Found`. If announce or search failed we return status
-    `AnnounceStatus::Failed`.
+    If `OnionAnnounceRequest` packet contains valid onion ping id it's
+    considered as announce request. Otherwise it's considered as search request.
+    In case of announce request we try to add new entry to announce list and if
+    succeed return status `AnnounceStatus::Announced`. In case of search request
+    we try to find entry by `search_pk` key from request and if succeed return
+    status `AnnounceStatus::Found`. If announce or search failed we return
+    status `AnnounceStatus::Failed`.
 
     If request is a search request and we found requested node then
     `ping_id_or_pk` field in response packet will contain `PublicKey` that
@@ -286,7 +286,7 @@ impl OnionAnnounce {
     announce.
 
     */
-    pub fn handle_announce_request(&mut self, request: AnnounceRequest, dht_sk: &SecretKey, kbucket: &Kbucket, addr: SocketAddr) -> Result<AnnounceResponse, Error> {
+    pub fn handle_onion_announce_request(&mut self, request: OnionAnnounceRequest, dht_sk: &SecretKey, kbucket: &Kbucket, addr: SocketAddr) -> Result<OnionAnnounceResponse, Error> {
         let shared_secret = precompute(&request.inner.pk, dht_sk);
         let payload = request.inner.get_payload(&shared_secret)?;
 
@@ -330,12 +330,12 @@ impl OnionAnnounce {
             (AnnounceStatus::Failed, ping_id_2)
         };
 
-        let response_payload = AnnounceResponsePayload {
+        let response_payload = OnionAnnounceResponsePayload {
             announce_status,
             ping_id_or_pk,
             nodes: kbucket.get_closest(&payload.search_pk)
         };
-        let response = AnnounceResponse::new(&shared_secret, payload.sendback_data, response_payload);
+        let response = OnionAnnounceResponse::new(&shared_secret, payload.sendback_data, response_payload);
 
         Ok(response)
     }
@@ -651,7 +651,7 @@ mod tests {
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////
-    // Tests for OnionAnnounce::handle_announce_request
+    // Tests for OnionAnnounce::handle_onion_announce_request
     #[test]
     fn handle_announce_failed_to_find_node() {
         let (dht_pk, dht_sk) = gen_keypair();
@@ -668,18 +668,18 @@ mod tests {
 
         // create request packet
         let sendback_data = 42;
-        let payload = AnnounceRequestPayload {
+        let payload = OnionAnnounceRequestPayload {
             ping_id: initial_ping_id(),
             search_pk,
             data_pk,
             sendback_data
         };
-        let inner = InnerAnnounceRequest::new(&shared_secret, &packet_pk, payload);
+        let inner = InnerOnionAnnounceRequest::new(&shared_secret, &packet_pk, payload);
         let onion_return = OnionReturn {
             nonce: gen_nonce(),
             payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
         };
-        let request = AnnounceRequest {
+        let request = OnionAnnounceRequest {
             inner,
             onion_return
         };
@@ -688,7 +688,7 @@ mod tests {
 
         let addr = "127.0.0.1:12345".parse().unwrap();
 
-        let response = onion_announce.handle_announce_request(request, &dht_sk, &kbucket, addr).unwrap();
+        let response = onion_announce.handle_onion_announce_request(request, &dht_sk, &kbucket, addr).unwrap();
 
         let response_payload = response.get_payload(&shared_secret).unwrap();
 
@@ -713,18 +713,18 @@ mod tests {
 
         // create request packet
         let sendback_data = 42;
-        let payload = AnnounceRequestPayload {
+        let payload = OnionAnnounceRequestPayload {
             ping_id: initial_ping_id(),
             search_pk,
             data_pk,
             sendback_data
         };
-        let inner = InnerAnnounceRequest::new(&shared_secret, &packet_pk, payload);
+        let inner = InnerOnionAnnounceRequest::new(&shared_secret, &packet_pk, payload);
         let onion_return = OnionReturn {
             nonce: gen_nonce(),
             payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
         };
-        let request = AnnounceRequest {
+        let request = OnionAnnounceRequest {
             inner,
             onion_return
         };
@@ -733,7 +733,7 @@ mod tests {
 
         let addr = "127.0.0.1:12345".parse().unwrap();
 
-        let response = onion_announce.handle_announce_request(request, &dht_sk, &kbucket, addr).unwrap();
+        let response = onion_announce.handle_onion_announce_request(request, &dht_sk, &kbucket, addr).unwrap();
 
         let response_payload = response.get_payload(&shared_secret).unwrap();
 
@@ -762,25 +762,25 @@ mod tests {
 
         // create request packet
         let sendback_data = 42;
-        let payload = AnnounceRequestPayload {
+        let payload = OnionAnnounceRequestPayload {
             ping_id,
             search_pk,
             data_pk,
             sendback_data
         };
-        let inner = InnerAnnounceRequest::new(&shared_secret, &packet_pk, payload);
+        let inner = InnerOnionAnnounceRequest::new(&shared_secret, &packet_pk, payload);
         let onion_return = OnionReturn {
             nonce: gen_nonce(),
             payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
         };
-        let request = AnnounceRequest {
+        let request = OnionAnnounceRequest {
             inner,
             onion_return
         };
 
         let kbucket = Kbucket::new(&dht_pk);
 
-        let response = onion_announce.handle_announce_request(request, &dht_sk, &kbucket, addr).unwrap();
+        let response = onion_announce.handle_onion_announce_request(request, &dht_sk, &kbucket, addr).unwrap();
 
         let response_payload = response.get_payload(&shared_secret).unwrap();
 
@@ -805,18 +805,18 @@ mod tests {
 
         // create request packet
         let sendback_data = 42;
-        let payload = AnnounceRequestPayload {
+        let payload = OnionAnnounceRequestPayload {
             ping_id: initial_ping_id(),
             search_pk: packet_pk,
             data_pk,
             sendback_data
         };
-        let inner = InnerAnnounceRequest::new(&shared_secret, &packet_pk, payload);
+        let inner = InnerOnionAnnounceRequest::new(&shared_secret, &packet_pk, payload);
         let onion_return = OnionReturn {
             nonce: gen_nonce(),
             payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
         };
-        let request = AnnounceRequest {
+        let request = OnionAnnounceRequest {
             inner,
             onion_return
         };
@@ -825,7 +825,7 @@ mod tests {
 
         let addr = "127.0.0.1:12345".parse().unwrap();
 
-        let response = onion_announce.handle_announce_request(request, &dht_sk, &kbucket, addr).unwrap();
+        let response = onion_announce.handle_onion_announce_request(request, &dht_sk, &kbucket, addr).unwrap();
 
         let response_payload = response.get_payload(&shared_secret).unwrap();
 
@@ -834,7 +834,7 @@ mod tests {
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////
-    // Tests for OnionAnnounce::handle_announce_request
+    // Tests for OnionAnnounce::handle_onion_announce_request
     #[test]
     fn handle_data_request() {
         let (dht_pk, _dht_sk) = gen_keypair();

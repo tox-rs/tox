@@ -21,8 +21,8 @@
 /*! Onion UDP Packets
 */
 
-mod announce_request;
-mod announce_response;
+mod onion_announce_request;
+mod onion_announce_response;
 mod inner_onion_request;
 mod inner_onion_response;
 mod onion_data_request;
@@ -34,8 +34,8 @@ mod onion_response_1;
 mod onion_response_2;
 mod onion_response_3;
 
-pub use self::announce_request::*;
-pub use self::announce_response::*;
+pub use self::onion_announce_request::*;
+pub use self::onion_announce_response::*;
 pub use self::inner_onion_request::*;
 pub use self::inner_onion_response::*;
 pub use self::onion_data_request::*;
