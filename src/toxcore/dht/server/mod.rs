@@ -49,9 +49,13 @@ use toxcore::onion::packet::*;
 use toxcore::onion::onion_announce::*;
 use toxcore::dht::server::client::*;
 use toxcore::io_tokio::IoFuture;
+use toxcore::tcp::packet::OnionRequest;
 
 /// Shorthand for the transmit half of the message channel.
 type Tx = mpsc::UnboundedSender<(DhtPacket, SocketAddr)>;
+
+/// Shorthand for the transmit half of the TCP onion channel.
+type TcpOnionTx = mpsc::UnboundedSender<(InnerOnionResponse, SocketAddr)>;
 
 /// Ping timeout in seconds
 pub const PING_TIMEOUT: u64 = 5;
@@ -94,7 +98,11 @@ pub struct Server {
     // symmetric key used for onion return encryption
     onion_symmetric_key: Arc<RwLock<PrecomputedKey>>,
     // onion announce struct to handle onion packets
-    onion_announce: Arc<RwLock<OnionAnnounce>>
+    onion_announce: Arc<RwLock<OnionAnnounce>>,
+    // `OnionResponse1` packets that have TCP protocol kind inside onion return
+    // should be redirected to TCP sender trough this sink
+    // None if there is no TCP relay
+    tcp_onion_sink: Option<TcpOnionTx>,
 }
 
 #[derive(Debug)]
@@ -124,6 +132,27 @@ impl Server {
             })),
             onion_symmetric_key: Arc::new(RwLock::new(new_symmetric_key())),
             onion_announce: Arc::new(RwLock::new(OnionAnnounce::new(pk))),
+            tcp_onion_sink: None
+        }
+    }
+    /**
+    Create new `Server` instance with TCP onion.
+    */
+    pub fn new_with_tcp_onion(tx: Tx, pk: PublicKey, sk: SecretKey, tcp_onion_sink: TcpOnionTx) -> Server {
+        let kbucket = Kbucket::new(&pk);
+
+        debug!("Created new Server instance");
+        Server {
+            sk,
+            pk,
+            tx,
+            state: Arc::new(RwLock::new(ServerState {
+                peers_cache: HashMap::new(),
+                kbucket,
+            })),
+            onion_symmetric_key: Arc::new(RwLock::new(new_symmetric_key())),
+            onion_announce: Arc::new(RwLock::new(OnionAnnounce::new(pk))),
+            tcp_onion_sink: Some(tcp_onion_sink)
         }
     }
     /// remove timed-out clients, also remove node from kbucket
@@ -775,7 +804,7 @@ impl Server {
             });
             self.send_to(ip_port.to_saddr(), next_packet)
         } else {
-            return Box::new( future::err(
+            Box::new( future::err(
                 Error::new(ErrorKind::Other,
                     format!("OnionResponse3 next_onion_return is none")
             )))
@@ -805,7 +834,7 @@ impl Server {
             });
             self.send_to(ip_port.to_saddr(), next_packet)
         } else {
-            return Box::new( future::err(
+            Box::new( future::err(
                 Error::new(ErrorKind::Other,
                     format!("OnionResponse2 next_onion_return is none")
             )))
@@ -830,13 +859,35 @@ impl Server {
         };
 
         if let (ip_port, None) = payload {
-            let next_packet = match packet.payload {
-                InnerOnionResponse::AnnounceResponse(inner) => DhtPacket::AnnounceResponse(inner),
-                InnerOnionResponse::OnionDataResponse(inner) => DhtPacket::OnionDataResponse(inner),
-            };
-            self.send_to(ip_port.to_saddr(), next_packet)
+            match ip_port.protocol {
+                ProtocolType::UDP => {
+                    let next_packet = match packet.payload {
+                        InnerOnionResponse::AnnounceResponse(inner) => DhtPacket::AnnounceResponse(inner),
+                        InnerOnionResponse::OnionDataResponse(inner) => DhtPacket::OnionDataResponse(inner),
+                    };
+                    self.send_to(ip_port.to_saddr(), next_packet)
+                },
+                ProtocolType::TCP => {
+                    if let Some(ref tcp_onion_sink) = self.tcp_onion_sink {
+                        Box::new(tcp_onion_sink.clone() // clone sink for 1 send only
+                            .send((packet.payload, ip_port.to_saddr()))
+                            .map(|_sink| ()) // ignore sink because it was cloned
+                            .map_err(|_| {
+                                // This may only happen if sink is gone
+                                // So cast SendError<T> to a corresponding std::io::Error
+                                Error::from(ErrorKind::UnexpectedEof)
+                            })
+                        )
+                    } else {
+                        Box::new( future::err(
+                            Error::new(ErrorKind::Other,
+                                format!("OnionResponse1 can't be redirected to TCP relay")
+                        )))
+                    }
+                },
+            }
         } else {
-            return Box::new( future::err(
+            Box::new( future::err(
                 Error::new(ErrorKind::Other,
                     format!("OnionResponse1 next_onion_return is some")
             )))
@@ -850,6 +901,24 @@ impl Server {
     pub fn try_add_to_kbucket(&self, pn: &PackedNode) -> bool {
         let mut state = self.state.write();
         state.kbucket.try_add(pn)
+    }
+    /// handle OnionRequest from TCP relay and send OnionRequest1 packet
+    /// to the next node in the onion path
+    pub fn handle_tcp_onion_request(&self, packet: OnionRequest, addr: SocketAddr) -> IoFuture<()> {
+        let onion_symmetric_key = self.onion_symmetric_key.read();
+
+        let onion_return = OnionReturn::new(
+            &onion_symmetric_key,
+            &IpPort::from_tcp_saddr(addr),
+            None // no previous onion return
+        );
+        let next_packet = DhtPacket::OnionRequest1(OnionRequest1 {
+            nonce: packet.nonce,
+            temporary_pk: packet.temporary_pk,
+            payload: packet.payload,
+            onion_return
+        });
+        self.send_to(packet.ip_port.to_saddr(), next_packet)
     }
 }
 
@@ -1819,6 +1888,67 @@ mod tests {
     }
 
     #[test]
+    fn server_handle_onion_response_1_redirect_to_tcp_test() {
+        let (pk, sk) = gen_keypair();
+        let (tx, _rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
+        let (tcp_onion_tx, tcp_onion_rx) = mpsc::unbounded::<(InnerOnionResponse, SocketAddr)>();
+        let alice = Server::new_with_tcp_onion(tx, pk, sk, tcp_onion_tx);
+
+        let addr: SocketAddr = "127.0.0.1:12346".parse().unwrap();
+
+        let onion_symmetric_key = alice.onion_symmetric_key.read();
+
+        let ip_port = IpPort {
+            protocol: ProtocolType::TCP,
+            ip_addr: "5.6.7.8".parse().unwrap(),
+            port: 12345
+        };
+        let onion_return = OnionReturn::new(&onion_symmetric_key, &ip_port, None);
+        let inner = InnerOnionResponse::AnnounceResponse(AnnounceResponse {
+            sendback_data: 12345,
+            nonce: gen_nonce(),
+            payload: vec![42; 123]
+        });
+        let packet = DhtPacket::OnionResponse1(OnionResponse1 {
+            onion_return,
+            payload: inner.clone()
+        });
+
+        assert!(alice.handle_packet((packet, addr)).wait().is_ok());
+
+        let (received, _tcp_onion_rx) = tcp_onion_rx.into_future().wait().unwrap();
+        let (packet, addr_to_send) = received.unwrap();
+
+        assert_eq!(addr_to_send, ip_port.to_saddr());
+        assert_eq!(packet, inner);
+    }
+
+    #[test]
+    fn server_handle_onion_response_1_can_not_redirect_to_tcp_test() {
+        let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
+
+        let onion_symmetric_key = alice.onion_symmetric_key.read();
+
+        let ip_port = IpPort {
+            protocol: ProtocolType::TCP,
+            ip_addr: "5.6.7.8".parse().unwrap(),
+            port: 12345
+        };
+        let onion_return = OnionReturn::new(&onion_symmetric_key, &ip_port, None);
+        let inner = AnnounceResponse {
+            sendback_data: 12345,
+            nonce: gen_nonce(),
+            payload: vec![42; 123]
+        };
+        let packet = DhtPacket::OnionResponse1(OnionResponse1 {
+            onion_return,
+            payload: InnerOnionResponse::AnnounceResponse(inner.clone())
+        });
+
+        assert!(alice.handle_packet((packet, addr)).wait().is_err());
+    }
+
+    #[test]
     fn server_handle_onion_response_1_invalid_onion_return_test() {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
@@ -2090,5 +2220,41 @@ mod tests {
         alice.refresh_onion_key();
 
         assert!(*alice.onion_symmetric_key.read() != onion_symmetric_key)
+    }
+
+    #[test]
+    fn server_handle_tcp_onion_request_test() {
+        let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
+
+        let temporary_pk = gen_keypair().0;
+        let payload = vec![42; 123];
+        let ip_port = IpPort {
+            protocol: ProtocolType::UDP,
+            ip_addr: "5.6.7.8".parse().unwrap(),
+            port: 12345
+        };
+        let packet = OnionRequest {
+            nonce: gen_nonce(),
+            ip_port: ip_port.clone(),
+            temporary_pk,
+            payload: payload.clone()
+        };
+
+        assert!(alice.handle_tcp_onion_request(packet, addr).wait().is_ok());
+
+        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (packet, addr_to_send) = received.unwrap();
+
+        assert_eq!(addr_to_send, ip_port.to_saddr());
+
+        let next_packet = unpack!(packet, DhtPacket::OnionRequest1);
+
+        assert_eq!(next_packet.temporary_pk, temporary_pk);
+        assert_eq!(next_packet.payload, payload);
+
+        let onion_symmetric_key = alice.onion_symmetric_key.read();
+        let onion_return_payload = next_packet.onion_return.get_payload(&onion_symmetric_key).unwrap();
+
+        assert_eq!(onion_return_payload.0, IpPort::from_tcp_saddr(addr));      
     }
 }
