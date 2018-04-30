@@ -57,12 +57,21 @@ fn main() {
         return;
     }
 
-    // gen some random keypair
-    let (pk, sk) = gen_keypair();
+    // Server constant PK for examples/tests
+    // Use `gen_keypair` to generate random keys
+    let server_pk = PublicKey([177, 185, 54, 250, 10, 168, 174,
+                            148, 0, 93, 99, 13, 131, 131, 239,
+                            193, 129, 141, 80, 158, 50, 133, 100,
+                            182, 179, 183, 234, 116, 142, 102, 53, 38]);
+    let server_sk = SecretKey([74, 163, 57, 111, 32, 145, 19, 40,
+                            44, 145, 233, 210, 173, 67, 88, 217,
+                            140, 147, 14, 176, 106, 255, 54, 249,
+                            159, 12, 18, 39, 123, 29, 125, 230]);
+
     // Create a channel for server to communicate with network
     let (tx, rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
 
-    let server_obj = Server::new(tx, pk, sk);
+    let server_obj = Server::new(tx, server_pk, server_sk);
 
     // Bootstrap from nodes
     for &(pk, saddr) in &[
@@ -153,7 +162,7 @@ fn main() {
 
     let server: IoFuture<()> = Box::new(network);
     let server = add_ping_sender(server, &server_obj);
-    let server = add_nat_sender(server, &server_obj, pk);
+    let server = add_nat_sender(server, &server_obj, server_pk);
     let server = add_lan_sender(server, &server_obj, local_addr);
     let server = add_nodes_sender(server, &server_obj);
     let server = add_onion_key_refresher(server, &server_obj);
