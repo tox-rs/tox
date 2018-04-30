@@ -26,7 +26,7 @@ extern crate tox;
 extern crate futures;
 extern crate tokio;
 extern crate tokio_io;
-extern crate rustc_serialize;
+extern crate hex;
 
 #[macro_use]
 extern crate log;
@@ -34,13 +34,13 @@ extern crate env_logger;
 
 use futures::*;
 use futures::sync::mpsc;
+use hex::FromHex;
 use tokio::net::{UdpSocket, UdpFramed};
 use tokio::timer::Interval;
 
 use std::net::{SocketAddr, IpAddr};
 use std::io::{ErrorKind, Error};
 use std::time::{Duration, Instant};
-use rustc_serialize::hex::FromHex;
 
 use tox::toxcore::dht::packet::*;
 use tox::toxcore::dht::codec::*;
@@ -88,7 +88,7 @@ fn main() {
     ]
     {
         // get PK bytes of the bootstrap node
-        let bootstrap_pk_bytes = FromHex::from_hex(pk).unwrap();
+        let bootstrap_pk_bytes: [u8; 32] = FromHex::from_hex(pk).unwrap();
         // create PK from bytes
         let bootstrap_pk = PublicKey::from_slice(&bootstrap_pk_bytes).unwrap();
 

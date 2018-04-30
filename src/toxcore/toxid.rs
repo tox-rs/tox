@@ -332,7 +332,6 @@ impl fmt::Display for ToxId {
 #[cfg(test)]
 mod tests {
     extern crate rand;
-    extern crate rustc_serialize;
 
     use quickcheck::quickcheck;
 
