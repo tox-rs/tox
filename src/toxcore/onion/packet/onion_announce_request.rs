@@ -18,7 +18,7 @@
     along with Tox.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-/*! AnnounceRequest packet with AnnounceRequestPayload
+/*! OnionAnnounceRequest packet with OnionAnnounceRequestPayload
 */
 
 use super::*;
@@ -32,16 +32,17 @@ use std::io::{Error, ErrorKind};
 /** It's used for announcing ourselves to onion node and for looking for other
 announced nodes.
 
-If we want to announce ourselves we should send one `AnnounceRequest` packet with
-PingId set to 0 to acquire correct PingId of onion node. Then using this PingId
-we can send another `AnnounceRequest` to be added to onion nodes list. If
-`AnnounceRequest` succeed we will get `AnnounceResponse` with announce_status
-set to 2. Otherwise announce_status will be set to 0.
+If we want to announce ourselves we should send one `OnionAnnounceRequest`
+packet with PingId set to 0 to acquire correct PingId of onion node. Then using
+this PingId we can send another `OnionAnnounceRequest` to be added to onion
+nodes list. If `OnionAnnounceRequest` succeed we will get
+`OnionAnnounceResponse` with announce_status set to 2. Otherwise announce_status
+will be set to 0.
 
-If we are looking for another node we should send `AnnounceRequest` packet with
-PingId set to 0 and with `PublicKey` of this node. If node is found we will get
-`AnnounceResponse` with announce_status set to 1. Otherwise announce_status will
-be set to 0.
+If we are looking for another node we should send `OnionAnnounceRequest` packet
+with PingId set to 0 and with `PublicKey` of this node. If node is found we will
+get `OnionAnnounceResponse` with announce_status set to 1. Otherwise
+announce_status will be set to 0.
 
 Serialized form:
 
@@ -52,11 +53,11 @@ Length   | Content
 `32`     | Temporary or real `PublicKey`
 variable | Payload
 
-where payload is encrypted [`AnnounceRequestPayload`](./struct.AnnounceRequestPayload.html)
+where payload is encrypted [`OnionAnnounceRequestPayload`](./struct.OnionAnnounceRequestPayload.html)
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct InnerAnnounceRequest {
+pub struct InnerOnionAnnounceRequest {
     /// Nonce for the current encrypted payload
     pub nonce: Nonce,
     /// Temporary or real `PublicKey` for the current encrypted payload
@@ -65,13 +66,13 @@ pub struct InnerAnnounceRequest {
     pub payload: Vec<u8>
 }
 
-impl FromBytes for InnerAnnounceRequest {
-    named!(from_bytes<InnerAnnounceRequest>, do_parse!(
+impl FromBytes for InnerOnionAnnounceRequest {
+    named!(from_bytes<InnerOnionAnnounceRequest>, do_parse!(
         tag!(&[0x83][..]) >>
         nonce: call!(Nonce::from_bytes) >>
         pk: call!(PublicKey::from_bytes) >>
         payload: rest >>
-        (InnerAnnounceRequest {
+        (InnerOnionAnnounceRequest {
             nonce,
             pk,
             payload: payload.to_vec()
@@ -79,7 +80,7 @@ impl FromBytes for InnerAnnounceRequest {
     ));
 }
 
-impl ToBytes for InnerAnnounceRequest {
+impl ToBytes for InnerOnionAnnounceRequest {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x83) >>
@@ -90,40 +91,40 @@ impl ToBytes for InnerAnnounceRequest {
     }
 }
 
-impl InnerAnnounceRequest {
-    /// Create new `InnerAnnounceRequest` object.
-    pub fn new(shared_secret: &PrecomputedKey, pk: &PublicKey, payload: AnnounceRequestPayload) -> InnerAnnounceRequest {
+impl InnerOnionAnnounceRequest {
+    /// Create new `InnerOnionAnnounceRequest` object.
+    pub fn new(shared_secret: &PrecomputedKey, pk: &PublicKey, payload: OnionAnnounceRequestPayload) -> InnerOnionAnnounceRequest {
         let nonce = gen_nonce();
         let mut buf = [0; ONION_MAX_PACKET_SIZE];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
         let payload = seal_precomputed(&buf[..size], &nonce, shared_secret);
 
-        InnerAnnounceRequest { nonce, pk: *pk, payload }
+        InnerOnionAnnounceRequest { nonce, pk: *pk, payload }
     }
 
-    /** Decrypt payload and try to parse it as `AnnounceRequestPayload`.
+    /** Decrypt payload and try to parse it as `OnionAnnounceRequestPayload`.
 
     Returns `Error` in case of failure:
 
     - fails to decrypt
-    - fails to parse as `AnnounceRequestPayload`
+    - fails to parse as `OnionAnnounceRequestPayload`
     */
-    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<AnnounceRequestPayload, Error> {
+    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<OnionAnnounceRequestPayload, Error> {
         let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
             .map_err(|()| {
-                debug!("Decrypting AnnounceRequest failed!");
-                Error::new(ErrorKind::Other, "AnnounceRequest decrypt error.")
+                debug!("Decrypting OnionAnnounceRequest failed!");
+                Error::new(ErrorKind::Other, "OnionAnnounceRequest decrypt error.")
             })?;
-        match AnnounceRequestPayload::from_bytes(&decrypted) {
+        match OnionAnnounceRequestPayload::from_bytes(&decrypted) {
             IResult::Incomplete(e) => {
-                debug!(target: "Onion", "AnnounceRequestPayload deserialize error: {:?}", e);
+                debug!(target: "Onion", "OnionAnnounceRequestPayload deserialize error: {:?}", e);
                 Err(Error::new(ErrorKind::Other,
-                    format!("AnnounceRequestPayload deserialize error: {:?}", e)))
+                    format!("OnionAnnounceRequestPayload deserialize error: {:?}", e)))
             },
             IResult::Error(e) => {
-                debug!(target: "Onion", "AnnounceRequestPayload deserialize error: {:?}", e);
+                debug!(target: "Onion", "OnionAnnounceRequestPayload deserialize error: {:?}", e);
                 Err(Error::new(ErrorKind::Other,
-                    format!("AnnounceRequestPayload deserialize error: {:?}", e)))
+                    format!("OnionAnnounceRequestPayload deserialize error: {:?}", e)))
             },
             IResult::Done(_, inner) => {
                 Ok(inner)
@@ -132,10 +133,10 @@ impl InnerAnnounceRequest {
     }
 }
 
-/** Same as `InnerAnnounceRequest` but with `OnionReturn` addresses. It's sent
+/** Same as `InnerOnionAnnounceRequest` but with `OnionReturn` addresses. It's sent
 from the third node from onion chain to the destination node.
 
-See [`InnerAnnounceRequest`](./struct.InnerAnnounceRequest.html) for additional docs.
+See [`InnerOnionAnnounceRequest`](./struct.InnerOnionAnnounceRequest.html) for additional docs.
 
 Serialized form:
 
@@ -147,40 +148,40 @@ Length   | Content
 variable | Payload
 `177`    | `OnionReturn`
 
-where payload is encrypted [`AnnounceRequestPayload`](./struct.AnnounceRequestPayload.html)
+where payload is encrypted [`OnionAnnounceRequestPayload`](./struct.OnionAnnounceRequestPayload.html)
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AnnounceRequest {
+pub struct OnionAnnounceRequest {
     /// Inner announce request that was enclosed in onion packets
-    pub inner: InnerAnnounceRequest,
+    pub inner: InnerOnionAnnounceRequest,
     /// Return address encrypted by the third node from onion chain
     pub onion_return: OnionReturn
 }
 
-impl FromBytes for AnnounceRequest {
-    named!(from_bytes<AnnounceRequest>, do_parse!(
+impl FromBytes for OnionAnnounceRequest {
+    named!(from_bytes<OnionAnnounceRequest>, do_parse!(
         rest_len: verify!(rest_len, |len| len <= ONION_MAX_PACKET_SIZE) >>
         inner: cond_reduce!(
             rest_len >= ONION_RETURN_3_SIZE,
-            flat_map!(take!(rest_len - ONION_RETURN_3_SIZE), InnerAnnounceRequest::from_bytes)
+            flat_map!(take!(rest_len - ONION_RETURN_3_SIZE), InnerOnionAnnounceRequest::from_bytes)
         ) >>
         onion_return: call!(OnionReturn::from_bytes) >>
-        (AnnounceRequest { inner, onion_return })
+        (OnionAnnounceRequest { inner, onion_return })
     ));
 }
 
-impl ToBytes for AnnounceRequest {
+impl ToBytes for OnionAnnounceRequest {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
-            gen_call!(|buf, inner| InnerAnnounceRequest::to_bytes(inner, buf), &self.inner) >>
+            gen_call!(|buf, inner| InnerOnionAnnounceRequest::to_bytes(inner, buf), &self.inner) >>
             gen_call!(|buf, onion_return| OnionReturn::to_bytes(onion_return, buf), &self.onion_return) >>
             gen_len_limit(ONION_MAX_PACKET_SIZE)
         )
     }
 }
 
-/** Unencrypted payload of `AnnounceRequest` packet.
+/** Unencrypted payload of `OnionAnnounceRequest` packet.
 
 Serialized form:
 
@@ -193,7 +194,7 @@ Length   | Content
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AnnounceRequestPayload {
+pub struct OnionAnnounceRequestPayload {
     /// Onion ping id
     pub ping_id: Digest,
     /// `PublicKey` we are searching for
@@ -204,18 +205,18 @@ pub struct AnnounceRequestPayload {
     pub sendback_data: u64
 }
 
-impl FromBytes for AnnounceRequestPayload {
-    named!(from_bytes<AnnounceRequestPayload>, do_parse!(
+impl FromBytes for OnionAnnounceRequestPayload {
+    named!(from_bytes<OnionAnnounceRequestPayload>, do_parse!(
         ping_id: call!(Digest::from_bytes) >>
         search_pk: call!(PublicKey::from_bytes) >>
         data_pk: call!(PublicKey::from_bytes) >>
         sendback_data: le_u64 >>
         eof!() >>
-        (AnnounceRequestPayload { ping_id, search_pk, data_pk, sendback_data })
+        (OnionAnnounceRequestPayload { ping_id, search_pk, data_pk, sendback_data })
     ));
 }
 
-impl ToBytes for AnnounceRequestPayload {
+impl ToBytes for OnionAnnounceRequestPayload {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_slice!(self.ping_id.as_ref()) >>
@@ -233,8 +234,8 @@ mod tests {
     const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - NONCEBYTES;
 
     encode_decode_test!(
-        inner_announce_request_encode_decode,
-        InnerAnnounceRequest {
+        inner_onion_announce_request_encode_decode,
+        InnerOnionAnnounceRequest {
             nonce: gen_nonce(),
             pk: gen_keypair().0,
             payload: vec![42; 123]
@@ -242,9 +243,9 @@ mod tests {
     );
 
     encode_decode_test!(
-        announce_request_encode_decode,
-        AnnounceRequest {
-            inner: InnerAnnounceRequest {
+        onion_announce_request_encode_decode,
+        OnionAnnounceRequest {
+            inner: InnerOnionAnnounceRequest {
                 nonce: gen_nonce(),
                 pk: gen_keypair().0,
                 payload: vec![42; 123]
@@ -257,8 +258,8 @@ mod tests {
     );
 
     encode_decode_test!(
-        announce_request_payload_encode_decode,
-        AnnounceRequestPayload {
+        onion_announce_request_payload_encode_decode,
+        OnionAnnounceRequestPayload {
             ping_id: hash(&[1, 2, 3]),
             search_pk: gen_keypair().0,
             data_pk: gen_keypair().0,
@@ -267,18 +268,18 @@ mod tests {
     );
 
     #[test]
-    fn announce_request_payload_encrypt_decrypt() {
+    fn onion_announce_request_payload_encrypt_decrypt() {
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
-        let payload = AnnounceRequestPayload {
+        let payload = OnionAnnounceRequestPayload {
             ping_id: hash(&[1, 2, 3]),
             search_pk: gen_keypair().0,
             data_pk: gen_keypair().0,
             sendback_data: 12345
         };
         // encode payload with shared secret
-        let onion_packet = InnerAnnounceRequest::new(&shared_secret, &alice_pk, payload.clone());
+        let onion_packet = InnerOnionAnnounceRequest::new(&shared_secret, &alice_pk, payload.clone());
         // decode payload with bob's secret key
         let decoded_payload = onion_packet.get_payload(&shared_secret).unwrap();
         // payloads should be equal
@@ -286,19 +287,19 @@ mod tests {
     }
 
     #[test]
-    fn announce_request_payload_encrypt_decrypt_invalid_key() {
+    fn onion_announce_request_payload_encrypt_decrypt_invalid_key() {
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let (_eve_pk, eve_sk) = gen_keypair();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
-        let payload = AnnounceRequestPayload {
+        let payload = OnionAnnounceRequestPayload {
             ping_id: hash(&[1, 2, 3]),
             search_pk: gen_keypair().0,
             data_pk: gen_keypair().0,
             sendback_data: 12345
         };
         // encode payload with shared secret
-        let onion_packet = InnerAnnounceRequest::new(&shared_secret, &alice_pk, payload.clone());
+        let onion_packet = InnerOnionAnnounceRequest::new(&shared_secret, &alice_pk, payload.clone());
         // try to decode payload with eve's secret key
         let eve_shared_secret = encrypt_precompute(&bob_pk, &eve_sk);
         let decoded_payload = onion_packet.get_payload(&eve_shared_secret);
@@ -306,27 +307,27 @@ mod tests {
     }
 
     #[test]
-    fn announce_request_decrypt_invalid() {
+    fn onion_announce_request_decrypt_invalid() {
         let symmetric_key = new_symmetric_key();
         let nonce = gen_nonce();
         let pk = gen_keypair().0;
         // Try long invalid array
         let invalid_payload = [42; 123];
         let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
-        let invalid_announce_request = InnerAnnounceRequest {
+        let invalid_onion_announce_request = InnerOnionAnnounceRequest {
             nonce,
             pk,
             payload: invalid_payload_encoded
         };
-        assert!(invalid_announce_request.get_payload(&symmetric_key).is_err());
+        assert!(invalid_onion_announce_request.get_payload(&symmetric_key).is_err());
         // Try short incomplete array
         let invalid_payload = [];
         let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
-        let invalid_announce_request = InnerAnnounceRequest {
+        let invalid_onion_announce_request = InnerOnionAnnounceRequest {
             nonce,
             pk,
             payload: invalid_payload_encoded
         };
-        assert!(invalid_announce_request.get_payload(&symmetric_key).is_err());
+        assert!(invalid_onion_announce_request.get_payload(&symmetric_key).is_err());
     }
 }

@@ -92,8 +92,8 @@ consider helping :wink:
         - [x] LanDiscovery
         - [x] OnionRequest[0,1,2]
         - [x] OnionResponse[3,2,1]
-        - [x] AnnounceRequest & OnionDataRequest
-        - [ ] AnnounceResponse & OnionDataResponse (parsed but ignored)
+        - [x] OnionAnnounceRequest & OnionDataRequest
+        - [ ] OnionAnnounceResponse & OnionDataResponse (parsed but ignored)
         - [ ] BootstrapInfo (parsed but ignored)
         - [x] NAT ping requests & responses
     - [ ] TCP Relay

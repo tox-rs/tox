@@ -29,12 +29,12 @@ use toxcore::binary_io::*;
 path.
 
 Onion allows only two types of packets to be sent as a request through onion
-paths: `AnnounceRequest` and `OnionDataRequest`.
+paths: `OnionAnnounceRequest` and `OnionDataRequest`.
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum InnerOnionRequest {
-    /// [`InnerAnnounceRequest`](./struct.InnerAnnounceRequest.html) structure.
-    InnerAnnounceRequest(InnerAnnounceRequest),
+    /// [`InnerOnionAnnounceRequest`](./struct.InnerOnionAnnounceRequest.html) structure.
+    InnerOnionAnnounceRequest(InnerOnionAnnounceRequest),
     /// [`InnerOnionDataRequest`](./struct.InnerOnionDataRequest.html) structure.
     InnerOnionDataRequest(InnerOnionDataRequest)
 }
@@ -42,7 +42,7 @@ pub enum InnerOnionRequest {
 impl ToBytes for InnerOnionRequest {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         match *self {
-            InnerOnionRequest::InnerAnnounceRequest(ref inner) => inner.to_bytes(buf),
+            InnerOnionRequest::InnerOnionAnnounceRequest(ref inner) => inner.to_bytes(buf),
             InnerOnionRequest::InnerOnionDataRequest(ref inner) => inner.to_bytes(buf),
         }
     }
@@ -50,7 +50,7 @@ impl ToBytes for InnerOnionRequest {
 
 impl FromBytes for InnerOnionRequest {
     named!(from_bytes<InnerOnionRequest>, alt!(
-        map!(InnerAnnounceRequest::from_bytes, InnerOnionRequest::InnerAnnounceRequest) |
+        map!(InnerOnionAnnounceRequest::from_bytes, InnerOnionRequest::InnerOnionAnnounceRequest) |
         map!(InnerOnionDataRequest::from_bytes, InnerOnionRequest::InnerOnionDataRequest)
     ));
 }
@@ -60,8 +60,8 @@ mod tests {
     use super::*;
 
     encode_decode_test!(
-        inner_announce_request_encode_decode,
-        InnerOnionRequest::InnerAnnounceRequest(InnerAnnounceRequest {
+        inner_onion_announce_request_encode_decode,
+        InnerOnionRequest::InnerOnionAnnounceRequest(InnerOnionAnnounceRequest {
             nonce: gen_nonce(),
             pk: gen_keypair().0,
             payload: vec![42; 123]

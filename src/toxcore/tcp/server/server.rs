@@ -765,7 +765,7 @@ mod tests {
         let client_port_1 = client_1.port();
         server.insert(client_1);
 
-        let payload = InnerOnionResponse::AnnounceResponse(AnnounceResponse {
+        let payload = InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
             sendback_data: 12345,
             nonce: gen_nonce(),
             payload: vec![42; 123]
@@ -1022,7 +1022,7 @@ mod tests {
         let client_pk_1 = client_1.pk();
         server.insert(client_1);
 
-        let payload = InnerOnionResponse::AnnounceResponse(AnnounceResponse {
+        let payload = InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
             sendback_data: 12345,
             nonce: gen_nonce(),
             payload: vec![42; 123]
@@ -1047,7 +1047,7 @@ mod tests {
         let client_addr_2 = IpAddr::V4(Ipv4Addr::new(5, 6, 7, 8));
         let client_port_2 = 54321u16;
 
-        let payload = InnerOnionResponse::AnnounceResponse(AnnounceResponse {
+        let payload = InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
             sendback_data: 12345,
             nonce: gen_nonce(),
             payload: vec![42; 123]

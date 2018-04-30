@@ -29,12 +29,12 @@ use toxcore::binary_io::*;
 path.
 
 Onion allows only two types of packets to be sent as a response through onion
-paths: `AnnounceResponse` and `OnionDataResponse`.
+paths: `OnionAnnounceResponse` and `OnionDataResponse`.
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum InnerOnionResponse {
-    /// [`AnnounceResponse`](./struct.AnnounceResponse.html) structure.
-    AnnounceResponse(AnnounceResponse),
+    /// [`OnionAnnounceResponse`](./struct.OnionAnnounceResponse.html) structure.
+    OnionAnnounceResponse(OnionAnnounceResponse),
     /// [`OnionDataResponse`](./struct.OnionDataResponse.html) structure.
     OnionDataResponse(OnionDataResponse)
 }
@@ -42,7 +42,7 @@ pub enum InnerOnionResponse {
 impl ToBytes for InnerOnionResponse {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         match *self {
-            InnerOnionResponse::AnnounceResponse(ref inner) => inner.to_bytes(buf),
+            InnerOnionResponse::OnionAnnounceResponse(ref inner) => inner.to_bytes(buf),
             InnerOnionResponse::OnionDataResponse(ref inner) => inner.to_bytes(buf),
         }
     }
@@ -50,7 +50,7 @@ impl ToBytes for InnerOnionResponse {
 
 impl FromBytes for InnerOnionResponse {
     named!(from_bytes<InnerOnionResponse>, alt!(
-        map!(AnnounceResponse::from_bytes, InnerOnionResponse::AnnounceResponse) |
+        map!(OnionAnnounceResponse::from_bytes, InnerOnionResponse::OnionAnnounceResponse) |
         map!(OnionDataResponse::from_bytes, InnerOnionResponse::OnionDataResponse)
     ));
 }
@@ -60,8 +60,8 @@ mod tests {
     use super::*;
 
     encode_decode_test!(
-        inner_announce_response_encode_decode,
-        InnerOnionResponse::AnnounceResponse(AnnounceResponse {
+        inner_onion_announce_response_encode_decode,
+        InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
             sendback_data: 12345,
             nonce: gen_nonce(),
             payload: vec![42; 123]

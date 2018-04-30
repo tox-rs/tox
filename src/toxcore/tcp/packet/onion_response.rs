@@ -64,12 +64,12 @@ mod test {
     use super::*;
 
     use toxcore::crypto_core::*;
-    use toxcore::onion::packet::{AnnounceResponse, OnionDataResponse};
+    use toxcore::onion::packet::{OnionAnnounceResponse, OnionDataResponse};
 
     encode_decode_test!(
         onion_response_with_announce_encode_decode,
         OnionResponse {
-            payload: InnerOnionResponse::AnnounceResponse(AnnounceResponse {
+            payload: InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
                 sendback_data: 12345,
                 nonce: gen_nonce(),
                 payload: vec![42; 123]

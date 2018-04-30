@@ -18,7 +18,7 @@
     along with Tox.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-/*! AnnounceResponse packet with AnnounceResponsePayload
+/*! OnionAnnounceResponse packet with OnionAnnounceResponsePayload
 */
 
 use super::*;
@@ -29,9 +29,9 @@ use toxcore::crypto_core::*;
 use nom::{le_u64, rest};
 use std::io::{Error, ErrorKind};
 
-/** It's used to respond to AnnounceRequest packet.
+/** It's used to respond to `OnionAnnounceRequest` packet.
 
-sendback_data is the data from `AnnounceRequest` that should be sent in the
+sendback_data is the data from `OnionAnnounceRequest` that should be sent in the
 response as is. It's used in onion client to match onion response with sent
 request.
 
@@ -44,11 +44,11 @@ Length   | Content
 `24`     | `Nonce`
 variable | Payload
 
-where payload is encrypted [`AnnounceResponsePayload`](./struct.AnnounceResponsePayload.html)
+where payload is encrypted [`OnionAnnounceResponsePayload`](./struct.OnionAnnounceResponsePayload.html)
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AnnounceResponse {
+pub struct OnionAnnounceResponse {
     /// Data to send back in response
     pub sendback_data: u64,
     /// Nonce for the current encrypted payload
@@ -57,14 +57,14 @@ pub struct AnnounceResponse {
     pub payload: Vec<u8>
 }
 
-impl FromBytes for AnnounceResponse {
-    named!(from_bytes<AnnounceResponse>, do_parse!(
+impl FromBytes for OnionAnnounceResponse {
+    named!(from_bytes<OnionAnnounceResponse>, do_parse!(
         verify!(rest_len, |len| len <= ONION_MAX_PACKET_SIZE) >>
         tag!(&[0x84][..]) >>
         sendback_data: le_u64 >>
         nonce: call!(Nonce::from_bytes) >>
         payload: rest >>
-        (AnnounceResponse {
+        (OnionAnnounceResponse {
             sendback_data,
             nonce,
             payload: payload.to_vec()
@@ -72,7 +72,7 @@ impl FromBytes for AnnounceResponse {
     ));
 }
 
-impl ToBytes for AnnounceResponse {
+impl ToBytes for OnionAnnounceResponse {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x84) >>
@@ -84,40 +84,40 @@ impl ToBytes for AnnounceResponse {
     }
 }
 
-impl AnnounceResponse {
-    /// Create new `AnnounceResponse` object.
-    pub fn new(shared_secret: &PrecomputedKey, sendback_data: u64, payload: AnnounceResponsePayload) -> AnnounceResponse {
+impl OnionAnnounceResponse {
+    /// Create new `OnionAnnounceResponse` object.
+    pub fn new(shared_secret: &PrecomputedKey, sendback_data: u64, payload: OnionAnnounceResponsePayload) -> OnionAnnounceResponse {
         let nonce = gen_nonce();
         let mut buf = [0; ONION_MAX_PACKET_SIZE];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
         let payload = seal_precomputed(&buf[..size], &nonce, shared_secret);
 
-        AnnounceResponse { sendback_data, nonce, payload }
+        OnionAnnounceResponse { sendback_data, nonce, payload }
     }
 
-    /** Decrypt payload and try to parse it as `AnnounceResponsePayload`.
+    /** Decrypt payload and try to parse it as `OnionAnnounceResponsePayload`.
 
     Returns `Error` in case of failure:
 
     - fails to decrypt
-    - fails to parse as `AnnounceResponsePayload`
+    - fails to parse as `OnionAnnounceResponsePayload`
     */
-    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<AnnounceResponsePayload, Error> {
+    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<OnionAnnounceResponsePayload, Error> {
         let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
             .map_err(|()| {
-                debug!("Decrypting AnnounceResponse failed!");
-                Error::new(ErrorKind::Other, "AnnounceResponse decrypt error.")
+                debug!("Decrypting OnionAnnounceResponse failed!");
+                Error::new(ErrorKind::Other, "OnionAnnounceResponse decrypt error.")
             })?;
-        match AnnounceResponsePayload::from_bytes(&decrypted) {
+        match OnionAnnounceResponsePayload::from_bytes(&decrypted) {
             IResult::Incomplete(e) => {
-                debug!(target: "Onion", "AnnounceResponsePayload deserialize error: {:?}", e);
+                debug!(target: "Onion", "OnionAnnounceResponsePayload deserialize error: {:?}", e);
                 Err(Error::new(ErrorKind::Other,
-                    format!("AnnounceResponsePayload deserialize error: {:?}", e)))
+                    format!("OnionAnnounceResponsePayload deserialize error: {:?}", e)))
             },
             IResult::Error(e) => {
-                debug!(target: "Onion", "AnnounceResponsePayload deserialize error: {:?}", e);
+                debug!(target: "Onion", "OnionAnnounceResponsePayload deserialize error: {:?}", e);
                 Err(Error::new(ErrorKind::Other,
-                    format!("AnnounceResponsePayload deserialize error: {:?}", e)))
+                    format!("OnionAnnounceResponsePayload deserialize error: {:?}", e)))
             },
             IResult::Done(_, inner) => {
                 Ok(inner)
@@ -126,7 +126,7 @@ impl AnnounceResponse {
     }
 }
 
-/** Unencrypted payload of `AnnounceResponse` packet.
+/** Unencrypted payload of `OnionAnnounceResponse` packet.
 
 `announce_status` variable contains the result of sent request. It might have
 values:
@@ -149,8 +149,8 @@ Length   | Content
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AnnounceResponsePayload {
-    /// Variable that represents result of sent `AnnounceRequest`. Also known
+pub struct OnionAnnounceResponsePayload {
+    /// Variable that represents result of sent `OnionAnnounceRequest`. Also known
     /// as `is_stored` variable
     pub announce_status: AnnounceStatus,
     /// Onion ping id or PublicKey that should be used to send data packets
@@ -159,13 +159,13 @@ pub struct AnnounceResponsePayload {
     pub nodes: Vec<PackedNode>
 }
 
-impl FromBytes for AnnounceResponsePayload {
-    named!(from_bytes<AnnounceResponsePayload>, do_parse!(
+impl FromBytes for OnionAnnounceResponsePayload {
+    named!(from_bytes<OnionAnnounceResponsePayload>, do_parse!(
         announce_status: call!(AnnounceStatus::from_bytes) >>
         ping_id_or_pk: call!(Digest::from_bytes) >>
         nodes: many0!(PackedNode::from_bytes) >>
         cond_reduce!(nodes.len() <= 4, eof!()) >>
-        (AnnounceResponsePayload {
+        (OnionAnnounceResponsePayload {
             announce_status,
             ping_id_or_pk,
             nodes
@@ -173,7 +173,7 @@ impl FromBytes for AnnounceResponsePayload {
     ));
 }
 
-impl ToBytes for AnnounceResponsePayload {
+impl ToBytes for OnionAnnounceResponsePayload {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_call!(|buf, announce_status| AnnounceStatus::to_bytes(announce_status, buf), &self.announce_status) >>
@@ -193,8 +193,8 @@ mod tests {
     use std::net::SocketAddr;
 
     encode_decode_test!(
-        announce_response_encode_decode,
-        AnnounceResponse {
+        onion_announce_response_encode_decode,
+        OnionAnnounceResponse {
             sendback_data: 12345,
             nonce: gen_nonce(),
             payload: vec![42; 123]
@@ -202,8 +202,8 @@ mod tests {
     );
 
     encode_decode_test!(
-        announce_response_payload_encode_decode,
-        AnnounceResponsePayload {
+        onion_announce_response_payload_encode_decode,
+        OnionAnnounceResponsePayload {
             announce_status: AnnounceStatus::Found,
             ping_id_or_pk: hash(&[1, 2, 3]),
             nodes: vec![
@@ -213,11 +213,11 @@ mod tests {
     );
 
     #[test]
-    fn announce_response_payload_encrypt_decrypt() {
+    fn onion_announce_response_payload_encrypt_decrypt() {
         let (_alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
-        let payload = AnnounceResponsePayload {
+        let payload = OnionAnnounceResponsePayload {
             announce_status: AnnounceStatus::Found,
             ping_id_or_pk: hash(&[1, 2, 3]),
             nodes: vec![
@@ -225,7 +225,7 @@ mod tests {
             ]
         };
         // encode payload with shared secret
-        let onion_packet = AnnounceResponse::new(&shared_secret, 12345, payload.clone());
+        let onion_packet = OnionAnnounceResponse::new(&shared_secret, 12345, payload.clone());
         // decode payload with bob's secret key
         let decoded_payload = onion_packet.get_payload(&shared_secret).unwrap();
         // payloads should be equal
@@ -233,12 +233,12 @@ mod tests {
     }
 
     #[test]
-    fn announce_response_payload_encrypt_decrypt_invalid_key() {
+    fn onion_announce_response_payload_encrypt_decrypt_invalid_key() {
         let (_alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let (_eve_pk, eve_sk) = gen_keypair();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
-        let payload = AnnounceResponsePayload {
+        let payload = OnionAnnounceResponsePayload {
             announce_status: AnnounceStatus::Found,
             ping_id_or_pk: hash(&[1, 2, 3]),
             nodes: vec![
@@ -246,7 +246,7 @@ mod tests {
             ]
         };
         // encode payload with shared secret
-        let onion_packet = AnnounceResponse::new(&shared_secret, 12345, payload.clone());
+        let onion_packet = OnionAnnounceResponse::new(&shared_secret, 12345, payload.clone());
         // try to decode payload with eve's secret key
         let eve_shared_secret = encrypt_precompute(&bob_pk, &eve_sk);
         let decoded_payload = onion_packet.get_payload(&eve_shared_secret);
@@ -254,26 +254,26 @@ mod tests {
     }
 
     #[test]
-    fn announce_response_decrypt_invalid() {
+    fn onion_announce_response_decrypt_invalid() {
         let symmetric_key = new_symmetric_key();
         let nonce = gen_nonce();
         // Try long invalid array
         let invalid_payload = [42; 123];
         let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
-        let invalid_announce_response = AnnounceResponse {
+        let invalid_onion_announce_response = OnionAnnounceResponse {
             sendback_data: 12345,
             nonce,
             payload: invalid_payload_encoded
         };
-        assert!(invalid_announce_response.get_payload(&symmetric_key).is_err());
+        assert!(invalid_onion_announce_response.get_payload(&symmetric_key).is_err());
         // Try short incomplete array
         let invalid_payload = [];
         let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
-        let invalid_announce_response = AnnounceResponse {
+        let invalid_onion_announce_response = OnionAnnounceResponse {
             sendback_data: 12345,
             nonce,
             payload: invalid_payload_encoded
         };
-        assert!(invalid_announce_response.get_payload(&symmetric_key).is_err());
+        assert!(invalid_onion_announce_response.get_payload(&symmetric_key).is_err());
     }
 }

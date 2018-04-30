@@ -306,9 +306,9 @@ impl Server {
                 debug!("Received OnionRequest2");
                 self.handle_onion_request_2(packet, addr)
             },
-            DhtPacket::AnnounceRequest(packet) => {
-                debug!("Received AnnounceRequest");
-                self.handle_announce_request(packet, addr)
+            DhtPacket::OnionAnnounceRequest(packet) => {
+                debug!("Received OnionAnnounceRequest");
+                self.handle_onion_announce_request(packet, addr)
             },
             DhtPacket::OnionDataRequest(packet) => {
                 debug!("Received OnionDataRequest");
@@ -718,7 +718,7 @@ impl Server {
         self.send_to(payload.ip_port.to_saddr(), next_packet)
     }
     /**
-    handle received OnionRequest2 packet, then create AnnounceRequest
+    handle received OnionRequest2 packet, then create OnionAnnounceRequest
     or OnionDataRequest packet and send it to the next peer.
     */
     fn handle_onion_request_2(&self, packet: OnionRequest2, addr: SocketAddr) -> IoFuture<()> {
@@ -741,7 +741,7 @@ impl Server {
             Some(&packet.onion_return)
         );
         let next_packet = match payload.inner {
-            InnerOnionRequest::InnerAnnounceRequest(inner) => DhtPacket::AnnounceRequest(AnnounceRequest {
+            InnerOnionRequest::InnerOnionAnnounceRequest(inner) => DhtPacket::OnionAnnounceRequest(OnionAnnounceRequest {
                 inner,
                 onion_return
             }),
@@ -753,18 +753,18 @@ impl Server {
         self.send_to(payload.ip_port.to_saddr(), next_packet)
     }
     /**
-    handle received AnnounceRequest packet and send AnnounceResponse packet back
-    if request succeed.
+    handle received OnionAnnounceRequest packet and send OnionAnnounceResponse
+    packet back if request succeed.
     */
-    fn handle_announce_request(&self, packet: AnnounceRequest, addr: SocketAddr) -> IoFuture<()> {
+    fn handle_onion_announce_request(&self, packet: OnionAnnounceRequest, addr: SocketAddr) -> IoFuture<()> {
         let mut onion_announce = self.onion_announce.write();
         let state = self.state.read();
         let onion_return = packet.onion_return.clone();
-        let response = onion_announce.handle_announce_request(packet, &self.sk, &state.kbucket, addr);
+        let response = onion_announce.handle_onion_announce_request(packet, &self.sk, &state.kbucket, addr);
         match response {
             Ok(response) => self.send_to(addr, DhtPacket::OnionResponse3(OnionResponse3 {
                 onion_return,
-                payload: InnerOnionResponse::AnnounceResponse(response)
+                payload: InnerOnionResponse::OnionAnnounceResponse(response)
             })),
             Err(e) => Box::new(future::err(e))
         }
@@ -841,7 +841,7 @@ impl Server {
         }
     }
     /**
-    handle received OnionResponse1 packet, then create AnnounceResponse
+    handle received OnionResponse1 packet, then create OnionAnnounceResponse
     or OnionDataResponse packet and send it to the next peer which address
     is stored in encrypted onion return.
     */
@@ -862,7 +862,7 @@ impl Server {
             match ip_port.protocol {
                 ProtocolType::UDP => {
                     let next_packet = match packet.payload {
-                        InnerOnionResponse::AnnounceResponse(inner) => DhtPacket::AnnounceResponse(inner),
+                        InnerOnionResponse::OnionAnnounceResponse(inner) => DhtPacket::OnionAnnounceResponse(inner),
                         InnerOnionResponse::OnionDataResponse(inner) => DhtPacket::OnionDataResponse(inner),
                     };
                     self.send_to(ip_port.to_saddr(), next_packet)
@@ -1423,10 +1423,10 @@ mod tests {
 
     // handle_onion_request_2
     #[test]
-    fn server_handle_onion_request_2_with_announce_request_test() {
+    fn server_handle_onion_request_2_with_onion_announce_request_test() {
         let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
 
-        let inner = InnerAnnounceRequest {
+        let inner = InnerOnionAnnounceRequest {
             nonce: gen_nonce(),
             pk: gen_keypair().0,
             payload: vec![42; 123]
@@ -1438,7 +1438,7 @@ mod tests {
         };
         let payload = OnionRequest2Payload {
             ip_port: ip_port.clone(),
-            inner: InnerOnionRequest::InnerAnnounceRequest(inner.clone())
+            inner: InnerOnionRequest::InnerOnionAnnounceRequest(inner.clone())
         };
         let onion_return = OnionReturn {
             nonce: gen_nonce(),
@@ -1453,7 +1453,7 @@ mod tests {
 
         assert_eq!(addr_to_send, ip_port.to_saddr());
 
-        let next_packet = unpack!(packet, DhtPacket::AnnounceRequest);
+        let next_packet = unpack!(packet, DhtPacket::OnionAnnounceRequest);
 
         assert_eq!(next_packet.inner, inner);
 
@@ -1522,24 +1522,24 @@ mod tests {
         assert!(alice.handle_packet((packet, addr)).wait().is_err());
     }
 
-    // handle_announce_request
+    // handle_onion_announce_request
     #[test]
-    fn server_handle_announce_request_test() {
+    fn server_handle_onion_announce_request_test() {
         let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
 
         let sendback_data = 42;
-        let payload = AnnounceRequestPayload {
+        let payload = OnionAnnounceRequestPayload {
             ping_id: initial_ping_id(),
             search_pk: gen_keypair().0,
             data_pk: gen_keypair().0,
             sendback_data
         };
-        let inner = InnerAnnounceRequest::new(&precomp, &bob_pk, payload);
+        let inner = InnerOnionAnnounceRequest::new(&precomp, &bob_pk, payload);
         let onion_return = OnionReturn {
             nonce: gen_nonce(),
             payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
         };
-        let packet = DhtPacket::AnnounceRequest(AnnounceRequest {
+        let packet = DhtPacket::OnionAnnounceRequest(OnionAnnounceRequest {
             inner,
             onion_return: onion_return.clone()
         });
@@ -1555,7 +1555,7 @@ mod tests {
 
         assert_eq!(response.onion_return, onion_return);
 
-        let response = unpack!(response.payload, InnerOnionResponse::AnnounceResponse);
+        let response = unpack!(response.payload, InnerOnionResponse::OnionAnnounceResponse);
 
         assert_eq!(response.sendback_data, sendback_data);
 
@@ -1571,18 +1571,18 @@ mod tests {
 
         // get ping id
 
-        let payload = AnnounceRequestPayload {
+        let payload = OnionAnnounceRequestPayload {
             ping_id: initial_ping_id(),
             search_pk: gen_keypair().0,
             data_pk: gen_keypair().0,
             sendback_data: 42
         };
-        let inner = InnerAnnounceRequest::new(&precomp, &bob_pk, payload);
+        let inner = InnerOnionAnnounceRequest::new(&precomp, &bob_pk, payload);
         let onion_return = OnionReturn {
             nonce: gen_nonce(),
             payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
         };
-        let packet = DhtPacket::AnnounceRequest(AnnounceRequest {
+        let packet = DhtPacket::OnionAnnounceRequest(OnionAnnounceRequest {
             inner,
             onion_return: onion_return.clone()
         });
@@ -1592,20 +1592,20 @@ mod tests {
         let (received, rx) = rx.into_future().wait().unwrap();
         let (packet, _addr_to_send) = received.unwrap();
         let response = unpack!(packet, DhtPacket::OnionResponse3);
-        let response = unpack!(response.payload, InnerOnionResponse::AnnounceResponse);
+        let response = unpack!(response.payload, InnerOnionResponse::OnionAnnounceResponse);
         let payload = response.get_payload(&precomp).unwrap();
         let ping_id = payload.ping_id_or_pk;
 
         // announce node
 
-        let payload = AnnounceRequestPayload {
+        let payload = OnionAnnounceRequestPayload {
             ping_id,
             search_pk: gen_keypair().0,
             data_pk: gen_keypair().0,
             sendback_data: 42
         };
-        let inner = InnerAnnounceRequest::new(&precomp, &bob_pk, payload);
-        let packet = DhtPacket::AnnounceRequest(AnnounceRequest {
+        let inner = InnerOnionAnnounceRequest::new(&precomp, &bob_pk, payload);
+        let packet = DhtPacket::OnionAnnounceRequest(OnionAnnounceRequest {
             inner,
             onion_return: onion_return.clone()
         });
@@ -1663,7 +1663,7 @@ mod tests {
             payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
         };
         let onion_return = OnionReturn::new(&onion_symmetric_key, &ip_port, Some(&next_onion_return));
-        let payload = InnerOnionResponse::AnnounceResponse(AnnounceResponse {
+        let payload = InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
             sendback_data: 12345,
             nonce: gen_nonce(),
             payload: vec![42; 123]
@@ -1694,7 +1694,7 @@ mod tests {
             nonce: gen_nonce(),
             payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE] // not encrypted with onion_symmetric_key
         };
-        let payload = InnerOnionResponse::AnnounceResponse(AnnounceResponse {
+        let payload = InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
             sendback_data: 12345,
             nonce: gen_nonce(),
             payload: vec![42; 123]
@@ -1749,7 +1749,7 @@ mod tests {
             payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
         };
         let onion_return = OnionReturn::new(&onion_symmetric_key, &ip_port, Some(&next_onion_return));
-        let payload = InnerOnionResponse::AnnounceResponse(AnnounceResponse {
+        let payload = InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
             sendback_data: 12345,
             nonce: gen_nonce(),
             payload: vec![42; 123]
@@ -1780,7 +1780,7 @@ mod tests {
             nonce: gen_nonce(),
             payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE] // not encrypted with onion_symmetric_key
         };
-        let payload = InnerOnionResponse::AnnounceResponse(AnnounceResponse {
+        let payload = InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
             sendback_data: 12345,
             nonce: gen_nonce(),
             payload: vec![42; 123]
@@ -1820,7 +1820,7 @@ mod tests {
 
     // handle_onion_response_1
     #[test]
-    fn server_handle_onion_response_1_with_announce_response_test() {
+    fn server_handle_onion_response_1_with_onion_announce_response_test() {
         let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
 
         let onion_symmetric_key = alice.onion_symmetric_key.read();
@@ -1831,14 +1831,14 @@ mod tests {
             port: 12345
         };
         let onion_return = OnionReturn::new(&onion_symmetric_key, &ip_port, None);
-        let inner = AnnounceResponse {
+        let inner = OnionAnnounceResponse {
             sendback_data: 12345,
             nonce: gen_nonce(),
             payload: vec![42; 123]
         };
         let packet = DhtPacket::OnionResponse1(OnionResponse1 {
             onion_return,
-            payload: InnerOnionResponse::AnnounceResponse(inner.clone())
+            payload: InnerOnionResponse::OnionAnnounceResponse(inner.clone())
         });
 
         assert!(alice.handle_packet((packet, addr)).wait().is_ok());
@@ -1848,7 +1848,7 @@ mod tests {
 
         assert_eq!(addr_to_send, ip_port.to_saddr());
 
-        let next_packet = unpack!(packet, DhtPacket::AnnounceResponse);
+        let next_packet = unpack!(packet, DhtPacket::OnionAnnounceResponse);
 
         assert_eq!(next_packet, inner);
     }
@@ -1904,7 +1904,7 @@ mod tests {
             port: 12345
         };
         let onion_return = OnionReturn::new(&onion_symmetric_key, &ip_port, None);
-        let inner = InnerOnionResponse::AnnounceResponse(AnnounceResponse {
+        let inner = InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
             sendback_data: 12345,
             nonce: gen_nonce(),
             payload: vec![42; 123]
@@ -1935,14 +1935,14 @@ mod tests {
             port: 12345
         };
         let onion_return = OnionReturn::new(&onion_symmetric_key, &ip_port, None);
-        let inner = AnnounceResponse {
+        let inner = OnionAnnounceResponse {
             sendback_data: 12345,
             nonce: gen_nonce(),
             payload: vec![42; 123]
         };
         let packet = DhtPacket::OnionResponse1(OnionResponse1 {
             onion_return,
-            payload: InnerOnionResponse::AnnounceResponse(inner.clone())
+            payload: InnerOnionResponse::OnionAnnounceResponse(inner.clone())
         });
 
         assert!(alice.handle_packet((packet, addr)).wait().is_err());
@@ -1956,7 +1956,7 @@ mod tests {
             nonce: gen_nonce(),
             payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE] // not encrypted with onion_symmetric_key
         };
-        let payload = InnerOnionResponse::AnnounceResponse(AnnounceResponse {
+        let payload = InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
             sendback_data: 12345,
             nonce: gen_nonce(),
             payload: vec![42; 123]
