@@ -26,15 +26,15 @@ extern crate tokio_io;
 #[macro_use]
 extern crate log;
 extern crate env_logger;
-
-extern crate rustc_serialize;
-use rustc_serialize::hex::FromHex;
+extern crate hex;
 
 use tox::toxcore::crypto_core::*;
 use tox::toxcore::tcp::packet::*;
 use tox::toxcore::tcp::handshake::make_client_handshake;
 use tox::toxcore::tcp::codec;
 use tox::toxcore::io_tokio::IoFuture;
+
+use hex::FromHex;
 
 use futures::prelude::*;
 use futures::future;
@@ -75,14 +75,14 @@ fn create_client(rx: mpsc::Receiver<Packet>, tx: mpsc::Sender<Packet>) -> IoFutu
         },
         2 => {
             // remote tcp relay server
-            let server_pk_bytes = FromHex::from_hex("461FA3776EF0FA655F1A05477DF1B3B614F7D6B124F7DB1DD4FE3C08B03B640F").unwrap();
+            let server_pk_bytes: [u8; 32] = FromHex::from_hex("461FA3776EF0FA655F1A05477DF1B3B614F7D6B124F7DB1DD4FE3C08B03B640F").unwrap();
             let server_pk = PublicKey::from_slice(&server_pk_bytes).unwrap();
             let addr = "130.133.110.14:33445".parse().unwrap();
             (addr, server_pk)
         },
         3 => {
             // local C DHT node, TODO remove this case
-            let server_pk_bytes = FromHex::from_hex("C4B8D288C391704E3C8840A8A7C19B21D0B76CAF3B55341D37C5A9732887F879").unwrap();
+            let server_pk_bytes: [u8; 32] = FromHex::from_hex("C4B8D288C391704E3C8840A8A7C19B21D0B76CAF3B55341D37C5A9732887F879").unwrap();
             let server_pk = PublicKey::from_slice(&server_pk_bytes).unwrap();
             let addr = "0.0.0.0:33445".parse().unwrap();
             (addr, server_pk)

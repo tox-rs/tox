@@ -65,7 +65,6 @@ extern crate parking_lot;
 #[macro_use]
 pub mod toxcore_tests {
     extern crate rand;
-    extern crate rustc_serialize;
 
     // Helper macros for testing, no tests
     // #[warn(missing_docs)]

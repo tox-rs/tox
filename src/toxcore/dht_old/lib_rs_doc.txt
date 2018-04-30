@@ -13,8 +13,8 @@ extern crate tokio_core;
 use tokio_core::reactor::Core;
 
 // to get bytes from PK in hex and to make PK from them
-extern crate rustc_serialize;
-use rustc_serialize::hex::FromHex;
+extern crate hex;
+use hex::FromHex;
 
 extern crate tox;
 use tox::toxcore::binary_io::*;
