@@ -212,7 +212,7 @@ impl Server {
             Some(peer) => peer,
         };
 
-        self.send_nodes_req(peer)
+        self.send_nodes_request(peer.pk, peer.saddr)
     }
 
     // Get random node from kbucket
@@ -221,31 +221,31 @@ impl Server {
         state.kbucket.get_random_node()
     }
 
-    // Send NodesRequest to peer
-    fn send_nodes_req(&self, target_peer: PackedNode) -> IoFuture<()> {
+    /// Send NodesRequest to peer
+    pub fn send_nodes_request(&self, target_pk: PublicKey, target_addr: SocketAddr) -> IoFuture<()> {
         // Check if packet is going to be sent to ourself.
-        if self.pk == target_peer.pk {
+        if self.pk == target_pk {
             return Box::new(
                 future::err(
-                    Error::new(ErrorKind::Other, "friend's pk is mine")
+                    Error::new(ErrorKind::Other, "target's pk is equal mine")
                 )
             )
         }
 
         let mut state = self.state.write();
-        let client = state.peers_cache.entry(target_peer.pk).or_insert_with(ClientData::new);
+        let client = state.peers_cache.entry(target_pk).or_insert_with(ClientData::new);
 
         let payload = NodesRequestPayload {
             pk: self.pk,
             id: client.insert_new_ping_id(),
         };
         let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(
-            &precompute(&target_peer.pk, &self.sk),
+            &precompute(&target_pk, &self.sk),
             &self.pk,
             payload
         ));
 
-        self.send_to(target_peer.saddr, nodes_req)
+        self.send_to(target_addr, nodes_req)
     }
     /// send NatPingRequests to peers every 3 seconds
     pub fn send_nat_ping_req(&self, peer: PackedNode, friend_pk: PublicKey) -> IoFuture<()> {
@@ -611,12 +611,7 @@ impl Server {
             return Box::new(future::ok(()));
         }
 
-        let target_node = PackedNode {
-            saddr: addr,
-            pk: packet.pk,
-        };
-
-        self.send_nodes_req(target_node)
+        self.send_nodes_request(packet.pk, addr)
     }
     /**
     send LanDiscovery packet to all broadcast addresses when dht_node runs as ipv4 mode
@@ -2260,6 +2255,6 @@ mod tests {
         let onion_symmetric_key = alice.onion_symmetric_key.read();
         let onion_return_payload = next_packet.onion_return.get_payload(&onion_symmetric_key).unwrap();
 
-        assert_eq!(onion_return_payload.0, IpPort::from_tcp_saddr(addr));      
+        assert_eq!(onion_return_payload.0, IpPort::from_tcp_saddr(addr));
     }
 }
