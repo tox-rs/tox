@@ -80,38 +80,7 @@ fn main() {
 
     let server_obj = Server::new(tx, server_pk, server_sk);
 
-    // Bootstrap from nodes
-    for &(pk, saddr) in &[
-        // Impyy
-        ("1D5A5F2F5D6233058BF0259B09622FB40B482E4FA0931EB8FD3AB8E7BF7DAF6F", "198.98.51.198:33445"),
-        // nurupo
-        ("F404ABAA1C99A9D37D61AB54898F56793E1DEF8BD46B1038B9D822E8460FAB67", "67.215.253.85:33445"),
-        // Manolis
-        ("461FA3776EF0FA655F1A05477DF1B3B614F7D6B124F7DB1DD4FE3C08B03B640F", "130.133.110.14:33445"),
-        // Busindre
-        ("A179B09749AC826FF01F37A9613F6B57118AE014D4196A0E1105A98F93A54702", "205.185.116.116:33445"),
-        // ray65536
-        ("8E7D0B859922EF569298B4D261A8CCB5FEA14FB91ED412A7603A585A25698832", "85.172.30.117:33445"),
-        // fluke571
-        ("3CEE1F054081E7A011234883BC4FC39F661A55B73637A5AC293DDF1251D9432B", "194.249.212.109:33445"),
-        // MAH69K
-        ("DA4E4ED4B697F2E9B000EEFE3A34B554ACD3F45F5C96EAEA2516DD7FF9AF7B43", "185.25.116.107:33445"),
-        // clearmartin
-        ("CD133B521159541FB1D326DE9850F5E56A6C724B5B8E5EB5CD8D950408E95707", "46.101.197.175:443"),
-        // tastytea
-        ("2B2137E094F743AC8BD44652C55F41DFACC502F125E99E4FE24D40537489E32F", "5.189.176.217:5190"),
-
-    ]
-    {
-        // get PK bytes of the bootstrap node
-        let bootstrap_pk_bytes: [u8; 32] = FromHex::from_hex(pk).unwrap();
-        // create PK from bytes
-        let bootstrap_pk = PublicKey::from_slice(&bootstrap_pk_bytes).unwrap();
-
-        let saddr: SocketAddr = saddr.parse().unwrap();
-        let bootstrap_pn = PackedNode::new(true, saddr, &bootstrap_pk);
-        assert!(server_obj.try_add_to_kbucket(&bootstrap_pn));
-    }
+    bootstrap(&server_obj);
 
     let local_addr: SocketAddr = "0.0.0.0:33445".parse().unwrap(); // 0.0.0.0 for ipv4
     // let local_addr: SocketAddr = "[::]:33445".parse().unwrap(); // [::] for ipv6
@@ -186,6 +155,46 @@ fn main() {
     tokio::run(server);
 }
 
+fn bootstrap(server_obj: &Server) {
+    // Bootstrap from nodes
+    let list_nodes = [
+        // Impyy
+        ("1D5A5F2F5D6233058BF0259B09622FB40B482E4FA0931EB8FD3AB8E7BF7DAF6F", "198.98.51.198:33445"),
+        // nurupo
+        ("F404ABAA1C99A9D37D61AB54898F56793E1DEF8BD46B1038B9D822E8460FAB67", "67.215.253.85:33445"),
+        // Manolis
+        ("461FA3776EF0FA655F1A05477DF1B3B614F7D6B124F7DB1DD4FE3C08B03B640F", "130.133.110.14:33445"),
+        // Busindre
+        ("A179B09749AC826FF01F37A9613F6B57118AE014D4196A0E1105A98F93A54702", "205.185.116.116:33445"),
+        // ray65536
+        ("8E7D0B859922EF569298B4D261A8CCB5FEA14FB91ED412A7603A585A25698832", "85.172.30.117:33445"),
+        // fluke571
+        ("3CEE1F054081E7A011234883BC4FC39F661A55B73637A5AC293DDF1251D9432B", "194.249.212.109:33445"),
+        // MAH69K
+        ("DA4E4ED4B697F2E9B000EEFE3A34B554ACD3F45F5C96EAEA2516DD7FF9AF7B43", "185.25.116.107:33445"),
+        // clearmartin
+        ("CD133B521159541FB1D326DE9850F5E56A6C724B5B8E5EB5CD8D950408E95707", "46.101.197.175:443"),
+        // tastytea
+        ("2B2137E094F743AC8BD44652C55F41DFACC502F125E99E4FE24D40537489E32F", "5.189.176.217:5190"),
+    ];
+
+    let send_nodes_requests = list_nodes.iter().map(|&(pk, saddr)| {
+        // get PK bytes of the bootstrap node
+        let bootstrap_pk_bytes: [u8; 32] = FromHex::from_hex(pk).unwrap();
+        // create PK from bytes
+        let bootstrap_pk = PublicKey::from_slice(&bootstrap_pk_bytes).unwrap();
+        // parse saddr
+        let saddr: SocketAddr = saddr.parse().unwrap();
+        // send NodesRequest which will make us bootstrap from pk
+        server_obj.send_nodes_request(bootstrap_pk, saddr)
+    });
+
+    let send_stream = stream::futures_unordered(send_nodes_requests).then(|_| Ok(()));
+    let send_stream = send_stream.for_each(|()| Ok(())).map_err(|()| ());
+
+    send_stream.wait().unwrap();
+}
+
 fn add_ping_sender(base_selector: IoFuture<()>, server_obj: &Server) -> IoFuture<()> {
     // 60 seconds for PingRequests
     let interval = Duration::from_secs(60);
@@ -205,6 +214,7 @@ fn add_ping_sender(base_selector: IoFuture<()>, server_obj: &Server) -> IoFuture
             err
         }))
 }
+
 fn add_nat_sender(base_selector: IoFuture<()>, server_obj: &Server, pk: PublicKey) -> IoFuture<()> {
     // 3 seconds for NatPingRequest
     let interval = Duration::from_secs(3);
@@ -230,6 +240,7 @@ fn add_nat_sender(base_selector: IoFuture<()>, server_obj: &Server, pk: PublicKe
             err
         }))
 }
+
 fn add_nodes_sender(base_selector: IoFuture<()>, server_obj: &Server) -> IoFuture<()> {
     // 20 seconds for NodesRequest
     let interval = Duration::from_secs(20);
@@ -250,6 +261,7 @@ fn add_nodes_sender(base_selector: IoFuture<()>, server_obj: &Server) -> IoFutur
             err
         }))
 }
+
 fn add_lan_sender(base_selector: IoFuture<()>, server_obj: &Server, local_addr: SocketAddr) -> IoFuture<()> {
     // 10 seconds for LanDiscovery
     let interval = Duration::from_secs(10);
@@ -273,6 +285,7 @@ fn add_lan_sender(base_selector: IoFuture<()>, server_obj: &Server, local_addr: 
             err
         }))
 }
+
 fn add_timedout_remover(base_selector: IoFuture<()>, server_obj: &Server) -> IoFuture<()> {
     // 1 seconds for timed-out clients remover
     let interval = Duration::from_secs(1);
@@ -299,6 +312,7 @@ fn add_timedout_remover(base_selector: IoFuture<()>, server_obj: &Server) -> IoF
             err
         }))
 }
+
 fn add_onion_key_refresher(base_selector: IoFuture<()>, server_obj: &Server) -> IoFuture<()> {
     // Refresh onion symmetric key every 2 hours. This enforces onion paths expiration.
     let interval = Duration::from_secs(7200);
