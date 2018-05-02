@@ -47,7 +47,7 @@ Length    | Content
 `32`      | Receiver's Public Key
 `32`      | Sender's Public Key
 `24`      | Nonce
-`10`      | Payload
+variable  | Payload
 
 where Payload is encrypted [`DhtRequestPayload`](./struct.DhtRequestPayload.html)
 

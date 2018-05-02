@@ -45,7 +45,7 @@ Length    | Content
 `32`      | Public Key
 `24`      | Nonce
 `1`       | Number of Response Nodes
-`[47,212]`| Payload
+`[25,229]`| Payload
 
 where Payload is encrypted [`NodesResponsePayload`](./struct.NodesResponsePayload.html)
 
