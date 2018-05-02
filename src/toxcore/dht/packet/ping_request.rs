@@ -46,7 +46,7 @@ Length  | Content
 `1`     | `0x00`
 `32`    | Public Key
 `24`    | Nonce
-`15`    | Payload
+`25`    | Payload
 
 where Payload is encrypted [`PingRequestPayload`](./struct.PingRequestPayload.html)
 
