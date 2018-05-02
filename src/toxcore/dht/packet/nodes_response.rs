@@ -45,7 +45,7 @@ Length    | Content
 `32`      | Public Key
 `24`      | Nonce
 `1`       | Number of Response Nodes
-`[47,212]`| Payload
+`[25,229]`| Payload
 
 where Payload is encrypted [`NodesResponsePayload`](./struct.NodesResponsePayload.html)
 
@@ -160,10 +160,8 @@ pub struct NodesResponsePayload {
 impl ToBytes for NodesResponsePayload {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
-            gen_cond!(
-                self.nodes.len() <= 4,
-                gen_be_u8!(self.nodes.len() as u8)
-            ) >>
+            gen_cond!(self.nodes.len() > 4, |buf| gen_error(buf, 0)) >>
+            gen_be_u8!(self.nodes.len() as u8) >>
             gen_many_ref!(&self.nodes, |buf, node| PackedNode::to_bytes(node, buf)) >>
             gen_be_u64!(self.id)
         )

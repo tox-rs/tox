@@ -43,7 +43,7 @@ Length  | Content
 `1`     | `0x02`
 `32`    | Public Key
 `24`    | Nonce
-`40`    | Payload
+`56`    | Payload
 
 where Payload is encrypted [`NodesRequestPayload`](./struct.NodesRequestPayload.html)
 
