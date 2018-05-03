@@ -534,6 +534,11 @@ impl Server {
                     debug!("Received nat ping response");
                     self.handle_nat_ping_resp(nat_payload, &packet.spk)
                 },
+                DhtRequestPayload::DhtPkAnnounce(_dht_pk_payload) => {
+                    debug!("Received DHT PublicKey Announce");
+                    // TODO: handle this packet in onion client
+                    Box::new( future::ok(()) )
+                },
             }
         } else {
             let state = self.state.read();

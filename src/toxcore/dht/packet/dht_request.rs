@@ -141,7 +141,7 @@ impl DhtRequest {
 }
 
 /** Standart DHT Request packet that embedded in the payload of
-[`DhtRequest`](./struct.DhtRequest.html)..
+[`DhtRequest`](./struct.DhtRequest.html).
 
 https://zetok.github.io/tox-spec/#dht-request-packets
 */
@@ -151,6 +151,8 @@ pub enum DhtRequestPayload {
     NatPingRequest(NatPingRequest),
     /// [`NatPingResponse`](./struct.NatPingResponse.html) structure.
     NatPingResponse(NatPingResponse),
+    /// [`DhtPkAnnounce`](./struct.DhtPkAnnounce.html) structure.
+    DhtPkAnnounce(DhtPkAnnounce),
 }
 
 impl ToBytes for DhtRequestPayload {
@@ -158,6 +160,7 @@ impl ToBytes for DhtRequestPayload {
         match *self {
             DhtRequestPayload::NatPingRequest(ref p) => p.to_bytes(buf),
             DhtRequestPayload::NatPingResponse(ref p) => p.to_bytes(buf),
+            DhtRequestPayload::DhtPkAnnounce(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -165,7 +168,8 @@ impl ToBytes for DhtRequestPayload {
 impl FromBytes for DhtRequestPayload {
     named!(from_bytes<DhtRequestPayload>, alt!(
         map!(NatPingRequest::from_bytes, DhtRequestPayload::NatPingRequest) |
-        map!(NatPingResponse::from_bytes, DhtRequestPayload::NatPingResponse)
+        map!(NatPingResponse::from_bytes, DhtRequestPayload::NatPingResponse) |
+        map!(DhtPkAnnounce::from_bytes, DhtRequestPayload::DhtPkAnnounce)
     ));
 }
 
@@ -238,24 +242,54 @@ impl ToBytes for NatPingResponse {
     }
 }
 
+/** Packet to announce self short term DHT `PublicKey` to a friend.
+
+Onion client can send self announce info to its friend via two channels: through
+`OnionDataRequest` or through `DhtRequest`. `DhtRequest` will be used if
+friend's DHT `PublicKey` is known.
+
+Length    | Content
+--------- | -------------------------
+`1`       | `0x9C`
+`32`      | Public Key
+`24`      | Nonce
+variable  | Payload
+
+*/
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DhtPkAnnounce {
+    /// `PublicKey` for the current encrypted payload
+    pub pk: PublicKey,
+    /// Nonce for the current encrypted payload
+    pub nonce: Nonce,
+    /// Encrypted payload
+    pub payload: Vec<u8>
+}
+
+impl FromBytes for DhtPkAnnounce {
+    named!(from_bytes<DhtPkAnnounce>, do_parse!(
+        tag!(&[0x9c][..]) >>
+        pk: call!(PublicKey::from_bytes) >>
+        nonce: call!(Nonce::from_bytes) >>
+        payload: rest >>
+        (DhtPkAnnounce { pk, nonce, payload: payload.to_vec() })
+    ));
+}
+
+impl ToBytes for DhtPkAnnounce {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_be_u8!(0x9c) >>
+            gen_slice!(self.pk.as_ref()) >>
+            gen_slice!(self.nonce.as_ref()) >>
+            gen_slice!(self.payload.as_slice())
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use toxcore::dht::packet::dht_request::*;
-
-    #[test]
-    fn dht_request_payload_check() {
-        let test_payloads = vec![
-            DhtRequestPayload::NatPingRequest(NatPingRequest { id: 42 }),
-            DhtRequestPayload::NatPingResponse(NatPingResponse { id: 42 })
-        ];
-
-        for payload in test_payloads {
-            let mut buf = [0; MAX_DHT_PACKET_SIZE];
-            let (_, len) = payload.to_bytes((&mut buf, 0)).ok().unwrap();
-            let (_, decoded) = DhtRequestPayload::from_bytes(&buf[..len]).unwrap();
-            assert_eq!(decoded, payload);
-        }
-    }
 
     encode_decode_test!(
         nat_ping_request_payload_encode_decode,
@@ -265,6 +299,15 @@ mod tests {
     encode_decode_test!(
         nat_ping_response_payload_encode_decode,
         DhtRequestPayload::NatPingResponse(NatPingResponse { id: 42 })
+    );
+
+    encode_decode_test!(
+        dht_pk_announce_payload_encode_decode,
+        DhtRequestPayload::DhtPkAnnounce(DhtPkAnnounce {
+            pk: gen_keypair().0,
+            nonce: gen_nonce(),
+            payload: vec![42; 123]
+        })
     );
 
     #[test]
