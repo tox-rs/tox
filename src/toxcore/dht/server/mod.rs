@@ -41,6 +41,7 @@ use std::ops::DerefMut;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::ops::Deref;
+use std::mem;
 
 use toxcore::crypto_core::*;
 use toxcore::dht::packet::*;
@@ -156,7 +157,6 @@ impl Server {
         self.remove_timedout_ping_ids(Duration::from_secs(ping_timeout));
 
         let mut friends = self.friends.write();
-        let friends = friends.deref_mut();
 
         let ping_bootstrap_nodes = self.ping_bootstrap_nodes();
         let ping_and_get_close_nodes = self.ping_and_get_close_nodes(ping_interval);
@@ -177,13 +177,13 @@ impl Server {
                                              send_nodes_req_packets)
             .map(|((), (), (), ())| ());
 
-        self.bootstrap_nodes.write().deref_mut().nodes.clear();
-
         Box::new(res)
     }
 
     fn ping_bootstrap_nodes(&self) -> IoFuture<()> {
-        let bootstrap_nodes =self.bootstrap_nodes.read();
+        let mut bootstrap_nodes = Bucket::new(None);
+        mem::swap(&mut bootstrap_nodes, self.bootstrap_nodes.write().deref_mut());
+
         let mut peers_cache = self.peers_cache.write();
         let peers_cache = peers_cache.deref_mut();
 
@@ -238,7 +238,16 @@ impl Server {
         let res = if !good_nodes.is_empty()
             && self.last_nodes_req_time.read().deref().elapsed() >= Duration::from_secs(nodes_req_interval)
             && *self.bootstrap_times.read().deref() < MAX_BOOTSTRAP_TIMES {
-            let random_node = good_nodes[random_u32() as usize % good_nodes.len()];
+            // to increase probability of sending packet to a closer node
+            // lower index is closer node
+            let num_nodes = good_nodes.len();
+            let mut random_node = random_u32() as usize % num_nodes;
+            if 0 != random_node {
+                random_node -= random_u32() as usize % (random_node + 1);
+            }
+
+            let random_node = good_nodes[random_node];
+
 
             let client = peers_cache.entry(random_node.pk).or_insert_with(ClientData::new);
 
