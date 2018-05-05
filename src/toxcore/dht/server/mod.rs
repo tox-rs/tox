@@ -114,6 +114,20 @@ pub struct Server {
     tcp_onion_sink: Option<TcpOnionTx>,
 }
 
+/// Struct for grouping parameters to Server's main loop
+pub struct DhtMainLoopArgs {
+    /// timeout for remove clients in peers_cache
+    pub kill_node_timeout: u64,
+    /// timeout for PingRequest and NodesRequest
+    pub ping_timeout: u64,
+    /// interval for ping
+    pub ping_interval: u64,
+    /// timeout for node is offline or not
+    pub bad_node_timeout: u64,
+    /// interval for random NodesRequest
+    pub nodes_req_interval: u64
+}
+
 impl Server {
     /**
     Create new `Server` instance.
@@ -152,19 +166,19 @@ impl Server {
     }
 
     /// main loop of dht server, call this function every second
-    pub fn dht_main_loop(&self, kill_timeout: u64, ping_timeout: u64, ping_interval: u64, bad_node_timeout: u64, nodes_req_interval: u64) -> IoFuture<()> {
-        self.remove_timedout_clients(Duration::from_secs(kill_timeout));
-        self.remove_timedout_ping_ids(Duration::from_secs(ping_timeout));
+    pub fn dht_main_loop(&self, args: DhtMainLoopArgs) -> IoFuture<()> {
+        self.remove_timedout_clients(Duration::from_secs(args.kill_node_timeout));
+        self.remove_timedout_ping_ids(Duration::from_secs(args.ping_timeout));
 
         let mut friends = self.friends.write();
 
         let ping_bootstrap_nodes = self.ping_bootstrap_nodes();
-        let ping_and_get_close_nodes = self.ping_and_get_close_nodes(ping_interval);
-        let send_nodes_req_random = self.send_nodes_req_random(bad_node_timeout, nodes_req_interval);
+        let ping_and_get_close_nodes = self.ping_and_get_close_nodes(Duration::from_secs(args.ping_interval));
+        let send_nodes_req_random = self.send_nodes_req_random(Duration::from_secs(args.bad_node_timeout), Duration::from_secs(args.nodes_req_interval));
         let send_nodes_req_packets = {
             let nodes_sender = friends.iter_mut()
                 .map(|friend| {
-                    friend.send_nodes_req_packets(self, PING_INTERVAL, NODES_REQ_INTERVAL, BAD_NODE_TIMEOUT)
+                    friend.send_nodes_req_packets(self, Duration::from_secs(args.ping_interval), Duration::from_secs(args.nodes_req_interval), Duration::from_secs(args.bad_node_timeout))
                 });
 
             let nodes_stream = stream::futures_unordered(nodes_sender).then(|_| Ok(()));
@@ -199,7 +213,7 @@ impl Server {
         Box::new(nodes_stream.for_each(|()| Ok(())))
     }
 
-    fn ping_and_get_close_nodes(&self, ping_interval: u64) -> IoFuture<()> {
+    fn ping_and_get_close_nodes(&self, ping_interval: Duration) -> IoFuture<()> {
         let close_nodes = self.close_nodes.read();
         let mut peers_cache = self.peers_cache.write();
 
@@ -207,7 +221,7 @@ impl Server {
             .map(|node| {
                 let client = peers_cache.entry(node.pk).or_insert_with(ClientData::new);
 
-                let result = if client.last_ping_req_time.elapsed() >= Duration::from_secs(ping_interval) {
+                let result = if client.last_ping_req_time.elapsed() >= ping_interval {
                     client.last_ping_req_time = Instant::now();
                     self.send_nodes_req(node, self.pk, client)
                 } else {
@@ -222,7 +236,7 @@ impl Server {
         Box::new(nodes_stream.for_each(|()| Ok(())))
     }
 
-    fn send_nodes_req_random(&self, bad_node_timeout: u64, nodes_req_interval: u64) -> IoFuture<()> {
+    fn send_nodes_req_random(&self, bad_node_timeout: Duration, nodes_req_interval: Duration) -> IoFuture<()> {
         let close_nodes = self.close_nodes.read();
         let mut peers_cache = self.peers_cache.write();
         let mut good_nodes = Vec::new();
@@ -230,13 +244,13 @@ impl Server {
         close_nodes.iter()
             .map(|node| {
                 let client = peers_cache.entry(node.pk).or_insert_with(ClientData::new);
-                if client.last_resp_time.elapsed() < Duration::from_secs(bad_node_timeout) {
+                if client.last_resp_time.elapsed() < bad_node_timeout {
                     good_nodes.push(node);
                 }
             }).collect::<Vec<_>>();
 
         let res = if !good_nodes.is_empty()
-            && self.last_nodes_req_time.read().deref().elapsed() >= Duration::from_secs(nodes_req_interval)
+            && self.last_nodes_req_time.read().deref().elapsed() >= nodes_req_interval
             && *self.bootstrap_times.read().deref() < MAX_BOOTSTRAP_TIMES {
             // to increase probability of sending packet to a closer node
             // lower index is closer node
@@ -2396,7 +2410,15 @@ mod tests {
         let pn = PackedNode::new(false, SocketAddr::V4("127.0.0.1:33445".parse().unwrap()), &bob_pk);
         assert!(alice.bootstrap_nodes.write().deref_mut().try_add(&alice.pk, &pn));
 
-        alice.dht_main_loop(10, 10, 0, 10, 0).wait().unwrap();
+        let args = DhtMainLoopArgs {
+            kill_node_timeout: 10,
+            ping_timeout: 10,
+            ping_interval: 0,
+            bad_node_timeout: 10,
+            nodes_req_interval: 0
+        };
+
+        alice.dht_main_loop(args).wait().unwrap();
 
         let mut peers_cache = alice.peers_cache.write();
 
@@ -2430,7 +2452,15 @@ mod tests {
         let pn = PackedNode::new(false, SocketAddr::V4("127.0.0.1:33445".parse().unwrap()), &bob_pk);
         assert!(alice.close_nodes.write().deref_mut().try_add(&pn));
 
-        alice.dht_main_loop(10, 10, 0, 10, 0).wait().unwrap();
+        let args = DhtMainLoopArgs {
+            kill_node_timeout: 10,
+            ping_timeout: 10,
+            ping_interval: 0,
+            bad_node_timeout: 10,
+            nodes_req_interval: 0
+        };
+
+        alice.dht_main_loop(args).wait().unwrap();
 
         let mut peers_cache = alice.peers_cache.write();
 
@@ -2464,11 +2494,25 @@ mod tests {
         let pn = PackedNode::new(false, SocketAddr::V4("127.0.0.1:33445".parse().unwrap()), &bob_pk);
         assert!(alice.close_nodes.write().deref_mut().try_add(&pn));
 
-        // bad_node_timeout == 0, so no good node
-        alice.dht_main_loop(10, 10, 0, 0, 0).wait().unwrap();
+        let args = DhtMainLoopArgs {
+            kill_node_timeout: 10,
+            ping_timeout: 10,
+            ping_interval: 0,
+            bad_node_timeout: 0,
+            nodes_req_interval: 0
+        };
 
-        // with good nodes
-        alice.dht_main_loop(10, 10, 0, 10, 0).wait().unwrap();
+        alice.dht_main_loop(args).wait().unwrap();
+
+        let args = DhtMainLoopArgs {
+            kill_node_timeout: 10,
+            ping_timeout: 10,
+            ping_interval: 0,
+            bad_node_timeout: 10,
+            nodes_req_interval: 0
+        };
+
+        alice.dht_main_loop(args).wait().unwrap();
 
         let mut peers_cache = alice.peers_cache.write();
 
@@ -2503,6 +2547,14 @@ mod tests {
         let friend = DhtFriend::new(friend_pk2, 0);
         alice.add_friend(friend);
 
-        assert!(alice.dht_main_loop(10, 10, 0, 10, 0).wait().is_ok());
+        let args = DhtMainLoopArgs {
+            kill_node_timeout: 10,
+            ping_timeout: 10,
+            ping_interval: 0,
+            bad_node_timeout: 10,
+            nodes_req_interval: 0
+        };
+
+        assert!(alice.dht_main_loop(args).wait().is_ok());
     }
 }

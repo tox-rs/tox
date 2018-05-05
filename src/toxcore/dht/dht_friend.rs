@@ -65,7 +65,7 @@ impl DhtFriend {
 
     /// send NodesRequest packet to bootstap_nodes, close list
     pub fn send_nodes_req_packets(&mut self, server: &Server,
-                                  ping_interval: u64, nodes_req_interval: u64, bad_node_timeout: u64) -> IoFuture<()> {
+                                  ping_interval: Duration, nodes_req_interval: Duration, bad_node_timeout: Duration) -> IoFuture<()> {
         let ping_bootstrap_nodes = self.ping_bootstrap_nodes(server);
         let ping_and_get_close_nodes = self.ping_and_get_close_nodes(server, ping_interval);
         let send_nodes_req_random = self.send_nodes_req_random(server, bad_node_timeout, nodes_req_interval);
@@ -95,14 +95,14 @@ impl DhtFriend {
     }
 
     // ping to close nodes of friend
-    fn ping_and_get_close_nodes(&mut self, server: &Server, ping_interval: u64) -> IoFuture<()> {
+    fn ping_and_get_close_nodes(&mut self, server: &Server, ping_interval: Duration) -> IoFuture<()> {
         let mut peers_cache = server.get_peers_cache().write();
 
         let nodes_sender = self.close_nodes.nodes.iter()
             .map(|node| {
                 let client = peers_cache.entry(node.pk).or_insert_with(ClientData::new);
 
-                if client.last_ping_req_time.elapsed() >= Duration::from_secs(ping_interval) {
+                if client.last_ping_req_time.elapsed() >= ping_interval {
                     client.last_ping_req_time = Instant::now();
                     server.send_nodes_req(*node, self.pk, client)
                 } else {
@@ -115,22 +115,17 @@ impl DhtFriend {
         Box::new(nodes_stream.for_each(|()| Ok(())))
     }
 
-    fn send_nodes_req_random(&mut self, server: &Server, bad_node_timeout: u64, nodes_req_interval: u64) -> IoFuture<()> {
-        let mut good_nodes = Vec::new();
-
+    fn send_nodes_req_random(&mut self, server: &Server, bad_node_timeout: Duration, nodes_req_interval: Duration) -> IoFuture<()> {
         let mut peers_cache = server.get_peers_cache().write();
 
-        self.close_nodes.nodes.iter()
-            .map(|node| {
+        let good_nodes = self.close_nodes.nodes.iter()
+            .filter(|node| {
                 let client = peers_cache.entry(node.pk).or_insert_with(ClientData::new);
-
-                if client.last_resp_time.elapsed() < Duration::from_secs(bad_node_timeout) {
-                    good_nodes.push(node.clone());
-                }
+                client.last_resp_time.elapsed() < bad_node_timeout
             }).collect::<Vec<_>>();
 
         let res = if !good_nodes.is_empty()
-            && self.last_nodes_req_time.elapsed() >= Duration::from_secs(nodes_req_interval)
+            && self.last_nodes_req_time.elapsed() >= nodes_req_interval
             && self.bootstrap_times < MAX_BOOTSTRAP_TIMES {
 
             // to increase probability of sending packet to a closer node
@@ -144,7 +139,7 @@ impl DhtFriend {
             let random_node = good_nodes[random_node];
 
             if let Some(client) = peers_cache.get_mut(&random_node.pk) {
-                let res = server.send_nodes_req(random_node, self.pk, client);
+                let res = server.send_nodes_req(*random_node, self.pk, client);
                 self.bootstrap_times += 1;
                 self.last_nodes_req_time = Instant::now();
 
@@ -208,7 +203,10 @@ mod tests {
             saddr: "127.0.0.1:33446".parse().unwrap(),
         }));
 
-        assert!(friend.send_nodes_req_packets(&server, 0, 0, 0).wait().is_ok());
+        let ping_interval = Duration::from_secs(0);
+        let nodes_req_interval = Duration::from_secs(0);
+        let bad_nodes_timeout = Duration::from_secs(0);
+        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval, bad_nodes_timeout).wait().is_ok());
 
         rx.take(2).map(|received| {
             let (packet, addr) = received;
@@ -250,8 +248,12 @@ mod tests {
         let (tx, rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
         let server = Server::new(tx, pk, sk.clone());
 
+        let ping_interval = Duration::from_secs(0);
+        let nodes_req_interval = Duration::from_secs(0);
+        let bad_nodes_timeout = Duration::from_secs(0);
+
         // Test with no close_nodes entry, send nothing, but return ok
-        assert!(friend.send_nodes_req_packets(&server, 0, 0, 0).wait().is_ok());
+        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval, bad_nodes_timeout).wait().is_ok());
 
         // Now, test with close_nodes entry
         let (node_pk1, node_sk1) = gen_keypair();
@@ -265,17 +267,29 @@ mod tests {
             saddr: "127.0.0.1:33446".parse().unwrap(),
         }));
 
+        let ping_interval = Duration::from_secs(10);
+        let nodes_req_interval = Duration::from_secs(0);
+        let bad_nodes_timeout = Duration::from_secs(0);
+
         // But, there are no entry in peers_cache, just return ok
-        assert!(friend.send_nodes_req_packets(&server, 10, 0, 0).wait().is_ok());
+        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval, bad_nodes_timeout).wait().is_ok());
 
         // Now, test with entry in peers_cache
         insert_client_to_peers_cache(&server, node_pk1, node_pk2);
 
+        let ping_interval = Duration::from_secs(10);
+        let nodes_req_interval = Duration::from_secs(0);
+        let bad_nodes_timeout = Duration::from_secs(0);
+
         // There are no ertry which exceeds PING_INTERVAL, so send nothing, just return ok
-        assert!(friend.send_nodes_req_packets(&server, 10, 0, 0).wait().is_ok());
+        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval, bad_nodes_timeout).wait().is_ok());
+
+        let ping_interval = Duration::from_secs(0);
+        let nodes_req_interval = Duration::from_secs(0);
+        let bad_nodes_timeout = Duration::from_secs(0);
 
         // Now send packet
-        assert!(friend.send_nodes_req_packets(&server, 0, 0, 0).wait().is_ok());
+        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval, bad_nodes_timeout).wait().is_ok());
 
         rx.take(2).map(|received| {
             let (packet, addr) = received;
@@ -311,8 +325,12 @@ mod tests {
         let (tx, rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
         let server = Server::new(tx, pk, sk.clone());
 
+        let ping_interval = Duration::from_secs(0);
+        let nodes_req_interval = Duration::from_secs(0);
+        let bad_nodes_timeout = Duration::from_secs(0);
+
         // Test with no close_nodes entry, send nothing, but return ok
-        assert!(friend.send_nodes_req_packets(&server, 0, 0, 0).wait().is_ok());
+        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval, bad_nodes_timeout).wait().is_ok());
 
         // Now, test with close_nodes entry
         let (node_pk1, node_sk1) = gen_keypair();
@@ -326,17 +344,29 @@ mod tests {
             saddr: "127.0.0.1:33446".parse().unwrap(),
         }));
 
+        let ping_interval = Duration::from_secs(10);
+        let nodes_req_interval = Duration::from_secs(0);
+        let bad_nodes_timeout = Duration::from_secs(0);
+
         // But, there are no entry in peers_cache, just return ok
-        assert!(friend.send_nodes_req_packets(&server, 10, 0, 0).wait().is_ok());
+        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval, bad_nodes_timeout).wait().is_ok());
 
         // Now, test with entry in peers_cache
         insert_client_to_peers_cache(&server, node_pk1, node_pk2);
 
+        let ping_interval = Duration::from_secs(10);
+        let nodes_req_interval = Duration::from_secs(0);
+        let bad_nodes_timeout = Duration::from_secs(0);
+
         // There are no ertry which exceeds BAD_NODE_TIMEOUT, so send nothing, just return ok
-        assert!(friend.send_nodes_req_packets(&server, 10, 0, 0).wait().is_ok());
+        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval, bad_nodes_timeout).wait().is_ok());
+
+        let ping_interval = Duration::from_secs(10);
+        let nodes_req_interval = Duration::from_secs(0);
+        let bad_nodes_timeout = Duration::from_secs(10);
 
         // Now send packet
-        assert!(friend.send_nodes_req_packets(&server, 10, 0, 10).wait().is_ok());
+        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval, bad_nodes_timeout).wait().is_ok());
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr) = received.unwrap();

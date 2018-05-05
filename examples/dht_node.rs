@@ -246,7 +246,15 @@ fn add_server_main_loop(base_selector: IoFuture<()>, server_obj: &Server) -> IoF
         .map_err(|e| Error::new(ErrorKind::Other, format!("Nodes timer error: {:?}", e)))
         .for_each(move |_instant| {
             println!("nodes_wakeup");
-            server_obj_c.dht_main_loop(KILL_NODE_TIMEOUT, PING_TIMEOUT, PING_INTERVAL, BAD_NODE_TIMEOUT, NODES_REQ_INTERVAL)
+            let args = DhtMainLoopArgs {
+                kill_node_timeout: KILL_NODE_TIMEOUT,
+                ping_timeout: PING_TIMEOUT,
+                ping_interval: PING_INTERVAL,
+                bad_node_timeout: BAD_NODE_TIMEOUT,
+                nodes_req_interval: NODES_REQ_INTERVAL
+            };
+
+            server_obj_c.dht_main_loop(args)
         })
         .map_err(|_err| Error::new(ErrorKind::Other, "Nodes timer error"));
 
