@@ -119,6 +119,7 @@ fn main() {
     let friend_pk_bytes: [u8; 32] = FromHex::from_hex(&pk_str).unwrap();
     // create PK from bytes
     let friend_pk = PublicKey::from_slice(&friend_pk_bytes).unwrap();
+    // add_friend with args, PK is friend_pk, bootstrap_time initial value is 0, so do bootstrapping 5 times
     server_obj.add_friend(DhtFriend::new(friend_pk, 0));
 
     let local_addr: SocketAddr = "0.0.0.0:33445".parse().unwrap(); // 0.0.0.0 for ipv4
@@ -246,12 +247,13 @@ fn add_server_main_loop(base_selector: IoFuture<()>, server_obj: &Server) -> IoF
         .map_err(|e| Error::new(ErrorKind::Other, format!("Nodes timer error: {:?}", e)))
         .for_each(move |_instant| {
             println!("nodes_wakeup");
+            // args to main loop, all value is seconds
             let args = DhtMainLoopArgs {
-                kill_node_timeout: KILL_NODE_TIMEOUT,
-                ping_timeout: PING_TIMEOUT,
-                ping_interval: PING_INTERVAL,
-                bad_node_timeout: BAD_NODE_TIMEOUT,
-                nodes_req_interval: NODES_REQ_INTERVAL
+                kill_node_timeout: 182,
+                ping_timeout: 5,
+                ping_interval: 60,
+                bad_node_timeout: 162,
+                nodes_req_interval: 20,
             };
 
             server_obj_c.dht_main_loop(args)

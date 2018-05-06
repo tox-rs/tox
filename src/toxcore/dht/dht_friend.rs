@@ -72,11 +72,12 @@ impl DhtFriend {
 
         let res = ping_bootstrap_nodes.join3(
             ping_and_get_close_nodes, send_nodes_req_random
-            ).map(|((),(),())| () );
+            ).map(|_| () );
 
         Box::new(res)
     }
 
+    // send NodesRequest to ping on nodes gotten by NodesResponse
     fn ping_bootstrap_nodes(&mut self, server: &Server) -> IoFuture<()> {
         let mut bootstrap_nodes = Bucket::new(None);
         mem::swap(&mut bootstrap_nodes, &mut self.bootstrap_nodes);
@@ -115,6 +116,7 @@ impl DhtFriend {
         Box::new(nodes_stream.for_each(|()| Ok(())))
     }
 
+    // send NodesRequest to random node which is in close list
     fn send_nodes_req_random(&mut self, server: &Server, bad_node_timeout: Duration, nodes_req_interval: Duration) -> IoFuture<()> {
         let mut peers_cache = server.get_peers_cache().write();
 
@@ -124,7 +126,7 @@ impl DhtFriend {
                 client.last_resp_time.elapsed() < bad_node_timeout
             }).collect::<Vec<_>>();
 
-        let res = if !good_nodes.is_empty()
+        if !good_nodes.is_empty()
             && self.last_nodes_req_time.elapsed() >= nodes_req_interval
             && self.bootstrap_times < MAX_BOOTSTRAP_TIMES {
 
@@ -153,9 +155,7 @@ impl DhtFriend {
             }
         } else {
             Box::new(future::ok(()))
-        };
-
-        res
+        }
     }
 
     /// add node to bootstrap_nodes and friend's close_nodes

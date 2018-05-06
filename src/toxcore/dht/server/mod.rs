@@ -62,6 +62,8 @@ type TcpOnionTx = mpsc::UnboundedSender<(InnerOnionResponse, SocketAddr)>;
 
 /// Ping timeout in seconds
 pub const PING_TIMEOUT: u64 = 5;
+/// Number of Nodes Req sending times to find close nodes
+pub const MAX_BOOTSTRAP_TIMES: u32 = 5;
 
 /**
 Own DHT node data.
@@ -96,8 +98,12 @@ pub struct Server {
     pub pk: PublicKey,
     /// tx split of channel to send packet to this peer via udp socket
     pub tx: Tx,
-    // struct to hold info of server states.
-    state: Arc<RwLock<ServerState>>,
+    /// option for hole punching
+    pub is_hole_punching_enabled: bool,
+    // store client object which has sent request packet to peer
+    peers_cache: Arc<RwLock<HashMap<PublicKey, ClientData>>>,
+    // Close List (contains nodes close to own DHT PK)
+    close_nodes: Arc<RwLock<Kbucket>>,
     // symmetric key used for onion return encryption
     onion_symmetric_key: Arc<RwLock<secretbox::Key>>,
     // onion announce struct to handle onion packets
@@ -106,6 +112,9 @@ pub struct Server {
     friends: Arc<RwLock<Vec<DhtFriend>>>,
     // nodes vector for bootstrap
     bootstrap_nodes: Arc<RwLock<Bucket>>,
+    // count for sending NodesRequest to random node which is in close node
+    // maximum value is 5, so setting this value to 2 will do sending 3 times
+    // setting this value to 0 will do sending 5 times
     bootstrap_times: Arc<RwLock<u32>>,
     last_nodes_req_time: Arc<RwLock<Instant>>,
     // `OnionResponse1` packets that have TCP protocol kind inside onion return
@@ -116,15 +125,15 @@ pub struct Server {
 
 /// Struct for grouping parameters to Server's main loop
 pub struct DhtMainLoopArgs {
-    /// timeout for remove clients in peers_cache
+    /// timeout in seconds for remove clients in peers_cache
     pub kill_node_timeout: u64,
-    /// timeout for PingRequest and NodesRequest
+    /// timeout in seconds for PingRequest and NodesRequest
     pub ping_timeout: u64,
-    /// interval for ping
+    /// interval in seconds for ping
     pub ping_interval: u64,
-    /// timeout for node is offline or not
+    /// timeout in seconds for node is offline or not
     pub bad_node_timeout: u64,
-    /// interval for random NodesRequest
+    /// interval in seconds for random NodesRequest
     pub nodes_req_interval: u64
 }
 
@@ -141,7 +150,7 @@ impl Server {
             is_hole_punching_enabled: true,
             peers_cache: Arc::new(RwLock::new(HashMap::new())),
             close_nodes: Arc::new(RwLock::new(Kbucket::new(&pk))),
-            onion_symmetric_key: Arc::new(RwLock::new(new_symmetric_key())),
+            onion_symmetric_key: Arc::new(RwLock::new(secretbox::gen_key())),
             onion_announce: Arc::new(RwLock::new(OnionAnnounce::new(pk))),
             friends: Arc::new(RwLock::new(Vec::new())),
             bootstrap_nodes: Arc::new(RwLock::new(Bucket::new(None))),
@@ -157,12 +166,10 @@ impl Server {
     }
 
     /// add friend
-    pub fn add_friend(&self, friend: DhtFriend) -> IoFuture<()> {
+    pub fn add_friend(&self, friend: DhtFriend) {
         let mut friends = self.friends.write();
 
         friends.push(friend);
-
-        Box::new(future::ok(()))
     }
 
     /// main loop of dht server, call this function every second
@@ -174,11 +181,14 @@ impl Server {
 
         let ping_bootstrap_nodes = self.ping_bootstrap_nodes();
         let ping_and_get_close_nodes = self.ping_and_get_close_nodes(Duration::from_secs(args.ping_interval));
-        let send_nodes_req_random = self.send_nodes_req_random(Duration::from_secs(args.bad_node_timeout), Duration::from_secs(args.nodes_req_interval));
+        let send_nodes_req_random = self.send_nodes_req_random(Duration::from_secs(args.bad_node_timeout),
+                                                               Duration::from_secs(args.nodes_req_interval));
         let send_nodes_req_packets = {
             let nodes_sender = friends.iter_mut()
                 .map(|friend| {
-                    friend.send_nodes_req_packets(self, Duration::from_secs(args.ping_interval), Duration::from_secs(args.nodes_req_interval), Duration::from_secs(args.bad_node_timeout))
+                    friend.send_nodes_req_packets(self, Duration::from_secs(args.ping_interval),
+                                                  Duration::from_secs(args.nodes_req_interval),
+                                                  Duration::from_secs(args.bad_node_timeout))
                 });
 
             let nodes_stream = stream::futures_unordered(nodes_sender).then(|_| Ok(()));
@@ -189,17 +199,21 @@ impl Server {
         let res = ping_bootstrap_nodes.join4(ping_and_get_close_nodes,
                                              send_nodes_req_random,
                                              send_nodes_req_packets)
-            .map(|((), (), (), ())| ());
+            .map(|_| ());
 
         Box::new(res)
     }
 
+    // send NodesRequest to nodes gotten by NodesResponse
+    // this is the checking if the node is alive(ping)
     fn ping_bootstrap_nodes(&self) -> IoFuture<()> {
+        // In this function we need to lock bootstap_nodes twice.
+        // one lock is to iterate, the other lock is to clear it.
+        // so to lock only one time, swap it with empty Bucket object.
         let mut bootstrap_nodes = Bucket::new(None);
         mem::swap(&mut bootstrap_nodes, self.bootstrap_nodes.write().deref_mut());
 
         let mut peers_cache = self.peers_cache.write();
-        let peers_cache = peers_cache.deref_mut();
 
         let nodes_sender = bootstrap_nodes.nodes.iter()
             .map(|node| {
@@ -213,22 +227,24 @@ impl Server {
         Box::new(nodes_stream.for_each(|()| Ok(())))
     }
 
+    // every 60 seconds DHT node send ping(NodesRequest) to all nodes which is in close list
     fn ping_and_get_close_nodes(&self, ping_interval: Duration) -> IoFuture<()> {
         let close_nodes = self.close_nodes.read();
-        let mut peers_cache = self.peers_cache.write();
 
         let nodes_sender = close_nodes.iter()
             .map(|node| {
-                let client = peers_cache.entry(node.pk).or_insert_with(ClientData::new);
-
-                let result = if client.last_ping_req_time.elapsed() >= ping_interval {
-                    client.last_ping_req_time = Instant::now();
-                    self.send_nodes_req(node, self.pk, client)
-                } else {
-                    Box::new(future::ok(()))
-                };
-
-                result
+                let mut peers_cache = self.peers_cache.write();
+                let client = peers_cache.entry(node.pk).or_insert_with(ClientData::new).clone();
+                (node, client)
+            })
+            .filter(|&(_node, ref client)|
+                client.last_ping_req_time.elapsed() >= ping_interval
+            )
+            .map(|(node, mut client)| {
+                client.last_ping_req_time = Instant::now();
+                let res = self.send_nodes_req(node, self.pk, &mut client);
+                self.peers_cache.write().deref_mut().insert(node.pk, client);
+                res
             });
 
         let nodes_stream = stream::futures_unordered(nodes_sender).then(|_| Ok(()));
@@ -236,20 +252,18 @@ impl Server {
         Box::new(nodes_stream.for_each(|()| Ok(())))
     }
 
+    // every 20 seconds DHT node send NodesRequest to random node which is in close list
     fn send_nodes_req_random(&self, bad_node_timeout: Duration, nodes_req_interval: Duration) -> IoFuture<()> {
         let close_nodes = self.close_nodes.read();
         let mut peers_cache = self.peers_cache.write();
-        let mut good_nodes = Vec::new();
 
-        close_nodes.iter()
-            .map(|node| {
+        let good_nodes = close_nodes.iter()
+            .filter(|&node| {
                 let client = peers_cache.entry(node.pk).or_insert_with(ClientData::new);
-                if client.last_resp_time.elapsed() < bad_node_timeout {
-                    good_nodes.push(node);
-                }
-            }).collect::<Vec<_>>();
+                client.last_resp_time.elapsed() < bad_node_timeout
+            }).collect::<Vec<PackedNode>>();
 
-        let res = if !good_nodes.is_empty()
+        if !good_nodes.is_empty()
             && self.last_nodes_req_time.read().deref().elapsed() >= nodes_req_interval
             && *self.bootstrap_times.read().deref() < MAX_BOOTSTRAP_TIMES {
             // to increase probability of sending packet to a closer node
@@ -272,9 +286,7 @@ impl Server {
             res
         } else {
             Box::new(future::ok(()))
-        };
-
-        res
+        }
     }
 
     /**
@@ -289,7 +301,7 @@ impl Server {
             is_hole_punching_enabled: true,
             peers_cache: Arc::new(RwLock::new(HashMap::new())),
             close_nodes: Arc::new(RwLock::new(Kbucket::new(&pk))),
-            onion_symmetric_key: Arc::new(RwLock::new(new_symmetric_key())),
+            onion_symmetric_key: Arc::new(RwLock::new(secretbox::gen_key())),
             onion_announce: Arc::new(RwLock::new(OnionAnnounce::new(pk))),
             friends: Arc::new(RwLock::new(Vec::new())),
             bootstrap_nodes: Arc::new(RwLock::new(Bucket::new(None))),
@@ -313,9 +325,9 @@ impl Server {
     fn remove_timedout_ping_ids(&self, timeout: Duration) -> IoFuture<()> {
         let mut peers_cache = self.peers_cache.write();
         peers_cache.iter_mut()
-            .map(|(_pk, client)|
+            .for_each(|(_pk, client)|
                 client.clear_timedout_pings(timeout)
-            ).collect::<Vec<_>>();
+            );
 
         Box::new( future::ok(()) )
     }
@@ -626,10 +638,9 @@ impl Server {
                 // ping them anymore
                 close_nodes.try_add(node);
                 bootstrap_nodes.try_add(&self.pk, node);
-                friends.iter_mut()
-                    .map(|friend| {
-                        friend.add_to_close(node);
-                    }).collect::<Vec<_>>();
+                friends.iter_mut().for_each(|friend| {
+                    friend.add_to_close(node);
+                });
             }
             Box::new( future::ok(()) )
         } else {
@@ -1129,7 +1140,8 @@ mod tests {
     fn add_friend_test() {
         let (alice, _precomp, bob_pk, _bob_sk, _rx, _addr) = create_node();
 
-        assert!(alice.add_friend(DhtFriend::new(bob_pk, 0)).wait().is_ok());
+        let friend = DhtFriend::new(bob_pk, 0);
+        alice.add_friend(friend);
     }
 
     // test handle_packet() with invlid packet type
