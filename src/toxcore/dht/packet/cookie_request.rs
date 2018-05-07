@@ -177,6 +177,23 @@ impl FromBytes for CookieRequestPayload {
 mod tests {
     use toxcore::dht::packet::cookie_request::*;
 
+    encode_decode_test!(
+        cookie_request_encode_decode,
+        CookieRequest {
+            pk: gen_keypair().0,
+            nonce: gen_nonce(),
+            payload: vec![42; 88],
+        }
+    );
+
+    encode_decode_test!(
+        cookie_request_payload_encode_decode,
+        CookieRequestPayload {
+            pk: gen_keypair().0,
+            id: 42
+        }
+    );
+
     dht_packet_encrypt_decrypt!(
         cookie_request_payload_encrypt_decrypt,
         CookieRequest,
