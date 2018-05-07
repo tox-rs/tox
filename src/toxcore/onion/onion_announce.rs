@@ -47,9 +47,9 @@ pub const PING_ID_TIMEOUT: u64 = 300;
 pub const ONION_ANNOUNCE_TIMEOUT: u64 = 300;
 
 /// Create onion ping id filled with zeros.
-pub fn initial_ping_id() -> Digest {
+pub fn initial_ping_id() -> sha256::Digest {
     // can not fail since slice has enough length
-    Digest::from_slice(&[0; DIGESTBYTES]).unwrap()
+    sha256::Digest::from_slice(&[0; sha256::DIGESTBYTES]).unwrap()
 }
 
 /** Entry that corresponds to announced onion node.
@@ -166,11 +166,11 @@ impl OnionPingData {
     `PING_ID_TIMEOUT` seconds.
 
     */
-    pub fn ping_id(&self) -> Digest {
+    pub fn ping_id(&self) -> sha256::Digest {
         let mut buf = [0; ONION_PING_DATA_SIZE];
         // can not fail since buf has enough length
         self.to_bytes((&mut buf, 0)).unwrap();
-        hash(&buf)
+        sha256::hash(&buf)
     }
 }
 
@@ -205,7 +205,7 @@ impl OnionAnnounce {
     `PING_ID_TIMEOUT` seconds.
 
     */
-    fn ping_id(&self, time: SystemTime, pk: PublicKey, ip_addr: IpAddr, port: u16) -> Digest {
+    fn ping_id(&self, time: SystemTime, pk: PublicKey, ip_addr: IpAddr, port: u16) -> sha256::Digest {
         let data = OnionPingData {
             secret_bytes: self.secret_bytes,
             time,

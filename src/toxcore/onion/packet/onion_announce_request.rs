@@ -196,7 +196,7 @@ Length   | Content
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OnionAnnounceRequestPayload {
     /// Onion ping id
-    pub ping_id: Digest,
+    pub ping_id: sha256::Digest,
     /// `PublicKey` we are searching for
     pub search_pk: PublicKey,
     /// `PublicKey` that should be used for sending data packets
@@ -207,7 +207,7 @@ pub struct OnionAnnounceRequestPayload {
 
 impl FromBytes for OnionAnnounceRequestPayload {
     named!(from_bytes<OnionAnnounceRequestPayload>, do_parse!(
-        ping_id: call!(Digest::from_bytes) >>
+        ping_id: call!(sha256::Digest::from_bytes) >>
         search_pk: call!(PublicKey::from_bytes) >>
         data_pk: call!(PublicKey::from_bytes) >>
         sendback_data: le_u64 >>
@@ -260,7 +260,7 @@ mod tests {
     encode_decode_test!(
         onion_announce_request_payload_encode_decode,
         OnionAnnounceRequestPayload {
-            ping_id: hash(&[1, 2, 3]),
+            ping_id: sha256::hash(&[1, 2, 3]),
             search_pk: gen_keypair().0,
             data_pk: gen_keypair().0,
             sendback_data: 12345
@@ -273,7 +273,7 @@ mod tests {
         let (bob_pk, _bob_sk) = gen_keypair();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
         let payload = OnionAnnounceRequestPayload {
-            ping_id: hash(&[1, 2, 3]),
+            ping_id: sha256::hash(&[1, 2, 3]),
             search_pk: gen_keypair().0,
             data_pk: gen_keypair().0,
             sendback_data: 12345
@@ -293,7 +293,7 @@ mod tests {
         let (_eve_pk, eve_sk) = gen_keypair();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
         let payload = OnionAnnounceRequestPayload {
-            ping_id: hash(&[1, 2, 3]),
+            ping_id: sha256::hash(&[1, 2, 3]),
             search_pk: gen_keypair().0,
             data_pk: gen_keypair().0,
             sendback_data: 12345
