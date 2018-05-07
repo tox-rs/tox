@@ -221,3 +221,7 @@ impl FromBytes for Nonce {
 impl FromBytes for sha256::Digest {
     named!(from_bytes<sha256::Digest>, map_opt!(take!(sha256::DIGESTBYTES), sha256::Digest::from_slice));
 }
+
+impl FromBytes for sha512::Digest {
+    named!(from_bytes<sha512::Digest>, map_opt!(take!(sha512::DIGESTBYTES), sha512::Digest::from_slice));
+}
