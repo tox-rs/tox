@@ -231,7 +231,7 @@ impl ToBytes for OnionAnnounceRequestPayload {
 mod tests {
     use super::*;
 
-    const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - NONCEBYTES;
+    const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - secretbox::NONCEBYTES;
 
     encode_decode_test!(
         inner_onion_announce_request_encode_decode,
@@ -251,7 +251,7 @@ mod tests {
                 payload: vec![42; 123]
             },
             onion_return: OnionReturn {
-                nonce: gen_nonce(),
+                nonce: secretbox::gen_nonce(),
                 payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
             }
         }
@@ -308,26 +308,28 @@ mod tests {
 
     #[test]
     fn onion_announce_request_decrypt_invalid() {
-        let symmetric_key = new_symmetric_key();
+        let (_alice_pk, alice_sk) = gen_keypair();
+        let (bob_pk, _bob_sk) = gen_keypair();
+        let shared_secret = precompute(&bob_pk, &alice_sk);
         let nonce = gen_nonce();
         let pk = gen_keypair().0;
         // Try long invalid array
         let invalid_payload = [42; 123];
-        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
         let invalid_onion_announce_request = InnerOnionAnnounceRequest {
             nonce,
             pk,
             payload: invalid_payload_encoded
         };
-        assert!(invalid_onion_announce_request.get_payload(&symmetric_key).is_err());
+        assert!(invalid_onion_announce_request.get_payload(&shared_secret).is_err());
         // Try short incomplete array
         let invalid_payload = [];
-        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
         let invalid_onion_announce_request = InnerOnionAnnounceRequest {
             nonce,
             pk,
             payload: invalid_payload_encoded
         };
-        assert!(invalid_onion_announce_request.get_payload(&symmetric_key).is_err());
+        assert!(invalid_onion_announce_request.get_payload(&shared_secret).is_err());
     }
 }

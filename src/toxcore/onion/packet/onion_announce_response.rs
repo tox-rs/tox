@@ -255,25 +255,27 @@ mod tests {
 
     #[test]
     fn onion_announce_response_decrypt_invalid() {
-        let symmetric_key = new_symmetric_key();
+        let (_alice_pk, alice_sk) = gen_keypair();
+        let (bob_pk, _bob_sk) = gen_keypair();
+        let shared_secret = precompute(&bob_pk, &alice_sk);
         let nonce = gen_nonce();
         // Try long invalid array
         let invalid_payload = [42; 123];
-        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
         let invalid_onion_announce_response = OnionAnnounceResponse {
             sendback_data: 12345,
             nonce,
             payload: invalid_payload_encoded
         };
-        assert!(invalid_onion_announce_response.get_payload(&symmetric_key).is_err());
+        assert!(invalid_onion_announce_response.get_payload(&shared_secret).is_err());
         // Try short incomplete array
         let invalid_payload = [];
-        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
         let invalid_onion_announce_response = OnionAnnounceResponse {
             sendback_data: 12345,
             nonce,
             payload: invalid_payload_encoded
         };
-        assert!(invalid_onion_announce_response.get_payload(&symmetric_key).is_err());
+        assert!(invalid_onion_announce_response.get_payload(&shared_secret).is_err());
     }
 }

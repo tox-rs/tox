@@ -24,6 +24,7 @@
 pub use sodiumoxide::randombytes::randombytes_into;
 pub use sodiumoxide::crypto::box_::*;
 pub use sodiumoxide::crypto::hash::{sha256, sha512};
+pub use sodiumoxide::crypto::secretbox;
 
 use std::sync::{Once, ONCE_INIT};
 use byteorder::{ByteOrder, NativeEndian};
@@ -186,14 +187,6 @@ pub fn increment_nonce_number(mut nonce: &mut Nonce, num: usize) {
     }
 }
 
-/// Create `PrecomputedKey` filling it with random bytes.
-pub fn new_symmetric_key() -> PrecomputedKey {
-    let mut buf = [0; PRECOMPUTEDKEYBYTES];
-    randombytes_into(&mut buf);
-    // can not fail since the buffer has correct length
-    PrecomputedKey::from_slice(&buf).unwrap()
-}
-
 /// Convert `PublicKey` to sha256 `Digest` type.
 pub fn pk_as_digest(pk: PublicKey) -> sha256::Digest {
     // can not fail since PublicKey has the same length as sha256 Digest
@@ -216,6 +209,10 @@ impl FromBytes for SecretKey {
 
 impl FromBytes for Nonce {
     named!(from_bytes<Nonce>, map_opt!(take!(NONCEBYTES), Nonce::from_slice));
+}
+
+impl FromBytes for secretbox::Nonce {
+    named!(from_bytes<secretbox::Nonce>, map_opt!(take!(secretbox::NONCEBYTES), secretbox::Nonce::from_slice));
 }
 
 impl FromBytes for sha256::Digest {

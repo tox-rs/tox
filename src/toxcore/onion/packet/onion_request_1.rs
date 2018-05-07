@@ -193,7 +193,7 @@ impl ToBytes for OnionRequest1Payload {
 mod tests {
     use super::*;
 
-    const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - NONCEBYTES;
+    const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - secretbox::NONCEBYTES;
 
     encode_decode_test!(
         onion_request_1_encode_decode,
@@ -202,7 +202,7 @@ mod tests {
             temporary_pk: gen_keypair().0,
             payload: vec![42; ONION_REQUEST_1_MIN_PAYLOAD_SIZE],
             onion_return: OnionReturn {
-                nonce: gen_nonce(),
+                nonce: secretbox::gen_nonce(),
                 payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
             }
         }
@@ -236,7 +236,7 @@ mod tests {
             inner: vec![42; ONION_REQUEST_1_MIN_PAYLOAD_SIZE]
         };
         let onion_return = OnionReturn {
-            nonce: gen_nonce(),
+            nonce: secretbox::gen_nonce(),
             payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
         };
         // encode payload with shared secret
@@ -263,7 +263,7 @@ mod tests {
             inner: vec![42; ONION_REQUEST_1_MIN_PAYLOAD_SIZE]
         };
         let onion_return = OnionReturn {
-            nonce: gen_nonce(),
+            nonce: secretbox::gen_nonce(),
             payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
         };
         // encode payload with shared secret
@@ -276,34 +276,36 @@ mod tests {
 
     #[test]
     fn onion_request_1_decrypt_invalid() {
-        let symmetric_key = new_symmetric_key();
+        let (_alice_pk, alice_sk) = gen_keypair();
+        let (bob_pk, _bob_sk) = gen_keypair();
+        let shared_secret = precompute(&bob_pk, &alice_sk);
         let nonce = gen_nonce();
         let temporary_pk = gen_keypair().0;
         // Try long invalid array
         let invalid_payload = [42; ONION_REQUEST_1_MIN_PAYLOAD_SIZE];
-        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
         let invalid_onion_request_1 = OnionRequest1 {
             nonce,
             temporary_pk,
             payload: invalid_payload_encoded,
             onion_return: OnionReturn {
-                nonce: gen_nonce(),
+                nonce: secretbox::gen_nonce(),
                 payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
             }
         };
-        assert!(invalid_onion_request_1.get_payload(&symmetric_key).is_err());
+        assert!(invalid_onion_request_1.get_payload(&shared_secret).is_err());
         // Try short incomplete array
         let invalid_payload = [];
-        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
         let invalid_onion_request_1 = OnionRequest1 {
             nonce,
             temporary_pk,
             payload: invalid_payload_encoded,
             onion_return: OnionReturn {
-                nonce: gen_nonce(),
+                nonce: secretbox::gen_nonce(),
                 payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
             }
         };
-        assert!(invalid_onion_request_1.get_payload(&symmetric_key).is_err());
+        assert!(invalid_onion_request_1.get_payload(&shared_secret).is_err());
     }
 }
