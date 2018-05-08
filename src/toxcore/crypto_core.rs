@@ -23,7 +23,8 @@
 
 pub use sodiumoxide::randombytes::randombytes_into;
 pub use sodiumoxide::crypto::box_::*;
-pub use sodiumoxide::crypto::hash::sha256::*;
+pub use sodiumoxide::crypto::hash::{sha256, sha512};
+pub use sodiumoxide::crypto::secretbox;
 
 use std::sync::{Once, ONCE_INIT};
 use byteorder::{ByteOrder, NativeEndian};
@@ -186,22 +187,14 @@ pub fn increment_nonce_number(mut nonce: &mut Nonce, num: usize) {
     }
 }
 
-/// Create `PrecomputedKey` filling it with random bytes.
-pub fn new_symmetric_key() -> PrecomputedKey {
-    let mut buf = [0; PRECOMPUTEDKEYBYTES];
-    randombytes_into(&mut buf);
-    // can not fail since the buffer has correct length
-    PrecomputedKey::from_slice(&buf).unwrap()
-}
-
 /// Convert `PublicKey` to sha256 `Digest` type.
-pub fn pk_as_digest(pk: PublicKey) -> Digest {
+pub fn pk_as_digest(pk: PublicKey) -> sha256::Digest {
     // can not fail since PublicKey has the same length as sha256 Digest
-    Digest::from_slice(pk.as_ref()).unwrap()
+    sha256::Digest::from_slice(pk.as_ref()).unwrap()
 }
 
 /// Convert sha256 `Digest` to `PublicKey` type.
-pub fn digest_as_pk(d: Digest) -> PublicKey {
+pub fn digest_as_pk(d: sha256::Digest) -> PublicKey {
     // can not fail since sha256 Digest has the same length as PublicKey
     PublicKey::from_slice(d.as_ref()).unwrap()
 }
@@ -218,6 +211,14 @@ impl FromBytes for Nonce {
     named!(from_bytes<Nonce>, map_opt!(take!(NONCEBYTES), Nonce::from_slice));
 }
 
-impl FromBytes for Digest {
-    named!(from_bytes<Digest>, map_opt!(take!(DIGESTBYTES), Digest::from_slice));
+impl FromBytes for secretbox::Nonce {
+    named!(from_bytes<secretbox::Nonce>, map_opt!(take!(secretbox::NONCEBYTES), secretbox::Nonce::from_slice));
+}
+
+impl FromBytes for sha256::Digest {
+    named!(from_bytes<sha256::Digest>, map_opt!(take!(sha256::DIGESTBYTES), sha256::Digest::from_slice));
+}
+
+impl FromBytes for sha512::Digest {
+    named!(from_bytes<sha512::Digest>, map_opt!(take!(sha512::DIGESTBYTES), sha512::Digest::from_slice));
 }

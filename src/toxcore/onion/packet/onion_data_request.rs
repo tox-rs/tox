@@ -138,7 +138,7 @@ impl ToBytes for OnionDataRequest {
 mod tests {
     use super::*;
 
-    const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - NONCEBYTES;
+    const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - secretbox::NONCEBYTES;
 
     encode_decode_test!(
         inner_onion_data_request_encode_decode,
@@ -160,7 +160,7 @@ mod tests {
                 payload: vec![42; 123]
             },
             onion_return: OnionReturn {
-                nonce: gen_nonce(),
+                nonce: secretbox::gen_nonce(),
                 payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
             }
         }

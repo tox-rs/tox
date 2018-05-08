@@ -253,26 +253,28 @@ mod tests {
 
     #[test]
     fn onion_request_0_decrypt_invalid() {
-        let symmetric_key = new_symmetric_key();
+        let (_alice_pk, alice_sk) = gen_keypair();
+        let (bob_pk, _bob_sk) = gen_keypair();
+        let shared_secret = precompute(&bob_pk, &alice_sk);
         let nonce = gen_nonce();
         let temporary_pk = gen_keypair().0;
         // Try long invalid array
         let invalid_payload = [42; 123];
-        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
         let invalid_onion_request_0 = OnionRequest0 {
             nonce,
             temporary_pk,
             payload: invalid_payload_encoded
         };
-        assert!(invalid_onion_request_0.get_payload(&symmetric_key).is_err());
+        assert!(invalid_onion_request_0.get_payload(&shared_secret).is_err());
         // Try short incomplete array
         let invalid_payload = [];
-        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
         let invalid_onion_request_0 = OnionRequest0 {
             nonce,
             temporary_pk,
             payload: invalid_payload_encoded
         };
-        assert!(invalid_onion_request_0.get_payload(&symmetric_key).is_err());
+        assert!(invalid_onion_request_0.get_payload(&shared_secret).is_err());
     }
 }

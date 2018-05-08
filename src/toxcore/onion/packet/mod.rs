@@ -68,11 +68,11 @@ pub const IPV4_PADDING_SIZE: usize = 12;
 pub const SIZE_IPPORT: usize = 19;
 
 /// Size of first `OnionReturn` struct with no inner `OnionReturn`s.
-pub const ONION_RETURN_1_SIZE: usize = NONCEBYTES + SIZE_IPPORT + MACBYTES; // 59
+pub const ONION_RETURN_1_SIZE: usize = secretbox::NONCEBYTES + SIZE_IPPORT + MACBYTES; // 59
 /// Size of second `OnionReturn` struct with one inner `OnionReturn`.
-pub const ONION_RETURN_2_SIZE: usize = NONCEBYTES + SIZE_IPPORT + MACBYTES + ONION_RETURN_1_SIZE; // 118
+pub const ONION_RETURN_2_SIZE: usize = secretbox::NONCEBYTES + SIZE_IPPORT + MACBYTES + ONION_RETURN_1_SIZE; // 118
 /// Size of third `OnionReturn` struct with two inner `OnionReturn`s.
-pub const ONION_RETURN_3_SIZE: usize = NONCEBYTES + SIZE_IPPORT + MACBYTES + ONION_RETURN_2_SIZE; // 177
+pub const ONION_RETURN_3_SIZE: usize = secretbox::NONCEBYTES + SIZE_IPPORT + MACBYTES + ONION_RETURN_2_SIZE; // 177
 
 /// The maximum size of onion packet including public key, nonce, packet kind
 /// byte, onion return.
@@ -255,14 +255,14 @@ where payload is encrypted inner `OnionReturn`
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OnionReturn {
     /// Nonce for the current encrypted payload
-    pub nonce: Nonce,
+    pub nonce: secretbox::Nonce,
     /// Encrypted payload
     pub payload: Vec<u8>
 }
 
 impl FromBytes for OnionReturn {
     named!(from_bytes<OnionReturn>, do_parse!(
-        nonce: call!(Nonce::from_bytes) >>
+        nonce: call!(secretbox::Nonce::from_bytes) >>
         payload: rest >>
         (OnionReturn { nonce, payload: payload.to_vec() })
     ));
@@ -296,11 +296,11 @@ impl OnionReturn {
     ));
 
     /// Create new `OnionReturn` object using symmetric key for encryption.
-    pub fn new(symmetric_key: &PrecomputedKey, ip_port: &IpPort, inner: Option<&OnionReturn>) -> OnionReturn {
-        let nonce = gen_nonce();
+    pub fn new(symmetric_key: &secretbox::Key, ip_port: &IpPort, inner: Option<&OnionReturn>) -> OnionReturn {
+        let nonce = secretbox::gen_nonce();
         let mut buf = [0; ONION_RETURN_2_SIZE + SIZE_IPPORT];
         let (_, size) = OnionReturn::inner_to_bytes(ip_port, inner, (&mut buf, 0)).unwrap();
-        let payload = seal_precomputed(&buf[..size], &nonce, symmetric_key);
+        let payload = secretbox::seal(&buf[..size], &nonce, symmetric_key);
 
         OnionReturn { nonce, payload }
     }
@@ -312,8 +312,8 @@ impl OnionReturn {
     - fails to decrypt
     - fails to parse as `IpPort` with possibly inner `OnionReturn`
     */
-    pub fn get_payload(&self, symmetric_key: &PrecomputedKey) -> Result<(IpPort, Option<OnionReturn>), Error> {
-        let decrypted = open_precomputed(&self.payload, &self.nonce, symmetric_key)
+    pub fn get_payload(&self, symmetric_key: &secretbox::Key) -> Result<(IpPort, Option<OnionReturn>), Error> {
+        let decrypted = secretbox::open(&self.payload, &self.nonce, symmetric_key)
             .map_err(|()| {
                 debug!("Decrypting OnionReturn failed!");
                 Error::new(ErrorKind::Other, "OnionReturn decrypt error.")
@@ -369,7 +369,7 @@ impl ToBytes for AnnounceStatus {
 mod tests {
     use super::*;
 
-    const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - NONCEBYTES;
+    const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - secretbox::NONCEBYTES;
 
     encode_decode_test!(
         ip_port_udp_encode_decode,
@@ -392,7 +392,7 @@ mod tests {
     encode_decode_test!(
         onion_return_encode_decode,
         OnionReturn {
-            nonce: gen_nonce(),
+            nonce: secretbox::gen_nonce(),
             payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
         }
     );
@@ -427,8 +427,8 @@ mod tests {
 
     #[test]
     fn onion_return_encrypt_decrypt() {
-        let alice_symmetric_key = new_symmetric_key();
-        let bob_symmetric_key = new_symmetric_key();
+        let alice_symmetric_key = secretbox::gen_key();
+        let bob_symmetric_key = secretbox::gen_key();
         // alice encrypt
         let ip_port_1 = IpPort {
             protocol: ProtocolType::UDP,
@@ -455,9 +455,9 @@ mod tests {
 
     #[test]
     fn onion_return_encrypt_decrypt_invalid_key() {
-        let alice_symmetric_key = new_symmetric_key();
-        let bob_symmetric_key = new_symmetric_key();
-        let eve_symmetric_key = new_symmetric_key();
+        let alice_symmetric_key = secretbox::gen_key();
+        let bob_symmetric_key = secretbox::gen_key();
+        let eve_symmetric_key = secretbox::gen_key();
         // alice encrypt
         let ip_port_1 = IpPort {
             protocol: ProtocolType::UDP,
@@ -479,11 +479,11 @@ mod tests {
 
     #[test]
     fn onion_return_decrypt_invalid() {
-        let symmetric_key = new_symmetric_key();
-        let nonce = gen_nonce();
+        let symmetric_key = secretbox::gen_key();
+        let nonce = secretbox::gen_nonce();
         // Try long invalid array
         let invalid_payload = [42; 123];
-        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_payload_encoded = secretbox::seal(&invalid_payload, &nonce, &symmetric_key);
         let invalid_onion_return = OnionReturn {
             nonce,
             payload: invalid_payload_encoded
@@ -491,7 +491,7 @@ mod tests {
         assert!(invalid_onion_return.get_payload(&symmetric_key).is_err());
         // Try short incomplete array
         let invalid_payload = [];
-        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_payload_encoded = secretbox::seal(&invalid_payload, &nonce, &symmetric_key);
         let invalid_onion_return = OnionReturn {
             nonce,
             payload: invalid_payload_encoded

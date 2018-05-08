@@ -47,9 +47,9 @@ pub const PING_ID_TIMEOUT: u64 = 300;
 pub const ONION_ANNOUNCE_TIMEOUT: u64 = 300;
 
 /// Create onion ping id filled with zeros.
-pub fn initial_ping_id() -> Digest {
+pub fn initial_ping_id() -> sha256::Digest {
     // can not fail since slice has enough length
-    Digest::from_slice(&[0; DIGESTBYTES]).unwrap()
+    sha256::Digest::from_slice(&[0; sha256::DIGESTBYTES]).unwrap()
 }
 
 /** Entry that corresponds to announced onion node.
@@ -166,11 +166,11 @@ impl OnionPingData {
     `PING_ID_TIMEOUT` seconds.
 
     */
-    pub fn ping_id(&self) -> Digest {
+    pub fn ping_id(&self) -> sha256::Digest {
         let mut buf = [0; ONION_PING_DATA_SIZE];
         // can not fail since buf has enough length
         self.to_bytes((&mut buf, 0)).unwrap();
-        hash(&buf)
+        sha256::hash(&buf)
     }
 }
 
@@ -205,7 +205,7 @@ impl OnionAnnounce {
     `PING_ID_TIMEOUT` seconds.
 
     */
-    fn ping_id(&self, time: SystemTime, pk: PublicKey, ip_addr: IpAddr, port: u16) -> Digest {
+    fn ping_id(&self, time: SystemTime, pk: PublicKey, ip_addr: IpAddr, port: u16) -> sha256::Digest {
         let data = OnionPingData {
             secret_bytes: self.secret_bytes,
             time,
@@ -378,7 +378,7 @@ mod tests {
 
     use quickcheck::{Arbitrary, StdGen};
 
-    const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - NONCEBYTES;
+    const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - secretbox::NONCEBYTES;
 
     #[test]
     fn announce_entry_valid() {
@@ -387,7 +387,7 @@ mod tests {
             "1.2.3.4".parse().unwrap(),
             12345,
             OnionReturn {
-                nonce: gen_nonce(),
+                nonce: secretbox::gen_nonce(),
                 payload: vec![42; 42]
             },
             gen_keypair().0
@@ -402,7 +402,7 @@ mod tests {
             "1.2.3.4".parse().unwrap(),
             12345,
             OnionReturn {
-                nonce: gen_nonce(),
+                nonce: secretbox::gen_nonce(),
                 payload: vec![42; 42]
             },
             gen_keypair().0
@@ -466,7 +466,7 @@ mod tests {
             IpAddr::arbitrary(&mut gen),
             u16::arbitrary(&mut gen),
             OnionReturn {
-                nonce: gen_nonce(),
+                nonce: secretbox::gen_nonce(),
                 payload: vec![42; 42]
             },
             gen_keypair().0
@@ -676,7 +676,7 @@ mod tests {
         };
         let inner = InnerOnionAnnounceRequest::new(&shared_secret, &packet_pk, payload);
         let onion_return = OnionReturn {
-            nonce: gen_nonce(),
+            nonce: secretbox::gen_nonce(),
             payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
         };
         let request = OnionAnnounceRequest {
@@ -721,7 +721,7 @@ mod tests {
         };
         let inner = InnerOnionAnnounceRequest::new(&shared_secret, &packet_pk, payload);
         let onion_return = OnionReturn {
-            nonce: gen_nonce(),
+            nonce: secretbox::gen_nonce(),
             payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
         };
         let request = OnionAnnounceRequest {
@@ -770,7 +770,7 @@ mod tests {
         };
         let inner = InnerOnionAnnounceRequest::new(&shared_secret, &packet_pk, payload);
         let onion_return = OnionReturn {
-            nonce: gen_nonce(),
+            nonce: secretbox::gen_nonce(),
             payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
         };
         let request = OnionAnnounceRequest {
@@ -813,7 +813,7 @@ mod tests {
         };
         let inner = InnerOnionAnnounceRequest::new(&shared_secret, &packet_pk, payload);
         let onion_return = OnionReturn {
-            nonce: gen_nonce(),
+            nonce: secretbox::gen_nonce(),
             payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
         };
         let request = OnionAnnounceRequest {
@@ -853,7 +853,7 @@ mod tests {
         let temporary_pk = gen_keypair().0;
         let payload = vec![42; 123];
         let onion_return = OnionReturn {
-            nonce: gen_nonce(),
+            nonce: secretbox::gen_nonce(),
             payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
         };
         let inner = InnerOnionDataRequest {
@@ -886,7 +886,7 @@ mod tests {
         let onion_announce = OnionAnnounce::new(dht_pk);
 
         let onion_return = OnionReturn {
-            nonce: gen_nonce(),
+            nonce: secretbox::gen_nonce(),
             payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
         };
         let inner = InnerOnionDataRequest {

@@ -196,7 +196,7 @@ Length   | Content
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OnionAnnounceRequestPayload {
     /// Onion ping id
-    pub ping_id: Digest,
+    pub ping_id: sha256::Digest,
     /// `PublicKey` we are searching for
     pub search_pk: PublicKey,
     /// `PublicKey` that should be used for sending data packets
@@ -207,7 +207,7 @@ pub struct OnionAnnounceRequestPayload {
 
 impl FromBytes for OnionAnnounceRequestPayload {
     named!(from_bytes<OnionAnnounceRequestPayload>, do_parse!(
-        ping_id: call!(Digest::from_bytes) >>
+        ping_id: call!(sha256::Digest::from_bytes) >>
         search_pk: call!(PublicKey::from_bytes) >>
         data_pk: call!(PublicKey::from_bytes) >>
         sendback_data: le_u64 >>
@@ -231,7 +231,7 @@ impl ToBytes for OnionAnnounceRequestPayload {
 mod tests {
     use super::*;
 
-    const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - NONCEBYTES;
+    const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - secretbox::NONCEBYTES;
 
     encode_decode_test!(
         inner_onion_announce_request_encode_decode,
@@ -251,7 +251,7 @@ mod tests {
                 payload: vec![42; 123]
             },
             onion_return: OnionReturn {
-                nonce: gen_nonce(),
+                nonce: secretbox::gen_nonce(),
                 payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
             }
         }
@@ -260,7 +260,7 @@ mod tests {
     encode_decode_test!(
         onion_announce_request_payload_encode_decode,
         OnionAnnounceRequestPayload {
-            ping_id: hash(&[1, 2, 3]),
+            ping_id: sha256::hash(&[1, 2, 3]),
             search_pk: gen_keypair().0,
             data_pk: gen_keypair().0,
             sendback_data: 12345
@@ -273,7 +273,7 @@ mod tests {
         let (bob_pk, _bob_sk) = gen_keypair();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
         let payload = OnionAnnounceRequestPayload {
-            ping_id: hash(&[1, 2, 3]),
+            ping_id: sha256::hash(&[1, 2, 3]),
             search_pk: gen_keypair().0,
             data_pk: gen_keypair().0,
             sendback_data: 12345
@@ -293,7 +293,7 @@ mod tests {
         let (_eve_pk, eve_sk) = gen_keypair();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
         let payload = OnionAnnounceRequestPayload {
-            ping_id: hash(&[1, 2, 3]),
+            ping_id: sha256::hash(&[1, 2, 3]),
             search_pk: gen_keypair().0,
             data_pk: gen_keypair().0,
             sendback_data: 12345
@@ -308,26 +308,28 @@ mod tests {
 
     #[test]
     fn onion_announce_request_decrypt_invalid() {
-        let symmetric_key = new_symmetric_key();
+        let (_alice_pk, alice_sk) = gen_keypair();
+        let (bob_pk, _bob_sk) = gen_keypair();
+        let shared_secret = precompute(&bob_pk, &alice_sk);
         let nonce = gen_nonce();
         let pk = gen_keypair().0;
         // Try long invalid array
         let invalid_payload = [42; 123];
-        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
         let invalid_onion_announce_request = InnerOnionAnnounceRequest {
             nonce,
             pk,
             payload: invalid_payload_encoded
         };
-        assert!(invalid_onion_announce_request.get_payload(&symmetric_key).is_err());
+        assert!(invalid_onion_announce_request.get_payload(&shared_secret).is_err());
         // Try short incomplete array
         let invalid_payload = [];
-        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
         let invalid_onion_announce_request = InnerOnionAnnounceRequest {
             nonce,
             pk,
             payload: invalid_payload_encoded
         };
-        assert!(invalid_onion_announce_request.get_payload(&symmetric_key).is_err());
+        assert!(invalid_onion_announce_request.get_payload(&shared_secret).is_err());
     }
 }

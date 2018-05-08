@@ -96,7 +96,7 @@ pub struct Server {
     // struct to hold info of server states.
     state: Arc<RwLock<ServerState>>,
     // symmetric key used for onion return encryption
-    onion_symmetric_key: Arc<RwLock<PrecomputedKey>>,
+    onion_symmetric_key: Arc<RwLock<secretbox::Key>>,
     // onion announce struct to handle onion packets
     onion_announce: Arc<RwLock<OnionAnnounce>>,
     // `OnionResponse1` packets that have TCP protocol kind inside onion return
@@ -130,7 +130,7 @@ impl Server {
                 peers_cache: HashMap::new(),
                 kbucket,
             })),
-            onion_symmetric_key: Arc::new(RwLock::new(new_symmetric_key())),
+            onion_symmetric_key: Arc::new(RwLock::new(secretbox::gen_key())),
             onion_announce: Arc::new(RwLock::new(OnionAnnounce::new(pk))),
             tcp_onion_sink: None
         }
@@ -150,7 +150,7 @@ impl Server {
                 peers_cache: HashMap::new(),
                 kbucket,
             })),
-            onion_symmetric_key: Arc::new(RwLock::new(new_symmetric_key())),
+            onion_symmetric_key: Arc::new(RwLock::new(secretbox::gen_key())),
             onion_announce: Arc::new(RwLock::new(OnionAnnounce::new(pk))),
             tcp_onion_sink: Some(tcp_onion_sink)
         }
@@ -900,7 +900,7 @@ impl Server {
     }
     /// refresh onion symmetric key to enforce onion paths expiration
     pub fn refresh_onion_key(&self) {
-        *self.onion_symmetric_key.write() = new_symmetric_key();
+        *self.onion_symmetric_key.write() = secretbox::gen_key();
     }
     /// add PackedNode object to kbucket as a thread-safe manner
     pub fn try_add_to_kbucket(&self, pn: &PackedNode) -> bool {
@@ -935,9 +935,9 @@ mod tests {
     use std::net::SocketAddr;
     use toxcore::binary_io::*;
 
-    const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - NONCEBYTES;
-    const ONION_RETURN_2_PAYLOAD_SIZE: usize = ONION_RETURN_2_SIZE - NONCEBYTES;
-    const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - NONCEBYTES;
+    const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - secretbox::NONCEBYTES;
+    const ONION_RETURN_2_PAYLOAD_SIZE: usize = ONION_RETURN_2_SIZE - secretbox::NONCEBYTES;
+    const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - secretbox::NONCEBYTES;
 
     macro_rules! unpack {
         ($variable:expr, $variant:path) => (
@@ -1386,7 +1386,7 @@ mod tests {
             inner: inner.clone()
         };
         let onion_return = OnionReturn {
-            nonce: gen_nonce(),
+            nonce: secretbox::gen_nonce(),
             payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
         };
         let packet = DhtPacket::OnionRequest1(OnionRequest1::new(&precomp, &bob_pk, payload, onion_return));
@@ -1418,7 +1418,7 @@ mod tests {
             temporary_pk: gen_keypair().0,
             payload: vec![42; 123], // not encrypted with dht pk
             onion_return: OnionReturn {
-                nonce: gen_nonce(),
+                nonce: secretbox::gen_nonce(),
                 payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
             }
         });
@@ -1446,7 +1446,7 @@ mod tests {
             inner: InnerOnionRequest::InnerOnionAnnounceRequest(inner.clone())
         };
         let onion_return = OnionReturn {
-            nonce: gen_nonce(),
+            nonce: secretbox::gen_nonce(),
             payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
         };
         let packet = DhtPacket::OnionRequest2(OnionRequest2::new(&precomp, &bob_pk, payload, onion_return));
@@ -1488,7 +1488,7 @@ mod tests {
             inner: InnerOnionRequest::InnerOnionDataRequest(inner.clone())
         };
         let onion_return = OnionReturn {
-            nonce: gen_nonce(),
+            nonce: secretbox::gen_nonce(),
             payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
         };
         let packet = DhtPacket::OnionRequest2(OnionRequest2::new(&precomp, &bob_pk, payload, onion_return));
@@ -1519,7 +1519,7 @@ mod tests {
             temporary_pk: gen_keypair().0,
             payload: vec![42; 123], // not encrypted with dht pk
             onion_return: OnionReturn {
-                nonce: gen_nonce(),
+                nonce: secretbox::gen_nonce(),
                 payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
             }
         });
@@ -1541,7 +1541,7 @@ mod tests {
         };
         let inner = InnerOnionAnnounceRequest::new(&precomp, &bob_pk, payload);
         let onion_return = OnionReturn {
-            nonce: gen_nonce(),
+            nonce: secretbox::gen_nonce(),
             payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
         };
         let packet = DhtPacket::OnionAnnounceRequest(OnionAnnounceRequest {
@@ -1584,7 +1584,7 @@ mod tests {
         };
         let inner = InnerOnionAnnounceRequest::new(&precomp, &bob_pk, payload);
         let onion_return = OnionReturn {
-            nonce: gen_nonce(),
+            nonce: secretbox::gen_nonce(),
             payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
         };
         let packet = DhtPacket::OnionAnnounceRequest(OnionAnnounceRequest {
@@ -1664,7 +1664,7 @@ mod tests {
             port: 12345
         };
         let next_onion_return = OnionReturn {
-            nonce: gen_nonce(),
+            nonce: secretbox::gen_nonce(),
             payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
         };
         let onion_return = OnionReturn::new(&onion_symmetric_key, &ip_port, Some(&next_onion_return));
@@ -1696,7 +1696,7 @@ mod tests {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let onion_return = OnionReturn {
-            nonce: gen_nonce(),
+            nonce: secretbox::gen_nonce(),
             payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE] // not encrypted with onion_symmetric_key
         };
         let payload = InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
@@ -1750,7 +1750,7 @@ mod tests {
             port: 12345
         };
         let next_onion_return = OnionReturn {
-            nonce: gen_nonce(),
+            nonce: secretbox::gen_nonce(),
             payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
         };
         let onion_return = OnionReturn::new(&onion_symmetric_key, &ip_port, Some(&next_onion_return));
@@ -1782,7 +1782,7 @@ mod tests {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let onion_return = OnionReturn {
-            nonce: gen_nonce(),
+            nonce: secretbox::gen_nonce(),
             payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE] // not encrypted with onion_symmetric_key
         };
         let payload = InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
@@ -1958,7 +1958,7 @@ mod tests {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let onion_return = OnionReturn {
-            nonce: gen_nonce(),
+            nonce: secretbox::gen_nonce(),
             payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE] // not encrypted with onion_symmetric_key
         };
         let payload = InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
@@ -1986,7 +1986,7 @@ mod tests {
             port: 12345
         };
         let next_onion_return = OnionReturn {
-            nonce: gen_nonce(),
+            nonce: secretbox::gen_nonce(),
             payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
         };
         let onion_return = OnionReturn::new(&onion_symmetric_key, &ip_port, Some(&next_onion_return));
