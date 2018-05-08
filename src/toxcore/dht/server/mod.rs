@@ -40,6 +40,8 @@ use std::collections::HashMap;
 use std::ops::DerefMut;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use std::ops::Deref;
+use std::mem;
 
 use toxcore::crypto_core::*;
 use toxcore::dht::packet::*;
@@ -49,6 +51,7 @@ use toxcore::onion::packet::*;
 use toxcore::onion::onion_announce::*;
 use toxcore::dht::server::client::*;
 use toxcore::io_tokio::IoFuture;
+use toxcore::dht::dht_friend::*;
 use toxcore::tcp::packet::OnionRequest;
 
 /// Shorthand for the transmit half of the message channel.
@@ -59,6 +62,8 @@ type TcpOnionTx = mpsc::UnboundedSender<(InnerOnionResponse, SocketAddr)>;
 
 /// Ping timeout in seconds
 pub const PING_TIMEOUT: u64 = 5;
+/// Number of Nodes Req sending times to find close nodes
+pub const MAX_BOOTSTRAP_TIMES: u32 = 5;
 
 /**
 Own DHT node data.
@@ -93,25 +98,43 @@ pub struct Server {
     pub pk: PublicKey,
     /// tx split of channel to send packet to this peer via udp socket
     pub tx: Tx,
-    // struct to hold info of server states.
-    state: Arc<RwLock<ServerState>>,
+    /// option for hole punching
+    pub is_hole_punching_enabled: bool,
+    // store client object which has sent request packet to peer
+    peers_cache: Arc<RwLock<HashMap<PublicKey, ClientData>>>,
+    // Close List (contains nodes close to own DHT PK)
+    close_nodes: Arc<RwLock<Kbucket>>,
     // symmetric key used for onion return encryption
     onion_symmetric_key: Arc<RwLock<secretbox::Key>>,
     // onion announce struct to handle onion packets
     onion_announce: Arc<RwLock<OnionAnnounce>>,
+    // friends vector of dht node
+    friends: Arc<RwLock<Vec<DhtFriend>>>,
+    // nodes vector for bootstrap
+    bootstrap_nodes: Arc<RwLock<Bucket>>,
+    // count for sending NodesRequest to random node which is in close node
+    // maximum value is 5, so setting this value to 2 will do sending 3 times
+    // setting this value to 0 will do sending 5 times
+    bootstrap_times: Arc<RwLock<u32>>,
+    last_nodes_req_time: Arc<RwLock<Instant>>,
     // `OnionResponse1` packets that have TCP protocol kind inside onion return
     // should be redirected to TCP sender trough this sink
     // None if there is no TCP relay
     tcp_onion_sink: Option<TcpOnionTx>,
 }
 
-#[derive(Debug)]
-// hold client object connected and kbucket object, this struct object is shared by threads
-struct ServerState {
-    /// store client object which has sent request packet to peer
-    pub peers_cache: HashMap<PublicKey, ClientData>,
-    /// Close List (contains nodes close to own DHT PK)
-    pub kbucket: Kbucket,
+/// Struct for grouping parameters to Server's main loop
+pub struct DhtMainLoopArgs {
+    /// timeout in seconds for remove clients in peers_cache
+    pub kill_node_timeout: u64,
+    /// timeout in seconds for PingRequest and NodesRequest
+    pub ping_timeout: u64,
+    /// interval in seconds for ping
+    pub ping_interval: u64,
+    /// timeout in seconds for node is offline or not
+    pub bad_node_timeout: u64,
+    /// interval in seconds for random NodesRequest
+    pub nodes_req_interval: u64
 }
 
 impl Server {
@@ -119,83 +142,201 @@ impl Server {
     Create new `Server` instance.
     */
     pub fn new(tx: Tx, pk: PublicKey, sk: SecretKey) -> Server {
-        let kbucket = Kbucket::new(&pk);
-
         debug!("Created new Server instance");
         Server {
             sk,
             pk,
             tx,
-            state: Arc::new(RwLock::new(ServerState {
-                peers_cache: HashMap::new(),
-                kbucket,
-            })),
+            is_hole_punching_enabled: true,
+            peers_cache: Arc::new(RwLock::new(HashMap::new())),
+            close_nodes: Arc::new(RwLock::new(Kbucket::new(&pk))),
             onion_symmetric_key: Arc::new(RwLock::new(secretbox::gen_key())),
             onion_announce: Arc::new(RwLock::new(OnionAnnounce::new(pk))),
+            friends: Arc::new(RwLock::new(Vec::new())),
+            bootstrap_nodes: Arc::new(RwLock::new(Bucket::new(None))),
+            bootstrap_times: Arc::new(RwLock::new(0)),
+            last_nodes_req_time: Arc::new(RwLock::new(Instant::now())),
             tcp_onion_sink: None
         }
     }
+
+    /// return peers_cache member variable
+    pub fn get_peers_cache(&self) -> &Arc<RwLock<HashMap<PublicKey, ClientData>>> {
+        &self.peers_cache
+    }
+
+    /// add friend
+    pub fn add_friend(&self, friend: DhtFriend) {
+        let mut friends = self.friends.write();
+
+        friends.push(friend);
+    }
+
+    /// main loop of dht server, call this function every second
+    pub fn dht_main_loop(&self, args: DhtMainLoopArgs) -> IoFuture<()> {
+        self.remove_timedout_clients(Duration::from_secs(args.kill_node_timeout));
+        self.remove_timedout_ping_ids(Duration::from_secs(args.ping_timeout));
+
+        let mut friends = self.friends.write();
+
+        let ping_bootstrap_nodes = self.ping_bootstrap_nodes();
+        let ping_and_get_close_nodes = self.ping_and_get_close_nodes(Duration::from_secs(args.ping_interval));
+        let send_nodes_req_random = self.send_nodes_req_random(Duration::from_secs(args.bad_node_timeout),
+                                                               Duration::from_secs(args.nodes_req_interval));
+        let send_nodes_req_packets = {
+            let nodes_sender = friends.iter_mut()
+                .map(|friend| {
+                    friend.send_nodes_req_packets(self, Duration::from_secs(args.ping_interval),
+                                                  Duration::from_secs(args.nodes_req_interval),
+                                                  Duration::from_secs(args.bad_node_timeout))
+                });
+
+            let nodes_stream = stream::futures_unordered(nodes_sender).then(|_| Ok(()));
+
+            nodes_stream.for_each(|()| Ok(()))
+        };
+
+        let res = ping_bootstrap_nodes.join4(ping_and_get_close_nodes,
+                                             send_nodes_req_random,
+                                             send_nodes_req_packets)
+            .map(|_| ());
+
+        Box::new(res)
+    }
+
+    // send NodesRequest to nodes gotten by NodesResponse
+    // this is the checking if the node is alive(ping)
+    fn ping_bootstrap_nodes(&self) -> IoFuture<()> {
+        // In this function we need to lock bootstap_nodes twice.
+        // one lock is to iterate, the other lock is to clear it.
+        // so to lock only one time, swap it with empty Bucket object.
+        let mut bootstrap_nodes = Bucket::new(None);
+        mem::swap(&mut bootstrap_nodes, self.bootstrap_nodes.write().deref_mut());
+
+        let mut peers_cache = self.peers_cache.write();
+
+        let nodes_sender = bootstrap_nodes.nodes.iter()
+            .map(|node| {
+                let client = peers_cache.entry(node.pk).or_insert_with(ClientData::new);
+
+                self.send_nodes_req(*node, self.pk, client)
+            });
+
+        let nodes_stream = stream::futures_unordered(nodes_sender).then(|_| Ok(()));
+
+        Box::new(nodes_stream.for_each(|()| Ok(())))
+    }
+
+    // every 60 seconds DHT node send ping(NodesRequest) to all nodes which is in close list
+    fn ping_and_get_close_nodes(&self, ping_interval: Duration) -> IoFuture<()> {
+        let close_nodes = self.close_nodes.read();
+
+        let nodes_sender = close_nodes.iter()
+            .map(|node| {
+                let mut peers_cache = self.peers_cache.write();
+                let client = peers_cache.entry(node.pk).or_insert_with(ClientData::new).clone();
+                (node, client)
+            })
+            .filter(|&(_node, ref client)|
+                client.last_ping_req_time.elapsed() >= ping_interval
+            )
+            .map(|(node, mut client)| {
+                client.last_ping_req_time = Instant::now();
+                let res = self.send_nodes_req(node, self.pk, &mut client);
+                self.peers_cache.write().deref_mut().insert(node.pk, client);
+                res
+            });
+
+        let nodes_stream = stream::futures_unordered(nodes_sender).then(|_| Ok(()));
+
+        Box::new(nodes_stream.for_each(|()| Ok(())))
+    }
+
+    // every 20 seconds DHT node send NodesRequest to random node which is in close list
+    fn send_nodes_req_random(&self, bad_node_timeout: Duration, nodes_req_interval: Duration) -> IoFuture<()> {
+        let close_nodes = self.close_nodes.read();
+        let mut peers_cache = self.peers_cache.write();
+
+        let good_nodes = close_nodes.iter()
+            .filter(|&node| {
+                let client = peers_cache.entry(node.pk).or_insert_with(ClientData::new);
+                client.last_resp_time.elapsed() < bad_node_timeout
+            }).collect::<Vec<PackedNode>>();
+
+        if !good_nodes.is_empty()
+            && self.last_nodes_req_time.read().deref().elapsed() >= nodes_req_interval
+            && *self.bootstrap_times.read().deref() < MAX_BOOTSTRAP_TIMES {
+            // to increase probability of sending packet to a closer node
+            // lower index is closer node
+            let num_nodes = good_nodes.len();
+            let mut random_node = random_u32() as usize % num_nodes;
+            if 0 != random_node {
+                random_node -= random_u32() as usize % (random_node + 1);
+            }
+
+            let random_node = good_nodes[random_node];
+
+
+            let client = peers_cache.entry(random_node.pk).or_insert_with(ClientData::new);
+
+            let res = self.send_nodes_req(random_node, self.pk, client);
+
+            *self.bootstrap_times.write().deref_mut() += 1;
+            *self.last_nodes_req_time.write().deref_mut() = Instant::now();
+            res
+        } else {
+            Box::new(future::ok(()))
+        }
+    }
+
     /**
     Create new `Server` instance with TCP onion.
     */
     pub fn new_with_tcp_onion(tx: Tx, pk: PublicKey, sk: SecretKey, tcp_onion_sink: TcpOnionTx) -> Server {
-        let kbucket = Kbucket::new(&pk);
-
         debug!("Created new Server instance");
         Server {
             sk,
             pk,
             tx,
-            state: Arc::new(RwLock::new(ServerState {
-                peers_cache: HashMap::new(),
-                kbucket,
-            })),
+            is_hole_punching_enabled: true,
+            peers_cache: Arc::new(RwLock::new(HashMap::new())),
+            close_nodes: Arc::new(RwLock::new(Kbucket::new(&pk))),
             onion_symmetric_key: Arc::new(RwLock::new(secretbox::gen_key())),
             onion_announce: Arc::new(RwLock::new(OnionAnnounce::new(pk))),
+            friends: Arc::new(RwLock::new(Vec::new())),
+            bootstrap_nodes: Arc::new(RwLock::new(Bucket::new(None))),
+            bootstrap_times: Arc::new(RwLock::new(0)),
+            last_nodes_req_time: Arc::new(RwLock::new(Instant::now())),
             tcp_onion_sink: Some(tcp_onion_sink)
         }
     }
-    /// remove timed-out clients, also remove node from kbucket
-    pub fn remove_timedout_clients(&self, timeout: Duration) -> IoFuture<()> {
-        let mut state = self.state.write();
-        let timeout_peers = state.peers_cache.iter()
-            .filter(|&(_pk, client)| client.last_resp_time.elapsed() > timeout)
-            .map(|(pk, _client)| *pk)
-            .collect::<Vec<_>>();
 
-        timeout_peers.into_iter().for_each(|pk| state.kbucket.remove(&pk));
+    // remove timed-out clients,
+    // close_nodes entry should be remain even if offline timed out, so after online, server try to ping again.
+    fn remove_timedout_clients(&self, timeout: Duration) -> IoFuture<()> {
+        let mut peers_cache = self.peers_cache.write();
 
-        state.peers_cache.retain(|&_pk, ref client|
+        peers_cache.retain(|&_pk, ref client|
             client.last_resp_time.elapsed() <= timeout);
         Box::new(future::ok(()))
     }
 
-    /// remove PING_TIMEOUT timed out ping_ids of PingHash
-    pub fn remove_timedout_ping_ids(&self, timeout: Duration) -> IoFuture<()> {
-        let mut state = self.state.write();
-        state.peers_cache.iter_mut()
-            .map(|(_pk, client)|
+    // remove PING_TIMEOUT timed out ping_ids of PingHash
+    fn remove_timedout_ping_ids(&self, timeout: Duration) -> IoFuture<()> {
+        let mut peers_cache = self.peers_cache.write();
+        peers_cache.iter_mut()
+            .for_each(|(_pk, client)|
                 client.clear_timedout_pings(timeout)
-            ).collect::<Vec<_>>();
+            );
 
         Box::new( future::ok(()) )
     }
 
-    /// send PingRequest to all peers in kbucket
+    /// send PingRequest to all peers in close_nodes
     pub fn send_pings(&self) -> IoFuture<()> {
-        let mut state = self.state.write();
-        let ping_sender = state.kbucket.iter().map(|peer| {
-            let client = state.peers_cache.entry(peer.pk).or_insert_with(ClientData::new);
-
-            let payload = PingRequestPayload {
-                id: client.insert_new_ping_id(),
-            };
-            let ping_req = DhtPacket::PingRequest(PingRequest::new(
-                &precompute(&peer.pk, &self.sk),
-                &self.pk,
-                payload
-            ));
-            self.send_to(peer.saddr, ping_req)
+        let close_nodes = self.close_nodes.read();
+        let ping_sender = close_nodes.iter().map(|peer| {
+            self.send_ping_req(&peer)
         });
 
         let pings_stream = stream::futures_unordered(ping_sender).then(|_| Ok(()));
@@ -203,26 +344,24 @@ impl Server {
         Box::new(pings_stream.for_each(|()| Ok(())))
     }
 
-    /// Send NodesRequest to random peer every 20 seconds
-    pub fn periodical_nodes_req(&self) -> IoFuture<()> {
-        let peer = match self.get_random_node() {
-            None => {
-                return Box::new( future::ok(()))
-            },
-            Some(peer) => peer,
+    /// Send PingRequest to peer
+    pub fn send_ping_req(&self, peer: &PackedNode) -> IoFuture<()> {
+        let mut peers_cache = self.peers_cache.write();
+        let client = peers_cache.entry(peer.pk).or_insert_with(ClientData::new);
+
+        let payload = PingRequestPayload {
+            id: client.insert_new_ping_id(),
         };
-
-        self.send_nodes_req(peer)
+        let ping_req = DhtPacket::PingRequest(PingRequest::new(
+            &precompute(&peer.pk, &self.sk),
+            &self.pk,
+            payload
+        ));
+        self.send_to(peer.saddr, ping_req)
     }
 
-    // Get random node from kbucket
-    fn get_random_node(&self) -> Option<PackedNode> {
-        let state = self.state.read();
-        state.kbucket.get_random_node()
-    }
-
-    // Send NodesRequest to peer
-    fn send_nodes_req(&self, target_peer: PackedNode) -> IoFuture<()> {
+    /// Send NodesRequest to peer
+    pub fn send_nodes_req(&self, target_peer: PackedNode, search_pk: PublicKey, client: &mut ClientData) -> IoFuture<()> {
         // Check if packet is going to be sent to ourself.
         if self.pk == target_peer.pk {
             return Box::new(
@@ -232,11 +371,8 @@ impl Server {
             )
         }
 
-        let mut state = self.state.write();
-        let client = state.peers_cache.entry(target_peer.pk).or_insert_with(ClientData::new);
-
         let payload = NodesRequestPayload {
-            pk: self.pk,
+            pk: search_pk,
             id: client.insert_new_ping_id(),
         };
         let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(
@@ -247,11 +383,12 @@ impl Server {
 
         self.send_to(target_peer.saddr, nodes_req)
     }
+
     /// send NatPingRequests to peers every 3 seconds
     pub fn send_nat_ping_req(&self, peer: PackedNode, friend_pk: PublicKey) -> IoFuture<()> {
-        let mut state = self.state.write();
+        let mut peers_cache = self.peers_cache.write();
 
-        let client = state.peers_cache.entry(peer.pk).or_insert_with(ClientData::new);
+        let client = peers_cache.entry(peer.pk).or_insert_with(ClientData::new);
 
         let payload = DhtRequestPayload::NatPingRequest(NatPingRequest {
             id: client.insert_new_ping_id(),
@@ -390,10 +527,10 @@ impl Server {
         self.send_to(addr, ping_resp)
     }
     /**
-    handle received PingResponse packet. If ping_id is correct, try_add peer to kbucket.
+    handle received PingResponse packet. If ping_id is correct, try_add peer to close_nodes.
     */
     fn handle_ping_resp(&self, packet: PingResponse) -> IoFuture<()> {
-        let mut state = self.state.write();
+        let mut peers_cache = self.peers_cache.write();
         let payload = packet.get_payload(&self.sk);
         let payload = match payload {
             Err(e) => {
@@ -412,7 +549,7 @@ impl Server {
             )))
         }
 
-        let client = state.peers_cache.get_mut(&packet.pk);
+        let client = peers_cache.get_mut(&packet.pk);
         let client = match client {
             None => {
                 return Box::new( future::err(
@@ -437,7 +574,7 @@ impl Server {
     handle received NodesRequest packet, responds with NodesResponse
     */
     fn handle_nodes_req(&self, packet: NodesRequest, addr: SocketAddr) -> IoFuture<()> {
-        let state = self.state.read();
+        let close_nodes = self.close_nodes.read();
 
         let payload = packet.get_payload(&self.sk);
         let payload = match payload {
@@ -450,7 +587,7 @@ impl Server {
             Ok(payload) => payload,
         };
 
-        let close_nodes = state.kbucket.get_closest(&self.pk);
+        let close_nodes = close_nodes.get_closest(&self.pk);
         let resp_payload = NodesResponsePayload {
             nodes: close_nodes,
             id: payload.id,
@@ -466,8 +603,7 @@ impl Server {
     handle received NodesResponse from peer.
     */
     fn handle_nodes_resp(&self, packet: NodesResponse) -> IoFuture<()> {
-        let mut state = self.state.write();
-        let state = state.deref_mut();
+        let mut peers_cache = self.peers_cache.write();
 
         let payload = packet.get_payload(&self.sk);
         let payload = match payload {
@@ -480,7 +616,7 @@ impl Server {
             Ok(payload) => payload,
         };
 
-        let client = state.peers_cache.get_mut(&packet.pk);
+        let client = peers_cache.get_mut(&packet.pk);
         let client = match client {
             None => {
                 return Box::new( future::err(
@@ -491,14 +627,20 @@ impl Server {
             Some(client) => client,
         };
 
+        let mut close_nodes = self.close_nodes.write();
+        let mut bootstrap_nodes = self.bootstrap_nodes.write();
+        let mut friends = self.friends.write();
         let timeout_dur = Duration::from_secs(PING_TIMEOUT);
         if client.check_ping_id(payload.id, timeout_dur) {
-            // TODO: replace it with addto_list
             for node in &payload.nodes {
                 // not worried about removing evicted nodes from peers_cache
                 // they will be removed by timeout eventually since we won't
                 // ping them anymore
-                state.kbucket.try_add(node);
+                close_nodes.try_add(node);
+                bootstrap_nodes.try_add(&self.pk, node);
+                friends.iter_mut().for_each(|friend| {
+                    friend.add_to_close(node);
+                });
             }
             Box::new( future::ok(()) )
         } else {
@@ -541,8 +683,8 @@ impl Server {
                 },
             }
         } else {
-            let state = self.state.read();
-            if let Some(addr) = state.kbucket.get_node(&packet.rpk) { // search kbucket to find target peer
+            let close_nodes = self.close_nodes.read();
+            if let Some(addr) = close_nodes.get_node(&packet.rpk) { // search close_nodes to find target peer
                 let packet = DhtPacket::DhtRequest(packet);
                 self.send_to(addr, packet)
             } else { // do nothing
@@ -571,9 +713,9 @@ impl Server {
     handle received NatPingResponse packet, start hole-punching
     */
     fn handle_nat_ping_resp(&self, payload: NatPingResponse, spk: &PublicKey) -> IoFuture<()> {
-        let mut state = self.state.write();
+        let mut peers_cache = self.peers_cache.write();
 
-        let client = state.peers_cache.get_mut(spk);
+        let client = peers_cache.get_mut(spk);
         let client = match client {
             None => {
                 return Box::new( future::err(
@@ -616,7 +758,11 @@ impl Server {
             pk: packet.pk,
         };
 
-        self.send_nodes_req(target_node)
+        let mut peers_cache = self.peers_cache.write();
+        let peers_cache = peers_cache.deref_mut();
+        let client = peers_cache.entry(packet.pk).or_insert_with(ClientData::new);
+
+        self.send_nodes_req(target_node, self.pk, client)
     }
     /**
     send LanDiscovery packet to all broadcast addresses when dht_node runs as ipv4 mode
@@ -763,9 +909,9 @@ impl Server {
     */
     fn handle_onion_announce_request(&self, packet: OnionAnnounceRequest, addr: SocketAddr) -> IoFuture<()> {
         let mut onion_announce = self.onion_announce.write();
-        let state = self.state.read();
+        let close_nodes = self.close_nodes.read();
         let onion_return = packet.onion_return.clone();
-        let response = onion_announce.handle_onion_announce_request(packet, &self.sk, &state.kbucket, addr);
+        let response = onion_announce.handle_onion_announce_request(packet, &self.sk, &close_nodes, addr);
         match response {
             Ok(response) => self.send_to(addr, DhtPacket::OnionResponse3(OnionResponse3 {
                 onion_return,
@@ -902,10 +1048,10 @@ impl Server {
     pub fn refresh_onion_key(&self) {
         *self.onion_symmetric_key.write() = secretbox::gen_key();
     }
-    /// add PackedNode object to kbucket as a thread-safe manner
-    pub fn try_add_to_kbucket(&self, pn: &PackedNode) -> bool {
-        let mut state = self.state.write();
-        state.kbucket.try_add(pn)
+    /// add PackedNode object to close_nodes as a thread-safe manner
+    pub fn try_add_to_close_nodes(&self, pn: &PackedNode) -> bool {
+        let mut close_nodes = self.close_nodes.write();
+        close_nodes.try_add(pn)
     }
     /// handle OnionRequest from TCP relay and send OnionRequest1 packet
     /// to the next node in the onion path
@@ -963,8 +1109,8 @@ mod tests {
     }
 
     fn add_to_peers_cache(alice: &Server, pk: PublicKey, client: ClientData) {
-        let mut state = alice.state.write();
-        state.peers_cache.insert(pk, client);
+        let mut peers_cache = alice.peers_cache.write();
+        peers_cache.insert(pk, client);
     }
 
     #[test]
@@ -981,6 +1127,21 @@ mod tests {
         let (pk, sk) = gen_keypair();
         let tx: Tx = mpsc::unbounded().0;
         let _ = Server::new(tx, pk, sk);
+    }
+
+    #[test]
+    fn server_get_peers_cache_test() {
+        let (alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
+
+        let _ = alice.get_peers_cache();
+    }
+
+    #[test]
+    fn add_friend_test() {
+        let (alice, _precomp, bob_pk, _bob_sk, _rx, _addr) = create_node();
+
+        let friend = DhtFriend::new(bob_pk, 0);
+        alice.add_friend(friend);
     }
 
     // test handle_packet() with invlid packet type
@@ -1096,7 +1257,7 @@ mod tests {
         // success case
         let packed_node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &bob_pk);
 
-        assert!(alice.try_add_to_kbucket(&packed_node));
+        assert!(alice.try_add_to_close_nodes(&packed_node));
 
         let req_payload = NodesRequestPayload { pk: bob_pk, id: 42 };
         let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(&precomp, &bob_pk, req_payload));
@@ -1143,14 +1304,14 @@ mod tests {
 
         assert!(alice.handle_packet((nodes_resp, addr)).wait().is_ok());
 
-        let mut kbucket = Kbucket::new(&alice.pk);
+        let mut close_nodes = Kbucket::new(&alice.pk);
         for pn in &resp_payload.nodes {
-            kbucket.try_add(pn);
+            close_nodes.try_add(pn);
         }
 
-        let state = alice.state.read();
+        let server_close_nodes = alice.close_nodes.read();
 
-        assert_eq!(state.kbucket, kbucket);
+        assert_eq!(server_close_nodes.buckets, close_nodes.buckets);
     }
 
     #[test]
@@ -1222,9 +1383,9 @@ mod tests {
         let (charlie_pk, _charlie_sk) = gen_keypair();
         let precomp = precompute(&charlie_pk, &bob_sk);
 
-        // if receiver' pk != node's pk and receiver's pk exists in kbucket, returns ok()
+        // if receiver' pk != node's pk and receiver's pk exists in close_nodes, returns ok()
         let pn = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &charlie_pk);
-        alice.try_add_to_kbucket(&pn);
+        alice.try_add_to_close_nodes(&pn);
 
         let nat_req = NatPingRequest { id: 42 };
         let nat_payload = DhtRequestPayload::NatPingRequest(nat_req);
@@ -2010,25 +2171,25 @@ mod tests {
         let (ping_pk, ping_sk) = gen_keypair();
 
         let pn = PackedNode::new(false, SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &ping_pk);
-        assert!(alice.try_add_to_kbucket(&pn));
+        assert!(alice.try_add_to_close_nodes(&pn));
         let pn = PackedNode::new(false, SocketAddr::V4("127.0.0.1:33445".parse().unwrap()), &bob_pk);
-        assert!(alice.try_add_to_kbucket(&pn));
+        assert!(alice.try_add_to_close_nodes(&pn));
 
         alice.send_pings().wait().unwrap();
 
-        let mut state = alice.state.write();
+        let mut peers_cache = alice.peers_cache.write();
         rx.take(2).map(|received| {
             let (packet, addr) = received;
             let mut buf = [0; 512];
             let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
             let (_, ping_req) = PingRequest::from_bytes(&buf[..size]).unwrap();
             if addr == SocketAddr::V4("127.0.0.1:33445".parse().unwrap()) {
-                let client = state.peers_cache.get_mut(&bob_pk).unwrap();
+                let client = peers_cache.get_mut(&bob_pk).unwrap();
                 let ping_req_payload = ping_req.get_payload(&bob_sk).unwrap();
                 let dur = Duration::from_secs(PING_TIMEOUT);
                 assert!(client.check_ping_id(ping_req_payload.id, dur));
             } else {
-                let client = state.peers_cache.get_mut(&ping_pk).unwrap();
+                let client = peers_cache.get_mut(&ping_pk).unwrap();
                 let ping_req_payload = ping_req.get_payload(&ping_sk).unwrap();
                 let dur = Duration::from_secs(PING_TIMEOUT);
                 assert!(client.check_ping_id(ping_req_payload.id, dur));
@@ -2036,31 +2197,19 @@ mod tests {
         }).collect().wait().unwrap();
     }
 
-    // periodical_nodes_req()
-    #[test]
-    fn server_periodical_nodes_req_test() {
-        let (alice, _precomp, bob_pk, bob_sk, rx, addr) = create_node();
+     // send_nodes_req()
+     #[test]
+     fn server_send_nodes_req_test() {
+         let (alice, _precomp, bob_pk, _bob_sk, _rx, _addr) = create_node();
 
-        // If there is no entry in kbucket, then it returns just ok()
-        assert!(alice.periodical_nodes_req().wait().is_ok());
+         let target_node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &bob_pk);
+         assert!(alice.send_nodes_req(target_node, alice.pk, &mut ClientData::new()).wait().is_ok());
 
-        // Now, test with kbucket entry
-        let node = PackedNode::new(false, addr, &bob_pk);
+         let node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12347".parse().unwrap()), &gen_keypair().0);
+         alice.try_add_to_close_nodes(&node);
 
-        alice.try_add_to_kbucket(&node);
-
-        alice.periodical_nodes_req().wait().unwrap();
-
-        let (received, _rx) = rx.into_future().wait().unwrap();
-        let (packet, addr_to_send) = received.unwrap();
-
-        assert_eq!(addr_to_send, addr);
-
-        let nodes_req = unpack!(packet, DhtPacket::NodesRequest);
-        let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
-
-        assert_eq!(nodes_req_payload.pk, alice.pk);
-    }
+         assert!(alice.send_nodes_req(target_node, alice.pk, &mut ClientData::new()).wait().is_ok());
+     }
 
     // send_nat_ping_req()
     #[test]
@@ -2069,12 +2218,12 @@ mod tests {
 
         let addr = SocketAddr::V4("127.0.0.1:12345".parse().unwrap());
         let node = PackedNode::new(false, addr, &alice.pk);
-        alice.try_add_to_kbucket(&node);
+        alice.try_add_to_close_nodes(&node);
 
         assert!(alice.send_nat_ping_req(node, bob_pk).wait().is_ok());
 
-        let mut state = alice.state.write();
-        let client = state.peers_cache.get_mut(&alice.pk).unwrap();
+        let mut peers_cache = alice.peers_cache.write();
+        let client = peers_cache.get_mut(&alice.pk).unwrap();
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -2180,19 +2329,17 @@ mod tests {
 
         let node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &bob_pk);
 
-        alice.try_add_to_kbucket(&node);
+        alice.try_add_to_close_nodes(&node);
 
         alice.send_pings().wait().unwrap();
 
         let dur = Duration::from_secs(0);
         alice.remove_timedout_clients(dur).wait().unwrap();
 
-        let state = alice.state.read();
+        let peers_cache = alice.peers_cache.read();
 
         // after client be removed
-        assert!(!state.peers_cache.contains_key(&bob_pk));
-        // peer should be removed from kbucket
-        assert!(!state.kbucket.contains(&bob_pk));
+        assert!(!peers_cache.contains_key(&bob_pk));
     }
 
     // remove_timedout_clients(), case of client remained
@@ -2202,19 +2349,20 @@ mod tests {
 
         let node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &bob_pk);
 
-        alice.try_add_to_kbucket(&node);
+        alice.try_add_to_close_nodes(&node);
 
         alice.send_pings().wait().unwrap();
 
         let dur = Duration::from_secs(1);
         alice.remove_timedout_clients(dur).wait().unwrap();
 
-        let state = alice.state.read();
+        let peers_cache = alice.peers_cache.read();
+        let close_nodes = alice.close_nodes.read();
 
         // client should be remained
-        assert!(state.peers_cache.contains_key(&bob_pk));
-        // peer should be remained in kbucket
-        assert!(state.kbucket.contains(&bob_pk));
+        assert!(peers_cache.contains_key(&bob_pk));
+        // peer should be remained in close_nodes
+        assert!(close_nodes.contains(&bob_pk));
     }
 
     #[test]
@@ -2260,6 +2408,165 @@ mod tests {
         let onion_symmetric_key = alice.onion_symmetric_key.read();
         let onion_return_payload = next_packet.onion_return.get_payload(&onion_symmetric_key).unwrap();
 
-        assert_eq!(onion_return_payload.0, IpPort::from_tcp_saddr(addr));      
+        assert_eq!(onion_return_payload.0, IpPort::from_tcp_saddr(addr));
+    }
+
+    #[test]
+    fn server_ping_bootstrap_nodes_test() {
+        let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
+        let (ping_pk, ping_sk) = gen_keypair();
+
+        let pn = PackedNode::new(false, SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &ping_pk);
+        assert!(alice.bootstrap_nodes.write().deref_mut().try_add(&alice.pk, &pn));
+
+        let pn = PackedNode::new(false, SocketAddr::V4("127.0.0.1:33445".parse().unwrap()), &bob_pk);
+        assert!(alice.bootstrap_nodes.write().deref_mut().try_add(&alice.pk, &pn));
+
+        let args = DhtMainLoopArgs {
+            kill_node_timeout: 10,
+            ping_timeout: 10,
+            ping_interval: 0,
+            bad_node_timeout: 10,
+            nodes_req_interval: 0
+        };
+
+        alice.dht_main_loop(args).wait().unwrap();
+
+        let mut peers_cache = alice.peers_cache.write();
+
+        rx.take(2).map(|received| {
+            let (packet, addr) = received;
+            let mut buf = [0; 512];
+            let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
+            let (_, nodes_req) = NodesRequest::from_bytes(&buf[..size]).unwrap();
+            if addr == SocketAddr::V4("127.0.0.1:33445".parse().unwrap()) {
+                let client = peers_cache.get_mut(&bob_pk).unwrap();
+                let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
+                let dur = Duration::from_secs(PING_TIMEOUT);
+                assert!(client.check_ping_id(nodes_req_payload.id, dur));
+            } else {
+                let client = peers_cache.get_mut(&ping_pk).unwrap();
+                let nodes_req_payload = nodes_req.get_payload(&ping_sk).unwrap();
+                let dur = Duration::from_secs(PING_TIMEOUT);
+                assert!(client.check_ping_id(nodes_req_payload.id, dur));
+            }
+        }).collect().wait().unwrap();
+    }
+
+    #[test]
+    fn server_ping_and_get_close_nodes_test() {
+        let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
+        let (ping_pk, ping_sk) = gen_keypair();
+
+        let pn = PackedNode::new(false, SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &ping_pk);
+        assert!(alice.close_nodes.write().deref_mut().try_add(&pn));
+
+        let pn = PackedNode::new(false, SocketAddr::V4("127.0.0.1:33445".parse().unwrap()), &bob_pk);
+        assert!(alice.close_nodes.write().deref_mut().try_add(&pn));
+
+        let args = DhtMainLoopArgs {
+            kill_node_timeout: 10,
+            ping_timeout: 10,
+            ping_interval: 0,
+            bad_node_timeout: 10,
+            nodes_req_interval: 0
+        };
+
+        alice.dht_main_loop(args).wait().unwrap();
+
+        let mut peers_cache = alice.peers_cache.write();
+
+        rx.take(2).map(|received| {
+            let (packet, addr) = received;
+            let mut buf = [0; 512];
+            let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
+            let (_, nodes_req) = NodesRequest::from_bytes(&buf[..size]).unwrap();
+            if addr == SocketAddr::V4("127.0.0.1:33445".parse().unwrap()) {
+                let client = peers_cache.get_mut(&bob_pk).unwrap();
+                let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
+                let dur = Duration::from_secs(PING_TIMEOUT);
+                assert!(client.check_ping_id(nodes_req_payload.id, dur));
+            } else {
+                let client = peers_cache.get_mut(&ping_pk).unwrap();
+                let nodes_req_payload = nodes_req.get_payload(&ping_sk).unwrap();
+                let dur = Duration::from_secs(PING_TIMEOUT);
+                assert!(client.check_ping_id(nodes_req_payload.id, dur));
+            }
+        }).collect().wait().unwrap();
+    }
+
+    #[test]
+    fn server_send_nodes_req_random_test() {
+        let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
+        let (ping_pk, ping_sk) = gen_keypair();
+
+        let pn = PackedNode::new(false, SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &ping_pk);
+        assert!(alice.close_nodes.write().deref_mut().try_add(&pn));
+
+        let pn = PackedNode::new(false, SocketAddr::V4("127.0.0.1:33445".parse().unwrap()), &bob_pk);
+        assert!(alice.close_nodes.write().deref_mut().try_add(&pn));
+
+        let args = DhtMainLoopArgs {
+            kill_node_timeout: 10,
+            ping_timeout: 10,
+            ping_interval: 0,
+            bad_node_timeout: 0,
+            nodes_req_interval: 0
+        };
+
+        alice.dht_main_loop(args).wait().unwrap();
+
+        let args = DhtMainLoopArgs {
+            kill_node_timeout: 10,
+            ping_timeout: 10,
+            ping_interval: 0,
+            bad_node_timeout: 10,
+            nodes_req_interval: 0
+        };
+
+        alice.dht_main_loop(args).wait().unwrap();
+
+        let mut peers_cache = alice.peers_cache.write();
+
+        rx.take(2).map(|received| {
+            let (packet, addr) = received;
+            let mut buf = [0; 512];
+            let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
+            let (_, nodes_req) = NodesRequest::from_bytes(&buf[..size]).unwrap();
+            if addr == SocketAddr::V4("127.0.0.1:33445".parse().unwrap()) {
+                let client = peers_cache.get_mut(&bob_pk).unwrap();
+                let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
+                let dur = Duration::from_secs(PING_TIMEOUT);
+                assert!(client.check_ping_id(nodes_req_payload.id, dur));
+            } else {
+                let client = peers_cache.get_mut(&ping_pk).unwrap();
+                let nodes_req_payload = nodes_req.get_payload(&ping_sk).unwrap();
+                let dur = Duration::from_secs(PING_TIMEOUT);
+                assert!(client.check_ping_id(nodes_req_payload.id, dur));
+            }
+        }).collect().wait().unwrap();
+    }
+
+    #[test]
+    fn server_send_nodes_req_packets_test() {
+        let (alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
+        let friend_pk1 = gen_keypair().0;
+        let friend_pk2 = gen_keypair().0;
+
+        let friend = DhtFriend::new(friend_pk1, 0);
+        alice.add_friend(friend);
+
+        let friend = DhtFriend::new(friend_pk2, 0);
+        alice.add_friend(friend);
+
+        let args = DhtMainLoopArgs {
+            kill_node_timeout: 10,
+            ping_timeout: 10,
+            ping_interval: 0,
+            bad_node_timeout: 10,
+            nodes_req_interval: 0
+        };
+
+        assert!(alice.dht_main_loop(args).wait().is_ok());
     }
 }
