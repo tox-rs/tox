@@ -89,7 +89,7 @@ impl FromBytes for CookieRequest {
 }
 
 impl CookieRequest {
-    /// Create `CookieRequest` from `CookieRequestPayload` encrypting in with `shared_key`
+    /// Create `CookieRequest` from `CookieRequestPayload` encrypting it with `shared_key`
     pub fn new(shared_secret: &PrecomputedKey, pk: &PublicKey, payload: CookieRequestPayload) -> CookieRequest {
         let nonce = gen_nonce();
         let mut buf = [0; 88];
@@ -102,7 +102,7 @@ impl CookieRequest {
             payload,
         }
     }
-    /** Decrypt payload with symmetric key and try to parse it as `CookieRequestPayload`.
+    /** Decrypt payload with secret key and try to parse it as `CookieRequestPayload`.
 
     Returns `Error` in case of failure:
 
