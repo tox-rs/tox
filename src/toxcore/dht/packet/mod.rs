@@ -49,10 +49,6 @@ pub use self::lan_discovery::*;
 use toxcore::binary_io::*;
 use toxcore::onion::packet::*;
 
-/// Length in bytes of [`PingRequest`](./struct.PingRequest.html) and
-/// [`PingResponse`](./struct.PingResponse.html) when serialized into bytes.
-pub const PING_SIZE: usize = 9;
-
 /** DHT packet enum that encapsulates all types of DHT packets.
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
