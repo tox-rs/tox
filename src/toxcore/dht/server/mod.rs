@@ -266,11 +266,11 @@ impl Server {
         if !good_nodes.is_empty()
             && self.last_nodes_req_time.read().deref().elapsed() >= nodes_req_interval
             && *self.bootstrap_times.read().deref() < MAX_BOOTSTRAP_TIMES {
-            // to increase probability of sending packet to a closer node
-            // lower index is closer node
+
             let num_nodes = good_nodes.len();
             let mut random_node = random_u32() as usize % num_nodes;
-            if 0 != random_node {
+            // increase probability of sending packet to a close node (has lower index)
+            if random_node != 0 {
                 random_node -= random_u32() as usize % (random_node + 1);
             }
 

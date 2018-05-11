@@ -82,14 +82,14 @@ impl FromBytes for PingResponse {
 impl PingResponse {
     /// create new PingResponse object
     pub fn new(shared_secret: &PrecomputedKey, pk: &PublicKey, payload: PingResponsePayload) -> PingResponse {
-        let nonce = &gen_nonce();
+        let nonce = gen_nonce();
         let mut buf = [0; MAX_DHT_PACKET_SIZE];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
-        let payload = seal_precomputed(&buf[..size] , nonce, shared_secret);
+        let payload = seal_precomputed(&buf[..size], &nonce, shared_secret);
 
         PingResponse {
             pk: *pk,
-            nonce: *nonce,
+            nonce,
             payload,
         }
     }

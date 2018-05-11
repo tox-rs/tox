@@ -89,20 +89,20 @@ impl FromBytes for CookieRequest {
 }
 
 impl CookieRequest {
-    /// Create `CookieRequest` from `CookieRequestPayload` encrypting in with `shared_key`
+    /// Create `CookieRequest` from `CookieRequestPayload` encrypting it with `shared_key`
     pub fn new(shared_secret: &PrecomputedKey, pk: &PublicKey, payload: CookieRequestPayload) -> CookieRequest {
-        let nonce = &gen_nonce();
+        let nonce = gen_nonce();
         let mut buf = [0; 88];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
-        let payload = seal_precomputed(&buf[..size] , nonce, shared_secret);
+        let payload = seal_precomputed(&buf[..size], &nonce, shared_secret);
 
         CookieRequest {
             pk: *pk,
-            nonce: *nonce,
+            nonce,
             payload,
         }
     }
-    /** Decrypt payload with symmetric key and try to parse it as `CookieRequestPayload`.
+    /** Decrypt payload with secret key and try to parse it as `CookieRequestPayload`.
 
     Returns `Error` in case of failure:
 
@@ -176,6 +176,23 @@ impl FromBytes for CookieRequestPayload {
 #[cfg(test)]
 mod tests {
     use toxcore::dht::packet::cookie_request::*;
+
+    encode_decode_test!(
+        cookie_request_encode_decode,
+        CookieRequest {
+            pk: gen_keypair().0,
+            nonce: gen_nonce(),
+            payload: vec![42; 88],
+        }
+    );
+
+    encode_decode_test!(
+        cookie_request_payload_encode_decode,
+        CookieRequestPayload {
+            pk: gen_keypair().0,
+            id: 42
+        }
+    );
 
     dht_packet_encrypt_decrypt!(
         cookie_request_payload_encrypt_decrypt,
