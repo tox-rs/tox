@@ -398,7 +398,7 @@ impl Server {
         // send NatPingRequest packet every 3 seconds
         let mut friends = self.friends.write();
 
-        if friends.len() == 0 {
+        if friends.is_empty() {
             return Box::new(future::ok(()))
         }
 
@@ -2289,8 +2289,7 @@ mod tests {
             let (received, rx1) = rx.into_future().wait().unwrap();
             let (packet, _addr_to_send) = received.unwrap();
 
-            if let DhtPacket::DhtRequest(_dht_packet) = packet.clone() {
-                let nat_ping_req = unpack!(packet, DhtPacket::DhtRequest);
+            if let DhtPacket::DhtRequest(nat_ping_req) = packet.clone() {
                 let nat_ping_req_payload = nat_ping_req.get_payload(&friend_sk1).unwrap();
                 let nat_ping_req_payload = unpack!(nat_ping_req_payload, DhtRequestPayload::NatPingRequest);
 

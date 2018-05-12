@@ -110,6 +110,8 @@ impl HolePunching {
 
                 if self.last_punching_time.elapsed() > Duration::from_secs(RESET_PUNCH_INTERVAL) {
                     self.num_punch_tries = 0;
+                    self.first_punching_index = 0;
+                    self.last_punching_index = 0;
                 }
 
                 let ports_to_try = HolePunching::get_nat_ports(&addrs, ip);
@@ -121,16 +123,18 @@ impl HolePunching {
 
                 res
         } else {
+            // NatPingResponse is not responded, or hole punching was already done,
+            // or the elapsed time is too long since we received NatPingResponse,
+            // then we do nothing.
             Box::new(future::ok(()))
         }
     }
 
     // Calc most common IP and if number of most common IP exceeds need_num, return it.
+    // need_num is normally 4, 4 is half of maximum close nodes per friend.
+    // When half of clients have same IP with different port, we consider it as
+    // friend is behind NAT.
     fn get_major_ip(addrs: &[SocketAddr], need_num: u32) -> Option<IpAddr> {
-        if need_num > MAX_CLIENTS_PER_FRIEND {
-            return None
-        }
-
         let mut occurrences = HashMap::new();
 
         for addr in addrs {
@@ -198,7 +202,7 @@ impl HolePunching {
 
     // do hole punch using port guessing algorithm designed by irungentoo
     fn punch(&mut self, ports: Vec<u16>, ip: IpAddr, server: &Server, friend_pk: PublicKey) ->IoFuture<()> {
-        if ports.is_empty() || ports.len() > MAX_CLIENTS_PER_FRIEND as usize {
+        if ports.is_empty() {
             return Box::new(future::ok(()))
         }
 
@@ -240,10 +244,17 @@ impl HolePunching {
 mod tests {
     use super::*;
     use toxcore::dht::packet::*;
-    use toxcore::binary_io::*;
     use futures::sync::mpsc;
-    use std::ops::DerefMut;
     use std::thread;
+
+    macro_rules! unpack {
+        ($variable:expr, $variant:path) => (
+            match $variable {
+                $variant(inner) => inner,
+                other => panic!("Expected {} but got {:?}", stringify!($variant), other),
+            }
+        )
+    }
 
     #[test]
     fn hole_punch_new_test() {
@@ -253,11 +264,12 @@ mod tests {
     }
 
     #[test]
-    fn hole_punch_get_major_ip_test() {
+    fn hole_punch_get_major_ip_with_null_addrs_test() {
         let (pk, sk) = gen_keypair();
         let (friend_pk, _friend_sk) = gen_keypair();
         let (tx, _rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
         let alice = Server::new(tx, pk, sk);
+
         let addrs = vec![];
 
         let mut hole_punch = HolePunching::new();
@@ -265,6 +277,14 @@ mod tests {
         thread::sleep(Duration::from_millis(1));
 
         assert!(hole_punch.try_nat_punch(&alice, friend_pk, addrs, Duration::from_millis(1)).wait().is_ok());
+    }
+
+    #[test]
+    fn hole_punch_get_major_ip_with_under_half_addrs_test() {
+        let (pk, sk) = gen_keypair();
+        let (friend_pk, _friend_sk) = gen_keypair();
+        let (tx, _rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
+        let alice = Server::new(tx, pk, sk);
 
         let addrs = vec![
             "127.0.0.1:11111".parse().unwrap(),
@@ -277,6 +297,14 @@ mod tests {
         thread::sleep(Duration::from_millis(1));
 
         assert!(hole_punch.try_nat_punch(&alice, friend_pk, addrs, Duration::from_millis(1)).wait().is_ok());
+    }
+
+    #[test]
+    fn hole_punch_get_major_ip_with_enough_addrs_test() {
+        let (pk, sk) = gen_keypair();
+        let (friend_pk, _friend_sk) = gen_keypair();
+        let (tx, _rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
+        let alice = Server::new(tx, pk, sk);
 
         let addrs = vec![
             "127.0.0.1:11111".parse().unwrap(),
@@ -345,19 +373,20 @@ mod tests {
         thread::sleep(Duration::from_millis(150));
 
         hole_punch.try_nat_punch(&alice, friend_pk, addrs, Duration::from_millis(150)).wait().unwrap();
+
         let (received, _rx) = rx.into_future().wait().unwrap();
-        let (packet, _addr) = received.unwrap();
-        let mut buf = [0; 512];
-        let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
-        let (_, ping_req) = PingRequest::from_bytes(&buf[..size]).unwrap();
+        let (packet, _addr_to_send) = received.unwrap();
+
+        let ping_req = unpack!(packet, DhtPacket::PingRequest);
+
+        let ping_req_payload = ping_req.get_payload(&friend_sk).unwrap();
 
         let peers_cache = alice.get_peers_cache();
         let mut peers_cache = peers_cache.write();
-        let peers_cache = peers_cache.deref_mut();
 
         let client = peers_cache.get_mut(&friend_pk).unwrap();
-        let ping_req_payload = ping_req.get_payload(&friend_sk).unwrap();
         let dur = Duration::from_secs(PING_TIMEOUT);
+
         assert!(client.check_ping_id(ping_req_payload.id, dur));
     }
 }
