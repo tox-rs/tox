@@ -389,4 +389,45 @@ mod tests {
 
         assert!(client.check_ping_id(ping_req_payload.id, dur));
     }
+
+    #[test]
+    fn hole_punch_lash_punch_test() {
+        let (pk, sk) = gen_keypair();
+        let (friend_pk, friend_sk) = gen_keypair();
+        let (tx, rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
+        let alice = Server::new(tx, pk, sk);
+        let addrs = vec![
+            "127.0.0.1:11111".parse().unwrap(),
+            "127.0.0.1:22222".parse().unwrap(),
+            "127.0.0.2:33333".parse().unwrap(),
+            "127.0.0.1:44444".parse().unwrap(),
+            "127.0.0.1:55555".parse().unwrap(),
+            "127.0.0.1:55556".parse().unwrap(),
+            "127.0.0.1:55557".parse().unwrap(),
+            "127.0.0.1:55558".parse().unwrap(),
+            "127.0.0.2:55559".parse().unwrap(),
+        ];
+
+        let mut hole_punch = HolePunching::new();
+        hole_punch.is_punching_done = false;
+        hole_punch.num_punch_tries = MAX_NORMAL_PUNCHING_TRIES + 1;
+        thread::sleep(Duration::from_millis(150));
+
+        hole_punch.try_nat_punch(&alice, friend_pk, addrs, Duration::from_millis(150)).wait().unwrap();
+
+        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (packet, _addr_to_send) = received.unwrap();
+
+        let ping_req = unpack!(packet, DhtPacket::PingRequest);
+
+        let ping_req_payload = ping_req.get_payload(&friend_sk).unwrap();
+
+        let peers_cache = alice.get_peers_cache();
+        let mut peers_cache = peers_cache.write();
+
+        let client = peers_cache.get_mut(&friend_pk).unwrap();
+        let dur = Duration::from_secs(PING_TIMEOUT);
+
+        assert!(client.check_ping_id(ping_req_payload.id, dur));
+    }
 }
