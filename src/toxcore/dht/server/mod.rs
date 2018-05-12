@@ -393,9 +393,8 @@ impl Server {
         self.send_to(target_peer.saddr, nodes_req)
     }
 
-    // send NatPingRequests to all of my friends.
+    // send NatPingRequests to all of my friends and do hole punching.
     fn send_nat_ping_req(&self, nat_ping_req_interval: Duration) -> IoFuture<()> {
-        // send NatPingRequest packet every 3 seconds
         let mut friends = self.friends.write();
 
         if friends.is_empty() {
@@ -405,6 +404,7 @@ impl Server {
         let nats_sender = friends.iter_mut()
             .map(|friend| {
                 let addrs_of_clients = friend.get_addrs_of_clients();
+                // try hole punching
                 friend.hole_punch.try_nat_punch(&self, friend.pk, addrs_of_clients, nat_ping_req_interval);
 
                 let payload = DhtRequestPayload::NatPingRequest(NatPingRequest {
@@ -2289,7 +2289,7 @@ mod tests {
             let (received, rx1) = rx.into_future().wait().unwrap();
             let (packet, _addr_to_send) = received.unwrap();
 
-            if let DhtPacket::DhtRequest(nat_ping_req) = packet.clone() {
+            if let DhtPacket::DhtRequest(nat_ping_req) = packet {
                 let nat_ping_req_payload = nat_ping_req.get_payload(&friend_sk1).unwrap();
                 let nat_ping_req_payload = unpack!(nat_ping_req_payload, DhtRequestPayload::NatPingRequest);
 

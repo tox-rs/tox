@@ -103,7 +103,10 @@ impl HolePunching {
         if !self.is_punching_done &&
             self.last_punching_time.elapsed() >= nat_ping_req_interval &&
             self.last_recv_ping_time.elapsed() <= nat_ping_req_interval * 2 {
-                let ip = match HolePunching::get_major_ip(&addrs, MAX_CLIENTS_PER_FRIEND / 2) {
+                let ip = match HolePunching::get_common_ip(&addrs, MAX_CLIENTS_PER_FRIEND / 2) {
+                    // A friend can have maximum 8 close node.
+                    // If 4 or more close nodes have same IP(with different ports), we consider friend is behind NAT.
+                    // Otherwise we do nothing.
                     None => return Box::new(future::ok(())),
                     Some(ip) => ip,
                 };
@@ -130,11 +133,12 @@ impl HolePunching {
         }
     }
 
-    // Calc most common IP and if number of most common IP exceeds need_num, return it.
+    // Calc most common IP. "most common IP" is a overlapping IP of close nodes of a friend.
+    // if number of most common IP exceeds need_num, return it.
     // need_num is normally 4, 4 is half of maximum close nodes per friend.
     // When half of clients have same IP with different port, we consider it as
     // friend is behind NAT.
-    fn get_major_ip(addrs: &[SocketAddr], need_num: u32) -> Option<IpAddr> {
+    fn get_common_ip(addrs: &[SocketAddr], need_num: u32) -> Option<IpAddr> {
         let mut occurrences = HashMap::new();
 
         for addr in addrs {
@@ -160,11 +164,14 @@ impl HolePunching {
     }
 
     // punch using first_punching_index
+    // do hole punching for typical NAT, but last_hole_punching do hole punching on more precise ports
     fn first_hole_punching(&mut self, ports: Vec<u16>, ip: IpAddr, server: &Server, friend_pk: PublicKey) -> IoFuture<()> {
         let num_ports = ports.len();
         let first_punching_index = self.first_punching_index;
         let ping_sender = (0..MAX_PORTS_TO_PUNCH)
             .map(|i| {
+                // algorithm from irungentoo
+                // https://zetok.github.io/tox-spec/#symmetric-nat
                 let it = i + first_punching_index;
                 let sign: i16 = if it % 2 == 1 { -1 } else { 1 };
                 let delta = sign * (it / (2 * num_ports as u32)) as i16;
@@ -182,16 +189,22 @@ impl HolePunching {
     }
 
     // do punch using last_punching_index
+    // do hole punchng on more precise ports.
     fn last_hole_punching(&mut self, ip: IpAddr, server: &Server, friend_pk: PublicKey) -> IoFuture<()> {
         let port: u32 = 1024;
 
         let last_punching_index = self.last_punching_index;
         let ping_sender = (0..MAX_PORTS_TO_PUNCH)
             .map(|i| {
+                // algorithm from irungentoo
+                // https://zetok.github.io/tox-spec/#symmetric-nat
                 let it = i + last_punching_index;
                 let port = port + it;
                 server.send_ping_req(
-                    &PackedNode::new(false, SocketAddr::new(ip, port as u16), &friend_pk)
+                    &PackedNode {
+                        pk: friend_pk,
+                        saddr: SocketAddr::new(ip, port as u16),
+                    }
                 )
             });
 
@@ -264,7 +277,7 @@ mod tests {
     }
 
     #[test]
-    fn hole_punch_get_major_ip_with_null_addrs_test() {
+    fn hole_punch_get_common_ip_with_null_addrs_test() {
         let (pk, sk) = gen_keypair();
         let (friend_pk, _friend_sk) = gen_keypair();
         let (tx, _rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
@@ -280,7 +293,7 @@ mod tests {
     }
 
     #[test]
-    fn hole_punch_get_major_ip_with_under_half_addrs_test() {
+    fn hole_punch_get_common_ip_with_under_half_addrs_test() {
         let (pk, sk) = gen_keypair();
         let (friend_pk, _friend_sk) = gen_keypair();
         let (tx, _rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
@@ -300,7 +313,7 @@ mod tests {
     }
 
     #[test]
-    fn hole_punch_get_major_ip_with_enough_addrs_test() {
+    fn hole_punch_get_common_ip_with_enough_addrs_test() {
         let (pk, sk) = gen_keypair();
         let (friend_pk, _friend_sk) = gen_keypair();
         let (tx, _rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
