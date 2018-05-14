@@ -36,6 +36,7 @@ mod dht_request;
 mod cookie_request;
 mod bootstrap_info;
 mod lan_discovery;
+mod cookie;
 
 pub use self::ping_request::*;
 pub use self::ping_response::*;
@@ -45,6 +46,7 @@ pub use self::dht_request::*;
 pub use self::cookie_request::*;
 pub use self::bootstrap_info::*;
 pub use self::lan_discovery::*;
+pub use self::cookie::*;
 
 use toxcore::binary_io::*;
 use toxcore::onion::packet::*;
