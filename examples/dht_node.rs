@@ -178,7 +178,6 @@ fn main() {
 
     let server: IoFuture<()> = Box::new(network);
     let server = add_ping_sender(server, &server_obj);
-    let server = add_nat_sender(server, &server_obj, server_pk);
     let server = add_lan_sender(server, &server_obj, local_addr);
     let server = add_server_main_loop(server, &server_obj);
     let server = add_onion_key_refresher(server, &server_obj);
@@ -213,50 +212,45 @@ fn add_ping_sender(base_selector: IoFuture<()>, server_obj: &Server) -> IoFuture
             err
         }))
 }
-fn add_nat_sender(base_selector: IoFuture<()>, server_obj: &Server, pk: PublicKey) -> IoFuture<()> {
-    // 3 seconds for NatPingRequest
-    let interval = Duration::from_secs(3);
-    let nat_wakeups = Interval::new(Instant::now() + interval, interval);
-    let server_obj_c = server_obj.clone();
-    let nat_sender = nat_wakeups
-        .map_err(|e| Error::new(ErrorKind::Other, format!("NatPing timer error: {:?}", e)))
-        .for_each(move |_instant| {
-            println!("nat_wakeup");
-            // for now loopback nat_request, the sender's pk is dht_node's pk
-            let node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:33445".parse().unwrap()), &pk);
-            let friend_pk = PublicKey([15, 107, 126, 130, 81, 55, 154, 157,
-                                    192, 117, 0, 225, 119, 43, 48, 117,
-                                    84, 109, 112, 57, 243, 216, 4, 171,
-                                    185, 111, 33, 146, 221, 31, 77, 118]);
-            server_obj_c.send_nat_ping_req(node, friend_pk)
-        });
 
-    Box::new(base_selector.select(Box::new(nat_sender))
-        .map(|_| ())
-        .map_err(move |(err, _select_next)| {
-            error!("Processing ended with error: {:?}", err);
-            err
-        }))
-}
 fn add_server_main_loop(base_selector: IoFuture<()>, server_obj: &Server) -> IoFuture<()> {
     // 20 seconds for NodesRequest
     let interval = Duration::from_secs(1);
     let nodes_wakeups = Interval::new(Instant::now() + interval, interval);
     let server_obj_c = server_obj.clone();
+    let mut bootstrap_fast: bool = false;
+
     let nodes_sender = nodes_wakeups
         .map_err(|e| Error::new(ErrorKind::Other, format!("Nodes timer error: {:?}", e)))
         .for_each(move |_instant| {
-            println!("nodes_wakeup");
-            // args to main loop, all value is seconds
-            let args = DhtMainLoopArgs {
-                kill_node_timeout: 182,
-                ping_timeout: 5,
-                ping_interval: 60,
-                bad_node_timeout: 162,
-                nodes_req_interval: 20,
-            };
+            println!("main_loop_wakeup");
+            // flag for fast bootstrapping
+            if bootstrap_fast {
+                // args to main loop, all value is seconds
+                let args = DhtMainLoopArgs {
+                    kill_node_timeout: 182,
+                    ping_timeout: 5,
+                    ping_interval: 60,
+                    bad_node_timeout: 162,
+                    nodes_req_interval: 20,
+                    nat_ping_req_interval: 3,
+                };
 
-            server_obj_c.dht_main_loop(args)
+                server_obj_c.dht_main_loop(args)
+            } else {
+                bootstrap_fast = true;
+                // args to main loop, all value is seconds
+                let args = DhtMainLoopArgs {
+                    kill_node_timeout: 182,
+                    ping_timeout: 5,
+                    ping_interval: 0,
+                    bad_node_timeout: 162,
+                    nodes_req_interval: 0,
+                    nat_ping_req_interval: 0,
+                };
+
+                server_obj_c.dht_main_loop(args)
+            }
         })
         .map_err(|_err| Error::new(ErrorKind::Other, "Nodes timer error"));
 
@@ -267,6 +261,7 @@ fn add_server_main_loop(base_selector: IoFuture<()>, server_obj: &Server) -> IoF
             err
         }))
 }
+
 fn add_lan_sender(base_selector: IoFuture<()>, server_obj: &Server, local_addr: SocketAddr) -> IoFuture<()> {
     // 10 seconds for LanDiscovery
     let interval = Duration::from_secs(10);

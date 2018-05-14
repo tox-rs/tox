@@ -27,6 +27,7 @@ This module works on top of other modules.
 */
 
 pub mod client;
+pub mod hole_punching;
 
 use futures::{Future, Sink, Stream, future, stream};
 use futures::sync::mpsc;
@@ -52,6 +53,7 @@ use toxcore::onion::onion_announce::*;
 use toxcore::dht::server::client::*;
 use toxcore::io_tokio::IoFuture;
 use toxcore::dht::dht_friend::*;
+use toxcore::dht::server::hole_punching::*;
 use toxcore::tcp::packet::OnionRequest;
 
 /// Shorthand for the transmit half of the message channel.
@@ -64,6 +66,8 @@ type TcpOnionTx = mpsc::UnboundedSender<(InnerOnionResponse, SocketAddr)>;
 pub const PING_TIMEOUT: u64 = 5;
 /// Number of Nodes Req sending times to find close nodes
 pub const MAX_BOOTSTRAP_TIMES: u32 = 5;
+/// Interval in seconds of sending NatPingRequest packet
+pub const NAT_PING_REQ_INTERVAL: u64 = 3;
 
 /**
 Own DHT node data.
@@ -134,7 +138,9 @@ pub struct DhtMainLoopArgs {
     /// timeout in seconds for node is offline or not
     pub bad_node_timeout: u64,
     /// interval in seconds for random NodesRequest
-    pub nodes_req_interval: u64
+    pub nodes_req_interval: u64,
+    /// interval in seconds for NatPingRequest
+    pub nat_ping_req_interval: u64,
 }
 
 impl Server {
@@ -160,6 +166,28 @@ impl Server {
         }
     }
 
+    /**
+    Create new `Server` instance with TCP onion.
+    */
+    pub fn new_with_tcp_onion(tx: Tx, pk: PublicKey, sk: SecretKey, tcp_onion_sink: TcpOnionTx) -> Server {
+        debug!("Created new Server instance");
+        Server {
+            sk,
+            pk,
+            tx,
+            is_hole_punching_enabled: true,
+            peers_cache: Arc::new(RwLock::new(HashMap::new())),
+            close_nodes: Arc::new(RwLock::new(Kbucket::new(&pk))),
+            onion_symmetric_key: Arc::new(RwLock::new(secretbox::gen_key())),
+            onion_announce: Arc::new(RwLock::new(OnionAnnounce::new(pk))),
+            friends: Arc::new(RwLock::new(Vec::new())),
+            bootstrap_nodes: Arc::new(RwLock::new(Bucket::new(None))),
+            bootstrap_times: Arc::new(RwLock::new(0)),
+            last_nodes_req_time: Arc::new(RwLock::new(Instant::now())),
+            tcp_onion_sink: Some(tcp_onion_sink)
+        }
+    }
+
     /// return peers_cache member variable
     pub fn get_peers_cache(&self) -> &Arc<RwLock<HashMap<PublicKey, ClientData>>> {
         &self.peers_cache
@@ -177,13 +205,13 @@ impl Server {
         self.remove_timedout_clients(Duration::from_secs(args.kill_node_timeout));
         self.remove_timedout_ping_ids(Duration::from_secs(args.ping_timeout));
 
-        let mut friends = self.friends.write();
-
         let ping_bootstrap_nodes = self.ping_bootstrap_nodes();
         let ping_and_get_close_nodes = self.ping_and_get_close_nodes(Duration::from_secs(args.ping_interval));
         let send_nodes_req_random = self.send_nodes_req_random(Duration::from_secs(args.bad_node_timeout),
                                                                Duration::from_secs(args.nodes_req_interval));
         let send_nodes_req_packets = {
+            let mut friends = self.friends.write();
+
             let nodes_sender = friends.iter_mut()
                 .map(|friend| {
                     friend.send_nodes_req_packets(self, Duration::from_secs(args.ping_interval),
@@ -196,9 +224,12 @@ impl Server {
             nodes_stream.for_each(|()| Ok(()))
         };
 
-        let res = ping_bootstrap_nodes.join4(ping_and_get_close_nodes,
+        let send_nat_ping_req = self.send_nat_ping_req(Duration::from_secs(args.nat_ping_req_interval));
+
+        let res = ping_bootstrap_nodes.join5(ping_and_get_close_nodes,
                                              send_nodes_req_random,
-                                             send_nodes_req_packets)
+                                             send_nodes_req_packets,
+                                             send_nat_ping_req)
             .map(|_| ());
 
         Box::new(res)
@@ -289,28 +320,6 @@ impl Server {
         }
     }
 
-    /**
-    Create new `Server` instance with TCP onion.
-    */
-    pub fn new_with_tcp_onion(tx: Tx, pk: PublicKey, sk: SecretKey, tcp_onion_sink: TcpOnionTx) -> Server {
-        debug!("Created new Server instance");
-        Server {
-            sk,
-            pk,
-            tx,
-            is_hole_punching_enabled: true,
-            peers_cache: Arc::new(RwLock::new(HashMap::new())),
-            close_nodes: Arc::new(RwLock::new(Kbucket::new(&pk))),
-            onion_symmetric_key: Arc::new(RwLock::new(secretbox::gen_key())),
-            onion_announce: Arc::new(RwLock::new(OnionAnnounce::new(pk))),
-            friends: Arc::new(RwLock::new(Vec::new())),
-            bootstrap_nodes: Arc::new(RwLock::new(Bucket::new(None))),
-            bootstrap_times: Arc::new(RwLock::new(0)),
-            last_nodes_req_time: Arc::new(RwLock::new(Instant::now())),
-            tcp_onion_sink: Some(tcp_onion_sink)
-        }
-    }
-
     // remove timed-out clients,
     // close_nodes entry should be remain even if offline timed out, so after online, server try to ping again.
     fn remove_timedout_clients(&self, timeout: Duration) -> IoFuture<()> {
@@ -384,23 +393,56 @@ impl Server {
         self.send_to(target_peer.saddr, nodes_req)
     }
 
-    /// send NatPingRequests to peers every 3 seconds
-    pub fn send_nat_ping_req(&self, peer: PackedNode, friend_pk: PublicKey) -> IoFuture<()> {
-        let mut peers_cache = self.peers_cache.write();
+    // send NatPingRequests to all of my friends and do hole punching.
+    fn send_nat_ping_req(&self, nat_ping_req_interval: Duration) -> IoFuture<()> {
+        let mut friends = self.friends.write();
 
-        let client = peers_cache.entry(peer.pk).or_insert_with(ClientData::new);
+        if friends.is_empty() {
+            return Box::new(future::ok(()))
+        }
 
-        let payload = DhtRequestPayload::NatPingRequest(NatPingRequest {
-            id: client.insert_new_ping_id(),
-        });
-        let nat_ping_req = DhtPacket::DhtRequest(DhtRequest::new(
-            &precompute(&peer.pk, &self.sk),
-            &friend_pk,
-            &self.pk,
-            payload
-        ));
-        self.send_to(peer.saddr, nat_ping_req)
+        let nats_sender = friends.iter_mut()
+            .map(|friend| {
+                let addrs_of_clients = friend.get_addrs_of_clients();
+                // try hole punching
+                friend.hole_punch.try_nat_punch(&self, friend.pk, addrs_of_clients, nat_ping_req_interval);
+
+                let payload = DhtRequestPayload::NatPingRequest(NatPingRequest {
+                    id: friend.hole_punch.ping_id,
+                });
+                let nat_ping_req_packet = DhtPacket::DhtRequest(DhtRequest::new(
+                    &precompute(&friend.pk, &self.sk),
+                    &friend.pk,
+                    &self.pk,
+                    payload
+                ));
+
+                if friend.hole_punch.last_send_ping_time.elapsed() >= nat_ping_req_interval {
+                    friend.hole_punch.last_send_ping_time = Instant::now();
+                    self.send_nat_ping_req_inner(friend, nat_ping_req_packet)
+                } else {
+                    Box::new(future::ok(()))
+                }
+
+            });
+
+        let nats_stream = stream::futures_unordered(nats_sender).then(|_| Ok(()));
+
+        Box::new(nats_stream.for_each(|()| Ok(())))
     }
+
+    // actual sending function of NatPingRequest.
+    fn send_nat_ping_req_inner(&self, friend: &DhtFriend, nat_ping_req_packet: DhtPacket) -> IoFuture<()> {
+        let nats_sender = friend.close_nodes.nodes.iter()
+            .map(|node| {
+                self.send_to(node.saddr, nat_ping_req_packet.clone())
+            });
+
+        let nats_stream = stream::futures_unordered(nats_sender).then(|_| Ok(()));
+
+        Box::new(nats_stream.for_each(|()| Ok(())))
+    }
+
     /**
     Function to handle incoming packets. If there is a response packet,
     send back it to the peer.
@@ -674,7 +716,8 @@ impl Server {
                 },
                 DhtRequestPayload::NatPingResponse(nat_payload) => {
                     debug!("Received nat ping response");
-                    self.handle_nat_ping_resp(nat_payload, &packet.spk)
+                    let timeout_dur = Duration::from_secs(NAT_PING_PUNCHING_INTERVAL);
+                    self.handle_nat_ping_resp(nat_payload, &packet.spk, timeout_dur)
                 },
                 DhtRequestPayload::DhtPkAnnounce(_dht_pk_payload) => {
                     debug!("Received DHT PublicKey Announce");
@@ -710,20 +753,19 @@ impl Server {
     }
 
     /**
-    handle received NatPingResponse packet, start hole-punching
+    handle received NatPingResponse packet, enable hole-punching
     */
-    fn handle_nat_ping_resp(&self, payload: NatPingResponse, spk: &PublicKey) -> IoFuture<()> {
-        let mut peers_cache = self.peers_cache.write();
+    fn handle_nat_ping_resp(&self, payload: NatPingResponse, spk: &PublicKey, send_nat_ping_interval: Duration) -> IoFuture<()> {
+        let mut friends = self.friends.write();
+        let friend = friends.iter_mut()
+            .find(|friend| friend.pk == *spk);
+        let friend = match friend {
+            None => return Box::new( future::err(
+                Error::new(ErrorKind::Other,
+                           "Can't find friend"
+                ))),
+            Some(friend) => friend,
 
-        let client = peers_cache.get_mut(spk);
-        let client = match client {
-            None => {
-                return Box::new( future::err(
-                    Error::new(ErrorKind::Other,
-                        "get_client() failed in handle_nat_ping_resp()"
-                )))
-            },
-            Some(client) => client,
         };
 
         if payload.id == 0 {
@@ -733,13 +775,14 @@ impl Server {
             )))
         }
 
-        let timeout_dur = Duration::from_secs(PING_TIMEOUT);
-        if client.check_ping_id(payload.id, timeout_dur) {
-            // TODO: start hole-punching
+        if friend.hole_punch.last_recv_ping_time.elapsed() < send_nat_ping_interval &&
+            friend.hole_punch.ping_id == payload.id {
+            // enable hole punching
+            friend.hole_punch.is_punching_done = false;
             Box::new( future::ok(()) )
         } else {
             Box::new( future::err(
-                Error::new(ErrorKind::Other, "NatPingResponse.ping_id does not match")
+                Error::new(ErrorKind::Other, "NatPingResponse.ping_id does not match or timed out")
             ))
         }
     }
@@ -1437,12 +1480,19 @@ mod tests {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         // success case
-        let mut client = ClientData::new();
-        let ping_id = client.insert_new_ping_id();
+        let (friend_pk1, _friend_sk1) = gen_keypair();
+
+        let mut friend = DhtFriend::new(bob_pk, 0);
+        let pn = PackedNode::new(false, SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &friend_pk1);
+        friend.close_nodes.try_add(&bob_pk, &pn);
+        let ping_id = friend.hole_punch.ping_id;
+        alice.add_friend(friend);
+
         let nat_res = NatPingResponse { id: ping_id };
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
         let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, nat_payload));
 
+        let client = ClientData::new();
         add_to_peers_cache(&alice, bob_pk, client);
 
         assert!(alice.handle_packet((dht_req, addr)).wait().is_ok());
@@ -2214,28 +2264,40 @@ mod tests {
     // send_nat_ping_req()
     #[test]
     fn server_send_nat_ping_req_test() {
-        let (alice, _precomp, bob_pk, _bob_sk, rx, _addr) = create_node();
+        let (alice, _precomp, _bob_pk, _bob_sk, mut rx, _addr) = create_node();
 
-        let addr = SocketAddr::V4("127.0.0.1:12345".parse().unwrap());
-        let node = PackedNode::new(false, addr, &alice.pk);
-        alice.try_add_to_close_nodes(&node);
+        let (friend_pk1, friend_sk1) = gen_keypair();
+        let friend_pk2 = gen_keypair().0;
 
-        assert!(alice.send_nat_ping_req(node, bob_pk).wait().is_ok());
+        let mut friend = DhtFriend::new(friend_pk1, 0);
+        let pn = PackedNode::new(false, SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &friend_pk2);
+        friend.close_nodes.try_add(&friend_pk1, &pn);
+        alice.add_friend(friend);
 
-        let mut peers_cache = alice.peers_cache.write();
-        let client = peers_cache.get_mut(&alice.pk).unwrap();
+        let args = DhtMainLoopArgs {
+            kill_node_timeout: 10,
+            ping_timeout: 10,
+            ping_interval: 0,
+            bad_node_timeout: 10,
+            nodes_req_interval: 0,
+            nat_ping_req_interval: 0,
+        };
 
-        let (received, _rx) = rx.into_future().wait().unwrap();
-        let (packet, addr_to_send) = received.unwrap();
+        alice.dht_main_loop(args).wait().unwrap();
 
-        assert_eq!(addr_to_send, addr);
+        loop {
+            let (received, rx1) = rx.into_future().wait().unwrap();
+            let (packet, _addr_to_send) = received.unwrap();
 
-        let nat_ping_req = unpack!(packet, DhtPacket::DhtRequest);
-        let nat_ping_req_payload = nat_ping_req.get_payload(&alice.sk).unwrap();
-        let nat_ping_req_payload = unpack!(nat_ping_req_payload, DhtRequestPayload::NatPingRequest);
+            if let DhtPacket::DhtRequest(nat_ping_req) = packet {
+                let nat_ping_req_payload = nat_ping_req.get_payload(&friend_sk1).unwrap();
+                let nat_ping_req_payload = unpack!(nat_ping_req_payload, DhtRequestPayload::NatPingRequest);
 
-        let dur = Duration::from_secs(PING_TIMEOUT);
-        assert!(client.check_ping_id(nat_ping_req_payload.id, dur));
+                assert_eq!(alice.friends.read().deref()[0].hole_punch.ping_id, nat_ping_req_payload.id);
+                break;
+            }
+            rx = rx1;
+        }
     }
 
     #[test]
@@ -2427,7 +2489,8 @@ mod tests {
             ping_timeout: 10,
             ping_interval: 0,
             bad_node_timeout: 10,
-            nodes_req_interval: 0
+            nodes_req_interval: 0,
+            nat_ping_req_interval: 10,
         };
 
         alice.dht_main_loop(args).wait().unwrap();
@@ -2469,7 +2532,8 @@ mod tests {
             ping_timeout: 10,
             ping_interval: 0,
             bad_node_timeout: 10,
-            nodes_req_interval: 0
+            nodes_req_interval: 0,
+            nat_ping_req_interval: 10,
         };
 
         alice.dht_main_loop(args).wait().unwrap();
@@ -2511,7 +2575,8 @@ mod tests {
             ping_timeout: 10,
             ping_interval: 0,
             bad_node_timeout: 0,
-            nodes_req_interval: 0
+            nodes_req_interval: 0,
+            nat_ping_req_interval: 10,
         };
 
         alice.dht_main_loop(args).wait().unwrap();
@@ -2521,7 +2586,8 @@ mod tests {
             ping_timeout: 10,
             ping_interval: 0,
             bad_node_timeout: 10,
-            nodes_req_interval: 0
+            nodes_req_interval: 0,
+            nat_ping_req_interval: 10,
         };
 
         alice.dht_main_loop(args).wait().unwrap();
@@ -2564,7 +2630,8 @@ mod tests {
             ping_timeout: 10,
             ping_interval: 0,
             bad_node_timeout: 10,
-            nodes_req_interval: 0
+            nodes_req_interval: 0,
+            nat_ping_req_interval: 10,
         };
 
         assert!(alice.dht_main_loop(args).wait().is_ok());

@@ -26,6 +26,7 @@ Module for friend.
 use std::time::{Duration, Instant};
 use std::io::{Error, ErrorKind};
 use std::mem;
+use std::net::SocketAddr;
 
 use futures::{future, Future, stream, Stream};
 
@@ -35,19 +36,22 @@ use toxcore::crypto_core::*;
 use toxcore::dht::server::*;
 use toxcore::dht::server::client::*;
 use toxcore::io_tokio::IoFuture;
+use toxcore::dht::server::hole_punching::*;
 
 /// Hold friend related info.
 pub struct DhtFriend {
-    // Public key of friend
-    pk: PublicKey,
-    // close nodes of friend
-    close_nodes: Bucket,
+    /// Public key of friend
+    pub pk: PublicKey,
+    /// close nodes of friend
+    pub close_nodes: Bucket,
     // Last time of NodesRequest packet sent
     last_nodes_req_time: Instant,
     // Counter for bootstappings.
     bootstrap_times: u32,
     // Nodes to bootstrap.
     bootstrap_nodes: Bucket,
+    /// struct for hole punching
+    pub hole_punch: HolePunching,
 }
 
 impl DhtFriend {
@@ -60,6 +64,7 @@ impl DhtFriend {
             last_nodes_req_time: Instant::now(),
             bootstrap_times,
             bootstrap_nodes: Bucket::new(None),
+            hole_punch: HolePunching::new(),
         }
     }
 
@@ -164,12 +169,18 @@ impl DhtFriend {
 
         Box::new(future::ok(()))
     }
+
+    /// get Socket Address list of a friend, a friend can have multi IP address bacause of NAT
+    pub fn get_addrs_of_clients(&self) -> Vec<SocketAddr> {
+        self.close_nodes.nodes.iter()
+            .map(|node| node.saddr)
+            .collect::<Vec<SocketAddr>>()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::SocketAddr;
     use toxcore::dht::packet::*;
     use toxcore::binary_io::*;
     use futures::sync::mpsc;
@@ -406,5 +417,19 @@ mod tests {
 
         assert!(friend.close_nodes.contains(&node_pk));
         assert!(friend.bootstrap_nodes.contains(&node_pk));
+    }
+
+    #[test]
+    fn friend_get_addrs_of_clients_test() {
+        let (friend_pk, _friend_sk) = gen_keypair();
+        let mut friend = DhtFriend::new(friend_pk, 0);
+
+        let (node_pk1, _node_sk1) = gen_keypair();
+        assert!(friend.close_nodes.try_add(&friend_pk, &PackedNode {
+            pk: node_pk1,
+            saddr: "127.0.0.1:33445".parse().unwrap(),
+        }));
+
+        assert_eq!(friend.get_addrs_of_clients(), vec!["127.0.0.1:33445".parse().unwrap()]);
     }
 }
