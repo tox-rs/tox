@@ -36,6 +36,7 @@ mod dht_request;
 mod cookie_request;
 mod bootstrap_info;
 mod lan_discovery;
+mod crypto_handshake;
 mod cookie;
 
 pub use self::ping_request::*;
@@ -46,6 +47,7 @@ pub use self::dht_request::*;
 pub use self::cookie_request::*;
 pub use self::bootstrap_info::*;
 pub use self::lan_discovery::*;
+pub use self::crypto_handshake::*;
 pub use self::cookie::*;
 
 use toxcore::binary_io::*;
@@ -66,7 +68,8 @@ pub enum DhtPacket {
     /// [`CookieRequest`](./struct.CookieRequest.html) structure.
     CookieRequest(CookieRequest),
     // TODO: CookieResponse
-    // TODO: CryptoHandshake
+    /// [`CryptoHandshake`](./struct.CryptoHandshake.html) structure.
+    CryptoHandshake(CryptoHandshake),
     // TODO: CryptoData
     /// [`DhtRequest`](./struct.DhtRequest.html) structure.
     DhtRequest(DhtRequest),
@@ -104,6 +107,7 @@ impl ToBytes for DhtPacket {
             DhtPacket::NodesRequest(ref p) => p.to_bytes(buf),
             DhtPacket::NodesResponse(ref p) => p.to_bytes(buf),
             DhtPacket::CookieRequest(ref p) => p.to_bytes(buf),
+            DhtPacket::CryptoHandshake(ref p) => p.to_bytes(buf),
             DhtPacket::DhtRequest(ref p) => p.to_bytes(buf),
             DhtPacket::LanDiscovery(ref p) => p.to_bytes(buf),
             DhtPacket::OnionRequest0(ref p) => p.to_bytes(buf),
@@ -128,6 +132,7 @@ impl FromBytes for DhtPacket {
         map!(NodesRequest::from_bytes, DhtPacket::NodesRequest) |
         map!(NodesResponse::from_bytes, DhtPacket::NodesResponse) |
         map!(CookieRequest::from_bytes, DhtPacket::CookieRequest) |
+        map!(CryptoHandshake::from_bytes, DhtPacket::CryptoHandshake) |
         map!(DhtRequest::from_bytes, DhtPacket::DhtRequest) |
         map!(LanDiscovery::from_bytes, DhtPacket::LanDiscovery) |
         map!(OnionRequest0::from_bytes, DhtPacket::OnionRequest0) |
