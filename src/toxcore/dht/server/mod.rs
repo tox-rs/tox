@@ -447,7 +447,7 @@ impl Server {
     Function to handle incoming packets. If there is a response packet,
     send back it to the peer.
     */
-    pub fn handle_packet(&self, (packet, addr): (DhtPacket, SocketAddr)) -> IoFuture<()> {
+    pub fn handle_packet(&self, packet: DhtPacket, addr: SocketAddr) -> IoFuture<()> {
         match packet {
             DhtPacket::PingRequest(packet) => {
                 debug!("Received ping request");
@@ -1195,7 +1195,7 @@ mod tests {
             version: 00,
             motd: b"Hello".to_owned().to_vec(),
         });
-        assert!(alice.handle_packet((packet, addr)).wait().is_err());
+        assert!(alice.handle_packet(packet, addr).wait().is_err());
     }
 
     // handle_ping_req()
@@ -1207,7 +1207,7 @@ mod tests {
         let req_payload = PingRequestPayload { id: 42 };
         let ping_req = DhtPacket::PingRequest(PingRequest::new(&precomp, &bob_pk, req_payload));
 
-        assert!(alice.handle_packet((ping_req, addr)).wait().is_ok());
+        assert!(alice.handle_packet(ping_req, addr).wait().is_ok());
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -1228,7 +1228,7 @@ mod tests {
         let req_payload = PingRequestPayload { id: 42 };
         let ping_req = DhtPacket::PingRequest(PingRequest::new(&precomp, &alice.pk, req_payload));
 
-        assert!(alice.handle_packet((ping_req, addr)).wait().is_err());
+        assert!(alice.handle_packet(ping_req, addr).wait().is_err());
     }
 
     // handle_ping_resp()
@@ -1245,7 +1245,7 @@ mod tests {
 
         add_to_peers_cache(&alice, bob_pk, client);
 
-        assert!(alice.handle_packet((ping_resp, addr)).wait().is_ok());
+        assert!(alice.handle_packet(ping_resp, addr).wait().is_ok());
     }
 
     #[test]
@@ -1260,7 +1260,7 @@ mod tests {
 
         add_to_peers_cache(&alice, bob_pk, client);
 
-        assert!(alice.handle_packet((ping_resp, addr)).wait().is_err());
+        assert!(alice.handle_packet(ping_resp, addr).wait().is_err());
     }
 
     #[test]
@@ -1274,7 +1274,7 @@ mod tests {
         let client = ClientData::new();
         add_to_peers_cache(&alice, bob_pk, client);
 
-        assert!(alice.handle_packet((ping_resp, addr)).wait().is_err());
+        assert!(alice.handle_packet(ping_resp, addr).wait().is_err());
     }
 
     #[test]
@@ -1289,7 +1289,7 @@ mod tests {
 
         add_to_peers_cache(&alice, bob_pk, client);
 
-        assert!(alice.handle_packet((ping_resp, addr)).wait().is_err());
+        assert!(alice.handle_packet(ping_resp, addr).wait().is_err());
     }
 
     // handle_nodes_req()
@@ -1305,7 +1305,7 @@ mod tests {
         let req_payload = NodesRequestPayload { pk: bob_pk, id: 42 };
         let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(&precomp, &bob_pk, req_payload));
 
-        assert!(alice.handle_packet((nodes_req, addr)).wait().is_ok());
+        assert!(alice.handle_packet(nodes_req, addr).wait().is_ok());
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -1327,7 +1327,7 @@ mod tests {
         let req_payload = NodesRequestPayload { pk: bob_pk, id: 42 };
         let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(&precomp, &alice.pk, req_payload));
 
-        assert!(alice.handle_packet((nodes_req, addr)).wait().is_err());
+        assert!(alice.handle_packet(nodes_req, addr).wait().is_err());
     }
 
     // handle_nodes_resp()
@@ -1345,7 +1345,7 @@ mod tests {
 
         add_to_peers_cache(&alice, bob_pk, client);
 
-        assert!(alice.handle_packet((nodes_resp, addr)).wait().is_ok());
+        assert!(alice.handle_packet(nodes_resp, addr).wait().is_ok());
 
         let mut close_nodes = Kbucket::new(&alice.pk);
         for pn in &resp_payload.nodes {
@@ -1367,7 +1367,7 @@ mod tests {
         ], id: 38 };
         let nodes_resp = DhtPacket::NodesResponse(NodesResponse::new(&precomp, &alice.pk, resp_payload));
 
-        assert!(alice.handle_packet((nodes_resp, addr)).wait().is_err());
+        assert!(alice.handle_packet(nodes_resp, addr).wait().is_err());
     }
 
     #[test]
@@ -1383,7 +1383,7 @@ mod tests {
         let client = ClientData::new();
         add_to_peers_cache(&alice, bob_pk, client);
 
-        assert!(alice.handle_packet((nodes_resp, addr)).wait().is_err());
+        assert!(alice.handle_packet(nodes_resp, addr).wait().is_err());
     }
 
     #[test]
@@ -1400,7 +1400,7 @@ mod tests {
 
         add_to_peers_cache(&alice, bob_pk, client);
 
-        assert!(alice.handle_packet((nodes_resp, addr)).wait().is_err());
+        assert!(alice.handle_packet(nodes_resp, addr).wait().is_err());
     }
 
     // handle_dht_req
@@ -1416,7 +1416,7 @@ mod tests {
         let nat_payload = DhtRequestPayload::NatPingRequest(nat_req);
         let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &charlie_pk, &bob_pk, nat_payload));
 
-        assert!(alice.handle_packet((dht_req, addr)).wait().is_ok());
+        assert!(alice.handle_packet(dht_req, addr).wait().is_ok());
     }
 
     #[test]
@@ -1434,7 +1434,7 @@ mod tests {
         let nat_payload = DhtRequestPayload::NatPingRequest(nat_req);
         let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &charlie_pk, &bob_pk, nat_payload));
 
-        assert!(alice.handle_packet((dht_req, addr)).wait().is_ok());
+        assert!(alice.handle_packet(dht_req, addr).wait().is_ok());
     }
 
     #[test]
@@ -1448,7 +1448,7 @@ mod tests {
             payload: vec![42; 123]
         });
 
-        assert!(alice.handle_packet((dht_req, addr)).wait().is_err());
+        assert!(alice.handle_packet(dht_req, addr).wait().is_err());
     }
 
     // handle nat ping request
@@ -1460,7 +1460,7 @@ mod tests {
         let nat_payload = DhtRequestPayload::NatPingRequest(nat_req);
         let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, nat_payload));
 
-        assert!(alice.handle_packet((dht_req, addr)).wait().is_ok());
+        assert!(alice.handle_packet(dht_req, addr).wait().is_ok());
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -1495,7 +1495,7 @@ mod tests {
         let client = ClientData::new();
         add_to_peers_cache(&alice, bob_pk, client);
 
-        assert!(alice.handle_packet((dht_req, addr)).wait().is_ok());
+        assert!(alice.handle_packet(dht_req, addr).wait().is_ok());
     }
 
     #[test]
@@ -1510,7 +1510,7 @@ mod tests {
         let client = ClientData::new();
         add_to_peers_cache(&alice, bob_pk, client);
 
-        assert!(alice.handle_packet((dht_req, addr)).wait().is_err());
+        assert!(alice.handle_packet(dht_req, addr).wait().is_err());
     }
 
     #[test]
@@ -1526,7 +1526,7 @@ mod tests {
 
         add_to_peers_cache(&alice, bob_pk, client);
 
-        assert!(alice.handle_packet((dht_req, addr)).wait().is_err());
+        assert!(alice.handle_packet(dht_req, addr).wait().is_err());
     }
 
     // handle_onion_request_0
@@ -1548,7 +1548,7 @@ mod tests {
         };
         let packet = DhtPacket::OnionRequest0(OnionRequest0::new(&precomp, &bob_pk, payload));
 
-        assert!(alice.handle_packet((packet, addr)).wait().is_ok());
+        assert!(alice.handle_packet(packet, addr).wait().is_ok());
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -1576,7 +1576,7 @@ mod tests {
             payload: vec![42; 123] // not encrypted with dht pk
         });
 
-        assert!(alice.handle_packet((packet, addr)).wait().is_err());
+        assert!(alice.handle_packet(packet, addr).wait().is_err());
     }
 
     // handle_onion_request_1
@@ -1602,7 +1602,7 @@ mod tests {
         };
         let packet = DhtPacket::OnionRequest1(OnionRequest1::new(&precomp, &bob_pk, payload, onion_return));
 
-        assert!(alice.handle_packet((packet, addr)).wait().is_ok());
+        assert!(alice.handle_packet(packet, addr).wait().is_ok());
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -1634,7 +1634,7 @@ mod tests {
             }
         });
 
-        assert!(alice.handle_packet((packet, addr)).wait().is_err());
+        assert!(alice.handle_packet(packet, addr).wait().is_err());
     }
 
     // handle_onion_request_2
@@ -1662,7 +1662,7 @@ mod tests {
         };
         let packet = DhtPacket::OnionRequest2(OnionRequest2::new(&precomp, &bob_pk, payload, onion_return));
 
-        assert!(alice.handle_packet((packet, addr)).wait().is_ok());
+        assert!(alice.handle_packet(packet, addr).wait().is_ok());
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -1704,7 +1704,7 @@ mod tests {
         };
         let packet = DhtPacket::OnionRequest2(OnionRequest2::new(&precomp, &bob_pk, payload, onion_return));
 
-        assert!(alice.handle_packet((packet, addr)).wait().is_ok());
+        assert!(alice.handle_packet(packet, addr).wait().is_ok());
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -1735,7 +1735,7 @@ mod tests {
             }
         });
 
-        assert!(alice.handle_packet((packet, addr)).wait().is_err());
+        assert!(alice.handle_packet(packet, addr).wait().is_err());
     }
 
     // handle_onion_announce_request
@@ -1760,7 +1760,7 @@ mod tests {
             onion_return: onion_return.clone()
         });
 
-        assert!(alice.handle_packet((packet, addr)).wait().is_ok());
+        assert!(alice.handle_packet(packet, addr).wait().is_ok());
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -1803,7 +1803,7 @@ mod tests {
             onion_return: onion_return.clone()
         });
 
-        assert!(alice.handle_packet((packet, addr)).wait().is_ok());
+        assert!(alice.handle_packet(packet, addr).wait().is_ok());
 
         let (received, rx) = rx.into_future().wait().unwrap();
         let (packet, _addr_to_send) = received.unwrap();
@@ -1826,7 +1826,7 @@ mod tests {
             onion_return: onion_return.clone()
         });
 
-        assert!(alice.handle_packet((packet, addr)).wait().is_ok());
+        assert!(alice.handle_packet(packet, addr).wait().is_ok());
 
         // send onion data request
 
@@ -1844,7 +1844,7 @@ mod tests {
             onion_return: onion_return.clone()
         });
 
-        assert!(alice.handle_packet((packet, addr)).wait().is_ok());
+        assert!(alice.handle_packet(packet, addr).wait().is_ok());
 
         let (received, _rx) = rx.skip(1).into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -1889,7 +1889,7 @@ mod tests {
             payload: payload.clone()
         });
 
-        assert!(alice.handle_packet((packet, addr)).wait().is_ok());
+        assert!(alice.handle_packet(packet, addr).wait().is_ok());
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -1920,7 +1920,7 @@ mod tests {
             payload
         });
 
-        assert!(alice.handle_packet((packet, addr)).wait().is_err());
+        assert!(alice.handle_packet(packet, addr).wait().is_err());
     }
 
     #[test]
@@ -1945,7 +1945,7 @@ mod tests {
             payload: InnerOnionResponse::OnionDataResponse(inner.clone())
         });
 
-        assert!(alice.handle_packet((packet, addr)).wait().is_err());
+        assert!(alice.handle_packet(packet, addr).wait().is_err());
     }
 
     // handle_onion_response_2
@@ -1975,7 +1975,7 @@ mod tests {
             payload: payload.clone()
         });
 
-        assert!(alice.handle_packet((packet, addr)).wait().is_ok());
+        assert!(alice.handle_packet(packet, addr).wait().is_ok());
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -2006,7 +2006,7 @@ mod tests {
             payload
         });
 
-        assert!(alice.handle_packet((packet, addr)).wait().is_err());
+        assert!(alice.handle_packet(packet, addr).wait().is_err());
     }
 
     #[test]
@@ -2031,7 +2031,7 @@ mod tests {
             payload: InnerOnionResponse::OnionDataResponse(inner.clone())
         });
 
-        assert!(alice.handle_packet((packet, addr)).wait().is_err());
+        assert!(alice.handle_packet(packet, addr).wait().is_err());
     }
 
     // handle_onion_response_1
@@ -2057,7 +2057,7 @@ mod tests {
             payload: InnerOnionResponse::OnionAnnounceResponse(inner.clone())
         });
 
-        assert!(alice.handle_packet((packet, addr)).wait().is_ok());
+        assert!(alice.handle_packet(packet, addr).wait().is_ok());
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -2091,7 +2091,7 @@ mod tests {
             payload: InnerOnionResponse::OnionDataResponse(inner.clone())
         });
 
-        assert!(alice.handle_packet((packet, addr)).wait().is_ok());
+        assert!(alice.handle_packet(packet, addr).wait().is_ok());
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -2130,7 +2130,7 @@ mod tests {
             payload: inner.clone()
         });
 
-        assert!(alice.handle_packet((packet, addr)).wait().is_ok());
+        assert!(alice.handle_packet(packet, addr).wait().is_ok());
 
         let (received, _tcp_onion_rx) = tcp_onion_rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -2161,7 +2161,7 @@ mod tests {
             payload: InnerOnionResponse::OnionAnnounceResponse(inner.clone())
         });
 
-        assert!(alice.handle_packet((packet, addr)).wait().is_err());
+        assert!(alice.handle_packet(packet, addr).wait().is_err());
     }
 
     #[test]
@@ -2182,7 +2182,7 @@ mod tests {
             payload
         });
 
-        assert!(alice.handle_packet((packet, addr)).wait().is_err());
+        assert!(alice.handle_packet(packet, addr).wait().is_err());
     }
 
     #[test]
@@ -2211,7 +2211,7 @@ mod tests {
             payload: InnerOnionResponse::OnionDataResponse(inner.clone())
         });
 
-        assert!(alice.handle_packet((packet, addr)).wait().is_err());
+        assert!(alice.handle_packet(packet, addr).wait().is_err());
     }
 
     // send_pings()
@@ -2306,7 +2306,7 @@ mod tests {
 
         let lan = DhtPacket::LanDiscovery(LanDiscovery { pk: bob_pk });
 
-        assert!(alice.handle_packet((lan, addr)).wait().is_ok());
+        assert!(alice.handle_packet(lan, addr).wait().is_ok());
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -2325,7 +2325,7 @@ mod tests {
 
         let lan = DhtPacket::LanDiscovery(LanDiscovery { pk: alice.pk });
 
-        assert!(alice.handle_packet((lan, addr)).wait().is_ok());
+        assert!(alice.handle_packet(lan, addr).wait().is_ok());
     }
 
     #[test]
