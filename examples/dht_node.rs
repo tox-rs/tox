@@ -138,7 +138,7 @@ fn main() {
     let server_obj_c = server_obj.clone();
     let network_reader = stream.for_each(move |(packet, addr)| {
         println!("recv = {:?}", packet.clone());
-        server_obj_c.handle_packet((packet, addr)).or_else(|err| {
+        server_obj_c.handle_packet(packet, addr).or_else(|err| {
             error!("failed to handle packet: {:?}", err);
             future::ok(())
         })
