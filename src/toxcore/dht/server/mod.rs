@@ -561,12 +561,7 @@ impl Server {
     fn handle_ping_req(&self, packet: PingRequest, addr: SocketAddr) -> IoFuture<()> {
         let payload = packet.get_payload(&self.sk);
         let payload = match payload {
-            Err(e) => {
-                return Box::new( future::err(
-                    Error::new(ErrorKind::Other,
-                        format!("PingRequest::get_payload() failed: {:?}", e)
-                )))
-            },
+            Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
 
@@ -587,12 +582,7 @@ impl Server {
         let mut peers_cache = self.peers_cache.write();
         let payload = packet.get_payload(&self.sk);
         let payload = match payload {
-            Err(e) => {
-                return Box::new( future::err(
-                    Error::new(ErrorKind::Other,
-                        format!("PingResponse::get_payload() failed: {:?}", e)
-                )))
-            },
+            Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
 
@@ -632,12 +622,7 @@ impl Server {
 
         let payload = packet.get_payload(&self.sk);
         let payload = match payload {
-            Err(e) => {
-                return Box::new( future::err(
-                    Error::new(ErrorKind::Other,
-                        format!("NodesRequest::get_payload() failed: {:?}", e)
-                )))
-            },
+            Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
 
@@ -661,12 +646,7 @@ impl Server {
 
         let payload = packet.get_payload(&self.sk);
         let payload = match payload {
-            Err(e) => {
-                return Box::new( future::err(
-                    Error::new(ErrorKind::Other,
-                        format!("NodesResponse::get_payload() failed: {:?}", e)
-                )))
-            },
+            Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
 
@@ -712,12 +692,7 @@ impl Server {
         if packet.rpk == self.pk { // the target peer is me
             let payload = packet.get_payload(&self.sk);
             let payload = match payload {
-                Err(err) => {
-                    return Box::new( future::err(
-                        Error::new(ErrorKind::Other,
-                            format!("DhtRequest::get_payload failed with: {:?}", err)
-                    )))
-                },
+                Err(e) => return Box::new(future::err(e)),
                 Ok(payload) => payload,
             };
 
@@ -870,12 +845,7 @@ impl Server {
         let shared_secret = precompute(&packet.temporary_pk, &self.sk);
         let payload = packet.get_payload(&shared_secret);
         let payload = match payload {
-            Err(e) => {
-                return Box::new( future::err(
-                    Error::new(ErrorKind::Other,
-                        format!("OnionRequest0::get_payload() failed: {:?}", e)
-                )))
-            },
+            Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
 
@@ -901,12 +871,7 @@ impl Server {
         let shared_secret = precompute(&packet.temporary_pk, &self.sk);
         let payload = packet.get_payload(&shared_secret);
         let payload = match payload {
-            Err(e) => {
-                return Box::new( future::err(
-                    Error::new(ErrorKind::Other,
-                        format!("OnionRequest1::get_payload() failed: {:?}", e)
-                )))
-            },
+            Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
 
@@ -932,12 +897,7 @@ impl Server {
         let shared_secret = precompute(&packet.temporary_pk, &self.sk);
         let payload = packet.get_payload(&shared_secret);
         let payload = match payload {
-            Err(e) => {
-                return Box::new( future::err(
-                    Error::new(ErrorKind::Other,
-                        format!("OnionRequest2::get_payload() failed: {:?}", e)
-                )))
-            },
+            Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
 
@@ -994,12 +954,7 @@ impl Server {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let payload = packet.onion_return.get_payload(&onion_symmetric_key);
         let payload = match payload {
-            Err(e) => {
-                return Box::new( future::err(
-                    Error::new(ErrorKind::Other,
-                        format!("OnionResponse3::get_payload() failed: {:?}", e)
-                )))
-            },
+            Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
 
@@ -1024,12 +979,7 @@ impl Server {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let payload = packet.onion_return.get_payload(&onion_symmetric_key);
         let payload = match payload {
-            Err(e) => {
-                return Box::new( future::err(
-                    Error::new(ErrorKind::Other,
-                        format!("OnionResponse2::get_payload() failed: {:?}", e)
-                )))
-            },
+            Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
 
@@ -1055,12 +1005,7 @@ impl Server {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let payload = packet.onion_return.get_payload(&onion_symmetric_key);
         let payload = match payload {
-            Err(e) => {
-                return Box::new( future::err(
-                    Error::new(ErrorKind::Other,
-                        format!("OnionResponse1::get_payload() failed: {:?}", e)
-                )))
-            },
+            Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
 
