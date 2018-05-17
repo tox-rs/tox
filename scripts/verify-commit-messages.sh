@@ -29,9 +29,19 @@ ARG="$1"
 
 echo "" # ← formatting
 
+git checkout $CI_COMMIT_REF_NAME
+
+if [[ $CI_COMMIT_REF_NAME == "master" ]]
+then
+    fail=$(git log --format=format:'%s' "$ARG" | grep -v -E '^((feat|fix|docs|style|refactor|perf|revert|test|chore)(\(.+\))?:.{1,68})|(Merge pull request #[[:digit:]]{1,10}( from .*/.*)?)$')
+else
+    fail=$(git log --format=format:'%s' "$CI_COMMIT_REF_NAME" ^master | grep -v -E '^((feat|fix|docs|style|refactor|perf|revert|test|chore)(\(.+\))?:.{1,68})|(Merge pull request #[[:digit:]]{1,10}( from .*/.*)?)$')
+fi
+
+echo "$fail"
+
 # Conform, /OR ELSE/.
-if git log --format=format:'%s' "$ARG" | \
-    grep -v -E '^((feat|fix|docs|style|refactor|perf|revert|test|chore)(\(.+\))?:.{1,68})|(Merge pull request #[[:digit:]]{1,10}( from .*/.*)?)$'
+if [[ $fail ]]
 then
     echo ""
     echo "Above ↑ commits don't conform to commit message format:"

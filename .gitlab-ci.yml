@@ -109,10 +109,18 @@ other:kcov-and-check-commit-message:
       export ROOT_DIR=`pwd`
       rm -rf target/kcov || echo 'target/kcov not exist'
 
+    ### export sha
+    - |
+      if [[ -z $CI_COMMIT_BEFORE_SHA ]]
+      then
+        export CI_COMMIT_BEFORE_SHA=$(git rev-parse HEAD^)
+      fi
+      export CI_COMMIT_RANGE="$CI_COMMIT_BEFORE_SHA..$CI_COMMIT_SHA"
+
     ### Script for verifying conformance to commit message format of commits in commit
     ### range supplied.
     - |
-      ./scripts/verify-commit-messages.sh "$CI_COMMIT_BEFORE_SHA..$CI_COMMIT_SHA"
+      ./scripts/verify-commit-messages.sh "$CI_COMMIT_RANGE"
 
     ### build kcov for 1.24.0
     - |
