@@ -79,7 +79,7 @@ fn main() {
     // Create a channel for server to communicate with network
     let (tx, rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
 
-    let server_obj = Server::new(tx, server_pk, server_sk);
+    let mut server_obj = Server::new(tx, server_pk, server_sk);
 
     // Bootstrap from nodes
     for &(pk, saddr) in &[
@@ -121,6 +121,8 @@ fn main() {
     let friend_pk = PublicKey::from_slice(&friend_pk_bytes).unwrap();
     // add_friend with args, PK is friend_pk, bootstrap_time initial value is 0, so do bootstrapping 5 times
     server_obj.add_friend(DhtFriend::new(friend_pk, 0));
+    // set bootstrap info
+    server_obj.set_bootstrap_info(07032018, "This is tox-rs".as_bytes().to_owned());
 
     let local_addr: SocketAddr = "0.0.0.0:33445".parse().unwrap(); // 0.0.0.0 for ipv4
     // let local_addr: SocketAddr = "[::]:33445".parse().unwrap(); // [::] for ipv6

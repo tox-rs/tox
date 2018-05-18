@@ -121,6 +121,10 @@ pub struct Server {
     // setting this value to 0 will do sending 5 times
     bootstrap_times: Arc<RwLock<u32>>,
     last_nodes_req_time: Arc<RwLock<Instant>>,
+    // toxcore version used in BootstrapInfo
+    tox_core_version: u32,
+    // message used in BootstrapInfo
+    motd: Vec<u8>,
     // `OnionResponse1` packets that have TCP protocol kind inside onion return
     // should be redirected to TCP sender trough this sink
     // None if there is no TCP relay
@@ -162,6 +166,8 @@ impl Server {
             bootstrap_nodes: Arc::new(RwLock::new(Bucket::new(None))),
             bootstrap_times: Arc::new(RwLock::new(0)),
             last_nodes_req_time: Arc::new(RwLock::new(Instant::now())),
+            tox_core_version: 0,
+            motd: Vec::new(),
             tcp_onion_sink: None
         }
     }
@@ -184,6 +190,8 @@ impl Server {
             bootstrap_nodes: Arc::new(RwLock::new(Bucket::new(None))),
             bootstrap_times: Arc::new(RwLock::new(0)),
             last_nodes_req_time: Arc::new(RwLock::new(Instant::now())),
+            tox_core_version: 0,
+            motd: Vec::new(),
             tcp_onion_sink: Some(tcp_onion_sink)
         }
     }
@@ -504,6 +512,10 @@ impl Server {
             DhtPacket::OnionResponse1(packet) => {
                 debug!("Received OnionResponse1");
                 self.handle_onion_response_1(packet)
+            },
+            DhtPacket::BootstrapInfo(packet) => {
+                debug!("Received BootstrapInfo");
+                self.handle_bootstrap_info(packet, addr)
             },
             ref p => {
                 Box::new( future::err(
@@ -1114,6 +1126,19 @@ impl Server {
         });
         self.send_to(packet.ip_port.to_saddr(), next_packet)
     }
+    // handle BootstrapInfo, respond with BootstrapInfo
+    fn handle_bootstrap_info(&self, _packet: BootstrapInfo, addr: SocketAddr) -> IoFuture<()> {
+        let packet = DhtPacket::BootstrapInfo(BootstrapInfo {
+            version: self.tox_core_version,
+            motd: self.motd.clone(),
+        });
+        self.send_to(addr, packet)
+    }
+    /// set toxcore verson and motd
+    pub fn set_bootstrap_info(&mut self, version: u32, motd: Vec<u8>) {
+        self.tox_core_version = version;
+        self.motd = motd;
+    }
 }
 
 #[cfg(test)]
@@ -1187,15 +1212,15 @@ mod tests {
         alice.add_friend(friend);
     }
 
-    // test handle_packet() with invlid packet type
+    // test handle_packet() with BootstrapInfo packet type
     #[test]
-    fn server_handle_packet_with_invalid_packet_test() {
+    fn server_handle_packet_with_bootstrap_info_packet_test() {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
         let packet = DhtPacket::BootstrapInfo(BootstrapInfo {
             version: 00,
             motd: b"Hello".to_owned().to_vec(),
         });
-        assert!(alice.handle_packet(packet, addr).wait().is_err());
+        assert!(alice.handle_packet(packet, addr).wait().is_ok());
     }
 
     // handle_ping_req()
@@ -2635,5 +2660,14 @@ mod tests {
         };
 
         assert!(alice.dht_main_loop(args).wait().is_ok());
+    }
+
+    #[test]
+    fn server_set_bootstrap_info_test() {
+        let (mut alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
+
+        alice.set_bootstrap_info(42, "test".as_bytes().to_owned());
+        assert_eq!(alice.tox_core_version, 42);
+        assert_eq!(alice.motd, "test".as_bytes().to_owned());
     }
 }
