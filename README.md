@@ -86,15 +86,15 @@ consider helping :wink:
         - [x] ping requests & responses
         - [x] nodes requests & responses
         - [ ] CookieRequest (parsed but ignored)
-        - [ ] CookieResponse
-        - [ ] CryptoHandshake
-        - [ ] CryptoData
+        - [ ] CookieResponse (parsed but ignored)
+        - [ ] CryptoHandshake (parsed but ignored)
+        - [ ] CryptoData (parsed but ignored)
         - [x] LanDiscovery
         - [x] OnionRequest[0,1,2]
         - [x] OnionResponse[3,2,1]
         - [x] OnionAnnounceRequest & OnionDataRequest
         - [ ] OnionAnnounceResponse & OnionDataResponse (parsed but ignored)
-        - [ ] BootstrapInfo (parsed but ignored)
+        - [x] BootstrapInfo
         - [x] NAT ping requests & responses
     - [ ] TCP Relay
         - [x] Handshake
@@ -106,8 +106,8 @@ consider helping :wink:
         - [x] PongResponse
         - [x] OobSend
         - [x] OobReceive
-        - [ ] OnionRequest (parsed but ignored)
-        - [ ] OnionResponse (parsed but ignored)
+        - [x] OnionRequest
+        - [x] OnionResponse
         - [x] Data
     - [x] toxencryptsave (aka TES)
  - [x] Rust API
