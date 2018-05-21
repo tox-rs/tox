@@ -172,30 +172,6 @@ impl Server {
         }
     }
 
-    /**
-    Create new `Server` instance with TCP onion.
-    */
-    pub fn new_with_tcp_onion(tx: Tx, pk: PublicKey, sk: SecretKey, tcp_onion_sink: TcpOnionTx) -> Server {
-        debug!("Created new Server instance");
-        Server {
-            sk,
-            pk,
-            tx,
-            is_hole_punching_enabled: true,
-            peers_cache: Arc::new(RwLock::new(HashMap::new())),
-            close_nodes: Arc::new(RwLock::new(Kbucket::new(&pk))),
-            onion_symmetric_key: Arc::new(RwLock::new(secretbox::gen_key())),
-            onion_announce: Arc::new(RwLock::new(OnionAnnounce::new(pk))),
-            friends: Arc::new(RwLock::new(Vec::new())),
-            bootstrap_nodes: Arc::new(RwLock::new(Bucket::new(None))),
-            bootstrap_times: Arc::new(RwLock::new(0)),
-            last_nodes_req_time: Arc::new(RwLock::new(Instant::now())),
-            tox_core_version: 0,
-            motd: Vec::new(),
-            tcp_onion_sink: Some(tcp_onion_sink)
-        }
-    }
-
     /// return peers_cache member variable
     pub fn get_peers_cache(&self) -> &Arc<RwLock<HashMap<PublicKey, ClientData>>> {
         &self.peers_cache
@@ -1083,6 +1059,10 @@ impl Server {
     pub fn set_bootstrap_info(&mut self, version: u32, motd: Vec<u8>) {
         self.tox_core_version = version;
         self.motd = motd;
+    }
+    /// set TCP sink for onion packets
+    pub fn set_tcp_onion_sink(&mut self, tcp_onion_sink: TcpOnionTx) {
+        self.tcp_onion_sink = Some(tcp_onion_sink)
     }
 }
 
@@ -2075,10 +2055,9 @@ mod tests {
 
     #[test]
     fn server_handle_onion_response_1_redirect_to_tcp_test() {
-        let (pk, sk) = gen_keypair();
-        let (tx, _rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
+        let (mut alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
         let (tcp_onion_tx, tcp_onion_rx) = mpsc::unbounded::<(InnerOnionResponse, SocketAddr)>();
-        let alice = Server::new_with_tcp_onion(tx, pk, sk, tcp_onion_tx);
+        alice.set_tcp_onion_sink(tcp_onion_tx);
 
         let addr: SocketAddr = "127.0.0.1:12346".parse().unwrap();
 
