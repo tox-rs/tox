@@ -48,8 +48,9 @@ use tox::toxcore::dht::codec::*;
 use tox::toxcore::dht::server::*;
 use tox::toxcore::dht::packed_node::*;
 use tox::toxcore::crypto_core::*;
-use tox::toxcore::io_tokio::IoFuture;
+use tox::toxcore::io_tokio::*;
 use tox::toxcore::dht::dht_friend::*;
+use tox::toxcore::net_crypto::*;
 
 fn main() {
     env_logger::init();
@@ -76,10 +77,26 @@ fn main() {
         gen_keypair()
     };
 
+    let (real_pk, _real_sk) = gen_keypair();
+
     // Create a channel for server to communicate with network
     let (tx, rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
 
+    // Create a channel for DHT PublicKey updates. When we receive a message
+    // from this channel we should update DHT PublicKey of our friend. The main
+    // source of such message should be onion client but other modules can learn
+    // DHT PublicKey as well.
+    let (dht_pk_tx, dht_pk_rx) = mpsc::unbounded();
+
+    // Ignore DHT PublicKey updates for now
+    let dht_pk_handler = dht_pk_rx
+        .map_err(|_| Error::new(ErrorKind::Other, "rx error"))
+        .for_each(|_| future::ok(()));
+
+    let net_crypto = NetCrypto::new(tx.clone(), dht_pk_tx, server_pk, server_sk.clone(), real_pk);
+
     let mut server_obj = Server::new(tx, server_pk, server_sk);
+    server_obj.set_net_crypto(net_crypto);
 
     // Bootstrap from nodes
     for &(pk, saddr) in &[
@@ -183,6 +200,7 @@ fn main() {
     let server = add_lan_sender(server, &server_obj, local_addr);
     let server = add_server_main_loop(server, &server_obj);
     let server = add_onion_key_refresher(server, &server_obj);
+    let server = server.join(dht_pk_handler).map(|_| ());
 
     let server = server
         .map(|_| ())
