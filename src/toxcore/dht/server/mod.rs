@@ -796,7 +796,7 @@ impl Server {
         let mut ip_addrs = Server::get_ipv4_broadcast_addrs();
         // Ipv6 broadcast address
         ip_addrs.push(
-            "::1".parse().unwrap() // TODO: it should be FF02::1, but for now, my LAN config has no route to address of FF02::1
+            "FF02::1".parse().unwrap()
         );
         // Ipv4 global broadcast address
         ip_addrs.push(
