@@ -28,3 +28,4 @@ pub mod packed_node;
 pub mod codec;
 pub mod server;
 pub mod dht_friend;
+pub mod dht_node;

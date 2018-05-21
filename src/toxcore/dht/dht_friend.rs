@@ -34,8 +34,8 @@ use toxcore::dht::packed_node::*;
 use toxcore::dht::kbucket::*;
 use toxcore::crypto_core::*;
 use toxcore::dht::server::*;
-use toxcore::dht::server::client::*;
-use toxcore::io_tokio::IoFuture;
+use toxcore::dht::dht_node::*;
+use toxcore::io_tokio::*;
 use toxcore::dht::server::hole_punching::*;
 
 /// Hold friend related info.
@@ -48,8 +48,8 @@ pub struct DhtFriend {
     last_nodes_req_time: Instant,
     // Counter for bootstappings.
     bootstrap_times: u32,
-    // Nodes to bootstrap.
-    bootstrap_nodes: Bucket,
+    /// Nodes to bootstrap.
+    pub bootstrap_nodes: Bucket,
     /// struct for hole punching
     pub hole_punch: HolePunching,
 }
@@ -89,9 +89,10 @@ impl DhtFriend {
 
         let mut peers_cache = server.get_peers_cache().write();
 
-        let nodes_sender = bootstrap_nodes.nodes.iter()
+        let bootstrap_nodes = bootstrap_nodes.to_packed_node();
+        let nodes_sender = bootstrap_nodes.iter()
             .map(|node| {
-                let client = peers_cache.entry(node.pk).or_insert_with(ClientData::new);
+                let client = peers_cache.entry(node.pk).or_insert_with(DhtNode::new);
                 server.send_nodes_req(*node, self.pk, client)
             });
 
@@ -104,9 +105,10 @@ impl DhtFriend {
     fn ping_and_get_close_nodes(&mut self, server: &Server, ping_interval: Duration) -> IoFuture<()> {
         let mut peers_cache = server.get_peers_cache().write();
 
-        let nodes_sender = self.close_nodes.nodes.iter()
+        let close_nodes = self.close_nodes.to_packed_node();
+        let nodes_sender = close_nodes.iter()
             .map(|node| {
-                let client = peers_cache.entry(node.pk).or_insert_with(ClientData::new);
+                let client = peers_cache.entry(node.pk).or_insert_with(DhtNode::new);
 
                 if client.last_ping_req_time.elapsed() >= ping_interval {
                     client.last_ping_req_time = Instant::now();
@@ -125,9 +127,10 @@ impl DhtFriend {
     fn send_nodes_req_random(&mut self, server: &Server, bad_node_timeout: Duration, nodes_req_interval: Duration) -> IoFuture<()> {
         let mut peers_cache = server.get_peers_cache().write();
 
-        let good_nodes = self.close_nodes.nodes.iter()
+        let close_nodes = self.close_nodes.to_packed_node();
+        let good_nodes = close_nodes.iter()
             .filter(|node| {
-                let client = peers_cache.entry(node.pk).or_insert_with(ClientData::new);
+                let client = peers_cache.entry(node.pk).or_insert_with(DhtNode::new);
                 client.last_resp_time.elapsed() < bad_node_timeout
             }).collect::<Vec<_>>();
 
@@ -244,8 +247,8 @@ mod tests {
 
     fn insert_client_to_peers_cache(server: &Server, pk1: PublicKey, pk2: PublicKey) {
         let mut peers_cache = server.get_peers_cache().write();
-        peers_cache.insert(pk1, ClientData::new());
-        peers_cache.insert(pk2, ClientData::new());
+        peers_cache.insert(pk1, DhtNode::new());
+        peers_cache.insert(pk2, DhtNode::new());
     }
 
     #[test]

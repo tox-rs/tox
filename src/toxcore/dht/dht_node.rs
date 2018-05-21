@@ -1,5 +1,5 @@
 /*
-    Copyright © 2017 Zetok Zalbavar <zexavexxe@gmail.com>
+    Copyright (C) 2013 Tox project All Rights Reserved.
     Copyright © 2018 Namsoo CHO <nscho66@gmail.com>
 
     This file is part of Tox.
@@ -18,35 +18,70 @@
     along with Tox.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+/*! Data structure used by Bucket.
+PackedNode type contains PK and SocketAddress.
+PackedNode does not contain status of Node, this struct contains status of node.
+Bucket needs status of node, because BAD status node should be replaced with higher proirity than GOOD node.
+Even GOOD node is farther than BAD node, BAD node should be replaced.
+Here, GOOD node is the node responded within 162 seconds, BAD node is the node not responded over 162 seconds.
+*/
 
-/*!
+use std::net::SocketAddr;
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
+use toxcore::crypto_core::*;
+
+/** Status of node in bucket.
+Good means it is online and responded within 162 seconds
+Bad means it is probably offline and did not responded for over 162 seconds
+When new peer is added to bucket, Bad status node should be replace.
+If there are no Bad nodes in bucket, node which is farther than peer is replaced.
+
 Manage ping_id.
 Generate ping_id on request packet, check ping_id on response packet.
 */
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum NodeStatus {
+    /// online
+    Good,
+    /// maybe offline
+    Bad,
+}
 
-use std::collections::HashMap;
-use std::time::{Duration, Instant};
+/** Struct used by Bucket, DHT maintains close node list, when we got new node,
+we should make decision to add new node to close node list, or not.
+the PK's distance and status of node help making decision.
+Bad node have higher priority than Good node.
+If both node is Good node, then we compare PK's distance.
 
-use toxcore::crypto_core::*;
-
-/// peer info.
-#[derive(Clone, Debug)]
-pub struct ClientData {
+Generate ping_id on request packet, check ping_id on response packet.
+*/
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DhtNode {
+    /// Socket addr of node.
+    pub saddr: SocketAddr,
+    /// Public Key of the node.
+    pub pk: PublicKey,
+    /// Status of node
+    pub status: NodeStatus,
     /// hash of ping_ids to check PingResponse is correct
-    ping_hash: HashMap<u64, Instant>,
+    pub ping_hash: HashMap<u64, Instant>,
     /// last received ping/nodes-response time
     pub last_resp_time: Instant,
     /// last sent ping-req time
     pub last_ping_req_time: Instant,
 }
 
-impl ClientData {
-    /// create ClientData object
-    pub fn new() -> ClientData {
-        ClientData {
+impl DhtNode {
+    /// create DhtNode object
+    pub fn new() -> DhtNode {
+        DhtNode {
+            pk : gen_keypair().0,
+            saddr: "127.0.0.1:33445".parse().unwrap(),
             ping_hash: HashMap::new(),
             last_resp_time: Instant::now(),
             last_ping_req_time: Instant::now(),
+            status: NodeStatus::Good,
         }
     }
     /// set new random ping id to the client and return it
@@ -103,13 +138,13 @@ mod tests {
 
     #[test]
     fn client_data_clonable() {
-        let client = ClientData::new();
+        let client = DhtNode::new();
         let _ = client.clone();
     }
 
     #[test]
     fn client_data_insert_new_ping_id_test() {
-        let mut client = ClientData::new();
+        let mut client = DhtNode::new();
 
         let ping_id = client.insert_new_ping_id();
 
@@ -118,7 +153,7 @@ mod tests {
 
     #[test]
     fn client_data_check_ping_id_test() {
-        let mut client = ClientData::new();
+        let mut client = DhtNode::new();
 
         let ping_id = client.insert_new_ping_id();
 
@@ -140,19 +175,19 @@ mod tests {
 
     #[test]
     fn client_data_clear_timedout_pings_test() {
-        let mut client = ClientData::new();
+        let mut client = DhtNode::new();
 
         // ping_id should be removed
         let ping_id = client.insert_new_ping_id();
         let dur = Duration::from_secs(0);
         client.clear_timedout_pings(dur);
         let dur = Duration::from_secs(1);
-        assert!(!client.check_ping_id(ping_id, dur));        
+        assert!(!client.check_ping_id(ping_id, dur));
 
         // ping_id should remain
         let ping_id = client.insert_new_ping_id();
         let dur = Duration::from_secs(1);
         client.clear_timedout_pings(dur);
-        assert!(client.check_ping_id(ping_id, dur));        
+        assert!(client.check_ping_id(ping_id, dur));
     }
 }
