@@ -24,9 +24,14 @@
 use nom::be_u64;
 
 use std::io::{Error, ErrorKind};
+use std::time::SystemTime;
 
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
+use toxcore::time::*;
+
+/// Number of seconds that generated cookie is valid
+pub const COOKIE_TIMEOUT: u64 = 15;
 
 /** Cookie is a struct that holds two public keys of a node: long term key and
 short term DHT key.
@@ -63,6 +68,26 @@ pub struct Cookie {
     pub real_pk: PublicKey,
     /// DHT `PublicKey`
     pub dht_pk: PublicKey,
+}
+
+impl Cookie {
+    /// Create new `Cookie`
+    pub fn new(real_pk: PublicKey, dht_pk: PublicKey) -> Cookie {
+        Cookie {
+            time: unix_time(SystemTime::now()),
+            real_pk,
+            dht_pk,
+        }
+    }
+
+    /** Check if this cookie is timed out.
+
+    Cookie considered timed out after 15 seconds since it was created.
+
+    */
+    pub fn is_timed_out(&self) -> bool {
+        self.time + COOKIE_TIMEOUT < unix_time(SystemTime::now())
+    }
 }
 
 impl FromBytes for Cookie {
@@ -124,7 +149,7 @@ impl EncryptedCookie {
     /// Create `EncryptedCookie` from `Cookie` encrypting it with `symmetric_key`
     pub fn new(symmetric_key: &secretbox::Key, payload: Cookie) -> EncryptedCookie {
         let nonce = secretbox::gen_nonce();
-        let mut buf = [0; 88];
+        let mut buf = [0; 72];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
         let payload = secretbox::seal(&buf[..size], &nonce, symmetric_key);
 
@@ -162,6 +187,12 @@ impl EncryptedCookie {
             }
         }
     }
+    /// Calculate SHA512 hash of encrypted cookie together with nonce
+    pub fn hash(&self) -> sha512::Digest {
+        let mut buf = [0; 112];
+        let (_, size) = self.to_bytes((&mut buf, 0)).unwrap();
+        sha512::hash(&buf[..size])
+    }
 }
 
 #[cfg(test)]
@@ -188,11 +219,7 @@ mod tests {
     #[test]
     fn cookie_encrypt_decrypt() {
         let symmetric_key = secretbox::gen_key();
-        let payload = Cookie {
-            time: 12345,
-            real_pk: gen_keypair().0,
-            dht_pk: gen_keypair().0,
-        };
+        let payload = Cookie::new(gen_keypair().0, gen_keypair().0);
         // encode payload with symmetric key
         let encrypted_cookie = EncryptedCookie::new(&symmetric_key, payload.clone());
         // decode payload with symmetric key
@@ -205,11 +232,7 @@ mod tests {
     fn cookie_encrypt_decrypt_invalid_key() {
         let symmetric_key = secretbox::gen_key();
         let eve_symmetric_key = secretbox::gen_key();
-        let payload = Cookie {
-            time: 12345,
-            real_pk: gen_keypair().0,
-            dht_pk: gen_keypair().0,
-        };
+        let payload = Cookie::new(gen_keypair().0, gen_keypair().0);
         // encode payload with symmetric key
         let encrypted_cookie = EncryptedCookie::new(&symmetric_key, payload.clone());
         // try to decode payload with eve's symmetric key
@@ -225,7 +248,7 @@ mod tests {
         let invalid_payload = [42; 123];
         let invalid_payload_encoded = secretbox::seal(&invalid_payload, &nonce, &symmetric_key);
         let invalid_encrypted_cookie = EncryptedCookie {
-            nonce: nonce,
+            nonce,
             payload: invalid_payload_encoded
         };
         let decoded_payload = invalid_encrypted_cookie.get_payload(&symmetric_key);
@@ -234,10 +257,40 @@ mod tests {
         let invalid_payload = [];
         let invalid_payload_encoded = secretbox::seal(&invalid_payload, &nonce, &symmetric_key);
         let invalid_encrypted_cookie = EncryptedCookie {
-            nonce: nonce,
+            nonce,
             payload: invalid_payload_encoded
         };
         let decoded_payload = invalid_encrypted_cookie.get_payload(&symmetric_key);
         assert!(decoded_payload.is_err());
+    }
+
+    #[test]
+    fn cookie_timed_out() {
+        let mut cookie = Cookie::new(gen_keypair().0, gen_keypair().0);
+        assert!(!cookie.is_timed_out());
+        cookie.time -= COOKIE_TIMEOUT + 1;
+        assert!(cookie.is_timed_out());
+    }
+
+    #[test]
+    fn hash_depends_on_all_fields() {
+        let nonce = secretbox::gen_nonce();
+        let payload = vec![42; 88];
+        let cookie = EncryptedCookie {
+            nonce,
+            payload: payload.clone()
+        };
+
+        let cookie_1 = EncryptedCookie {
+            nonce,
+            payload: vec![43; 88]
+        };
+        let cookie_2 = EncryptedCookie {
+            nonce: secretbox::gen_nonce(),
+            payload
+        };
+
+        assert!(cookie.hash() != cookie_1.hash());
+        assert!(cookie.hash() != cookie_2.hash());
     }
 }

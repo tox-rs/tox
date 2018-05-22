@@ -92,7 +92,7 @@ impl CookieRequest {
     /// Create `CookieRequest` from `CookieRequestPayload` encrypting it with `shared_key`
     pub fn new(shared_secret: &PrecomputedKey, pk: &PublicKey, payload: CookieRequestPayload) -> CookieRequest {
         let nonce = gen_nonce();
-        let mut buf = [0; 88];
+        let mut buf = [0; 72];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
         let payload = seal_precomputed(&buf[..size], &nonce, shared_secret);
 
