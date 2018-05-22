@@ -51,7 +51,7 @@ use toxcore::dht::kbucket::*;
 use toxcore::onion::packet::*;
 use toxcore::onion::onion_announce::*;
 use toxcore::dht::server::client::*;
-use toxcore::io_tokio::IoFuture;
+use toxcore::io_tokio::*;
 use toxcore::dht::dht_friend::*;
 use toxcore::dht::server::hole_punching::*;
 use toxcore::tcp::packet::OnionRequest;
@@ -169,30 +169,6 @@ impl Server {
             tox_core_version: 0,
             motd: Vec::new(),
             tcp_onion_sink: None
-        }
-    }
-
-    /**
-    Create new `Server` instance with TCP onion.
-    */
-    pub fn new_with_tcp_onion(tx: Tx, pk: PublicKey, sk: SecretKey, tcp_onion_sink: TcpOnionTx) -> Server {
-        debug!("Created new Server instance");
-        Server {
-            sk,
-            pk,
-            tx,
-            is_hole_punching_enabled: true,
-            peers_cache: Arc::new(RwLock::new(HashMap::new())),
-            close_nodes: Arc::new(RwLock::new(Kbucket::new(&pk))),
-            onion_symmetric_key: Arc::new(RwLock::new(secretbox::gen_key())),
-            onion_announce: Arc::new(RwLock::new(OnionAnnounce::new(pk))),
-            friends: Arc::new(RwLock::new(Vec::new())),
-            bootstrap_nodes: Arc::new(RwLock::new(Bucket::new(None))),
-            bootstrap_times: Arc::new(RwLock::new(0)),
-            last_nodes_req_time: Arc::new(RwLock::new(Instant::now())),
-            tox_core_version: 0,
-            motd: Vec::new(),
-            tcp_onion_sink: Some(tcp_onion_sink)
         }
     }
 
@@ -528,16 +504,7 @@ impl Server {
 
     /// actual send method
     fn send_to(&self, addr: SocketAddr, packet: DhtPacket) -> IoFuture<()> {
-        Box::new(self.tx.clone() // clone tx sender for 1 send only
-            .send((packet, addr))
-            .map(|_tx| ()) // ignore tx because it was cloned
-            .map_err(|e| {
-                // This may only happen if rx is gone
-                // So cast SendError<T> to a corresponding std::io::Error
-                debug!("send to peer error {:?}", e);
-                Error::from(ErrorKind::UnexpectedEof)
-            })
-        )
+        send_to(&self.tx, (packet, addr))
     }
 
     /// get broadcast addresses for host's network interfaces
@@ -561,12 +528,7 @@ impl Server {
     fn handle_ping_req(&self, packet: PingRequest, addr: SocketAddr) -> IoFuture<()> {
         let payload = packet.get_payload(&self.sk);
         let payload = match payload {
-            Err(e) => {
-                return Box::new( future::err(
-                    Error::new(ErrorKind::Other,
-                        format!("PingRequest::get_payload() failed: {:?}", e)
-                )))
-            },
+            Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
 
@@ -587,12 +549,7 @@ impl Server {
         let mut peers_cache = self.peers_cache.write();
         let payload = packet.get_payload(&self.sk);
         let payload = match payload {
-            Err(e) => {
-                return Box::new( future::err(
-                    Error::new(ErrorKind::Other,
-                        format!("PingResponse::get_payload() failed: {:?}", e)
-                )))
-            },
+            Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
 
@@ -632,12 +589,7 @@ impl Server {
 
         let payload = packet.get_payload(&self.sk);
         let payload = match payload {
-            Err(e) => {
-                return Box::new( future::err(
-                    Error::new(ErrorKind::Other,
-                        format!("NodesRequest::get_payload() failed: {:?}", e)
-                )))
-            },
+            Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
 
@@ -661,12 +613,7 @@ impl Server {
 
         let payload = packet.get_payload(&self.sk);
         let payload = match payload {
-            Err(e) => {
-                return Box::new( future::err(
-                    Error::new(ErrorKind::Other,
-                        format!("NodesResponse::get_payload() failed: {:?}", e)
-                )))
-            },
+            Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
 
@@ -712,12 +659,7 @@ impl Server {
         if packet.rpk == self.pk { // the target peer is me
             let payload = packet.get_payload(&self.sk);
             let payload = match payload {
-                Err(err) => {
-                    return Box::new( future::err(
-                        Error::new(ErrorKind::Other,
-                            format!("DhtRequest::get_payload failed with: {:?}", err)
-                    )))
-                },
+                Err(e) => return Box::new(future::err(e)),
                 Ok(payload) => payload,
             };
 
@@ -845,7 +787,7 @@ impl Server {
         let mut ip_addrs = Server::get_ipv4_broadcast_addrs();
         // Ipv6 broadcast address
         ip_addrs.push(
-            "::1".parse().unwrap() // TODO: it should be FF02::1, but for now, my LAN config has no route to address of FF02::1
+            "FF02::1".parse().unwrap()
         );
         // Ipv4 global broadcast address
         ip_addrs.push(
@@ -870,12 +812,7 @@ impl Server {
         let shared_secret = precompute(&packet.temporary_pk, &self.sk);
         let payload = packet.get_payload(&shared_secret);
         let payload = match payload {
-            Err(e) => {
-                return Box::new( future::err(
-                    Error::new(ErrorKind::Other,
-                        format!("OnionRequest0::get_payload() failed: {:?}", e)
-                )))
-            },
+            Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
 
@@ -901,12 +838,7 @@ impl Server {
         let shared_secret = precompute(&packet.temporary_pk, &self.sk);
         let payload = packet.get_payload(&shared_secret);
         let payload = match payload {
-            Err(e) => {
-                return Box::new( future::err(
-                    Error::new(ErrorKind::Other,
-                        format!("OnionRequest1::get_payload() failed: {:?}", e)
-                )))
-            },
+            Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
 
@@ -932,12 +864,7 @@ impl Server {
         let shared_secret = precompute(&packet.temporary_pk, &self.sk);
         let payload = packet.get_payload(&shared_secret);
         let payload = match payload {
-            Err(e) => {
-                return Box::new( future::err(
-                    Error::new(ErrorKind::Other,
-                        format!("OnionRequest2::get_payload() failed: {:?}", e)
-                )))
-            },
+            Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
 
@@ -994,12 +921,7 @@ impl Server {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let payload = packet.onion_return.get_payload(&onion_symmetric_key);
         let payload = match payload {
-            Err(e) => {
-                return Box::new( future::err(
-                    Error::new(ErrorKind::Other,
-                        format!("OnionResponse3::get_payload() failed: {:?}", e)
-                )))
-            },
+            Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
 
@@ -1024,12 +946,7 @@ impl Server {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let payload = packet.onion_return.get_payload(&onion_symmetric_key);
         let payload = match payload {
-            Err(e) => {
-                return Box::new( future::err(
-                    Error::new(ErrorKind::Other,
-                        format!("OnionResponse2::get_payload() failed: {:?}", e)
-                )))
-            },
+            Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
 
@@ -1055,12 +972,7 @@ impl Server {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let payload = packet.onion_return.get_payload(&onion_symmetric_key);
         let payload = match payload {
-            Err(e) => {
-                return Box::new( future::err(
-                    Error::new(ErrorKind::Other,
-                        format!("OnionResponse1::get_payload() failed: {:?}", e)
-                )))
-            },
+            Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
 
@@ -1138,6 +1050,10 @@ impl Server {
     pub fn set_bootstrap_info(&mut self, version: u32, motd: Vec<u8>) {
         self.tox_core_version = version;
         self.motd = motd;
+    }
+    /// set TCP sink for onion packets
+    pub fn set_tcp_onion_sink(&mut self, tcp_onion_sink: TcpOnionTx) {
+        self.tcp_onion_sink = Some(tcp_onion_sink)
     }
 }
 
@@ -2130,10 +2046,9 @@ mod tests {
 
     #[test]
     fn server_handle_onion_response_1_redirect_to_tcp_test() {
-        let (pk, sk) = gen_keypair();
-        let (tx, _rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
+        let (mut alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
         let (tcp_onion_tx, tcp_onion_rx) = mpsc::unbounded::<(InnerOnionResponse, SocketAddr)>();
-        let alice = Server::new_with_tcp_onion(tx, pk, sk, tcp_onion_tx);
+        alice.set_tcp_onion_sink(tcp_onion_tx);
 
         let addr: SocketAddr = "127.0.0.1:12346".parse().unwrap();
 

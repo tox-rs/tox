@@ -23,9 +23,8 @@
 
 
 use toxcore::tcp::packet::*;
-use toxcore::io_tokio::IoFuture;
+use toxcore::io_tokio::*;
 
-use futures::prelude::*;
 use futures::sync::mpsc;
 use futures::future;
 
@@ -143,27 +142,11 @@ impl Connection {
     }
     /// Send packet to server
     fn send_to_server(&self, packet: Packet) -> IoFuture<()> {
-        Box::new(self.server_tx.clone() // clone tx sender for 1 send only
-            .send(packet)
-            .map(|_tx| ()) // ignore tx because it was cloned
-            .map_err(|_| {
-                // This may only happen if rx is gone
-                // So cast SendError<T> to a corresponding std::io::Error
-                Error::from(ErrorKind::UnexpectedEof)
-            })
-        )
+        send_to(&self.server_tx, packet)
     }
     /// Send packet back to client (to be handled as a callback)
     fn send_to_client(&self, packet: IncomingPacket) -> IoFuture<()> {
-        Box::new(self.callback_tx.clone() // clone tx sender for 1 send only
-            .send(packet)
-            .map(|_tx| ()) // ignore tx because it was cloned
-            .map_err(|_| {
-                // This may only happen if rx is gone
-                // So cast SendError<T> to a corresponding std::io::Error
-                Error::from(ErrorKind::UnexpectedEof)
-            })
-        )
+        send_to(&self.callback_tx, packet)
     }
 }
 
@@ -171,6 +154,7 @@ impl Connection {
 mod tests {
     use toxcore::crypto_core::*;
     use toxcore::tcp::client::connection::*;
+    use futures::prelude::*;
     use futures::sync::mpsc;
 
     fn create_connection_channels()
