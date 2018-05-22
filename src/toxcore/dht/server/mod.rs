@@ -51,7 +51,7 @@ use toxcore::dht::kbucket::*;
 use toxcore::onion::packet::*;
 use toxcore::onion::onion_announce::*;
 use toxcore::dht::server::client::*;
-use toxcore::io_tokio::IoFuture;
+use toxcore::io_tokio::*;
 use toxcore::dht::dht_friend::*;
 use toxcore::dht::server::hole_punching::*;
 use toxcore::tcp::packet::OnionRequest;
@@ -504,16 +504,7 @@ impl Server {
 
     /// actual send method
     fn send_to(&self, addr: SocketAddr, packet: DhtPacket) -> IoFuture<()> {
-        Box::new(self.tx.clone() // clone tx sender for 1 send only
-            .send((packet, addr))
-            .map(|_tx| ()) // ignore tx because it was cloned
-            .map_err(|e| {
-                // This may only happen if rx is gone
-                // So cast SendError<T> to a corresponding std::io::Error
-                debug!("send to peer error {:?}", e);
-                Error::from(ErrorKind::UnexpectedEof)
-            })
-        )
+        send_to(&self.tx, (packet, addr))
     }
 
     /// get broadcast addresses for host's network interfaces

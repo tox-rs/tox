@@ -23,14 +23,13 @@
 
 use toxcore::crypto_core::*;
 use toxcore::tcp::packet::*;
-use toxcore::io_tokio::IoFuture;
+use toxcore::io_tokio::*;
 use toxcore::onion::packet::InnerOnionResponse;
 
-use std::io::{Error, ErrorKind};
 use std::net::IpAddr;
 use std::slice::Iter;
 
-use futures::{Sink, Future};
+use futures::Future;
 use futures::sync::mpsc;
 
 /** Structure that represents how Server keeps connected clients. A write-only socket with
@@ -151,15 +150,7 @@ impl Client {
     /** This is actually the sender method
     */
     fn send_impl(&self, packet: Packet) -> IoFuture<()> {
-        Box::new(self.tx.clone() // clone tx sender for 1 send only
-            .send(packet)
-            .map(|_tx| ()) // ignore tx because it was cloned
-            .map_err(|_| {
-                // This may only happen if rx is gone
-                // So cast SendError<T> to a corresponding std::io::Error
-                Error::from(ErrorKind::UnexpectedEof)
-            })
-        )
+        send_to(&self.tx, packet)
     }
     /** Send a packet. This method does not ignore IO error
     */
