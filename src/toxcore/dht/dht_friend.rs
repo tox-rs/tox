@@ -92,7 +92,7 @@ impl DhtFriend {
         let bootstrap_nodes = bootstrap_nodes.to_packed_node();
         let nodes_sender = bootstrap_nodes.iter()
             .map(|node| {
-                let client = peers_cache.entry(node.pk).or_insert_with(DhtNode::new);
+                let client = peers_cache.entry(node.pk).or_insert_with(|| DhtNode::new(*node));
                 server.send_nodes_req(*node, self.pk, client)
             });
 
@@ -108,7 +108,7 @@ impl DhtFriend {
         let close_nodes = self.close_nodes.to_packed_node();
         let nodes_sender = close_nodes.iter()
             .map(|node| {
-                let client = peers_cache.entry(node.pk).or_insert_with(DhtNode::new);
+                let client = peers_cache.entry(node.pk).or_insert_with(|| DhtNode::new(*node));
 
                 if client.last_ping_req_time.elapsed() >= ping_interval {
                     client.last_ping_req_time = Instant::now();
@@ -130,7 +130,7 @@ impl DhtFriend {
         let close_nodes = self.close_nodes.to_packed_node();
         let good_nodes = close_nodes.iter()
             .filter(|node| {
-                let client = peers_cache.entry(node.pk).or_insert_with(DhtNode::new);
+                let client = peers_cache.entry(node.pk).or_insert_with(|| DhtNode::new(**node));
                 client.last_resp_time.elapsed() < bad_node_timeout
             }).collect::<Vec<_>>();
 
@@ -247,8 +247,16 @@ mod tests {
 
     fn insert_client_to_peers_cache(server: &Server, pk1: PublicKey, pk2: PublicKey) {
         let mut peers_cache = server.get_peers_cache().write();
-        peers_cache.insert(pk1, DhtNode::new());
-        peers_cache.insert(pk2, DhtNode::new());
+        let pn = PackedNode {
+            pk: pk1,
+            saddr: "127.0.0.1:33445".parse().unwrap(),
+        };
+        peers_cache.insert(pk1, DhtNode::new(pn));
+        let pn = PackedNode {
+            pk: pk2,
+            saddr: "127.0.0.1:33445".parse().unwrap(),
+        };
+        peers_cache.insert(pk2, DhtNode::new(pn));
     }
 
     #[test]

@@ -30,6 +30,7 @@ use std::net::SocketAddr;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use toxcore::crypto_core::*;
+use toxcore::dht::packed_node::*;
 
 /** Status of node in bucket.
 Good means it is online and responded within 162 seconds
@@ -74,10 +75,10 @@ pub struct DhtNode {
 
 impl DhtNode {
     /// create DhtNode object
-    pub fn new() -> DhtNode {
+    pub fn new(pn: PackedNode) -> DhtNode {
         DhtNode {
-            pk : gen_keypair().0,
-            saddr: "127.0.0.1:33445".parse().unwrap(),
+            pk: pn.pk,
+            saddr: pn.saddr,
             ping_hash: HashMap::new(),
             last_resp_time: Instant::now(),
             last_ping_req_time: Instant::now(),
@@ -138,13 +139,21 @@ mod tests {
 
     #[test]
     fn client_data_clonable() {
-        let client = DhtNode::new();
+        let pn = PackedNode {
+            pk: gen_keypair().0,
+            saddr: "127.0.0.1:33445".parse().unwrap(),
+        };
+        let client = DhtNode::new(pn);
         let _ = client.clone();
     }
 
     #[test]
     fn client_data_insert_new_ping_id_test() {
-        let mut client = DhtNode::new();
+        let pn = PackedNode {
+            pk: gen_keypair().0,
+            saddr: "127.0.0.1:33445".parse().unwrap(),
+        };
+        let mut client = DhtNode::new(pn);
 
         let ping_id = client.insert_new_ping_id();
 
@@ -153,7 +162,11 @@ mod tests {
 
     #[test]
     fn client_data_check_ping_id_test() {
-        let mut client = DhtNode::new();
+        let pn = PackedNode {
+            pk: gen_keypair().0,
+            saddr: "127.0.0.1:33445".parse().unwrap(),
+        };
+        let mut client = DhtNode::new(pn);
 
         let ping_id = client.insert_new_ping_id();
 
@@ -175,7 +188,11 @@ mod tests {
 
     #[test]
     fn client_data_clear_timedout_pings_test() {
-        let mut client = DhtNode::new();
+        let pn = PackedNode {
+            pk: gen_keypair().0,
+            saddr: "127.0.0.1:33445".parse().unwrap(),
+        };
+        let mut client = DhtNode::new(pn);
 
         // ping_id should be removed
         let ping_id = client.insert_new_ping_id();
