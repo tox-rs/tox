@@ -84,7 +84,6 @@ impl Into<DhtNode> for PackedNode {
             pk: self.pk,
             saddr: self.saddr,
             ping_hash: HashMap::new(),
-            status: NodeStatus::Good,
             last_resp_time: Instant::now(),
             last_ping_req_time: Instant::now(),
         }
@@ -96,8 +95,6 @@ pub trait Distance {
     /// Check whether distance between PK1 and own PK is smaller than distance
     /// between PK2 and own PK.
     fn distance(&self, &PublicKey, &PublicKey) -> Ordering;
-    /// Check distance including status of node
-    fn replace_order(&self, &DhtNode, &DhtNode) -> Ordering;
 }
 
 impl Distance for PublicKey {
@@ -113,51 +110,6 @@ impl Distance for PublicKey {
             }
         }
         Ordering::Equal
-    }
-
-    fn replace_order(&self,
-                node1: &DhtNode,
-                node2: &DhtNode) -> Ordering {
-
-        trace!(target: "Distance", "Comparing distance between PKs. and status of node");
-        match node1.status {
-            NodeStatus::Good => {
-                match node2.status {
-                    NodeStatus::Good => { // Good, Good
-                        let &PublicKey(own) = self;
-                        let PublicKey(pk1) = node1.pk;
-                        let PublicKey(pk2) = node2.pk;
-                        for i in 0..PUBLICKEYBYTES {
-                            if pk1[i] != pk2[i] {
-                                return Ord::cmp(&(own[i] ^ pk1[i]), &(own[i] ^ pk2[i]))
-                            }
-                        }
-                        Ordering::Equal
-                    },
-                    NodeStatus::Bad => { // Good, Bad
-                        Ordering::Less // Good is closer
-                    },
-                }
-            },
-            NodeStatus::Bad => {
-                match node2.status {
-                    NodeStatus::Good => { // Bad, Good
-                        Ordering::Greater // Bad is farther
-                    },
-                    NodeStatus::Bad => { // Bad, Bad
-                        let &PublicKey(own) = self;
-                        let PublicKey(pk1) = node1.pk;
-                        let PublicKey(pk2) = node2.pk;
-                        for i in 0..PUBLICKEYBYTES {
-                            if pk1[i] != pk2[i] {
-                                return Ord::cmp(&(own[i] ^ pk1[i]), &(own[i] ^ pk2[i]))
-                            }
-                        }
-                        Ordering::Equal
-                    },
-                }
-            },
-        }
     }
 }
 
@@ -255,18 +207,9 @@ impl Bucket {
         trace!(target: "Bucket", "With bucket: {:?}; PK: {:?} and new node: {:?}",
             self, base_pk, new_node);
 
-        let mut new_node: DhtNode = new_node.clone().into();
+        let new_node: DhtNode = (*new_node).into();
 
-        let bad_node_timeout = self.bad_node_timeout;
-        self.nodes.iter_mut()
-            .filter(|node| node.last_resp_time.elapsed() > bad_node_timeout)
-            .for_each(|node| node.status = NodeStatus::Bad);
-
-        if new_node.last_resp_time.elapsed() > bad_node_timeout {
-            new_node.status = NodeStatus::Bad;
-        }
-
-        match self.nodes.binary_search_by(|n| base_pk.replace_order(n, &new_node)) {
+        match self.nodes.binary_search_by(|n| base_pk.replace_order(n, &new_node, self.bad_node_timeout)) {
             Ok(index) => {
                 debug!(target: "Bucket",
                     "Updated: the node was already in the bucket.");
@@ -363,23 +306,14 @@ impl Bucket {
     [`PackedNode`]: ./struct.PackedNode.html
     */
     pub fn can_add(&mut self, base_pk: &PublicKey, new_node: &PackedNode) -> bool {
-        let mut new_node: DhtNode = new_node.clone().into();
+        let new_node: DhtNode = (*new_node).into();
 
-        let bad_node_timeout = self.bad_node_timeout;
-        self.nodes.iter_mut()
-            .filter(|node| node.last_resp_time.elapsed() > bad_node_timeout)
-            .for_each(|node| node.status = NodeStatus::Bad);
-
-        if new_node.last_resp_time.elapsed() > bad_node_timeout {
-            new_node.status = NodeStatus::Bad;
-        }
-
-        match self.nodes.binary_search_by(|n| base_pk.replace_order(n, &new_node)) {
+        match self.nodes.binary_search_by(|n| base_pk.replace_order(n, &new_node, self.bad_node_timeout)) {
             Ok(_index) => false, // node already exist in bucket, so can't add node
             Err(index) if index == self.nodes.len() => { // can't find node in bucket
                 if self.is_full() { // bucket is full, so can't add node
                     false
-                } else { // buceket has space, so can add node
+                } else { // bucket has space, so can add node
                     true
                 }
             },
@@ -387,7 +321,7 @@ impl Bucket {
         }
     }
 
-    /// convert voctor of DhtNode to vector of PackedNode
+    /// convert vector of DhtNode to vector of PackedNode
     pub fn to_packed_node(&self) -> Vec<PackedNode> {
         let bucket_packed = self.nodes.iter().map(|node| node.clone().into()).collect::<Vec<PackedNode>>();
 
@@ -541,9 +475,8 @@ impl Kbucket {
             }
         }
         trace!("Returning nodes: {:?}", &bucket.nodes);
-        bucket.nodes.iter()
-            .map(|dht_node| dht_node.clone().into())
-            .collect::<Vec<PackedNode>>()
+
+        bucket.to_packed_node()
     }
 
     /**
@@ -574,7 +507,6 @@ impl Kbucket {
             None => false,
             Some(i) =>
                 self.buckets[i].can_add(&self.pk, new_node),
-//                !self.buckets[i].is_full() && !self.buckets[i].contains(pk),
         }
     }
 

@@ -228,17 +228,6 @@ fn add_server_main_loop(base_selector: IoFuture<()>, server_obj: &Server) -> IoF
             println!("main_loop_wakeup");
             // flag for fast bootstrapping
             if bootstrap_fast {
-                // args to main loop, all value is seconds
-                let args = ConfigArgs {
-                    kill_node_timeout: 182,
-                    ping_timeout: 5,
-                    ping_interval: 60,
-                    bad_node_timeout: 162,
-                    nodes_req_interval: 20,
-                    nat_ping_req_interval: 3,
-                };
-
-                server_obj_c.set_config_values(args);
                 server_obj_c.dht_main_loop()
             } else {
                 bootstrap_fast = true;
@@ -253,7 +242,21 @@ fn add_server_main_loop(base_selector: IoFuture<()>, server_obj: &Server) -> IoF
                 };
 
                 server_obj_c.set_config_values(args);
-                server_obj_c.dht_main_loop()
+                let res = server_obj_c.dht_main_loop();
+
+                // args to main loop, all value is seconds
+                let args = ConfigArgs {
+                    kill_node_timeout: 182,
+                    ping_timeout: 5,
+                    ping_interval: 60,
+                    bad_node_timeout: 162,
+                    nodes_req_interval: 20,
+                    nat_ping_req_interval: 3,
+                };
+
+                server_obj_c.set_config_values(args);
+
+                res
             }
         })
         .map_err(|_err| Error::new(ErrorKind::Other, "Nodes timer error"));

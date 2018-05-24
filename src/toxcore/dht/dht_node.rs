@@ -29,8 +29,10 @@ Here, GOOD node is the node responded within 162 seconds, BAD node is the node n
 use std::net::SocketAddr;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
+use std::cmp::Ordering;
 use toxcore::crypto_core::*;
 use toxcore::dht::packed_node::*;
+use toxcore::dht::kbucket::*;
 
 /** Status of node in bucket.
 Good means it is online and responded within 162 seconds
@@ -49,6 +51,43 @@ pub enum NodeStatus {
     Bad,
 }
 
+/// check distance of PK1 and PK2 from base_PK including status of node
+pub trait ReplaceOrder {
+    /// Check distance of PK1 and Pk2 including status of node
+    fn replace_order(&self, &DhtNode, &DhtNode, Duration) -> Ordering;
+}
+
+impl ReplaceOrder for PublicKey {
+    fn replace_order(&self,
+                     node1: &DhtNode,
+                     node2: &DhtNode,
+                     bad_node_timeout: Duration) -> Ordering {
+
+        trace!(target: "Distance", "Comparing distance between PKs. and status of node");
+        match node1.calc_status(bad_node_timeout) {
+            NodeStatus::Good => {
+                match node2.calc_status(bad_node_timeout) {
+                    NodeStatus::Good => { // Good, Good
+                        self.distance(&node1.pk, &node2.pk)
+                    },
+                    NodeStatus::Bad => { // Good, Bad
+                        Ordering::Less // Good is closer
+                    },
+                }
+            },
+            NodeStatus::Bad => {
+                match node2.calc_status(bad_node_timeout) {
+                    NodeStatus::Good => { // Bad, Good
+                        Ordering::Greater // Bad is farther
+                    },
+                    NodeStatus::Bad => { // Bad, Bad
+                        self.distance(&node1.pk, &node2.pk)
+                    },
+                }
+            },
+        }
+    }
+}
 /** Struct used by Bucket, DHT maintains close node list, when we got new node,
 we should make decision to add new node to close node list, or not.
 the PK's distance and status of node help making decision.
@@ -63,8 +102,6 @@ pub struct DhtNode {
     pub saddr: SocketAddr,
     /// Public Key of the node.
     pub pk: PublicKey,
-    /// Status of node
-    pub status: NodeStatus,
     /// hash of ping_ids to check PingResponse is correct
     pub ping_hash: HashMap<u64, Instant>,
     /// last received ping/nodes-response time
@@ -82,9 +119,18 @@ impl DhtNode {
             ping_hash: HashMap::new(),
             last_resp_time: Instant::now(),
             last_ping_req_time: Instant::now(),
-            status: NodeStatus::Good,
         }
     }
+
+    /// calc. status of node
+    pub fn calc_status(&self, bad_node_timeout: Duration) -> NodeStatus {
+        if self.last_resp_time.elapsed() > bad_node_timeout {
+            NodeStatus::Bad
+        } else {
+            NodeStatus::Good
+        }
+    }
+
     /// set new random ping id to the client and return it
     fn generate_ping_id(&mut self) -> u64 {
         loop {
@@ -136,6 +182,7 @@ impl DhtNode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use quickcheck::quickcheck;
 
     #[test]
     fn client_data_clonable() {
@@ -206,5 +253,30 @@ mod tests {
         let dur = Duration::from_secs(1);
         client.clear_timedout_pings(dur);
         assert!(client.check_ping_id(ping_id, dur));
+    }
+
+    #[test]
+    fn dht_node_bucket_try_add_test() {
+        fn with_nodes(n1: PackedNode, n2: PackedNode, n3: PackedNode,
+                      n4: PackedNode, n5: PackedNode, n6: PackedNode,
+                      n7: PackedNode, n8: PackedNode) {
+            let pk = PublicKey([0; PUBLICKEYBYTES]);
+            let mut bucket = Bucket::new(None);
+            assert_eq!(true, bucket.try_add(&pk, &n1));
+            assert_eq!(true, bucket.try_add(&pk, &n2));
+            assert_eq!(true, bucket.try_add(&pk, &n3));
+            assert_eq!(true, bucket.try_add(&pk, &n4));
+            assert_eq!(true, bucket.try_add(&pk, &n5));
+            assert_eq!(true, bucket.try_add(&pk, &n6));
+            assert_eq!(true, bucket.try_add(&pk, &n7));
+            assert_eq!(true, bucket.try_add(&pk, &n8));
+
+            // updating bucket
+            assert_eq!(true, bucket.try_add(&pk, &n1));
+
+            // TODO: check whether adding a closest node will always work
+        }
+        quickcheck(with_nodes as fn(PackedNode, PackedNode, PackedNode, PackedNode,
+                                    PackedNode, PackedNode, PackedNode, PackedNode));
     }
 }
