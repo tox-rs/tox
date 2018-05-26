@@ -305,17 +305,13 @@ impl Bucket {
     [`Bucket`]: ./struct.Bucket.html
     [`PackedNode`]: ./struct.PackedNode.html
     */
-    pub fn can_add(&mut self, base_pk: &PublicKey, new_node: &PackedNode) -> bool {
+    pub fn can_add(&self, base_pk: &PublicKey, new_node: &PackedNode) -> bool {
         let new_node: DhtNode = (*new_node).into();
 
         match self.nodes.binary_search_by(|n| base_pk.replace_order(n, &new_node, self.bad_node_timeout)) {
             Ok(_index) => false, // node already exist in bucket, so can't add node
             Err(index) if index == self.nodes.len() => { // can't find node in bucket
-                if self.is_full() { // bucket is full, so can't add node
-                    false
-                } else { // bucket has space, so can add node
-                    true
-                }
+                !self.is_full()
             },
             Err(_index) => true, // node is not found in bucket, so can add node
         }
@@ -323,9 +319,7 @@ impl Bucket {
 
     /// convert vector of DhtNode to vector of PackedNode
     pub fn to_packed_node(&self) -> Vec<PackedNode> {
-        let bucket_packed = self.nodes.iter().map(|node| node.clone().into()).collect::<Vec<PackedNode>>();
-
-        bucket_packed
+        self.nodes.iter().map(|node| node.clone().into()).collect::<Vec<PackedNode>>()
     }
 
     /// set bad_node_timeout in seconds
@@ -502,7 +496,7 @@ impl Kbucket {
     [`Bucket`]: ./struct.Bucket.html
     [`PackedNode`]: ./struct.PackedNode.html
     */
-    pub fn can_add(&mut self, new_node: &mut PackedNode) -> bool {
+    pub fn can_add(&self, new_node: &PackedNode) -> bool {
         match self.bucket_index(&new_node.pk) {
             None => false,
             Some(i) =>
@@ -1040,9 +1034,9 @@ mod tests {
 
             kbucket.set_bad_node_timeout(10);
 
-            for mut node in pns.clone() {
+            for node in pns {
                 if kbucket.try_add(&node) {
-                    assert!(!kbucket.can_add(&mut node));
+                    assert!(!kbucket.can_add(&node));
                 }
             }
 
