@@ -26,7 +26,6 @@ Functionality needed to work as a DHT node.
 This module works on top of other modules.
 */
 
-pub mod client;
 pub mod hole_punching;
 
 use futures::{Future, Sink, Stream, future, stream};
@@ -50,7 +49,7 @@ use toxcore::dht::packed_node::*;
 use toxcore::dht::kbucket::*;
 use toxcore::onion::packet::*;
 use toxcore::onion::onion_announce::*;
-use toxcore::dht::server::client::*;
+use toxcore::dht::dht_node::*;
 use toxcore::io_tokio::*;
 use toxcore::dht::dht_friend::*;
 use toxcore::dht::server::hole_punching::*;
@@ -105,7 +104,7 @@ pub struct Server {
     /// option for hole punching
     pub is_hole_punching_enabled: bool,
     // store client object which has sent request packet to peer
-    peers_cache: Arc<RwLock<HashMap<PublicKey, ClientData>>>,
+    peers_cache: Arc<RwLock<HashMap<PublicKey, DhtNode>>>,
     // Close List (contains nodes close to own DHT PK)
     close_nodes: Arc<RwLock<Kbucket>>,
     // symmetric key used for onion return encryption
@@ -125,6 +124,8 @@ pub struct Server {
     tox_core_version: u32,
     // message used in BootstrapInfo
     motd: Vec<u8>,
+    // values in config file
+    config: ConfigArgs,
     // `OnionResponse1` packets that have TCP protocol kind inside onion return
     // should be redirected to TCP sender trough this sink
     // None if there is no TCP relay
@@ -132,7 +133,8 @@ pub struct Server {
 }
 
 /// Struct for grouping parameters to Server's main loop
-pub struct DhtMainLoopArgs {
+#[derive(Copy, Clone, Default)]
+pub struct ConfigArgs {
     /// timeout in seconds for remove clients in peers_cache
     pub kill_node_timeout: u64,
     /// timeout in seconds for PingRequest and NodesRequest
@@ -168,12 +170,13 @@ impl Server {
             last_nodes_req_time: Arc::new(RwLock::new(Instant::now())),
             tox_core_version: 0,
             motd: Vec::new(),
+            config: ConfigArgs::default(),
             tcp_onion_sink: None
         }
     }
 
     /// return peers_cache member variable
-    pub fn get_peers_cache(&self) -> &Arc<RwLock<HashMap<PublicKey, ClientData>>> {
+    pub fn get_peers_cache(&self) -> &Arc<RwLock<HashMap<PublicKey, DhtNode>>> {
         &self.peers_cache
     }
 
@@ -184,23 +187,38 @@ impl Server {
         friends.push(friend);
     }
 
+    /// set various config values
+    pub fn set_config_values(&mut self, config: ConfigArgs) {
+        self.config = config;
+
+        let bad_node_timeout = Duration::from_secs(config.bad_node_timeout);
+
+        self.close_nodes.write().buckets.iter_mut().for_each(|bucket| bucket.bad_node_timeout = bad_node_timeout);
+        self.bootstrap_nodes.write().bad_node_timeout = bad_node_timeout;
+
+        self.friends.write().iter_mut().for_each(|friend| {
+            friend.close_nodes.bad_node_timeout = bad_node_timeout;
+            friend.bootstrap_nodes.bad_node_timeout = bad_node_timeout;
+        });
+    }
+
     /// main loop of dht server, call this function every second
-    pub fn dht_main_loop(&self, args: DhtMainLoopArgs) -> IoFuture<()> {
-        self.remove_timedout_clients(Duration::from_secs(args.kill_node_timeout));
-        self.remove_timedout_ping_ids(Duration::from_secs(args.ping_timeout));
+    pub fn dht_main_loop(&self) -> IoFuture<()> {
+        self.remove_timedout_clients(Duration::from_secs(self.config.kill_node_timeout));
+        self.remove_timedout_ping_ids(Duration::from_secs(self.config.ping_timeout));
 
         let ping_bootstrap_nodes = self.ping_bootstrap_nodes();
-        let ping_and_get_close_nodes = self.ping_and_get_close_nodes(Duration::from_secs(args.ping_interval));
-        let send_nodes_req_random = self.send_nodes_req_random(Duration::from_secs(args.bad_node_timeout),
-                                                               Duration::from_secs(args.nodes_req_interval));
+        let ping_and_get_close_nodes = self.ping_and_get_close_nodes(Duration::from_secs(self.config.ping_interval));
+        let send_nodes_req_random = self.send_nodes_req_random(Duration::from_secs(self.config.bad_node_timeout),
+                                                               Duration::from_secs(self.config.nodes_req_interval));
         let send_nodes_req_packets = {
             let mut friends = self.friends.write();
 
             let nodes_sender = friends.iter_mut()
                 .map(|friend| {
-                    friend.send_nodes_req_packets(self, Duration::from_secs(args.ping_interval),
-                                                  Duration::from_secs(args.nodes_req_interval),
-                                                  Duration::from_secs(args.bad_node_timeout))
+                    friend.send_nodes_req_packets(self, Duration::from_secs(self.config.ping_interval),
+                                                  Duration::from_secs(self.config.nodes_req_interval),
+                                                  Duration::from_secs(self.config.bad_node_timeout))
                 });
 
             let nodes_stream = stream::futures_unordered(nodes_sender).then(|_| Ok(()));
@@ -208,7 +226,7 @@ impl Server {
             nodes_stream.for_each(|()| Ok(()))
         };
 
-        let send_nat_ping_req = self.send_nat_ping_req(Duration::from_secs(args.nat_ping_req_interval));
+        let send_nat_ping_req = self.send_nat_ping_req(Duration::from_secs(self.config.nat_ping_req_interval));
 
         let res = ping_bootstrap_nodes.join5(ping_and_get_close_nodes,
                                              send_nodes_req_random,
@@ -230,9 +248,10 @@ impl Server {
 
         let mut peers_cache = self.peers_cache.write();
 
-        let nodes_sender = bootstrap_nodes.nodes.iter()
+        let bootstrap_nodes = bootstrap_nodes.to_packed_node();
+        let nodes_sender = bootstrap_nodes.iter()
             .map(|node| {
-                let client = peers_cache.entry(node.pk).or_insert_with(ClientData::new);
+                let client = peers_cache.entry(node.pk).or_insert_with(|| DhtNode::new(*node));
 
                 self.send_nodes_req(*node, self.pk, client)
             });
@@ -249,8 +268,8 @@ impl Server {
         let nodes_sender = close_nodes.iter()
             .map(|node| {
                 let mut peers_cache = self.peers_cache.write();
-                let client = peers_cache.entry(node.pk).or_insert_with(ClientData::new).clone();
-                (node, client)
+                let client = peers_cache.entry(node.pk).or_insert_with(|| DhtNode::new(node));
+                (node, client.clone())
             })
             .filter(|&(_node, ref client)|
                 client.last_ping_req_time.elapsed() >= ping_interval
@@ -274,7 +293,7 @@ impl Server {
 
         let good_nodes = close_nodes.iter()
             .filter(|&node| {
-                let client = peers_cache.entry(node.pk).or_insert_with(ClientData::new);
+                let client = peers_cache.entry(node.pk).or_insert_with(|| DhtNode::new(node));
                 client.last_resp_time.elapsed() < bad_node_timeout
             }).collect::<Vec<PackedNode>>();
 
@@ -292,7 +311,7 @@ impl Server {
             let random_node = good_nodes[random_node];
 
 
-            let client = peers_cache.entry(random_node.pk).or_insert_with(ClientData::new);
+            let client = peers_cache.entry(random_node.pk).or_insert_with(|| DhtNode::new(random_node));
 
             let res = self.send_nodes_req(random_node, self.pk, client);
 
@@ -337,24 +356,24 @@ impl Server {
         Box::new(pings_stream.for_each(|()| Ok(())))
     }
 
-    /// Send PingRequest to peer
-    pub fn send_ping_req(&self, peer: &PackedNode) -> IoFuture<()> {
+    /// Send PingRequest to node
+    pub fn send_ping_req(&self, node: &PackedNode) -> IoFuture<()> {
         let mut peers_cache = self.peers_cache.write();
-        let client = peers_cache.entry(peer.pk).or_insert_with(ClientData::new);
+        let client = peers_cache.entry(node.pk).or_insert_with(|| DhtNode::new(*node));
 
         let payload = PingRequestPayload {
             id: client.insert_new_ping_id(),
         };
         let ping_req = DhtPacket::PingRequest(PingRequest::new(
-            &precompute(&peer.pk, &self.sk),
+            &precompute(&node.pk, &self.sk),
             &self.pk,
             payload
         ));
-        self.send_to(peer.saddr, ping_req)
+        self.send_to(node.saddr, ping_req)
     }
 
     /// Send NodesRequest to peer
-    pub fn send_nodes_req(&self, target_peer: PackedNode, search_pk: PublicKey, client: &mut ClientData) -> IoFuture<()> {
+    pub fn send_nodes_req(&self, target_peer: PackedNode, search_pk: PublicKey, client: &mut DhtNode) -> IoFuture<()> {
         // Check if packet is going to be sent to ourself.
         if self.pk == target_peer.pk {
             return Box::new(
@@ -757,7 +776,7 @@ impl Server {
 
         let mut peers_cache = self.peers_cache.write();
         let peers_cache = peers_cache.deref_mut();
-        let client = peers_cache.entry(packet.pk).or_insert_with(ClientData::new);
+        let client = peers_cache.entry(packet.pk).or_insert_with(|| DhtNode::new(target_node));
 
         self.send_nodes_req(target_node, self.pk, client)
     }
@@ -1092,7 +1111,7 @@ mod tests {
         (alice, precomp, bob_pk, bob_sk, rx, addr)
     }
 
-    fn add_to_peers_cache(alice: &Server, pk: PublicKey, client: ClientData) {
+    fn add_to_peers_cache(alice: &Server, pk: PublicKey, client: DhtNode) {
         let mut peers_cache = alice.peers_cache.write();
         peers_cache.insert(pk, client);
     }
@@ -1179,7 +1198,11 @@ mod tests {
 
         // handle ping response, request from bob peer
         // success case
-        let mut client = ClientData::new();
+        let pn = PackedNode {
+            pk: bob_pk,
+            saddr: addr
+        };
+        let mut client = DhtNode::new(pn);
         let ping_id = client.insert_new_ping_id();
         let resp_payload = PingResponsePayload { id: ping_id };
         let ping_resp = DhtPacket::PingResponse(PingResponse::new(&precomp, &bob_pk, resp_payload));
@@ -1194,7 +1217,11 @@ mod tests {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         // wrong PK, decrypt fail
-        let mut client = ClientData::new();
+        let pn = PackedNode {
+            pk: bob_pk,
+            saddr: addr
+        };
+        let mut client = DhtNode::new(pn);
         let ping_id = client.insert_new_ping_id();
         let prs = PingResponsePayload { id: ping_id };
         let ping_resp = DhtPacket::PingResponse(PingResponse::new(&precomp, &alice.pk, prs));
@@ -1212,7 +1239,11 @@ mod tests {
         let prs = PingResponsePayload { id: 0 };
         let ping_resp = DhtPacket::PingResponse(PingResponse::new(&precomp, &bob_pk, prs));
 
-        let client = ClientData::new();
+        let pn = PackedNode {
+            pk: bob_pk,
+            saddr: addr
+        };
+        let client = DhtNode::new(pn);
         add_to_peers_cache(&alice, bob_pk, client);
 
         assert!(alice.handle_packet(ping_resp, addr).wait().is_err());
@@ -1223,7 +1254,11 @@ mod tests {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         // incorrect ping_id, fail
-        let mut client = ClientData::new();
+        let pn = PackedNode {
+            pk: bob_pk,
+            saddr: addr
+        };
+        let mut client = DhtNode::new(pn);
         let ping_id = client.insert_new_ping_id();
         let prs = PingResponsePayload { id: ping_id + 1 };
         let ping_resp = DhtPacket::PingResponse(PingResponse::new(&precomp, &bob_pk, prs));
@@ -1279,7 +1314,11 @@ mod tests {
         let node = vec![PackedNode::new(false, addr, &bob_pk)];
 
         // handle nodes response, request from bob peer
-        let mut client = ClientData::new();
+        let pn = PackedNode {
+            pk: bob_pk,
+            saddr: addr
+        };
+        let mut client = DhtNode::new(pn);
         let ping_id = client.insert_new_ping_id();
         let resp_payload = NodesResponsePayload { nodes: node, id: ping_id };
         let nodes_resp = DhtPacket::NodesResponse(NodesResponse::new(&precomp, &bob_pk, resp_payload.clone()));
@@ -1295,7 +1334,7 @@ mod tests {
 
         let server_close_nodes = alice.close_nodes.read();
 
-        assert_eq!(server_close_nodes.buckets, close_nodes.buckets);
+        assert_eq!(server_close_nodes.get_node(&bob_pk), close_nodes.get_node(&bob_pk));
     }
 
     #[test]
@@ -1321,7 +1360,11 @@ mod tests {
         ], id: 0 };
         let nodes_resp = DhtPacket::NodesResponse(NodesResponse::new(&precomp, &bob_pk, resp_payload));
 
-        let client = ClientData::new();
+        let pn = PackedNode {
+            pk: bob_pk,
+            saddr: addr
+        };
+        let client = DhtNode::new(pn);
         add_to_peers_cache(&alice, bob_pk, client);
 
         assert!(alice.handle_packet(nodes_resp, addr).wait().is_err());
@@ -1332,7 +1375,11 @@ mod tests {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         // incorrect ping_id
-        let mut client = ClientData::new();
+        let pn = PackedNode {
+            pk: bob_pk,
+            saddr: addr
+        };
+        let mut client = DhtNode::new(pn);
         let ping_id = client.insert_new_ping_id();
         let resp_payload = NodesResponsePayload { nodes: vec![
             PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &gen_keypair().0)
@@ -1433,7 +1480,11 @@ mod tests {
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
         let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, nat_payload));
 
-        let client = ClientData::new();
+        let pn = PackedNode {
+            pk: bob_pk,
+            saddr: addr
+        };
+        let client = DhtNode::new(pn);
         add_to_peers_cache(&alice, bob_pk, client);
 
         assert!(alice.handle_packet(dht_req, addr).wait().is_ok());
@@ -1448,7 +1499,11 @@ mod tests {
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
         let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, nat_payload));
 
-        let client = ClientData::new();
+        let pn = PackedNode {
+            pk: bob_pk,
+            saddr: addr
+        };
+        let client = DhtNode::new(pn);
         add_to_peers_cache(&alice, bob_pk, client);
 
         assert!(alice.handle_packet(dht_req, addr).wait().is_err());
@@ -1459,7 +1514,11 @@ mod tests {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         // error case, incorrect ping_id
-        let mut client = ClientData::new();
+        let pn = PackedNode {
+            pk: bob_pk,
+            saddr: addr
+        };
+        let mut client = DhtNode::new(pn);
         let ping_id = client.insert_new_ping_id();
         let nat_res = NatPingResponse { id: ping_id + 1 };
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
@@ -2192,19 +2251,25 @@ mod tests {
      fn server_send_nodes_req_test() {
          let (alice, _precomp, bob_pk, _bob_sk, _rx, _addr) = create_node();
 
-         let target_node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &bob_pk);
-         assert!(alice.send_nodes_req(target_node, alice.pk, &mut ClientData::new()).wait().is_ok());
+         let target_node = PackedNode {
+             pk: bob_pk,
+             saddr: "127.0.0.1:12345".parse().unwrap(),
+         };
+         assert!(alice.send_nodes_req(target_node, alice.pk, &mut DhtNode::new(target_node)).wait().is_ok());
 
-         let node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12347".parse().unwrap()), &gen_keypair().0);
+         let node = PackedNode {
+             pk: gen_keypair().0,
+             saddr: "127.0.0.1:12347".parse().unwrap(),
+         };
          alice.try_add_to_close_nodes(&node);
 
-         assert!(alice.send_nodes_req(target_node, alice.pk, &mut ClientData::new()).wait().is_ok());
+         assert!(alice.send_nodes_req(target_node, alice.pk, &mut DhtNode::new(node)).wait().is_ok());
      }
 
     // send_nat_ping_req()
     #[test]
     fn server_send_nat_ping_req_test() {
-        let (alice, _precomp, _bob_pk, _bob_sk, mut rx, _addr) = create_node();
+        let (mut alice, _precomp, _bob_pk, _bob_sk, mut rx, _addr) = create_node();
 
         let (friend_pk1, friend_sk1) = gen_keypair();
         let friend_pk2 = gen_keypair().0;
@@ -2214,7 +2279,7 @@ mod tests {
         friend.close_nodes.try_add(&friend_pk1, &pn);
         alice.add_friend(friend);
 
-        let args = DhtMainLoopArgs {
+        let args = ConfigArgs {
             kill_node_timeout: 10,
             ping_timeout: 10,
             ping_interval: 0,
@@ -2223,7 +2288,8 @@ mod tests {
             nat_ping_req_interval: 0,
         };
 
-        alice.dht_main_loop(args).wait().unwrap();
+        alice.set_config_values(args);
+        alice.dht_main_loop().wait().unwrap();
 
         loop {
             let (received, rx1) = rx.into_future().wait().unwrap();
@@ -2415,7 +2481,7 @@ mod tests {
 
     #[test]
     fn server_ping_bootstrap_nodes_test() {
-        let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
+        let (mut alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         let (ping_pk, ping_sk) = gen_keypair();
 
         let pn = PackedNode::new(false, SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &ping_pk);
@@ -2424,7 +2490,7 @@ mod tests {
         let pn = PackedNode::new(false, SocketAddr::V4("127.0.0.1:33445".parse().unwrap()), &bob_pk);
         assert!(alice.bootstrap_nodes.write().deref_mut().try_add(&alice.pk, &pn));
 
-        let args = DhtMainLoopArgs {
+        let args = ConfigArgs {
             kill_node_timeout: 10,
             ping_timeout: 10,
             ping_interval: 0,
@@ -2433,7 +2499,8 @@ mod tests {
             nat_ping_req_interval: 10,
         };
 
-        alice.dht_main_loop(args).wait().unwrap();
+        alice.set_config_values(args);
+        alice.dht_main_loop().wait().unwrap();
 
         let mut peers_cache = alice.peers_cache.write();
 
@@ -2458,7 +2525,7 @@ mod tests {
 
     #[test]
     fn server_ping_and_get_close_nodes_test() {
-        let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
+        let (mut alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         let (ping_pk, ping_sk) = gen_keypair();
 
         let pn = PackedNode::new(false, SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &ping_pk);
@@ -2467,7 +2534,7 @@ mod tests {
         let pn = PackedNode::new(false, SocketAddr::V4("127.0.0.1:33445".parse().unwrap()), &bob_pk);
         assert!(alice.close_nodes.write().deref_mut().try_add(&pn));
 
-        let args = DhtMainLoopArgs {
+        let args = ConfigArgs {
             kill_node_timeout: 10,
             ping_timeout: 10,
             ping_interval: 0,
@@ -2476,7 +2543,8 @@ mod tests {
             nat_ping_req_interval: 10,
         };
 
-        alice.dht_main_loop(args).wait().unwrap();
+        alice.set_config_values(args);
+        alice.dht_main_loop().wait().unwrap();
 
         let mut peers_cache = alice.peers_cache.write();
 
@@ -2501,7 +2569,7 @@ mod tests {
 
     #[test]
     fn server_send_nodes_req_random_test() {
-        let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
+        let (mut alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         let (ping_pk, ping_sk) = gen_keypair();
 
         let pn = PackedNode::new(false, SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &ping_pk);
@@ -2510,7 +2578,7 @@ mod tests {
         let pn = PackedNode::new(false, SocketAddr::V4("127.0.0.1:33445".parse().unwrap()), &bob_pk);
         assert!(alice.close_nodes.write().deref_mut().try_add(&pn));
 
-        let args = DhtMainLoopArgs {
+        let args = ConfigArgs {
             kill_node_timeout: 10,
             ping_timeout: 10,
             ping_interval: 0,
@@ -2519,9 +2587,10 @@ mod tests {
             nat_ping_req_interval: 10,
         };
 
-        alice.dht_main_loop(args).wait().unwrap();
+        alice.set_config_values(args);
+        alice.dht_main_loop().wait().unwrap();
 
-        let args = DhtMainLoopArgs {
+        let args = ConfigArgs {
             kill_node_timeout: 10,
             ping_timeout: 10,
             ping_interval: 0,
@@ -2530,7 +2599,8 @@ mod tests {
             nat_ping_req_interval: 10,
         };
 
-        alice.dht_main_loop(args).wait().unwrap();
+        alice.set_config_values(args);
+        alice.dht_main_loop().wait().unwrap();
 
         let mut peers_cache = alice.peers_cache.write();
 
@@ -2555,7 +2625,7 @@ mod tests {
 
     #[test]
     fn server_send_nodes_req_packets_test() {
-        let (alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
+        let (mut alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
         let friend_pk1 = gen_keypair().0;
         let friend_pk2 = gen_keypair().0;
 
@@ -2565,7 +2635,7 @@ mod tests {
         let friend = DhtFriend::new(friend_pk2, 0);
         alice.add_friend(friend);
 
-        let args = DhtMainLoopArgs {
+        let args = ConfigArgs {
             kill_node_timeout: 10,
             ping_timeout: 10,
             ping_interval: 0,
@@ -2574,7 +2644,8 @@ mod tests {
             nat_ping_req_interval: 10,
         };
 
-        assert!(alice.dht_main_loop(args).wait().is_ok());
+        alice.set_config_values(args);
+        alice.dht_main_loop().wait().unwrap();
     }
 
     #[test]

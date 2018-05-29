@@ -219,7 +219,7 @@ fn add_server_main_loop(base_selector: IoFuture<()>, server_obj: &Server) -> IoF
     // 20 seconds for NodesRequest
     let interval = Duration::from_secs(1);
     let nodes_wakeups = Interval::new(Instant::now() + interval, interval);
-    let server_obj_c = server_obj.clone();
+    let mut server_obj_c = server_obj.clone();
     let mut bootstrap_fast: bool = false;
 
     let nodes_sender = nodes_wakeups
@@ -228,21 +228,11 @@ fn add_server_main_loop(base_selector: IoFuture<()>, server_obj: &Server) -> IoF
             println!("main_loop_wakeup");
             // flag for fast bootstrapping
             if bootstrap_fast {
-                // args to main loop, all value is seconds
-                let args = DhtMainLoopArgs {
-                    kill_node_timeout: 182,
-                    ping_timeout: 5,
-                    ping_interval: 60,
-                    bad_node_timeout: 162,
-                    nodes_req_interval: 20,
-                    nat_ping_req_interval: 3,
-                };
-
-                server_obj_c.dht_main_loop(args)
+                server_obj_c.dht_main_loop()
             } else {
                 bootstrap_fast = true;
                 // args to main loop, all value is seconds
-                let args = DhtMainLoopArgs {
+                let args = ConfigArgs {
                     kill_node_timeout: 182,
                     ping_timeout: 5,
                     ping_interval: 0,
@@ -251,7 +241,22 @@ fn add_server_main_loop(base_selector: IoFuture<()>, server_obj: &Server) -> IoF
                     nat_ping_req_interval: 0,
                 };
 
-                server_obj_c.dht_main_loop(args)
+                server_obj_c.set_config_values(args);
+                let res = server_obj_c.dht_main_loop();
+
+                // args to main loop, all value is seconds
+                let args = ConfigArgs {
+                    kill_node_timeout: 182,
+                    ping_timeout: 5,
+                    ping_interval: 60,
+                    bad_node_timeout: 162,
+                    nodes_req_interval: 20,
+                    nat_ping_req_interval: 3,
+                };
+
+                server_obj_c.set_config_values(args);
+
+                res
             }
         })
         .map_err(|_err| Error::new(ErrorKind::Other, "Nodes timer error"));

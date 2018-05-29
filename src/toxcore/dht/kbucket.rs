@@ -25,7 +25,7 @@ Structure for holding nodes.
 Number of nodes it can contain is set during creation. If not set (aka `None`
 is supplied), number of nodes defaults to [`BUCKET_DEFAULT_SIZE`].
 
-Nodes stored in `Bucket` are in [`PackedNode`](./struct.PackedNode.html)
+Nodes stored in `Bucket` are in [`DhtNode`](./struct.DhtNode.html)
 format.
 
 Used in [`Kbucket`](./struct.Kbucket.html) for storing nodes close to given
@@ -37,9 +37,15 @@ PK; and additionally used to store nodes closest to friends.
 */
 
 use toxcore::crypto_core::*;
-use toxcore::dht::packed_node::PackedNode;
+use toxcore::dht::dht_node::*;
+use toxcore::dht::packed_node::*;
 use std::cmp::{Ord, Ordering};
 use std::net::SocketAddr;
+use std::time::{Duration, Instant};
+use std::convert::Into;
+use std::collections::HashMap;
+
+const BAD_NODE_TIMEOUT: u64 = 182;
 
 /** Calculate the [`k-bucket`](./struct.Kbucket.html) index of a PK compared
 to "own" PK.
@@ -63,6 +69,27 @@ pub fn kbucket_index(&PublicKey(ref own_pk): &PublicKey,
         }
     }
     None  // PKs are equal
+}
+
+impl Into<PackedNode> for DhtNode {
+    fn into(self) -> PackedNode {
+        PackedNode {
+            pk: self.pk,
+            saddr: self.saddr,
+        }
+    }
+}
+
+impl Into<DhtNode> for PackedNode {
+    fn into(self) -> DhtNode {
+        DhtNode {
+            pk: self.pk,
+            saddr: self.saddr,
+            ping_hash: HashMap::new(),
+            last_resp_time: Instant::now(),
+            last_ping_req_time: Instant::now(),
+        }
+    }
 }
 
 /// Trait for functionality related to distance between `PublicKey`s.
@@ -94,7 +121,7 @@ Structure for holding nodes.
 Number of nodes it can contain is set during creation. If not set (aka `None`
 is supplied), number of nodes defaults to [`BUCKET_DEFAULT_SIZE`].
 
-Nodes stored in `Bucket` are in [`PackedNode`](./struct.PackedNode.html)
+Nodes stored in `Bucket` are in [`DhtNode`](./struct.DhtNode.html)
 format.
 
 Used in [`Kbucket`](./struct.Kbucket.html) for storing nodes close to given
@@ -109,7 +136,9 @@ pub struct Bucket {
     /// Amount of nodes it can hold.
     pub capacity: u8,
     /// Nodes that bucket has, sorted by distance to PK.
-    pub nodes: Vec<PackedNode>
+    pub nodes: Vec<DhtNode>,
+    /// timeout for switching good to bad node
+    pub bad_node_timeout: Duration,
 }
 
 /// Default number of nodes that bucket can hold.
@@ -131,7 +160,8 @@ impl Bucket {
                 trace!("Creating a new Bucket with default capacity.");
                 Bucket {
                     capacity: BUCKET_DEFAULT_SIZE as u8,
-                    nodes: Vec::with_capacity(BUCKET_DEFAULT_SIZE)
+                    nodes: Vec::with_capacity(BUCKET_DEFAULT_SIZE),
+                    bad_node_timeout: Duration::from_secs(BAD_NODE_TIMEOUT),
                 }
             },
             Some(0) => {
@@ -140,7 +170,11 @@ impl Bucket {
             },
             Some(n) => {
                 trace!("Creating a new Bucket with capacity: {}", n);
-                Bucket { capacity: n, nodes: Vec::with_capacity(n as usize) }
+                Bucket {
+                    capacity: n,
+                    nodes: Vec::with_capacity(n as usize),
+                    bad_node_timeout: Duration::from_secs(BAD_NODE_TIMEOUT),
+                }
             }
         }
     }
@@ -175,11 +209,13 @@ impl Bucket {
         trace!(target: "Bucket", "With bucket: {:?}; PK: {:?} and new node: {:?}",
             self, base_pk, new_node);
 
-        match self.nodes.binary_search_by(|n| base_pk.distance(&n.pk, &new_node.pk)) {
+        let new_node: DhtNode = (*new_node).into();
+
+        match self.nodes.binary_search_by(|n| base_pk.replace_order(n, &new_node, self.bad_node_timeout)) {
             Ok(index) => {
                 debug!(target: "Bucket",
                     "Updated: the node was already in the bucket.");
-                self.nodes[index] = *new_node;
+                self.nodes[index] = new_node;
                 true
             },
             Err(index) if index == self.nodes.len() => {
@@ -193,7 +229,7 @@ impl Bucket {
                     // there's still free space in the bucket for a node
                     debug!(target: "Bucket",
                         "Node inserted at the end of the bucket.");
-                    self.nodes.push(*new_node);
+                    self.nodes.push(new_node);
                     true
                 }
             },
@@ -205,29 +241,29 @@ impl Bucket {
                     self.nodes.pop();
                 }
                 debug!(target: "Bucket", "Node inserted inside the bucket.");
-                self.nodes.insert(index, *new_node);
+                self.nodes.insert(index, new_node);
                 true
             },
         }
     }
 
-    /** Remove [`PackedNode`](./struct.PackedNode.html) with given PK from the
+    /** Remove [`DhtNode`](./struct.DhtNode.html) with given PK from the
     `Bucket`.
 
     Note that you must pass the same `base_pk` each call or the internal
     state will be undefined. Also `base_pk` must be equal to `base_pk` you added
     a node with. Normally you don't call this function on your own but Kbucket does.
 
-    If there's no `PackedNode` with given PK, nothing is being done.
+    If there's no `DhtNode` with given PK, nothing is being done.
     */
     pub fn remove(&mut self, base_pk: &PublicKey, node_pk: &PublicKey) {
-        trace!(target: "Bucket", "Removing PackedNode with PK: {:?}", node_pk);
+        trace!(target: "Bucket", "Removing DhtNode with PK: {:?}", node_pk);
         match self.nodes.binary_search_by(|n| base_pk.distance(&n.pk, node_pk) ) {
             Ok(index) => {
                 self.nodes.remove(index);
             },
             Err(_) => {
-                trace!("No PackedNode to remove with PK: {:?}", node_pk);
+                trace!("No DhtNode to remove with PK: {:?}", node_pk);
             }
         }
     }
@@ -259,6 +295,39 @@ impl Bucket {
     pub fn is_full(&self) -> bool {
         self.nodes.len() == self.capacity()
     }
+
+    /**
+    Naive check whether a [`PackedNode`] can be added to the `Bucket`.
+
+    Returns `true` if [`Bucket`] where node could be placed is not full
+    and node is not already in the [`Bucket`].
+
+    Otherwise `false` is returned.
+
+    [`Bucket`]: ./struct.Bucket.html
+    [`PackedNode`]: ./struct.PackedNode.html
+    */
+    pub fn can_add(&self, base_pk: &PublicKey, new_node: &PackedNode) -> bool {
+        let new_node: DhtNode = (*new_node).into();
+
+        match self.nodes.binary_search_by(|n| base_pk.replace_order(n, &new_node, self.bad_node_timeout)) {
+            Ok(_index) => false, // node already exist in bucket, so can't add node
+            Err(index) if index == self.nodes.len() => { // can't find node in bucket
+                !self.is_full()
+            },
+            Err(_index) => true, // node is not found in bucket, so can add node
+        }
+    }
+
+    /// convert vector of DhtNode to vector of PackedNode
+    pub fn to_packed_node(&self) -> Vec<PackedNode> {
+        self.nodes.iter().map(|node| node.clone().into()).collect::<Vec<PackedNode>>()
+    }
+
+    /// set bad_node_timeout in seconds
+    pub fn set_bad_node_timeout(&mut self, bad_node_timeout: u64) {
+        self.bad_node_timeout = Duration::from_secs(bad_node_timeout);
+    }
 }
 
 /**
@@ -276,7 +345,6 @@ impl Default for Bucket {
         Bucket::new(Some(BUCKET_DEFAULT_SIZE as u8))
     }
 }
-
 
 /** K-buckets structure to hold up to
 [`KBUCKET_MAX_ENTRIES`](./constant.KBUCKET_MAX_ENTRIES.html) *
@@ -336,19 +404,6 @@ impl Kbucket {
         )
     }
 
-    /// get random node to select peer to send NodesRequest
-    pub fn get_random_node(&self) -> Option<PackedNode> {
-        if self.is_empty() {
-            return None
-        }
-        let mut num_k = random_u64() % u64::from(KBUCKET_MAX_ENTRIES);
-        while self.buckets[num_k as usize].nodes.is_empty() {
-            num_k = random_u64() % u64::from(KBUCKET_MAX_ENTRIES);
-        }
-        let num = random_u64() % self.buckets[num_k as usize].nodes.len() as u64;
-        Some(self.buckets[num_k as usize].nodes[num as usize])
-    }
-
     /** Return the possible internal index of [`Bucket`](./struct.Bucket.html)
         where the key could be inserted/removed.
 
@@ -385,7 +440,7 @@ impl Kbucket {
         }
     }
 
-    /// Remove [`PackedNode`](./struct.PackedNode.html) with given PK from the
+    /// Remove [`DhtNode`](./struct.DhtNode.html) with given PK from the
     /// `Kbucket`.
     pub fn remove(&mut self, node_pk: &PublicKey) {
         trace!(target: "Kbucket", "Removing PK: {:?} from Kbucket: {:?}", node_pk,
@@ -412,11 +467,12 @@ impl Kbucket {
         let mut bucket = Bucket::new(Some(4));
         for buc in &*self.buckets {
             for node in &*buc.nodes {
-                bucket.try_add(pk, node);
+                bucket.try_add(pk, &node.clone().into());
             }
         }
         trace!("Returning nodes: {:?}", &bucket.nodes);
-        bucket.nodes
+
+        bucket.to_packed_node()
     }
 
     /**
@@ -442,11 +498,11 @@ impl Kbucket {
     [`Bucket`]: ./struct.Bucket.html
     [`PackedNode`]: ./struct.PackedNode.html
     */
-    pub fn can_add(&self, pk: &PublicKey) -> bool {
-        match self.bucket_index(pk) {
+    pub fn can_add(&self, new_node: &PackedNode) -> bool {
+        match self.bucket_index(&new_node.pk) {
             None => false,
             Some(i) =>
-                !self.buckets[i].is_full() && !self.buckets[i].contains(pk),
+                self.buckets[i].can_add(&self.pk, new_node),
         }
     }
 
@@ -468,9 +524,14 @@ impl Kbucket {
             buckets: self.clone().buckets,
         }
     }
+
+    /// set bad_node_timeout in seconds
+    pub fn set_bad_node_timeout(&mut self, bad_node_timeout: u64) {
+        self.buckets.iter_mut().for_each(|bucket| bucket.set_bad_node_timeout(bad_node_timeout));
+    }
 }
 
-/// Iterator over `PackedNode`s in `Kbucket`.
+/// Iterator over `DhtNode`s in `Kbucket`.
 pub struct KbucketIter {
     pos_b: usize,
     pos_pn: usize,
@@ -485,7 +546,7 @@ impl Iterator for KbucketIter {
             match self.buckets[self.pos_b].nodes.get(self.pos_pn) {
                 Some(s) => {
                     self.pos_pn += 1;
-                    return Some(*s);
+                    return Some(s.clone().into());
                 },
                 None => {
                     self.pos_b += 1;
@@ -970,17 +1031,14 @@ mod tests {
 
             let mut kbucket = Kbucket {
                 pk,
-                buckets: vec![Bucket::new(Some(1)); KBUCKET_MAX_ENTRIES as usize],
+                buckets: vec![Bucket::new(Some(2)); KBUCKET_MAX_ENTRIES as usize],
             };
 
-            for node in &pns {
-                if kbucket.try_add(node) {
-                    let index = kbucket_index(&pk, &node.pk);
-                    // none of nodes with the same index can be added
-                    // to the kbucket
-                    assert!(pns.iter()
-                        .filter(|pn| kbucket_index(&pk, &pn.pk) == index)
-                        .all(|pn| !kbucket.can_add(&pn.pk)));
+            kbucket.set_bad_node_timeout(10);
+
+            for node in pns {
+                if kbucket.try_add(&node) {
+                    assert!(!kbucket.can_add(&node));
                 }
             }
 
@@ -1004,7 +1062,7 @@ mod tests {
             let mut expect = Vec::new();
             for bucket in &kbucket.buckets {
                 for node in &bucket.nodes {
-                    expect.push(*node);
+                    expect.push(node.clone().into());
                 }
             }
 
@@ -1023,5 +1081,31 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn kbucket_to_packed_node_test() {
+        let (pk, _) = gen_keypair();
+        let mut bucket = Bucket::new(None);
+
+        let pn = PackedNode {
+            pk: gen_keypair().0,
+            saddr: "127.0.0.1:33445".parse().unwrap(),
+        };
+
+        assert!(bucket.try_add(&pk,&pn));
+
+        let res_pn = bucket.to_packed_node();
+
+        assert_eq!(pn, res_pn[0]);
+    }
+
+    #[test]
+    fn kbucket_set_bad_node_timeout_test() {
+        let mut bucket = Bucket::new(None);
+
+        bucket.set_bad_node_timeout(10);
+
+        assert_eq!(bucket.bad_node_timeout, Duration::from_secs(10));
     }
 }
