@@ -45,6 +45,8 @@ use std::time::{Duration, Instant};
 use std::convert::Into;
 use std::collections::HashMap;
 
+const BAD_NODE_TIMEOUT: u64 = 182;
+
 /** Calculate the [`k-bucket`](./struct.Kbucket.html) index of a PK compared
 to "own" PK.
 
@@ -159,7 +161,7 @@ impl Bucket {
                 Bucket {
                     capacity: BUCKET_DEFAULT_SIZE as u8,
                     nodes: Vec::with_capacity(BUCKET_DEFAULT_SIZE),
-                    bad_node_timeout: Duration::default(),
+                    bad_node_timeout: Duration::from_secs(BAD_NODE_TIMEOUT),
                 }
             },
             Some(0) => {
@@ -171,7 +173,7 @@ impl Bucket {
                 Bucket {
                     capacity: n,
                     nodes: Vec::with_capacity(n as usize),
-                    bad_node_timeout: Duration::default(),
+                    bad_node_timeout: Duration::from_secs(BAD_NODE_TIMEOUT),
                 }
             }
         }
