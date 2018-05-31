@@ -31,6 +31,26 @@ windows:stable:
     - tox
     - windows
 
+macos:stable:
+  script:
+    ### init valiables
+    - |
+      export SODIUM_STATIC=1
+      export SODIUM_LIB_DIR=/usr/local/Cellar/libsodium/1.0.16/lib/
+
+    ### set rustup version
+    - rustup default stable
+
+    ### run build, test and doc
+    - |
+      cargo build --verbose
+      cargo test --verbose
+      cargo doc
+  stage: build
+  tags:
+    - tox
+    - macos
+
 .linux_before_template: &linux_before_script
   ### init variables
   - |
