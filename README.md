@@ -85,7 +85,7 @@ consider helping :wink:
     - [ ] DHT Node
         - [x] ping requests & responses
         - [x] nodes requests & responses
-        - [ ] CookieRequest (parsed but ignored)
+        - [x] CookieRequest
         - [ ] CookieResponse (parsed but ignored)
         - [ ] CryptoHandshake (parsed but ignored)
         - [ ] CryptoData (parsed but ignored)
