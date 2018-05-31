@@ -85,9 +85,9 @@ consider helping :wink:
     - [ ] DHT Node
         - [x] ping requests & responses
         - [x] nodes requests & responses
-        - [ ] CookieRequest (parsed but ignored)
-        - [ ] CookieResponse (parsed but ignored)
-        - [ ] CryptoHandshake (parsed but ignored)
+        - [x] CookieRequest
+        - [x] CookieResponse
+        - [x] CryptoHandshake
         - [ ] CryptoData (parsed but ignored)
         - [x] LanDiscovery
         - [x] OnionRequest[0,1,2]
