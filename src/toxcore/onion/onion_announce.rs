@@ -23,10 +23,11 @@
 
 use std::io::{ErrorKind, Error};
 use std::net::{IpAddr, SocketAddr};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
+use toxcore::time::*;
 use toxcore::onion::packet::*;
 use toxcore::dht::kbucket::{Distance, Kbucket};
 
@@ -143,7 +144,7 @@ impl ToBytes for OnionPingData {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_slice!(&self.secret_bytes) >>
-            gen_be_u64!(OnionPingData::unix_time(self.time) / PING_ID_TIMEOUT) >>
+            gen_be_u64!(unix_time(self.time) / PING_ID_TIMEOUT) >>
             gen_slice!(self.pk.as_ref()) >>
             gen_be_u8!(self.ip_addr.is_ipv4() as u8) >>
             gen_call!(|buf, ip_addr| IpAddr::to_bytes(ip_addr, buf), &self.ip_addr) >>
@@ -153,13 +154,6 @@ impl ToBytes for OnionPingData {
 }
 
 impl OnionPingData {
-    /// Return number of seconds that have elapsed since Unix epoch.
-    fn unix_time(time: SystemTime) -> u64 {
-        let since_the_epoch = time.duration_since(UNIX_EPOCH)
-            .expect("Current time is earlier than Unix epoch");
-        since_the_epoch.as_secs()
-    }
-
     /** Calculate onion ping id using sha256 hash of stored data.
 
     Time is divided by `PING_ID_TIMEOUT` so this hash remains unchanged for
@@ -416,7 +410,7 @@ mod tests {
         let onion_announce = OnionAnnounce::new(gen_keypair().0);
 
         let time = SystemTime::now();
-        let time_1 = time - Duration::from_secs(OnionPingData::unix_time(time) % PING_ID_TIMEOUT);
+        let time_1 = time - Duration::from_secs(unix_time(time) % PING_ID_TIMEOUT);
         let time_2 = time_1 + Duration::from_secs(PING_ID_TIMEOUT - 1);
         let pk = gen_keypair().0;
         let ip_addr = "1.2.3.4".parse().unwrap();

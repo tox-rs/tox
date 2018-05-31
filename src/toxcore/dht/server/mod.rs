@@ -54,6 +54,7 @@ use toxcore::io_tokio::*;
 use toxcore::dht::dht_friend::*;
 use toxcore::dht::server::hole_punching::*;
 use toxcore::tcp::packet::OnionRequest;
+use toxcore::net_crypto::NetCrypto;
 
 /// Shorthand for the transmit half of the message channel.
 type Tx = mpsc::UnboundedSender<(DhtPacket, SocketAddr)>;
@@ -130,6 +131,11 @@ pub struct Server {
     // should be redirected to TCP sender trough this sink
     // None if there is no TCP relay
     tcp_onion_sink: Option<TcpOnionTx>,
+    // Net crypto module that handles `CookieRequest`, `CookieResponse`,
+    // `CryptoHandshake` and `CryptoData` packets. It can be `None` in case of
+    // pure bootstrap server when we don't have friends and therefore don't
+    // have to handle related packets
+    net_crypto: Option<NetCrypto>,
 }
 
 /// Struct for grouping parameters to Server's main loop
@@ -171,7 +177,8 @@ impl Server {
             tox_core_version: 0,
             motd: Vec::new(),
             config: ConfigArgs::default(),
-            tcp_onion_sink: None
+            tcp_onion_sink: None,
+            net_crypto: None
         }
     }
 
@@ -468,6 +475,18 @@ impl Server {
                 debug!("Received NodesResponse");
                 self.handle_nodes_resp(packet)
             },
+            DhtPacket::CookieRequest(packet) => {
+                debug!("Received CookieRequest");
+                self.handle_cookie_request(packet, addr)
+            },
+            DhtPacket::CookieResponse(packet) => {
+                debug!("Received CookieResponse");
+                self.handle_cookie_response(packet, addr)
+            },
+            DhtPacket::CryptoHandshake(packet) => {
+                debug!("Received CryptoHandshake");
+                self.handle_crypto_handshake(packet, addr)
+            },
             DhtPacket::DhtRequest(packet) => {
                 debug!("Received DhtRequest");
                 self.handle_dht_req(packet, addr)
@@ -666,6 +685,42 @@ impl Server {
         } else {
             Box::new( future::err(
                 Error::new(ErrorKind::Other, "NodesResponse.ping_id does not match")
+            ))
+        }
+    }
+
+    /** handle received CookieRequest and pass it to net_crypto module
+    */
+    fn handle_cookie_request(&self, packet: CookieRequest, addr: SocketAddr) -> IoFuture<()> {
+        if let Some(ref net_crypto) = self.net_crypto {
+            net_crypto.handle_udp_cookie_request(packet, addr)
+        } else {
+            Box::new( future::err(
+                Error::new(ErrorKind::Other, "Net crypto is not initialised")
+            ))
+        }
+    }
+
+    /** handle received CookieResponse and pass it to net_crypto module
+    */
+    fn handle_cookie_response(&self, packet: CookieResponse, addr: SocketAddr) -> IoFuture<()> {
+        if let Some(ref net_crypto) = self.net_crypto {
+            net_crypto.handle_udp_cookie_response(packet, addr)
+        } else {
+            Box::new( future::err(
+                Error::new(ErrorKind::Other, "Net crypto is not initialised")
+            ))
+        }
+    }
+
+    /** handle received CryptoHandshake and pass it to net_crypto module
+    */
+    fn handle_crypto_handshake(&self, packet: CryptoHandshake, addr: SocketAddr) -> IoFuture<()> {
+        if let Some(ref net_crypto) = self.net_crypto {
+            net_crypto.handle_udp_crypto_handshake(packet, addr)
+        } else {
+            Box::new( future::err(
+                Error::new(ErrorKind::Other, "Net crypto is not initialised")
             ))
         }
     }
@@ -1074,6 +1129,10 @@ impl Server {
     pub fn set_tcp_onion_sink(&mut self, tcp_onion_sink: TcpOnionTx) {
         self.tcp_onion_sink = Some(tcp_onion_sink)
     }
+    /// set net crypto module
+    pub fn set_net_crypto(&mut self, net_crypto: NetCrypto) {
+        self.net_crypto = Some(net_crypto);
+    }
 }
 
 #[cfg(test)]
@@ -1389,6 +1448,97 @@ mod tests {
         add_to_peers_cache(&alice, bob_pk, client);
 
         assert!(alice.handle_packet(nodes_resp, addr).wait().is_err());
+    }
+
+    // handle_cookie_request
+    #[test]
+    fn handle_cookie_request_test() {
+        let (udp_tx, udp_rx) = mpsc::unbounded();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let mut alice = Server::new(udp_tx.clone(), dht_pk, dht_sk.clone());
+
+        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
+        let (real_pk, _real_sk) = gen_keypair();
+        let (bob_pk, bob_sk) = gen_keypair();
+        let (bob_real_pk, _bob_real_sk) = gen_keypair();
+        let precomp = precompute(&alice.pk, &bob_sk);
+        let net_crypto = NetCrypto::new(udp_tx, dht_pk_tx, dht_pk, dht_sk, real_pk);
+
+        alice.set_net_crypto(net_crypto);
+
+        let addr = "127.0.0.1:12346".parse().unwrap();
+
+        let cookie_request_id = 12345;
+        let cookie_request_payload = CookieRequestPayload {
+            pk: bob_real_pk,
+            id: cookie_request_id,
+        };
+        let cookie_request = DhtPacket::CookieRequest(CookieRequest::new(&precomp, &bob_pk, cookie_request_payload));
+
+        assert!(alice.handle_packet(cookie_request, addr).wait().is_ok());
+
+        let (received, _udp_rx) = udp_rx.into_future().wait().unwrap();
+        let (packet, addr_to_send) = received.unwrap();
+
+        assert_eq!(addr_to_send, addr);
+
+        let packet = unpack!(packet, DhtPacket::CookieResponse);
+        let payload = packet.get_payload(&precomp).unwrap();
+
+        assert_eq!(payload.id, cookie_request_id);
+    }
+
+    #[test]
+    fn handle_cookie_request_uninitialized_test() {
+        let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
+
+        let (bob_real_pk, _bob_real_sk) = gen_keypair();
+
+        let cookie_request_payload = CookieRequestPayload {
+            pk: bob_real_pk,
+            id: 12345,
+        };
+        let cookie_request = DhtPacket::CookieRequest(CookieRequest::new(&precomp, &bob_pk, cookie_request_payload));
+
+        assert!(alice.handle_packet(cookie_request, addr).wait().is_err());
+    }
+
+    // handle_cookie_response
+    #[test]
+    fn handle_cookie_response_uninitialized_test() {
+        let (alice, precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
+
+        let cookie = EncryptedCookie {
+            nonce: secretbox::gen_nonce(),
+            payload: vec![43; 88]
+        };
+        let cookie_response_payload = CookieResponsePayload {
+            cookie: cookie.clone(),
+            id: 12345
+        };
+        let cookie_response = DhtPacket::CookieResponse(CookieResponse::new(&precomp, cookie_response_payload));
+
+        assert!(alice.handle_packet(cookie_response, addr).wait().is_err());
+    }
+
+    // handle_crypto_handshake
+    #[test]
+    fn handle_crypto_handshake_uninitialized_test() {
+        let (alice, precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
+
+        let cookie = EncryptedCookie {
+            nonce: secretbox::gen_nonce(),
+            payload: vec![43; 88]
+        };
+        let crypto_handshake_payload = CryptoHandshakePayload {
+            base_nonce: gen_nonce(),
+            session_pk: gen_keypair().0,
+            cookie_hash: cookie.hash(),
+            cookie: cookie.clone()
+        };
+        let crypto_handshake = DhtPacket::CryptoHandshake(CryptoHandshake::new(&precomp, crypto_handshake_payload, cookie));
+
+        assert!(alice.handle_packet(crypto_handshake, addr).wait().is_err());
     }
 
     // handle_dht_req

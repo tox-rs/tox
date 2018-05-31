@@ -88,11 +88,13 @@ pub mod toxcore {
     pub mod binary_io;
     pub mod io_tokio;
     pub mod crypto_core;
+    pub mod time;
     pub mod state_format;
     pub mod toxid;
     pub mod tcp;
     pub mod dht;
     pub mod onion;
+    pub mod net_crypto;
 }
 
 /// Tox Encrypt Save (a.k.a. **TES**) module. Can be used to ecrypt / decrypt
