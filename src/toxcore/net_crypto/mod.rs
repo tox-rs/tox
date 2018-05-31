@@ -172,7 +172,7 @@ impl NetCrypto {
 
         connection.status = ConnectionStatus::HandshakeSending {
             sent_nonce,
-            packet: StatusPacket::new(DhtPacket::CryptoHandshake(handshake))
+            packet: StatusPacket::new_crypto_handshake(handshake)
         };
 
         self.send_status_packet(connection)
@@ -263,7 +263,7 @@ impl NetCrypto {
                     sent_nonce,
                     received_nonce: payload.base_nonce,
                     peer_session_pk: payload.session_pk,
-                    packet: StatusPacket::new(DhtPacket::CryptoHandshake(handshake))
+                    packet: StatusPacket::new_crypto_handshake(handshake)
                 }
             },
             ConnectionStatus::HandshakeSending { sent_nonce, ref packet, .. }
@@ -533,7 +533,7 @@ mod tests {
         assert!(net_crypto.handle_cookie_response(&mut connection, cookie_response).wait().is_ok());
 
         let packet = unpack!(connection.status, ConnectionStatus::HandshakeSending, packet);
-        let packet = unpack!(packet.packet, DhtPacket::CryptoHandshake);
+        let packet = unpack!(packet.dht_packet(), DhtPacket::CryptoHandshake);
         assert_eq!(packet.cookie, cookie);
 
         let payload = packet.get_payload(&connection.dht_precomputed_key).unwrap();
@@ -641,7 +641,7 @@ mod tests {
         let connection = connections.get(&peer_real_pk).unwrap().read().clone();
 
         let packet = unpack!(connection.status, ConnectionStatus::HandshakeSending, packet);
-        let packet = unpack!(packet.packet, DhtPacket::CryptoHandshake);
+        let packet = unpack!(packet.dht_packet(), DhtPacket::CryptoHandshake);
         assert_eq!(packet.cookie, cookie);
 
         let payload = packet.get_payload(&dht_precomputed_key).unwrap();
@@ -711,7 +711,7 @@ mod tests {
         assert_eq!(peer_session_pk, session_pk);
 
         let packet = unpack!(connection.status, ConnectionStatus::NotConfirmed, packet);
-        let packet = unpack!(packet.packet, DhtPacket::CryptoHandshake);
+        let packet = unpack!(packet.dht_packet(), DhtPacket::CryptoHandshake);
         assert_eq!(packet.cookie, cookie);
 
         let payload = packet.get_payload(&connection.dht_precomputed_key).unwrap();
@@ -769,7 +769,7 @@ mod tests {
 
         // cookie should not be updated
         let packet = unpack!(connection.status, ConnectionStatus::NotConfirmed, packet);
-        let packet = unpack!(packet.packet, DhtPacket::CryptoHandshake);
+        let packet = unpack!(packet.dht_packet(), DhtPacket::CryptoHandshake);
         assert_eq!(packet.cookie, cookie);
 
         let payload = packet.get_payload(&connection.dht_precomputed_key).unwrap();
@@ -994,7 +994,7 @@ mod tests {
         assert_eq!(peer_session_pk, session_pk);
 
         let packet = unpack!(connection.status, ConnectionStatus::NotConfirmed, packet);
-        let packet = unpack!(packet.packet, DhtPacket::CryptoHandshake);
+        let packet = unpack!(packet.dht_packet(), DhtPacket::CryptoHandshake);
         assert_eq!(packet.cookie, cookie);
 
         let payload = packet.get_payload(&dht_precomputed_key).unwrap();
@@ -1026,7 +1026,7 @@ mod tests {
         let (received, _udp_rx) = udp_rx.into_future().wait().unwrap();
         let (received, addr_to_send) = received.unwrap();
 
-        assert_eq!(received, packet.packet);
+        assert_eq!(received, packet.dht_packet());
         assert_eq!(addr_to_send, addr);
         
         // send status packet again - it shouldn't be sent
@@ -1156,7 +1156,7 @@ mod tests {
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
         let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
-        let packet = unpack!(connection.status.clone(), ConnectionStatus::CookieRequesting, packet).packet;
+        let packet = unpack!(connection.status.clone(), ConnectionStatus::CookieRequesting, packet).dht_packet();
 
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.udp_addr = Some(addr);

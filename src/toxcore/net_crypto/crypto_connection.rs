@@ -38,13 +38,23 @@ pub const MAX_NUM_SENDPACKET_TRIES: u8 = 8;
 /// direct UDP connection is considered dead
 pub const UDP_DIRECT_TIMEOUT: u64 = 8;
 
+/// Packet that should be sent every second. Depending on `ConnectionStatus` it
+/// can be `CookieRequest` or `CryptoHandshake`
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum StatusPacketEnum {
+    /// `CookieRequest` packet
+    CookieRequest(CookieRequest),
+    /// `CryptoHandshake` packet
+    CryptoHandshake(CryptoHandshake),
+}
+
 /// Packet that should be sent to the peer every second together with info how
 /// many times it was sent and when it was sent last time
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StatusPacket {
     /// Packet that should be sent every second. Depending on `ConnectionStatus`
     /// it can be `CookieRequest` or `CryptoHandshake`
-    pub packet: DhtPacket,
+    packet: StatusPacketEnum,
     /// When packet was sent last time
     pub sent_time: SystemTime,
     /// How many times packet was sent
@@ -52,12 +62,29 @@ pub struct StatusPacket {
 }
 
 impl StatusPacket {
-    /// Create new `StatusPacket`
-    pub fn new(packet: DhtPacket) -> StatusPacket {
+    /// Create new `StatusPacket` with `CookieRequest` packet
+    pub fn new_cookie_request(packet: CookieRequest) -> StatusPacket {
         StatusPacket {
-            packet,
+            packet: StatusPacketEnum::CookieRequest(packet),
             sent_time: SystemTime::now(),
             num_sent: 0
+        }
+    }
+
+    /// Create new `StatusPacket` with `CryptoHandshake` packet
+    pub fn new_crypto_handshake(packet: CryptoHandshake) -> StatusPacket {
+        StatusPacket {
+            packet: StatusPacketEnum::CryptoHandshake(packet),
+            sent_time: SystemTime::now(),
+            num_sent: 0
+        }
+    }
+
+    /// Get `DhtPacket` that should be sent every second
+    pub fn dht_packet(&self) -> DhtPacket {
+        match self.packet {
+            StatusPacketEnum::CookieRequest(ref packet) => DhtPacket::CookieRequest(packet.clone()),
+            StatusPacketEnum::CryptoHandshake(ref packet) => DhtPacket::CryptoHandshake(packet.clone()),
         }
     }
 
@@ -184,7 +211,7 @@ impl CryptoConnection {
         let cookie_request = CookieRequest::new(&dht_precomputed_key, &dht_pk, cookie_request_payload);
         let status = ConnectionStatus::CookieRequesting {
             cookie_request_id,
-            packet: StatusPacket::new(DhtPacket::CookieRequest(cookie_request))
+            packet: StatusPacket::new_cookie_request(cookie_request)
         };
 
         CryptoConnection {
@@ -229,7 +256,7 @@ impl CryptoConnection {
             sent_nonce,
             received_nonce,
             peer_session_pk,
-            packet: StatusPacket::new(DhtPacket::CryptoHandshake(handshake))
+            packet: StatusPacket::new_crypto_handshake(handshake)
         };
 
         CryptoConnection {
@@ -255,7 +282,7 @@ impl CryptoConnection {
                 if packet.should_be_sent() {
                     packet.num_sent += 1;
                     packet.sent_time = SystemTime::now();
-                    Some(packet.packet.clone())
+                    Some(packet.dht_packet())
                 } else {
                     None
                 }
@@ -311,11 +338,11 @@ mod tests {
     #[test]
     fn status_packet_should_be_sent() {
         // just created packet should be sent
-        let mut packet = StatusPacket::new(DhtPacket::CookieRequest(CookieRequest {
+        let mut packet = StatusPacket::new_cookie_request(CookieRequest {
             pk: gen_keypair().0,
             nonce: gen_nonce(),
             payload: vec![42; 88]
-        }));
+        });
         assert!(packet.should_be_sent());
         // packet shouldn't be sent if it was sent not earlier than 1 second ago
         packet.num_sent += 1;
@@ -331,11 +358,11 @@ mod tests {
     #[test]
     fn status_packet_is_timed_out() {
         // just created packet isn't timed out
-        let mut packet = StatusPacket::new(DhtPacket::CookieRequest(CookieRequest {
+        let mut packet = StatusPacket::new_cookie_request(CookieRequest {
             pk: gen_keypair().0,
             nonce: gen_nonce(),
             payload: vec![42; 88]
-        }));
+        });
         assert!(!packet.is_timed_out());
         // packet is timed out if it was sent 8 times and 1 second elapsed since last sending
         packet.num_sent += MAX_NUM_SENDPACKET_TRIES;
@@ -354,18 +381,18 @@ mod tests {
         let connection_c = connection.clone();
         assert_eq!(connection_c, connection);
 
-        let crypto_handshake = DhtPacket::CryptoHandshake(CryptoHandshake {
+        let crypto_handshake = CryptoHandshake {
             cookie: EncryptedCookie {
                 nonce: secretbox::gen_nonce(),
                 payload: vec![42; 88]
             },
             nonce: gen_nonce(),
             payload: vec![42; 248]
-        });
+        };
 
         connection.status = ConnectionStatus::HandshakeSending {
             sent_nonce: gen_nonce(),
-            packet: StatusPacket::new(crypto_handshake.clone())
+            packet: StatusPacket::new_crypto_handshake(crypto_handshake.clone())
         };
 
         let connection_c = connection.clone();
@@ -375,7 +402,7 @@ mod tests {
             sent_nonce: gen_nonce(),
             received_nonce: gen_nonce(),
             peer_session_pk: gen_keypair().0,
-            packet: StatusPacket::new(crypto_handshake),
+            packet: StatusPacket::new_crypto_handshake(crypto_handshake),
         };
 
         let connection_c = connection.clone();
