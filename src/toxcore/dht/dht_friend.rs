@@ -34,7 +34,7 @@ use toxcore::dht::packed_node::*;
 use toxcore::dht::kbucket::*;
 use toxcore::crypto_core::*;
 use toxcore::dht::server::*;
-use toxcore::dht::dht_node::*;
+use toxcore::dht::server::client::*;
 use toxcore::io_tokio::*;
 use toxcore::dht::server::hole_punching::*;
 
@@ -92,7 +92,7 @@ impl DhtFriend {
         let bootstrap_nodes = bootstrap_nodes.to_packed_node();
         let nodes_sender = bootstrap_nodes.iter()
             .map(|node| {
-                let client = peers_cache.entry(node.pk).or_insert_with(|| DhtNode::new(*node));
+                let client = peers_cache.entry(node.pk).or_insert_with(ClientData::new);
                 server.send_nodes_req(*node, self.pk, client)
             });
 
@@ -108,7 +108,7 @@ impl DhtFriend {
         let close_nodes = self.close_nodes.to_packed_node();
         let nodes_sender = close_nodes.iter()
             .map(|node| {
-                let client = peers_cache.entry(node.pk).or_insert_with(|| DhtNode::new(*node));
+                let client = peers_cache.entry(node.pk).or_insert_with(ClientData::new);
 
                 if client.last_ping_req_time.elapsed() >= ping_interval {
                     client.last_ping_req_time = Instant::now();
@@ -130,7 +130,7 @@ impl DhtFriend {
         let close_nodes = self.close_nodes.to_packed_node();
         let good_nodes = close_nodes.iter()
             .filter(|node| {
-                let client = peers_cache.entry(node.pk).or_insert_with(|| DhtNode::new(**node));
+                let client = peers_cache.entry(node.pk).or_insert_with(ClientData::new);
                 client.last_resp_time.elapsed() < bad_node_timeout
             }).collect::<Vec<_>>();
 
@@ -247,16 +247,8 @@ mod tests {
 
     fn insert_client_to_peers_cache(server: &Server, pk1: PublicKey, pk2: PublicKey) {
         let mut peers_cache = server.get_peers_cache().write();
-        let pn = PackedNode {
-            pk: pk1,
-            saddr: "127.0.0.1:33445".parse().unwrap(),
-        };
-        peers_cache.insert(pk1, DhtNode::new(pn));
-        let pn = PackedNode {
-            pk: pk2,
-            saddr: "127.0.0.1:33445".parse().unwrap(),
-        };
-        peers_cache.insert(pk2, DhtNode::new(pn));
+        peers_cache.insert(pk1, ClientData::new());
+        peers_cache.insert(pk2, ClientData::new());
     }
 
     #[test]
