@@ -152,6 +152,9 @@ pub enum ConnectionStatus {
         received_nonce: Nonce,
         /// `PublicKey` of the other side for this session
         peer_session_pk: PublicKey,
+        /// `PrecomputedKey` for this session that is used to encrypt and
+        /// decrypt data packets
+        session_precomputed_key: PrecomputedKey,
         /// Packet that should be sent every second
         packet: StatusPacket,
     },
@@ -164,6 +167,9 @@ pub enum ConnectionStatus {
         received_nonce: Nonce,
         /// `PublicKey` of the other side for this session
         peer_session_pk: PublicKey,
+        /// `PrecomputedKey` for this session that is used to encrypt and
+        /// decrypt data packets
+        session_precomputed_key: PrecomputedKey,
     },
 }
 
@@ -256,6 +262,7 @@ impl CryptoConnection {
             sent_nonce,
             received_nonce,
             peer_session_pk,
+            session_precomputed_key: precompute(&peer_session_pk, &session_sk),
             packet: StatusPacket::new_crypto_handshake(handshake)
         };
 
@@ -398,20 +405,28 @@ mod tests {
         let connection_c = connection.clone();
         assert_eq!(connection_c, connection);
 
+        let (peer_session_pk, _peer_session_sk) = gen_keypair();
+        let (_session_pk, session_sk) = gen_keypair();
+        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::NotConfirmed {
             sent_nonce: gen_nonce(),
             received_nonce: gen_nonce(),
-            peer_session_pk: gen_keypair().0,
+            peer_session_pk,
+            session_precomputed_key,
             packet: StatusPacket::new_crypto_handshake(crypto_handshake),
         };
 
         let connection_c = connection.clone();
         assert_eq!(connection_c, connection);
 
+        let (peer_session_pk, _peer_session_sk) = gen_keypair();
+        let (_session_pk, session_sk) = gen_keypair();
+        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce: gen_nonce(),
-            peer_session_pk: gen_keypair().0,
+            peer_session_pk,
+            session_precomputed_key,
         };
 
         let connection_c = connection.clone();

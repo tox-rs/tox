@@ -269,6 +269,7 @@ impl NetCrypto {
                     sent_nonce,
                     received_nonce: payload.base_nonce,
                     peer_session_pk: payload.session_pk,
+                    session_precomputed_key: precompute(&payload.session_pk, &connection.session_sk),
                     packet: StatusPacket::new_crypto_handshake(handshake)
                 }
             },
@@ -277,6 +278,7 @@ impl NetCrypto {
                 sent_nonce,
                 received_nonce: payload.base_nonce,
                 peer_session_pk: payload.session_pk,
+                session_precomputed_key: precompute(&payload.session_pk, &connection.session_sk),
                 packet: packet.clone()
             },
             ConnectionStatus::Established { .. } => unreachable!("Checked for Established status above"),
@@ -790,10 +792,14 @@ mod tests {
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
         let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
+        let (peer_session_pk, _peer_session_sk) = gen_keypair();
+        let (_session_pk, session_sk) = gen_keypair();
+        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce: gen_nonce(),
-            peer_session_pk: gen_keypair().0,
+            peer_session_pk,
+            session_precomputed_key,
         };
 
         let base_nonce = gen_nonce();
