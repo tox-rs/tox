@@ -33,6 +33,12 @@ use toxcore::crypto_core::*;
 /// packet kind byte.
 const MAX_CRYPTO_PACKET_SIZE: usize = 1400;
 
+/// The maximum size of data in packets.
+const MAX_CRYPTO_DATA_SIZE: usize = MAX_CRYPTO_PACKET_SIZE - MACBYTES - 11;
+
+/// All packets will be padded a number of bytes based on this number.
+const CRYPTO_MAX_PADDING: usize = 8;
+
 /** Packet used to send data over `net_crypto` connection.
 
 Serialized form:
@@ -148,6 +154,7 @@ impl FromBytes for CryptoDataPayload {
     named!(from_bytes<CryptoDataPayload>, do_parse!(
         buffer_start: be_u32 >>
         packet_number: be_u32 >>
+        take_while!(|b| b == 0) >>
         data: rest >>
         (CryptoDataPayload { buffer_start, packet_number, data: data.to_vec() })
     ));
@@ -158,6 +165,7 @@ impl ToBytes for CryptoDataPayload {
         do_gen!(buf,
             gen_be_u32!(self.buffer_start) >>
             gen_be_u32!(self.packet_number) >>
+            gen_slice!(vec![0; (MAX_CRYPTO_DATA_SIZE - self.data.len()) % CRYPTO_MAX_PADDING]) >>
             gen_slice!(self.data.as_slice())
         )
     }
@@ -197,6 +205,11 @@ mod tests {
         };
         // encode payload with shared secret
         let crypto_data = CryptoData::new(&shared_secret, nonce, payload.clone());
+        // payload length should be gradual
+        assert_eq!(
+            (crypto_data.payload.len() - MACBYTES - 8) % CRYPTO_MAX_PADDING,
+            MAX_CRYPTO_DATA_SIZE % CRYPTO_MAX_PADDING
+        );
         // decode payload with shared secret
         let decoded_payload = crypto_data.get_payload(&shared_secret, &nonce).unwrap();
         // payloads should be equal
@@ -217,9 +230,14 @@ mod tests {
             data: vec![42; 123],
         };
         // encode payload with shared secret
-        let dht_packet = CryptoData::new(&shared_secret, nonce, payload);
+        let crypto_data = CryptoData::new(&shared_secret, nonce, payload);
+        // payload length should be gradual
+        assert_eq!(
+            (crypto_data.payload.len() - MACBYTES - 8) % CRYPTO_MAX_PADDING,
+            MAX_CRYPTO_DATA_SIZE % CRYPTO_MAX_PADDING
+        );
         // try to decode payload with eve's shared secret
-        let decoded_payload = dht_packet.get_payload(&eve_shared_secret, &nonce);
+        let decoded_payload = crypto_data.get_payload(&eve_shared_secret, &nonce);
         assert!(decoded_payload.is_err());
     }
 
