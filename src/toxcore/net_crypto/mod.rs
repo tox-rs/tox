@@ -85,7 +85,7 @@ pub struct NetCrypto {
     /// Symmetric key used for cookies encryption
     symmetric_key: secretbox::Key,
     /// Connection by long term public key of DHT node map
-    connections: Arc<RwLock<HashMap<PublicKey, RwLock<CryptoConnection>>>>,
+    connections: Arc<RwLock<HashMap<PublicKey, Arc<RwLock<CryptoConnection>>>>>,
     /// Long term keys by IP address of DHT node map. `SocketAddr` can't be used
     /// as a key since it contains additional info for `IPv6` address.
     keys_by_addr: Arc<RwLock<HashMap<(IpAddr, /*port*/ u16), PublicKey>>>,
@@ -109,6 +109,16 @@ impl NetCrypto {
     /// Send `DhtPacket` packet to UDP socket
     fn send_to_udp(&self, addr: SocketAddr, packet: DhtPacket) -> IoFuture<()> {
         send_to(&self.udp_tx, (packet, addr))
+    }
+
+    /// Get long term `PublicKey` of the peer by its UDP address
+    fn key_by_addr(&self, addr: SocketAddr) -> Option<PublicKey> {
+        self.keys_by_addr.read().get(&(addr.ip(), addr.port())).cloned()
+    }
+
+    /// Get crypto connection by long term `PublicKey`
+    fn connection_by_key(&self, pk: PublicKey) -> Option<Arc<RwLock<CryptoConnection>>> {
+        self.connections.read().get(&pk).cloned()
     }
 
     /// Create `CookieResponse` packet with `Cookie` requested by `CookieRequest` packet
@@ -180,11 +190,7 @@ impl NetCrypto {
 
     /// Handle `CookieResponse` packet received from UDP socket
     pub fn handle_udp_cookie_response(&self, packet: CookieResponse, addr: SocketAddr) -> IoFuture<()> {
-        let connections = self.connections.read();
-        let keys_by_addr = self.keys_by_addr.read();
-        let connection = keys_by_addr.get(&(addr.ip(), addr.port())).cloned().and_then(|pk|
-            connections.get(&pk)
-        );
+        let connection = self.key_by_addr(addr).and_then(|pk| self.connection_by_key(pk));
         if let Some(connection) = connection {
             let mut connection = connection.write();
             connection.update_udp_received_time();
@@ -281,11 +287,7 @@ impl NetCrypto {
 
     /// Handle `CryptoHandshake` packet received from UDP socket
     pub fn handle_udp_crypto_handshake(&self, packet: CryptoHandshake, addr: SocketAddr) -> IoFuture<()> {
-        let connections = self.connections.read();
-        let keys_by_addr = self.keys_by_addr.read();
-        let connection = keys_by_addr.get(&(addr.ip(), addr.port())).cloned().and_then(|pk|
-            connections.get(&pk)
-        );
+        let connection = self.key_by_addr(addr).and_then(|pk| self.connection_by_key(pk));
         if let Some(connection) = connection {
             let mut connection = connection.write();
             connection.update_udp_received_time();
@@ -622,7 +624,7 @@ mod tests {
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.udp_addr = Some(addr);
 
-        net_crypto.connections.write().insert(peer_real_pk, RwLock::new(connection));
+        net_crypto.connections.write().insert(peer_real_pk, Arc::new(RwLock::new(connection)));
         net_crypto.keys_by_addr.write().insert((addr.ip(), addr.port()), peer_real_pk);
 
         let cookie = EncryptedCookie {
@@ -963,7 +965,7 @@ mod tests {
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.udp_addr = Some(addr);
 
-        net_crypto.connections.write().insert(peer_real_pk, RwLock::new(connection));
+        net_crypto.connections.write().insert(peer_real_pk, Arc::new(RwLock::new(connection)));
         net_crypto.keys_by_addr.write().insert((addr.ip(), addr.port()), peer_real_pk);
 
         let base_nonce = gen_nonce();
@@ -1162,7 +1164,7 @@ mod tests {
         connection.udp_addr = Some(addr);
         connection.update_udp_received_time();
 
-        net_crypto.connections.write().insert(peer_real_pk, RwLock::new(connection));
+        net_crypto.connections.write().insert(peer_real_pk, Arc::new(RwLock::new(connection)));
 
         assert!(net_crypto.main_loop().wait().is_ok());
 
@@ -1200,7 +1202,7 @@ mod tests {
 
         assert!(connection.is_timed_out());
 
-        net_crypto.connections.write().insert(peer_real_pk, RwLock::new(connection));
+        net_crypto.connections.write().insert(peer_real_pk, Arc::new(RwLock::new(connection)));
         net_crypto.keys_by_addr.write().insert((addr.ip(), addr.port()), peer_real_pk);
 
         assert!(net_crypto.main_loop().wait().is_ok());
