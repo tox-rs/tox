@@ -43,7 +43,6 @@ use std::cmp::{Ord, Ordering};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use std::convert::Into;
-use std::collections::HashMap;
 
 const BAD_NODE_TIMEOUT: u64 = 182;
 
@@ -85,9 +84,7 @@ impl Into<DhtNode> for PackedNode {
         DhtNode {
             pk: self.pk,
             saddr: self.saddr,
-            ping_hash: HashMap::new(),
             last_resp_time: Instant::now(),
-            last_ping_req_time: Instant::now(),
         }
     }
 }

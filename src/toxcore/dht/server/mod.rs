@@ -27,6 +27,7 @@ This module works on top of other modules.
 */
 
 pub mod hole_punching;
+pub mod client;
 
 use futures::{Future, Sink, Stream, future, stream};
 use futures::sync::mpsc;
@@ -49,7 +50,7 @@ use toxcore::dht::packed_node::*;
 use toxcore::dht::kbucket::*;
 use toxcore::onion::packet::*;
 use toxcore::onion::onion_announce::*;
-use toxcore::dht::dht_node::*;
+use toxcore::dht::server::client::*;
 use toxcore::io_tokio::*;
 use toxcore::dht::dht_friend::*;
 use toxcore::dht::server::hole_punching::*;
@@ -104,8 +105,8 @@ pub struct Server {
     pub tx: Tx,
     /// option for hole punching
     pub is_hole_punching_enabled: bool,
-    // store client object which has sent request packet to peer
-    peers_cache: Arc<RwLock<HashMap<PublicKey, DhtNode>>>,
+    // store ping object which has sent request packet to peer
+    ping_map: Arc<RwLock<HashMap<PublicKey, PingData>>>,
     // Close List (contains nodes close to own DHT PK)
     close_nodes: Arc<RwLock<Kbucket>>,
     // symmetric key used for onion return encryption
@@ -141,7 +142,7 @@ pub struct Server {
 /// Struct for grouping parameters to Server's main loop
 #[derive(Copy, Clone, Default)]
 pub struct ConfigArgs {
-    /// timeout in seconds for remove clients in peers_cache
+    /// timeout in seconds for remove clients in ping_map
     pub kill_node_timeout: u64,
     /// timeout in seconds for PingRequest and NodesRequest
     pub ping_timeout: u64,
@@ -166,7 +167,7 @@ impl Server {
             pk,
             tx,
             is_hole_punching_enabled: true,
-            peers_cache: Arc::new(RwLock::new(HashMap::new())),
+            ping_map: Arc::new(RwLock::new(HashMap::new())),
             close_nodes: Arc::new(RwLock::new(Kbucket::new(&pk))),
             onion_symmetric_key: Arc::new(RwLock::new(secretbox::gen_key())),
             onion_announce: Arc::new(RwLock::new(OnionAnnounce::new(pk))),
@@ -182,9 +183,9 @@ impl Server {
         }
     }
 
-    /// return peers_cache member variable
-    pub fn get_peers_cache(&self) -> &Arc<RwLock<HashMap<PublicKey, DhtNode>>> {
-        &self.peers_cache
+    /// return ping_map member variable
+    pub fn get_ping_map(&self) -> &Arc<RwLock<HashMap<PublicKey, PingData>>> {
+        &self.ping_map
     }
 
     /// add friend
@@ -253,12 +254,12 @@ impl Server {
         let mut bootstrap_nodes = Bucket::new(None);
         mem::swap(&mut bootstrap_nodes, self.bootstrap_nodes.write().deref_mut());
 
-        let mut peers_cache = self.peers_cache.write();
+        let mut ping_map = self.ping_map.write();
 
         let bootstrap_nodes = bootstrap_nodes.to_packed_node();
         let nodes_sender = bootstrap_nodes.iter()
             .map(|node| {
-                let client = peers_cache.entry(node.pk).or_insert_with(|| DhtNode::new(*node));
+                let client = ping_map.entry(node.pk).or_insert_with(PingData::new);
 
                 self.send_nodes_req(*node, self.pk, client)
             });
@@ -274,8 +275,8 @@ impl Server {
 
         let nodes_sender = close_nodes.iter()
             .map(|node| {
-                let mut peers_cache = self.peers_cache.write();
-                let client = peers_cache.entry(node.pk).or_insert_with(|| DhtNode::new(node));
+                let mut ping_map = self.ping_map.write();
+                let client = ping_map.entry(node.pk).or_insert_with(PingData::new);
                 (node, client.clone())
             })
             .filter(|&(_node, ref client)|
@@ -284,7 +285,7 @@ impl Server {
             .map(|(node, mut client)| {
                 client.last_ping_req_time = Instant::now();
                 let res = self.send_nodes_req(node, self.pk, &mut client);
-                self.peers_cache.write().deref_mut().insert(node.pk, client);
+                self.ping_map.write().deref_mut().insert(node.pk, client);
                 res
             });
 
@@ -296,11 +297,11 @@ impl Server {
     // every 20 seconds DHT node send NodesRequest to random node which is in close list
     fn send_nodes_req_random(&self, bad_node_timeout: Duration, nodes_req_interval: Duration) -> IoFuture<()> {
         let close_nodes = self.close_nodes.read();
-        let mut peers_cache = self.peers_cache.write();
+        let mut ping_map = self.ping_map.write();
 
         let good_nodes = close_nodes.iter()
             .filter(|&node| {
-                let client = peers_cache.entry(node.pk).or_insert_with(|| DhtNode::new(node));
+                let client = ping_map.entry(node.pk).or_insert_with(PingData::new);
                 client.last_resp_time.elapsed() < bad_node_timeout
             }).collect::<Vec<PackedNode>>();
 
@@ -318,7 +319,7 @@ impl Server {
             let random_node = good_nodes[random_node];
 
 
-            let client = peers_cache.entry(random_node.pk).or_insert_with(|| DhtNode::new(random_node));
+            let client = ping_map.entry(random_node.pk).or_insert_with(PingData::new);
 
             let res = self.send_nodes_req(random_node, self.pk, client);
 
@@ -333,17 +334,17 @@ impl Server {
     // remove timed-out clients,
     // close_nodes entry should be remain even if offline timed out, so after online, server try to ping again.
     fn remove_timedout_clients(&self, timeout: Duration) -> IoFuture<()> {
-        let mut peers_cache = self.peers_cache.write();
+        let mut ping_map = self.ping_map.write();
 
-        peers_cache.retain(|&_pk, ref client|
+        ping_map.retain(|&_pk, ref client|
             client.last_resp_time.elapsed() <= timeout);
         Box::new(future::ok(()))
     }
 
     // remove PING_TIMEOUT timed out ping_ids of PingHash
     fn remove_timedout_ping_ids(&self, timeout: Duration) -> IoFuture<()> {
-        let mut peers_cache = self.peers_cache.write();
-        peers_cache.iter_mut()
+        let mut ping_map = self.ping_map.write();
+        ping_map.iter_mut()
             .for_each(|(_pk, client)|
                 client.clear_timedout_pings(timeout)
             );
@@ -365,8 +366,8 @@ impl Server {
 
     /// Send PingRequest to node
     pub fn send_ping_req(&self, node: &PackedNode) -> IoFuture<()> {
-        let mut peers_cache = self.peers_cache.write();
-        let client = peers_cache.entry(node.pk).or_insert_with(|| DhtNode::new(*node));
+        let mut ping_map = self.ping_map.write();
+        let client = ping_map.entry(node.pk).or_insert_with(PingData::new);
 
         let payload = PingRequestPayload {
             id: client.insert_new_ping_id(),
@@ -380,7 +381,7 @@ impl Server {
     }
 
     /// Send NodesRequest to peer
-    pub fn send_nodes_req(&self, target_peer: PackedNode, search_pk: PublicKey, client: &mut DhtNode) -> IoFuture<()> {
+    pub fn send_nodes_req(&self, target_peer: PackedNode, search_pk: PublicKey, client: &mut PingData) -> IoFuture<()> {
         // Check if packet is going to be sent to ourself.
         if self.pk == target_peer.pk {
             return Box::new(
@@ -584,7 +585,7 @@ impl Server {
     handle received PingResponse packet. If ping_id is correct, try_add peer to close_nodes.
     */
     fn handle_ping_resp(&self, packet: PingResponse) -> IoFuture<()> {
-        let mut peers_cache = self.peers_cache.write();
+        let mut ping_map = self.ping_map.write();
         let payload = packet.get_payload(&self.sk);
         let payload = match payload {
             Err(e) => return Box::new(future::err(e)),
@@ -598,7 +599,7 @@ impl Server {
             )))
         }
 
-        let client = peers_cache.get_mut(&packet.pk);
+        let client = ping_map.get_mut(&packet.pk);
         let client = match client {
             None => {
                 return Box::new( future::err(
@@ -647,7 +648,7 @@ impl Server {
     handle received NodesResponse from peer.
     */
     fn handle_nodes_resp(&self, packet: NodesResponse) -> IoFuture<()> {
-        let mut peers_cache = self.peers_cache.write();
+        let mut ping_map = self.ping_map.write();
 
         let payload = packet.get_payload(&self.sk);
         let payload = match payload {
@@ -655,7 +656,7 @@ impl Server {
             Ok(payload) => payload,
         };
 
-        let client = peers_cache.get_mut(&packet.pk);
+        let client = ping_map.get_mut(&packet.pk);
         let client = match client {
             None => {
                 return Box::new( future::err(
@@ -672,7 +673,7 @@ impl Server {
         let timeout_dur = Duration::from_secs(PING_TIMEOUT);
         if client.check_ping_id(payload.id, timeout_dur) {
             for node in &payload.nodes {
-                // not worried about removing evicted nodes from peers_cache
+                // not worried about removing evicted nodes from ping_map
                 // they will be removed by timeout eventually since we won't
                 // ping them anymore
                 close_nodes.try_add(node);
@@ -829,9 +830,9 @@ impl Server {
             pk: packet.pk,
         };
 
-        let mut peers_cache = self.peers_cache.write();
-        let peers_cache = peers_cache.deref_mut();
-        let client = peers_cache.entry(packet.pk).or_insert_with(|| DhtNode::new(target_node));
+        let mut ping_map = self.ping_map.write();
+        let ping_map = ping_map.deref_mut();
+        let client = ping_map.entry(packet.pk).or_insert_with(PingData::new);
 
         self.send_nodes_req(target_node, self.pk, client)
     }
@@ -1170,9 +1171,9 @@ mod tests {
         (alice, precomp, bob_pk, bob_sk, rx, addr)
     }
 
-    fn add_to_peers_cache(alice: &Server, pk: PublicKey, client: DhtNode) {
-        let mut peers_cache = alice.peers_cache.write();
-        peers_cache.insert(pk, client);
+    fn add_to_ping_map(alice: &Server, pk: PublicKey, client: PingData) {
+        let mut ping_map = alice.ping_map.write();
+        ping_map.insert(pk, client);
     }
 
     #[test]
@@ -1192,10 +1193,10 @@ mod tests {
     }
 
     #[test]
-    fn server_get_peers_cache_test() {
+    fn server_get_ping_map_test() {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
 
-        let _ = alice.get_peers_cache();
+        let _ = alice.get_ping_map();
     }
 
     #[test]
@@ -1257,16 +1258,12 @@ mod tests {
 
         // handle ping response, request from bob peer
         // success case
-        let pn = PackedNode {
-            pk: bob_pk,
-            saddr: addr
-        };
-        let mut client = DhtNode::new(pn);
+        let mut client = PingData::new();
         let ping_id = client.insert_new_ping_id();
         let resp_payload = PingResponsePayload { id: ping_id };
         let ping_resp = DhtPacket::PingResponse(PingResponse::new(&precomp, &bob_pk, resp_payload));
 
-        add_to_peers_cache(&alice, bob_pk, client);
+        add_to_ping_map(&alice, bob_pk, client);
 
         assert!(alice.handle_packet(ping_resp, addr).wait().is_ok());
     }
@@ -1276,16 +1273,12 @@ mod tests {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         // wrong PK, decrypt fail
-        let pn = PackedNode {
-            pk: bob_pk,
-            saddr: addr
-        };
-        let mut client = DhtNode::new(pn);
+        let mut client = PingData::new();
         let ping_id = client.insert_new_ping_id();
         let prs = PingResponsePayload { id: ping_id };
         let ping_resp = DhtPacket::PingResponse(PingResponse::new(&precomp, &alice.pk, prs));
 
-        add_to_peers_cache(&alice, bob_pk, client);
+        add_to_ping_map(&alice, bob_pk, client);
 
         assert!(alice.handle_packet(ping_resp, addr).wait().is_err());
     }
@@ -1298,12 +1291,8 @@ mod tests {
         let prs = PingResponsePayload { id: 0 };
         let ping_resp = DhtPacket::PingResponse(PingResponse::new(&precomp, &bob_pk, prs));
 
-        let pn = PackedNode {
-            pk: bob_pk,
-            saddr: addr
-        };
-        let client = DhtNode::new(pn);
-        add_to_peers_cache(&alice, bob_pk, client);
+        let client = PingData::new();
+        add_to_ping_map(&alice, bob_pk, client);
 
         assert!(alice.handle_packet(ping_resp, addr).wait().is_err());
     }
@@ -1313,16 +1302,12 @@ mod tests {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         // incorrect ping_id, fail
-        let pn = PackedNode {
-            pk: bob_pk,
-            saddr: addr
-        };
-        let mut client = DhtNode::new(pn);
+        let mut client = PingData::new();
         let ping_id = client.insert_new_ping_id();
         let prs = PingResponsePayload { id: ping_id + 1 };
         let ping_resp = DhtPacket::PingResponse(PingResponse::new(&precomp, &bob_pk, prs));
 
-        add_to_peers_cache(&alice, bob_pk, client);
+        add_to_ping_map(&alice, bob_pk, client);
 
         assert!(alice.handle_packet(ping_resp, addr).wait().is_err());
     }
@@ -1373,16 +1358,12 @@ mod tests {
         let node = vec![PackedNode::new(false, addr, &bob_pk)];
 
         // handle nodes response, request from bob peer
-        let pn = PackedNode {
-            pk: bob_pk,
-            saddr: addr
-        };
-        let mut client = DhtNode::new(pn);
+        let mut client = PingData::new();
         let ping_id = client.insert_new_ping_id();
         let resp_payload = NodesResponsePayload { nodes: node, id: ping_id };
         let nodes_resp = DhtPacket::NodesResponse(NodesResponse::new(&precomp, &bob_pk, resp_payload.clone()));
 
-        add_to_peers_cache(&alice, bob_pk, client);
+        add_to_ping_map(&alice, bob_pk, client);
 
         assert!(alice.handle_packet(nodes_resp, addr).wait().is_ok());
 
@@ -1419,12 +1400,8 @@ mod tests {
         ], id: 0 };
         let nodes_resp = DhtPacket::NodesResponse(NodesResponse::new(&precomp, &bob_pk, resp_payload));
 
-        let pn = PackedNode {
-            pk: bob_pk,
-            saddr: addr
-        };
-        let client = DhtNode::new(pn);
-        add_to_peers_cache(&alice, bob_pk, client);
+        let client = PingData::new();
+        add_to_ping_map(&alice, bob_pk, client);
 
         assert!(alice.handle_packet(nodes_resp, addr).wait().is_err());
     }
@@ -1434,18 +1411,14 @@ mod tests {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         // incorrect ping_id
-        let pn = PackedNode {
-            pk: bob_pk,
-            saddr: addr
-        };
-        let mut client = DhtNode::new(pn);
+        let mut client = PingData::new();
         let ping_id = client.insert_new_ping_id();
         let resp_payload = NodesResponsePayload { nodes: vec![
             PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &gen_keypair().0)
         ], id: ping_id + 1 };
         let nodes_resp = DhtPacket::NodesResponse(NodesResponse::new(&precomp, &bob_pk, resp_payload));
 
-        add_to_peers_cache(&alice, bob_pk, client);
+        add_to_ping_map(&alice, bob_pk, client);
 
         assert!(alice.handle_packet(nodes_resp, addr).wait().is_err());
     }
@@ -1630,12 +1603,8 @@ mod tests {
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
         let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, nat_payload));
 
-        let pn = PackedNode {
-            pk: bob_pk,
-            saddr: addr
-        };
-        let client = DhtNode::new(pn);
-        add_to_peers_cache(&alice, bob_pk, client);
+        let client = PingData::new();
+        add_to_ping_map(&alice, bob_pk, client);
 
         assert!(alice.handle_packet(dht_req, addr).wait().is_ok());
     }
@@ -1649,12 +1618,8 @@ mod tests {
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
         let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, nat_payload));
 
-        let pn = PackedNode {
-            pk: bob_pk,
-            saddr: addr
-        };
-        let client = DhtNode::new(pn);
-        add_to_peers_cache(&alice, bob_pk, client);
+        let client = PingData::new();
+        add_to_ping_map(&alice, bob_pk, client);
 
         assert!(alice.handle_packet(dht_req, addr).wait().is_err());
     }
@@ -1664,17 +1629,13 @@ mod tests {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         // error case, incorrect ping_id
-        let pn = PackedNode {
-            pk: bob_pk,
-            saddr: addr
-        };
-        let mut client = DhtNode::new(pn);
+        let mut client = PingData::new();
         let ping_id = client.insert_new_ping_id();
         let nat_res = NatPingResponse { id: ping_id + 1 };
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
         let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, nat_payload));
 
-        add_to_peers_cache(&alice, bob_pk, client);
+        add_to_ping_map(&alice, bob_pk, client);
 
         assert!(alice.handle_packet(dht_req, addr).wait().is_err());
     }
@@ -2376,19 +2337,19 @@ mod tests {
 
         alice.send_pings().wait().unwrap();
 
-        let mut peers_cache = alice.peers_cache.write();
+        let mut ping_map = alice.ping_map.write();
         rx.take(2).map(|received| {
             let (packet, addr) = received;
             let mut buf = [0; 512];
             let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
             let (_, ping_req) = PingRequest::from_bytes(&buf[..size]).unwrap();
             if addr == SocketAddr::V4("127.0.0.1:33445".parse().unwrap()) {
-                let client = peers_cache.get_mut(&bob_pk).unwrap();
+                let client = ping_map.get_mut(&bob_pk).unwrap();
                 let ping_req_payload = ping_req.get_payload(&bob_sk).unwrap();
                 let dur = Duration::from_secs(PING_TIMEOUT);
                 assert!(client.check_ping_id(ping_req_payload.id, dur));
             } else {
-                let client = peers_cache.get_mut(&ping_pk).unwrap();
+                let client = ping_map.get_mut(&ping_pk).unwrap();
                 let ping_req_payload = ping_req.get_payload(&ping_sk).unwrap();
                 let dur = Duration::from_secs(PING_TIMEOUT);
                 assert!(client.check_ping_id(ping_req_payload.id, dur));
@@ -2405,7 +2366,7 @@ mod tests {
              pk: bob_pk,
              saddr: "127.0.0.1:12345".parse().unwrap(),
          };
-         assert!(alice.send_nodes_req(target_node, alice.pk, &mut DhtNode::new(target_node)).wait().is_ok());
+         assert!(alice.send_nodes_req(target_node, alice.pk, &mut PingData::new()).wait().is_ok());
 
          let node = PackedNode {
              pk: gen_keypair().0,
@@ -2413,7 +2374,7 @@ mod tests {
          };
          alice.try_add_to_close_nodes(&node);
 
-         assert!(alice.send_nodes_req(target_node, alice.pk, &mut DhtNode::new(node)).wait().is_ok());
+         assert!(alice.send_nodes_req(target_node, alice.pk, &mut PingData::new()).wait().is_ok());
      }
 
     // send_nat_ping_req()
@@ -2554,10 +2515,10 @@ mod tests {
         let dur = Duration::from_secs(0);
         alice.remove_timedout_clients(dur).wait().unwrap();
 
-        let peers_cache = alice.peers_cache.read();
+        let ping_map = alice.ping_map.read();
 
         // after client be removed
-        assert!(!peers_cache.contains_key(&bob_pk));
+        assert!(!ping_map.contains_key(&bob_pk));
     }
 
     // remove_timedout_clients(), case of client remained
@@ -2574,11 +2535,11 @@ mod tests {
         let dur = Duration::from_secs(1);
         alice.remove_timedout_clients(dur).wait().unwrap();
 
-        let peers_cache = alice.peers_cache.read();
+        let ping_map = alice.ping_map.read();
         let close_nodes = alice.close_nodes.read();
 
         // client should be remained
-        assert!(peers_cache.contains_key(&bob_pk));
+        assert!(ping_map.contains_key(&bob_pk));
         // peer should be remained in close_nodes
         assert!(close_nodes.contains(&bob_pk));
     }
@@ -2652,7 +2613,7 @@ mod tests {
         alice.set_config_values(args);
         alice.dht_main_loop().wait().unwrap();
 
-        let mut peers_cache = alice.peers_cache.write();
+        let mut ping_map = alice.ping_map.write();
 
         rx.take(2).map(|received| {
             let (packet, addr) = received;
@@ -2660,12 +2621,12 @@ mod tests {
             let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
             let (_, nodes_req) = NodesRequest::from_bytes(&buf[..size]).unwrap();
             if addr == SocketAddr::V4("127.0.0.1:33445".parse().unwrap()) {
-                let client = peers_cache.get_mut(&bob_pk).unwrap();
+                let client = ping_map.get_mut(&bob_pk).unwrap();
                 let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
                 let dur = Duration::from_secs(PING_TIMEOUT);
                 assert!(client.check_ping_id(nodes_req_payload.id, dur));
             } else {
-                let client = peers_cache.get_mut(&ping_pk).unwrap();
+                let client = ping_map.get_mut(&ping_pk).unwrap();
                 let nodes_req_payload = nodes_req.get_payload(&ping_sk).unwrap();
                 let dur = Duration::from_secs(PING_TIMEOUT);
                 assert!(client.check_ping_id(nodes_req_payload.id, dur));
@@ -2696,7 +2657,7 @@ mod tests {
         alice.set_config_values(args);
         alice.dht_main_loop().wait().unwrap();
 
-        let mut peers_cache = alice.peers_cache.write();
+        let mut ping_map = alice.ping_map.write();
 
         rx.take(2).map(|received| {
             let (packet, addr) = received;
@@ -2704,12 +2665,12 @@ mod tests {
             let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
             let (_, nodes_req) = NodesRequest::from_bytes(&buf[..size]).unwrap();
             if addr == SocketAddr::V4("127.0.0.1:33445".parse().unwrap()) {
-                let client = peers_cache.get_mut(&bob_pk).unwrap();
+                let client = ping_map.get_mut(&bob_pk).unwrap();
                 let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
                 let dur = Duration::from_secs(PING_TIMEOUT);
                 assert!(client.check_ping_id(nodes_req_payload.id, dur));
             } else {
-                let client = peers_cache.get_mut(&ping_pk).unwrap();
+                let client = ping_map.get_mut(&ping_pk).unwrap();
                 let nodes_req_payload = nodes_req.get_payload(&ping_sk).unwrap();
                 let dur = Duration::from_secs(PING_TIMEOUT);
                 assert!(client.check_ping_id(nodes_req_payload.id, dur));
@@ -2752,7 +2713,7 @@ mod tests {
         alice.set_config_values(args);
         alice.dht_main_loop().wait().unwrap();
 
-        let mut peers_cache = alice.peers_cache.write();
+        let mut ping_map = alice.ping_map.write();
 
         rx.take(2).map(|received| {
             let (packet, addr) = received;
@@ -2760,12 +2721,12 @@ mod tests {
             let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
             let (_, nodes_req) = NodesRequest::from_bytes(&buf[..size]).unwrap();
             if addr == SocketAddr::V4("127.0.0.1:33445".parse().unwrap()) {
-                let client = peers_cache.get_mut(&bob_pk).unwrap();
+                let client = ping_map.get_mut(&bob_pk).unwrap();
                 let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
                 let dur = Duration::from_secs(PING_TIMEOUT);
                 assert!(client.check_ping_id(nodes_req_payload.id, dur));
             } else {
-                let client = peers_cache.get_mut(&ping_pk).unwrap();
+                let client = ping_map.get_mut(&ping_pk).unwrap();
                 let nodes_req_payload = nodes_req.get_payload(&ping_sk).unwrap();
                 let dur = Duration::from_secs(PING_TIMEOUT);
                 assert!(client.check_ping_id(nodes_req_payload.id, dur));
