@@ -394,10 +394,10 @@ mod tests {
 
         let ping_req_payload = ping_req.get_payload(&friend_sk).unwrap();
 
-        let peers_cache = alice.get_peers_cache();
-        let mut peers_cache = peers_cache.write();
+        let ping_map = alice.get_ping_map();
+        let mut ping_map = ping_map.write();
 
-        let client = peers_cache.get_mut(&friend_pk).unwrap();
+        let client = ping_map.get_mut(&friend_pk).unwrap();
         let dur = Duration::from_secs(PING_TIMEOUT);
 
         assert!(client.check_ping_id(ping_req_payload.id, dur));
@@ -435,10 +435,10 @@ mod tests {
 
         let ping_req_payload = ping_req.get_payload(&friend_sk).unwrap();
 
-        let peers_cache = alice.get_peers_cache();
-        let mut peers_cache = peers_cache.write();
+        let ping_map = alice.get_ping_map();
+        let mut ping_map = ping_map.write();
 
-        let client = peers_cache.get_mut(&friend_pk).unwrap();
+        let client = ping_map.get_mut(&friend_pk).unwrap();
         let dur = Duration::from_secs(PING_TIMEOUT);
 
         assert!(client.check_ping_id(ping_req_payload.id, dur));

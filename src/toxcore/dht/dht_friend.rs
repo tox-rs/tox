@@ -87,12 +87,12 @@ impl DhtFriend {
         let mut bootstrap_nodes = Bucket::new(None);
         mem::swap(&mut bootstrap_nodes, &mut self.bootstrap_nodes);
 
-        let mut peers_cache = server.get_peers_cache().write();
+        let mut ping_map = server.get_ping_map().write();
 
         let bootstrap_nodes = bootstrap_nodes.to_packed_node();
         let nodes_sender = bootstrap_nodes.iter()
             .map(|node| {
-                let client = peers_cache.entry(node.pk).or_insert_with(ClientData::new);
+                let client = ping_map.entry(node.pk).or_insert_with(PingData::new);
                 server.send_nodes_req(*node, self.pk, client)
             });
 
@@ -103,12 +103,12 @@ impl DhtFriend {
 
     // ping to close nodes of friend
     fn ping_and_get_close_nodes(&mut self, server: &Server, ping_interval: Duration) -> IoFuture<()> {
-        let mut peers_cache = server.get_peers_cache().write();
+        let mut ping_map = server.get_ping_map().write();
 
         let close_nodes = self.close_nodes.to_packed_node();
         let nodes_sender = close_nodes.iter()
             .map(|node| {
-                let client = peers_cache.entry(node.pk).or_insert_with(ClientData::new);
+                let client = ping_map.entry(node.pk).or_insert_with(PingData::new);
 
                 if client.last_ping_req_time.elapsed() >= ping_interval {
                     client.last_ping_req_time = Instant::now();
@@ -125,12 +125,12 @@ impl DhtFriend {
 
     // send NodesRequest to random node which is in close list
     fn send_nodes_req_random(&mut self, server: &Server, bad_node_timeout: Duration, nodes_req_interval: Duration) -> IoFuture<()> {
-        let mut peers_cache = server.get_peers_cache().write();
+        let mut ping_map = server.get_ping_map().write();
 
         let close_nodes = self.close_nodes.to_packed_node();
         let good_nodes = close_nodes.iter()
             .filter(|node| {
-                let client = peers_cache.entry(node.pk).or_insert_with(ClientData::new);
+                let client = ping_map.entry(node.pk).or_insert_with(PingData::new);
                 client.last_resp_time.elapsed() < bad_node_timeout
             }).collect::<Vec<_>>();
 
@@ -147,7 +147,7 @@ impl DhtFriend {
 
             let random_node = good_nodes[random_node];
 
-            if let Some(client) = peers_cache.get_mut(&random_node.pk) {
+            if let Some(client) = ping_map.get_mut(&random_node.pk) {
                 let res = server.send_nodes_req(*random_node, self.pk, client);
                 self.bootstrap_times += 1;
                 self.last_nodes_req_time = Instant::now();
@@ -156,7 +156,7 @@ impl DhtFriend {
             } else {
                 Box::new(
                     future::err(
-                        Error::new(ErrorKind::Other, "Can't find client in peers_cache")
+                        Error::new(ErrorKind::Other, "Can't find client in ping_map")
                     )
                 )
             }
@@ -227,17 +227,17 @@ mod tests {
             let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
             let (_, nodes_req) = NodesRequest::from_bytes(&buf[..size]).unwrap();
 
-            let peers_cache = server.get_peers_cache();
-            let mut peers_cache = peers_cache.write();
-            let peers_cache = peers_cache.deref_mut();
+            let ping_map = server.get_ping_map();
+            let mut ping_map = ping_map.write();
+            let ping_map = ping_map.deref_mut();
 
             if addr == SocketAddr::V4("127.0.0.1:33445".parse().unwrap()) {
-                let client = peers_cache.get_mut(&node_pk1).unwrap();
+                let client = ping_map.get_mut(&node_pk1).unwrap();
                 let nodes_req_payload = nodes_req.get_payload(&node_sk1).unwrap();
                 let dur = Duration::from_secs(PING_TIMEOUT);
                 assert!(client.check_ping_id(nodes_req_payload.id, dur));
             } else {
-                let client = peers_cache.get_mut(&node_pk2).unwrap();
+                let client = ping_map.get_mut(&node_pk2).unwrap();
                 let nodes_req_payload = nodes_req.get_payload(&node_sk2).unwrap();
                 let dur = Duration::from_secs(PING_TIMEOUT);
                 assert!(client.check_ping_id(nodes_req_payload.id, dur));
@@ -245,10 +245,10 @@ mod tests {
         }).collect().wait().unwrap();
     }
 
-    fn insert_client_to_peers_cache(server: &Server, pk1: PublicKey, pk2: PublicKey) {
-        let mut peers_cache = server.get_peers_cache().write();
-        peers_cache.insert(pk1, ClientData::new());
-        peers_cache.insert(pk2, ClientData::new());
+    fn insert_client_to_ping_map(server: &Server, pk1: PublicKey, pk2: PublicKey) {
+        let mut ping_map = server.get_ping_map().write();
+        ping_map.insert(pk1, PingData::new());
+        ping_map.insert(pk2, PingData::new());
     }
 
     #[test]
@@ -284,11 +284,11 @@ mod tests {
         let nodes_req_interval = Duration::from_secs(0);
         let bad_nodes_timeout = Duration::from_secs(0);
 
-        // But, there are no entry in peers_cache, just return ok
+        // But, there are no entry in ping_map, just return ok
         assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval, bad_nodes_timeout).wait().is_ok());
 
-        // Now, test with entry in peers_cache
-        insert_client_to_peers_cache(&server, node_pk1, node_pk2);
+        // Now, test with entry in ping_map
+        insert_client_to_ping_map(&server, node_pk1, node_pk2);
 
         let ping_interval = Duration::from_secs(10);
         let nodes_req_interval = Duration::from_secs(0);
@@ -310,17 +310,17 @@ mod tests {
             let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
             let (_, nodes_req) = NodesRequest::from_bytes(&buf[..size]).unwrap();
 
-            let peers_cache = server.get_peers_cache();
-            let mut peers_cache = peers_cache.write();
-            let peers_cache = peers_cache.deref_mut();
+            let ping_map = server.get_ping_map();
+            let mut ping_map = ping_map.write();
+            let ping_map = ping_map.deref_mut();
 
             if addr == SocketAddr::V4("127.0.0.1:33445".parse().unwrap()) {
-                let client = peers_cache.get_mut(&node_pk1).unwrap();
+                let client = ping_map.get_mut(&node_pk1).unwrap();
                 let nodes_req_payload = nodes_req.get_payload(&node_sk1).unwrap();
                 let dur = Duration::from_secs(PING_TIMEOUT);
                 assert!(client.check_ping_id(nodes_req_payload.id, dur));
             } else {
-                let client = peers_cache.get_mut(&node_pk2).unwrap();
+                let client = ping_map.get_mut(&node_pk2).unwrap();
                 let nodes_req_payload = nodes_req.get_payload(&node_sk2).unwrap();
                 let dur = Duration::from_secs(PING_TIMEOUT);
                 assert!(client.check_ping_id(nodes_req_payload.id, dur));
@@ -361,11 +361,11 @@ mod tests {
         let nodes_req_interval = Duration::from_secs(0);
         let bad_nodes_timeout = Duration::from_secs(0);
 
-        // But, there are no entry in peers_cache, just return ok
+        // But, there are no entry in ping_map, just return ok
         assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval, bad_nodes_timeout).wait().is_ok());
 
-        // Now, test with entry in peers_cache
-        insert_client_to_peers_cache(&server, node_pk1, node_pk2);
+        // Now, test with entry in ping_map
+        insert_client_to_ping_map(&server, node_pk1, node_pk2);
 
         let ping_interval = Duration::from_secs(10);
         let nodes_req_interval = Duration::from_secs(0);
@@ -387,17 +387,17 @@ mod tests {
         let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
         let (_, nodes_req) = NodesRequest::from_bytes(&buf[..size]).unwrap();
 
-        let peers_cache = server.get_peers_cache();
-        let mut peers_cache = peers_cache.write();
-        let peers_cache = peers_cache.deref_mut();
+        let ping_map = server.get_ping_map();
+        let mut ping_map = ping_map.write();
+        let ping_map = ping_map.deref_mut();
 
         if addr == SocketAddr::V4("127.0.0.1:33445".parse().unwrap()) {
-            let client = peers_cache.get_mut(&node_pk1).unwrap();
+            let client = ping_map.get_mut(&node_pk1).unwrap();
             let nodes_req_payload = nodes_req.get_payload(&node_sk1).unwrap();
             let dur = Duration::from_secs(PING_TIMEOUT);
             assert!(client.check_ping_id(nodes_req_payload.id, dur));
         } else {
-            let client = peers_cache.get_mut(&node_pk2).unwrap();
+            let client = ping_map.get_mut(&node_pk2).unwrap();
             let nodes_req_payload = nodes_req.get_payload(&node_sk2).unwrap();
             let dur = Duration::from_secs(PING_TIMEOUT);
             assert!(client.check_ping_id(nodes_req_payload.id, dur));

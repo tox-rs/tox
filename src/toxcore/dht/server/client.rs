@@ -31,7 +31,7 @@ use toxcore::crypto_core::*;
 
 /// peer info.
 #[derive(Clone, Debug)]
-pub struct ClientData {
+pub struct PingData {
     /// hash of ping_ids to check PingResponse is correct
     ping_hash: HashMap<u64, Instant>,
     /// last received ping/nodes-response time
@@ -40,10 +40,10 @@ pub struct ClientData {
     pub last_ping_req_time: Instant,
 }
 
-impl ClientData {
-    /// create ClientData object
-    pub fn new() -> ClientData {
-        ClientData {
+impl PingData {
+    /// create PingData object
+    pub fn new() -> PingData {
+        PingData {
             ping_hash: HashMap::new(),
             last_resp_time: Instant::now(),
             last_ping_req_time: Instant::now(),
@@ -103,13 +103,13 @@ mod tests {
 
     #[test]
     fn client_data_clonable() {
-        let client = ClientData::new();
+        let client = PingData::new();
         let _ = client.clone();
     }
 
     #[test]
     fn client_data_insert_new_ping_id_test() {
-        let mut client = ClientData::new();
+        let mut client = PingData::new();
 
         let ping_id = client.insert_new_ping_id();
 
@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn client_data_check_ping_id_test() {
-        let mut client = ClientData::new();
+        let mut client = PingData::new();
 
         let ping_id = client.insert_new_ping_id();
 
@@ -140,7 +140,7 @@ mod tests {
 
     #[test]
     fn client_data_clear_timedout_pings_test() {
-        let mut client = ClientData::new();
+        let mut client = PingData::new();
 
         // ping_id should be removed
         let ping_id = client.insert_new_ping_id();
