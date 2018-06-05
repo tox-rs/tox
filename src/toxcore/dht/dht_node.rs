@@ -32,6 +32,7 @@ use std::cmp::Ordering;
 use toxcore::crypto_core::*;
 use toxcore::dht::packed_node::*;
 use toxcore::dht::kbucket::*;
+use toxcore::dht::server::*;
 
 /** Status of node in bucket.
 Good means it is online and responded within 162 seconds
@@ -118,6 +119,13 @@ impl DhtNode {
             NodeStatus::Good
         }
     }
+
+    /// check it the node is timed out
+    pub fn is_bad_node_timed_out(&self, server: &Server) -> bool {
+        self.last_resp_time.elapsed() > Duration::from_secs(server.config.bad_node_timeout)
+    }
+
+
 }
 
 #[cfg(test)]

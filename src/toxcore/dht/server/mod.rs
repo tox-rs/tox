@@ -124,13 +124,13 @@ pub struct Server {
     // setting this value to 0 will do sending 5 times
     bootstrap_times: Arc<RwLock<u32>>,
     last_nodes_req_time: Arc<RwLock<Instant>>,
-    ping_sender: Arc<RwLock<Ping>>,
+    ping_sender: Arc<RwLock<PingSender>>,
     // toxcore version used in BootstrapInfo
     tox_core_version: u32,
     // message used in BootstrapInfo
     motd: Vec<u8>,
-    // values in config file
-    config: ConfigArgs,
+    /// values in config file
+    pub config: ConfigArgs,
     // `OnionResponse1` packets that have TCP protocol kind inside onion return
     // should be redirected to TCP sender trough this sink
     // None if there is no TCP relay
@@ -180,7 +180,7 @@ impl Server {
             bootstrap_nodes: Arc::new(RwLock::new(Bucket::new(None))),
             bootstrap_times: Arc::new(RwLock::new(0)),
             last_nodes_req_time: Arc::new(RwLock::new(Instant::now())),
-            ping_sender: Arc::new(RwLock::new(Ping::new())),
+            ping_sender: Arc::new(RwLock::new(PingSender::new())),
             tox_core_version: 0,
             motd: Vec::new(),
             config: ConfigArgs::default(),
@@ -227,7 +227,7 @@ impl Server {
                                                                Duration::from_secs(self.config.nodes_req_interval));
         let send_nodes_req_to_friends = self.send_nodes_req_to_friends();
 
-        let ping_sender = self.iterate_ping_list(Duration::from_secs(self.config.ping_iter_interval));
+        let ping_sender = self.send_pings(Duration::from_secs(self.config.ping_iter_interval));
 
         let send_nat_ping_req = self.send_nat_ping_req(Duration::from_secs(self.config.nat_ping_req_interval));
 
@@ -243,10 +243,10 @@ impl Server {
     }
 
     // send PingRequest using Ping object
-    fn iterate_ping_list(&self, ping_send_interval: Duration) -> IoFuture<()> {
+    fn send_pings(&self, ping_send_interval: Duration) -> IoFuture<()> {
         let mut ping_sender = self.ping_sender.write();
 
-        ping_sender.iterate_ping_list(&self, ping_send_interval)
+        ping_sender.send_pings(&self, ping_send_interval)
     }
 
     // send NodesRequest to friends
@@ -469,14 +469,6 @@ impl Server {
         match packet {
             DhtPacket::PingRequest(packet) => {
                 debug!("Received ping request");
-                // send PingRequest
-                let node_to_ping = PackedNode {
-                    pk: packet.pk,
-                    saddr: addr,
-                };
-
-                self.ping_sender.write().try_add(&self, &node_to_ping);
-
                 self.handle_ping_req(packet, addr)
             },
             DhtPacket::PingResponse(packet) => {
@@ -485,14 +477,6 @@ impl Server {
             },
             DhtPacket::NodesRequest(packet) => {
                 debug!("Received NodesRequest");
-                // send PingRequest
-                let node_to_ping = PackedNode {
-                    pk: packet.pk,
-                    saddr: addr,
-                };
-
-                self.ping_sender.write().try_add(&self, &node_to_ping);
-
                 self.handle_nodes_req(packet, addr)
             },
             DhtPacket::NodesResponse(packet) => {
@@ -602,6 +586,17 @@ impl Server {
             &self.pk,
             resp_payload
         ));
+
+        // send PingRequest
+        let node_to_ping = PackedNode {
+            pk: packet.pk,
+            saddr: addr,
+        };
+
+        // node is added if it's PK is closer than nodes in ping list
+        // the result of try_add is ignored, if it is not added, then PingRequest is not sent to the node.
+        self.ping_sender.write().try_add(&self, &node_to_ping);
+
         self.send_to(addr, ping_resp)
     }
     /**
@@ -665,6 +660,16 @@ impl Server {
             &self.pk,
             resp_payload
         ));
+
+        // send PingRequest
+        let node_to_ping = PackedNode {
+            pk: packet.pk,
+            saddr: addr,
+        };
+
+        // node is added if it's PK is closer than nodes in ping list
+        // the result of try_add is ignored, if it is not added, then PingRequest is not sent to the node.
+        self.ping_sender.write().try_add(&self, &node_to_ping);
 
         self.send_to(addr, nodes_resp)
     }
