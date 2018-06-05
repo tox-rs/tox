@@ -104,10 +104,8 @@ impl PingSender {
             return Box::new(future::ok(()))
         }
 
-        let mut nodes_to_send_ping = Bucket::new(None);
-
+        let nodes_to_send_ping = mem::replace(&mut self.nodes_to_send_ping, Bucket::new(None));
         self.last_time_send_ping = Instant::now();
-        mem::swap(&mut self.nodes_to_send_ping, &mut nodes_to_send_ping);
 
         let ping_sender = nodes_to_send_ping.nodes.iter().map(|node| {
             server.send_ping_req(&(node.clone()).into())
