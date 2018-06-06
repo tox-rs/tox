@@ -27,7 +27,7 @@ This module works on top of other modules.
 */
 
 pub mod client;
-pub mod ping;
+pub mod ping_sender;
 pub mod hole_punching;
 
 use futures::{Future, Sink, Stream, future, stream};
@@ -56,7 +56,7 @@ use toxcore::io_tokio::*;
 use toxcore::dht::dht_friend::*;
 use toxcore::dht::server::hole_punching::*;
 use toxcore::tcp::packet::OnionRequest;
-use toxcore::dht::server::ping::*;
+use toxcore::dht::server::ping_sender::*;
 use toxcore::net_crypto::NetCrypto;
 
 /// Shorthand for the transmit half of the message channel.

@@ -59,8 +59,8 @@ impl PingSender {
             .any(|friend| friend.close_nodes.nodes.iter().any(|peer| peer.pk == node.pk))
     }
 
-    fn is_in_ping_list(node: &PackedNode, ping_list: &Bucket) -> bool {
-        ping_list.nodes.iter().any(|peer| peer.pk == node.pk)
+    fn is_in_ping_list(&self, node: &PackedNode) -> bool {
+        self.nodes_to_send_ping.nodes.iter().any(|peer| peer.pk == node.pk)
     }
 
     fn can_send_pings(&self, iterate_interval: Duration) -> bool {
@@ -90,7 +90,7 @@ impl PingSender {
         }
 
         // if node already exists in ping list, then don't add
-        if PingSender::is_in_ping_list(node, &self.nodes_to_send_ping) {
+        if self.is_in_ping_list(node) {
             return false
         }
 
