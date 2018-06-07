@@ -82,7 +82,7 @@ linux:v1-25-0:
       cargo coveralls
   stage: build
   tags:
-    - linux
+    - tox
     - docker
 
 linux:stable:
@@ -91,7 +91,7 @@ linux:stable:
   script: *linux_script
   stage: build
   tags:
-    - linux
+    - tox
     - docker
 
 linux:beta:
@@ -101,7 +101,7 @@ linux:beta:
   script: *linux_script
   stage: build
   tags:
-    - linux
+    - tox
     - docker
 
 linux:nightly:
@@ -116,19 +116,13 @@ linux:nightly:
       cargo doc
   stage: build
   tags:
-    - linux
+    - tox
     - docker
 
 other:kcov-and-check-commit-message:
   image: rustdocker/rust:1.25.0
+  before_script: *linux_before_script
   script:
-    ### export env variables and create dirs
-    - |
-      export APT_CACHE_DIR=`pwd`/apt-cache && mkdir -pv $APT_CACHE_DIR
-      export KCOV_DIR=`pwd`/kcov && mkdir -pv $KCOV_DIR
-      export ROOT_DIR=`pwd`
-      rm -rf target/kcov || echo 'target/kcov not exist'
-
     ### export sha
     - |
       if [[ -z $CI_COMMIT_BEFORE_SHA ]]
@@ -142,15 +136,40 @@ other:kcov-and-check-commit-message:
     - |
       ./scripts/verify-commit-messages.sh "$CI_COMMIT_RANGE"
 
+    ### export env variables and create dirs
+    - |
+      export APT_CACHE_DIR=`pwd`/apt-cache && mkdir -pv $APT_CACHE_DIR
+      export KCOV_DIR=`pwd`/kcov && mkdir -pv $KCOV_DIR
+      export ROOT_DIR=`pwd`
+      rm -rf target/kcov || echo 'target/kcov not exist'
+
     ### build kcov for 1.25.0
     - |
       sudo apt-get remove kcov -y || echo 'ok'
       sudo apt-get -o dir::cache::archives="$APT_CACHE_DIR" update -yq
-      sudo apt-get -o dir::cache::archives="$APT_CACHE_DIR" install build-essential libcurl4-openssl-dev libelf-dev libdw-dev cmake gcc binutils-dev libiberty-dev zlib1g-dev cmake -yq
+      sudo apt-get -o dir::cache::archives="$APT_CACHE_DIR" install libcurl4-openssl-dev libelf-dev libdw-dev cmake gcc binutils-dev libiberty-dev -yq
       cd $KCOV_DIR && git clone https://github.com/SimonKagstrom/kcov || echo 'kcov exist'
       cd kcov && cmake . && make && make install || echo 'kcov exist'
       cd $ROOT_DIR
+
+    ### remove target directory
+    - |
+      rm -rf $ROOT_DIR/target/
+
+    ### run test for build test executables
+    - |
+      cargo test --verbose
+
+    ### run verify, merge code coverage and upload to codecov.io
+    - |
+      for file in $ROOT_DIR/target/debug/deps/tox-*[^\.d]
+      do
+        mkdir -pv $ROOT_DIR/target/cov/$(basename $file)
+        kcov --exclude-pattern=$HOME/.cargo,/usr/lib --verify $ROOT_DIR/target/cov/$(basename $file) $file
+        bash <(curl -s https://codecov.io/bash) -t $CODECOV_UPLOAD_TOKEN -s $ROOT_DIR/target/cov/$(basename $file) && echo "Uploaded code coverage" || echo "Not uploaded code coverage"
+      done
+
   stage: build
   tags:
-    - linux
+    - tox
     - docker
