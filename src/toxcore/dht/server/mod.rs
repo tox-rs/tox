@@ -26,8 +26,9 @@ Functionality needed to work as a DHT node.
 This module works on top of other modules.
 */
 
-pub mod hole_punching;
 pub mod client;
+pub mod ping_sender;
+pub mod hole_punching;
 
 use futures::{Future, Sink, Stream, future, stream};
 use futures::sync::mpsc;
@@ -55,6 +56,7 @@ use toxcore::io_tokio::*;
 use toxcore::dht::dht_friend::*;
 use toxcore::dht::server::hole_punching::*;
 use toxcore::tcp::packet::OnionRequest;
+use toxcore::dht::server::ping_sender::*;
 use toxcore::net_crypto::NetCrypto;
 
 /// Shorthand for the transmit half of the message channel.
@@ -122,12 +124,13 @@ pub struct Server {
     // setting this value to 0 will do sending 5 times
     bootstrap_times: Arc<RwLock<u32>>,
     last_nodes_req_time: Arc<RwLock<Instant>>,
+    ping_sender: Arc<RwLock<PingSender>>,
     // toxcore version used in BootstrapInfo
     tox_core_version: u32,
     // message used in BootstrapInfo
     motd: Vec<u8>,
-    // values in config file
-    config: ConfigArgs,
+    /// values in config file
+    pub config: ConfigArgs,
     // `OnionResponse1` packets that have TCP protocol kind inside onion return
     // should be redirected to TCP sender trough this sink
     // None if there is no TCP relay
@@ -152,6 +155,8 @@ pub struct ConfigArgs {
     pub bad_node_timeout: u64,
     /// interval in seconds for random NodesRequest
     pub nodes_req_interval: u64,
+    /// interval in seconds for iteration of sending PingRequest
+    pub ping_iter_interval: u64,
     /// interval in seconds for NatPingRequest
     pub nat_ping_req_interval: u64,
 }
@@ -175,6 +180,7 @@ impl Server {
             bootstrap_nodes: Arc::new(RwLock::new(Bucket::new(None))),
             bootstrap_times: Arc::new(RwLock::new(0)),
             last_nodes_req_time: Arc::new(RwLock::new(Instant::now())),
+            ping_sender: Arc::new(RwLock::new(PingSender::new())),
             tox_core_version: 0,
             motd: Vec::new(),
             config: ConfigArgs::default(),
@@ -219,30 +225,43 @@ impl Server {
         let ping_and_get_close_nodes = self.ping_and_get_close_nodes(Duration::from_secs(self.config.ping_interval));
         let send_nodes_req_random = self.send_nodes_req_random(Duration::from_secs(self.config.bad_node_timeout),
                                                                Duration::from_secs(self.config.nodes_req_interval));
-        let send_nodes_req_packets = {
-            let mut friends = self.friends.write();
+        let send_nodes_req_to_friends = self.send_nodes_req_to_friends();
 
-            let nodes_sender = friends.iter_mut()
-                .map(|friend| {
-                    friend.send_nodes_req_packets(self, Duration::from_secs(self.config.ping_interval),
-                                                  Duration::from_secs(self.config.nodes_req_interval),
-                                                  Duration::from_secs(self.config.bad_node_timeout))
-                });
-
-            let nodes_stream = stream::futures_unordered(nodes_sender).then(|_| Ok(()));
-
-            nodes_stream.for_each(|()| Ok(()))
-        };
+        let ping_sender = self.send_pings(Duration::from_secs(self.config.ping_iter_interval));
 
         let send_nat_ping_req = self.send_nat_ping_req(Duration::from_secs(self.config.nat_ping_req_interval));
 
-        let res = ping_bootstrap_nodes.join5(ping_and_get_close_nodes,
-                                             send_nodes_req_random,
-                                             send_nodes_req_packets,
-                                             send_nat_ping_req)
+        let res = future::join_all(vec![ping_bootstrap_nodes,
+                                        ping_and_get_close_nodes,
+                                        send_nodes_req_random,
+                                        send_nodes_req_to_friends,
+                                        ping_sender,
+                                        send_nat_ping_req])
             .map(|_| ());
 
         Box::new(res)
+    }
+
+    // send PingRequest using Ping object
+    fn send_pings(&self, ping_send_interval: Duration) -> IoFuture<()> {
+        let mut ping_sender = self.ping_sender.write();
+
+        ping_sender.send_pings(&self, ping_send_interval)
+    }
+
+    // send NodesRequest to friends
+    fn send_nodes_req_to_friends(&self) -> IoFuture<()> {
+        let mut friends = self.friends.write();
+
+        let nodes_sender = friends.iter_mut()
+            .map(|friend| {
+                friend.send_nodes_req_packets(self, Duration::from_secs(self.config.ping_interval),
+                                              Duration::from_secs(self.config.nodes_req_interval),
+                                              Duration::from_secs(self.config.bad_node_timeout))
+            });
+
+        let nodes_stream = stream::futures_unordered(nodes_sender).then(|_| Ok(()));
+        Box::new(nodes_stream.for_each(|()| Ok(())))
     }
 
     // send NodesRequest to nodes gotten by NodesResponse
@@ -350,18 +369,6 @@ impl Server {
             );
 
         Box::new( future::ok(()) )
-    }
-
-    /// send PingRequest to all peers in close_nodes
-    pub fn send_pings(&self) -> IoFuture<()> {
-        let close_nodes = self.close_nodes.read();
-        let ping_sender = close_nodes.iter().map(|peer| {
-            self.send_ping_req(&peer)
-        });
-
-        let pings_stream = stream::futures_unordered(ping_sender).then(|_| Ok(()));
-
-        Box::new(pings_stream.for_each(|()| Ok(())))
     }
 
     /// Send PingRequest to node
@@ -579,6 +586,17 @@ impl Server {
             &self.pk,
             resp_payload
         ));
+
+        // send PingRequest
+        let node_to_ping = PackedNode {
+            pk: packet.pk,
+            saddr: addr,
+        };
+
+        // node is added if it's PK is closer than nodes in ping list
+        // the result of try_add is ignored, if it is not added, then PingRequest is not sent to the node.
+        self.ping_sender.write().try_add(&self, &node_to_ping);
+
         self.send_to(addr, ping_resp)
     }
     /**
@@ -642,6 +660,17 @@ impl Server {
             &self.pk,
             resp_payload
         ));
+
+        // send PingRequest
+        let node_to_ping = PackedNode {
+            pk: packet.pk,
+            saddr: addr,
+        };
+
+        // node is added if it's PK is closer than nodes in ping list
+        // the result of try_add is ignored, if it is not added, then PingRequest is not sent to the node.
+        self.ping_sender.write().try_add(&self, &node_to_ping);
+
         self.send_to(addr, nodes_resp)
     }
     /**
@@ -2324,39 +2353,6 @@ mod tests {
         assert!(alice.handle_packet(packet, addr).wait().is_err());
     }
 
-    // send_pings()
-    #[test]
-    fn server_send_pings_test() {
-        let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
-        let (ping_pk, ping_sk) = gen_keypair();
-
-        let pn = PackedNode::new(false, SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &ping_pk);
-        assert!(alice.try_add_to_close_nodes(&pn));
-        let pn = PackedNode::new(false, SocketAddr::V4("127.0.0.1:33445".parse().unwrap()), &bob_pk);
-        assert!(alice.try_add_to_close_nodes(&pn));
-
-        alice.send_pings().wait().unwrap();
-
-        let mut ping_map = alice.ping_map.write();
-        rx.take(2).map(|received| {
-            let (packet, addr) = received;
-            let mut buf = [0; 512];
-            let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
-            let (_, ping_req) = PingRequest::from_bytes(&buf[..size]).unwrap();
-            if addr == SocketAddr::V4("127.0.0.1:33445".parse().unwrap()) {
-                let client = ping_map.get_mut(&bob_pk).unwrap();
-                let ping_req_payload = ping_req.get_payload(&bob_sk).unwrap();
-                let dur = Duration::from_secs(PING_TIMEOUT);
-                assert!(client.check_ping_id(ping_req_payload.id, dur));
-            } else {
-                let client = ping_map.get_mut(&ping_pk).unwrap();
-                let ping_req_payload = ping_req.get_payload(&ping_sk).unwrap();
-                let dur = Duration::from_secs(PING_TIMEOUT);
-                assert!(client.check_ping_id(ping_req_payload.id, dur));
-            }
-        }).collect().wait().unwrap();
-    }
-
      // send_nodes_req()
      #[test]
      fn server_send_nodes_req_test() {
@@ -2397,6 +2393,7 @@ mod tests {
             bad_node_timeout: 10,
             nodes_req_interval: 0,
             nat_ping_req_interval: 0,
+            ping_iter_interval: 0,
         };
 
         alice.set_config_values(args);
@@ -2504,16 +2501,26 @@ mod tests {
     // remove_timedout_clients(), case of client removed
     #[test]
     fn server_remove_timedout_clients_removed_test() {
-        let (alice, _precomp, bob_pk, _bob_sk, _rx, _addr) = create_node();
+        let (mut alice, _precomp, bob_pk, _bob_sk, _rx, _addr) = create_node();
 
         let node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &bob_pk);
 
         alice.try_add_to_close_nodes(&node);
 
-        alice.send_pings().wait().unwrap();
+        let args = ConfigArgs {
+            kill_node_timeout: 0, // time out seconds for remove client
+            ping_timeout: 10,
+            ping_interval: 0,
+            bad_node_timeout: 10,
+            nodes_req_interval: 0,
+            ping_iter_interval: 2,
+            nat_ping_req_interval: 10,
+        };
 
-        let dur = Duration::from_secs(0);
-        alice.remove_timedout_clients(dur).wait().unwrap();
+        alice.set_config_values(args);
+        alice.dht_main_loop().wait().unwrap(); // send NodesRequest
+        alice.close_nodes.write().remove(&node.pk);
+        alice.dht_main_loop().wait().unwrap(); // remove client
 
         let ping_map = alice.ping_map.read();
 
@@ -2524,24 +2531,31 @@ mod tests {
     // remove_timedout_clients(), case of client remained
     #[test]
     fn server_remove_timedout_clients_remained_test() {
-        let (alice, _precomp, bob_pk, _bob_sk, _rx, _addr) = create_node();
+        let (mut alice, _precomp, bob_pk, _bob_sk, _rx, _addr) = create_node();
 
         let node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &bob_pk);
 
         alice.try_add_to_close_nodes(&node);
 
-        alice.send_pings().wait().unwrap();
+        let args = ConfigArgs {
+            kill_node_timeout: 10, // time out seconds for remove client
+            ping_timeout: 10,
+            ping_interval: 0,
+            bad_node_timeout: 10,
+            nodes_req_interval: 0,
+            ping_iter_interval: 2,
+            nat_ping_req_interval: 10,
+        };
 
-        let dur = Duration::from_secs(1);
-        alice.remove_timedout_clients(dur).wait().unwrap();
+        alice.set_config_values(args);
+        alice.dht_main_loop().wait().unwrap(); // send NodesRequest
+        alice.close_nodes.write().remove(&node.pk);
+        alice.dht_main_loop().wait().unwrap(); // remove client, but not timed out
 
         let ping_map = alice.ping_map.read();
-        let close_nodes = alice.close_nodes.read();
 
         // client should be remained
         assert!(ping_map.contains_key(&bob_pk));
-        // peer should be remained in close_nodes
-        assert!(close_nodes.contains(&bob_pk));
     }
 
     #[test]
@@ -2607,6 +2621,7 @@ mod tests {
             ping_interval: 0,
             bad_node_timeout: 10,
             nodes_req_interval: 0,
+            ping_iter_interval: 2,
             nat_ping_req_interval: 10,
         };
 
@@ -2651,6 +2666,7 @@ mod tests {
             ping_interval: 0,
             bad_node_timeout: 10,
             nodes_req_interval: 0,
+            ping_iter_interval: 0,
             nat_ping_req_interval: 10,
         };
 
@@ -2695,6 +2711,7 @@ mod tests {
             ping_interval: 0,
             bad_node_timeout: 0,
             nodes_req_interval: 0,
+            ping_iter_interval: 2,
             nat_ping_req_interval: 10,
         };
 
@@ -2708,6 +2725,7 @@ mod tests {
             bad_node_timeout: 10,
             nodes_req_interval: 0,
             nat_ping_req_interval: 10,
+            ping_iter_interval: 2,
         };
 
         alice.set_config_values(args);
@@ -2752,6 +2770,7 @@ mod tests {
             ping_interval: 0,
             bad_node_timeout: 10,
             nodes_req_interval: 0,
+            ping_iter_interval: 2,
             nat_ping_req_interval: 10,
         };
 

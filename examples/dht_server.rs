@@ -196,7 +196,6 @@ fn main() {
         });
 
     let server: IoFuture<()> = Box::new(network);
-    let server = add_ping_sender(server, &server_obj);
     let server = add_lan_sender(server, &server_obj, local_addr);
     let server = add_server_main_loop(server, &server_obj);
     let server = add_onion_key_refresher(server, &server_obj);
@@ -211,26 +210,6 @@ fn main() {
 
     info!("server running on localhost:12345");
     tokio::run(server);
-}
-
-fn add_ping_sender(base_selector: IoFuture<()>, server_obj: &Server) -> IoFuture<()> {
-    // 60 seconds for PingRequests
-    let interval = Duration::from_secs(60);
-    let ping_wakeups = Interval::new(Instant::now() + interval, interval);
-    let server_obj_c = server_obj.clone();
-    let ping_sender = ping_wakeups
-        .map_err(|e| Error::new(ErrorKind::Other, format!("Ping timer error: {:?}", e)))
-        .for_each(move |_instant| {
-            println!("ping_wakeup");
-            server_obj_c.send_pings()
-        });
-
-    Box::new(base_selector.select(Box::new(ping_sender))
-        .map(|_| ())
-        .map_err(move |(err, _select_next)| {
-            error!("Processing ended with error: {:?}", err);
-            err
-        }))
 }
 
 fn add_server_main_loop(base_selector: IoFuture<()>, server_obj: &Server) -> IoFuture<()> {
@@ -257,6 +236,7 @@ fn add_server_main_loop(base_selector: IoFuture<()>, server_obj: &Server) -> IoF
                     bad_node_timeout: 162,
                     nodes_req_interval: 0,
                     nat_ping_req_interval: 0,
+                    ping_iter_interval: 0,
                 };
 
                 server_obj_c.set_config_values(args);
@@ -270,6 +250,7 @@ fn add_server_main_loop(base_selector: IoFuture<()>, server_obj: &Server) -> IoF
                     bad_node_timeout: 162,
                     nodes_req_interval: 20,
                     nat_ping_req_interval: 3,
+                    ping_iter_interval: 2,
                 };
 
                 server_obj_c.set_config_values(args);

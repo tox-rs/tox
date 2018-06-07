@@ -401,6 +401,15 @@ impl Kbucket {
         )
     }
 
+    /// return peer which has pk
+    pub fn find_node(&self, pk: &PublicKey) -> Option<&DhtNode> {
+        self.bucket_index(pk).and_then(|index|
+            self.buckets[index]
+                .find(&self.pk, pk)
+                .map(|node_index| &self.buckets[index].nodes[node_index])
+        )
+    }
+
     /** Return the possible internal index of [`Bucket`](./struct.Bucket.html)
         where the key could be inserted/removed.
 
