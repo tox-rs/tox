@@ -60,6 +60,11 @@ extern crate tokio_io;
 extern crate get_if_addrs;
 extern crate parking_lot;
 
+#[cfg(test)]
+extern crate tokio_timer;
+#[cfg(test)]
+extern crate tokio_executor;
+
 // TODO: refactor macros
 #[cfg(test)]
 #[macro_use]
