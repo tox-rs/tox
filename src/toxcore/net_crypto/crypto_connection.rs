@@ -21,7 +21,7 @@
 //! Crypto connection implementation.
 
 use std::net::SocketAddr;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 use super::packets_array::*;
 
@@ -65,7 +65,7 @@ pub struct StatusPacket {
     /// it can be `CookieRequest` or `CryptoHandshake`
     packet: StatusPacketEnum,
     /// When packet was sent last time
-    pub sent_time: SystemTime,
+    pub sent_time: Instant,
     /// How many times packet was sent
     pub num_sent: u8
 }
@@ -75,7 +75,7 @@ impl StatusPacket {
     pub fn new_cookie_request(packet: CookieRequest) -> StatusPacket {
         StatusPacket {
             packet: StatusPacketEnum::CookieRequest(packet),
-            sent_time: SystemTime::now(),
+            sent_time: clock_now(),
             num_sent: 0
         }
     }
@@ -84,7 +84,7 @@ impl StatusPacket {
     pub fn new_crypto_handshake(packet: CryptoHandshake) -> StatusPacket {
         StatusPacket {
             packet: StatusPacketEnum::CryptoHandshake(packet),
-            sent_time: SystemTime::now(),
+            sent_time: clock_now(),
             num_sent: 0
         }
     }
@@ -99,7 +99,7 @@ impl StatusPacket {
 
     /// Check if one second is elapsed since last time when the packet was sent
     fn is_time_elapsed(&self) -> bool {
-        self.sent_time.elapsed().unwrap_or(Duration::from_secs(0)) > Duration::from_secs(CRYPTO_SEND_PACKET_INTERVAL)
+        clock_elapsed(self.sent_time) > Duration::from_secs(CRYPTO_SEND_PACKET_INTERVAL)
     }
 
     /// Check if packet should be sent to the peer
@@ -245,9 +245,9 @@ pub struct CryptoConnection {
     /// Address to send UDP packets directly to the peer
     pub udp_addr: Option<SocketAddr>, // TODO: separate v4 and v6?
     /// Time when last UDP packet was received
-    pub udp_received_time: Option<SystemTime>,
+    pub udp_received_time: Option<Instant>,
     /// Time when we made an attempt to send UDP packet
-    pub udp_send_attempt_time: Option<SystemTime>,
+    pub udp_send_attempt_time: Option<Instant>,
     /// Buffer of sent packets
     pub send_array: PacketsArray<SentPacket>,
     /// Buffer of received packets
@@ -349,7 +349,7 @@ impl CryptoConnection {
             | ConnectionStatus::NotConfirmed { ref mut packet, .. } => {
                 if packet.should_be_sent() {
                     packet.num_sent += 1;
-                    packet.sent_time = SystemTime::now();
+                    packet.sent_time = clock_now();
                     Some(packet.dht_packet())
                 } else {
                     None
@@ -372,19 +372,18 @@ impl CryptoConnection {
 
     /// Set time when last UDP packet was received to now
     pub fn update_udp_received_time(&mut self) {
-        self.udp_received_time = Some(SystemTime::now())
+        self.udp_received_time = Some(clock_now())
     }
 
     /// Set time when we made an attempt to send UDP packet
     pub fn update_udp_send_attempt_time(&mut self) {
-        self.udp_send_attempt_time = Some(SystemTime::now())
+        self.udp_send_attempt_time = Some(clock_now())
     }
 
     /// Check if we received the last UDP packet not later than 8 seconds ago
     pub fn is_udp_alive(&self) -> bool {
         self.udp_received_time
-            .and_then(|time| time.elapsed().ok())
-            .map(|duration| duration < Duration::from_secs(UDP_DIRECT_TIMEOUT))
+            .map(|time| clock_elapsed(time) < Duration::from_secs(UDP_DIRECT_TIMEOUT))
             .unwrap_or(false)
     }
 
@@ -393,8 +392,7 @@ impl CryptoConnection {
     /// packet via TCP relay
     pub fn udp_attempt_should_be_made(&self) -> bool {
         self.udp_send_attempt_time
-            .and_then(|time| time.elapsed().ok())
-            .map(|duration| duration >= Duration::from_secs(UDP_DIRECT_TIMEOUT / 2))
+            .map(|time| clock_elapsed(time) >= Duration::from_secs(UDP_DIRECT_TIMEOUT / 2))
             .unwrap_or(true)
     }
 }
@@ -402,6 +400,11 @@ impl CryptoConnection {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use tokio_executor;
+    use tokio_timer::clock::*;
+
+    use toxcore::time::ConstNow;
 
     #[test]
     fn status_packet_should_be_sent() {
@@ -411,16 +414,25 @@ mod tests {
             nonce: gen_nonce(),
             payload: vec![42; 88]
         });
+
         assert!(packet.should_be_sent());
+
         // packet shouldn't be sent if it was sent not earlier than 1 second ago
         packet.num_sent += 1;
         assert!(!packet.should_be_sent());
-        // packet should be sent if it was sent earlier than 1 second ago
-        packet.sent_time -= Duration::from_secs(CRYPTO_SEND_PACKET_INTERVAL + 1);
-        assert!(packet.should_be_sent());
-        // packet shouldn't be sent if it was sent 8 times or more
-        packet.num_sent += MAX_NUM_SENDPACKET_TRIES;
-        assert!(!packet.should_be_sent());
+
+        let mut enter = tokio_executor::enter().unwrap();
+        let clock = Clock::new_with_now(ConstNow(
+            packet.sent_time + Duration::from_secs(CRYPTO_SEND_PACKET_INTERVAL + 1)
+        ));
+
+        with_default(&clock, &mut enter, |_| {
+            // packet should be sent if it was sent earlier than 1 second ago
+            assert!(packet.should_be_sent());
+            // packet shouldn't be sent if it was sent 8 times or more
+            packet.num_sent += MAX_NUM_SENDPACKET_TRIES;
+            assert!(!packet.should_be_sent());
+        });
     }
 
     #[test]
@@ -431,11 +443,20 @@ mod tests {
             nonce: gen_nonce(),
             payload: vec![42; 88]
         });
+
         assert!(!packet.is_timed_out());
+
         // packet is timed out if it was sent 8 times and 1 second elapsed since last sending
         packet.num_sent += MAX_NUM_SENDPACKET_TRIES;
-        packet.sent_time -= Duration::from_secs(CRYPTO_SEND_PACKET_INTERVAL + 1);
-        assert!(packet.is_timed_out());
+
+        let mut enter = tokio_executor::enter().unwrap();
+        let clock = Clock::new_with_now(ConstNow(
+            packet.sent_time + Duration::from_secs(CRYPTO_SEND_PACKET_INTERVAL + 1)
+        ));
+
+        with_default(&clock, &mut enter, |_| {
+            assert!(packet.is_timed_out());
+        });
     }
 
     #[test]
