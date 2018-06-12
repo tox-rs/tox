@@ -23,7 +23,7 @@
 
 use std::io::{ErrorKind, Error};
 use std::net::{IpAddr, SocketAddr};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
@@ -72,7 +72,7 @@ struct OnionAnnounceEntry {
     /// PublicKey that should be used to encrypt data packets for announced node
     pub data_pk: PublicKey,
     /// Time when this entry was added to the list of announced nodes
-    pub time: SystemTime
+    pub time: Instant
 }
 
 impl OnionAnnounceEntry {
@@ -84,7 +84,7 @@ impl OnionAnnounceEntry {
             port,
             onion_return,
             data_pk,
-            time: SystemTime::now()
+            time: clock_now()
         }
     }
 
@@ -95,7 +95,7 @@ impl OnionAnnounceEntry {
 
     */
     pub fn is_timed_out(&self) -> bool {
-        self.time + Duration::from_secs(ONION_ANNOUNCE_TIMEOUT) <= SystemTime::now()
+        clock_elapsed(self.time) >= Duration::from_secs(ONION_ANNOUNCE_TIMEOUT)
     }
 }
 
@@ -371,6 +371,10 @@ mod tests {
     use super::*;
 
     use quickcheck::{Arbitrary, StdGen};
+    use tokio_executor;
+    use tokio_timer::clock::*;
+
+    use toxcore::time::ConstNow;
 
     const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - secretbox::NONCEBYTES;
 
@@ -391,7 +395,7 @@ mod tests {
 
     #[test]
     fn announce_entry_expired() {
-        let mut entry = OnionAnnounceEntry::new(
+        let entry = OnionAnnounceEntry::new(
             PublicKey::from_slice(&[1; 32]).unwrap(),
             "1.2.3.4".parse().unwrap(),
             12345,
@@ -401,8 +405,16 @@ mod tests {
             },
             gen_keypair().0
         );
-        entry.time -= Duration::from_secs(ONION_ANNOUNCE_TIMEOUT + 1);
-        assert!(entry.is_timed_out());
+
+        let mut enter = tokio_executor::enter().unwrap();
+        // time when entry is timed out
+        let clock = Clock::new_with_now(ConstNow(
+            entry.time + Duration::from_secs(ONION_ANNOUNCE_TIMEOUT + 1)
+        ));
+
+        with_default(&clock, &mut enter, |_| {
+            assert!(entry.is_timed_out());
+        });
     }
 
     #[test]
@@ -482,14 +494,21 @@ mod tests {
         let dht_pk = gen_keypair().0;
         let mut onion_announce = OnionAnnounce::new(dht_pk);
 
-        let mut entry = create_random_entry();
+        let entry = create_random_entry();
         let entry_pk = entry.pk;
+        let entry_time = entry.time;
 
-        // make entry timed out
-        entry.time -= Duration::from_secs(ONION_ANNOUNCE_TIMEOUT + 1);
         onion_announce.entries.push(entry);
 
-        assert!(onion_announce.find_in_entries(entry_pk).is_none());
+        let mut enter = tokio_executor::enter().unwrap();
+        // time when entry is timed out
+        let clock = Clock::new_with_now(ConstNow(
+            entry_time + Duration::from_secs(ONION_ANNOUNCE_TIMEOUT + 1)
+        ));
+
+        with_default(&clock, &mut enter, |_| {
+            assert!(onion_announce.find_in_entries(entry_pk).is_none());
+        });
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////
@@ -535,17 +554,23 @@ mod tests {
         entry_to_update.ip_addr = "1.2.3.4".parse().unwrap();
         entry_to_update.port = 12345;
 
-        // update entry
-        assert!(onion_announce.add_to_entries(entry_to_update.clone()).is_some());
+        let mut enter = tokio_executor::enter().unwrap();
+        // time when entry will be updated
+        let clock = Clock::new_with_now(ConstNow(entry_to_update.time));
 
-        assert_eq!(onion_announce.find_in_entries(entry_to_update.pk), Some(&entry_to_update));
+        with_default(&clock, &mut enter, |_| {
+            // update entry
+            assert!(onion_announce.add_to_entries(entry_to_update.clone()).is_some());
 
-        // check that announce list contains all added entries
-        for pk in pks {
-            assert!(onion_announce.find_in_entries(pk).is_some());
-        }
+            assert_eq!(onion_announce.find_in_entries(entry_to_update.pk), Some(&entry_to_update));
 
-        assert_eq!(onion_announce.entries.len(), ONION_ANNOUNCE_MAX_ENTRIES);
+            // check that announce list contains all added entries
+            for pk in pks {
+                assert!(onion_announce.find_in_entries(pk).is_some());
+            }
+
+            assert_eq!(onion_announce.entries.len(), ONION_ANNOUNCE_MAX_ENTRIES);
+        });
     }
 
     #[test]
@@ -555,29 +580,45 @@ mod tests {
 
         let mut pks = Vec::new();
 
-        for _ in 0..ONION_ANNOUNCE_MAX_ENTRIES {
-            let entry = create_random_entry();
-            pks.push(entry.pk);
-            assert!(onion_announce.add_to_entries(entry).is_some());
-        }
+        let now = Instant::now();
+
+        let mut enter = tokio_executor::enter().unwrap();
+        // time when all entries except one will be created
+        let clock_1 = Clock::new_with_now(ConstNow(
+            now + Duration::from_secs(ONION_ANNOUNCE_TIMEOUT)
+        ));
+        // time when one entry will be timed out
+        let clock_2 = Clock::new_with_now(ConstNow(
+            now + Duration::from_secs(ONION_ANNOUNCE_TIMEOUT + 1)
+        ));
+
+        with_default(&clock_1, &mut enter, |_| {
+            for _ in 0..ONION_ANNOUNCE_MAX_ENTRIES {
+                let entry = create_random_entry();
+                pks.push(entry.pk);
+                assert!(onion_announce.add_to_entries(entry).is_some());
+            }
+        });
 
         // make one of entries timed out
         let timed_out_pk = onion_announce.entries[ONION_ANNOUNCE_MAX_ENTRIES / 2].pk;
-        onion_announce.entries[ONION_ANNOUNCE_MAX_ENTRIES / 2].time -= Duration::from_secs(ONION_ANNOUNCE_TIMEOUT + 1);
+        onion_announce.entries[ONION_ANNOUNCE_MAX_ENTRIES / 2].time = now;
 
-        let entry = create_random_entry();
-        let entry_pk = entry.pk;
-        assert!(onion_announce.add_to_entries(entry).is_some());
+        with_default(&clock_2, &mut enter, |_| {
+            let entry = create_random_entry();
+            let entry_pk = entry.pk;
+            assert!(onion_announce.add_to_entries(entry).is_some());
 
-        // check that announce list contains new entry
-        assert!(onion_announce.find_in_entries(entry_pk).is_some());
+            // check that announce list contains new entry
+            assert!(onion_announce.find_in_entries(entry_pk).is_some());
 
-        // check that announce list contains all old entries except timed out
-        for pk in pks.into_iter().filter(|&pk| pk != timed_out_pk) {
-            assert!(onion_announce.find_in_entries(pk).is_some());
-        }
+            // check that announce list contains all old entries except timed out
+            for pk in pks.into_iter().filter(|&pk| pk != timed_out_pk) {
+                assert!(onion_announce.find_in_entries(pk).is_some());
+            }
 
-        assert_eq!(onion_announce.entries.len(), ONION_ANNOUNCE_MAX_ENTRIES);
+            assert_eq!(onion_announce.entries.len(), ONION_ANNOUNCE_MAX_ENTRIES);
+        });
     }
 
     #[test]
