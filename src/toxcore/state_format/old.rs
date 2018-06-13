@@ -1,5 +1,6 @@
 /*
     Copyright © 2016 Zetok Zalbavar <zexavexxe@gmail.com>
+    Copyright © 2018 Namsoo CHO <nscho66@gmail.com>
 
     This file is part of Tox.
 
@@ -21,156 +22,22 @@
 //! better will become available.*
 
 use std::default::Default;
-use byteorder::{BigEndian, LittleEndian, WriteBytesExt};
-#[cfg(test)]
-use byteorder::ByteOrder;
-use nom::{be_u16, le_u16, le_u8, le_u32, le_u64, rest};
-
-use toxcore::binary_io::*;
-use toxcore::crypto_core::*;
-use toxcore::dht::*;
-use toxcore::toxid::{NoSpam, NOSPAMBYTES};
-
+use nom::{le_u16, le_u8, le_u32, le_u64};
 
 #[cfg(test)]
 use quickcheck::*;
 
-// TODO: add logging where it's missing
+use toxcore::binary_io::*;
+use toxcore::crypto_core::*;
+use toxcore::dht::packed_node::*;
+use toxcore::toxid::{NoSpam, NOSPAMBYTES};
 
-/// Length in bytes of request message.
-// FIXME: move somewhere else
-// TODO: rename
 const REQUEST_MSG_LEN: usize = 1024;
 
+/// According to https://zetok.github.io/tox-spec/#sections
+const SECTION_MAGIC: [u8; 2] = [206, 1];
 
-// TODO: improve docs
-
-/** Sections of the old state format.
-
-https://zetok.github.io/tox-spec/#sections
-*/
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SectionKind {
-    /** Section for [`NoSpam`](../../toxid/struct.NoSpam.html), public and
-    secret keys.
-
-    https://zetok.github.io/tox-spec/#nospam-and-keys-0x01
-    */
-    NospamKeys = 0x01,
-    /** Section for DHT-related data – [`DhtState`](./struct.DhtState.html).
-
-    https://zetok.github.io/tox-spec/#dht-0x02
-    */
-    // TODO: rename to DhtState
-    DHT =        0x02,
-    /** Section for friends data. Contains list of [`Friends`]
-    (./struct.Friends.html).
-
-    https://zetok.github.io/tox-spec/#friends-0x03
-    */
-    Friends =    0x03,
-    /** Section for own [`Name`](./struct.Name.html).
-
-    https://zetok.github.io/tox-spec/#name-0x04
-    */
-    Name =       0x04,
-    /** Section for own [`StatusMsg`](./struct.StatusMsg.html).
-
-    https://zetok.github.io/tox-spec/#status-message-0x05
-    */
-    StatusMsg =  0x05,
-    /** Section for own [`UserStatus`](./enum.UserStatus.html).
-
-    https://zetok.github.io/tox-spec/#status-0x06
-    */
-    // TODO: rename to UserStatus
-    Status =     0x06,
-    /** Section for a list of [`TcpRelays`](./struct.TcpRelays.html).
-
-    https://zetok.github.io/tox-spec/#tcp-relays-0x0a
-    */
-    TcpRelays =  0x0a,
-    /** Section for a list of [`PathNodes`](./struct.PathNodes.html) for onion
-    routing.
-
-    https://zetok.github.io/tox-spec/#path-nodes-0x0b
-    */
-    PathNodes =  0x0b,
-    /// End of file. https://zetok.github.io/tox-spec/#eof-0xff
-    EOF =        0xff,
-}
-
-from_bytes!(SectionKind, switch!(le_u16,
-    0x01 => value!(SectionKind::NospamKeys) |
-    0x02 => value!(SectionKind::DHT) |
-    0x03 => value!(SectionKind::Friends) |
-    0x04 => value!(SectionKind::Name) |
-    0x05 => value!(SectionKind::StatusMsg) |
-    0x06 => value!(SectionKind::Status) |
-    0x0a => value!(SectionKind::TcpRelays) |
-    0x0b => value!(SectionKind::PathNodes) |
-    0xff => value!(SectionKind::EOF)
-));
-
-/** Serialization into bytes
-
-```
-use self::tox::toxcore::binary_io::ToBytes;
-use self::tox::toxcore::state_format::old::SectionKind;
-
-assert_eq!(vec![1u8, 0],   SectionKind::NospamKeys .to_bytes());
-assert_eq!(vec![2u8, 0],   SectionKind::DHT        .to_bytes());
-assert_eq!(vec![3u8, 0],   SectionKind::Friends    .to_bytes());
-assert_eq!(vec![4u8, 0],   SectionKind::Name       .to_bytes());
-assert_eq!(vec![5u8, 0],   SectionKind::StatusMsg  .to_bytes());
-assert_eq!(vec![6u8, 0],   SectionKind::Status     .to_bytes());
-assert_eq!(vec![10u8, 0],  SectionKind::TcpRelays  .to_bytes());
-assert_eq!(vec![11u8, 0],  SectionKind::PathNodes  .to_bytes());
-assert_eq!(vec![255u8, 0], SectionKind::EOF        .to_bytes());
-```
-*/
-impl ToBytes for SectionKind {
-    fn to_bytes(&self) -> Vec<u8> {
-        let mut result = Vec::with_capacity(2);
-        result.write_u16::<LittleEndian>(*self as u16)
-            .expect("Failed to write SectionKind!");
-        result
-    }
-}
-
-
-/// Implement returning matching SectionKind for sections.
-trait SectionKindMatch {
-    /// Returns matching `SectionKind`.
-    fn kind() -> SectionKind;
-}
-
-macro_rules! section_kind_for_section {
-    ($($skind:ident, $sect:ident, $tname:ident),+) => ($(
-        impl SectionKindMatch for $sect {
-            fn kind() -> SectionKind { SectionKind::$skind }
-        }
-
-        #[test]
-        fn $tname() {
-            assert_eq!(SectionKind::$skind, $sect::kind());
-        }
-    )+)
-}
-section_kind_for_section!(
-    NospamKeys, NospamKeys, nospam_keys_kind_test,
-    DHT, DhtState, dht_state_kind_test,
-    Friends, Friends, friends_kind_test,
-    Name, Name, name_kind_test,
-    StatusMsg, StatusMsg, status_msg_kind_test,
-    Status, UserStatus, user_status_kind_test,
-    TcpRelays, TcpRelays, tcp_relays_kind_test,
-    PathNodes, PathNodes, path_nodes_kind_test,
-    EOF, Eof, eof_kind_test
-);
-
-
-/** NoSpam and Keys section of the old state format.
+/** NoSpam and Keys section of the new state format.
 
 https://zetok.github.io/tox-spec/#nospam-and-keys-0x01
 */
@@ -194,147 +61,93 @@ impl Default for NospamKeys {
         let nospam = NoSpam::default();
         let (pk, sk) = gen_keypair();
         NospamKeys {
-            nospam: nospam,
-            pk: pk,
-            sk: sk
+            nospam,
+            pk,
+            sk
         }
     }
 }
 
 /** Provided that there's at least [`NOSPAMKEYSBYTES`]
 (./constant.NOSPAMKEYSBYTES.html) de-serializing will not fail.
-
-E.g.
-
-```
-use self::tox::toxcore::binary_io::FromBytes;
-use self::tox::toxcore::crypto_core::{
-        PublicKey,
-        PUBLICKEYBYTES,
-        SecretKey,
-        SECRETKEYBYTES,
-};
-use self::tox::toxcore::state_format::old::{NospamKeys, NOSPAMKEYSBYTES};
-use self::tox::toxcore::toxid::{NoSpam, NOSPAMBYTES};
-
-let bytes = [0; NOSPAMKEYSBYTES];
-
-let result = NospamKeys {
-    nospam: NoSpam([0; NOSPAMBYTES]),
-    pk: PublicKey([0; PUBLICKEYBYTES]),
-    sk: SecretKey([0; SECRETKEYBYTES]),
-};
-
-assert_eq!(None, NospamKeys::from_bytes(&bytes[..NOSPAMKEYSBYTES - 1]));
-assert_eq!(result, NospamKeys::from_bytes(&bytes)
-                    .expect("Failed to parse NospamKeys!"));
-```
 */
-from_bytes!(NospamKeys, do_parse!(
-    nospam: call!(NoSpam::parse_bytes) >>
-    pk: call!(PublicKey::parse_bytes) >>
-    sk: call!(SecretKey::parse_bytes) >>
-    (NospamKeys {
-        nospam: nospam,
-        pk: pk,
-        sk: sk
-    })
-));
-
-/** E.g.
-
-```
-use self::tox::toxcore::binary_io::{FromBytes, ToBytes};
-use self::tox::toxcore::crypto_core::*;
-use self::tox::toxcore::state_format::old::{NospamKeys, NOSPAMKEYSBYTES};
-use self::tox::toxcore::toxid::{NoSpam, NOSPAMBYTES};
-
-{ // with `0` keys
-    let nk = NospamKeys {
-        nospam: NoSpam([0; NOSPAMBYTES]),
-        pk: PublicKey([0; PUBLICKEYBYTES]),
-        sk: SecretKey([0; SECRETKEYBYTES]),
-    };
-    assert_eq!(nk.to_bytes(), [0; NOSPAMKEYSBYTES].to_vec());
+// NoSpam is defined in toxid.rs
+impl FromBytes for NospamKeys {
+    named!(from_bytes<NospamKeys>, do_parse!(
+        tag!([0x01,0x00]) >>
+        tag!(SECTION_MAGIC) >>
+        nospam: call!(NoSpam::from_bytes) >>
+        pk: call!(PublicKey::from_bytes) >>
+        sk: call!(SecretKey::from_bytes) >>
+        (NospamKeys {
+            nospam,
+            pk,
+            sk
+        })
+    ));
 }
 
-{ // with random
-    let mut to_compare = Vec::with_capacity(NOSPAMKEYSBYTES);
-
-    let mut nospam_bytes = [0; NOSPAMBYTES];
-    randombytes_into(&mut nospam_bytes);
-    to_compare.extend_from_slice(&nospam_bytes);
-
-    let mut pk_bytes = [0; PUBLICKEYBYTES];
-    randombytes_into(&mut pk_bytes);
-    to_compare.extend_from_slice(&pk_bytes);
-
-    let mut sk_bytes = [0; SECRETKEYBYTES];
-    randombytes_into(&mut sk_bytes);
-    to_compare.extend_from_slice(&sk_bytes);
-
-    let nk = NospamKeys {
-        nospam: NoSpam(nospam_bytes),
-        pk: PublicKey(pk_bytes),
-        sk: SecretKey(sk_bytes),
-    };
-
-    assert_eq!(to_compare, nk.to_bytes());
-}
-
-{ // with de-serialized
-    let (pk, sk) = gen_keypair();
-    let nk = NospamKeys {
-        nospam: NoSpam::new(),
-        pk: pk,
-        sk: sk,
-    };
-
-    assert_eq!(nk, NospamKeys::from_bytes(&nk.to_bytes()).unwrap());
-}
-```
-*/
 impl ToBytes for NospamKeys {
-    fn to_bytes(&self) -> Vec<u8> {
-        let mut result = Vec::with_capacity(NOSPAMKEYSBYTES);
-        result.extend_from_slice(&self.nospam.0);
-        result.extend_from_slice(&self.pk.0);
-        result.extend_from_slice(&self.sk.0);
-        result
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_le_u16!(0x0001) >>
+            gen_slice!(SECTION_MAGIC) >>
+            gen_slice!(self.nospam.0) >>
+            gen_slice!(self.pk.as_ref()) >>
+            gen_slice!(self.sk.0)
+        )
     }
 }
 
+/** Own name, up to [`NAME_LEN`](./constant.NAME_LEN.html) bytes long.
+*/
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct Name(pub Vec<u8>);
+
+/// Length in bytes of name. ***Will be moved elsewhere.***
+pub const NAME_LEN: usize = 128;
+
+/** Produces up to [`NAME_LEN`](./constant.NAME_LEN.html) bytes long `Name`.
+    Can't fail.
+*/
+impl FromBytes for Name {
+    named!(from_bytes<Name>, do_parse!(
+        tag!([0x04,0x00]) >>
+        tag!(SECTION_MAGIC) >>
+        name_len: le_u16 >>
+        verify!(value!(name_len), |len| len <= NAME_LEN as u16) >>
+        name_bytes: take!(name_len) >>
+        name: value!(name_bytes.to_vec()) >>
+        (Name(name))
+    ));
+}
+
+impl ToBytes for Name {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_le_u16!(0x0004) >>
+            gen_slice!(SECTION_MAGIC) >>
+            gen_le_u16!(self.0.len()) >>
+            gen_slice!(self.0.as_slice())
+        )
+    }
+}
 
 /** DHT section of the old state format.
-
 https://zetok.github.io/tox-spec/#dht-0x02
-
 Default is empty, no Nodes.
-
-```
-# use std::default::Default;
-# use tox::toxcore::state_format::old::DhtState;
-# use tox::toxcore::dht::PackedNode;
-assert_eq!(&[] as &[PackedNode], DhtState::default().0.as_slice());
-```
 */
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct DhtState(pub Vec<PackedNode>);
 
-/// Minimal number of bytes [`DhtState`](./struct.DhtState.html) has.
-///
-/// Assumes that at least all the magic numbers are present.
-pub const DHT_STATE_MIN_SIZE: usize = 12;
-
 /// Special, magical beginning of DHT section in LE.
-// TODO: change to &'static [u8]
-const DHT_MAGICAL: u32 = 0x159_000d;
+const DHT_MAGICAL: u32 = 0x0159_000d;
 
 /** Special DHT section type encoded in LE.
 
     https://zetok.github.io/tox-spec/#dht-sections
 */
-const DHT_SECTION_TYPE: u16 = 0x04;
+const DHT_SECTION_TYPE: u16 = 0x0004;
 
 /** Yet another magical number in DHT section that needs a check.
 
@@ -342,112 +155,37 @@ https://zetok.github.io/tox-spec/#dht-sections
 */
 const DHT_2ND_MAGICAL: u16 = 0x11ce;
 
-/** If successful, returns `DhtState` and length of the section in bytes.
-
-> **Note:** An empty list of nodes can be returned!
-
-If de-serialization failed, returns `None`.
-
-Fails when:
-
-* number of bytes is less than [`DHT_STATE_MIN_SIZE`]
-  (./constant.DHT_STATE_MIN_SIZE.html)
-* one of 3 magic numbers doesn't match
-* encoded length of section + `DHT_STATE_MIN_SIZE` is bigger than all
-  suppplied bytes
-
-E.g. de-serialization with an empty list:
-
-```
-use self::tox::toxcore::binary_io::*;
-use self::tox::toxcore::dht::*;
-use self::tox::toxcore::state_format::old::*;
-
-let serialized = vec![
-        0x0d, 0x00, 0x59, 0x01,  // the first magic number
-        0, 0, 0, 0,   // length of `PackedNode`s bytes
-        0x04, 0,  // section magic number
-        0xce, 0x11,  // another magic number
-        // here would go `PackedNode`s, but since their length is `0`..
-];
-
-assert_eq!(DhtState(vec![]), DhtState::from_bytes(&serialized).unwrap());
-```
-*/
-from_bytes!(DhtState, do_parse!(
-    verify!(le_u32, |value| value == DHT_MAGICAL) >> // check whether beginning of the section matches DHT magic bytes
-    nodes: le_u32 >>
-    verify!(le_u16, |value| value == DHT_SECTION_TYPE) >> // check DHT section type
-    verify!(le_u16, |value| value == DHT_2ND_MAGICAL) >> // check whether yet another magic number matches
-    pns: flat_map!(take!(nodes as usize), many0!(PackedNode::parse_bytes)) >>
-    (DhtState(pns))
-));
-
-/** E.g. serialization of an empty list:
-
-```
-use self::tox::toxcore::binary_io::*;
-use self::tox::toxcore::dht::*;
-use self::tox::toxcore::state_format::old::*;
-
-let result = vec![
-        0x0d, 0x00, 0x59, 0x01,  // the first magic number
-        0, 0, 0, 0,   // length of `PackedNode`s bytes
-        0x04, 0,  // section magic number
-        0xce, 0x11,  // another magic number
-        // here would go `PackedNode`s, but since their length is `0`..
-];
-
-assert_eq!(result, DhtState(vec![]).to_bytes());
-```
-*/
-impl ToBytes for DhtState {
-    fn to_bytes(&self) -> Vec<u8> {
-        let mut result = Vec::with_capacity(DHT_STATE_MIN_SIZE);
-        result.write_u32::<LittleEndian>(DHT_MAGICAL)
-            .expect("Failed to write DhtState DHT_MAGICAL!");;
-
-        let pn_bytes = {
-            let mut bytes = Vec::with_capacity(
-                                    PACKED_NODE_IPV6_SIZE * self.0.len());
-            for pn in &self.0 {
-                bytes.extend_from_slice(&pn.to_bytes());
-            }
-            bytes
-        };
-
-        // add length of serialized `PackedNode`s
-        result.write_u32::<LittleEndian>(pn_bytes.len() as u32)
-            .expect("Failed to write DhtState PackedNode length!");
-
-        // section magic number
-        result.write_u16::<LittleEndian>(DHT_SECTION_TYPE)
-            .expect("Failed to write DhtState DHT_SECTION_TYPE!");
-
-        // 2nd magic number
-        result.write_u16::<LittleEndian>(DHT_2ND_MAGICAL)
-            .expect("Failed to write DhtState DHT_2ND_MAGICAL!");
-
-        // and `PackedNode`s
-        result.extend_from_slice(&pn_bytes);
-        result
-    }
+impl FromBytes for DhtState {
+    named!(from_bytes<DhtState>, do_parse!(
+        tag!([0x02,0x00]) >>
+        tag!(SECTION_MAGIC) >>
+        verify!(le_u32, |value| value == DHT_MAGICAL) >> // check whether beginning of the section matches DHT magic bytes
+        num_of_nodes: le_u16 >>
+        verify!(le_u16, |value| value == DHT_SECTION_TYPE) >> // check DHT section type
+        verify!(le_u16, |value| value == DHT_2ND_MAGICAL) >> // check whether yet another magic number matches
+        nodes: many_m_n!(num_of_nodes as usize, num_of_nodes as usize, PackedNode::from_bytes) >>
+        (DhtState(nodes))
+    ));
 }
 
+impl ToBytes for DhtState {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_le_u16!(0x0002) >>
+            gen_slice!(SECTION_MAGIC) >>
+            gen_le_u32!(DHT_MAGICAL as u32) >>
+            gen_le_u16!(self.0.len() as u16) >>
+            gen_le_u16!(DHT_SECTION_TYPE as u16) >>
+            gen_le_u16!(DHT_2ND_MAGICAL as u16) >>
+            gen_many_ref!(&self.0, |buf, node| PackedNode::to_bytes(node, buf))
+        )
+    }
+}
 
 /** Friend state status. Used by [`FriendState`](./struct.FriendState.html).
 
 https://zetok.github.io/tox-spec/#friends-0x03
 
-```
-use self::tox::toxcore::state_format::old::FriendStatus;
-
-assert_eq!(0u8, FriendStatus::NotFriend as u8);
-assert_eq!(1u8, FriendStatus::Added     as u8);
-assert_eq!(2u8, FriendStatus::FrSent    as u8);
-assert_eq!(3u8, FriendStatus::Confirmed as u8);
-assert_eq!(4u8, FriendStatus::Online    as u8);
-```
 */
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum FriendStatus {
@@ -464,86 +202,23 @@ pub enum FriendStatus {
     Online      = 4,
 }
 
-/** E.g.
-
-```
-use self::tox::toxcore::binary_io::*;
-use self::tox::toxcore::state_format::old::*;
-
-{ // ::NotFriend
-    let bytes = [FriendStatus::NotFriend as u8];
-    assert_eq!(FriendStatus::NotFriend,
-        FriendStatus::from_bytes(&bytes)
-            .expect("Failed to de-serialize FriendStatus::NotFriend!"));
+impl FromBytes for FriendStatus {
+    named!(from_bytes<FriendStatus>, switch!(le_u8,
+        0 => value!(FriendStatus::NotFriend) |
+        1 => value!(FriendStatus::Added) |
+        2 => value!(FriendStatus::FrSent) |
+        3 => value!(FriendStatus::Confirmed) |
+        4 => value!(FriendStatus::Online)
+    ));
 }
-
-{ // ::Added
-    let bytes = [FriendStatus::Added as u8];
-    assert_eq!(FriendStatus::Added,
-        FriendStatus::from_bytes(&bytes)
-            .expect("Failed to de-serialize FriendStatus::Added!"));
-}
-
-{ // ::FrSent
-    let bytes = [FriendStatus::FrSent as u8];
-    assert_eq!(FriendStatus::FrSent,
-        FriendStatus::from_bytes(&bytes)
-            .expect("Failed to de-serialize FriendStatus::FrSent!"));
-}
-
-{ // ::Confirmed
-    let bytes = [FriendStatus::Confirmed as u8];
-    assert_eq!(FriendStatus::Confirmed,
-        FriendStatus::from_bytes(&bytes)
-            .expect("Failed to de-serialize FriendStatus::Confirmed!"));
-}
-
-{ // ::Online
-    let bytes = [FriendStatus::Online as u8];
-    assert_eq!(FriendStatus::Online,
-        FriendStatus::from_bytes(&bytes)
-            .expect("Failed to de-serialize FriendStatus::Online!"));
-}
-
-{ // empty
-    assert_eq!(None, FriendStatus::from_bytes(&[]));
-    let debug = format!("{:?}", FriendStatus::parse_bytes(&[]).unwrap_err());
-    let err_msg = "Not enough bytes for FriendStatus.";
-    assert!(debug.contains(err_msg));
-}
-
-// wrong
-for i in 5..256 {
-    let bytes = [i as u8];
-    assert_eq!(None, FriendStatus::from_bytes(&bytes));
-    let debug = format!("{:?}", FriendStatus::parse_bytes(&bytes).unwrap_err());
-    let err_msg = format!("Unknown FriendStatus: {}", i);
-    assert!(debug.contains(&err_msg));
-}
-```
-*/
-from_bytes!(FriendStatus, switch!(le_u8,
-    0 => value!(FriendStatus::NotFriend) |
-    1 => value!(FriendStatus::Added) |
-    2 => value!(FriendStatus::FrSent) |
-    3 => value!(FriendStatus::Confirmed) |
-    4 => value!(FriendStatus::Online)
-));
-
 
 /** User status. Used for both own & friend statuses.
 
 https://zetok.github.io/tox-spec/#userstatus
 
-```
-# use self::tox::toxcore::state_format::old::UserStatus;
-assert_eq!(UserStatus::Online, UserStatus::default());
-```
 */
-// FIXME: *move somewhere else* (messenger?)
-// TODO: rename to `Status` ?
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum UserStatus {
+pub enum UserWorkingStatus {
     /// User is `Online`.
     Online = 0,
     /// User is `Away`.
@@ -552,24 +227,146 @@ pub enum UserStatus {
     Busy   = 2,
 }
 
-/// Returns `UserStatus::Online`.
-impl Default for UserStatus {
+/// Returns `UserWorkingStatus::Online`.
+impl Default for UserWorkingStatus {
     fn default() -> Self {
-        UserStatus::Online
+        UserWorkingStatus::Online
     }
 }
 
-from_bytes!(UserStatus, switch!(le_u8,
-    0 => value!(UserStatus::Online) |
-    1 => value!(UserStatus::Away) |
-    2 => value!(UserStatus::Busy)
-));
+impl FromBytes for UserWorkingStatus {
+    named!(from_bytes<UserWorkingStatus>,
+        switch!(le_u8,
+            0 => value!(UserWorkingStatus::Online) |
+            1 => value!(UserWorkingStatus::Away) |
+            2 => value!(UserWorkingStatus::Busy)
+        )
+    );
+}
+
+/// User status section
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct UserStatus(UserWorkingStatus);
+
+impl FromBytes for UserStatus {
+    named!(from_bytes<UserStatus>, do_parse!(
+        tag!([0x06,0x00]) >>
+        tag!(SECTION_MAGIC) >>
+        user_status : call!(UserWorkingStatus::from_bytes) >>
+        (UserStatus(user_status))
+    ));
+}
 
 impl ToBytes for UserStatus {
-    fn to_bytes(&self) -> Vec<u8> {
-        vec![*self as u8]
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_le_u16!(0x0006) >>
+            gen_slice!(SECTION_MAGIC) >>
+            gen_le_u8!(self.0 as u8)
+        )
     }
 }
+
+/** Status message, up to [`STATUS_MSG_LEN`](./constant.STATUS_MSG_LEN.html)
+bytes.
+
+*/
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct StatusMsg(pub Vec<u8>);
+
+/// Length in bytes of friend's status message.
+// FIXME: move somewhere else
+pub const STATUS_MSG_LEN: usize = 1007;
+
+impl ToBytes for StatusMsg {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_le_u16!(0x0005) >>
+            gen_slice!(SECTION_MAGIC) >>
+            gen_le_u16!(self.0.len()) >>
+            gen_slice!(self.0.as_slice())
+        )
+    }
+}
+
+impl FromBytes for StatusMsg {
+    named!(from_bytes<StatusMsg>, do_parse!(
+        tag!([0x05,0x00]) >>
+        tag!(SECTION_MAGIC) >>
+        status_msg_len: le_u16 >>
+        verify!(value!(status_msg_len), |len| len <= STATUS_MSG_LEN as u16) >>
+        status_msg_bytes: take!(status_msg_len) >>
+        status_msg: value!(status_msg_bytes.to_vec()) >>
+        (StatusMsg(status_msg))
+    ));
+}
+
+macro_rules! impl_arb_for_pn {
+    ($name:ident) => (
+        #[cfg(test)]
+        impl Arbitrary for $name {
+            fn arbitrary<G: Gen>(g: &mut G) -> Self {
+                let vec_len = g.gen_range(0, 16);
+                let nodes = (0..vec_len).into_iter()
+                    .map(|_| PackedNode::arbitrary(g))
+                    .collect();
+
+                $name(nodes)
+            }
+        }
+    )
+}
+
+macro_rules! nodes_list {
+    ($($name:ident, $tname:ident, $tag:expr),+) => ($(
+        /// Contains list in `PackedNode` format.
+        #[derive(Clone, Debug, Default, Eq, PartialEq)]
+        pub struct $name(pub Vec<PackedNode>);
+
+        impl FromBytes for $name {
+            named!(from_bytes<$name>, do_parse!(
+                tag!([0x00, $tag]) >>
+                tag!(SECTION_MAGIC) >>
+                num_of_nodes: le_u16 >>
+                nodes: many_m_n!(num_of_nodes as usize, num_of_nodes as usize, PackedNode::from_bytes) >>
+                ($name(nodes))
+            ));
+        }
+
+        impl ToBytes for $name {
+            fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+                do_gen!(buf,
+                    gen_le_u8!(0) >>
+                    gen_le_u8!($tag) >>
+                    gen_slice!(SECTION_MAGIC) >>
+                    gen_le_u16!(self.0.len()) >>
+                    gen_many_ref!(&self.0, |buf, node| PackedNode::to_bytes(node, buf))
+                )
+            }
+        }
+
+        impl_arb_for_pn!($name);
+
+        #[test]
+        fn $tname() {
+            fn with_pns(pns: $name) {
+                let mut buf = [0u8; 1024 * 10];
+                let (_, size) = pns.to_bytes((&mut buf, 0)).unwrap();
+                let (r_bytes, p) = $name::from_bytes(&buf[..size]).unwrap();
+
+                assert_eq!(p.0, pns.0);
+                assert_eq!(&[] as &[u8], r_bytes);
+            }
+            quickcheck(with_pns as fn($name));
+
+            // Default impl test
+            assert_eq!(&[] as &[PackedNode], $name::default().0.as_slice());
+        }
+    )+)
+}
+
+nodes_list!(TcpRelays, tcp_relays_test, 0x0a,
+                PathNodes, path_nodes_test, 0x0b);
 
 /** Friend state format for a single friend, compatible with what C toxcore
 does with on `GCC x86{,_x64}` platform.
@@ -585,518 +382,151 @@ https://zetok.github.io/tox-spec/#friends-0x03
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FriendState {
-    status: FriendStatus,
+    friend_status: FriendStatus,
     pk: PublicKey,
     /// Friend request message that is being sent to friend.
     fr_msg: Vec<u8>,
     /// Friend's name.
     name: Name,
     status_msg: StatusMsg,
-    user_status: UserStatus,
+    user_status: UserWorkingStatus,
     nospam: NoSpam,
     /// Time when friend was last seen online.
     last_seen: u64,
 }
 
-impl FriendState {
-    /** Add a new friend via `PublicKey`.
-
-    State assumes that friend request was sent and accepted.
-    */
-    pub fn new_from_pk(pk: &PublicKey) -> Self {
-        FriendState {
-            status: FriendStatus::Added,
-            pk: *pk,
-            fr_msg: Vec::new(),
-            name: Name::default(),
-            status_msg: StatusMsg::default(),
-            user_status: UserStatus::default(),
-            nospam: NoSpam([0; NOSPAMBYTES]),
-            last_seen: 0,
-        }
-    }
-}
-
-
 /// Number of bytes of serialized [`FriendState`](./struct.FriendState.html).
-pub const FRIENDSTATEBYTES: usize = 1      // "Status"
-                                  + PUBLICKEYBYTES
-/* Friend request message      */ + REQUEST_MSG_LEN
-/* padding1                    */ + 1
-/* actual size of FR message   */ + 2
-/* Name;                       */ + NAME_LEN
-/* actual size of Name         */ + 2
-/* Status msg;                 */ + STATUS_MSG_LEN
-/* padding2                    */ + 1
-/* actual size of status msg   */ + 2
-/* UserStatus                  */ + 1
-/* padding3                    */ + 3
-/* only used for sending FR    */ + NOSPAMBYTES
-/* last time seen              */ + 8;
+/* friend status               1    */
+/* PUBLICKEYBYTES              32   */
+/* Friend request message      1024 */
+/* padding1                    1    */
+/* actual size of FR message   2    */
+/* Name                        128  */
+/* actual size of Name         2    */
+/* Status msg                  1007 */
+/* padding2                    1    */
+/* actual size of status msg   2    */
+/* UserStatus                  1    */
+/* padding3                    3    */
+/* no spam                     4    */
+/* last time seen              8    */
 
-from_bytes!(FriendState, do_parse!(
-    status: call!(FriendStatus::parse_bytes) >>
-    pk: call!(PublicKey::parse_bytes) >>
-    fr_msg_bytes: take!(REQUEST_MSG_LEN) >>
-    take!(1) >> // padding
-    fr_msg_len: verify!(map!(be_u16, |len| len as usize), |len| len <= REQUEST_MSG_LEN) >>
-    fr_msg: value!(fr_msg_bytes[..fr_msg_len].to_vec()) >>
-    name_bytes: take!(NAME_LEN) >>
-    name_len: verify!(map!(be_u16, |len| len as usize), |len| len <= NAME_LEN) >>
-    name: value!(Name(name_bytes[..name_len].to_vec())) >>
-    status_msg_bytes: take!(STATUS_MSG_LEN) >>
-    take!(1) >> // padding
-    status_msg_len: verify!(map!(be_u16, |len| len as usize), |len| len <= STATUS_MSG_LEN) >>
-    status_msg: value!(StatusMsg(status_msg_bytes[..status_msg_len].to_vec())) >>
-    user_status: call!(UserStatus::parse_bytes) >>
-    take!(3) >> // padding
-    nospam: call!(NoSpam::parse_bytes) >>
-    seen: le_u64 >>
-    (FriendState {
-        status: status,
-        pk: pk,
-        fr_msg: fr_msg,
-        name: name,
-        status_msg: status_msg,
-        user_status: user_status,
-        nospam: nospam,
-        last_seen: seen,
-    })
-));
-// TODO: write tests ↑
+impl FromBytes for FriendState {
+    named!(from_bytes<FriendState>, do_parse!(
+        friend_status: call!(FriendStatus::from_bytes) >>
+        pk: call!(PublicKey::from_bytes) >>
+        fr_msg_bytes: take!(REQUEST_MSG_LEN) >>
+        padding1: take!(1) >>
+        fr_msg_len: le_u16 >>
+        verify!(value!(fr_msg_len), |len| len <= REQUEST_MSG_LEN as u16) >>
+        fr_msg: value!(fr_msg_bytes[..fr_msg_len as usize].to_vec()) >>
+        name_bytes: take!(NAME_LEN) >>
+        name_len: le_u16 >>
+        verify!(value!(name_len), |len| len <= NAME_LEN as u16) >>
+        name: value!(Name(name_bytes[..name_len as usize].to_vec())) >>
+        status_msg_bytes: take!(STATUS_MSG_LEN) >>
+        padding2: take!(1) >>
+        status_msg_len: le_u16 >>
+        verify!(value!(status_msg_len), |len| len <= STATUS_MSG_LEN as u16) >>
+        status_msg: value!(StatusMsg(status_msg_bytes[..status_msg_len as usize].to_vec())) >>
+        user_status: call!(UserWorkingStatus::from_bytes) >>
+        padding3: take!(3) >>
+        nospam: call!(NoSpam::from_bytes) >>
+        last_seen: le_u64 >>
+        (FriendState {
+            friend_status,
+            pk,
+            fr_msg,
+            name,
+            status_msg,
+            user_status,
+            nospam,
+            last_seen,
+        })
+    ));
+}
 
 impl ToBytes for FriendState {
-    fn to_bytes(&self) -> Vec<u8> {
-        // extend vec with all contents of slice and pad with `0`s up to `len`
-        // assume that Vec isn't too big for fr_msg
-        fn ext_vec(vec: &mut Vec<u8>, slice: &[u8], len: usize) {
-            let mut to_add = slice.to_vec();
-            append_zeros(&mut to_add, len);
-            vec.append(&mut to_add);
-        }
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        let mut fr_msg_pad = self.fr_msg.clone();
+        let mut name_pad = self.name.0.clone();
+        let mut status_msg_pad = self.status_msg.0.clone();
+        fr_msg_pad.resize(REQUEST_MSG_LEN, 0);
+        name_pad.resize(NAME_LEN, 0);
+        status_msg_pad.resize(STATUS_MSG_LEN, 0);
 
-        let mut result = Vec::with_capacity(FRIENDSTATEBYTES);
-
-        // friend status
-        result.push(self.status as u8);
-
-        // pk
-        result.extend_from_slice(&self.pk.0);
-
-        // friend request msg..
-        ext_vec(&mut result, &self.fr_msg, REQUEST_MSG_LEN);
-        // padding
-        result.push(0);
-        // .. and its length
-        result.write_u16::<BigEndian>(self.fr_msg.len() as u16)
-            .expect("Failed to write FriendState message length!");
-
-        // name and its length
-        ext_vec(&mut result, &self.name.0, NAME_LEN);
-        result.write_u16::<BigEndian>(self.name.0.len() as u16)
-            .expect("Failed to write FriendState name length!");
-
-        // status msg ..
-        ext_vec(&mut result, &self.status_msg.0, STATUS_MSG_LEN);
-        // padding
-        result.push(0);
-        // .. and its length
-        result.write_u16::<BigEndian>(self.status_msg.0.len() as u16)
-            .expect("Failed to write FriendState padding length!");
-
-        // UserStatus
-        result.push(self.user_status as u8);
-
-        // padding
-        append_zeros(&mut result, FRIENDSTATEBYTES - 12);
-
-        // NoSpam
-        result.extend_from_slice(&self.nospam.0);
-
-        // last seen
-        result.write_u64::<LittleEndian>(self.last_seen)
-            .expect("Failed to write FriendState last seen!");
-
-        result
+        do_gen!(buf,
+            gen_le_u8!(self.friend_status as u8) >>
+            gen_slice!(self.pk.as_ref()) >>
+            gen_slice!(fr_msg_pad.as_slice()) >>
+            gen_le_u8!(0) >>
+            gen_le_u16!(self.fr_msg.len()) >>
+            gen_slice!(name_pad.as_slice()) >>
+            gen_le_u16!(self.name.0.len()) >>
+            gen_slice!(status_msg_pad.as_slice()) >>
+            gen_le_u8!(0) >>
+            gen_le_u16!(self.status_msg.0.len()) >>
+            gen_le_u8!(self.user_status as u8) >>
+            gen_le_u8!(0) >>
+            gen_le_u16!(0) >>
+            gen_slice!(self.nospam.0) >>
+            gen_le_u64!(self.last_seen)
+        )
     }
 }
 
-#[cfg(test)]
-impl Arbitrary for FriendState {
-    fn arbitrary<G: Gen>(g: &mut G) -> Self {
-        // friend's PublicKey
-        let mut pk_bytes = [0; PUBLICKEYBYTES];
-        g.fill_bytes(&mut pk_bytes);
-        let pk = PublicKey(pk_bytes);
-
-        // friend message and its length
-        let mut fr_msg = [0; REQUEST_MSG_LEN];
-        let fr_msg_len = g.gen_range(0, REQUEST_MSG_LEN);
-        g.fill_bytes(&mut fr_msg[..fr_msg_len]);
-        let fr_msg = fr_msg[..fr_msg_len].to_vec();
-
-        // friend name and its length
-        let mut fname = [0; NAME_LEN];
-        let fname_len = g.gen_range(0, NAME_LEN);
-        g.fill_bytes(&mut fname[..fname_len]);
-        let fname = Name(fname[..fname_len].to_vec());
-
-        // status message and its length
-        let mut status_msg = [0; STATUS_MSG_LEN];
-        let status_msg_len = g.gen_range(0, STATUS_MSG_LEN);
-        g.fill_bytes(&mut status_msg[..status_msg_len]);
-        let status_msg = StatusMsg(status_msg[..status_msg_len].to_vec());
-
-        let mut ns_bytes = [0; NOSPAMBYTES];
-        g.fill_bytes(&mut ns_bytes);
-        let nospam = NoSpam(ns_bytes);
-
-        FriendState {
-            status: Arbitrary::arbitrary(g),
-            pk: pk,
-            fr_msg: fr_msg,
-            name: fname,
-            status_msg: status_msg,
-            user_status: Arbitrary::arbitrary(g),
-            nospam: nospam,
-            last_seen: Arbitrary::arbitrary(g),
-        }
-    }
-}
-
-
-// TODO: replace every `Vec<FriendState>` with `Friends`
 /** Wrapper struct for `Vec<FriendState>` to ease working with friend lists.
 */
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Friends(pub Vec<FriendState>);
 
-impl Friends {
-
-    /// `true` if there is a friend with given `PublicKey`, `false` otherwise.
-    pub fn is_friend(&self, pk: &PublicKey) -> bool {
-        self.0.iter().any(|fs| fs.pk == *pk)
-    }
-
-    /** Add [`FriendState`](./struct.FriendState.html) to the list of friends.
-
-    If the friend was already in `Friends`, `false` is returned, `true`
-    otherwise.
-    */
-    pub fn add_friend(&mut self, fs: FriendState) -> bool {
-        if self.is_friend(&fs.pk) {
-            return false
-        }
-
-        self.0.push(fs);
-        true
-    }
+impl FromBytes for Friends {
+    named!(from_bytes<Friends>, do_parse!(
+        tag!([0x03, 0x00]) >>
+        tag!(SECTION_MAGIC) >>
+        num_of_friends: le_u16 >>
+        friends: many_m_n!(num_of_friends as usize, num_of_friends as usize, FriendState::from_bytes) >>
+        (Friends(friends))
+    ));
 }
-
-from_bytes!(Friends, map!(many0!(FriendState::parse_bytes), Friends));
 
 impl ToBytes for Friends {
-    fn to_bytes(&self) -> Vec<u8> {
-        let mut res = Vec::with_capacity(FRIENDSTATEBYTES * self.0.len());
-        for f in &self.0 {
-            res.extend_from_slice(&f.to_bytes());
-        }
-        res
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_le_u16!(0x0003) >>
+            gen_slice!(SECTION_MAGIC) >>
+            gen_le_u16!(self.0.len()) >>
+            gen_many_ref!(&self.0, |buf, friend| FriendState::to_bytes(friend, buf))
+        )
     }
 }
-
-#[cfg(test)]
-impl Arbitrary for Friends {
-    fn arbitrary<G: Gen>(g: &mut G) -> Self {
-        Friends(Arbitrary::arbitrary(g))
-    }
-}
-
-
-macro_rules! impl_to_bytes_for_bytes_struct {
-    ($name:ty, $tname:ident) => (
-        impl ToBytes for $name {
-            fn to_bytes(&self) -> Vec<u8> {
-                self.0.clone()
-            }
-        }
-
-        #[test]
-        fn $tname() {
-            fn test_fn(s: $name) {
-                assert_eq!(s.0, s.to_bytes());
-            }
-            quickcheck(test_fn as fn($name));
-        }
-    )
-}
-
-// TODO: refactor `Name` and `StatusMsg` to implementation via via macro,
-//       in a similar way to how sodiumoxide does implementation via macros
-
-/** Own name, up to [`NAME_LEN`](./constant.NAME_LEN.html) bytes long.
-*/
-// TODO: move elsewhere from this module
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct Name(pub Vec<u8>);
-
-/// Length in bytes of name. ***Will be moved elsewhere.***
-// FIXME: move somewhere else
-pub const NAME_LEN: usize = 128;
-
-impl Name {
-    /** Create new `Name` from bytes in a slice. If there are more bytes than
-    [`NAME_LEN`](./constant.NAME_LEN.html), use only `NAME_LEN` bytes.
-
-    E.g.:
-
-    ```
-    use self::tox::toxcore::state_format::old::*;
-
-    for n in 0..(NAME_LEN + 1) {
-        let bytes = vec![0; n];
-        assert_eq!(bytes, Name::new(&bytes).0);
-    }
-
-    for n in (NAME_LEN + 1)..(NAME_LEN + 20) {
-        let bytes = vec![0; n];
-        assert_eq!(&bytes[..NAME_LEN], Name::new(&bytes).0.as_slice());
-    }
-    ```
-    */
-    pub fn new(bytes: &[u8]) -> Self {
-        if bytes.len() < NAME_LEN {
-            Name(bytes.to_vec())
-        } else {
-            Name(bytes[..NAME_LEN].to_vec())
-        }
-    }
-}
-
-/** Produces up to [`NAME_LEN`](./constant.NAME_LEN.html) bytes long `Name`.
-    Can't fail.
-*/
-from_bytes!(Name, map!(alt_complete!(take!(NAME_LEN) | rest), Name::new));
-
-impl_to_bytes_for_bytes_struct!(Name, name_to_bytes_test);
-
-
-/** Status message, up to [`STATUS_MSG_LEN`](./constant.STATUS_MSG_LEN.html)
-bytes.
-
-> ***Note: will be moved (and renamed?)***.
-*/
-// TODO: rename(?) & move from this module
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct StatusMsg(pub Vec<u8>);
-
-/// Length in bytes of friend's status message.
-// FIXME: move somewhere else
-pub const STATUS_MSG_LEN: usize = 1007;
-
-impl StatusMsg {
-    /** Create new `StatusMsg` from bytes in a slice. If there are more bytes
-    than [`STATUS_MSG_LEN`](./constant.STATUS_MSG_LEN.html), use only
-    `STATUS_MSG_LEN` bytes.
-
-    E.g.:
-
-    ```
-    use self::tox::toxcore::state_format::old::*;
-
-    for n in 0..(STATUS_MSG_LEN + 1) {
-        let bytes = vec![0; n];
-        assert_eq!(bytes, StatusMsg::new(&bytes).0);
-    }
-
-    for n in (STATUS_MSG_LEN + 1)..(STATUS_MSG_LEN + 20) {
-        let bytes = vec![0; n];
-        assert_eq!(&bytes[..STATUS_MSG_LEN],
-                StatusMsg::new(&bytes).0.as_slice());
-    }
-    ```
-    */
-    pub fn new(bytes: &[u8]) -> Self {
-        if bytes.len() < STATUS_MSG_LEN {
-            StatusMsg(bytes.to_vec())
-        } else {
-            StatusMsg(bytes[..STATUS_MSG_LEN].to_vec())
-        }
-    }
-}
-
-/** Produces up to [`STATUS_MSG_LEN`](./constant.STATUS_MSG_LEN.html) bytes
-long `StatusMsg`. Can't fail.
-*/
-from_bytes!(StatusMsg, map!(alt_complete!(take!(STATUS_MSG_LEN) | rest), StatusMsg::new));
-
-impl_to_bytes_for_bytes_struct!(StatusMsg, status_msg_to_bytes_test);
-
-macro_rules! nodes_list {
-    ($($name:ident, $tname:ident),+) => ($(
-        /// Contains list in `PackedNode` format.
-        #[derive(Clone, Debug, Default, Eq, PartialEq)]
-        pub struct $name(pub Vec<PackedNode>);
-
-        from_bytes!($name, map!(many0!(PackedNode::parse_bytes), $name));
-
-        impl ToBytes for $name {
-            fn to_bytes(&self) -> Vec<u8> {
-                let mut result = Vec::with_capacity(
-                            PACKED_NODE_IPV6_SIZE * self.0.len());
-                for node in &self.0 {
-                    result.append(&mut node.to_bytes());
-                }
-                result
-            }
-        }
-
-        #[cfg(test)]
-        impl_arb_for_pn!($name);
-
-        #[cfg(test)]
-        #[test]
-        // TODO: test also for failures? should be covered by other test, but..
-        fn $tname() {
-            fn with_pns(pns: Vec<PackedNode>) {
-                let mut bytes = Vec::new();
-                for pn in &pns {
-                    bytes.append(&mut pn.to_bytes());
-                }
-                {
-                    let (r_bytes, p) = $name::parse_bytes(&bytes).unwrap();
-
-                    assert_eq!(p.0, pns);
-                    assert_eq!(&[] as &[u8], r_bytes);
-                }
-
-                assert_eq!($name(pns).to_bytes(), bytes);
-            }
-            quickcheck(with_pns as fn(Vec<PackedNode>));
-
-            // Default impl test
-            assert_eq!(&[] as &[PackedNode], $name::default().0.as_slice());
-        }
-    )+)
-}
-
-nodes_list!(TcpRelays, tcp_relays_test,
-            PathNodes, path_nodes_test);
-
 
 /// End of the state format data.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-struct Eof;
+pub struct Eof;
+
+impl FromBytes for Eof {
+    named!(from_bytes<Eof>, do_parse!(
+        tag!([0xff, 0x00]) >>
+        tag!(SECTION_MAGIC) >>
+        (Eof)
+    ));
+}
 
 impl ToBytes for Eof {
-    fn to_bytes(&self) -> Vec<u8> {
-        Vec::new()
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_le_u16!(0x00ff) >>
+            gen_slice!(SECTION_MAGIC)
+        )
     }
 }
-
-#[cfg(test)]
-impl Arbitrary for Eof {
-    fn arbitrary<G: Gen>(_g: &mut G) -> Self { Eof }
-}
-
-/// Data for `Section`. Might, or might not contain valid data.
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct SectionData {
-    kind: SectionKind,
-    data: Vec<u8>,
-}
-
-/// Minimal length in bytes of an empty section. Any section that is not empty
-/// should be bigger.
-const SECTION_MIN_LEN: usize = 8;
-
-/// According to https://zetok.github.io/tox-spec/#sections
-const SECTION_MAGIC: &[u8; 2] = &[206, 1];
-
-impl SectionData {
-
-    /** Try to parse `SectionData`'s bytes into [`Section`]
-    (./enum.Section.html).
-
-    Fails if `SectionData` doesn't contain valid data.
-    */
-    // TODO: test failures?
-    fn as_section(&self) -> Option<Section> {
-        match self.kind {
-            SectionKind::NospamKeys => NospamKeys::from_bytes(&self.data)
-                .map(Section::NospamKeys),
-            SectionKind::DHT => DhtState::from_bytes(&self.data)
-                .map(Section::DHT),
-            SectionKind::Friends => Friends::from_bytes(&self.data)
-                .map(Section::Friends),
-            SectionKind::Name => Name::from_bytes(&self.data)
-                .map(Section::Name),
-            SectionKind::StatusMsg => StatusMsg::from_bytes(&self.data)
-                .map(Section::StatusMsg),
-            SectionKind::Status => UserStatus::from_bytes(&self.data)
-                .map(Section::Status),
-            SectionKind::TcpRelays => TcpRelays::from_bytes(&self.data)
-                .map(Section::TcpRelays),
-            SectionKind::PathNodes => PathNodes::from_bytes(&self.data)
-                .map(Section::PathNodes),
-            SectionKind::EOF => Some(Section::EOF),
-        }
-    }
-
-    /** Try to parse `SectionData`'s bytes into multiple [`Section`s]
-    (./enum.Section.html).
-
-    Fails if `SectionData` doesn't contain valid data.
-
-    Can return empty `Vec<_>`.
-    */
-    // TODO: move under `Section` ?
-    fn into_sect_mult(s: &[SectionData]) -> Vec<Section> {
-        // TODO: don't return an empty Vec ?
-        s.iter()
-            .map(|sd| sd.as_section())
-            .filter(|s| s.is_some())
-            .map(|s| s.expect("IS Some(_)"))
-            .collect()
-    }
-}
-
-
-from_bytes!(SectionData, do_parse!(
-    data_len: le_u32 >>
-    kind: call!(SectionKind::parse_bytes) >>
-    tag!(SECTION_MAGIC) >>
-    data: take!(data_len) >>
-    (SectionData { kind, data: data.to_vec() })
-));
-
-
-#[cfg(test)]
-impl Arbitrary for SectionData {
-    fn arbitrary<G: Gen>(g: &mut G) -> Self {
-        let kind: SectionKind = Arbitrary::arbitrary(g);
-        let data = match kind {
-            SectionKind::NospamKeys => NospamKeys::arbitrary(g).to_bytes(),
-            SectionKind::DHT => DhtState::arbitrary(g).to_bytes(),
-            SectionKind::Friends => Friends::arbitrary(g).to_bytes(),
-            SectionKind::Name => Name::arbitrary(g).0,
-            SectionKind::StatusMsg => StatusMsg::arbitrary(g).0,
-            SectionKind::Status => vec![UserStatus::arbitrary(g) as u8],
-            SectionKind::TcpRelays => TcpRelays::arbitrary(g).to_bytes(),
-            SectionKind::PathNodes => PathNodes::arbitrary(g).to_bytes(),
-            SectionKind::EOF => vec![],
-        };
-        SectionData { kind: kind, data: data }
-    }
-}
-
 
 /** Sections of state format.
 
 https://zetok.github.io/tox-spec/#sections
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
-// TODO: deduplicate with `SectionKind` ?
 pub enum Section {
     /** Section for [`NoSpam`](../../toxid/struct.NoSpam.html), public and
     secret keys.
@@ -1108,7 +538,7 @@ pub enum Section {
 
     https://zetok.github.io/tox-spec/#dht-0x02
     */
-    DHT(DhtState),
+    DhtState(DhtState),
     /** Section for friends data. Contains list of [`Friends`]
     (./struct.Friends.html).
 
@@ -1129,7 +559,7 @@ pub enum Section {
 
     https://zetok.github.io/tox-spec/#status-0x06
     */
-    Status(UserStatus),
+    UserStatus(UserStatus),
     /** Section for a list of [`TcpRelays`](./struct.TcpRelays.html).
 
     https://zetok.github.io/tox-spec/#tcp-relays-0x0a
@@ -1141,581 +571,222 @@ pub enum Section {
     https://zetok.github.io/tox-spec/#path-nodes-0x0b
     */
     PathNodes(PathNodes),
-    /// End of file. https://zetok.github.io/tox-spec/#eof-0xff
-    EOF,
 }
 
+impl FromBytes for Section {
+    named!(from_bytes<Section>, alt!(
+        map!(NospamKeys::from_bytes, Section::NospamKeys) |
+        map!(DhtState::from_bytes, Section::DhtState) |
+        map!(Friends::from_bytes, Section::Friends) |
+        map!(Name::from_bytes, Section::Name) |
+        map!(StatusMsg::from_bytes, Section::StatusMsg) |
+        map!(UserStatus::from_bytes, Section::UserStatus) |
+        map!(TcpRelays::from_bytes, Section::TcpRelays) |
+        map!(PathNodes::from_bytes, Section::PathNodes)
+    ));
+}
+
+impl ToBytes for Section {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        match *self {
+            Section::NospamKeys(ref p) => p.to_bytes(buf),
+            Section::DhtState(ref p) => p.to_bytes(buf),
+            Section::Friends(ref p) => p.to_bytes(buf),
+            Section::Name(ref p) => p.to_bytes(buf),
+            Section::StatusMsg(ref p) => p.to_bytes(buf),
+            Section::UserStatus(ref p) => p.to_bytes(buf),
+            Section::TcpRelays(ref p) => p.to_bytes(buf),
+            Section::PathNodes(ref p) => p.to_bytes(buf)
+        }
+    }
+}
 
 /** Tox State sections. Use to manage `.tox` save files.
 
 https://zetok.github.io/tox-spec/#state-format
 */
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-// TODO: change to use `Section`s
 pub struct State {
-    // Sections are listed in order from the spec.
-    nospamkeys: NospamKeys,
-    dhtstate: DhtState,
-    friends: Friends,
-    name: Name,
-    status_msg: StatusMsg,
-    status: UserStatus,
-    tcp_relays: TcpRelays,
-    path_nodes: PathNodes,
+    sections: Vec<Section>,
     eof: Eof,
 }
 
-/// State Format magic bytes.
-const STATE_MAGIC: &[u8; 4] = &[0x1f, 0x1b, 0xed, 0x15];
-
-/// Length of `State` header.
-#[cfg(test)]
-const STATE_HEAD_LEN: usize = 8;
-
-
-// TODO: refactor the whole thing
-impl State {
-
-    /** Add friend with `PublicKey` without sending a friend request.
-
-    Returns `true` if friend was added, `false` otherwise.
-
-    **Subject to change**.
-    */
-    // TODO: move elsewhere
-    pub fn add_friend_norequest(&mut self, pk: &PublicKey) -> bool {
-        self.friends.add_friend(FriendState::new_from_pk(pk))
-    }
-
-    /** Check if given `PublicKey` is an exact match to the `State` PK.
-
-    When checking if given Tox ID is our own, check only PK part, as it is
-    the only usable unchanging part.
-
-    Returns `true` if there's an exact match, `false` otherwise.
-    */
-    pub fn is_own_pk(&self, pk: &PublicKey) -> bool {
-        self.nospamkeys.pk == *pk
-    }
-
-    /** Fails (returns `None`) only if there is no `NospamKeys` in supplied
-    sections. If some other section than `NospamKeys` has invalid data,
-    `Default` value is used.
-    */
-    // TODO: test
-    fn from_sects(sects: &[Section]) -> Option<Self> {
-        // if no section matches `NospamKeys` return early
-        if !sects.iter()
-            .any(|s| match *s { Section::NospamKeys(_) => true, _ => false })
-        {
-            return None
-        }
-
-        // TODO: ↓ refactor once Eof gets implemented
-
-        // get the section, or `Default` if section doesn't exist
-        macro_rules! state_section {
-            ($pname: path) => (
-                sects.iter()
-                    .filter_map(|s| match *s {
-                        $pname(ref s) => Some(s.clone()),
-                        _ => None,
-                    })
-                    .next()
-                    .unwrap_or_default()
-            )
-        }
-
-        // return `Some(_)` only if there are valid `NospamKeys`
-        sects.iter()
-            .filter_map(|s| match *s {
-                Section::NospamKeys(ref nspks) => Some(nspks.clone()),
-                _ => None,
-            })
-            .next()
-            .map(|nspks|
-                State {
-                    nospamkeys: nspks,
-                    dhtstate: state_section!(Section::DHT),
-                    friends: state_section!(Section::Friends),
-                    name: state_section!(Section::Name),
-                    status_msg: state_section!(Section::StatusMsg),
-                    status: state_section!(Section::Status),
-                    tcp_relays: state_section!(Section::TcpRelays),
-                    path_nodes: state_section!(Section::PathNodes),
-                    eof: Eof,
-                }
-            )
-    }
+impl FromBytes for State {
+    named!(from_bytes<State>, do_parse!(
+        num_of_sections: le_u8 >>
+        sections: many_m_n!(num_of_sections as usize, num_of_sections as usize, Section::from_bytes) >>
+        eof: call!(Eof::from_bytes) >>
+        (State {
+            sections: sections.to_vec(),
+            eof,
+        })
+    ));
 }
-
-from_bytes!(State, do_parse!(
-    tag!(&[0; 4]) >>
-    tag!(STATE_MAGIC) >>
-    sections: map!(many0!(SectionData::parse_bytes), |ref sd| SectionData::into_sect_mult(sd)) >>
-    state: expr_opt!(Self::from_sects(&sections)) >>
-    (state)
-));
 
 impl ToBytes for State {
-    // unoptimized
-    fn to_bytes(&self) -> Vec<u8> {
-        // should be run for each State's section
-        fn to_s_bytes<S: ToBytes + SectionKindMatch>(sect: &S) -> Vec<u8> {
-            let bytes = sect.to_bytes();
-            let mut res = Vec::with_capacity(SECTION_MIN_LEN + bytes.len());
-            // length of the section goes first
-            res.write_u32::<LittleEndian>(bytes.len() as u32)
-                .expect("Failed to write State length!");
-            // knowing what's the section is useful
-            res.extend_from_slice(&S::kind().to_bytes());
-            // lets make it *magical*
-            res.extend_from_slice(SECTION_MAGIC);
-            res.extend_from_slice(&bytes);
-            res
-        }
-
-        let mut res = Vec::new();
-        // state header
-        res.extend_from_slice(&[0; 4]);
-        res.extend_from_slice(STATE_MAGIC);
-
-        macro_rules! append_to_res {
-            ($($sect:ident),+) => ($(
-                res.extend_from_slice(&to_s_bytes(&self.$sect));
-            )+)
-        }
-        // Right STR8 C Order:
-        // 1. NospamKeys
-        // 2. Friends
-        // 3. Name
-        // 4. StatusMsg
-        // 5. Status
-        // 6. DhtState ← /obviously/ 2nd section kind fits here
-        // 7. TcpRelays
-        // 8. PathNodes
-        // 9. EOF
-        append_to_res!(nospamkeys, friends, name, status_msg, status,
-                       dhtstate, tcp_relays, path_nodes, eof);
-        res
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_le_u8!(self.sections.len() as u8) >>
+            gen_many_ref!(&self.sections, |buf, section| Section::to_bytes(section, buf)) >>
+            gen_call!(|buf, eof| Eof::to_bytes(eof, buf), &self.eof)
+        )
     }
 }
-
 
 #[cfg(test)]
-impl Arbitrary for State {
-    fn arbitrary<G: Gen>(g: &mut G) -> Self {
-        macro_rules! arb_state_section {
-            ($($section:ident),+) => (
-                State {
-                    $($section: Arbitrary::arbitrary(g),)+
-                }
-            )
+mod tests {
+    use super::*;
+
+    encode_decode_test!(
+        no_spam_keys_encode_decode,
+        NospamKeys::default()
+    );
+
+    encode_decode_test!(
+        dht_state_encode_decode,
+        DhtState(vec![
+            PackedNode {
+                pk: gen_keypair().0,
+                saddr: "1.2.3.4:1234".parse().unwrap(),
+            },
+            PackedNode {
+                pk: gen_keypair().0,
+                saddr: "1.2.3.5:1235".parse().unwrap(),
+            },
+        ])
+    );
+
+    encode_decode_test!(
+        friends_encode_decode,
+        Friends(vec![
+            FriendState {
+                friend_status: FriendStatus::Added,
+                pk: gen_keypair().0,
+                fr_msg: b"test msg".to_vec(),
+                name: Name(b"test name".to_vec()),
+                status_msg: StatusMsg(b"test status msg".to_vec()),
+                user_status: UserWorkingStatus::Online,
+                nospam: NoSpam([7; NOSPAMBYTES]),
+                last_seen: 1234,
+            },
+            FriendState {
+                friend_status: FriendStatus::Added,
+                pk: gen_keypair().0,
+                fr_msg: b"test msg2".to_vec(),
+                name: Name(b"test name2".to_vec()),
+                status_msg: StatusMsg(b"test status msg2".to_vec()),
+                user_status: UserWorkingStatus::Online,
+                nospam: NoSpam([8; NOSPAMBYTES]),
+                last_seen: 1235,
+            },
+        ])
+    );
+
+    encode_decode_test!(
+        name_encode_decode,
+        Name(vec![0,1,2,3,4])
+    );
+
+    encode_decode_test!(
+        status_msg_encode_decode,
+        StatusMsg(vec![0,1,2,3,4,5])
+    );
+
+    encode_decode_test!(
+        user_status_encode_decode,
+        UserStatus(UserWorkingStatus::Online)
+    );
+
+    encode_decode_test!(
+        tcp_relays_encode_decode,
+        TcpRelays(vec![
+            PackedNode {
+                pk: gen_keypair().0,
+                saddr: "1.2.3.4:1234".parse().unwrap(),
+            },
+            PackedNode {
+                pk: gen_keypair().0,
+                saddr: "1.2.3.5:1235".parse().unwrap(),
+            },
+        ])
+    );
+
+    encode_decode_test!(
+        path_nodes_encode_decode,
+        PathNodes(vec![
+            PackedNode {
+                pk: gen_keypair().0,
+                saddr: "1.2.3.4:1234".parse().unwrap(),
+            },
+            PackedNode {
+                pk: gen_keypair().0,
+                saddr: "1.2.3.5:1235".parse().unwrap(),
+            },
+        ])
+    );
+
+    encode_decode_test!(
+        state_encode_decode,
+        State {
+            sections: vec![
+                Section::NospamKeys(NospamKeys::default()),
+                Section::DhtState(DhtState(vec![
+                    PackedNode {
+                        pk: gen_keypair().0,
+                        saddr: "1.2.3.4:1234".parse().unwrap(),
+                    },
+                    PackedNode {
+                        pk: gen_keypair().0,
+                        saddr: "1.2.3.5:1235".parse().unwrap(),
+                    },
+                ])),
+                Section::Friends(Friends(vec![
+                    FriendState {
+                        friend_status: FriendStatus::Added,
+                        pk: gen_keypair().0,
+                        fr_msg: b"test msg".to_vec(),
+                        name: Name(b"test name".to_vec()),
+                        status_msg: StatusMsg(b"test status msg".to_vec()),
+                        user_status: UserWorkingStatus::Online,
+                        nospam: NoSpam([7; NOSPAMBYTES]),
+                        last_seen: 1234,
+                    },
+                    FriendState {
+                        friend_status: FriendStatus::Added,
+                        pk: gen_keypair().0,
+                        fr_msg: b"test msg2".to_vec(),
+                        name: Name(b"test name2".to_vec()),
+                        status_msg: StatusMsg(b"test status msg2".to_vec()),
+                        user_status: UserWorkingStatus::Online,
+                        nospam: NoSpam([8; NOSPAMBYTES]),
+                        last_seen: 1235,
+                    },
+                ])),
+                Section::Name(Name(vec![0,1,2,3,4])),
+                Section::StatusMsg(StatusMsg(vec![0,1,2,3,4,5])),
+                Section::UserStatus(UserStatus(UserWorkingStatus::Online)),
+                Section::TcpRelays(TcpRelays(vec![
+                    PackedNode {
+                        pk: gen_keypair().0,
+                        saddr: "1.2.3.4:1234".parse().unwrap(),
+                    },
+                    PackedNode {
+                        pk: gen_keypair().0,
+                        saddr: "1.2.3.5:1235".parse().unwrap(),
+                    },
+                ])),
+                Section::PathNodes(PathNodes(vec![
+                    PackedNode {
+                        pk: gen_keypair().0,
+                        saddr: "1.2.3.4:1234".parse().unwrap(),
+                    },
+                    PackedNode {
+                        pk: gen_keypair().0,
+                        saddr: "1.2.3.5:1235".parse().unwrap(),
+                    },
+                ])),
+            ],
+            eof: Eof,
         }
-        arb_state_section!(nospamkeys, friends, name, status_msg, status,
-                           dhtstate, tcp_relays, path_nodes, eof)
-    }
-}
-
-
-
-// FriendState::
-
-// FriendState::new_from_pk()
-
-#[test]
-fn friend_state_new_from_pk_test() {
-    fn with_pkbytes(bytes: Vec<u8>) -> TestResult {
-        if bytes.len() < PUBLICKEYBYTES {
-            return TestResult::discard()
-        }
-
-        let pk = PublicKey::from_slice(&bytes[..PUBLICKEYBYTES]).unwrap();
-
-        let fs = FriendState::new_from_pk(&pk);
-
-        assert_eq!(FriendStatus::Added, fs.status);
-        assert_eq!(pk, fs.pk);
-        assert!(fs.fr_msg.is_empty());
-        assert!(fs.name.0.is_empty());
-        assert!(fs.status_msg.0.is_empty());
-        assert_eq!(UserStatus::Online, fs.user_status);
-        assert_eq!(NoSpam([0; NOSPAMBYTES]), fs.nospam);
-        assert_eq!(0, fs.last_seen);
-
-        TestResult::passed()
-    }
-    quickcheck(with_pkbytes as fn(Vec<u8>) -> TestResult);
-}
-
-// FriendState::parse_bytes()
-
-#[test]
-fn friend_state_parse_bytes_test() {
-    // serialized and deserialized remain the same
-    fn assert_success(bytes: &[u8], friend_state: &FriendState) {
-        let (_, ref p) = FriendState::parse_bytes(bytes).unwrap();
-        assert_eq!(friend_state, p);
-    }
-
-    fn with_fs(fs: FriendState) {
-        let fs_bytes = fs.to_bytes();
-        assert_success(&fs_bytes, &fs);
-
-        for b in 0..(FRIENDSTATEBYTES - 1) {
-            assert!(FriendState::parse_bytes(&fs_bytes[..b]).is_incomplete());
-        }
-
-        { // FriendStatus
-            let mut bytes = fs_bytes.clone();
-            // TODO: change to inclusive range (`...`) once gets stabilised
-            //       rust #28237
-            for b in 5..u8::max_value() {
-                bytes[0] = b;
-                assert!(FriendState::parse_bytes(&bytes).is_err());
-            }
-        }
-
-        const FR_MSG_LEN_POS: usize = 1 + PUBLICKEYBYTES + REQUEST_MSG_LEN + 1;
-        { // friend request message lenght check
-            let mut bytes = fs_bytes.clone();
-            for i in (REQUEST_MSG_LEN+1)..2500 { // too slow with bigger ranges
-                BigEndian::write_u16(&mut bytes[FR_MSG_LEN_POS..], i as u16);
-                assert!(FriendState::parse_bytes(&bytes).is_err());
-            }
-        }
-
-        const NAME_LEN_POS: usize = FR_MSG_LEN_POS + NAME_LEN + 2;
-        { // friend name lenght check
-            let mut bytes = fs_bytes.clone();
-            for i in (NAME_LEN+1)..2500 { // too slow with bigger ranges
-                BigEndian::write_u16(&mut bytes[NAME_LEN_POS..], i as u16);
-                assert!(FriendState::parse_bytes(&bytes).is_err());
-            }
-        }
-
-        // padding + bytes containing length
-        const STATUS_MSG_LEN_POS: usize = NAME_LEN_POS + STATUS_MSG_LEN + 3;
-        { // friend name lenght check
-            let mut bytes = fs_bytes.clone();
-            for i in (STATUS_MSG_LEN+1)..2500 { // too slow with bigger ranges
-                BigEndian::write_u16(&mut bytes[STATUS_MSG_LEN_POS..], i as u16);
-                assert!(FriendState::parse_bytes(&bytes).is_err());
-            }
-        }
-
-
-        const USTATUS_POS: usize = STATUS_MSG_LEN_POS + 2;
-        { // user status
-            fn has_status(bytes: &[u8], status: UserStatus) {
-                let (_, fs) = FriendState::parse_bytes(bytes).unwrap();
-                assert_eq!(fs.user_status, status);
-            }
-
-            let mut bytes = fs_bytes.clone();
-
-            // TODO: change to inclusive range (`...`) once gets stabilised
-            //       rust #28237
-            for i in 0..u8::max_value() {
-                bytes[USTATUS_POS] = i;
-
-                match i {
-                    0 => has_status(&bytes, UserStatus::Online),
-                    1 => has_status(&bytes, UserStatus::Away),
-                    2 => has_status(&bytes, UserStatus::Busy),
-                    _ => assert!(FriendState::parse_bytes(&bytes).is_err()),
-                }
-            }
-        }
-
-        const PADDING_POS: usize = USTATUS_POS + 1;
-        { // padding; should be always ignored when parsing
-            let mut bytes = fs_bytes.clone();
-            // TODO: change to inclusive range (`...`) once gets stabilised
-            //       rust #28237
-            for i in 0..u8::max_value() {
-                bytes[PADDING_POS]   = i;
-                bytes[PADDING_POS+1] = i;
-                bytes[PADDING_POS+2] = i;
-                assert_success(&bytes, &fs);
-            }
-        }
-
-        // TODO: test for:
-        //
-        // nospam
-        //
-        // last time seen
-    }
-    quickcheck(with_fs as fn(FriendState));
-}
-
-
-// Friends::
-
-// Friends::is_friend()
-
-#[test]
-fn friends_is_friend_test() {
-    fn with_friends(friends: Friends, fstate: FriendState) -> TestResult {
-        // can fail if quickcheck produces `Friends` that includes generated
-        // friend
-        assert_eq!(false, friends.is_friend(&fstate.pk));
-
-        let mut friends = friends.clone();
-        let pk = fstate.pk;
-        friends.0.push(fstate);
-        assert_eq!(true, friends.is_friend(&pk));
-        TestResult::passed()
-    }
-    quickcheck(with_friends as fn(Friends, FriendState) -> TestResult);
-
-    // empty
-    let pk = PublicKey([0; PUBLICKEYBYTES]);
-    assert_eq!(false, Friends(Vec::new()).is_friend(&pk));
-}
-
-
-// SectionData::
-
-// SectionData::into_section()
-
-// check for each type
-macro_rules! section_data_with_kind_into {
-    ($($kind:ident, $tname:ident),+) => ($(
-        #[test]
-        fn $tname() {
-            fn tf(sd: SectionData) -> TestResult {
-                if sd.kind != SectionKind::$kind {
-                    return TestResult::discard()
-                }
-                assert!(sd.as_section().is_some());
-                TestResult::passed()
-            }
-            quickcheck(tf as fn(SectionData) -> TestResult);
-        }
-    )+)
-}
-section_data_with_kind_into!(
-    NospamKeys, section_data_into_sect_test_nospamkeys,
-    DHT,        section_data_into_sect_test_dht,
-    Friends,    section_data_into_sect_test_friends,
-    Name,       section_data_into_sect_test_name,
-    StatusMsg,  section_data_into_sect_test_status_msg,
-    Status,     section_data_into_sect_test_status,
-    TcpRelays,  section_data_into_sect_test_tcp_relays,
-    PathNodes,  section_data_into_sect_test_path_nodes,
-    EOF,        section_data_into_sect_test_eof
-);
-
-#[test]
-fn section_data_into_section_test_random() {
-    fn with_section(sd: SectionData) {
-        assert!(sd.as_section().is_some());
-    }
-    quickcheck(with_section as fn(SectionData));
-}
-
-// SectionData::into_sect_mult()
-
-macro_rules! section_data_into_sect_mult_into {
-    ($($sect:ty, $kind:ident, $tname:ident),+) => ($(
-        #[test]
-        fn $tname() {
-            fn with_sects(s: Vec<$sect>) {
-                let sds: Vec<SectionData> = s.iter()
-                    .map(|se| SectionData {
-                        kind: SectionKind::$kind,
-                        data: se.to_bytes()
-                    })
-                    .collect();
-                let sections = SectionData::into_sect_mult(&sds);
-                assert_eq!(s.len(), sections.len());
-                if !s.is_empty() {
-                    assert!(sections.iter().all(|se| match *se {
-                        Section::$kind(_) => true,
-                        _ => false,
-                    }));
-                }
-            }
-            QuickCheck::new().max_tests(20).quickcheck(with_sects as fn(Vec<$sect>));
-        }
-    )+)
-}
-// NOTE: ↓ this takes 5 min of CPU time on a 4GHz AMD Piledriver(!)
-section_data_into_sect_mult_into!(
-    NospamKeys, NospamKeys, section_data_into_sect_mult_test_nospamkeys,
-    DhtState, DHT, section_data_into_sect_mult_test_dht,
-    // ↓ takes longest, since it requires generating Vec<Friend> and then
-    //   parsing that
-    Friends, Friends, section_data_into_sect_mult_test_friends,
-    Name, Name, section_data_into_sect_mult_test_name,
-    StatusMsg, StatusMsg, section_data_into_sect_mult_test_status_msg,
-    UserStatus, Status, section_data_into_sect_mult_test_status,
-    TcpRelays, TcpRelays, section_data_into_sect_mult_test_path_nodes,
-    TcpRelays, TcpRelays, section_data_into_sect_mult_test_tcp_relays
-);
-
-#[test]
-fn section_data_into_sect_mult_test_random() {
-    fn random_sds(sds: Vec<SectionData>) {
-        assert_eq!(sds.len(), SectionData::into_sect_mult(&sds).len());
-    }
-    quickcheck(random_sds as fn(Vec<SectionData>));
-}
-
-// SectionData::parse_bytes()
-
-#[test]
-fn section_data_parse_bytes_test() {
-    fn rand_b_sect(kind: SectionKind, bytes: &[u8]) -> Vec<u8> {
-        let mut b_sect = Vec::with_capacity(bytes.len() + SECTION_MIN_LEN);
-        b_sect.write_u32::<LittleEndian>(bytes.len() as u32).unwrap();
-        b_sect.write_u16::<LittleEndian>(kind as u16).unwrap();
-        b_sect.extend_from_slice(SECTION_MAGIC);
-        b_sect.extend_from_slice(bytes);
-        b_sect
-    }
-
-    fn with_bytes(bytes: Vec<u8>, kind: SectionKind) {
-        let b_sect = rand_b_sect(kind, &bytes);
-
-        { // working case
-            let (left, section) = SectionData::parse_bytes(&b_sect).unwrap();
-
-            assert_eq!(0, left.len());
-            assert_eq!(section.kind, kind);
-            assert_eq!(&section.data, &bytes);
-        }
-
-        { // wrong SectionKind
-            fn wrong_skind(bytes: &[u8]) {
-                assert!(SectionData::parse_bytes(bytes).is_err());
-            }
-
-            let mut b_sect = b_sect.clone();
-            for num in 7..10 {
-                b_sect[4] = num;
-                wrong_skind(&b_sect);
-            }
-            // TODO: change to inclusive range (`...`) once gets stabilised
-            //       rust #28237
-            for num in 12..u8::max_value() {
-                b_sect[4] = num;
-                wrong_skind(&b_sect);
-            }
-
-            b_sect[4] = 1; // right
-            b_sect[5] = 1; // wrong
-            wrong_skind(&b_sect);
-        }
-
-        // too short
-        for l in 0..SECTION_MIN_LEN {
-            assert!(SectionData::parse_bytes(&b_sect[..l]).is_incomplete());
-        }
-
-        // wrong len
-        for l in SECTION_MIN_LEN..(b_sect.len() - 1) {
-            assert!(SectionData::parse_bytes(&b_sect[..l]).is_incomplete());
-        }
-    }
-    quickcheck(with_bytes as fn(Vec<u8>, SectionKind));
-
-    fn with_magic(bytes: Vec<u8>, kind: SectionKind, magic: Vec<u8>)
-        -> TestResult
-    {
-        if magic.len() < 2 || &[magic[0], magic[1]] == SECTION_MAGIC {
-                return TestResult::discard()
-        }
-
-        let tmp_b_sect = rand_b_sect(kind, &bytes);
-        let mut b_sect = Vec::with_capacity(tmp_b_sect.len());
-        b_sect.extend_from_slice(&tmp_b_sect[..SECTION_MIN_LEN - 2]);
-        b_sect.extend_from_slice(&magic[..2]);
-        b_sect.extend_from_slice(&tmp_b_sect[SECTION_MIN_LEN..]);
-        assert!(SectionData::parse_bytes(&b_sect).is_err());
-        TestResult::passed()
-    }
-    quickcheck(with_magic as fn(Vec<u8>, SectionKind, Vec<u8>) -> TestResult);
-}
-
-
-// State::
-
-// State::add_friend_norequest()
-
-#[test]
-fn state_add_friend_norequest_test() {
-    fn with_pk(state: State, pkbytes: Vec<u8>) -> TestResult {
-        quick_pk_from_bytes!(pkbytes, pk);
-
-        let mut new_state = state.clone();
-
-        assert!(new_state.add_friend_norequest(&pk));
-        assert_eq!(false, new_state.add_friend_norequest(&pk));
-        assert!(state != new_state);
-        assert_eq!(state.friends.0.len() + 1, new_state.friends.0.len());
-
-        let popped = new_state.friends.0.pop().expect("Friend");
-        assert_eq!(state, new_state);
-        assert_eq!(popped, FriendState::new_from_pk(&pk));
-
-        TestResult::passed()
-    }
-    quickcheck(with_pk as fn(State, Vec<u8>) -> TestResult);
-}
-
-// State::is_own_pk()
-
-#[test]
-fn state_is_own_pk_test() {
-    fn with_pk(state: State, bytes: Vec<u8>) -> TestResult {
-        quick_pk_from_bytes!(bytes, rand_pk);
-
-        assert!(state.is_own_pk(&state.nospamkeys.pk));
-        assert_eq!(false, state.is_own_pk(&rand_pk));
-        TestResult::passed()
-    }
-    quickcheck(with_pk as fn(State, Vec<u8>) -> TestResult);
-}
-
-// State::parse_bytes()
-
-#[test]
-fn state_parse_bytes_test_magic() {
-    fn with_state(state: State, rand_bytes: Vec<u8>) -> TestResult {
-        if rand_bytes.len() < STATE_HEAD_LEN {
-            return TestResult::discard()
-        }
-
-        let state_bytes = state.to_bytes();
-        assert!(State::parse_bytes(&state_bytes).is_done());
-
-        let mut invalid_bytes = Vec::with_capacity(state_bytes.len());
-        invalid_bytes.extend_from_slice(&rand_bytes[..STATE_HEAD_LEN]);
-        invalid_bytes.extend_from_slice(&state_bytes[STATE_HEAD_LEN..]);
-        assert!(State::parse_bytes(&invalid_bytes).is_err());
-        TestResult::passed()
-    }
-    quickcheck(with_state as fn(State, Vec<u8>) -> TestResult);
-}
-
-#[test]
-fn state_parse_bytes_test_section_detect() {
-    fn with_state(state: State, rand_byte: u8) -> TestResult {
-        if rand_byte == SECTION_MAGIC[0] {
-            return TestResult::discard()
-        }
-
-        let bytes: Vec<u8> = state.to_bytes().iter_mut()
-            .map(|b| { if *b == SECTION_MAGIC[0] { *b = rand_byte; } *b })
-            .collect();
-
-        assert!(State::parse_bytes(&bytes).is_err());
-
-        TestResult::passed()
-    }
-    quickcheck(with_state as fn(State, u8) -> TestResult);
-    with_state(State::default(), SECTION_MAGIC[0]);
+    );
 }

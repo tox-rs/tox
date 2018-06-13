@@ -31,4 +31,4 @@ https://zetok.github.io/tox-spec/#state-format
 
 
 // FIXME: use new dht code instead of old
-// pub mod old;
+pub mod old;
