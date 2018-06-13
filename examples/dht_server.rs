@@ -23,6 +23,7 @@
 // an example of DHT node with current code
 //
 extern crate tox;
+extern crate failure;
 extern crate futures;
 extern crate tokio;
 extern crate tokio_io;
@@ -155,18 +156,24 @@ fn main() {
     // The server task asynchronously iterates over and processes each
     // incoming packet.
     let server_obj_c = server_obj.clone();
-    let network_reader = stream.for_each(move |(packet, addr)| {
+    let network_reader = stream.then(Ok).filter(|event| // TODO: use filter_map from futures 0.2 to avoid next `expect`
+        match event {
+            &Ok(_) => true,
+            &Err(ref e) => {
+                error!("packet receive error = {:?}", e);
+                // ignore packet decode errors
+                e.cause().downcast_ref::<DecodeError>().is_none()
+            }
+        }
+    ).then(|event: Result<_, ()>|
+        event.expect("always ok")
+    ).for_each(move |(packet, addr)| {
         println!("recv = {:?}", packet.clone());
         server_obj_c.handle_packet(packet, addr).or_else(|err| {
             error!("failed to handle packet: {:?}", err);
             future::ok(())
         })
-    }).map_err(|err| {
-        // All tasks must have an `Error` type of `()`. This forces error
-        // handling and helps avoid silencing failures.
-        error!("packet receive error = {:?}", err);
-        Error::new(ErrorKind::Other, "udp receive error")
-    });
+    }).map_err(|e| Error::new(ErrorKind::Other, e.compat()));
 
     let network_writer = rx
         .map_err(|_| Error::new(ErrorKind::Other, "rx error"))
@@ -182,11 +189,10 @@ fn main() {
                     addr = SocketAddr::new(IpAddr::V6(ip.to_ipv6_mapped()), addr.port());
                 }
             }
-            sink.send((packet, addr))
+            sink.send((packet, addr)).map_err(|e| Error::new(ErrorKind::Other, e.compat()))
         })
         // drop sink when rx stream is exhausted
-        .map(|_sink| ())
-    ;
+        .map(|_sink| ());
 
     let network = network_writer.select(network_reader)
         .map(|_| ())
