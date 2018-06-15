@@ -40,6 +40,7 @@ nom = "3.2"
 cookie-factory = "0.2.3"
 get_if_addrs = "0.5.1"
 parking_lot = "0.5"
+failure = "0.1"
 
 [dev-dependencies]
 env_logger = "0.5"

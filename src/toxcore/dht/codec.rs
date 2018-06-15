@@ -27,12 +27,50 @@
 use toxcore::dht::packet::*;
 use toxcore::binary_io::*;
 
-use std::io::{Error, ErrorKind};
 use bytes::BytesMut;
+use cookie_factory::GenError;
+use failure::Error;
+use nom::{ErrorKind, Needed};
 use tokio_io::codec::{Decoder, Encoder};
 
 /// A serialized `DhtPacket` should be not longer than 2048 bytes.
 pub const MAX_DHT_PACKET_SIZE: usize = 2048;
+
+/// Error that can happen when decoding `DhtPacket` from bytes
+#[derive(Debug, Fail)]
+pub enum DecodeError {
+    /// Error indicates that we received too big packet
+    #[fail(display = "DhtPacket should not be longer then 2048 bytes: {} bytes", len)]
+    TooBigPacket {
+        /// Length of received packet
+        len: usize
+    },
+    /// Error indicates that more data is needed to parse received packet
+    #[fail(display = "DhtPacket should not be incomplete: length {}, needed {:?}", len, needed)]
+    IncompletePacket {
+        /// Length of received packet
+        len: usize,
+        /// Required data size to be parsed
+        needed: Needed
+    },
+    /// Error indicates that received packet can't be parsed
+    #[fail(display = "Deserialize DhtPacket error: {:?}", error)]
+    DeserializeError {
+        /// Parsing error
+        error: ErrorKind
+    }
+}
+
+/// Error that can happen when encoding `DhtPacket` to bytes
+#[derive(Debug, Fail)]
+pub enum EncodeError {
+    /// Error indicates that `DhtPacket` is invalid and can't be serialized
+    #[fail(display = "Serialize DhtPacket error: {:?}", error)]
+    SerializeError {
+        /// Serialization error
+        error: GenError
+    }
+}
 
 /// Struct to use for {de-,}serializing DHT UDP packets.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -43,23 +81,15 @@ impl Decoder for DhtCodec {
     type Error = Error;
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        if buf.len() > MAX_DHT_PACKET_SIZE {
-            return Err(Error::new(ErrorKind::Other,
-                "DhtPacket should not be longer then 2048 bytes"))
+        let len = buf.len();
+        if len > MAX_DHT_PACKET_SIZE {
+            return Err(DecodeError::TooBigPacket { len }.into())
         }
 
         match DhtPacket::from_bytes(buf) {
-            IResult::Incomplete(_) => {
-                Err(Error::new(ErrorKind::Other,
-                    "DhtPacket should not be incomplete"))
-            },
-            IResult::Error(e) => {
-                Err(Error::new(ErrorKind::Other,
-                    format!("Deserialize DhtPacket error: {:?}", e)))
-            },
-            IResult::Done(_, encrypted_packet) => {
-                Ok(Some(encrypted_packet))
-            }
+            IResult::Incomplete(needed) => Err(DecodeError::IncompletePacket { len, needed }.into()),
+            IResult::Error(error) => Err(DecodeError::DeserializeError { error }.into()),
+            IResult::Done(_, packet) => Ok(Some(packet))
         }
     }
 }
@@ -74,11 +104,9 @@ impl Encoder for DhtCodec {
             .map(|(packet_buf, size)| {
                 buf.extend(&packet_buf[..size]);
             })
-            .map_err(|e|
-                Error::new(ErrorKind::Other,
-                    format!("DhtPacket serialize error: {:?}", e))
-            )?;
-        Ok(())
+            .map_err(|error|
+                EncodeError::SerializeError { error }.into()
+            )
     }
 }
 
