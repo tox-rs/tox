@@ -21,10 +21,13 @@
 //! Crypto connection implementation.
 
 use std::net::SocketAddr;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant};
+
+use super::packets_array::*;
 
 use toxcore::crypto_core::*;
 use toxcore::dht::packet::*;
+use toxcore::time::*;
 
 /// How often in seconds `CookieRequest` or `CryptoHandshake` packets should be
 /// sent
@@ -37,6 +40,12 @@ pub const MAX_NUM_SENDPACKET_TRIES: u8 = 8;
 /// If we don't receive UDP packets for this amount of time in seconds the
 /// direct UDP connection is considered dead
 pub const UDP_DIRECT_TIMEOUT: u64 = 8;
+
+/// Default rtt in milliseconds
+pub const DEFAULT_RTT: u64 = 1000;
+
+/// rtt in milliseconds for TCP connections
+pub const TCP_RTT: u64 = 500;
 
 /// Packet that should be sent every second. Depending on `ConnectionStatus` it
 /// can be `CookieRequest` or `CryptoHandshake`
@@ -56,7 +65,7 @@ pub struct StatusPacket {
     /// it can be `CookieRequest` or `CryptoHandshake`
     packet: StatusPacketEnum,
     /// When packet was sent last time
-    pub sent_time: SystemTime,
+    pub sent_time: Instant,
     /// How many times packet was sent
     pub num_sent: u8
 }
@@ -66,7 +75,7 @@ impl StatusPacket {
     pub fn new_cookie_request(packet: CookieRequest) -> StatusPacket {
         StatusPacket {
             packet: StatusPacketEnum::CookieRequest(packet),
-            sent_time: SystemTime::now(),
+            sent_time: clock_now(),
             num_sent: 0
         }
     }
@@ -75,7 +84,7 @@ impl StatusPacket {
     pub fn new_crypto_handshake(packet: CryptoHandshake) -> StatusPacket {
         StatusPacket {
             packet: StatusPacketEnum::CryptoHandshake(packet),
-            sent_time: SystemTime::now(),
+            sent_time: clock_now(),
             num_sent: 0
         }
     }
@@ -90,7 +99,7 @@ impl StatusPacket {
 
     /// Check if one second is elapsed since last time when the packet was sent
     fn is_time_elapsed(&self) -> bool {
-        self.sent_time.elapsed().unwrap_or(Duration::from_secs(0)) > Duration::from_secs(CRYPTO_SEND_PACKET_INTERVAL)
+        clock_elapsed(self.sent_time) > Duration::from_secs(CRYPTO_SEND_PACKET_INTERVAL)
     }
 
     /// Check if packet should be sent to the peer
@@ -152,6 +161,9 @@ pub enum ConnectionStatus {
         received_nonce: Nonce,
         /// `PublicKey` of the other side for this session
         peer_session_pk: PublicKey,
+        /// `PrecomputedKey` for this session that is used to encrypt and
+        /// decrypt data packets
+        session_precomputed_key: PrecomputedKey,
         /// Packet that should be sent every second
         packet: StatusPacket,
     },
@@ -164,7 +176,49 @@ pub enum ConnectionStatus {
         received_nonce: Nonce,
         /// `PublicKey` of the other side for this session
         peer_session_pk: PublicKey,
+        /// `PrecomputedKey` for this session that is used to encrypt and
+        /// decrypt data packets
+        session_precomputed_key: PrecomputedKey,
     },
+}
+
+/// Sent but not confirmed data packet that is stored in `PacketsArray`
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SentPacket {
+    /// Packet data
+    pub data: Vec<u8>,
+    /// Time when we sent this packet last time
+    pub sent_time: Instant,
+    /// True if a request was received for this packet and rtt was elapsed at
+    /// that moment
+    pub requested: bool
+}
+
+impl SentPacket {
+    /// Create new `SentPacket`
+    pub fn new(data: Vec<u8>) -> SentPacket {
+        SentPacket {
+            data,
+            sent_time: clock_now(),
+            requested: false
+        }
+    }
+}
+
+/// Received but not handled data packet that is stored in `PacketsArray`
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecvPacket {
+    /// Packet data
+    pub data: Vec<u8>
+}
+
+impl RecvPacket {
+    /// Create new `RecvPacket`
+    pub fn new(data: Vec<u8>) -> RecvPacket {
+        RecvPacket {
+            data
+        }
+    }
 }
 
 /** Secure connection to send data between two friends that provides encryption,
@@ -191,9 +245,16 @@ pub struct CryptoConnection {
     /// Address to send UDP packets directly to the peer
     pub udp_addr: Option<SocketAddr>, // TODO: separate v4 and v6?
     /// Time when last UDP packet was received
-    pub udp_received_time: Option<SystemTime>,
+    pub udp_received_time: Option<Instant>,
     /// Time when we made an attempt to send UDP packet
-    pub udp_send_attempt_time: Option<SystemTime>,
+    pub udp_send_attempt_time: Option<Instant>,
+    /// Buffer of sent packets
+    pub send_array: PacketsArray<SentPacket>,
+    /// Buffer of received packets
+    pub recv_array: PacketsArray<RecvPacket>,
+    /// Round trip time - the lowest (for all packets) difference between time
+    /// when a packet was sent and time when we received the confirmation
+    pub rtt: Duration,
 }
 
 impl CryptoConnection {
@@ -223,7 +284,10 @@ impl CryptoConnection {
             status,
             udp_addr: None,
             udp_received_time: None,
-            udp_send_attempt_time: None
+            udp_send_attempt_time: None,
+            send_array: PacketsArray::new(),
+            recv_array: PacketsArray::new(),
+            rtt: Duration::from_millis(DEFAULT_RTT),
         }
     }
 
@@ -256,6 +320,7 @@ impl CryptoConnection {
             sent_nonce,
             received_nonce,
             peer_session_pk,
+            session_precomputed_key: precompute(&peer_session_pk, &session_sk),
             packet: StatusPacket::new_crypto_handshake(handshake)
         };
 
@@ -268,7 +333,10 @@ impl CryptoConnection {
             status,
             udp_addr: None,
             udp_received_time: None,
-            udp_send_attempt_time: None
+            udp_send_attempt_time: None,
+            send_array: PacketsArray::new(),
+            recv_array: PacketsArray::new(),
+            rtt: Duration::from_millis(DEFAULT_RTT),
         }
     }
 
@@ -281,7 +349,7 @@ impl CryptoConnection {
             | ConnectionStatus::NotConfirmed { ref mut packet, .. } => {
                 if packet.should_be_sent() {
                     packet.num_sent += 1;
-                    packet.sent_time = SystemTime::now();
+                    packet.sent_time = clock_now();
                     Some(packet.dht_packet())
                 } else {
                     None
@@ -304,19 +372,18 @@ impl CryptoConnection {
 
     /// Set time when last UDP packet was received to now
     pub fn update_udp_received_time(&mut self) {
-        self.udp_received_time = Some(SystemTime::now())
+        self.udp_received_time = Some(clock_now())
     }
 
     /// Set time when we made an attempt to send UDP packet
     pub fn update_udp_send_attempt_time(&mut self) {
-        self.udp_send_attempt_time = Some(SystemTime::now())
+        self.udp_send_attempt_time = Some(clock_now())
     }
 
     /// Check if we received the last UDP packet not later than 8 seconds ago
     pub fn is_udp_alive(&self) -> bool {
         self.udp_received_time
-            .and_then(|time| time.elapsed().ok())
-            .map(|duration| duration < Duration::from_secs(UDP_DIRECT_TIMEOUT))
+            .map(|time| clock_elapsed(time) < Duration::from_secs(UDP_DIRECT_TIMEOUT))
             .unwrap_or(false)
     }
 
@@ -325,8 +392,7 @@ impl CryptoConnection {
     /// packet via TCP relay
     pub fn udp_attempt_should_be_made(&self) -> bool {
         self.udp_send_attempt_time
-            .and_then(|time| time.elapsed().ok())
-            .map(|duration| duration >= Duration::from_secs(UDP_DIRECT_TIMEOUT / 2))
+            .map(|time| clock_elapsed(time) >= Duration::from_secs(UDP_DIRECT_TIMEOUT / 2))
             .unwrap_or(true)
     }
 }
@@ -334,6 +400,11 @@ impl CryptoConnection {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use tokio_executor;
+    use tokio_timer::clock::*;
+
+    use toxcore::time::ConstNow;
 
     #[test]
     fn status_packet_should_be_sent() {
@@ -343,16 +414,25 @@ mod tests {
             nonce: gen_nonce(),
             payload: vec![42; 88]
         });
+
         assert!(packet.should_be_sent());
+
         // packet shouldn't be sent if it was sent not earlier than 1 second ago
         packet.num_sent += 1;
         assert!(!packet.should_be_sent());
-        // packet should be sent if it was sent earlier than 1 second ago
-        packet.sent_time -= Duration::from_secs(CRYPTO_SEND_PACKET_INTERVAL + 1);
-        assert!(packet.should_be_sent());
-        // packet shouldn't be sent if it was sent 8 times or more
-        packet.num_sent += MAX_NUM_SENDPACKET_TRIES;
-        assert!(!packet.should_be_sent());
+
+        let mut enter = tokio_executor::enter().unwrap();
+        let clock = Clock::new_with_now(ConstNow(
+            packet.sent_time + Duration::from_secs(CRYPTO_SEND_PACKET_INTERVAL + 1)
+        ));
+
+        with_default(&clock, &mut enter, |_| {
+            // packet should be sent if it was sent earlier than 1 second ago
+            assert!(packet.should_be_sent());
+            // packet shouldn't be sent if it was sent 8 times or more
+            packet.num_sent += MAX_NUM_SENDPACKET_TRIES;
+            assert!(!packet.should_be_sent());
+        });
     }
 
     #[test]
@@ -363,11 +443,34 @@ mod tests {
             nonce: gen_nonce(),
             payload: vec![42; 88]
         });
+
         assert!(!packet.is_timed_out());
+
         // packet is timed out if it was sent 8 times and 1 second elapsed since last sending
         packet.num_sent += MAX_NUM_SENDPACKET_TRIES;
-        packet.sent_time -= Duration::from_secs(CRYPTO_SEND_PACKET_INTERVAL + 1);
-        assert!(packet.is_timed_out());
+
+        let mut enter = tokio_executor::enter().unwrap();
+        let clock = Clock::new_with_now(ConstNow(
+            packet.sent_time + Duration::from_secs(CRYPTO_SEND_PACKET_INTERVAL + 1)
+        ));
+
+        with_default(&clock, &mut enter, |_| {
+            assert!(packet.is_timed_out());
+        });
+    }
+
+    #[test]
+    fn sent_packet_clone() {
+        let sent_packet = SentPacket::new(vec![42; 123]);
+        let sent_packet_c = sent_packet.clone();
+        assert_eq!(sent_packet_c, sent_packet);
+    }
+
+    #[test]
+    fn recv_packet_clone() {
+        let recv_packet = RecvPacket::new(vec![42; 123]);
+        let recv_packet_c = recv_packet.clone();
+        assert_eq!(recv_packet_c, recv_packet);
     }
 
     #[test]
@@ -398,20 +501,28 @@ mod tests {
         let connection_c = connection.clone();
         assert_eq!(connection_c, connection);
 
+        let (peer_session_pk, _peer_session_sk) = gen_keypair();
+        let (_session_pk, session_sk) = gen_keypair();
+        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::NotConfirmed {
             sent_nonce: gen_nonce(),
             received_nonce: gen_nonce(),
-            peer_session_pk: gen_keypair().0,
+            peer_session_pk,
+            session_precomputed_key,
             packet: StatusPacket::new_crypto_handshake(crypto_handshake),
         };
 
         let connection_c = connection.clone();
         assert_eq!(connection_c, connection);
 
+        let (peer_session_pk, _peer_session_sk) = gen_keypair();
+        let (_session_pk, session_sk) = gen_keypair();
+        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce: gen_nonce(),
-            peer_session_pk: gen_keypair().0,
+            peer_session_pk,
+            session_precomputed_key,
         };
 
         let connection_c = connection.clone();

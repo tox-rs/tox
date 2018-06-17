@@ -57,7 +57,7 @@ use toxcore::dht::dht_friend::*;
 use toxcore::dht::server::hole_punching::*;
 use toxcore::tcp::packet::OnionRequest;
 use toxcore::dht::server::ping_sender::*;
-use toxcore::net_crypto::NetCrypto;
+use toxcore::net_crypto::*;
 
 /// Shorthand for the transmit half of the message channel.
 type Tx = mpsc::UnboundedSender<(DhtPacket, SocketAddr)>;
@@ -1460,11 +1460,21 @@ mod tests {
         let mut alice = Server::new(udp_tx.clone(), dht_pk, dht_sk.clone());
 
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
+        let (lossless_tx, _lossless_rx) = mpsc::unbounded();
+        let (lossy_tx, _lossy_rx) = mpsc::unbounded();
         let (real_pk, _real_sk) = gen_keypair();
         let (bob_pk, bob_sk) = gen_keypair();
         let (bob_real_pk, _bob_real_sk) = gen_keypair();
         let precomp = precompute(&alice.pk, &bob_sk);
-        let net_crypto = NetCrypto::new(udp_tx, dht_pk_tx, dht_pk, dht_sk, real_pk);
+        let net_crypto = NetCrypto::new(NetCryptoNewArgs {
+            udp_tx,
+            dht_pk_tx,
+            lossless_tx,
+            lossy_tx,
+            dht_pk,
+            dht_sk,
+            real_pk
+        });
 
         alice.set_net_crypto(net_crypto);
 

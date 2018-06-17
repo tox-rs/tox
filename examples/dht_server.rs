@@ -89,12 +89,35 @@ fn main() {
     // DHT PublicKey as well.
     let (dht_pk_tx, dht_pk_rx) = mpsc::unbounded();
 
+    // Create channels for packets sending through net crypto connection.
+    // Lossless unlike lossy guarantees delivery and ordering of sent packets.
+    let (lossless_tx, lossless_rx) = mpsc::unbounded();
+    let (lossy_tx, lossy_rx) = mpsc::unbounded();
+
     // Ignore DHT PublicKey updates for now
     let dht_pk_handler = dht_pk_rx
         .map_err(|_| Error::new(ErrorKind::Other, "rx error"))
         .for_each(|_| future::ok(()));
 
-    let net_crypto = NetCrypto::new(tx.clone(), dht_pk_tx, server_pk, server_sk.clone(), real_pk);
+    // Ignore lossless packets for now
+    let lossless_handler = lossless_rx
+        .map_err(|_| Error::new(ErrorKind::Other, "rx error"))
+        .for_each(|_| future::ok(()));
+
+    // Ignore lossy packets for now
+    let lossy_handler = lossy_rx
+        .map_err(|_| Error::new(ErrorKind::Other, "rx error"))
+        .for_each(|_| future::ok(()));
+
+    let net_crypto = NetCrypto::new(NetCryptoNewArgs {
+        udp_tx: tx.clone(),
+        dht_pk_tx,
+        lossless_tx,
+        lossy_tx,
+        dht_pk: server_pk,
+        dht_sk: server_sk.clone(),
+        real_pk
+    });
 
     let mut server_obj = Server::new(tx, server_pk, server_sk);
     server_obj.set_net_crypto(net_crypto);
@@ -206,6 +229,8 @@ fn main() {
     let server = add_server_main_loop(server, &server_obj);
     let server = add_onion_key_refresher(server, &server_obj);
     let server = server.join(dht_pk_handler).map(|_| ());
+    let server = server.join(lossless_handler).map(|_| ());
+    let server = server.join(lossy_handler).map(|_| ());
 
     let server = server
         .map(|_| ())
