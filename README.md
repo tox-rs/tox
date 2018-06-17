@@ -122,7 +122,7 @@ consider helping :wink:
 
 ## License
 
-Licensed under GPLv3+. For details, see [COPYING](/COPYING).
+Licensed under MIT. For details, see [LICENSE](/LICENSE).
 
 [libsodium]: https://github.com/jedisct1/libsodium
 [Reference source repository]: https://github.com/zetok/tox-spec
