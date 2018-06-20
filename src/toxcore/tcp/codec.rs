@@ -28,7 +28,7 @@ use toxcore::tcp::secure::*;
 use nom::Offset;
 use std::io::{Error, ErrorKind};
 use bytes::BytesMut;
-use tokio_io::codec::{Decoder, Encoder};
+use tokio_codec::{Decoder, Encoder};
 
 /// implements tokio-io's Decoder and Encoder to deal with Packet
 pub struct Codec {

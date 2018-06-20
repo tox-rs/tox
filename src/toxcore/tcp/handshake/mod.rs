@@ -36,7 +36,7 @@ use toxcore::io_tokio::IoFuture;
 
 use futures::{self, Stream, Sink, Future};
 use std::io::{Error, ErrorKind};
-use tokio::io::AsyncRead;
+use tokio_codec::Framed;
 use tokio::net::TcpStream;
 
 /// Create a handshake from client to server
@@ -124,7 +124,7 @@ pub fn make_client_handshake(socket: TcpStream,
     let res = futures::done(create_client_handshake(client_pk, client_sk, server_pk))
         .and_then(|(session, common_key, handshake)| {
             // send handshake
-            socket.framed(ClientHandshakeCodec)
+            Framed::new(socket, ClientHandshakeCodec)
                 .send(handshake)
                 .map_err(|e| {
                     Error::new(
@@ -138,7 +138,7 @@ pub fn make_client_handshake(socket: TcpStream,
         })
         .and_then(|(socket, session, common_key)| {
             // receive handshake from server
-            socket.framed(ServerHandshakeCodec)
+            Framed::new(socket, ServerHandshakeCodec)
                 .into_future()
                 .map_err(|(e, _socket)| {
                     Error::new(
@@ -169,7 +169,7 @@ pub fn make_client_handshake(socket: TcpStream,
 pub fn make_server_handshake(socket: TcpStream,
                             server_sk: SecretKey)
     -> IoFuture<(TcpStream, secure::Channel, PublicKey)> {
-    let res = socket.framed(ClientHandshakeCodec)
+    let res = Framed::new(socket, ClientHandshakeCodec)
         .into_future() // receive handshake from client
         .map_err(|(e, _socket)| {
             Error::new(
@@ -193,7 +193,7 @@ pub fn make_server_handshake(socket: TcpStream,
         })
         .and_then(|(socket, channel, client_pk, server_handshake)| {
             // send handshake
-            socket.framed(ServerHandshakeCodec)
+            Framed::new(socket, ServerHandshakeCodec)
                 .send(server_handshake)
                 .map_err(|e| {
                     Error::new(

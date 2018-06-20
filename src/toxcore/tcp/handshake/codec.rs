@@ -28,7 +28,7 @@ use toxcore::tcp::handshake::packet::*;
 use nom::Offset;
 use bytes::BytesMut;
 use std::io::{Error, ErrorKind};
-use tokio_io::codec::{Decoder, Encoder};
+use tokio_codec::{Decoder, Encoder};
 
 /// implements tokio-io's Decoder and Encoder to deal with Client handshake
 pub struct ClientHandshakeCodec;
@@ -112,10 +112,9 @@ impl Encoder for ServerHandshakeCodec {
 
 #[cfg(test)]
 mod tests {
-    use ::toxcore::tcp::handshake::*;
+    use ::toxcore::tcp::handshake::codec::*;
     use ::toxcore::crypto_core::*;
     use bytes::BytesMut;
-    use tokio_io::codec::*;
 
     #[test]
     fn client_encode_decode() {

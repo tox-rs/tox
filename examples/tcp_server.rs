@@ -21,6 +21,7 @@
 extern crate tox;
 extern crate futures;
 extern crate tokio;
+extern crate tokio_codec;
 
 #[macro_use]
 extern crate log;
@@ -35,7 +36,7 @@ use futures::prelude::*;
 
 use tokio::util::FutureExt;
 use tokio::net::TcpListener;
-use tokio::io::AsyncRead;
+use tokio_codec::Framed;
 
 use std::time;
 use std::io::{Error, ErrorKind};
@@ -81,7 +82,7 @@ fn main() {
 
         let server_inner_c = server_inner.clone();
         let process = register_client.and_then(move |(socket, channel, client_pk)| {
-            let secure_socket = socket.framed(codec::Codec::new(channel));
+            let secure_socket = Framed::new(socket, codec::Codec::new(channel));
             let (to_client, from_client) = secure_socket.split();
             let ServerProcessor { from_client_tx, to_client_rx, processor } =
                 ServerProcessor::create(

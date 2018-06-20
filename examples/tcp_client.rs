@@ -21,7 +21,7 @@
 extern crate tox;
 extern crate futures;
 extern crate tokio;
-extern crate tokio_io;
+extern crate tokio_codec;
 
 #[macro_use]
 extern crate log;
@@ -40,7 +40,7 @@ use futures::prelude::*;
 use futures::future;
 use futures::sync::mpsc;
 
-use tokio_io::AsyncRead;
+use tokio_codec::Framed;
 use tokio::net::TcpStream;
 
 use std::{thread, time};
@@ -99,7 +99,7 @@ fn create_client(rx: mpsc::Receiver<Packet>, tx: mpsc::Sender<Packet>) -> IoFutu
         .and_then(|(socket, channel)| {
             debug!("Handshake complited");
 
-            let secure_socket = socket.framed(codec::Codec::new(channel));
+            let secure_socket = Framed::new(socket, codec::Codec::new(channel));
             let (to_server, from_server) = secure_socket.split();
 
             let reader = from_server.for_each(move |packet| -> IoFuture<()> {
