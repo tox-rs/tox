@@ -31,7 +31,7 @@ use bytes::BytesMut;
 use cookie_factory::GenError;
 use failure::Error;
 use nom::{ErrorKind, Needed};
-use tokio_io::codec::{Decoder, Encoder};
+use tokio_codec::{Decoder, Encoder};
 
 /// A serialized `DhtPacket` should be not longer than 2048 bytes.
 pub const MAX_DHT_PACKET_SIZE: usize = 2048;

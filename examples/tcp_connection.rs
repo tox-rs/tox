@@ -21,7 +21,7 @@
 extern crate tox;
 extern crate futures;
 extern crate tokio;
-extern crate tokio_io;
+extern crate tokio_codec;
 extern crate env_logger;
 
 use tox::toxcore::crypto_core::{PublicKey, SecretKey};
@@ -32,7 +32,7 @@ use tox::toxcore::tcp::client::*;
 
 use futures::{Future, Sink, Stream};
 
-use tokio_io::AsyncRead;
+use tokio_codec::Framed;
 use tokio::net::TcpStream;
 
 use std::io::{Error, ErrorKind};
@@ -74,7 +74,7 @@ fn main() {
             make_client_handshake(socket, client_pk, client_sk, server_pk)
         })
         .and_then(|(socket, channel)| {
-            let secure_socket = socket.framed(codec::Codec::new(channel));
+            let secure_socket = Framed::new(socket, codec::Codec::new(channel));
             let (to_server, from_server) = secure_socket.split();
 
             let writer = to_server_rx

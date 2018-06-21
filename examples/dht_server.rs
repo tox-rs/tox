@@ -26,7 +26,6 @@ extern crate tox;
 extern crate failure;
 extern crate futures;
 extern crate tokio;
-extern crate tokio_io;
 extern crate hex;
 
 #[macro_use]

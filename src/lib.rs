@@ -56,7 +56,7 @@ extern crate sodiumoxide;
 extern crate quickcheck;
 
 extern crate tokio;
-extern crate tokio_io;
+extern crate tokio_codec;
 extern crate get_if_addrs;
 extern crate parking_lot;
 #[macro_use]
