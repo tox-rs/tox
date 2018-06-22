@@ -60,11 +60,9 @@ impl DaemonState {
             .collect::<Vec<PackedNode>>();
 
         let mut buf = [0u8; DHT_STATE_BUFFER_SIZE];
-        if let Ok((_, buf_len)) = DhtState(nodes).to_bytes((&mut buf, 0)) {
-            buf[..buf_len].to_vec()
-        } else {
-            Vec::new()
-        }
+        let (_, buf_len) = DhtState(nodes).to_bytes((&mut buf, 0)).expect("DhtState(nodes).to_bytes has failed");
+
+        buf[..buf_len].to_vec()
     }
 
     /// load DHT close list and then re-setup close list
