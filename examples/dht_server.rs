@@ -226,36 +226,32 @@ fn main() {
             err
         });
 
-    let server: IoFuture<()> = Box::new(network);
-    let server = add_server_main_loop(server, &server_obj);
-    let server = add_onion_key_refresher(server, &server_obj);
-    let server = server.join(run_lan_discovery_sender(lan_discovery_sender)).map(|_| ());
-    let server = server.join(dht_pk_handler).map(|_| ());
-    let server = server.join(lossless_handler).map(|_| ());
-    let server = server.join(lossy_handler).map(|_| ());
+    let server: IoFuture<()> = Box::new(network); // TODO: remove these boxes on rustc 1.26
+    let server: IoFuture<()> = Box::new(server.select(run_server(&server_obj)).map(|_| ()).map_err(|(e, _)| e));
+    let server: IoFuture<()> = Box::new(server.select(run_lan_discovery_sender(lan_discovery_sender)).map(|_| ()).map_err(|(e, _)| e));
+    let server: IoFuture<()> = Box::new(server.select(dht_pk_handler).map(|_| ()).map_err(|(e, _)| e));
+    let server: IoFuture<()> = Box::new(server.select(lossless_handler).map(|_| ()).map_err(|(e, _)| e));
+    let server: IoFuture<()> = Box::new(server.select(lossy_handler).map(|_| ()).map_err(|(e, _)| e));
 
-    let server = server
-        .map(|_| ())
-        .map_err(move |err| {
-            error!("Processing ended with error: {:?}", err);
-            ()
-        });
+    let server = server.map_err(move |err| {
+        error!("Processing ended with error: {:?}", err);
+        ()
+    });
 
     info!("server running on localhost:12345");
     tokio::run(server);
 }
 
-fn add_server_main_loop(base_selector: IoFuture<()>, server_obj: &Server) -> IoFuture<()> {
-    // 20 seconds for NodesRequest
+fn run_server(server_obj: &Server) -> IoFuture<()> {
     let interval = Duration::from_secs(1);
-    let nodes_wakeups = Interval::new(Instant::now() + interval, interval);
+    let dht_wakeups = Interval::new(Instant::now(), interval);
     let mut server_obj_c = server_obj.clone();
     let mut bootstrap_fast: bool = false;
 
-    let nodes_sender = nodes_wakeups
+    let future = dht_wakeups
         .map_err(|e| Error::new(ErrorKind::Other, format!("Nodes timer error: {:?}", e)))
         .for_each(move |_instant| {
-            println!("main_loop_wakeup");
+            trace!("DHT server wake up");
             // flag for fast bootstrapping
             if bootstrap_fast {
                 server_obj_c.dht_main_loop()
@@ -290,15 +286,9 @@ fn add_server_main_loop(base_selector: IoFuture<()>, server_obj: &Server) -> IoF
 
                 res
             }
-        })
-        .map_err(|_err| Error::new(ErrorKind::Other, "Nodes timer error"));
+        });
 
-    Box::new(base_selector.select(Box::new(nodes_sender))
-        .map(|_| ())
-        .map_err(move |(err, _select_next)| {
-            error!("Processing ended with error: {:?}", err);
-            err
-        }))
+    Box::new(future)
 }
 
 fn run_lan_discovery_sender(mut lan_discovery_sender: LanDiscoverySender) -> IoFuture<()> {
