@@ -43,6 +43,7 @@ use std::time::{Duration, Instant};
 use std::ops::Deref;
 use std::mem;
 
+use toxcore::time::*;
 use toxcore::crypto_core::*;
 use toxcore::dht::packet::*;
 use toxcore::dht::packed_node::*;
@@ -69,6 +70,8 @@ pub const PING_TIMEOUT: u64 = 5;
 pub const MAX_BOOTSTRAP_TIMES: u32 = 5;
 /// Interval in seconds of sending NatPingRequest packet
 pub const NAT_PING_REQ_INTERVAL: u64 = 3;
+/// How often onion key should be refreshed
+pub const ONION_REFRESH_KEY_INTERVAL: u64 = 7200;
 
 /**
 Own DHT node data.
@@ -111,6 +114,8 @@ pub struct Server {
     pub close_nodes: Arc<RwLock<Kbucket>>,
     // symmetric key used for onion return encryption
     onion_symmetric_key: Arc<RwLock<secretbox::Key>>,
+    // time when onion key was generated
+    onion_symmetric_key_time: Arc<RwLock<Instant>>,
     // onion announce struct to handle onion packets
     onion_announce: Arc<RwLock<OnionAnnounce>>,
     /// friends vector of dht node
@@ -173,6 +178,7 @@ impl Server {
             ping_map: Arc::new(RwLock::new(HashMap::new())),
             close_nodes: Arc::new(RwLock::new(Kbucket::new(&pk))),
             onion_symmetric_key: Arc::new(RwLock::new(secretbox::gen_key())),
+            onion_symmetric_key_time: Arc::new(RwLock::new(clock_now())),
             onion_announce: Arc::new(RwLock::new(OnionAnnounce::new(pk))),
             friends: Arc::new(RwLock::new(Vec::new())),
             bootstrap_nodes: Arc::new(RwLock::new(Bucket::new(None))),
@@ -218,6 +224,7 @@ impl Server {
     pub fn dht_main_loop(&self) -> IoFuture<()> {
         self.remove_timedout_clients(Duration::from_secs(self.config.kill_node_timeout));
         self.remove_timedout_ping_ids(Duration::from_secs(self.config.ping_timeout));
+        self.refresh_onion_key();
 
         let ping_bootstrap_nodes = self.ping_bootstrap_nodes();
         let ping_and_get_close_nodes = self.ping_and_get_close_nodes(Duration::from_secs(self.config.ping_interval));
@@ -1058,8 +1065,11 @@ impl Server {
         }
     }
     /// refresh onion symmetric key to enforce onion paths expiration
-    pub fn refresh_onion_key(&self) {
-        *self.onion_symmetric_key.write() = secretbox::gen_key();
+    fn refresh_onion_key(&self) {
+        if clock_elapsed(*self.onion_symmetric_key_time.read()) >= Duration::from_secs(ONION_REFRESH_KEY_INTERVAL) {
+            *self.onion_symmetric_key_time.write() = clock_now();
+            *self.onion_symmetric_key.write() = secretbox::gen_key();
+        }
     }
     /// add PackedNode object to close_nodes as a thread-safe manner
     pub fn try_add_to_close_nodes(&self, pn: &PackedNode) -> bool {
@@ -1113,7 +1123,11 @@ mod tests {
 
     use futures::Future;
     use std::net::SocketAddr;
+    use tokio_executor;
+    use tokio_timer::clock::*;
+
     use toxcore::binary_io::*;
+    use toxcore::time::ConstNow;
 
     const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - secretbox::NONCEBYTES;
     const ONION_RETURN_2_PAYLOAD_SIZE: usize = ONION_RETURN_2_SIZE - secretbox::NONCEBYTES;
@@ -2459,7 +2473,16 @@ mod tests {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
 
         let onion_symmetric_key = alice.onion_symmetric_key.read().clone();
-        alice.refresh_onion_key();
+        let onion_symmetric_key_time = alice.onion_symmetric_key_time.read().clone();
+
+        let mut enter = tokio_executor::enter().unwrap();
+        let clock = Clock::new_with_now(ConstNow(
+            onion_symmetric_key_time + Duration::from_secs(ONION_REFRESH_KEY_INTERVAL)
+        ));
+
+        with_default(&clock, &mut enter, |_| {
+            alice.refresh_onion_key();
+        });
 
         assert!(*alice.onion_symmetric_key.read() != onion_symmetric_key)
     }

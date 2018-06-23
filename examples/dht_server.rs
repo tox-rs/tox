@@ -312,24 +312,3 @@ fn run_lan_discovery_sender(mut lan_discovery_sender: LanDiscoverySender) -> IoF
         });
     Box::new(future)
 }
-
-fn add_onion_key_refresher(base_selector: IoFuture<()>, server_obj: &Server) -> IoFuture<()> {
-    // Refresh onion symmetric key every 2 hours. This enforces onion paths expiration.
-    let interval = Duration::from_secs(7200);
-    let refresh_onion_key_wakeups = Interval::new(Instant::now() + interval, interval);
-    let server_obj_c = server_obj.clone();
-    let onion_key_updater = refresh_onion_key_wakeups
-        .map_err(|e| Error::new(ErrorKind::Other, format!("Refresh onion key timer error: {:?}", e)))
-        .for_each(move |_instant| {
-            println!("refresh_onion_key_wakeup");
-            server_obj_c.refresh_onion_key();
-            future::ok(())
-        });
-
-    Box::new(base_selector.select(Box::new(onion_key_updater))
-        .map(|_| ())
-        .map_err(move |(err, _select_next)| {
-            error!("Processing ended with error: {:?}", err);
-            err
-        }))
-}
