@@ -32,12 +32,10 @@ pub mod hole_punching;
 
 use futures::{Future, Sink, Stream, future, stream};
 use futures::sync::mpsc;
-use get_if_addrs;
-use get_if_addrs::IfAddr;
 use parking_lot::RwLock;
 
 use std::io::{ErrorKind, Error};
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use std::collections::HashMap;
 use std::ops::DerefMut;
 use std::sync::Arc;
@@ -553,20 +551,6 @@ impl Server {
         send_to(&self.tx, (packet, addr))
     }
 
-    /// get broadcast addresses for host's network interfaces
-    fn get_ipv4_broadcast_addrs() -> Vec<IpAddr> {
-        let ifs = get_if_addrs::get_if_addrs().expect("no network interface");
-        ifs.iter().filter_map(|interface|
-            match interface.addr {
-                IfAddr::V4(ref addr) => addr.broadcast,
-                _ => None,
-        })
-        .map(|addr|
-            IpAddr::V4(addr)
-        )
-        .collect()
-    }
-
     /**
     handle received PingRequest packet, then create PingResponse packet
     and send back it to the peer.
@@ -864,48 +848,6 @@ impl Server {
         let client = ping_map.entry(packet.pk).or_insert_with(PingData::new);
 
         self.send_nodes_req(target_node, self.pk, client)
-    }
-    /**
-    send LanDiscovery packet to all broadcast addresses when dht_node runs as ipv4 mode
-    */
-    pub fn send_lan_discovery_ipv4(&self) -> IoFuture<()> {
-        let mut ip_addrs = Server::get_ipv4_broadcast_addrs();
-        // Ipv4 global broadcast address
-        ip_addrs.push(
-            "255.255.255.255".parse().unwrap()
-        );
-        let lan_packet = DhtPacket::LanDiscovery(LanDiscovery {
-            pk: self.pk,
-        });
-        let lan_sender = ip_addrs.iter().map(|&addr|
-            self.send_to(SocketAddr::new(addr, 33445), lan_packet.clone()) // 33445 is default port for tox
-        );
-
-        let lan_stream = stream::futures_unordered(lan_sender).then(|_| Ok(()));
-        Box::new(lan_stream.for_each(|()| Ok(())))
-    }
-    /**
-    send LanDiscovery packet to all broadcast addresses when dht_node runs as ipv6 mode
-    */
-    pub fn send_lan_discovery_ipv6(&self) -> IoFuture<()> {
-        let mut ip_addrs = Server::get_ipv4_broadcast_addrs();
-        // Ipv6 broadcast address
-        ip_addrs.push(
-            "FF02::1".parse().unwrap()
-        );
-        // Ipv4 global broadcast address
-        ip_addrs.push(
-            "::ffff:255.255.255.255".parse().unwrap()
-        );
-        let lan_packet = DhtPacket::LanDiscovery(LanDiscovery {
-            pk: self.pk,
-        });
-        let lan_sender = ip_addrs.iter().map(|&addr|
-            self.send_to(SocketAddr::new(addr, 33445), lan_packet.clone()) // 33445 is default port for tox
-        );
-
-        let lan_stream = stream::futures_unordered(lan_sender).then(|_| Ok(()));
-        Box::new(lan_stream.for_each(|()| Ok(())))
     }
     /**
     handle received OnionRequest0 packet, then create OnionRequest1 packet
@@ -2450,62 +2392,6 @@ mod tests {
         let lan = DhtPacket::LanDiscovery(LanDiscovery { pk: alice.pk });
 
         assert!(alice.handle_packet(lan, addr).wait().is_ok());
-    }
-
-    #[test]
-    fn server_send_lan_discovery_ipv4_test() {
-        let (alice, _precomp, _bob_pk, _bob_sk, mut rx, _addr) = create_node();
-
-        assert!(alice.send_lan_discovery_ipv4().wait().is_ok());
-
-        let ifs = get_if_addrs::get_if_addrs().expect("no network interface");
-        let broad_vec: Vec<SocketAddr> = ifs.iter().filter_map(|interface|
-            match interface.addr {
-                IfAddr::V4(ref addr) => addr.broadcast,
-                _ => None,
-            })
-            .map(|ipv4|
-                SocketAddr::new(IpAddr::V4(ipv4), 33445)
-            ).collect();
-
-        for _i in 0..broad_vec.len() + 1 { // `+1` for 255.255.255.255
-            let (received, rx1) = rx.into_future().wait().unwrap();
-            let (packet, _addr) = received.unwrap();
-
-            let lan_discovery = unpack!(packet, DhtPacket::LanDiscovery);
-
-            assert_eq!(lan_discovery.pk, alice.pk);
-
-            rx = rx1;
-        }
-    }
-
-    #[test]
-    fn server_send_lan_discovery_ipv6_test() {
-        let (alice, _precomp, _bob_pk, _bob_sk, mut rx, _addr) = create_node();
-
-        assert!(alice.send_lan_discovery_ipv6().wait().is_ok());
-
-        let ifs = get_if_addrs::get_if_addrs().expect("no network interface");
-        let broad_vec: Vec<SocketAddr> = ifs.iter().filter_map(|interface|
-            match interface.addr {
-                IfAddr::V4(ref addr) => addr.broadcast,
-                _ => None,
-            })
-            .map(|ipv4|
-                SocketAddr::new(IpAddr::V4(ipv4), 33445)
-            ).collect();
-
-        for _i in 0..broad_vec.len() + 2 { // `+2` for ::1 and ::ffff:255.255.255.255
-            let (received, rx1) = rx.into_future().wait().unwrap();
-            let (packet, _addr) = received.unwrap();
-
-            let lan_discovery = unpack!(packet, DhtPacket::LanDiscovery);
-
-            assert_eq!(lan_discovery.pk, alice.pk);
-
-            rx = rx1;
-        }
     }
 
     // remove_timedout_clients(), case of client removed
