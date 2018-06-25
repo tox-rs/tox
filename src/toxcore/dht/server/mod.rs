@@ -32,12 +32,10 @@ pub mod hole_punching;
 
 use futures::{Future, Sink, Stream, future, stream};
 use futures::sync::mpsc;
-use get_if_addrs;
-use get_if_addrs::IfAddr;
 use parking_lot::RwLock;
 
 use std::io::{ErrorKind, Error};
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use std::collections::HashMap;
 use std::ops::DerefMut;
 use std::sync::Arc;
@@ -45,6 +43,7 @@ use std::time::{Duration, Instant};
 use std::ops::Deref;
 use std::mem;
 
+use toxcore::time::*;
 use toxcore::crypto_core::*;
 use toxcore::dht::packet::*;
 use toxcore::dht::packed_node::*;
@@ -71,6 +70,8 @@ pub const PING_TIMEOUT: u64 = 5;
 pub const MAX_BOOTSTRAP_TIMES: u32 = 5;
 /// Interval in seconds of sending NatPingRequest packet
 pub const NAT_PING_REQ_INTERVAL: u64 = 3;
+/// How often onion key should be refreshed
+pub const ONION_REFRESH_KEY_INTERVAL: u64 = 7200;
 
 /**
 Own DHT node data.
@@ -113,6 +114,8 @@ pub struct Server {
     pub close_nodes: Arc<RwLock<Kbucket>>,
     // symmetric key used for onion return encryption
     onion_symmetric_key: Arc<RwLock<secretbox::Key>>,
+    // time when onion key was generated
+    onion_symmetric_key_time: Arc<RwLock<Instant>>,
     // onion announce struct to handle onion packets
     onion_announce: Arc<RwLock<OnionAnnounce>>,
     /// friends vector of dht node
@@ -175,6 +178,7 @@ impl Server {
             ping_map: Arc::new(RwLock::new(HashMap::new())),
             close_nodes: Arc::new(RwLock::new(Kbucket::new(&pk))),
             onion_symmetric_key: Arc::new(RwLock::new(secretbox::gen_key())),
+            onion_symmetric_key_time: Arc::new(RwLock::new(clock_now())),
             onion_announce: Arc::new(RwLock::new(OnionAnnounce::new(pk))),
             friends: Arc::new(RwLock::new(Vec::new())),
             bootstrap_nodes: Arc::new(RwLock::new(Bucket::new(None))),
@@ -220,6 +224,7 @@ impl Server {
     pub fn dht_main_loop(&self) -> IoFuture<()> {
         self.remove_timedout_clients(Duration::from_secs(self.config.kill_node_timeout));
         self.remove_timedout_ping_ids(Duration::from_secs(self.config.ping_timeout));
+        self.refresh_onion_key();
 
         let ping_bootstrap_nodes = self.ping_bootstrap_nodes();
         let ping_and_get_close_nodes = self.ping_and_get_close_nodes(Duration::from_secs(self.config.ping_interval));
@@ -553,20 +558,6 @@ impl Server {
         send_to(&self.tx, (packet, addr))
     }
 
-    /// get broadcast addresses for host's network interfaces
-    fn get_ipv4_broadcast_addrs() -> Vec<IpAddr> {
-        let ifs = get_if_addrs::get_if_addrs().expect("no network interface");
-        ifs.iter().filter_map(|interface|
-            match interface.addr {
-                IfAddr::V4(ref addr) => addr.broadcast,
-                _ => None,
-        })
-        .map(|addr|
-            IpAddr::V4(addr)
-        )
-        .collect()
-    }
-
     /**
     handle received PingRequest packet, then create PingResponse packet
     and send back it to the peer.
@@ -866,48 +857,6 @@ impl Server {
         self.send_nodes_req(target_node, self.pk, client)
     }
     /**
-    send LanDiscovery packet to all broadcast addresses when dht_node runs as ipv4 mode
-    */
-    pub fn send_lan_discovery_ipv4(&self) -> IoFuture<()> {
-        let mut ip_addrs = Server::get_ipv4_broadcast_addrs();
-        // Ipv4 global broadcast address
-        ip_addrs.push(
-            "255.255.255.255".parse().unwrap()
-        );
-        let lan_packet = DhtPacket::LanDiscovery(LanDiscovery {
-            pk: self.pk,
-        });
-        let lan_sender = ip_addrs.iter().map(|&addr|
-            self.send_to(SocketAddr::new(addr, 33445), lan_packet.clone()) // 33445 is default port for tox
-        );
-
-        let lan_stream = stream::futures_unordered(lan_sender).then(|_| Ok(()));
-        Box::new(lan_stream.for_each(|()| Ok(())))
-    }
-    /**
-    send LanDiscovery packet to all broadcast addresses when dht_node runs as ipv6 mode
-    */
-    pub fn send_lan_discovery_ipv6(&self) -> IoFuture<()> {
-        let mut ip_addrs = Server::get_ipv4_broadcast_addrs();
-        // Ipv6 broadcast address
-        ip_addrs.push(
-            "FF02::1".parse().unwrap()
-        );
-        // Ipv4 global broadcast address
-        ip_addrs.push(
-            "::ffff:255.255.255.255".parse().unwrap()
-        );
-        let lan_packet = DhtPacket::LanDiscovery(LanDiscovery {
-            pk: self.pk,
-        });
-        let lan_sender = ip_addrs.iter().map(|&addr|
-            self.send_to(SocketAddr::new(addr, 33445), lan_packet.clone()) // 33445 is default port for tox
-        );
-
-        let lan_stream = stream::futures_unordered(lan_sender).then(|_| Ok(()));
-        Box::new(lan_stream.for_each(|()| Ok(())))
-    }
-    /**
     handle received OnionRequest0 packet, then create OnionRequest1 packet
     and send it to the next peer.
     */
@@ -1116,8 +1065,11 @@ impl Server {
         }
     }
     /// refresh onion symmetric key to enforce onion paths expiration
-    pub fn refresh_onion_key(&self) {
-        *self.onion_symmetric_key.write() = secretbox::gen_key();
+    fn refresh_onion_key(&self) {
+        if clock_elapsed(*self.onion_symmetric_key_time.read()) >= Duration::from_secs(ONION_REFRESH_KEY_INTERVAL) {
+            *self.onion_symmetric_key_time.write() = clock_now();
+            *self.onion_symmetric_key.write() = secretbox::gen_key();
+        }
     }
     /// add PackedNode object to close_nodes as a thread-safe manner
     pub fn try_add_to_close_nodes(&self, pn: &PackedNode) -> bool {
@@ -1171,20 +1123,15 @@ mod tests {
 
     use futures::Future;
     use std::net::SocketAddr;
+    use tokio_executor;
+    use tokio_timer::clock::*;
+
     use toxcore::binary_io::*;
+    use toxcore::time::ConstNow;
 
     const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - secretbox::NONCEBYTES;
     const ONION_RETURN_2_PAYLOAD_SIZE: usize = ONION_RETURN_2_SIZE - secretbox::NONCEBYTES;
     const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - secretbox::NONCEBYTES;
-
-    macro_rules! unpack {
-        ($variable:expr, $variant:path) => (
-            match $variable {
-                $variant(inner) => inner,
-                other => panic!("Expected {} but got {:?}", stringify!($variant), other),
-            }
-        )
-    }
 
     fn create_node() -> (Server, PrecomputedKey, PublicKey, SecretKey,
             mpsc::UnboundedReceiver<(DhtPacket, SocketAddr)>, SocketAddr) {
@@ -2452,62 +2399,6 @@ mod tests {
         assert!(alice.handle_packet(lan, addr).wait().is_ok());
     }
 
-    #[test]
-    fn server_send_lan_discovery_ipv4_test() {
-        let (alice, _precomp, _bob_pk, _bob_sk, mut rx, _addr) = create_node();
-
-        assert!(alice.send_lan_discovery_ipv4().wait().is_ok());
-
-        let ifs = get_if_addrs::get_if_addrs().expect("no network interface");
-        let broad_vec: Vec<SocketAddr> = ifs.iter().filter_map(|interface|
-            match interface.addr {
-                IfAddr::V4(ref addr) => addr.broadcast,
-                _ => None,
-            })
-            .map(|ipv4|
-                SocketAddr::new(IpAddr::V4(ipv4), 33445)
-            ).collect();
-
-        for _i in 0..broad_vec.len() + 1 { // `+1` for 255.255.255.255
-            let (received, rx1) = rx.into_future().wait().unwrap();
-            let (packet, _addr) = received.unwrap();
-
-            let lan_discovery = unpack!(packet, DhtPacket::LanDiscovery);
-
-            assert_eq!(lan_discovery.pk, alice.pk);
-
-            rx = rx1;
-        }
-    }
-
-    #[test]
-    fn server_send_lan_discovery_ipv6_test() {
-        let (alice, _precomp, _bob_pk, _bob_sk, mut rx, _addr) = create_node();
-
-        assert!(alice.send_lan_discovery_ipv6().wait().is_ok());
-
-        let ifs = get_if_addrs::get_if_addrs().expect("no network interface");
-        let broad_vec: Vec<SocketAddr> = ifs.iter().filter_map(|interface|
-            match interface.addr {
-                IfAddr::V4(ref addr) => addr.broadcast,
-                _ => None,
-            })
-            .map(|ipv4|
-                SocketAddr::new(IpAddr::V4(ipv4), 33445)
-            ).collect();
-
-        for _i in 0..broad_vec.len() + 2 { // `+2` for ::1 and ::ffff:255.255.255.255
-            let (received, rx1) = rx.into_future().wait().unwrap();
-            let (packet, _addr) = received.unwrap();
-
-            let lan_discovery = unpack!(packet, DhtPacket::LanDiscovery);
-
-            assert_eq!(lan_discovery.pk, alice.pk);
-
-            rx = rx1;
-        }
-    }
-
     // remove_timedout_clients(), case of client removed
     #[test]
     fn server_remove_timedout_clients_removed_test() {
@@ -2573,7 +2464,16 @@ mod tests {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
 
         let onion_symmetric_key = alice.onion_symmetric_key.read().clone();
-        alice.refresh_onion_key();
+        let onion_symmetric_key_time = alice.onion_symmetric_key_time.read().clone();
+
+        let mut enter = tokio_executor::enter().unwrap();
+        let clock = Clock::new_with_now(ConstNow(
+            onion_symmetric_key_time + Duration::from_secs(ONION_REFRESH_KEY_INTERVAL)
+        ));
+
+        with_default(&clock, &mut enter, |_| {
+            alice.refresh_onion_key();
+        });
 
         assert!(*alice.onion_symmetric_key.read() != onion_symmetric_key)
     }

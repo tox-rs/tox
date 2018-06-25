@@ -135,3 +135,20 @@ macro_rules! encode_decode_test (
         }
     )
 );
+
+/// Extract inner content of enums.
+#[cfg(test)]
+macro_rules! unpack {
+    ($variable:expr, $variant:path, $name:ident) => (
+        match $variable {
+            $variant { $name, .. } => $name,
+            other => panic!("Expected {} but got {:?}", stringify!($variant), other),
+        }
+    );
+    ($variable:expr, $variant:path) => (
+        match $variable {
+            $variant(inner) => inner,
+            other => panic!("Expected {} but got {:?}", stringify!($variant), other),
+        }
+    )
+}

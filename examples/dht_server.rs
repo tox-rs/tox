@@ -47,6 +47,7 @@ use tox::toxcore::dht::packet::*;
 use tox::toxcore::dht::codec::*;
 use tox::toxcore::dht::server::*;
 use tox::toxcore::dht::packed_node::*;
+use tox::toxcore::dht::lan_discovery::*;
 use tox::toxcore::crypto_core::*;
 use tox::toxcore::io_tokio::*;
 use tox::toxcore::dht::dht_friend::*;
@@ -93,6 +94,9 @@ fn main() {
     let (lossless_tx, lossless_rx) = mpsc::unbounded();
     let (lossy_tx, lossy_rx) = mpsc::unbounded();
 
+    let local_addr: SocketAddr = "0.0.0.0:33445".parse().unwrap(); // 0.0.0.0 for ipv4
+    // let local_addr: SocketAddr = "[::]:33445".parse().unwrap(); // [::] for ipv6
+
     // Ignore DHT PublicKey updates for now
     let dht_pk_handler = dht_pk_rx
         .map_err(|_| Error::new(ErrorKind::Other, "rx error"))
@@ -117,6 +121,8 @@ fn main() {
         dht_sk: server_sk.clone(),
         real_pk
     });
+
+    let lan_discovery_sender = LanDiscoverySender::new(tx.clone(), server_pk, local_addr.is_ipv6());
 
     let mut server_obj = Server::new(tx, server_pk, server_sk);
     server_obj.set_net_crypto(net_crypto);
@@ -163,9 +169,6 @@ fn main() {
     server_obj.add_friend(DhtFriend::new(friend_pk, 0));
     // set bootstrap info
     server_obj.set_bootstrap_info(07032018, "This is tox-rs".as_bytes().to_owned());
-
-    let local_addr: SocketAddr = "0.0.0.0:33445".parse().unwrap(); // 0.0.0.0 for ipv4
-    // let local_addr: SocketAddr = "[::]:33445".parse().unwrap(); // [::] for ipv6
 
     // Bind a UDP listener to the socket address.
     let socket = UdpSocket::bind(&local_addr).unwrap();
@@ -223,36 +226,32 @@ fn main() {
             err
         });
 
-    let server: IoFuture<()> = Box::new(network);
-    let server = add_lan_sender(server, &server_obj, local_addr);
-    let server = add_server_main_loop(server, &server_obj);
-    let server = add_onion_key_refresher(server, &server_obj);
-    let server = server.join(dht_pk_handler).map(|_| ());
-    let server = server.join(lossless_handler).map(|_| ());
-    let server = server.join(lossy_handler).map(|_| ());
+    let server: IoFuture<()> = Box::new(network); // TODO: remove these boxes on rustc 1.26
+    let server: IoFuture<()> = Box::new(server.select(run_server(&server_obj)).map(|_| ()).map_err(|(e, _)| e));
+    let server: IoFuture<()> = Box::new(server.select(run_lan_discovery_sender(lan_discovery_sender)).map(|_| ()).map_err(|(e, _)| e));
+    let server: IoFuture<()> = Box::new(server.select(dht_pk_handler).map(|_| ()).map_err(|(e, _)| e));
+    let server: IoFuture<()> = Box::new(server.select(lossless_handler).map(|_| ()).map_err(|(e, _)| e));
+    let server: IoFuture<()> = Box::new(server.select(lossy_handler).map(|_| ()).map_err(|(e, _)| e));
 
-    let server = server
-        .map(|_| ())
-        .map_err(move |err| {
-            error!("Processing ended with error: {:?}", err);
-            ()
-        });
+    let server = server.map_err(move |err| {
+        error!("Processing ended with error: {:?}", err);
+        ()
+    });
 
     info!("server running on localhost:12345");
     tokio::run(server);
 }
 
-fn add_server_main_loop(base_selector: IoFuture<()>, server_obj: &Server) -> IoFuture<()> {
-    // 20 seconds for NodesRequest
+fn run_server(server_obj: &Server) -> IoFuture<()> {
     let interval = Duration::from_secs(1);
-    let nodes_wakeups = Interval::new(Instant::now() + interval, interval);
+    let dht_wakeups = Interval::new(Instant::now(), interval);
     let mut server_obj_c = server_obj.clone();
     let mut bootstrap_fast: bool = false;
 
-    let nodes_sender = nodes_wakeups
+    let future = dht_wakeups
         .map_err(|e| Error::new(ErrorKind::Other, format!("Nodes timer error: {:?}", e)))
         .for_each(move |_instant| {
-            println!("main_loop_wakeup");
+            trace!("DHT server wake up");
             // flag for fast bootstrapping
             if bootstrap_fast {
                 server_obj_c.dht_main_loop()
@@ -287,57 +286,19 @@ fn add_server_main_loop(base_selector: IoFuture<()>, server_obj: &Server) -> IoF
 
                 res
             }
-        })
-        .map_err(|_err| Error::new(ErrorKind::Other, "Nodes timer error"));
+        });
 
-    Box::new(base_selector.select(Box::new(nodes_sender))
-        .map(|_| ())
-        .map_err(move |(err, _select_next)| {
-            error!("Processing ended with error: {:?}", err);
-            err
-        }))
+    Box::new(future)
 }
 
-fn add_lan_sender(base_selector: IoFuture<()>, server_obj: &Server, local_addr: SocketAddr) -> IoFuture<()> {
-    // 10 seconds for LanDiscovery
-    let interval = Duration::from_secs(10);
-    let lan_wakeups = Interval::new(Instant::now() + interval, interval);
-    let server_obj_c = server_obj.clone();
-    let lan_sender = lan_wakeups
+fn run_lan_discovery_sender(mut lan_discovery_sender: LanDiscoverySender) -> IoFuture<()> {
+    let interval = Duration::from_secs(LAN_DISCOVERY_INTERVAL);
+    let lan_wakeups = Interval::new(Instant::now(), interval);
+    let future = lan_wakeups
         .map_err(|e| Error::new(ErrorKind::Other, format!("LanDiscovery timer error: {:?}", e)))
         .for_each(move |_instant| {
-            println!("lan_wakeup");
-            if local_addr.is_ipv4() {
-                server_obj_c.send_lan_discovery_ipv4()
-            } else {
-                server_obj_c.send_lan_discovery_ipv6()
-            }
+            trace!("LAN discovery sender wake up");
+            lan_discovery_sender.send()
         });
-
-    Box::new(base_selector.select(Box::new(lan_sender))
-        .map(|_| ())
-        .map_err(move |(err, _select_next)| {
-            error!("Processing ended with error: {:?}", err);
-            err
-        }))
-}
-fn add_onion_key_refresher(base_selector: IoFuture<()>, server_obj: &Server) -> IoFuture<()> {
-    // Refresh onion symmetric key every 2 hours. This enforces onion paths expiration.
-    let interval = Duration::from_secs(7200);
-    let refresh_onion_key_wakeups = Interval::new(Instant::now() + interval, interval);
-    let server_obj_c = server_obj.clone();
-    let onion_key_updater = refresh_onion_key_wakeups
-        .map_err(|e| Error::new(ErrorKind::Other, format!("Refresh onion key timer error: {:?}", e)))
-        .for_each(move |_instant| {
-            println!("refresh_onion_key_wakeup");
-            server_obj_c.refresh_onion_key();
-            future::ok(())
-        });
-
-    Box::new(base_selector.select(Box::new(onion_key_updater))
-        .map(|_| ())
-        .map_err(move |(err, _select_next)| {
-            error!("Processing ended with error: {:?}", err);
-            err
-        }))
+    Box::new(future)
 }

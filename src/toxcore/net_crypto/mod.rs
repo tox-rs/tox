@@ -660,21 +660,6 @@ mod tests {
 
     use toxcore::time::ConstNow;
 
-    macro_rules! unpack {
-        ($variable:expr, $variant:path, $name:ident) => (
-            match $variable {
-                $variant { $name, .. } => $name,
-                other => panic!("Expected {} but got {:?}", stringify!($variant), other),
-            }
-        );
-        ($variable:expr, $variant:path) => (
-            match $variable {
-                $variant(inner) => inner,
-                other => panic!("Expected {} but got {:?}", stringify!($variant), other),
-            }
-        )
-    }
-
     #[test]
     fn net_crypto_clone() {
         let (udp_tx, _udp_rx) = mpsc::unbounded();
