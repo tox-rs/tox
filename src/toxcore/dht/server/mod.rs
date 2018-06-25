@@ -107,16 +107,16 @@ pub struct Server {
     pub tx: Tx,
     /// option for hole punching
     pub is_hole_punching_enabled: bool,
-    // store ping object which has sent request packet to peer
-    ping_map: Arc<RwLock<HashMap<PublicKey, PingData>>>,
-    // Close List (contains nodes close to own DHT PK)
-    close_nodes: Arc<RwLock<Kbucket>>,
+    /// store ping object which has sent request packet to peer
+    pub ping_map: Arc<RwLock<HashMap<PublicKey, PingData>>>,
+    /// Close List (contains nodes close to own DHT PK)
+    pub close_nodes: Arc<RwLock<Kbucket>>,
     // symmetric key used for onion return encryption
     onion_symmetric_key: Arc<RwLock<secretbox::Key>>,
     // onion announce struct to handle onion packets
     onion_announce: Arc<RwLock<OnionAnnounce>>,
-    // friends vector of dht node
-    friends: Arc<RwLock<Vec<DhtFriend>>>,
+    /// friends vector of dht node
+    pub friends: Arc<RwLock<Vec<DhtFriend>>>,
     // nodes vector for bootstrap
     bootstrap_nodes: Arc<RwLock<Bucket>>,
     // count for sending NodesRequest to random node which is in close node
