@@ -5,6 +5,6 @@ authors = ["Roman Proskuryakov <humbug@deeptown.org>"]
 readme = "README.md"
 description = "A server application to run tox node"
 repository = "https://github.com/tox-rs/tox-node/"
-license = "Unlicense"
+license = "MIT"
 
 [dependencies]
