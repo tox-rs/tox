@@ -20,9 +20,9 @@
 
 
 /*!
-Save or load states of tox daemon.
-When toxcore start, it load states from saved file.
-Toxcore daemon saves its states to file every 10 minutes.
+serialize or deserialize states of tox daemon.
+When toxcore start, it deserialize states from serialized file.
+Toxcore daemon serializes its states to file every 10 minutes.
 */
 
 use std::io::{Error, ErrorKind};
@@ -37,7 +37,7 @@ use toxcore::binary_io::*;
 use toxcore::io_tokio::*;
 use toxcore::dht::kbucket::*;
 
-/// Save or load states of DHT close lists
+/// serialize or deserialize states of DHT close lists
 #[derive(Clone, Debug)]
 pub struct DaemonState;
 
@@ -53,8 +53,8 @@ const DHT_STATE_BUFFER_SIZE: usize =
     ) * KBUCKET_MAX_ENTRIES as usize; // 255
 
 impl DaemonState {
-    /// save DHT close list
-    pub fn save(server: &Server) -> Vec<u8> {
+    /// serialize DHT states, old means that the format of seriaization is old version
+    pub fn serialize_old(server: &Server) -> Vec<u8> {
         let nodes = server.close_nodes.read().iter() // DhtNode is reformed to PackedNode through iter()
             .map(|node| node)
             .collect::<Vec<PackedNode>>();
@@ -65,13 +65,13 @@ impl DaemonState {
         buf[..buf_len].to_vec()
     }
 
-    /// load DHT close list and then re-setup close list
-    pub fn load(server: &Server, saved_data: Vec<u8>) -> IoFuture<()> {
-        let nodes = match DhtState::from_bytes(&saved_data) {
+    /// deserialize DHT close list and then re-setup close list, old means that the format of deserialization is old version
+    pub fn deserialize_old(server: &Server, serialized_data: Vec<u8>) -> IoFuture<()> {
+        let nodes = match DhtState::from_bytes(&serialized_data) {
             IResult::Done(_, DhtState(nodes)) => nodes,
             e => return Box::new(
                 future::err(
-                    Error::new(ErrorKind::Other, format!("Can't load DHT states from saved file(s) {:?}", e))
+                    Error::new(ErrorKind::Other, format!("Can't deserialize DHT states from serialized file(s) {:?}", e))
                 )
             ),
         };
@@ -110,7 +110,7 @@ mod tests {
     }
 
     #[test]
-    fn daemon_state_save_load_test() {
+    fn daemon_state_serialize_deserialize_test() {
         let (pk, sk) = gen_keypair();
         let (tx, rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
         let alice = Server::new(tx, pk, sk);
@@ -120,8 +120,8 @@ mod tests {
         let pn = PackedNode { pk: pk_org, saddr: addr_org };
         alice.close_nodes.write().try_add(&pn);
 
-        let saved_vec = DaemonState::save(&alice);
-        DaemonState::load(&alice, saved_vec).wait().unwrap();
+        let serialized_vec = DaemonState::serialize_old(&alice);
+        DaemonState::deserialize_old(&alice, serialized_vec).wait().unwrap();
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -132,14 +132,14 @@ mod tests {
 
         assert_eq!(sending_packet.pk, pk);
 
-        // test with incompleted saved data
-        let saved_vec = DaemonState::save(&alice);
-        let saved_len = saved_vec.len();
-        assert!(DaemonState::load(&alice, saved_vec[..saved_len - 1].to_vec()).wait().is_err());
+        // test with incompleted serialized data
+        let serialized_vec = DaemonState::serialize_old(&alice);
+        let serialized_len = serialized_vec.len();
+        assert!(DaemonState::deserialize_old(&alice, serialized_vec[..serialized_len - 1].to_vec()).wait().is_err());
 
         // test with empty close list
         alice.close_nodes.write().remove(&pk_org);
-        let saved_vec = DaemonState::save(&alice);
-        assert!(DaemonState::load(&alice, saved_vec).wait().is_ok());
+        let serialized_vec = DaemonState::serialize_old(&alice);
+        assert!(DaemonState::deserialize_old(&alice, serialized_vec).wait().is_ok());
     }
 }
