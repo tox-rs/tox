@@ -20,9 +20,9 @@
 
 
 /*!
-serialize or deserialize states of tox daemon.
-When toxcore start, it deserialize states from serialized file.
-Toxcore daemon serializes its states to file every 10 minutes.
+Serialize or deserialize states of tox daemon.
+When toxcore starts, it deserializes states from serialized file.
+Toxcore daemon may serialize its states to file with some interval.
 */
 
 use std::io::{Error, ErrorKind};
@@ -71,7 +71,7 @@ impl DaemonState {
             IResult::Done(_, DhtState(nodes)) => nodes,
             e => return Box::new(
                 future::err(
-                    Error::new(ErrorKind::Other, format!("Can't deserialize DHT states from serialized file(s) {:?}", e))
+                    Error::new(ErrorKind::Other, format!("Can't deserialize DHT states from serialized bytes {:?}", e))
                 )
             ),
         };
