@@ -1133,15 +1133,6 @@ mod tests {
     const ONION_RETURN_2_PAYLOAD_SIZE: usize = ONION_RETURN_2_SIZE - secretbox::NONCEBYTES;
     const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - secretbox::NONCEBYTES;
 
-    macro_rules! unpack {
-        ($variable:expr, $variant:path) => (
-            match $variable {
-                $variant(inner) => inner,
-                other => panic!("Expected {} but got {:?}", stringify!($variant), other),
-            }
-        )
-    }
-
     fn create_node() -> (Server, PrecomputedKey, PublicKey, SecretKey,
             mpsc::UnboundedReceiver<(DhtPacket, SocketAddr)>, SocketAddr) {
         crypto_init();

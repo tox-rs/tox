@@ -129,15 +129,6 @@ mod tests {
 
     const BOOTSTRAP_TIMES: u32 = 5;
 
-    macro_rules! unpack {
-        ($variable:expr, $variant:path) => (
-            match $variable {
-                $variant(inner) => inner,
-                other => panic!("Expected {} but got {:?}", stringify!($variant), other),
-            }
-        )
-    }
-
     #[test]
     fn ping_new_test() {
         let _ = PingSender::new();

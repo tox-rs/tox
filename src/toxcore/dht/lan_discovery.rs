@@ -145,15 +145,6 @@ mod tests {
 
     use futures::{Future, Stream};
 
-    macro_rules! unpack {
-        ($variable:expr, $variant:path) => (
-            match $variable {
-                $variant(inner) => inner,
-                other => panic!("Expected {} but got {:?}", stringify!($variant), other),
-            }
-        )
-    }
-
     fn broadcast_addrs_count() -> usize {
         get_if_addrs::get_if_addrs().expect("no network interface").iter().filter_map(|interface|
             match interface.addr {

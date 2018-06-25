@@ -260,15 +260,6 @@ mod tests {
     use futures::sync::mpsc;
     use std::thread;
 
-    macro_rules! unpack {
-        ($variable:expr, $variant:path) => (
-            match $variable {
-                $variant(inner) => inner,
-                other => panic!("Expected {} but got {:?}", stringify!($variant), other),
-            }
-        )
-    }
-
     #[test]
     fn hole_punch_new_test() {
         let hole_punch = HolePunching::new();
