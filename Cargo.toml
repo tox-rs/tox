@@ -8,3 +8,9 @@ repository = "https://github.com/tox-rs/tox-node/"
 license = "MIT"
 
 [dependencies]
+env_logger = "0.5"
+failure = "0.1"
+futures = "0.1"
+log = "0.4"
+tokio = "0.1.7"
+tox = { git = "https://github.com/tox-rs/tox" }
