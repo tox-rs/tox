@@ -128,7 +128,7 @@ impl LanDiscoverySender {
     }
 
     /// Send `LanDiscovery` packets.
-    pub fn send(&mut self) -> IoFuture<()> {
+    fn send(&mut self) -> IoFuture<()> {
         let addrs = self.get_broadcast_socket_addrs();
         let lan_packet = DhtPacket::LanDiscovery(LanDiscovery {
             pk: self.dht_pk,

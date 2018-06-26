@@ -236,7 +236,7 @@ impl Server {
     }
 
     /// main loop of dht server, call this function every second
-    pub fn dht_main_loop(&self) -> IoFuture<()> {
+    fn dht_main_loop(&self) -> IoFuture<()> {
         self.remove_timedout_clients(Duration::from_secs(self.config.kill_node_timeout));
         self.remove_timedout_ping_ids(Duration::from_secs(self.config.ping_timeout));
         self.refresh_onion_key();
