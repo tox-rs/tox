@@ -147,7 +147,7 @@ pub struct Server {
 }
 
 /// Struct for grouping parameters to Server's main loop
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone)]
 pub struct ConfigArgs {
     /// timeout in seconds for remove clients in ping_map
     pub kill_node_timeout: u64,
@@ -163,6 +163,20 @@ pub struct ConfigArgs {
     pub ping_iter_interval: u64,
     /// interval in seconds for NatPingRequest
     pub nat_ping_req_interval: u64,
+}
+
+impl Default for ConfigArgs {
+    fn default() -> ConfigArgs {
+        ConfigArgs {
+            kill_node_timeout: 182,
+            ping_timeout: 5,
+            ping_interval: 60,
+            bad_node_timeout: 162,
+            nodes_req_interval: 20,
+            nat_ping_req_interval: 3,
+            ping_iter_interval: 2,
+        }
+    }
 }
 
 impl Server {
