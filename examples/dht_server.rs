@@ -36,12 +36,10 @@ use futures::*;
 use futures::sync::mpsc;
 use hex::FromHex;
 use tokio::net::{UdpSocket, UdpFramed};
-use tokio::timer::Interval;
 
 use std::env;
 use std::net::{SocketAddr, IpAddr};
 use std::io::{ErrorKind, Error};
-use std::time::{Duration, Instant};
 
 use tox::toxcore::dht::packet::*;
 use tox::toxcore::dht::codec::*;
@@ -227,8 +225,8 @@ fn main() {
         });
 
     let server: IoFuture<()> = Box::new(network); // TODO: remove these boxes on rustc 1.26
-    let server: IoFuture<()> = Box::new(server.select(run_server(&server_obj)).map(|_| ()).map_err(|(e, _)| e));
-    let server: IoFuture<()> = Box::new(server.select(run_lan_discovery_sender(lan_discovery_sender)).map(|_| ()).map_err(|(e, _)| e));
+    let server: IoFuture<()> = Box::new(server.select(server_obj.run()).map(|_| ()).map_err(|(e, _)| e));
+    let server: IoFuture<()> = Box::new(server.select(lan_discovery_sender.run()).map(|_| ()).map_err(|(e, _)| e));
     let server: IoFuture<()> = Box::new(server.select(dht_pk_handler).map(|_| ()).map_err(|(e, _)| e));
     let server: IoFuture<()> = Box::new(server.select(lossless_handler).map(|_| ()).map_err(|(e, _)| e));
     let server: IoFuture<()> = Box::new(server.select(lossy_handler).map(|_| ()).map_err(|(e, _)| e));
@@ -240,65 +238,4 @@ fn main() {
 
     info!("server running on localhost:12345");
     tokio::run(server);
-}
-
-fn run_server(server_obj: &Server) -> IoFuture<()> {
-    let interval = Duration::from_secs(1);
-    let dht_wakeups = Interval::new(Instant::now(), interval);
-    let mut server_obj_c = server_obj.clone();
-    let mut bootstrap_fast: bool = false;
-
-    let future = dht_wakeups
-        .map_err(|e| Error::new(ErrorKind::Other, format!("Nodes timer error: {:?}", e)))
-        .for_each(move |_instant| {
-            trace!("DHT server wake up");
-            // flag for fast bootstrapping
-            if bootstrap_fast {
-                server_obj_c.dht_main_loop()
-            } else {
-                bootstrap_fast = true;
-                // args to main loop, all value is seconds
-                let args = ConfigArgs {
-                    kill_node_timeout: 182,
-                    ping_timeout: 5,
-                    ping_interval: 0,
-                    bad_node_timeout: 162,
-                    nodes_req_interval: 0,
-                    nat_ping_req_interval: 0,
-                    ping_iter_interval: 0,
-                };
-
-                server_obj_c.set_config_values(args);
-                let res = server_obj_c.dht_main_loop();
-
-                // args to main loop, all value is seconds
-                let args = ConfigArgs {
-                    kill_node_timeout: 182,
-                    ping_timeout: 5,
-                    ping_interval: 60,
-                    bad_node_timeout: 162,
-                    nodes_req_interval: 20,
-                    nat_ping_req_interval: 3,
-                    ping_iter_interval: 2,
-                };
-
-                server_obj_c.set_config_values(args);
-
-                res
-            }
-        });
-
-    Box::new(future)
-}
-
-fn run_lan_discovery_sender(mut lan_discovery_sender: LanDiscoverySender) -> IoFuture<()> {
-    let interval = Duration::from_secs(LAN_DISCOVERY_INTERVAL);
-    let lan_wakeups = Interval::new(Instant::now(), interval);
-    let future = lan_wakeups
-        .map_err(|e| Error::new(ErrorKind::Other, format!("LanDiscovery timer error: {:?}", e)))
-        .for_each(move |_instant| {
-            trace!("LAN discovery sender wake up");
-            lan_discovery_sender.send()
-        });
-    Box::new(future)
 }

@@ -33,6 +33,7 @@ pub mod hole_punching;
 use futures::{Future, Sink, Stream, future, stream};
 use futures::sync::mpsc;
 use parking_lot::RwLock;
+use tokio::timer::Interval;
 
 use std::io::{ErrorKind, Error};
 use std::net::SocketAddr;
@@ -146,7 +147,7 @@ pub struct Server {
 }
 
 /// Struct for grouping parameters to Server's main loop
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone)]
 pub struct ConfigArgs {
     /// timeout in seconds for remove clients in ping_map
     pub kill_node_timeout: u64,
@@ -162,6 +163,20 @@ pub struct ConfigArgs {
     pub ping_iter_interval: u64,
     /// interval in seconds for NatPingRequest
     pub nat_ping_req_interval: u64,
+}
+
+impl Default for ConfigArgs {
+    fn default() -> ConfigArgs {
+        ConfigArgs {
+            kill_node_timeout: 182,
+            ping_timeout: 5,
+            ping_interval: 60,
+            bad_node_timeout: 162,
+            nodes_req_interval: 20,
+            nat_ping_req_interval: 3,
+            ping_iter_interval: 2,
+        }
+    }
 }
 
 impl Server {
@@ -221,7 +236,7 @@ impl Server {
     }
 
     /// main loop of dht server, call this function every second
-    pub fn dht_main_loop(&self) -> IoFuture<()> {
+    fn dht_main_loop(&self) -> IoFuture<()> {
         self.remove_timedout_clients(Duration::from_secs(self.config.kill_node_timeout));
         self.remove_timedout_ping_ids(Duration::from_secs(self.config.ping_timeout));
         self.refresh_onion_key();
@@ -245,6 +260,55 @@ impl Server {
             .map(|_| ());
 
         Box::new(res)
+    }
+
+    /// Run DHT main loop periodically. Result future will never be completed
+    /// successfully.
+    pub fn run(mut self) -> IoFuture<()> {
+        let interval = Duration::from_secs(1);
+        let wakeups = Interval::new(Instant::now(), interval);
+        let mut bootstrap_fast: bool = false;
+        let future = wakeups
+            .map_err(|e| Error::new(ErrorKind::Other, format!("DHT server timer error: {:?}", e)))
+            .for_each(move |_instant| {
+                trace!("DHT server wake up");
+
+                // flag for fast bootstrapping
+                if bootstrap_fast {
+                    self.dht_main_loop()
+                } else {
+                    bootstrap_fast = true;
+                    // args to main loop, all value is seconds
+                    let args = ConfigArgs {
+                        kill_node_timeout: 182,
+                        ping_timeout: 5,
+                        ping_interval: 0,
+                        bad_node_timeout: 162,
+                        nodes_req_interval: 0,
+                        nat_ping_req_interval: 0,
+                        ping_iter_interval: 0,
+                    };
+
+                    self.set_config_values(args);
+                    let res = self.dht_main_loop();
+
+                    // args to main loop, all value is seconds
+                    let args = ConfigArgs {
+                        kill_node_timeout: 182,
+                        ping_timeout: 5,
+                        ping_interval: 60,
+                        bad_node_timeout: 162,
+                        nodes_req_interval: 20,
+                        nat_ping_req_interval: 3,
+                        ping_iter_interval: 2,
+                    };
+
+                    self.set_config_values(args);
+
+                    res
+                }
+            });
+        Box::new(future)
     }
 
     // send PingRequest using Ping object

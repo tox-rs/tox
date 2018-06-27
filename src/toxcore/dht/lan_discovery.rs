@@ -21,12 +21,15 @@
 //! Module for LAN discovery.
 
 use std::iter;
+use std::io::{Error, ErrorKind};
 use std::net::{IpAddr, SocketAddr};
+use std::time::{Duration, Instant};
 
-use futures::stream;
+use futures::{stream, Stream};
 use futures::sync::mpsc;
 use get_if_addrs;
 use get_if_addrs::IfAddr;
+use tokio::timer::Interval;
 
 use toxcore::crypto_core::*;
 use toxcore::io_tokio::*;
@@ -124,8 +127,8 @@ impl LanDiscoverySender {
         socket_addrs
     }
 
-    /// Send `LanDiscovery` packets if necessary.
-    pub fn send(&mut self) -> IoFuture<()> {
+    /// Send `LanDiscovery` packets.
+    fn send(&mut self) -> IoFuture<()> {
         let addrs = self.get_broadcast_socket_addrs();
         let lan_packet = DhtPacket::LanDiscovery(LanDiscovery {
             pk: self.dht_pk,
@@ -136,6 +139,20 @@ impl LanDiscoverySender {
         );
 
         send_all_to(&self.tx, stream)
+    }
+
+    /// Run LAN discovery periodically. Result future will never be completed
+    /// successfully.
+    pub fn run(mut self) -> IoFuture<()> {
+        let interval = Duration::from_secs(LAN_DISCOVERY_INTERVAL);
+        let wakeups = Interval::new(Instant::now(), interval);
+        let future = wakeups
+            .map_err(|e| Error::new(ErrorKind::Other, format!("LanDiscovery timer error: {:?}", e)))
+            .for_each(move |_instant| {
+                trace!("LAN discovery sender wake up");
+                self.send()
+            });
+        Box::new(future)
     }
 }
 
