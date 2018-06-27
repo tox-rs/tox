@@ -1,21 +1,77 @@
+#[macro_use]
+extern crate clap;
 extern crate env_logger;
 extern crate failure;
 extern crate futures;
+extern crate hex;
+extern crate itertools;
 #[macro_use]
 extern crate log;
 extern crate tokio;
 extern crate tox;
 
 use std::io::{Error, ErrorKind};
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 
+use clap::{Arg, App};
 use futures::sync::mpsc;
 use futures::{future, Future, Sink, Stream};
+use hex::FromHex;
+use itertools::Itertools;
 use tokio::net::{UdpSocket, UdpFramed};
-use tox::toxcore::crypto_core::{crypto_init, gen_keypair};
+use tox::toxcore::crypto_core::*;
 use tox::toxcore::dht::codec::{DecodeError, DhtCodec};
+use tox::toxcore::dht::packed_node::PackedNode;
 use tox::toxcore::dht::server::Server;
 use tox::toxcore::dht::lan_discovery::LanDiscoverySender;
+
+/// Config parsed from command line arguments.
+#[derive(Clone, PartialEq, Eq, Debug)]
+struct CliConfig {
+    /// List of bootstrap nodes.
+    bootstrap_nodes: Vec<PackedNode>,
+}
+
+/// Parse command line arguments.
+fn cli_parse() -> CliConfig {
+    let matches = App::new(crate_name!())
+        .version(crate_version!())
+        .author(crate_authors!("\n"))
+        .about(crate_description!())
+        .arg(Arg::with_name("bootstrap-node")
+            .short("b")
+            .long("bootstrap-node")
+            .help("Node to perform initial bootstrap")
+            .multiple(true)
+            .takes_value(true)
+            .number_of_values(2)
+            .value_names(&["public key", "address"]))
+        .get_matches();
+
+    let bootstrap_nodes = matches
+        .values_of("bootstrap-node")
+        .into_iter()
+        .flat_map(|values| values)
+        .tuples()
+        .map(|(pk, saddr)| {
+            // get PK bytes of the bootstrap node
+            let bootstrap_pk_bytes: [u8; 32] = FromHex::from_hex(pk).expect("Invalid node key");
+            // create PK from bytes
+            let bootstrap_pk = PublicKey::from_slice(&bootstrap_pk_bytes).expect("Invalid node key");
+
+            let saddr = saddr
+                .to_socket_addrs()
+                .expect("Invalid node address")
+                .next()
+                .expect("Invalid node address");
+            PackedNode::new(true, saddr, &bootstrap_pk)
+        })
+        .collect();
+
+    CliConfig {
+        bootstrap_nodes
+    }
+}
 
 /// Bind a UDP listener to the socket address.
 fn bind_socket(addr: SocketAddr) -> UdpSocket {
@@ -34,6 +90,8 @@ fn main() {
         panic!("Crypto initialization failed.");
     }
 
+    let cli_config = cli_parse();
+
     let local_addr: SocketAddr = "0.0.0.0:33445".parse().unwrap(); // 0.0.0.0 for ipv4
     // let local_addr: SocketAddr = "[::]:33445".parse().unwrap(); // [::] for ipv6
 
@@ -49,6 +107,10 @@ fn main() {
 
     let mut server = Server::new(tx, dht_pk, dht_sk);
     server.set_bootstrap_info(07032018, b"This is tox-rs".to_vec());
+
+    for node in cli_config.bootstrap_nodes {
+        assert!(server.try_add_to_close_nodes(&node));
+    }
 
     // The server task asynchronously iterates over and processes each
     // incoming packet.
