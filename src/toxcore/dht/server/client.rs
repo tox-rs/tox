@@ -1,24 +1,3 @@
-/*
-    Copyright © 2017 Zetok Zalbavar <zexavexxe@gmail.com>
-    Copyright © 2018 Namsoo CHO <nscho66@gmail.com>
-
-    This file is part of Tox.
-
-    Tox is libre software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-
-    Tox is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with Tox.  If not, see <http://www.gnu.org/licenses/>.
-*/
-
-
 /*!
 Manage ping_id.
 Generate ping_id on request packet, check ping_id on response packet.
@@ -147,12 +126,12 @@ mod tests {
         let dur = Duration::from_secs(0);
         client.clear_timedout_pings(dur);
         let dur = Duration::from_secs(1);
-        assert!(!client.check_ping_id(ping_id, dur));        
+        assert!(!client.check_ping_id(ping_id, dur));
 
         // ping_id should remain
         let ping_id = client.insert_new_ping_id();
         let dur = Duration::from_secs(1);
         client.clear_timedout_pings(dur);
-        assert!(client.check_ping_id(ping_id, dur));        
+        assert!(client.check_ping_id(ping_id, dur));
     }
 }
