@@ -1,7 +1,10 @@
 [package]
 name = "tox-node"
 version = "0.0.2"
-authors = ["Roman Proskuryakov <humbug@deeptown.org>"]
+authors = [
+  "Roman Proskuryakov <humbug@deeptown.org>",
+  "Evgeny Kurnevsky <kurnevsky@gmail.com>",
+]
 readme = "README.md"
 description = "A server application to run tox node"
 repository = "https://github.com/tox-rs/tox-node/"
