@@ -18,6 +18,7 @@ use futures::sync::mpsc;
 use futures::{future, Future, Sink, Stream};
 use hex::FromHex;
 use itertools::Itertools;
+use log::LevelFilter;
 use tokio::net::{UdpSocket, UdpFramed};
 use tox::toxcore::crypto_core::*;
 use tox::toxcore::dht::codec::{DecodeError, DhtCodec};
@@ -84,7 +85,9 @@ fn bind_socket(addr: SocketAddr) -> UdpSocket {
 }
 
 fn main() {
-    env_logger::init();
+    env_logger::Builder::from_default_env()
+        .filter_level(LevelFilter::Info)
+        .init();
 
     if !crypto_init() {
         panic!("Crypto initialization failed.");
