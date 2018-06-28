@@ -111,6 +111,10 @@ fn main() {
     let mut server = Server::new(tx, dht_pk, dht_sk);
     server.set_bootstrap_info(07032018, b"This is tox-rs".to_vec());
 
+    if cli_config.bootstrap_nodes.is_empty() {
+        warn!("No bootstrap nodes!");
+    }
+
     for node in cli_config.bootstrap_nodes {
         assert!(server.try_add_to_close_nodes(&node));
     }
