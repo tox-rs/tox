@@ -14,7 +14,7 @@ extern crate tox;
 use std::io::{Error, ErrorKind};
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 
-use clap::{Arg, App};
+use clap::{Arg, App, AppSettings};
 use futures::sync::mpsc;
 use futures::{future, Future, Sink, Stream};
 use hex::FromHex;
@@ -47,6 +47,7 @@ fn cli_parse() -> CliConfig {
         .version(crate_version!())
         .author(crate_authors!("\n"))
         .about(crate_description!())
+        .setting(AppSettings::ColoredHelp)
         .arg(Arg::with_name("bootstrap-node")
             .short("b")
             .long("bootstrap-node")
