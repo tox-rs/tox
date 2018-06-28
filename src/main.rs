@@ -7,6 +7,7 @@ extern crate hex;
 extern crate itertools;
 #[macro_use]
 extern crate log;
+extern crate num_cpus;
 extern crate tokio;
 extern crate tox;
 
@@ -19,7 +20,9 @@ use futures::{future, Future, Sink, Stream};
 use hex::FromHex;
 use itertools::Itertools;
 use log::LevelFilter;
+use tokio::executor::thread_pool;
 use tokio::net::{UdpSocket, UdpFramed};
+use tokio::runtime;
 use tox::toxcore::crypto_core::*;
 use tox::toxcore::dht::codec::{DecodeError, DhtCodec};
 use tox::toxcore::dht::packed_node::PackedNode;
@@ -31,10 +34,15 @@ use tox::toxcore::dht::lan_discovery::LanDiscoverySender;
 struct CliConfig {
     /// List of bootstrap nodes.
     bootstrap_nodes: Vec<PackedNode>,
+    /// Number of threads for execution. None if single threaded runtime should
+    /// be used.
+    threads_count: Option<usize>,
 }
 
 /// Parse command line arguments.
 fn cli_parse() -> CliConfig {
+    let num_cpus_string = num_cpus::get().to_string();
+
     let matches = App::new(crate_name!())
         .version(crate_version!())
         .author(crate_authors!("\n"))
@@ -47,6 +55,20 @@ fn cli_parse() -> CliConfig {
             .takes_value(true)
             .number_of_values(2)
             .value_names(&["public key", "address"]))
+        .arg(Arg::with_name("threaded")
+            .long("threaded")
+            .short("t")
+            .help("Use threaded runtime. By default the number of threads is \
+                   determined automatically by the number of CPU cores"))
+        .arg(Arg::with_name("threads-count")
+            .short("T")
+            .long("threads-count")
+            .requires("threaded")
+            .help("Number of threads to use if threaded flag is specified. \
+                   Will be determined automatically by the number of CPU cores \
+                   if not specified")
+            .takes_value(true)
+            .default_value_if("threaded", None, &num_cpus_string))
         .get_matches();
 
     let bootstrap_nodes = matches
@@ -69,8 +91,15 @@ fn cli_parse() -> CliConfig {
         })
         .collect();
 
+    let threads_count = if matches.is_present("threaded") {
+        Some(value_t!(matches.value_of("threads-count"), usize).unwrap_or_else(|e| e.exit()))
+    } else {
+        None
+    };
+
     CliConfig {
-        bootstrap_nodes
+        bootstrap_nodes,
+        threads_count,
     }
 }
 
@@ -82,6 +111,26 @@ fn bind_socket(addr: SocketAddr) -> UdpSocket {
         socket.set_multicast_loop_v6(true).expect("set_multicast_loop_v6 call failed");
     }
     socket
+}
+
+/// Run a future with the runtime specified by config.
+fn run<F>(future: F, threads_count: Option<usize>)
+    where F: Future<Item = (), Error = Error> + Send + 'static
+{
+    if let Some(threads_count) = threads_count {
+        let mut threadpool_builder = thread_pool::Builder::new();
+        threadpool_builder
+            .name_prefix("tox-node-thread-")
+            .pool_size(threads_count);
+        let mut runtime = runtime::Builder::new()
+            .threadpool_builder(threadpool_builder)
+            .build()
+            .expect("Failed to create runtime");
+        runtime.block_on(future).expect("Execution was terminated with error");
+    } else {
+        let mut runtime = runtime::current_thread::Runtime::new().expect("Failed to create runtime");
+        runtime.block_on(future).expect("Execution was terminated with error");
+    };
 }
 
 fn main() {
@@ -160,11 +209,8 @@ fn main() {
     let future = network_writer.select(network_reader).map(|_| ()).map_err(|(e, _)| e);
     let future = future.select(server.run()).map(|_| ()).map_err(|(e, _)| e);
     let future = future.select(lan_discovery_sender.run()).map(|_| ()).map_err(|(e, _)| e);
-    let future = future.map_err(|err| {
-        error!("Processing ended with error: {:?}", err);
-        ()
-    });
 
     info!("Running server on {}", local_addr);
-    tokio::run(future);
+
+    run(future, cli_config.threads_count);
 }

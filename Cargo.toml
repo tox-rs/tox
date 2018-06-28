@@ -21,5 +21,6 @@ futures = "0.1"
 hex = "0.3"
 itertools = "0.7"
 log = "0.4"
+num_cpus = "1.0"
 tokio = "0.1.7"
 tox = { git = "https://github.com/tox-rs/tox" }
