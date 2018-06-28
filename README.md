@@ -17,7 +17,7 @@ cargo run --release
 ```
 
 If you want to change default log level you can do it via setting `RUST_LOG`
-environment variable. For example, if you want to see all received ant sent
+environment variable. For example, if you want to see all received and sent
 packets you can change log level to `trace` for `tox_node`:
 
 ```sh
