@@ -32,6 +32,8 @@ impl FromStr for ThreadsConfig {
 /// Config parsed from command line arguments.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct CliConfig {
+    /// Path to the file where DHT keys are stored.
+    pub keys_file: String,
     /// List of bootstrap nodes.
     pub bootstrap_nodes: Vec<PackedNode>,
     /// Number of threads for execution.
@@ -45,6 +47,12 @@ pub fn cli_parse() -> CliConfig {
         .author(crate_authors!("\n"))
         .about(crate_description!())
         .setting(AppSettings::ColoredHelp)
+        .arg(Arg::with_name("keys-file")
+            .short("k")
+            .long("keys-file")
+            .help("Path to the file where DHT keys are stored")
+            .default_value("keys")
+            .takes_value(true))
         .arg(Arg::with_name("bootstrap-node")
             .short("b")
             .long("bootstrap-node")
@@ -62,6 +70,8 @@ pub fn cli_parse() -> CliConfig {
             .takes_value(true)
             .default_value("1"))
         .get_matches();
+
+    let keys_file = value_t!(matches.value_of("keys-file"), String).unwrap_or_else(|e| e.exit());
 
     let bootstrap_nodes = matches
         .values_of("bootstrap-node")
@@ -86,6 +96,7 @@ pub fn cli_parse() -> CliConfig {
     let threads_config = value_t!(matches.value_of("threads"), ThreadsConfig).unwrap_or_else(|e| e.exit());
 
     CliConfig {
+        keys_file,
         bootstrap_nodes,
         threads_config,
     }
