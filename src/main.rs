@@ -121,7 +121,13 @@ fn main() {
     let socket = bind_socket(local_addr);
     let (sink, stream) = UdpFramed::new(socket, DhtCodec).split();
 
-    let (dht_pk, dht_sk) = load_or_gen_keys(cli_config.keys_file);
+    let (dht_pk, dht_sk) = if let Some(sk) = cli_config.sk {
+        (sk.public_key(), sk)
+    } else if let Some(keys_file) = cli_config.keys_file {
+        load_or_gen_keys(keys_file)
+    } else {
+        panic!("Neither secret key nor keys file is specified")
+    };
     info!("DHT public key: {}", hex::encode(dht_pk.as_ref()).to_uppercase());
 
     // Create a channel for server to communicate with network

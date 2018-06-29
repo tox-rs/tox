@@ -32,8 +32,9 @@ impl FromStr for ThreadsConfig {
 /// Config parsed from command line arguments.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct CliConfig {
+    pub sk: Option<SecretKey>,
     /// Path to the file where DHT keys are stored.
-    pub keys_file: String,
+    pub keys_file: Option<String>,
     /// List of bootstrap nodes.
     pub bootstrap_nodes: Vec<PackedNode>,
     /// Number of threads for execution.
@@ -47,12 +48,20 @@ pub fn cli_parse() -> CliConfig {
         .author(crate_authors!("\n"))
         .about(crate_description!())
         .setting(AppSettings::ColoredHelp)
+        .arg(Arg::with_name("secret-key")
+            .short("s")
+            .long("secret-key")
+            .help("DHT secret key")
+            .takes_value(true)
+            .required(true)
+            .conflicts_with("keys-file"))
         .arg(Arg::with_name("keys-file")
             .short("k")
             .long("keys-file")
             .help("Path to the file where DHT keys are stored")
-            .default_value("keys")
-            .takes_value(true))
+            .takes_value(true)
+            .required(true)
+            .conflicts_with("secret-key"))
         .arg(Arg::with_name("bootstrap-node")
             .short("b")
             .long("bootstrap-node")
@@ -71,7 +80,12 @@ pub fn cli_parse() -> CliConfig {
             .default_value("1"))
         .get_matches();
 
-    let keys_file = value_t!(matches.value_of("keys-file"), String).unwrap_or_else(|e| e.exit());
+    let sk = matches.value_of("secret-key").map(|s| {
+        let sk_bytes: [u8; 32] = FromHex::from_hex(s).expect("Invalid DHT secret key");
+        SecretKey::from_slice(&sk_bytes).expect("Invalid DHT secret key")
+    });
+
+    let keys_file = matches.value_of("keys-file").map(|s| s.to_owned());
 
     let bootstrap_nodes = matches
         .values_of("bootstrap-node")
@@ -96,6 +110,7 @@ pub fn cli_parse() -> CliConfig {
     let threads_config = value_t!(matches.value_of("threads"), ThreadsConfig).unwrap_or_else(|e| e.exit());
 
     CliConfig {
+        sk,
         keys_file,
         bootstrap_nodes,
         threads_config,
