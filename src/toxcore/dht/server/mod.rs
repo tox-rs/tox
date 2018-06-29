@@ -888,12 +888,12 @@ impl Server {
     and send back it to the peer.
     */
     fn handle_lan_discovery(&self, packet: LanDiscovery, addr: SocketAddr) -> IoFuture<()> {
-        // if Lan Discovery packet has my PK, then it is sent by myself.
         // LanDiscovery is optional
         if !self.lan_discovery_enabled {
             return Box::new(future::ok(()));
         }
 
+        // if Lan Discovery packet has my PK, then it is sent by myself.
         if packet.pk == self.pk {
             return Box::new(future::ok(()));
         }
