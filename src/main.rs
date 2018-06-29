@@ -12,9 +12,11 @@ extern crate tox;
 
 mod cli_config;
 
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{Error, ErrorKind, Read, Write};
 use std::net::{IpAddr, SocketAddr};
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 
 use futures::sync::mpsc;
 use futures::{future, Future, Sink, Stream};
@@ -41,7 +43,17 @@ fn bind_socket(addr: SocketAddr) -> UdpSocket {
 
 /// Save DHT keys to a binary file.
 fn save_keys(keys_file: String, pk: PublicKey, sk: SecretKey) {
+    #[cfg(not(unix))]
     let mut file = File::create(keys_file).expect("Failed to create the keys file");
+
+    #[cfg(unix)]
+    let mut file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .mode(0o600)
+        .open(keys_file)
+        .expect("Failed to create the keys file");
+
     file.write(pk.as_ref()).expect("Failed to save public key to the keys file");
     file.write(&sk[0..SECRETKEYBYTES]).expect("Failed to save secret key to the keys file");
 }
