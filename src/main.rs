@@ -7,7 +7,6 @@ extern crate hex;
 extern crate itertools;
 #[macro_use]
 extern crate log;
-extern crate num_cpus;
 extern crate tokio;
 extern crate tox;
 
@@ -40,21 +39,23 @@ fn bind_socket(addr: SocketAddr) -> UdpSocket {
 }
 
 /// Run a future with the runtime specified by config.
-fn run<F>(future: F, threads_count: Option<usize>)
+fn run<F>(future: F, threads_config: ThreadsConfig)
     where F: Future<Item = (), Error = Error> + Send + 'static
 {
-    if let Some(threads_count) = threads_count {
+    if threads_config == ThreadsConfig::N(1) {
+        let mut runtime = runtime::current_thread::Runtime::new().expect("Failed to create runtime");
+        runtime.block_on(future).expect("Execution was terminated with error");
+    } else {
         let mut threadpool_builder = thread_pool::Builder::new();
-        threadpool_builder
-            .name_prefix("tox-node-thread-")
-            .pool_size(threads_count);
+        threadpool_builder.name_prefix("tox-node-");
+        match threads_config {
+            ThreadsConfig::N(n) => { threadpool_builder.pool_size(n as usize); },
+            ThreadsConfig::Auto => { }, // builder will detect number of cores automatically
+        }
         let mut runtime = runtime::Builder::new()
             .threadpool_builder(threadpool_builder)
             .build()
             .expect("Failed to create runtime");
-        runtime.block_on(future).expect("Execution was terminated with error");
-    } else {
-        let mut runtime = runtime::current_thread::Runtime::new().expect("Failed to create runtime");
         runtime.block_on(future).expect("Execution was terminated with error");
     };
 }
@@ -138,5 +139,5 @@ fn main() {
 
     info!("Running server on {}", local_addr);
 
-    run(future, cli_config.threads_count);
+    run(future, cli_config.threads_config);
 }

@@ -1,26 +1,45 @@
 use std::net::ToSocketAddrs;
+use std::num::ParseIntError;
+use std::str::FromStr;
 
 use clap::{Arg, App, AppSettings};
 use hex::FromHex;
 use itertools::Itertools;
-use num_cpus;
 use tox::toxcore::crypto_core::*;
 use tox::toxcore::dht::packed_node::PackedNode;
+
+/// Config for threading.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum ThreadsConfig {
+    /// Detect number of threads automatically by the number of CPU cores.
+    Auto,
+    /// Exact number of threads.
+    N(u16)
+}
+
+impl FromStr for ThreadsConfig {
+    type Err = ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == "auto" {
+            Ok(ThreadsConfig::Auto)
+        } else {
+            u16::from_str(s).map(ThreadsConfig::N)
+        }
+    }
+}
 
 /// Config parsed from command line arguments.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct CliConfig {
     /// List of bootstrap nodes.
     pub bootstrap_nodes: Vec<PackedNode>,
-    /// Number of threads for execution. None if single threaded runtime should
-    /// be used.
-    pub threads_count: Option<usize>,
+    /// Number of threads for execution.
+    pub threads_config: ThreadsConfig,
 }
 
 /// Parse command line arguments.
 pub fn cli_parse() -> CliConfig {
-    let num_cpus_string = num_cpus::get().to_string();
-
     let matches = App::new(crate_name!())
         .version(crate_version!())
         .author(crate_authors!("\n"))
@@ -34,20 +53,14 @@ pub fn cli_parse() -> CliConfig {
             .takes_value(true)
             .number_of_values(2)
             .value_names(&["public key", "address"]))
-        .arg(Arg::with_name("threaded")
-            .long("threaded")
-            .short("t")
-            .help("Use threaded runtime. By default the number of threads is \
-                   determined automatically by the number of CPU cores"))
-        .arg(Arg::with_name("threads-count")
-            .short("T")
-            .long("threads-count")
-            .requires("threaded")
-            .help("Number of threads to use if threaded flag is specified. \
-                   Will be determined automatically by the number of CPU cores \
-                   if not specified")
+        .arg(Arg::with_name("threads")
+            .short("j")
+            .long("threads")
+            .help("Number of threads to use. The value 'auto' means that the \
+                   number of threads will be determined automatically by the \
+                   number of CPU cores")
             .takes_value(true)
-            .default_value_if("threaded", None, &num_cpus_string))
+            .default_value("1"))
         .get_matches();
 
     let bootstrap_nodes = matches
@@ -70,14 +83,10 @@ pub fn cli_parse() -> CliConfig {
         })
         .collect();
 
-    let threads_count = if matches.is_present("threaded") {
-        Some(value_t!(matches.value_of("threads-count"), usize).unwrap_or_else(|e| e.exit()))
-    } else {
-        None
-    };
+    let threads_config = value_t!(matches.value_of("threads"), ThreadsConfig).unwrap_or_else(|e| e.exit());
 
     CliConfig {
         bootstrap_nodes,
-        threads_count,
+        threads_config,
     }
 }
