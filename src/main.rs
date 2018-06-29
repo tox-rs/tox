@@ -10,69 +10,23 @@ extern crate log;
 extern crate tokio;
 extern crate tox;
 
-use std::io::{Error, ErrorKind};
-use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
+mod cli_config;
 
-use clap::{Arg, App};
+use std::io::{Error, ErrorKind};
+use std::net::{IpAddr, SocketAddr};
+
 use futures::sync::mpsc;
 use futures::{future, Future, Sink, Stream};
-use hex::FromHex;
-use itertools::Itertools;
 use log::LevelFilter;
+use tokio::executor::thread_pool;
 use tokio::net::{UdpSocket, UdpFramed};
+use tokio::runtime;
 use tox::toxcore::crypto_core::*;
 use tox::toxcore::dht::codec::{DecodeError, DhtCodec};
-use tox::toxcore::dht::packed_node::PackedNode;
 use tox::toxcore::dht::server::Server;
 use tox::toxcore::dht::lan_discovery::LanDiscoverySender;
 
-/// Config parsed from command line arguments.
-#[derive(Clone, PartialEq, Eq, Debug)]
-struct CliConfig {
-    /// List of bootstrap nodes.
-    bootstrap_nodes: Vec<PackedNode>,
-}
-
-/// Parse command line arguments.
-fn cli_parse() -> CliConfig {
-    let matches = App::new(crate_name!())
-        .version(crate_version!())
-        .author(crate_authors!("\n"))
-        .about(crate_description!())
-        .arg(Arg::with_name("bootstrap-node")
-            .short("b")
-            .long("bootstrap-node")
-            .help("Node to perform initial bootstrap")
-            .multiple(true)
-            .takes_value(true)
-            .number_of_values(2)
-            .value_names(&["public key", "address"]))
-        .get_matches();
-
-    let bootstrap_nodes = matches
-        .values_of("bootstrap-node")
-        .into_iter()
-        .flat_map(|values| values)
-        .tuples()
-        .map(|(pk, saddr)| {
-            // get PK bytes of the bootstrap node
-            let bootstrap_pk_bytes: [u8; 32] = FromHex::from_hex(pk).expect("Invalid node key");
-            // create PK from bytes
-            let bootstrap_pk = PublicKey::from_slice(&bootstrap_pk_bytes).expect("Invalid node key");
-
-            let saddr = saddr
-                .to_socket_addrs()
-                .expect("Invalid node address")
-                .next()
-                .expect("Invalid node address");
-            PackedNode::new(true, saddr, &bootstrap_pk)
-        })
-        .collect();
-
-    CliConfig {
-        bootstrap_nodes
-    }
-}
+use cli_config::*;
 
 /// Bind a UDP listener to the socket address.
 fn bind_socket(addr: SocketAddr) -> UdpSocket {
@@ -82,6 +36,28 @@ fn bind_socket(addr: SocketAddr) -> UdpSocket {
         socket.set_multicast_loop_v6(true).expect("set_multicast_loop_v6 call failed");
     }
     socket
+}
+
+/// Run a future with the runtime specified by config.
+fn run<F>(future: F, threads_config: ThreadsConfig)
+    where F: Future<Item = (), Error = Error> + Send + 'static
+{
+    if threads_config == ThreadsConfig::N(1) {
+        let mut runtime = runtime::current_thread::Runtime::new().expect("Failed to create runtime");
+        runtime.block_on(future).expect("Execution was terminated with error");
+    } else {
+        let mut threadpool_builder = thread_pool::Builder::new();
+        threadpool_builder.name_prefix("tox-node-");
+        match threads_config {
+            ThreadsConfig::N(n) => { threadpool_builder.pool_size(n as usize); },
+            ThreadsConfig::Auto => { }, // builder will detect number of cores automatically
+        }
+        let mut runtime = runtime::Builder::new()
+            .threadpool_builder(threadpool_builder)
+            .build()
+            .expect("Failed to create runtime");
+        runtime.block_on(future).expect("Execution was terminated with error");
+    };
 }
 
 fn main() {
@@ -160,11 +136,8 @@ fn main() {
     let future = network_writer.select(network_reader).map(|_| ()).map_err(|(e, _)| e);
     let future = future.select(server.run()).map(|_| ()).map_err(|(e, _)| e);
     let future = future.select(lan_discovery_sender.run()).map(|_| ()).map_err(|(e, _)| e);
-    let future = future.map_err(|err| {
-        error!("Processing ended with error: {:?}", err);
-        ()
-    });
 
     info!("Running server on {}", local_addr);
-    tokio::run(future);
+
+    run(future, cli_config.threads_config);
 }
