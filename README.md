@@ -23,3 +23,27 @@ packets you can change log level to `trace` for `tox_node`:
 ```sh
 RUST_LOG=tox_node=trace cargo run --release
 ```
+
+## Keys generation
+
+In order to run node you have to provide either secret key or path to a keys file.
+
+### Keys file
+
+Keys file is a binary file with sequentially stored public and secret keys. Path
+to a keys file can be specified via `--keys-file` argument. If file doesn't
+exist it will be created with automatically generated keys. The format of this
+file is compatible with `tox-bootstrapd`.
+
+### Secret key
+
+Secret key is a hexadecimal string of size 32 bytes. It can be specified via
+`--secret-key` argument. Any random string will fit but note that only strong
+random generators should be used to generate a secret key. Here are some
+examples how you can do it in the terminal:
+
+```sh
+openssl rand -hex 32
+hexdump -n 32 -e '8 "%08x" 1 "\n"' /dev/random
+od -vN 32 -An -tx1 /dev/random | tr -d " \n" ; echo
+```

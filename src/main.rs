@@ -12,8 +12,11 @@ extern crate tox;
 
 mod cli_config;
 
-use std::io::{Error, ErrorKind};
+use std::fs::{File, OpenOptions};
+use std::io::{Error, ErrorKind, Read, Write};
 use std::net::{IpAddr, SocketAddr};
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 
 use futures::sync::mpsc;
 use futures::{future, Future, Sink, Stream};
@@ -36,6 +39,47 @@ fn bind_socket(addr: SocketAddr) -> UdpSocket {
         socket.set_multicast_loop_v6(true).expect("set_multicast_loop_v6 call failed");
     }
     socket
+}
+
+/// Save DHT keys to a binary file.
+fn save_keys(keys_file: String, pk: PublicKey, sk: SecretKey) {
+    #[cfg(not(unix))]
+    let mut file = File::create(keys_file).expect("Failed to create the keys file");
+
+    #[cfg(unix)]
+    let mut file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .mode(0o600)
+        .open(keys_file)
+        .expect("Failed to create the keys file");
+
+    file.write(pk.as_ref()).expect("Failed to save public key to the keys file");
+    file.write(&sk[0..SECRETKEYBYTES]).expect("Failed to save secret key to the keys file");
+}
+
+/// Load DHT keys from a binary file.
+fn load_keys(mut file: File) -> (PublicKey, SecretKey) {
+    let mut buf = [0; PUBLICKEYBYTES + SECRETKEYBYTES];
+    file.read(&mut buf).expect("Failed to read keys from the keys file");
+    let pk = PublicKey::from_slice(&buf[..PUBLICKEYBYTES]).expect("Failed to read public key from the keys file");
+    let sk = SecretKey::from_slice(&buf[PUBLICKEYBYTES..]).expect("Failed to read secret key from the keys file");
+    (pk, sk)
+}
+
+/// Load DHT keys from a binary file or generate and save them if file does not
+/// exist.
+fn load_or_gen_keys(keys_file: String) -> (PublicKey, SecretKey) {
+    match File::open(&keys_file) {
+        Ok(file) => load_keys(file),
+        Err(ref e) if e.kind() == ErrorKind::NotFound => {
+            info!("Generating new DHT keys and storing them to '{}'", keys_file);
+            let (pk, sk) = gen_keypair();
+            save_keys(keys_file, pk, sk.clone());
+            (pk, sk)
+        },
+        Err(e) => panic!("Failed to read the keys file: {}", e)
+    }
 }
 
 /// Run a future with the runtime specified by config.
@@ -77,7 +121,14 @@ fn main() {
     let socket = bind_socket(local_addr);
     let (sink, stream) = UdpFramed::new(socket, DhtCodec).split();
 
-    let (dht_pk, dht_sk) = gen_keypair();
+    let (dht_pk, dht_sk) = if let Some(sk) = cli_config.sk {
+        (sk.public_key(), sk)
+    } else if let Some(keys_file) = cli_config.keys_file {
+        load_or_gen_keys(keys_file)
+    } else {
+        panic!("Neither secret key nor keys file is specified")
+    };
+    info!("DHT public key: {}", hex::encode(dht_pk.as_ref()).to_uppercase());
 
     // Create a channel for server to communicate with network
     let (tx, rx) = mpsc::unbounded();
