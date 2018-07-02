@@ -134,7 +134,7 @@ fn main() {
     let lan_discovery_sender = LanDiscoverySender::new(tx.clone(), dht_pk, udp_addr.is_ipv6());
 
     let mut server = Server::new(tx, dht_pk, dht_sk);
-    server.set_bootstrap_info(07032018, b"This is tox-rs".to_vec());
+    server.set_bootstrap_info(07032018, cli_config.motd.as_bytes().to_owned());
 
     if cli_config.bootstrap_nodes.is_empty() {
         warn!("No bootstrap nodes!");
