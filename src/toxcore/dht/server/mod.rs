@@ -35,6 +35,7 @@ use toxcore::dht::server::hole_punching::*;
 use toxcore::tcp::packet::OnionRequest;
 use toxcore::dht::server::ping_sender::*;
 use toxcore::net_crypto::*;
+use toxcore::dht::ip_port::IsGlobal;
 
 /// Shorthand for the transmit half of the message channel.
 type Tx = mpsc::UnboundedSender<(DhtPacket, SocketAddr)>;
@@ -689,7 +690,7 @@ impl Server {
             Ok(payload) => payload,
         };
 
-        let close_nodes = close_nodes.get_closest(&self.pk);
+        let close_nodes = close_nodes.get_closest(&self.pk, IsGlobal::is_global(&addr.ip()));
         let resp_payload = NodesResponsePayload {
             nodes: close_nodes,
             id: payload.id,

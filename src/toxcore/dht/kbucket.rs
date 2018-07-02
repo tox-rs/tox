@@ -18,6 +18,7 @@ PK; and additionally used to store nodes closest to friends.
 use toxcore::crypto_core::*;
 use toxcore::dht::dht_node::*;
 use toxcore::dht::packed_node::*;
+use toxcore::dht::ip_port::IsGlobal;
 use std::cmp::{Ord, Ordering};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
@@ -443,8 +444,10 @@ impl Kbucket {
 
     Returns less than 4 nodes only if `Kbucket` contains less than 4
     nodes.
+
+    It should not contain LAN ip node if the request is from global ip.
     */
-    pub fn get_closest(&self, pk: &PublicKey) -> Vec<PackedNode> {
+    pub fn get_closest(&self, pk: &PublicKey, only_global_ip: bool) -> Vec<PackedNode> {
         debug!(target: "Kbucket", "Getting closest nodes.");
         trace!(target: "Kbucket", "With PK: {:?} and self: {:?}", pk, self);
         // create a new Bucket with associated pk, and add nodes that are close
@@ -452,6 +455,10 @@ impl Kbucket {
         let mut bucket = Bucket::new(Some(4));
         for buc in &*self.buckets {
             for node in &*buc.nodes {
+                if !IsGlobal::is_global(&node.saddr.ip()) && only_global_ip {
+                    continue;
+                }
+
                 bucket.try_add(pk, &node.clone().into());
             }
         }
@@ -830,8 +837,8 @@ mod tests {
     fn dht_kbucket_get_closest_test() {
         fn with_kbucket(kb: Kbucket, a: u64, b: u64, c: u64, d: u64) {
             let pk = nums_to_pk(a, b, c, d);
-            assert!(kb.get_closest(&pk).len() <= 4);
-            assert_eq!(kb.get_closest(&pk), kb.get_closest(&pk));
+            assert!(kb.get_closest(&pk, true).len() <= 4);
+            assert_eq!(kb.get_closest(&pk, true), kb.get_closest(&pk, true));
         }
         quickcheck(with_kbucket as fn(Kbucket, u64, u64, u64, u64));
 
@@ -839,14 +846,21 @@ mod tests {
         fn with_nodes(n1: PackedNode, n2: PackedNode, n3: PackedNode,
                         n4: PackedNode, a: u64, b: u64, c: u64, d: u64) {
 
+            if !IsGlobal::is_global(&n1.saddr.ip()) ||
+                !IsGlobal::is_global(&n2.saddr.ip()) ||
+                !IsGlobal::is_global(&n3.saddr.ip()) ||
+                !IsGlobal::is_global(&n4.saddr.ip()) {
+                return;
+            }
+
             let pk = nums_to_pk(a, b, c, d);
             let mut kbucket = Kbucket::new(&pk);
 
             // check whether number of correct nodes that are returned is right
             let correctness = |should, kbc: &Kbucket| {
-                assert_eq!(kbc.get_closest(&pk), kbc.get_closest(&kbc.pk));
+                assert_eq!(kbc.get_closest(&pk, true), kbc.get_closest(&kbc.pk, true));
 
-                let got_nodes = kbc.get_closest(&pk);
+                let got_nodes = kbc.get_closest(&pk, true);
                 let mut got_correct = 0;
                 for node in got_nodes {
                     if node == n1 || node == n2 || node == n3 || node == n4 {
