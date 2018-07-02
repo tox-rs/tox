@@ -121,6 +121,7 @@ pub struct Server {
     // pure bootstrap server when we don't have friends and therefore don't
     // have to handle related packets
     net_crypto: Option<NetCrypto>,
+    lan_discovery_enabled: bool,
 }
 
 /// Struct for grouping parameters to Server's main loop
@@ -181,8 +182,14 @@ impl Server {
             motd: Vec::new(),
             config: ConfigArgs::default(),
             tcp_onion_sink: None,
-            net_crypto: None
+            net_crypto: None,
+            lan_discovery_enabled: true,
         }
+    }
+
+    /// enable/disable processing LanDiscovery packet received
+    pub fn enable_lan_discovery(&mut self, enable: bool) {
+        self.lan_discovery_enabled = enable;
     }
 
     /// return ping_map member variable
@@ -881,6 +888,11 @@ impl Server {
     and send back it to the peer.
     */
     fn handle_lan_discovery(&self, packet: LanDiscovery, addr: SocketAddr) -> IoFuture<()> {
+        // LanDiscovery is optional
+        if !self.lan_discovery_enabled {
+            return Box::new(future::ok(()));
+        }
+
         // if Lan Discovery packet has my PK, then it is sent by myself.
         if packet.pk == self.pk {
             return Box::new(future::ok(()));
@@ -2736,5 +2748,13 @@ mod tests {
         alice.set_bootstrap_info(42, "test".as_bytes().to_owned());
         assert_eq!(alice.tox_core_version, 42);
         assert_eq!(alice.motd, "test".as_bytes().to_owned());
+    }
+
+    #[test]
+    fn server_enable_lan_discovery_test() {
+        let (mut alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
+
+        alice.enable_lan_discovery(false);
+        assert_eq!(alice.lan_discovery_enabled, false);
     }
 }
