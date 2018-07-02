@@ -1,4 +1,4 @@
-use std::net::ToSocketAddrs;
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::num::ParseIntError;
 use std::str::FromStr;
 
@@ -32,6 +32,9 @@ impl FromStr for ThreadsConfig {
 /// Config parsed from command line arguments.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct CliConfig {
+    /// UDP address to run DHT node
+    pub udp_addr: SocketAddr,
+    /// DHT SecretKey
     pub sk: Option<SecretKey>,
     /// Path to the file where DHT keys are stored.
     pub keys_file: Option<String>,
@@ -48,6 +51,12 @@ pub fn cli_parse() -> CliConfig {
         .author(crate_authors!("\n"))
         .about(crate_description!())
         .setting(AppSettings::ColoredHelp)
+        .arg(Arg::with_name("udp-address")
+            .short("u")
+            .long("udp-address")
+            .help("UDP address to run DHT node")
+            .takes_value(true)
+            .default_value("0.0.0.0:33445"))
         .arg(Arg::with_name("secret-key")
             .short("s")
             .long("secret-key")
@@ -80,6 +89,8 @@ pub fn cli_parse() -> CliConfig {
             .default_value("1"))
         .get_matches();
 
+    let udp_addr = value_t!(matches.value_of("udp-address"), SocketAddr).unwrap_or_else(|e| e.exit());
+
     let sk = matches.value_of("secret-key").map(|s| {
         let sk_bytes: [u8; 32] = FromHex::from_hex(s).expect("Invalid DHT secret key");
         SecretKey::from_slice(&sk_bytes).expect("Invalid DHT secret key")
@@ -110,6 +121,7 @@ pub fn cli_parse() -> CliConfig {
     let threads_config = value_t!(matches.value_of("threads"), ThreadsConfig).unwrap_or_else(|e| e.exit());
 
     CliConfig {
+        udp_addr,
         sk,
         keys_file,
         bootstrap_nodes,
