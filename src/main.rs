@@ -114,11 +114,9 @@ fn main() {
     }
 
     let cli_config = cli_parse();
+    let udp_addr = cli_config.udp_addr;
 
-    let local_addr: SocketAddr = "0.0.0.0:33445".parse().unwrap(); // 0.0.0.0 for ipv4
-    // let local_addr: SocketAddr = "[::]:33445".parse().unwrap(); // [::] for ipv6
-
-    let socket = bind_socket(local_addr);
+    let socket = bind_socket(udp_addr);
     let (sink, stream) = UdpFramed::new(socket, DhtCodec).split();
 
     let (dht_pk, dht_sk) = if let Some(sk) = cli_config.sk {
@@ -133,10 +131,10 @@ fn main() {
     // Create a channel for server to communicate with network
     let (tx, rx) = mpsc::unbounded();
 
-    let lan_discovery_sender = LanDiscoverySender::new(tx.clone(), dht_pk, local_addr.is_ipv6());
+    let lan_discovery_sender = LanDiscoverySender::new(tx.clone(), dht_pk, udp_addr.is_ipv6());
 
     let mut server = Server::new(tx, dht_pk, dht_sk);
-    server.set_bootstrap_info(07032018, b"This is tox-rs".to_vec());
+    server.set_bootstrap_info(07032018, cli_config.motd.as_bytes().to_owned());
 
     if cli_config.bootstrap_nodes.is_empty() {
         warn!("No bootstrap nodes!");
@@ -171,9 +169,9 @@ fn main() {
     let network_writer = rx
         .map_err(|()| Error::new(ErrorKind::Other, "rx error"))
         // filter out IPv6 packets if node is running in IPv4 mode
-        .filter(move |&(ref _packet, addr)| !(local_addr.is_ipv4() && addr.is_ipv6()))
+        .filter(move |&(ref _packet, addr)| !(udp_addr.is_ipv4() && addr.is_ipv6()))
         .fold(sink, move |sink, (packet, mut addr)| {
-            if local_addr.is_ipv6() {
+            if udp_addr.is_ipv6() {
                 if let IpAddr::V4(ip) = addr.ip() {
                     addr = SocketAddr::new(IpAddr::V6(ip.to_ipv6_mapped()), addr.port());
                 }
@@ -188,7 +186,7 @@ fn main() {
     let future = future.select(server.run()).map(|_| ()).map_err(|(e, _)| e);
     let future = future.select(lan_discovery_sender.run()).map(|_| ()).map_err(|(e, _)| e);
 
-    info!("Running server on {}", local_addr);
+    info!("Running server on {}", udp_addr);
 
     run(future, cli_config.threads_config);
 }

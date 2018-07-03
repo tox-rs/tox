@@ -1,4 +1,4 @@
-use std::net::ToSocketAddrs;
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::num::ParseIntError;
 use std::str::FromStr;
 
@@ -7,6 +7,7 @@ use hex::FromHex;
 use itertools::Itertools;
 use tox::toxcore::crypto_core::*;
 use tox::toxcore::dht::packed_node::PackedNode;
+use tox::toxcore::dht::packet::BOOSTRAP_SERVER_MAX_MOTD_LENGTH;
 
 /// Config for threading.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -32,6 +33,9 @@ impl FromStr for ThreadsConfig {
 /// Config parsed from command line arguments.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct CliConfig {
+    /// UDP address to run DHT node
+    pub udp_addr: SocketAddr,
+    /// DHT SecretKey
     pub sk: Option<SecretKey>,
     /// Path to the file where DHT keys are stored.
     pub keys_file: Option<String>,
@@ -39,6 +43,8 @@ pub struct CliConfig {
     pub bootstrap_nodes: Vec<PackedNode>,
     /// Number of threads for execution.
     pub threads_config: ThreadsConfig,
+    /// Message of the day
+    pub motd: String
 }
 
 /// Parse command line arguments.
@@ -48,6 +54,12 @@ pub fn cli_parse() -> CliConfig {
         .author(crate_authors!("\n"))
         .about(crate_description!())
         .setting(AppSettings::ColoredHelp)
+        .arg(Arg::with_name("udp-address")
+            .short("u")
+            .long("udp-address")
+            .help("UDP address to run DHT node")
+            .takes_value(true)
+            .default_value("0.0.0.0:33445"))
         .arg(Arg::with_name("secret-key")
             .short("s")
             .long("secret-key")
@@ -78,7 +90,22 @@ pub fn cli_parse() -> CliConfig {
                    number of CPU cores")
             .takes_value(true)
             .default_value("1"))
+        .arg(Arg::with_name("motd")
+            .short("m")
+            .long("motd")
+            .help("Message of the day")
+            .takes_value(true)
+            .validator(|m|
+                if m.len() > BOOSTRAP_SERVER_MAX_MOTD_LENGTH {
+                    Err(format!("Message of the day must not be longer than {} bytes", BOOSTRAP_SERVER_MAX_MOTD_LENGTH))
+                } else {
+                    Ok(())
+                }
+            )
+            .default_value("This is tox-rs"))
         .get_matches();
+
+    let udp_addr = value_t!(matches.value_of("udp-address"), SocketAddr).unwrap_or_else(|e| e.exit());
 
     let sk = matches.value_of("secret-key").map(|s| {
         let sk_bytes: [u8; 32] = FromHex::from_hex(s).expect("Invalid DHT secret key");
@@ -109,10 +136,14 @@ pub fn cli_parse() -> CliConfig {
 
     let threads_config = value_t!(matches.value_of("threads"), ThreadsConfig).unwrap_or_else(|e| e.exit());
 
+    let motd = value_t!(matches.value_of("motd"), String).unwrap_or_else(|e| e.exit());
+
     CliConfig {
+        udp_addr,
         sk,
         keys_file,
         bootstrap_nodes,
         threads_config,
+        motd,
     }
 }
