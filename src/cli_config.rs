@@ -44,7 +44,9 @@ pub struct CliConfig {
     /// Number of threads for execution.
     pub threads_config: ThreadsConfig,
     /// Message of the day
-    pub motd: String
+    pub motd: String,
+    /// Whether LAN discovery is enabled
+    pub lan_discovery_enabled: bool,
 }
 
 /// Parse command line arguments.
@@ -103,6 +105,9 @@ pub fn cli_parse() -> CliConfig {
                 }
             )
             .default_value("This is tox-rs"))
+        .arg(Arg::with_name("no-lan")
+            .long("no-lan")
+            .help("Disable LAN discovery"))
         .get_matches();
 
     let udp_addr = value_t!(matches.value_of("udp-address"), SocketAddr).unwrap_or_else(|e| e.exit());
@@ -138,6 +143,8 @@ pub fn cli_parse() -> CliConfig {
 
     let motd = value_t!(matches.value_of("motd"), String).unwrap_or_else(|e| e.exit());
 
+    let lan_discovery_enabled = !matches.is_present("no-lan");
+
     CliConfig {
         udp_addr,
         sk,
@@ -145,5 +152,6 @@ pub fn cli_parse() -> CliConfig {
         bootstrap_nodes,
         threads_config,
         motd,
+        lan_discovery_enabled,
     }
 }

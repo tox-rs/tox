@@ -131,10 +131,15 @@ fn main() {
     // Create a channel for server to communicate with network
     let (tx, rx) = mpsc::unbounded();
 
-    let lan_discovery_sender = LanDiscoverySender::new(tx.clone(), dht_pk, udp_addr.is_ipv6());
+    let lan_discovery_future = if cli_config.lan_discovery_enabled {
+        LanDiscoverySender::new(tx.clone(), dht_pk, udp_addr.is_ipv6()).run()
+    } else {
+        Box::new(future::empty())
+    };
 
     let mut server = Server::new(tx, dht_pk, dht_sk);
     server.set_bootstrap_info(07032018, cli_config.motd.as_bytes().to_owned());
+    server.enable_lan_discovery(cli_config.lan_discovery_enabled);
 
     if cli_config.bootstrap_nodes.is_empty() {
         warn!("No bootstrap nodes!");
@@ -184,7 +189,7 @@ fn main() {
 
     let future = network_writer.select(network_reader).map(|_| ()).map_err(|(e, _)| e);
     let future = future.select(server.run()).map(|_| ()).map_err(|(e, _)| e);
-    let future = future.select(lan_discovery_sender.run()).map(|_| ()).map_err(|(e, _)| e);
+    let future = future.select(lan_discovery_future).map(|_| ()).map_err(|(e, _)| e);
 
     info!("Running server on {}", udp_addr);
 
