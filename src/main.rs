@@ -8,6 +8,7 @@ extern crate itertools;
 #[macro_use]
 extern crate log;
 extern crate tokio;
+extern crate tokio_codec;
 extern crate tox;
 
 mod cli_config;
@@ -17,17 +18,27 @@ use std::io::{Error, ErrorKind, Read, Write};
 use std::net::{IpAddr, SocketAddr};
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
+use std::time::{Duration, Instant};
 
 use futures::sync::mpsc;
 use futures::{future, Future, Sink, Stream};
+use itertools::Itertools;
 use log::LevelFilter;
 use tokio::executor::thread_pool;
-use tokio::net::{UdpSocket, UdpFramed};
+use tokio::net::{TcpListener, UdpSocket, UdpFramed};
 use tokio::runtime;
+use tokio::util::FutureExt;
+use tokio_codec::Framed;
 use tox::toxcore::crypto_core::*;
 use tox::toxcore::dht::codec::{DecodeError, DhtCodec};
 use tox::toxcore::dht::server::Server;
 use tox::toxcore::dht::lan_discovery::LanDiscoverySender;
+use tox::toxcore::io_tokio::IoFuture;
+use tox::toxcore::onion::packet::InnerOnionResponse;
+use tox::toxcore::tcp::codec;
+use tox::toxcore::tcp::handshake::make_server_handshake;
+use tox::toxcore::tcp::packet::OnionRequest;
+use tox::toxcore::tcp::server::{Server as TcpServer, ServerProcessor};
 
 use cli_config::*;
 
@@ -104,6 +115,103 @@ fn run<F>(future: F, threads_config: ThreadsConfig)
     };
 }
 
+fn run_tcp_server(server: TcpServer, listener: TcpListener, dht_sk: SecretKey) -> IoFuture<()> {
+    let future = listener.incoming().for_each(move |stream| -> IoFuture<()> {
+        let addr = match stream.peer_addr() {
+            Ok(addr) => addr,
+            Err(e) => {
+                error!("Could not get peer addr: {}", e);
+                return Box::new(future::err(e))
+            }, 
+        };
+
+        debug!("A new client connected from {}", addr);
+
+        let register_client = make_server_handshake(stream, dht_sk.clone())
+            .map_err(|e|
+                Error::new(ErrorKind::Other,
+                    format!("Handshake error {:?}", e))
+            )
+            .map(|(stream, channel, client_pk)| {
+                debug!("Handshake for client {:?} complited", &client_pk);
+                (stream, channel, client_pk)
+            });
+
+        let server_c = server.clone();
+        let process = register_client.and_then(move |(stream, channel, client_pk)| {
+            let secure_socket = Framed::new(stream, codec::Codec::new(channel));
+            let (to_client, from_client) = secure_socket.split();
+            let ServerProcessor { from_client_tx, to_client_rx, processor } =
+                ServerProcessor::create(
+                    server_c,
+                    client_pk.clone(),
+                    addr.ip(),
+                    addr.port()
+                );
+
+            // writer = for each Packet from to_client_rx send it to client
+            let writer = to_client_rx
+                .map_err(|()| Error::from(ErrorKind::UnexpectedEof))
+                .fold(to_client, move |to_client, packet| {
+                    debug!("Send {:?} to {:?}", client_pk, packet);
+                    to_client.send(packet)
+                        .deadline(Instant::now() + Duration::from_secs(30))
+                        .map_err(|_|
+                            Error::new(ErrorKind::Other,
+                                format!("Writer timed out"))
+                        )
+                })
+                // drop to_client when to_client_rx stream is exhausted
+                .map(|_to_client| ());
+
+            // reader = for each Packet from client send it to server processor
+            let reader = from_client
+                .forward(from_client_tx
+                    .sink_map_err(|e|
+                        Error::new(ErrorKind::Other,
+                            format!("Could not forward message from client to server {:?}", e))
+                    )
+                )
+                .map(|(_from_client, _sink_err)| ());
+
+            processor
+                .select(reader).map(|_| ()).map_err(|(e, _)| e)
+                .select(writer).map(|_| ()).map_err(|(e, _)| e)
+        });
+
+        Box::new(process)
+    });
+
+    Box::new(future)
+}
+
+/// Sink for onion packets from TCP to UDP.
+type TcpOnionTx = mpsc::UnboundedSender<(OnionRequest, SocketAddr)>;
+/// Stream of onion packets from UDP to TCP.
+type UdpOnionRx = mpsc::UnboundedReceiver<(InnerOnionResponse, SocketAddr)>;
+
+fn run_tcp(tcp_addrs: Vec<SocketAddr>, dht_sk: SecretKey, tcp_onion_tx: TcpOnionTx, udp_onion_rx: UdpOnionRx) -> impl Future<Item = (), Error = Error> {
+    let tcp_server = TcpServer::new_with_onion(tcp_onion_tx);
+    let tcp_server_c = tcp_server.clone();
+    let tcp_server_futures = tcp_addrs.iter().map(move |&addr| {
+        let listener = TcpListener::bind(&addr).expect("Failed to bind TCP listener");
+        run_tcp_server(tcp_server_c.clone(), listener, dht_sk.clone())
+    });
+    let tcp_server_future = future::select_all(tcp_server_futures)
+        .map(|_| ())
+        .map_err(|(e, _, _)| e);
+
+    let tcp_onion_future = udp_onion_rx
+        .map_err(|()| Error::from(ErrorKind::UnexpectedEof))
+        .for_each(move |(onion_response, addr)|
+            tcp_server.handle_udp_onion_response(addr.ip(), addr.port(), onion_response)
+        );
+
+    info!("Running TCP relay on {}", tcp_addrs.iter().format(","));
+
+    tcp_server_future.select(tcp_onion_future).map(|_| ()).map_err(|(e, _)| e)
+}
+
 fn main() {
     env_logger::Builder::from_default_env()
         .filter_level(LevelFilter::Info)
@@ -137,9 +245,20 @@ fn main() {
         Box::new(future::empty())
     };
 
-    let mut server = Server::new(tx, dht_pk, dht_sk);
+    let (udp_onion_tx, udp_onion_rx) = mpsc::unbounded();
+    let (tcp_onion_tx, tcp_onion_rx) = mpsc::unbounded();
+
+    let mut server = Server::new(tx, dht_pk, dht_sk.clone());
     server.set_bootstrap_info(07032018, cli_config.motd.as_bytes().to_owned());
     server.enable_lan_discovery(cli_config.lan_discovery_enabled);
+    server.set_tcp_onion_sink(udp_onion_tx);
+
+    let server_c = server.clone();
+    let udp_onion_future = tcp_onion_rx
+        .map_err(|()| Error::from(ErrorKind::UnexpectedEof))
+        .for_each(move |(onion_request, addr)|
+            server_c.handle_tcp_onion_request(onion_request, addr)
+        );
 
     if cli_config.bootstrap_nodes.is_empty() {
         warn!("No bootstrap nodes!");
@@ -187,11 +306,15 @@ fn main() {
         // drop sink when rx stream is exhausted
         .map(|_sink| ());
 
+    let tcp_server_future = run_tcp(cli_config.tcp_addrs, dht_sk, tcp_onion_tx, udp_onion_rx);
+
     let future = network_writer.select(network_reader).map(|_| ()).map_err(|(e, _)| e);
     let future = future.select(server.run()).map(|_| ()).map_err(|(e, _)| e);
     let future = future.select(lan_discovery_future).map(|_| ()).map_err(|(e, _)| e);
+    let future = future.select(tcp_server_future).map(|_| ()).map_err(|(e, _)| e);
+    let future = future.select(udp_onion_future).map(|_| ()).map_err(|(e, _)| e);
 
-    info!("Running server on {}", udp_addr);
+    info!("Running DHT server on {}", udp_addr);
 
     run(future, cli_config.threads_config);
 }
