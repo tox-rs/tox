@@ -20,8 +20,8 @@ use toxcore::dht::kbucket::*;
 #[derive(Clone, Debug)]
 pub struct DaemonState;
 
-// close list has DhtNode, but when we access it with iter(), DhtNode is reformed to PackedNode
-const DHT_STATE_BUFFER_SIZE: usize =
+/// close list has DhtNode, but when we access it with iter(), DhtNode is reformed to PackedNode
+pub const DHT_STATE_BUFFER_SIZE: usize =
     // Bucket size
     (
         // PackedNode size
