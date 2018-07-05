@@ -87,3 +87,64 @@ impl ServerExt for Server {
         Box::new(process)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use tokio;
+    use tokio::net::TcpListener;
+
+    use toxcore::tcp::codec::Codec;
+    use toxcore::tcp::handshake::make_client_handshake;
+    use toxcore::tcp::packet::{Packet, PingRequest, PongResponse};
+
+    #[test]
+    fn run() {
+        let (client_pk, client_sk) = gen_keypair();
+        let (server_pk, server_sk) = gen_keypair();
+
+        let addr = "127.0.0.1:12345".parse().unwrap();
+
+        let server = TcpListener::bind(&addr).unwrap().incoming()
+            .into_future() // take the first connection
+            .map_err(|(e, _other_incomings)| e)
+            .map(|(connection, _other_incomings)| connection.unwrap())
+            .and_then(move |stream|
+                Server::new().run(stream, server_sk)
+            );
+
+        let client = TcpStream::connect(&addr)
+            .and_then(move |socket| {
+                make_client_handshake(socket, client_pk, client_sk, server_pk)
+            })
+            .and_then(|(stream, channel)| {
+                let secure_socket = Framed::new(stream, Codec::new(channel));
+                let (to_server, from_server) = secure_socket.split();
+                let packet = Packet::PingRequest(PingRequest {
+                    ping_id: 42
+                });
+                to_server.send(packet).map(|_| from_server)
+            })
+            .and_then(|from_server| {
+                from_server.into_future()
+                    .map(|(packet, _)| packet)
+                    .map_err(|(e, _)| e)
+            })
+            .map(|packet| {
+                assert_eq!(packet.unwrap(), Packet::PongResponse(PongResponse {
+                    ping_id: 42
+                }));
+            });
+
+
+        let both = server.join(client)
+            .then(|r| {
+                assert!(r.is_ok());
+                r
+            })
+            .map(|_| ()).map_err(|_| ());
+
+        tokio::run(both);
+    }
+}
