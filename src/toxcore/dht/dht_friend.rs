@@ -155,7 +155,7 @@ impl DhtFriend {
     /// get Socket Address list of a friend, a friend can have multi IP address bacause of NAT
     pub fn get_addrs_of_clients(&self) -> Vec<SocketAddr> {
         self.close_nodes.nodes.iter()
-            .map(|node| node.saddr)
+            .map(|node| node.get_socket_addr())
             .collect::<Vec<SocketAddr>>()
     }
 }

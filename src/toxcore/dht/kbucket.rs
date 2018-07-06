@@ -23,8 +23,10 @@ use std::cmp::{Ord, Ordering};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use std::convert::Into;
+use std::ops::Sub;
 
-const BAD_NODE_TIMEOUT: u64 = 182;
+/// timeout in seconds for offline node
+pub const BAD_NODE_TIMEOUT: u64 = 182;
 
 /** Calculate the [`k-bucket`](./struct.Kbucket.html) index of a PK compared
 to "own" PK.
@@ -52,19 +54,37 @@ pub fn kbucket_index(&PublicKey(ref own_pk): &PublicKey,
 
 impl Into<PackedNode> for DhtNode {
     fn into(self) -> PackedNode {
+        let saddr = if self.saddr_v6.is_none() {
+            SocketAddr::V4(self.saddr_v4.expect("into() PackedNode fails"))
+        } else {
+            SocketAddr::V6(self.saddr_v6.expect("into() PackedNode fails"))
+        };
+
         PackedNode {
             pk: self.pk,
-            saddr: self.saddr,
+            saddr,
         }
     }
 }
 
 impl Into<DhtNode> for PackedNode {
     fn into(self) -> DhtNode {
+        let (saddr_v4, saddr_v6) = match self.saddr {
+            SocketAddr::V4(v4) => (Some(v4), None),
+            SocketAddr::V6(v6) => (None, Some(v6)),
+        };
+
+        let (last_resp_time_v4, last_resp_time_v6) = match self.saddr {
+            SocketAddr::V4(_v4) => (Instant::now(), Instant::now().sub(Duration::from_secs(BAD_NODE_TIMEOUT))),
+            SocketAddr::V6(_v6) => (Instant::now().sub(Duration::from_secs(BAD_NODE_TIMEOUT)), Instant::now()),
+        };
+
         DhtNode {
             pk: self.pk,
-            saddr: self.saddr,
-            last_resp_time: Instant::now(),
+            saddr_v4,
+            saddr_v6,
+            last_resp_time_v4,
+            last_resp_time_v6,
         }
     }
 }
@@ -186,13 +206,22 @@ impl Bucket {
         trace!(target: "Bucket", "With bucket: {:?}; PK: {:?} and new node: {:?}",
             self, base_pk, new_node);
 
-        let new_node: DhtNode = (*new_node).into();
+        let dht_node: DhtNode = (*new_node).into();
 
-        match self.nodes.binary_search_by(|n| base_pk.replace_order(n, &new_node, self.bad_node_timeout)) {
+        match self.nodes.binary_search_by(|n| base_pk.replace_order(n, &dht_node, self.bad_node_timeout)) {
             Ok(index) => {
                 debug!(target: "Bucket",
                     "Updated: the node was already in the bucket.");
-                self.nodes[index] = new_node;
+                match new_node.saddr {
+                    SocketAddr::V4(sock_v4) => {
+                        self.nodes[index].saddr_v4 = Some(sock_v4);
+                        self.nodes[index].last_resp_time_v4 = Instant::now();
+                    },
+                    SocketAddr::V6(sock_v6) => {
+                        self.nodes[index].saddr_v6 = Some(sock_v6);
+                        self.nodes[index].last_resp_time_v6 = Instant::now();
+                    }
+                }
                 true
             },
             Err(index) if index == self.nodes.len() => {
@@ -206,7 +235,7 @@ impl Bucket {
                     // there's still free space in the bucket for a node
                     debug!(target: "Bucket",
                         "Node inserted at the end of the bucket.");
-                    self.nodes.push(new_node);
+                    self.nodes.push(dht_node);
                     true
                 }
             },
@@ -218,7 +247,7 @@ impl Bucket {
                     self.nodes.pop();
                 }
                 debug!(target: "Bucket", "Node inserted inside the bucket.");
-                self.nodes.insert(index, new_node);
+                self.nodes.insert(index, dht_node);
                 true
             },
         }
@@ -377,7 +406,7 @@ impl Kbucket {
         self.bucket_index(pk).and_then(|index|
             self.buckets[index]
                 .find(&self.pk, pk)
-                .map(|node_index| self.buckets[index].nodes[node_index].saddr)
+                .map(|node_index| self.buckets[index].nodes[node_index].get_socket_addr())
         )
     }
 
@@ -455,7 +484,7 @@ impl Kbucket {
         let mut bucket = Bucket::new(Some(4));
         for buc in &*self.buckets {
             for node in &*buc.nodes {
-                if !IsGlobal::is_global(&node.saddr.ip()) && only_global_ip {
+                if !IsGlobal::is_global(&node.get_socket_addr().ip()) && only_global_ip {
                     continue;
                 }
 

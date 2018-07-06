@@ -86,7 +86,7 @@ const ONION_PING_DATA_SIZE: usize =
     /* time */ 8 +
     PUBLICKEYBYTES +
     /* ip_type */ 1 +
-    /* ip_addr */ 8 +
+    /* ip_addr */ 16 +  // for IPv6
     /* port */ 2;
 
 /** Data on the basis of which onion ping id is calculated.
@@ -103,7 +103,7 @@ Length   | Content
 `8`      | Unix time in seconds divided by PING_ID_TIMEOUT
 `32`     | `PublicKey` of sender
 `1`      | IP type of sender
-`8`      | `IpAddr` of sender
+`16`     | `IpAddr` of sender
 `2`      | Port of sender
 
 */
