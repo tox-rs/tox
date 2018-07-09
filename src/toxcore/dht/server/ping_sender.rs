@@ -54,7 +54,7 @@ impl PingSender {
         let close_nodes = server.close_nodes.read();
 
         match close_nodes.find_node(&node.pk) {
-            Some(ref node_in_close_list) if !node_in_close_list.is_bad_node_timed_out(server) => return Box::new(future::ok(false)),
+            Some(ref node_in_close_list) if !node_in_close_list.is_bad_node_timed_out() => return Box::new(future::ok(false)),
             _ => {},
         };
 

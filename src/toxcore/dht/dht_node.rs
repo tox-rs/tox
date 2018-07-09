@@ -14,8 +14,9 @@ use std::ops::Sub;
 use toxcore::crypto_core::*;
 use toxcore::dht::packed_node::*;
 use toxcore::dht::kbucket::*;
-use toxcore::dht::server::*;
-use toxcore::dht::kbucket::BAD_NODE_TIMEOUT;
+
+/// timeout in seconds for offline node
+pub const BAD_NODE_TIMEOUT: u64 = 182;
 
 /** Status of node in bucket.
 Good means it is online and responded within 162 seconds
@@ -34,19 +35,18 @@ pub enum NodeStatus {
 /// check distance of PK1 and PK2 from base_PK including status of node
 pub trait ReplaceOrder {
     /// Check distance of PK1 and Pk2 including status of node
-    fn replace_order(&self, &DhtNode, &DhtNode, Duration) -> Ordering;
+    fn replace_order(&self, &DhtNode, &DhtNode) -> Ordering;
 }
 
 impl ReplaceOrder for PublicKey {
     fn replace_order(&self,
                      node1: &DhtNode,
-                     node2: &DhtNode,
-                     bad_node_timeout: Duration) -> Ordering {
+                     node2: &DhtNode) -> Ordering {
 
         trace!(target: "Distance", "Comparing distance between PKs. and status of node");
-        match node1.calc_status(bad_node_timeout) {
+        match node1.calc_status() {
             NodeStatus::Good => {
-                match node2.calc_status(bad_node_timeout) {
+                match node2.calc_status() {
                     NodeStatus::Good => { // Good, Good
                         self.distance(&node1.pk, &node2.pk)
                     },
@@ -56,7 +56,7 @@ impl ReplaceOrder for PublicKey {
                 }
             },
             NodeStatus::Bad => {
-                match node2.calc_status(bad_node_timeout) {
+                match node2.calc_status() {
                     NodeStatus::Good => { // Bad, Good
                         Ordering::Greater // Bad is farther
                     },
@@ -118,9 +118,9 @@ impl DhtNode {
     }
 
     /// calc. status of node
-    pub fn calc_status(&self, bad_node_timeout: Duration) -> NodeStatus {
-        if self.last_resp_time_v4.elapsed() > bad_node_timeout &&
-            self.last_resp_time_v6.elapsed() > bad_node_timeout {
+    pub fn calc_status(&self) -> NodeStatus {
+        if self.last_resp_time_v4.elapsed() > Duration::from_secs(BAD_NODE_TIMEOUT) &&
+            self.last_resp_time_v6.elapsed() > Duration::from_secs(BAD_NODE_TIMEOUT) {
             NodeStatus::Bad
         } else {
             NodeStatus::Good
@@ -128,8 +128,8 @@ impl DhtNode {
     }
 
     /// check it the node is timed out
-    pub fn is_bad_node_timed_out(&self, server: &Server) -> bool {
-        self.calc_status(Duration::from_secs(server.config.bad_node_timeout)) == NodeStatus::Bad
+    pub fn is_bad_node_timed_out(&self) -> bool {
+        self.calc_status() == NodeStatus::Bad
     }
 
     /// return SocketAddr for DhtNode
@@ -191,7 +191,6 @@ mod tests {
             assert_eq!(true, bucket.try_add(&pk, &n3));
             assert_eq!(true, bucket.try_add(&pk, &n4));
             assert_eq!(true, bucket.try_add(&pk, &n5));
-            bucket.set_bad_node_timeout(0);
             assert_eq!(true, bucket.try_add(&pk, &n6));
             assert_eq!(true, bucket.try_add(&pk, &n7));
             assert_eq!(true, bucket.try_add(&pk, &n8));

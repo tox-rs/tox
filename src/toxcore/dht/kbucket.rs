@@ -19,14 +19,12 @@ use toxcore::crypto_core::*;
 use toxcore::dht::dht_node::*;
 use toxcore::dht::packed_node::*;
 use toxcore::dht::ip_port::IsGlobal;
+use toxcore::dht::dht_node::BAD_NODE_TIMEOUT;
 use std::cmp::{Ord, Ordering};
 use std::net::{SocketAddr, SocketAddrV4};
 use std::time::{Duration, Instant};
 use std::convert::Into;
 use std::ops::Sub;
-
-/// timeout in seconds for offline node
-pub const BAD_NODE_TIMEOUT: u64 = 182;
 
 /** Calculate the [`k-bucket`](./struct.Kbucket.html) index of a PK compared
 to "own" PK.
@@ -141,8 +139,6 @@ pub struct Bucket {
     pub capacity: u8,
     /// Nodes that bucket has, sorted by distance to PK.
     pub nodes: Vec<DhtNode>,
-    /// timeout for switching good to bad node
-    pub bad_node_timeout: Duration,
 }
 
 /// Default number of nodes that bucket can hold.
@@ -165,7 +161,6 @@ impl Bucket {
                 Bucket {
                     capacity: BUCKET_DEFAULT_SIZE as u8,
                     nodes: Vec::with_capacity(BUCKET_DEFAULT_SIZE),
-                    bad_node_timeout: Duration::from_secs(BAD_NODE_TIMEOUT),
                 }
             },
             Some(0) => {
@@ -177,7 +172,6 @@ impl Bucket {
                 Bucket {
                     capacity: n,
                     nodes: Vec::with_capacity(n as usize),
-                    bad_node_timeout: Duration::from_secs(BAD_NODE_TIMEOUT),
                 }
             }
         }
@@ -215,7 +209,7 @@ impl Bucket {
 
         let dht_node: DhtNode = (*new_node).into();
 
-        match self.nodes.binary_search_by(|n| base_pk.replace_order(n, &dht_node, self.bad_node_timeout)) {
+        match self.nodes.binary_search_by(|n| base_pk.replace_order(n, &dht_node)) {
             Ok(index) => {
                 debug!(target: "Bucket",
                     "Updated: the node was already in the bucket.");
@@ -323,7 +317,7 @@ impl Bucket {
     pub fn can_add(&self, base_pk: &PublicKey, new_node: &PackedNode) -> bool {
         let new_node: DhtNode = (*new_node).into();
 
-        match self.nodes.binary_search_by(|n| base_pk.replace_order(n, &new_node, self.bad_node_timeout)) {
+        match self.nodes.binary_search_by(|n| base_pk.replace_order(n, &new_node)) {
             Ok(_index) => false, // node already exist in bucket, so can't add node
             Err(index) if index == self.nodes.len() => { // can't find node in bucket
                 !self.is_full()
@@ -335,11 +329,6 @@ impl Bucket {
     /// convert vector of DhtNode to vector of PackedNode
     pub fn to_packed_node(&self) -> Vec<PackedNode> {
         self.nodes.iter().map(|node| node.clone().into()).collect::<Vec<PackedNode>>()
-    }
-
-    /// set bad_node_timeout in seconds
-    pub fn set_bad_node_timeout(&mut self, bad_node_timeout: u64) {
-        self.bad_node_timeout = Duration::from_secs(bad_node_timeout);
     }
 }
 
@@ -561,11 +550,6 @@ impl Kbucket {
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut DhtNode> {
         self.buckets.iter_mut()
             .flat_map(|bucket| bucket.nodes.iter_mut())
-    }
-
-    /// set bad_node_timeout in seconds
-    pub fn set_bad_node_timeout(&mut self, bad_node_timeout: u64) {
-        self.buckets.iter_mut().for_each(|bucket| bucket.set_bad_node_timeout(bad_node_timeout));
     }
 }
 
@@ -1054,8 +1038,6 @@ mod tests {
                 buckets: vec![Bucket::new(Some(2)); KBUCKET_MAX_ENTRIES as usize],
             };
 
-            kbucket.set_bad_node_timeout(10);
-
             for node in pns {
                 if kbucket.try_add(&node) {
                     assert!(!kbucket.can_add(&node));
@@ -1153,14 +1135,5 @@ mod tests {
         let res_pn = bucket.to_packed_node();
 
         assert_eq!(pn, res_pn[0]);
-    }
-
-    #[test]
-    fn kbucket_set_bad_node_timeout_test() {
-        let mut bucket = Bucket::new(None);
-
-        bucket.set_bad_node_timeout(10);
-
-        assert_eq!(bucket.bad_node_timeout, Duration::from_secs(10));
     }
 }

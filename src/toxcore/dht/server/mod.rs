@@ -216,16 +216,6 @@ impl Server {
     /// set various config values
     pub fn set_config_values(&mut self, config: ConfigArgs) {
         self.config = config;
-
-        let bad_node_timeout = Duration::from_secs(config.bad_node_timeout);
-
-        self.close_nodes.write().buckets.iter_mut().for_each(|bucket| bucket.bad_node_timeout = bad_node_timeout);
-        self.bootstrap_nodes.write().bad_node_timeout = bad_node_timeout;
-
-        self.friends.write().iter_mut().for_each(|friend| {
-            friend.close_nodes.bad_node_timeout = bad_node_timeout;
-            friend.bootstrap_nodes.bad_node_timeout = bad_node_timeout;
-        });
     }
 
     /// main loop of dht server, call this function every second
