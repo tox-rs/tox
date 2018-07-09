@@ -513,7 +513,7 @@ impl Kbucket {
         KbucketIter {
             pos_b: 0,
             pos_pn: 0,
-            buckets: self.clone().buckets,
+            kbucket: &self,
         }
     }
 
@@ -524,21 +524,21 @@ impl Kbucket {
 }
 
 /// Iterator over `DhtNode`s in `Kbucket`.
-pub struct KbucketIter {
+pub struct KbucketIter<'a> {
     pos_b: usize,
     pos_pn: usize,
-    buckets: Vec<Bucket>,
+    kbucket: &'a Kbucket,
 }
 
-impl Iterator for KbucketIter {
-    type Item = PackedNode;
+impl<'a> Iterator for KbucketIter<'a> {
+    type Item = &'a DhtNode;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.pos_b < self.buckets.len() {
-            match self.buckets[self.pos_b].nodes.get(self.pos_pn) {
+        if self.pos_b < self.kbucket.buckets.len() {
+            match self.kbucket.buckets[self.pos_b].nodes.get(self.pos_pn) {
                 Some(s) => {
                     self.pos_pn += 1;
-                    return Some(s.clone().into());
+                    return Some(s);
                 },
                 None => {
                     self.pos_b += 1;
@@ -1061,7 +1061,7 @@ mod tests {
             let mut expect = Vec::new();
             for bucket in &kbucket.buckets {
                 for node in &bucket.nodes {
-                    expect.push(node.clone().into());
+                    expect.push(node.clone());
                 }
             }
 
@@ -1070,7 +1070,7 @@ mod tests {
             loop {
                 let enext = e_iter.next();
                 if let Some(knext) = k_iter.next() {
-                    let knext = Some(&knext);
+                    let knext = Some(knext);
                     assert_eq!(enext, knext);
                     if enext.is_none() {
                         break;

@@ -357,7 +357,7 @@ impl Server {
             )
             .map(|(node, mut client)| {
                 client.last_ping_req_time = Instant::now();
-                let res = self.send_nodes_req(node, self.pk, &mut client);
+                let res = self.send_nodes_req(node.clone().into(), self.pk, &mut client);
                 self.ping_map.write().deref_mut().insert(node.pk, client);
                 res
             });
@@ -376,7 +376,10 @@ impl Server {
             .filter(|&node| {
                 let client = ping_map.entry(node.pk).or_insert_with(PingData::new);
                 client.last_resp_time.elapsed() < bad_node_timeout
-            }).collect::<Vec<PackedNode>>();
+            })
+            .cloned()
+            .map(|node| node.into())
+            .collect::<Vec<PackedNode>>();
 
         if !good_nodes.is_empty()
             && self.last_nodes_req_time.read().deref().elapsed() >= nodes_req_interval

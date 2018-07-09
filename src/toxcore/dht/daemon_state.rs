@@ -34,8 +34,11 @@ pub const DHT_STATE_BUFFER_SIZE: usize =
 impl DaemonState {
     /// serialize DHT states, old means that the format of seriaization is old version
     pub fn serialize_old(server: &Server) -> Vec<u8> {
-        let nodes = server.close_nodes.read().iter() // DhtNode is reformed to PackedNode through iter()
-            .map(|node| node)
+        let close_nodes = server.close_nodes.read();
+
+        let nodes = close_nodes.iter()
+            .cloned()
+            .map(|node| node.into())
             .collect::<Vec<PackedNode>>();
 
         let mut buf = [0u8; DHT_STATE_BUFFER_SIZE];
