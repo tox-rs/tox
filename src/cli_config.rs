@@ -10,7 +10,7 @@ use tox::toxcore::dht::packed_node::PackedNode;
 use tox::toxcore::dht::packet::BOOSTRAP_SERVER_MAX_MOTD_LENGTH;
 
 /// Config for threading.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ThreadsConfig {
     /// Detect number of threads automatically by the number of CPU cores.
     Auto,
