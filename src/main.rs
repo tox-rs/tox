@@ -141,7 +141,8 @@ fn create_onion_streams() -> (TcpOnion, UdpOnion) {
 }
 
 fn run_tcp(cli_config: &CliConfig, dht_sk: SecretKey, tcp_onion: TcpOnion) -> impl Future<Item = (), Error = Error> {
-    let tcp_server = TcpServer::new_with_onion(tcp_onion.tx);
+    let mut tcp_server = TcpServer::new();
+    tcp_server.set_udp_onion_sink(tcp_onion.tx);
     let tcp_server_c = tcp_server.clone();
     let tcp_server_futures = cli_config.tcp_addrs.iter().map(move |&addr| {
         let tcp_server_c = tcp_server_c.clone();
