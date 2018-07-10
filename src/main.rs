@@ -8,6 +8,7 @@ extern crate itertools;
 #[macro_use]
 extern crate log;
 extern crate tokio;
+extern crate tokio_codec;
 extern crate tox;
 
 mod cli_config;
@@ -20,14 +21,18 @@ use std::os::unix::fs::OpenOptionsExt;
 
 use futures::sync::mpsc;
 use futures::{future, Future, Sink, Stream};
+use itertools::Itertools;
 use log::LevelFilter;
 use tokio::executor::thread_pool;
-use tokio::net::{UdpSocket, UdpFramed};
+use tokio::net::{TcpListener, UdpSocket, UdpFramed};
 use tokio::runtime;
 use tox::toxcore::crypto_core::*;
 use tox::toxcore::dht::codec::{DecodeError, DhtCodec};
-use tox::toxcore::dht::server::Server;
+use tox::toxcore::dht::server::{Server as UdpServer};
 use tox::toxcore::dht::lan_discovery::LanDiscoverySender;
+use tox::toxcore::onion::packet::InnerOnionResponse;
+use tox::toxcore::tcp::packet::OnionRequest;
+use tox::toxcore::tcp::server::{Server as TcpServer, ServerExt};
 
 use cli_config::*;
 
@@ -42,7 +47,7 @@ fn bind_socket(addr: SocketAddr) -> UdpSocket {
 }
 
 /// Save DHT keys to a binary file.
-fn save_keys(keys_file: String, pk: PublicKey, sk: SecretKey) {
+fn save_keys(keys_file: &str, pk: PublicKey, sk: &SecretKey) {
     #[cfg(not(unix))]
     let mut file = File::create(keys_file).expect("Failed to create the keys file");
 
@@ -54,14 +59,14 @@ fn save_keys(keys_file: String, pk: PublicKey, sk: SecretKey) {
         .open(keys_file)
         .expect("Failed to create the keys file");
 
-    file.write(pk.as_ref()).expect("Failed to save public key to the keys file");
-    file.write(&sk[0..SECRETKEYBYTES]).expect("Failed to save secret key to the keys file");
+    file.write_all(pk.as_ref()).expect("Failed to save public key to the keys file");
+    file.write_all(&sk[0..SECRETKEYBYTES]).expect("Failed to save secret key to the keys file");
 }
 
 /// Load DHT keys from a binary file.
 fn load_keys(mut file: File) -> (PublicKey, SecretKey) {
     let mut buf = [0; PUBLICKEYBYTES + SECRETKEYBYTES];
-    file.read(&mut buf).expect("Failed to read keys from the keys file");
+    file.read_exact(&mut buf).expect("Failed to read keys from the keys file");
     let pk = PublicKey::from_slice(&buf[..PUBLICKEYBYTES]).expect("Failed to read public key from the keys file");
     let sk = SecretKey::from_slice(&buf[PUBLICKEYBYTES..]).expect("Failed to read secret key from the keys file");
     (pk, sk)
@@ -69,13 +74,13 @@ fn load_keys(mut file: File) -> (PublicKey, SecretKey) {
 
 /// Load DHT keys from a binary file or generate and save them if file does not
 /// exist.
-fn load_or_gen_keys(keys_file: String) -> (PublicKey, SecretKey) {
-    match File::open(&keys_file) {
+fn load_or_gen_keys(keys_file: &str) -> (PublicKey, SecretKey) {
+    match File::open(keys_file) {
         Ok(file) => load_keys(file),
         Err(ref e) if e.kind() == ErrorKind::NotFound => {
             info!("Generating new DHT keys and storing them to '{}'", keys_file);
             let (pk, sk) = gen_keypair();
-            save_keys(keys_file, pk, sk.clone());
+            save_keys(keys_file, pk, &sk);
             (pk, sk)
         },
         Err(e) => panic!("Failed to read the keys file: {}", e)
@@ -104,29 +109,71 @@ fn run<F>(future: F, threads_config: ThreadsConfig)
     };
 }
 
-fn main() {
-    env_logger::Builder::from_default_env()
-        .filter_level(LevelFilter::Info)
-        .init();
+/// Onion sink and stream for TCP.
+struct TcpOnion {
+    /// Sink for onion packets from TCP to UDP.
+    tx: mpsc::UnboundedSender<(OnionRequest, SocketAddr)>,
+    /// Stream of onion packets from TCP to UDP.
+    rx: mpsc::UnboundedReceiver<(InnerOnionResponse, SocketAddr)>,
+}
 
-    if !crypto_init() {
-        panic!("Crypto initialization failed.");
-    }
+/// Onion sink and stream for UDP.
+struct UdpOnion {
+    /// Sink for onion packets from UDP to TCP.
+    tx: mpsc::UnboundedSender<(InnerOnionResponse, SocketAddr)>,
+    /// Stream of onion packets from TCP to UDP.
+    rx: mpsc::UnboundedReceiver<(OnionRequest, SocketAddr)>,
+}
 
-    let cli_config = cli_parse();
+/// Create onion streams for TCP and UDP servers communication.
+fn create_onion_streams() -> (TcpOnion, UdpOnion) {
+    let (udp_onion_tx, udp_onion_rx) = mpsc::unbounded();
+    let (tcp_onion_tx, tcp_onion_rx) = mpsc::unbounded();
+    let tcp_onion = TcpOnion {
+        tx: tcp_onion_tx,
+        rx: udp_onion_rx,
+    };
+    let udp_onion = UdpOnion {
+        tx: udp_onion_tx,
+        rx: tcp_onion_rx,
+    };
+    (tcp_onion, udp_onion)
+}
+
+fn run_tcp(cli_config: &CliConfig, dht_sk: SecretKey, tcp_onion: TcpOnion) -> impl Future<Item = (), Error = Error> {
+    let mut tcp_server = TcpServer::new();
+    tcp_server.set_udp_onion_sink(tcp_onion.tx);
+    let tcp_server_c = tcp_server.clone();
+    let tcp_server_futures = cli_config.tcp_addrs.iter().map(move |&addr| {
+        let tcp_server_c = tcp_server_c.clone();
+        let dht_sk = dht_sk.clone();
+        TcpListener::bind(&addr)
+            .expect("Failed to bind TCP listener")
+            .incoming()
+            .for_each(move |stream|
+                tcp_server_c.clone().run(stream, dht_sk.clone())
+            )
+    });
+    let tcp_server_future = future::select_all(tcp_server_futures)
+        .map(|_| ())
+        .map_err(|(e, _, _)| e);
+
+    let tcp_onion_future = tcp_onion.rx
+        .map_err(|()| Error::from(ErrorKind::UnexpectedEof))
+        .for_each(move |(onion_response, addr)|
+            tcp_server.handle_udp_onion_response(addr.ip(), addr.port(), onion_response)
+        );
+
+    info!("Running TCP relay on {}", cli_config.tcp_addrs.iter().format(","));
+
+    tcp_server_future.select(tcp_onion_future).map(|_| ()).map_err(|(e, _)| e)
+}
+
+fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_onion: UdpOnion) -> impl Future<Item = (), Error = Error> {
     let udp_addr = cli_config.udp_addr;
 
     let socket = bind_socket(udp_addr);
     let (sink, stream) = UdpFramed::new(socket, DhtCodec).split();
-
-    let (dht_pk, dht_sk) = if let Some(sk) = cli_config.sk {
-        (sk.public_key(), sk)
-    } else if let Some(keys_file) = cli_config.keys_file {
-        load_or_gen_keys(keys_file)
-    } else {
-        panic!("Neither secret key nor keys file is specified")
-    };
-    info!("DHT public key: {}", hex::encode(dht_pk.as_ref()).to_uppercase());
 
     // Create a channel for server to communicate with network
     let (tx, rx) = mpsc::unbounded();
@@ -137,15 +184,23 @@ fn main() {
         Box::new(future::empty())
     };
 
-    let mut server = Server::new(tx, dht_pk, dht_sk);
+    let mut server = UdpServer::new(tx, dht_pk, dht_sk.clone());
     server.set_bootstrap_info(07032018, cli_config.motd.as_bytes().to_owned());
     server.enable_lan_discovery(cli_config.lan_discovery_enabled);
+    server.set_tcp_onion_sink(udp_onion.tx);
+
+    let server_c = server.clone();
+    let udp_onion_future = udp_onion.rx
+        .map_err(|()| Error::from(ErrorKind::UnexpectedEof))
+        .for_each(move |(onion_request, addr)|
+            server_c.handle_tcp_onion_request(onion_request, addr)
+        );
 
     if cli_config.bootstrap_nodes.is_empty() {
         warn!("No bootstrap nodes!");
     }
 
-    for node in cli_config.bootstrap_nodes {
+    for &node in &cli_config.bootstrap_nodes {
         assert!(server.try_add_to_close_nodes(&node));
     }
 
@@ -154,8 +209,8 @@ fn main() {
     let server_c = server.clone();
     let network_reader = stream.then(future::ok).filter(|event| // TODO: use filter_map from futures 0.2 to avoid next `expect`
         match event {
-            &Ok(_) => true,
-            &Err(ref e) => {
+            Ok(_) => true,
+            Err(ref e) => {
                 error!("packet receive error = {:?}", e);
                 // ignore packet decode errors
                 e.cause().downcast_ref::<DecodeError>().is_none()
@@ -187,11 +242,41 @@ fn main() {
         // drop sink when rx stream is exhausted
         .map(|_sink| ());
 
-    let future = network_writer.select(network_reader).map(|_| ()).map_err(|(e, _)| e);
-    let future = future.select(server.run()).map(|_| ()).map_err(|(e, _)| e);
-    let future = future.select(lan_discovery_future).map(|_| ()).map_err(|(e, _)| e);
+    info!("Running DHT server on {}", udp_addr);
 
-    info!("Running server on {}", udp_addr);
+    network_reader
+        .select(network_writer).map(|_| ()).map_err(|(e, _)| e)
+        .select(server.run()).map(|_| ()).map_err(|(e, _)| e)
+        .select(lan_discovery_future).map(|_| ()).map_err(|(e, _)| e)
+        .select(udp_onion_future).map(|_| ()).map_err(|(e, _)| e)
+}
+
+fn main() {
+    env_logger::Builder::from_default_env()
+        .filter_level(LevelFilter::Info)
+        .init();
+
+    if !crypto_init() {
+        panic!("Crypto initialization failed.");
+    }
+
+    let cli_config = cli_parse();
+
+    let (dht_pk, dht_sk) = if let Some(ref sk) = cli_config.sk {
+        (sk.public_key(), sk.clone())
+    } else if let Some(ref keys_file) = cli_config.keys_file {
+        load_or_gen_keys(keys_file)
+    } else {
+        panic!("Neither secret key nor keys file is specified")
+    };
+    info!("DHT public key: {}", hex::encode(dht_pk.as_ref()).to_uppercase());
+
+    let (tcp_onion, udp_onion) = create_onion_streams();
+
+    let udp_server_future = run_udp(&cli_config, dht_pk, &dht_sk, udp_onion);
+    let tcp_server_future = run_tcp(&cli_config, dht_sk, tcp_onion);
+
+    let future = udp_server_future.select(tcp_server_future).map(|_| ()).map_err(|(e, _)| e);
 
     run(future, cli_config.threads_config);
 }

@@ -10,7 +10,7 @@ use tox::toxcore::dht::packed_node::PackedNode;
 use tox::toxcore::dht::packet::BOOSTRAP_SERVER_MAX_MOTD_LENGTH;
 
 /// Config for threading.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ThreadsConfig {
     /// Detect number of threads automatically by the number of CPU cores.
     Auto,
@@ -35,6 +35,8 @@ impl FromStr for ThreadsConfig {
 pub struct CliConfig {
     /// UDP address to run DHT node
     pub udp_addr: SocketAddr,
+    /// TCP addresses to run TCP relay
+    pub tcp_addrs: Vec<SocketAddr>,
     /// DHT SecretKey
     pub sk: Option<SecretKey>,
     /// Path to the file where DHT keys are stored.
@@ -61,6 +63,14 @@ pub fn cli_parse() -> CliConfig {
             .long("udp-address")
             .help("UDP address to run DHT node")
             .takes_value(true)
+            .default_value("0.0.0.0:33445"))
+        .arg(Arg::with_name("tcp-address")
+            .short("t")
+            .long("tcp-address")
+            .help("TCP address to run TCP relay")
+            .multiple(true)
+            .takes_value(true)
+            .use_delimiter(true)
             .default_value("0.0.0.0:33445"))
         .arg(Arg::with_name("secret-key")
             .short("s")
@@ -112,6 +122,8 @@ pub fn cli_parse() -> CliConfig {
 
     let udp_addr = value_t!(matches.value_of("udp-address"), SocketAddr).unwrap_or_else(|e| e.exit());
 
+    let tcp_addrs = values_t!(matches.values_of("tcp-address"), SocketAddr).unwrap_or_else(|e| e.exit());
+
     let sk = matches.value_of("secret-key").map(|s| {
         let sk_bytes: [u8; 32] = FromHex::from_hex(s).expect("Invalid DHT secret key");
         SecretKey::from_slice(&sk_bytes).expect("Invalid DHT secret key")
@@ -147,6 +159,7 @@ pub fn cli_parse() -> CliConfig {
 
     CliConfig {
         udp_addr,
+        tcp_addrs,
         sk,
         keys_file,
         bootstrap_nodes,

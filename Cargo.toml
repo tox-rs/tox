@@ -22,4 +22,5 @@ hex = "0.3"
 itertools = "0.7"
 log = "0.4"
 tokio = "0.1.7"
+tokio-codec = "0.1"
 tox = { git = "https://github.com/tox-rs/tox" }
