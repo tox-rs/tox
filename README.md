@@ -4,6 +4,8 @@ A server application to run tox bootstrap node.
 
 ## Building and running
 
+You'll need [Rust] >= 1.26.0 and [libsodium].
+
 Build with:
 
 ```sh
@@ -47,3 +49,6 @@ openssl rand -hex 32
 hexdump -n 32 -e '8 "%08x" 1 "\n"' /dev/random
 od -vN 32 -An -tx1 /dev/random | tr -d " \n" ; echo
 ```
+
+[libsodium]: https://github.com/jedisct1/libsodium
+[Rust]: https://www.rust-lang.org
