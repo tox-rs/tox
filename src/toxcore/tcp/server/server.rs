@@ -49,11 +49,8 @@ impl Server {
     }
     /** Create a new `Server` with onion
     */
-    pub fn new_with_onion(onion_sink: mpsc::UnboundedSender<(OnionRequest, SocketAddr)>) -> Server {
-        Server {
-            state: Default::default(),
-            onion_sink: Some(onion_sink),
-        }
+    pub fn set_udp_onion_sink(&mut self, onion_sink: mpsc::UnboundedSender<(OnionRequest, SocketAddr)>) {
+        self.onion_sink = Some(onion_sink)
     }
     /** Insert the client into connected_clients. Do nothing else.
     */
@@ -705,8 +702,9 @@ mod tests {
     }
     #[test]
     fn handle_onion_request() {
-        let (tcp_onion_sink, tcp_onion_stream) = mpsc::unbounded();
-        let server = Server::new_with_onion(tcp_onion_sink);
+        let (udp_onion_sink, udp_onion_stream) = mpsc::unbounded();
+        let mut server = Server::new();
+        server.set_udp_onion_sink(udp_onion_sink);
 
         let (client_1, _rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
@@ -729,7 +727,7 @@ mod tests {
             .wait();
         assert!(handle_res.is_ok());
 
-        let (packet, _) = tcp_onion_stream.into_future().wait().unwrap();
+        let (packet, _) = udp_onion_stream.into_future().wait().unwrap();
         let (packet, saddr) = packet.unwrap();
 
         assert_eq!(saddr.ip(), client_addr_1);
@@ -1014,8 +1012,9 @@ mod tests {
     }
     #[test]
     fn handle_udp_onion_response_for_unknown_client() {
-        let (tcp_onion_sink, _) = mpsc::unbounded();
-        let server = Server::new_with_onion(tcp_onion_sink);
+        let (udp_onion_sink, _) = mpsc::unbounded();
+        let mut server = Server::new();
+        server.set_udp_onion_sink(udp_onion_sink);
 
         let client_addr_1 = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
         let client_port_1 = 12345u16;
@@ -1212,14 +1211,15 @@ mod tests {
     }
     #[test]
     fn send_onion_request_to_dropped_stream() {
-        let (tcp_onion_sink, tcp_onion_stream) = mpsc::unbounded();
-        let server = Server::new_with_onion(tcp_onion_sink);
+        let (udp_onion_sink, udp_onion_stream) = mpsc::unbounded();
+        let mut server = Server::new();
+        server.set_udp_onion_sink(udp_onion_sink);
 
         let (client_1, _rx_1) = create_random_client();
         let client_pk_1 = client_1.pk();
         server.insert(client_1);
 
-        drop(tcp_onion_stream);
+        drop(udp_onion_stream);
 
         // emulate send OnionRequest from client_1
         let request = OnionRequest {
