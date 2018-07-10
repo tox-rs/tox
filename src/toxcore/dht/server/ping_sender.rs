@@ -127,7 +127,6 @@ mod tests {
             kill_node_timeout: 10,
             ping_timeout: 10,
             ping_interval: 0,
-            bad_node_timeout: 10,
             nodes_req_interval: 0,
             nat_ping_req_interval: 0,
             ping_iter_interval: 0,

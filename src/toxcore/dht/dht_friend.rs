@@ -3,7 +3,6 @@ Module for friend.
 */
 
 use std::time::{Duration, Instant};
-use std::io::{Error, ErrorKind};
 use std::mem;
 use std::net::SocketAddr;
 
@@ -50,10 +49,10 @@ impl DhtFriend {
 
     /// send NodesRequest packet to bootstap_nodes, close list
     pub fn send_nodes_req_packets(&mut self, server: &Server,
-                                  ping_interval: Duration, nodes_req_interval: Duration, bad_node_timeout: Duration) -> IoFuture<()> {
+                                  ping_interval: Duration, nodes_req_interval: Duration) -> IoFuture<()> {
         let ping_bootstrap_nodes = self.ping_bootstrap_nodes(server);
         let ping_and_get_close_nodes = self.ping_and_get_close_nodes(server, ping_interval);
-        let send_nodes_req_random = self.send_nodes_req_random(server, bad_node_timeout, nodes_req_interval);
+        let send_nodes_req_random = self.send_nodes_req_random(server, nodes_req_interval);
 
         let res = ping_bootstrap_nodes.join3(
             ping_and_get_close_nodes, send_nodes_req_random
@@ -104,15 +103,13 @@ impl DhtFriend {
     }
 
     // send NodesRequest to random node which is in close list
-    fn send_nodes_req_random(&mut self, server: &Server, bad_node_timeout: Duration, nodes_req_interval: Duration) -> IoFuture<()> {
+    fn send_nodes_req_random(&mut self, server: &Server, nodes_req_interval: Duration) -> IoFuture<()> {
         let mut ping_map = server.get_ping_map().write();
 
-        let close_nodes = self.close_nodes.to_packed_node();
-        let good_nodes = close_nodes.iter()
-            .filter(|node| {
-                let client = ping_map.entry(node.pk).or_insert_with(PingData::new);
-                client.last_resp_time.elapsed() < bad_node_timeout
-            }).collect::<Vec<_>>();
+        let good_nodes = self.close_nodes.nodes.iter()
+            .filter(|&node| !node.is_bad_node_timed_out())
+            .map(|node| node.clone().into())
+            .collect::<Vec<PackedNode>>();
 
         if !good_nodes.is_empty()
             && self.last_nodes_req_time.elapsed() >= nodes_req_interval
@@ -127,19 +124,13 @@ impl DhtFriend {
 
             let random_node = good_nodes[random_node];
 
-            if let Some(client) = ping_map.get_mut(&random_node.pk) {
-                let res = server.send_nodes_req(*random_node, self.pk, client);
-                self.bootstrap_times += 1;
-                self.last_nodes_req_time = Instant::now();
+            let client = ping_map.entry(random_node.pk).or_insert_with(PingData::new);
 
-                res
-            } else {
-                Box::new(
-                    future::err(
-                        Error::new(ErrorKind::Other, "Can't find client in ping_map")
-                    )
-                )
-            }
+            let res = server.send_nodes_req(random_node, self.pk, client);
+            self.bootstrap_times += 1;
+            self.last_nodes_req_time = Instant::now();
+
+            res
         } else {
             Box::new(future::ok(()))
         }
@@ -199,8 +190,7 @@ mod tests {
 
         let ping_interval = Duration::from_secs(0);
         let nodes_req_interval = Duration::from_secs(0);
-        let bad_nodes_timeout = Duration::from_secs(0);
-        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval, bad_nodes_timeout).wait().is_ok());
+        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval).wait().is_ok());
 
         rx.take(2).map(|received| {
             let (packet, addr) = received;
@@ -226,12 +216,6 @@ mod tests {
         }).collect().wait().unwrap();
     }
 
-    fn insert_client_to_ping_map(server: &Server, pk1: PublicKey, pk2: PublicKey) {
-        let mut ping_map = server.get_ping_map().write();
-        ping_map.insert(pk1, PingData::new());
-        ping_map.insert(pk2, PingData::new());
-    }
-
     #[test]
     fn friend_ping_and_get_close_nodes_test() {
         crypto_init();
@@ -244,10 +228,9 @@ mod tests {
 
         let ping_interval = Duration::from_secs(0);
         let nodes_req_interval = Duration::from_secs(0);
-        let bad_nodes_timeout = Duration::from_secs(0);
 
         // Test with no close_nodes entry, send nothing, but return ok
-        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval, bad_nodes_timeout).wait().is_ok());
+        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval).wait().is_ok());
 
         // Now, test with close_nodes entry
         let (node_pk1, node_sk1) = gen_keypair();
@@ -263,27 +246,15 @@ mod tests {
 
         let ping_interval = Duration::from_secs(10);
         let nodes_req_interval = Duration::from_secs(0);
-        let bad_nodes_timeout = Duration::from_secs(0);
-
-        // But, there are no entry in ping_map, just return ok
-        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval, bad_nodes_timeout).wait().is_ok());
-
-        // Now, test with entry in ping_map
-        insert_client_to_ping_map(&server, node_pk1, node_pk2);
-
-        let ping_interval = Duration::from_secs(10);
-        let nodes_req_interval = Duration::from_secs(0);
-        let bad_nodes_timeout = Duration::from_secs(0);
 
         // There are no ertry which exceeds PING_INTERVAL, so send nothing, just return ok
-        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval, bad_nodes_timeout).wait().is_ok());
+        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval).wait().is_ok());
 
         let ping_interval = Duration::from_secs(0);
         let nodes_req_interval = Duration::from_secs(0);
-        let bad_nodes_timeout = Duration::from_secs(0);
 
         // Now send packet
-        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval, bad_nodes_timeout).wait().is_ok());
+        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval).wait().is_ok());
 
         rx.take(2).map(|received| {
             let (packet, addr) = received;
@@ -321,10 +292,9 @@ mod tests {
 
         let ping_interval = Duration::from_secs(0);
         let nodes_req_interval = Duration::from_secs(0);
-        let bad_nodes_timeout = Duration::from_secs(0);
 
         // Test with no close_nodes entry, send nothing, but return ok
-        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval, bad_nodes_timeout).wait().is_ok());
+        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval).wait().is_ok());
 
         // Now, test with close_nodes entry
         let (node_pk1, node_sk1) = gen_keypair();
@@ -340,27 +310,15 @@ mod tests {
 
         let ping_interval = Duration::from_secs(10);
         let nodes_req_interval = Duration::from_secs(0);
-        let bad_nodes_timeout = Duration::from_secs(0);
-
-        // But, there are no entry in ping_map, just return ok
-        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval, bad_nodes_timeout).wait().is_ok());
-
-        // Now, test with entry in ping_map
-        insert_client_to_ping_map(&server, node_pk1, node_pk2);
-
-        let ping_interval = Duration::from_secs(10);
-        let nodes_req_interval = Duration::from_secs(0);
-        let bad_nodes_timeout = Duration::from_secs(0);
 
         // There are no ertry which exceeds BAD_NODE_TIMEOUT, so send nothing, just return ok
-        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval, bad_nodes_timeout).wait().is_ok());
+        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval).wait().is_ok());
 
         let ping_interval = Duration::from_secs(10);
         let nodes_req_interval = Duration::from_secs(0);
-        let bad_nodes_timeout = Duration::from_secs(10);
 
         // Now send packet
-        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval, bad_nodes_timeout).wait().is_ok());
+        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval).wait().is_ok());
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr) = received.unwrap();

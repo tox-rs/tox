@@ -135,8 +135,6 @@ pub struct ConfigArgs {
     pub ping_timeout: u64,
     /// interval in seconds for ping
     pub ping_interval: u64,
-    /// timeout in seconds for node is offline or not
-    pub bad_node_timeout: u64,
     /// interval in seconds for random NodesRequest
     pub nodes_req_interval: u64,
     /// interval in seconds for iteration of sending PingRequest
@@ -151,7 +149,6 @@ impl Default for ConfigArgs {
             kill_node_timeout: 182,
             ping_timeout: 5,
             ping_interval: 60,
-            bad_node_timeout: 162,
             nodes_req_interval: 20,
             nat_ping_req_interval: 3,
             ping_iter_interval: 2,
@@ -226,8 +223,7 @@ impl Server {
 
         let ping_bootstrap_nodes = self.ping_bootstrap_nodes();
         let ping_and_get_close_nodes = self.ping_and_get_close_nodes(Duration::from_secs(self.config.ping_interval));
-        let send_nodes_req_random = self.send_nodes_req_random(Duration::from_secs(self.config.bad_node_timeout),
-                                                               Duration::from_secs(self.config.nodes_req_interval));
+        let send_nodes_req_random = self.send_nodes_req_random(Duration::from_secs(self.config.nodes_req_interval));
         let send_nodes_req_to_friends = self.send_nodes_req_to_friends();
 
         let ping_sender = self.send_pings(Duration::from_secs(self.config.ping_iter_interval));
@@ -273,8 +269,7 @@ impl Server {
         let nodes_sender = friends.iter_mut()
             .map(|friend| {
                 friend.send_nodes_req_packets(self, Duration::from_secs(self.config.ping_interval),
-                                              Duration::from_secs(self.config.nodes_req_interval),
-                                              Duration::from_secs(self.config.bad_node_timeout))
+                                              Duration::from_secs(self.config.nodes_req_interval))
             });
 
         let nodes_stream = stream::futures_unordered(nodes_sender).then(|_| Ok(()));
@@ -331,15 +326,12 @@ impl Server {
     }
 
     // every 20 seconds DHT node send NodesRequest to random node which is in close list
-    fn send_nodes_req_random(&self, bad_node_timeout: Duration, nodes_req_interval: Duration) -> IoFuture<()> {
+    fn send_nodes_req_random(&self, nodes_req_interval: Duration) -> IoFuture<()> {
         let close_nodes = self.close_nodes.read();
         let mut ping_map = self.ping_map.write();
 
         let good_nodes = close_nodes.iter()
-            .filter(|&node| {
-                let client = ping_map.entry(node.pk).or_insert_with(PingData::new);
-                client.last_resp_time.elapsed() < bad_node_timeout
-            })
+            .filter(|&node| !node.is_bad_node_timed_out())
             .cloned()
             .map(|node| node.into())
             .collect::<Vec<PackedNode>>();
@@ -2412,7 +2404,6 @@ mod tests {
             kill_node_timeout: 10,
             ping_timeout: 10,
             ping_interval: 0,
-            bad_node_timeout: 10,
             nodes_req_interval: 0,
             nat_ping_req_interval: 0,
             ping_iter_interval: 0,
@@ -2477,7 +2468,6 @@ mod tests {
             kill_node_timeout: 0, // time out seconds for remove client
             ping_timeout: 10,
             ping_interval: 0,
-            bad_node_timeout: 10,
             nodes_req_interval: 0,
             ping_iter_interval: 2,
             nat_ping_req_interval: 10,
@@ -2507,7 +2497,6 @@ mod tests {
             kill_node_timeout: 10, // time out seconds for remove client
             ping_timeout: 10,
             ping_interval: 0,
-            bad_node_timeout: 10,
             nodes_req_interval: 0,
             ping_iter_interval: 2,
             nat_ping_req_interval: 10,
@@ -2594,7 +2583,6 @@ mod tests {
             kill_node_timeout: 10,
             ping_timeout: 10,
             ping_interval: 0,
-            bad_node_timeout: 10,
             nodes_req_interval: 0,
             ping_iter_interval: 2,
             nat_ping_req_interval: 10,
@@ -2639,7 +2627,6 @@ mod tests {
             kill_node_timeout: 10,
             ping_timeout: 10,
             ping_interval: 0,
-            bad_node_timeout: 10,
             nodes_req_interval: 0,
             ping_iter_interval: 0,
             nat_ping_req_interval: 10,
@@ -2684,7 +2671,6 @@ mod tests {
             kill_node_timeout: 10,
             ping_timeout: 10,
             ping_interval: 0,
-            bad_node_timeout: 0,
             nodes_req_interval: 0,
             ping_iter_interval: 2,
             nat_ping_req_interval: 10,
@@ -2697,7 +2683,6 @@ mod tests {
             kill_node_timeout: 10,
             ping_timeout: 10,
             ping_interval: 0,
-            bad_node_timeout: 10,
             nodes_req_interval: 0,
             nat_ping_req_interval: 10,
             ping_iter_interval: 2,
@@ -2743,7 +2728,6 @@ mod tests {
             kill_node_timeout: 10,
             ping_timeout: 10,
             ping_interval: 0,
-            bad_node_timeout: 10,
             nodes_req_interval: 0,
             ping_iter_interval: 2,
             nat_ping_req_interval: 10,
@@ -2790,7 +2774,6 @@ mod tests {
             kill_node_timeout: 10,
             ping_timeout: 10,
             ping_interval: 0,
-            bad_node_timeout: 10,
             nodes_req_interval: 0,
             nat_ping_req_interval: 10,
             ping_iter_interval: 2,
