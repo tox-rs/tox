@@ -137,8 +137,6 @@ pub struct ConfigArgs {
     pub ping_interval: u64,
     /// interval in seconds for random NodesRequest
     pub nodes_req_interval: u64,
-    /// interval in seconds for iteration of sending PingRequest
-    pub ping_iter_interval: u64,
     /// interval in seconds for NatPingRequest
     pub nat_ping_req_interval: u64,
 }
@@ -151,7 +149,6 @@ impl Default for ConfigArgs {
             ping_interval: 60,
             nodes_req_interval: 20,
             nat_ping_req_interval: 3,
-            ping_iter_interval: 2,
         }
     }
 }
@@ -226,7 +223,7 @@ impl Server {
         let send_nodes_req_random = self.send_nodes_req_random(Duration::from_secs(self.config.nodes_req_interval));
         let send_nodes_req_to_friends = self.send_nodes_req_to_friends();
 
-        let ping_sender = self.send_pings(Duration::from_secs(self.config.ping_iter_interval));
+        let ping_sender = self.send_pings();
 
         let send_nat_ping_req = self.send_nat_ping_req(Duration::from_secs(self.config.nat_ping_req_interval));
 
@@ -256,10 +253,10 @@ impl Server {
     }
 
     // send PingRequest using Ping object
-    fn send_pings(&self, ping_send_interval: Duration) -> IoFuture<()> {
+    fn send_pings(&self) -> IoFuture<()> {
         let mut ping_sender = self.ping_sender.write();
 
-        ping_sender.send_pings(&self, ping_send_interval)
+        ping_sender.send_pings(&self)
     }
 
     // send NodesRequest to friends
@@ -2406,7 +2403,6 @@ mod tests {
             ping_interval: 0,
             nodes_req_interval: 0,
             nat_ping_req_interval: 0,
-            ping_iter_interval: 0,
         };
 
         alice.set_config_values(args);
@@ -2469,7 +2465,6 @@ mod tests {
             ping_timeout: 10,
             ping_interval: 0,
             nodes_req_interval: 0,
-            ping_iter_interval: 2,
             nat_ping_req_interval: 10,
         };
 
@@ -2498,7 +2493,6 @@ mod tests {
             ping_timeout: 10,
             ping_interval: 0,
             nodes_req_interval: 0,
-            ping_iter_interval: 2,
             nat_ping_req_interval: 10,
         };
 
@@ -2584,7 +2578,6 @@ mod tests {
             ping_timeout: 10,
             ping_interval: 0,
             nodes_req_interval: 0,
-            ping_iter_interval: 2,
             nat_ping_req_interval: 10,
         };
 
@@ -2628,7 +2621,6 @@ mod tests {
             ping_timeout: 10,
             ping_interval: 0,
             nodes_req_interval: 0,
-            ping_iter_interval: 0,
             nat_ping_req_interval: 10,
         };
 
@@ -2672,7 +2664,6 @@ mod tests {
             ping_timeout: 10,
             ping_interval: 0,
             nodes_req_interval: 0,
-            ping_iter_interval: 2,
             nat_ping_req_interval: 10,
         };
 
@@ -2685,7 +2676,6 @@ mod tests {
             ping_interval: 0,
             nodes_req_interval: 0,
             nat_ping_req_interval: 10,
-            ping_iter_interval: 2,
         };
 
         alice.set_config_values(args);
@@ -2729,7 +2719,6 @@ mod tests {
             ping_timeout: 10,
             ping_interval: 0,
             nodes_req_interval: 0,
-            ping_iter_interval: 2,
             nat_ping_req_interval: 10,
         };
 
@@ -2776,7 +2765,6 @@ mod tests {
             ping_interval: 0,
             nodes_req_interval: 0,
             nat_ping_req_interval: 10,
-            ping_iter_interval: 2,
         };
 
         // test with ipv4 mode

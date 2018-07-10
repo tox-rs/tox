@@ -15,9 +15,11 @@ use toxcore::dht::kbucket::*;
 use toxcore::dht::server::*;
 use toxcore::io_tokio::IoFuture;
 
+const TIME_TO_PING: u64 = 2;
+
 /// Hold data for sending PingRequest
 pub struct PingSender {
-    last_time_send_ping: Instant,
+    last_time_send_ping: Option<Instant>,
     nodes_to_send_ping: Bucket,
 }
 
@@ -25,7 +27,7 @@ impl PingSender {
     /// new PingSender object
     pub fn new() -> Self {
         PingSender {
-            last_time_send_ping: Instant::now(),
+            last_time_send_ping: None,
             nodes_to_send_ping: Bucket::new(None),
         }
     }
@@ -43,8 +45,8 @@ impl PingSender {
         self.nodes_to_send_ping.nodes.iter().any(|peer| peer.pk == node.pk)
     }
 
-    fn can_send_pings(&self, iterate_interval: Duration) -> bool {
-        self.last_time_send_ping.elapsed() >= iterate_interval
+    fn can_send_pings(&self) -> bool {
+        self.last_time_send_ping.map_or(true, |time| time.elapsed() >= Duration::from_secs(TIME_TO_PING))
     }
 
     /// try to add node to list to send PingRequest
@@ -83,13 +85,13 @@ impl PingSender {
     }
 
     /// send PingRequest to all nodes in list
-    pub fn send_pings(&mut self, server: &Server, iterate_interval: Duration) -> IoFuture<()> {
-        if !self.can_send_pings(iterate_interval) {
+    pub fn send_pings(&mut self, server: &Server) -> IoFuture<()> {
+        if !self.can_send_pings() {
             return Box::new(future::ok(()))
         }
 
         let nodes_to_send_ping = mem::replace(&mut self.nodes_to_send_ping, Bucket::new(None));
-        self.last_time_send_ping = Instant::now();
+        self.last_time_send_ping = Some(Instant::now());
 
         let ping_sender = nodes_to_send_ping.nodes.iter().map(|node| {
             server.send_ping_req(&(node.clone()).into())
@@ -129,7 +131,6 @@ mod tests {
             ping_interval: 0,
             nodes_req_interval: 0,
             nat_ping_req_interval: 0,
-            ping_iter_interval: 0,
         };
 
         server.set_config_values(args);
@@ -179,9 +180,9 @@ mod tests {
             saddr: "127.0.0.1:33445".parse().unwrap(),
         };
 
-        ping.try_add(&server,&pn).wait().unwrap();
+        ping.try_add(&server, &pn).wait().unwrap();
 
-        ping.send_pings(&server, Duration::from_secs(0)).wait().unwrap();
+        ping.send_pings(&server).wait().unwrap();
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, _addr) = received.unwrap();
