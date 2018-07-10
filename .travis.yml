@@ -1,0 +1,45 @@
+language: rust
+rust:
+  - 1.25.0
+  - stable
+  - beta
+  - nightly
+cache:
+  - apt
+  - cargo
+
+os:
+  - linux
+  - osx
+
+matrix:
+  allow_failures:
+  - rust: beta
+  - rust: nightly
+
+sudo: required
+
+env:
+  global:
+    - RUST_BACKTRACE=1
+
+branches:
+  except:
+    - /test.*/
+
+before_install:
+  - |
+    if [[ "$TRAVIS_OS_NAME" == "linux" ]]
+    then
+        ./scripts/verify-commit-messages.sh "$TRAVIS_COMMIT_RANGE" \
+        && ./scripts/bootstrap-ubuntu-14-04.sh
+    fi
+  - |
+    if [[ "$TRAVIS_OS_NAME" == "osx" ]]
+    then
+        ./scripts/bootstrap-osx.sh
+    fi
+
+script:
+  - cargo build --verbose
+  - cargo test --verbose
