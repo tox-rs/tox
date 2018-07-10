@@ -635,9 +635,11 @@ impl Server {
 
         // node is added if it's PK is closer than nodes in ping list
         // the result of try_add is ignored, if it is not added, then PingRequest is not sent to the node.
-        self.ping_sender.write().try_add(&self, &node_to_ping);
-
-        self.send_to(addr, ping_resp)
+        Box::new(self.ping_sender.write().try_add(&self, &node_to_ping)
+            .map(|_| ())
+            .join(self.send_to(addr, ping_resp))
+            .map(|_| ())
+        )
     }
     /**
     handle received PingResponse packet. If ping_id is correct, try_add peer to close_nodes.
@@ -709,9 +711,11 @@ impl Server {
 
         // node is added if it's PK is closer than nodes in ping list
         // the result of try_add is ignored, if it is not added, then PingRequest is not sent to the node.
-        self.ping_sender.write().try_add(&self, &node_to_ping);
-
-        self.send_to(addr, nodes_resp)
+        Box::new(self.ping_sender.write().try_add(&self, &node_to_ping)
+            .map(|_| ())
+            .join(self.send_to(addr, nodes_resp))
+            .map(|_| ())
+        )
     }
     /**
     handle received NodesResponse from peer.

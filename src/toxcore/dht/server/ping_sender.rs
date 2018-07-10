@@ -6,6 +6,7 @@ Using Bucket, we can avoid flooding of sending PingRequest.
 
 use std::time::{Duration, Instant};
 use std::mem;
+use std::io::{Error, ErrorKind};
 
 use futures::{future, stream, Stream};
 
@@ -48,33 +49,37 @@ impl PingSender {
 
     /// try to add node to list to send PingRequest
     /// return true if node is added, false otherwise
-    pub fn try_add(&mut self, server: &Server, node: &PackedNode) -> bool {
+    pub fn try_add(&mut self, server: &Server, node: &PackedNode) -> IoFuture<bool> {
         // if node already exists in close list and not timed out, then don't send PingRequest
         let close_nodes = server.close_nodes.read();
 
         match close_nodes.find_node(&node.pk) {
-            Some(ref node_in_close_list) if !node_in_close_list.is_bad_node_timed_out(server) => return false,
+            Some(ref node_in_close_list) if !node_in_close_list.is_bad_node_timed_out(server) => return Box::new(future::ok(false)),
             _ => {},
         };
 
         // if node is not addable to close list, don't send PingRequest
         if !close_nodes.can_add(node) {
-            return false
+            return Box::new(future::ok(false))
         }
 
         // If node is friend and don't exist in friend's close list then send PingRequest
         if PingSender::is_friend(node, server) && !PingSender::is_in_close_list(node, server) {
-            server.send_ping_req(node);
-            return false
+            return Box::new(server.send_ping_req(node)
+                .map(|_| false)
+                .map_err(|e| {
+                    debug!("Sending PingRequest fails {:?}", e);
+                    Error::from(ErrorKind::Other)
+                }))
         }
 
         // if node already exists in ping list, then don't add
         if self.is_in_ping_list(node) {
-            return false
+            return Box::new(future::ok(false));
         }
 
         // PingRequest is sent only for maximum 8 nodes in Bucket
-        self.nodes_to_send_ping.try_add(&server.pk, node)
+        Box::new(future::ok(self.nodes_to_send_ping.try_add(&server.pk, node)))
     }
 
     /// send PingRequest to all nodes in list
@@ -138,26 +143,26 @@ mod tests {
         };
 
         // adding success
-        ping.try_add(&server,&pn);
+        ping.try_add(&server,&pn).wait().unwrap();
 
         assert_eq!(pn, ping.nodes_to_send_ping.nodes[0].clone().into());
 
         // try again, it is already in ping list
-        assert!(!ping.try_add(&server,&pn));
+        assert!(!ping.try_add(&server,&pn).wait().unwrap());
 
         // clear ping list
         ping.nodes_to_send_ping.nodes.clear();
 
         // node already exist in close list, do not be added to ping list
         server.close_nodes.write().try_add(&pn);
-        ping.try_add(&server,&pn);
+        ping.try_add(&server,&pn).wait().unwrap();
 
         assert!(ping.nodes_to_send_ping.is_empty());
 
         // node is a friend, do not be added to ping list
         server.add_friend(DhtFriend::new(pn.pk, BOOTSTRAP_TIMES));
 
-        ping.try_add(&server,&pn);
+        ping.try_add(&server,&pn).wait().unwrap();
 
         assert!(ping.nodes_to_send_ping.is_empty());
     }
@@ -175,7 +180,7 @@ mod tests {
             saddr: "127.0.0.1:33445".parse().unwrap(),
         };
 
-        ping.try_add(&server,&pn);
+        ping.try_add(&server,&pn).wait().unwrap();
 
         ping.send_pings(&server, Duration::from_secs(0)).wait().unwrap();
 
