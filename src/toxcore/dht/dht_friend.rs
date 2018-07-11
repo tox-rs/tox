@@ -202,13 +202,11 @@ mod tests {
             if addr == SocketAddr::V4("127.0.0.1:33445".parse().unwrap()) {
                 let client = ping_map.get_mut(&node_pk1).unwrap();
                 let nodes_req_payload = nodes_req.get_payload(&node_sk1).unwrap();
-                let dur = Duration::from_secs(PING_TIMEOUT);
-                assert!(client.check_ping_id(nodes_req_payload.id, dur));
+                assert!(client.check_ping_id(nodes_req_payload.id));
             } else {
                 let client = ping_map.get_mut(&node_pk2).unwrap();
                 let nodes_req_payload = nodes_req.get_payload(&node_sk2).unwrap();
-                let dur = Duration::from_secs(PING_TIMEOUT);
-                assert!(client.check_ping_id(nodes_req_payload.id, dur));
+                assert!(client.check_ping_id(nodes_req_payload.id));
             }
         }).collect().wait().unwrap();
     }
@@ -254,13 +252,11 @@ mod tests {
             if addr == SocketAddr::V4("127.0.0.1:33445".parse().unwrap()) {
                 let client = ping_map.get_mut(&node_pk1).unwrap();
                 let nodes_req_payload = nodes_req.get_payload(&node_sk1).unwrap();
-                let dur = Duration::from_secs(PING_TIMEOUT);
-                assert!(client.check_ping_id(nodes_req_payload.id, dur));
+                assert!(client.check_ping_id(nodes_req_payload.id));
             } else {
                 let client = ping_map.get_mut(&node_pk2).unwrap();
                 let nodes_req_payload = nodes_req.get_payload(&node_sk2).unwrap();
-                let dur = Duration::from_secs(PING_TIMEOUT);
-                assert!(client.check_ping_id(nodes_req_payload.id, dur));
+                assert!(client.check_ping_id(nodes_req_payload.id));
             }
         }).collect().wait().unwrap();
     }
@@ -306,13 +302,11 @@ mod tests {
         if addr == SocketAddr::V4("127.0.0.1:33445".parse().unwrap()) {
             let client = ping_map.get_mut(&node_pk1).unwrap();
             let nodes_req_payload = nodes_req.get_payload(&node_sk1).unwrap();
-            let dur = Duration::from_secs(PING_TIMEOUT);
-            assert!(client.check_ping_id(nodes_req_payload.id, dur));
+            assert!(client.check_ping_id(nodes_req_payload.id));
         } else {
             let client = ping_map.get_mut(&node_pk2).unwrap();
             let nodes_req_payload = nodes_req.get_payload(&node_sk2).unwrap();
-            let dur = Duration::from_secs(PING_TIMEOUT);
-            assert!(client.check_ping_id(nodes_req_payload.id, dur));
+            assert!(client.check_ping_id(nodes_req_payload.id));
         }
     }
 

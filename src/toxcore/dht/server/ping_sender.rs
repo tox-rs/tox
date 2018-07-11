@@ -127,7 +127,6 @@ mod tests {
         let mut server = Server::new(tx, pk, sk);
         let args = ConfigArgs {
             kill_node_timeout: 10,
-            ping_timeout: 10,
         };
 
         server.set_config_values(args);
@@ -191,7 +190,6 @@ mod tests {
 
         let client = ping_map.get_mut(&pn.pk).unwrap();
         let ping_req_payload = ping_req.get_payload(&pn_sk).unwrap();
-        let dur = Duration::from_secs(PING_TIMEOUT);
-        assert!(client.check_ping_id(ping_req_payload.id, dur));
+        assert!(client.check_ping_id(ping_req_payload.id));
     }
 }

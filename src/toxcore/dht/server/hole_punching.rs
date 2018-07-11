@@ -362,9 +362,8 @@ mod tests {
         let mut ping_map = ping_map.write();
 
         let client = ping_map.get_mut(&friend_pk).unwrap();
-        let dur = Duration::from_secs(PING_TIMEOUT);
 
-        assert!(client.check_ping_id(ping_req_payload.id, dur));
+        assert!(client.check_ping_id(ping_req_payload.id));
     }
 
     #[test]
@@ -402,8 +401,7 @@ mod tests {
         let mut ping_map = ping_map.write();
 
         let client = ping_map.get_mut(&friend_pk).unwrap();
-        let dur = Duration::from_secs(PING_TIMEOUT);
 
-        assert!(client.check_ping_id(ping_req_payload.id, dur));
+        assert!(client.check_ping_id(ping_req_payload.id));
     }
 }

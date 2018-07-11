@@ -43,8 +43,6 @@ type Tx = mpsc::UnboundedSender<(DhtPacket, SocketAddr)>;
 /// Shorthand for the transmit half of the TCP onion channel.
 type TcpOnionTx = mpsc::UnboundedSender<(InnerOnionResponse, SocketAddr)>;
 
-/// Ping timeout in seconds
-pub const PING_TIMEOUT: u64 = 5;
 /// Number of Nodes Req sending times to find close nodes
 pub const MAX_BOOTSTRAP_TIMES: u32 = 5;
 /// Interval in seconds of sending NatPingRequest packet
@@ -135,15 +133,12 @@ pub struct Server {
 pub struct ConfigArgs {
     /// timeout in seconds for remove clients in ping_map
     pub kill_node_timeout: u64,
-    /// timeout in seconds for PingRequest and NodesRequest
-    pub ping_timeout: u64,
 }
 
 impl Default for ConfigArgs {
     fn default() -> ConfigArgs {
         ConfigArgs {
             kill_node_timeout: 182,
-            ping_timeout: 5,
         }
     }
 }
@@ -210,7 +205,7 @@ impl Server {
     /// main loop of dht server, call this function every second
     fn dht_main_loop(&self) -> IoFuture<()> {
         self.remove_timedout_clients(Duration::from_secs(self.config.kill_node_timeout));
-        self.remove_timedout_ping_ids(Duration::from_secs(self.config.ping_timeout));
+        self.remove_timedout_ping_ids();
         self.refresh_onion_key();
 
         let ping_bootstrap_nodes = self.ping_bootstrap_nodes();
@@ -364,11 +359,11 @@ impl Server {
     }
 
     // remove PING_TIMEOUT timed out ping_ids of PingHash
-    fn remove_timedout_ping_ids(&self, timeout: Duration) -> IoFuture<()> {
+    fn remove_timedout_ping_ids(&self) -> IoFuture<()> {
         let mut ping_map = self.ping_map.write();
         ping_map.iter_mut()
             .for_each(|(_pk, client)|
-                client.clear_timedout_pings(timeout)
+                client.clear_timedout_pings()
             );
 
         Box::new( future::ok(()) )
@@ -640,8 +635,7 @@ impl Server {
             Some(client) => client,
         };
 
-        let timeout_dur = Duration::from_secs(PING_TIMEOUT);
-        if client.check_ping_id(payload.id, timeout_dur) {
+        if client.check_ping_id(payload.id) {
             client.last_resp_time = Instant::now();
             Box::new( future::ok(()) )
         } else {
@@ -733,8 +727,7 @@ impl Server {
         let mut close_nodes = self.close_nodes.write();
         let mut bootstrap_nodes = self.bootstrap_nodes.write();
         let mut friends = self.friends.write();
-        let timeout_dur = Duration::from_secs(PING_TIMEOUT);
-        if client.check_ping_id(payload.id, timeout_dur) {
+        if client.check_ping_id(payload.id) {
             for node in &payload.nodes {
                 // not worried about removing evicted nodes from ping_map
                 // they will be removed by timeout eventually since we won't
@@ -2393,7 +2386,6 @@ mod tests {
 
         let args = ConfigArgs {
             kill_node_timeout: 10,
-            ping_timeout: 10,
         };
 
         alice.set_config_values(args);
@@ -2453,7 +2445,6 @@ mod tests {
 
         let args = ConfigArgs {
             kill_node_timeout: 0, // time out seconds for remove client
-            ping_timeout: 10,
         };
 
         alice.set_config_values(args);
@@ -2478,7 +2469,6 @@ mod tests {
 
         let args = ConfigArgs {
             kill_node_timeout: 10, // time out seconds for remove client
-            ping_timeout: 10,
         };
 
         alice.set_config_values(args);
@@ -2560,7 +2550,6 @@ mod tests {
 
         let args = ConfigArgs {
             kill_node_timeout: 10,
-            ping_timeout: 10,
         };
 
         alice.set_config_values(args);
@@ -2576,13 +2565,11 @@ mod tests {
             if addr == SocketAddr::V4("127.0.0.1:33445".parse().unwrap()) {
                 let client = ping_map.get_mut(&bob_pk).unwrap();
                 let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
-                let dur = Duration::from_secs(PING_TIMEOUT);
-                assert!(client.check_ping_id(nodes_req_payload.id, dur));
+                assert!(client.check_ping_id(nodes_req_payload.id));
             } else {
                 let client = ping_map.get_mut(&ping_pk).unwrap();
                 let nodes_req_payload = nodes_req.get_payload(&ping_sk).unwrap();
-                let dur = Duration::from_secs(PING_TIMEOUT);
-                assert!(client.check_ping_id(nodes_req_payload.id, dur));
+                assert!(client.check_ping_id(nodes_req_payload.id));
             }
         }).collect().wait().unwrap();
     }
@@ -2600,7 +2587,6 @@ mod tests {
 
         let args = ConfigArgs {
             kill_node_timeout: 10,
-            ping_timeout: 10,
         };
 
         alice.set_config_values(args);
@@ -2616,13 +2602,11 @@ mod tests {
             if addr == SocketAddr::V4("127.0.0.1:33445".parse().unwrap()) {
                 let client = ping_map.get_mut(&bob_pk).unwrap();
                 let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
-                let dur = Duration::from_secs(PING_TIMEOUT);
-                assert!(client.check_ping_id(nodes_req_payload.id, dur));
+                assert!(client.check_ping_id(nodes_req_payload.id));
             } else {
                 let client = ping_map.get_mut(&ping_pk).unwrap();
                 let nodes_req_payload = nodes_req.get_payload(&ping_sk).unwrap();
-                let dur = Duration::from_secs(PING_TIMEOUT);
-                assert!(client.check_ping_id(nodes_req_payload.id, dur));
+                assert!(client.check_ping_id(nodes_req_payload.id));
             }
         }).collect().wait().unwrap();
     }
@@ -2640,7 +2624,6 @@ mod tests {
 
         let args = ConfigArgs {
             kill_node_timeout: 10,
-            ping_timeout: 10,
         };
 
         alice.set_config_values(args);
@@ -2648,7 +2631,6 @@ mod tests {
 
         let args = ConfigArgs {
             kill_node_timeout: 10,
-            ping_timeout: 10,
         };
 
         alice.set_config_values(args);
@@ -2664,13 +2646,11 @@ mod tests {
             if addr == SocketAddr::V4("127.0.0.1:33445".parse().unwrap()) {
                 let client = ping_map.get_mut(&bob_pk).unwrap();
                 let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
-                let dur = Duration::from_secs(PING_TIMEOUT);
-                assert!(client.check_ping_id(nodes_req_payload.id, dur));
+                assert!(client.check_ping_id(nodes_req_payload.id));
             } else {
                 let client = ping_map.get_mut(&ping_pk).unwrap();
                 let nodes_req_payload = nodes_req.get_payload(&ping_sk).unwrap();
-                let dur = Duration::from_secs(PING_TIMEOUT);
-                assert!(client.check_ping_id(nodes_req_payload.id, dur));
+                assert!(client.check_ping_id(nodes_req_payload.id));
             }
         }).collect().wait().unwrap();
     }
@@ -2689,7 +2669,6 @@ mod tests {
 
         let args = ConfigArgs {
             kill_node_timeout: 10,
-            ping_timeout: 10,
         };
 
         alice.set_config_values(args);
@@ -2731,7 +2710,6 @@ mod tests {
 
         let args = ConfigArgs {
             kill_node_timeout: 10,
-            ping_timeout: 10,
         };
         alice.set_config_values(args);
 
@@ -2752,13 +2730,11 @@ mod tests {
             if addr == SocketAddr::V6("[FF::01]:33445".parse().unwrap()) {
                 let client = ping_map.get_mut(&bob_pk).unwrap();
                 let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
-                let dur = Duration::from_secs(PING_TIMEOUT);
-                assert!(client.check_ping_id(nodes_req_payload.id, dur));
+                assert!(client.check_ping_id(nodes_req_payload.id));
             } else {
                 let client = ping_map.get_mut(&ping_pk).unwrap();
                 let nodes_req_payload = nodes_req.get_payload(&ping_sk).unwrap();
-                let dur = Duration::from_secs(PING_TIMEOUT);
-                assert!(client.check_ping_id(nodes_req_payload.id, dur));
+                assert!(client.check_ping_id(nodes_req_payload.id));
             }
         }).collect().wait().unwrap();
     }
