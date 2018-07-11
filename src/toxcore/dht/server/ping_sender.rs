@@ -129,7 +129,6 @@ mod tests {
             kill_node_timeout: 10,
             ping_timeout: 10,
             ping_interval: 0,
-            nodes_req_interval: 0,
         };
 
         server.set_config_values(args);

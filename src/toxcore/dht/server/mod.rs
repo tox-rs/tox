@@ -51,6 +51,8 @@ pub const MAX_BOOTSTRAP_TIMES: u32 = 5;
 pub const NAT_PING_REQ_INTERVAL: u64 = 3;
 /// How often onion key should be refreshed
 pub const ONION_REFRESH_KEY_INTERVAL: u64 = 7200;
+/// Interval in seconds for random NodesRequest
+pub const NODES_REQ_INTERVAL: u64 = 20;
 
 /**
 Own DHT node data.
@@ -135,8 +137,6 @@ pub struct ConfigArgs {
     pub ping_timeout: u64,
     /// interval in seconds for ping
     pub ping_interval: u64,
-    /// interval in seconds for random NodesRequest
-    pub nodes_req_interval: u64,
 }
 
 impl Default for ConfigArgs {
@@ -145,7 +145,6 @@ impl Default for ConfigArgs {
             kill_node_timeout: 182,
             ping_timeout: 5,
             ping_interval: 60,
-            nodes_req_interval: 20,
         }
     }
 }
@@ -217,7 +216,7 @@ impl Server {
 
         let ping_bootstrap_nodes = self.ping_bootstrap_nodes();
         let ping_and_get_close_nodes = self.ping_and_get_close_nodes(Duration::from_secs(self.config.ping_interval));
-        let send_nodes_req_random = self.send_nodes_req_random(Duration::from_secs(self.config.nodes_req_interval));
+        let send_nodes_req_random = self.send_nodes_req_random();
         let send_nodes_req_to_friends = self.send_nodes_req_to_friends();
 
         let ping_sender = self.send_pings();
@@ -262,8 +261,7 @@ impl Server {
 
         let nodes_sender = friends.iter_mut()
             .map(|friend| {
-                friend.send_nodes_req_packets(self, Duration::from_secs(self.config.ping_interval),
-                                              Duration::from_secs(self.config.nodes_req_interval))
+                friend.send_nodes_req_packets(self, Duration::from_secs(self.config.ping_interval))
             });
 
         let nodes_stream = stream::futures_unordered(nodes_sender).then(|_| Ok(()));
@@ -320,7 +318,7 @@ impl Server {
     }
 
     // every 20 seconds DHT node send NodesRequest to random node which is in close list
-    fn send_nodes_req_random(&self, nodes_req_interval: Duration) -> IoFuture<()> {
+    fn send_nodes_req_random(&self) -> IoFuture<()> {
         let close_nodes = self.close_nodes.read();
         let mut ping_map = self.ping_map.write();
 
@@ -331,7 +329,7 @@ impl Server {
             .collect::<Vec<PackedNode>>();
 
         if !good_nodes.is_empty()
-            && self.last_nodes_req_time.read().deref().elapsed() >= nodes_req_interval
+            && self.last_nodes_req_time.read().deref().elapsed() >= Duration::from_secs(NODES_REQ_INTERVAL)
             && *self.bootstrap_times.read().deref() < MAX_BOOTSTRAP_TIMES {
 
             let num_nodes = good_nodes.len();
@@ -2398,7 +2396,6 @@ mod tests {
             kill_node_timeout: 10,
             ping_timeout: 10,
             ping_interval: 0,
-            nodes_req_interval: 0,
         };
 
         alice.set_config_values(args);
@@ -2460,7 +2457,6 @@ mod tests {
             kill_node_timeout: 0, // time out seconds for remove client
             ping_timeout: 10,
             ping_interval: 0,
-            nodes_req_interval: 0,
         };
 
         alice.set_config_values(args);
@@ -2487,7 +2483,6 @@ mod tests {
             kill_node_timeout: 10, // time out seconds for remove client
             ping_timeout: 10,
             ping_interval: 0,
-            nodes_req_interval: 0,
         };
 
         alice.set_config_values(args);
@@ -2571,7 +2566,6 @@ mod tests {
             kill_node_timeout: 10,
             ping_timeout: 10,
             ping_interval: 0,
-            nodes_req_interval: 0,
         };
 
         alice.set_config_values(args);
@@ -2613,7 +2607,6 @@ mod tests {
             kill_node_timeout: 10,
             ping_timeout: 10,
             ping_interval: 0,
-            nodes_req_interval: 0,
         };
 
         alice.set_config_values(args);
@@ -2655,7 +2648,6 @@ mod tests {
             kill_node_timeout: 10,
             ping_timeout: 10,
             ping_interval: 0,
-            nodes_req_interval: 0,
         };
 
         alice.set_config_values(args);
@@ -2665,7 +2657,6 @@ mod tests {
             kill_node_timeout: 10,
             ping_timeout: 10,
             ping_interval: 0,
-            nodes_req_interval: 0,
         };
 
         alice.set_config_values(args);
@@ -2708,7 +2699,6 @@ mod tests {
             kill_node_timeout: 10,
             ping_timeout: 10,
             ping_interval: 0,
-            nodes_req_interval: 0,
         };
 
         alice.set_config_values(args);
@@ -2752,14 +2742,8 @@ mod tests {
             kill_node_timeout: 10,
             ping_timeout: 10,
             ping_interval: 0,
-            nodes_req_interval: 0,
         };
-
-        // test with ipv4 mode
-        // packet sending will be fail, because running in IPv4 mode but try to sending to IPv6 node
         alice.set_config_values(args);
-        alice.enable_ipv6_mode(false);
-        assert!(alice.dht_main_loop().wait().is_err());
 
         let pn = PackedNode::new(false, SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &ping_pk);
         assert!(alice.close_nodes.write().deref_mut().try_add(&pn));

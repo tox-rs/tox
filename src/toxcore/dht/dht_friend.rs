@@ -24,7 +24,7 @@ pub struct DhtFriend {
     /// close nodes of friend
     pub close_nodes: Bucket,
     // Last time of NodesRequest packet sent
-    last_nodes_req_time: Instant,
+    last_nodes_req_time: Option<Instant>,
     // Counter for bootstappings.
     bootstrap_times: u32,
     /// Nodes to bootstrap.
@@ -40,7 +40,7 @@ impl DhtFriend {
         DhtFriend {
             pk,
             close_nodes: Bucket::new(None),
-            last_nodes_req_time: Instant::now(),
+            last_nodes_req_time: None,
             bootstrap_times,
             bootstrap_nodes: Bucket::new(None),
             hole_punch: HolePunching::new(),
@@ -49,10 +49,10 @@ impl DhtFriend {
 
     /// send NodesRequest packet to bootstap_nodes, close list
     pub fn send_nodes_req_packets(&mut self, server: &Server,
-                                  ping_interval: Duration, nodes_req_interval: Duration) -> IoFuture<()> {
+                                  ping_interval: Duration) -> IoFuture<()> {
         let ping_bootstrap_nodes = self.ping_bootstrap_nodes(server);
         let ping_and_get_close_nodes = self.ping_and_get_close_nodes(server, ping_interval);
-        let send_nodes_req_random = self.send_nodes_req_random(server, nodes_req_interval);
+        let send_nodes_req_random = self.send_nodes_req_random(server);
 
         let res = ping_bootstrap_nodes.join3(
             ping_and_get_close_nodes, send_nodes_req_random
@@ -103,7 +103,7 @@ impl DhtFriend {
     }
 
     // send NodesRequest to random node which is in close list
-    fn send_nodes_req_random(&mut self, server: &Server, nodes_req_interval: Duration) -> IoFuture<()> {
+    fn send_nodes_req_random(&mut self, server: &Server) -> IoFuture<()> {
         let mut ping_map = server.get_ping_map().write();
 
         let good_nodes = self.close_nodes.nodes.iter()
@@ -112,7 +112,7 @@ impl DhtFriend {
             .collect::<Vec<PackedNode>>();
 
         if !good_nodes.is_empty()
-            && self.last_nodes_req_time.elapsed() >= nodes_req_interval
+            && self.last_nodes_req_time.map_or(true, |time| time.elapsed() >= Duration::from_secs(NODES_REQ_INTERVAL))
             && self.bootstrap_times < MAX_BOOTSTRAP_TIMES {
 
             let num_nodes = good_nodes.len();
@@ -128,7 +128,7 @@ impl DhtFriend {
 
             let res = server.send_nodes_req(random_node, self.pk, client);
             self.bootstrap_times += 1;
-            self.last_nodes_req_time = Instant::now();
+            self.last_nodes_req_time = Some(Instant::now());
 
             res
         } else {
@@ -189,8 +189,7 @@ mod tests {
         }));
 
         let ping_interval = Duration::from_secs(0);
-        let nodes_req_interval = Duration::from_secs(0);
-        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval).wait().is_ok());
+        assert!(friend.send_nodes_req_packets(&server, ping_interval).wait().is_ok());
 
         rx.take(2).map(|received| {
             let (packet, addr) = received;
@@ -227,10 +226,9 @@ mod tests {
         let server = Server::new(tx, pk, sk.clone());
 
         let ping_interval = Duration::from_secs(0);
-        let nodes_req_interval = Duration::from_secs(0);
 
         // Test with no close_nodes entry, send nothing, but return ok
-        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval).wait().is_ok());
+        assert!(friend.send_nodes_req_packets(&server, ping_interval).wait().is_ok());
 
         // Now, test with close_nodes entry
         let (node_pk1, node_sk1) = gen_keypair();
@@ -245,16 +243,14 @@ mod tests {
         }));
 
         let ping_interval = Duration::from_secs(10);
-        let nodes_req_interval = Duration::from_secs(0);
 
         // There are no ertry which exceeds PING_INTERVAL, so send nothing, just return ok
-        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval).wait().is_ok());
+        assert!(friend.send_nodes_req_packets(&server, ping_interval).wait().is_ok());
 
         let ping_interval = Duration::from_secs(0);
-        let nodes_req_interval = Duration::from_secs(0);
 
         // Now send packet
-        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval).wait().is_ok());
+        assert!(friend.send_nodes_req_packets(&server, ping_interval).wait().is_ok());
 
         rx.take(2).map(|received| {
             let (packet, addr) = received;
@@ -291,10 +287,9 @@ mod tests {
         let server = Server::new(tx, pk, sk.clone());
 
         let ping_interval = Duration::from_secs(0);
-        let nodes_req_interval = Duration::from_secs(0);
 
         // Test with no close_nodes entry, send nothing, but return ok
-        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval).wait().is_ok());
+        assert!(friend.send_nodes_req_packets(&server, ping_interval).wait().is_ok());
 
         // Now, test with close_nodes entry
         let (node_pk1, node_sk1) = gen_keypair();
@@ -309,16 +304,9 @@ mod tests {
         }));
 
         let ping_interval = Duration::from_secs(10);
-        let nodes_req_interval = Duration::from_secs(0);
-
-        // There are no ertry which exceeds BAD_NODE_TIMEOUT, so send nothing, just return ok
-        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval).wait().is_ok());
-
-        let ping_interval = Duration::from_secs(10);
-        let nodes_req_interval = Duration::from_secs(0);
 
         // Now send packet
-        assert!(friend.send_nodes_req_packets(&server, ping_interval, nodes_req_interval).wait().is_ok());
+        assert!(friend.send_nodes_req_packets(&server, ping_interval).wait().is_ok());
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr) = received.unwrap();
