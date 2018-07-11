@@ -48,10 +48,9 @@ impl DhtFriend {
     }
 
     /// send NodesRequest packet to bootstap_nodes, close list
-    pub fn send_nodes_req_packets(&mut self, server: &Server,
-                                  ping_interval: Duration) -> IoFuture<()> {
+    pub fn send_nodes_req_packets(&mut self, server: &Server) -> IoFuture<()> {
         let ping_bootstrap_nodes = self.ping_bootstrap_nodes(server);
-        let ping_and_get_close_nodes = self.ping_and_get_close_nodes(server, ping_interval);
+        let ping_and_get_close_nodes = self.ping_and_get_close_nodes(server);
         let send_nodes_req_random = self.send_nodes_req_random(server);
 
         let res = ping_bootstrap_nodes.join3(
@@ -81,7 +80,7 @@ impl DhtFriend {
     }
 
     // ping to close nodes of friend
-    fn ping_and_get_close_nodes(&mut self, server: &Server, ping_interval: Duration) -> IoFuture<()> {
+    fn ping_and_get_close_nodes(&mut self, server: &Server) -> IoFuture<()> {
         let mut ping_map = server.get_ping_map().write();
 
         let close_nodes = self.close_nodes.to_packed_node();
@@ -89,8 +88,8 @@ impl DhtFriend {
             .map(|node| {
                 let client = ping_map.entry(node.pk).or_insert_with(PingData::new);
 
-                if client.last_ping_req_time.elapsed() >= ping_interval {
-                    client.last_ping_req_time = Instant::now();
+                if client.last_ping_req_time.map_or(true, |time| time.elapsed() >= Duration::from_secs(PING_INTERVAL)) {
+                    client.last_ping_req_time = Some(Instant::now());
                     server.send_nodes_req(*node, self.pk, client)
                 } else {
                     Box::new(future::ok(()))
@@ -188,8 +187,7 @@ mod tests {
             saddr: "127.0.0.1:33446".parse().unwrap(),
         }));
 
-        let ping_interval = Duration::from_secs(0);
-        assert!(friend.send_nodes_req_packets(&server, ping_interval).wait().is_ok());
+        assert!(friend.send_nodes_req_packets(&server).wait().is_ok());
 
         rx.take(2).map(|received| {
             let (packet, addr) = received;
@@ -225,10 +223,8 @@ mod tests {
         let (tx, rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
         let server = Server::new(tx, pk, sk.clone());
 
-        let ping_interval = Duration::from_secs(0);
-
         // Test with no close_nodes entry, send nothing, but return ok
-        assert!(friend.send_nodes_req_packets(&server, ping_interval).wait().is_ok());
+        assert!(friend.send_nodes_req_packets(&server).wait().is_ok());
 
         // Now, test with close_nodes entry
         let (node_pk1, node_sk1) = gen_keypair();
@@ -242,15 +238,8 @@ mod tests {
             saddr: "127.0.0.1:33446".parse().unwrap(),
         }));
 
-        let ping_interval = Duration::from_secs(10);
-
-        // There are no ertry which exceeds PING_INTERVAL, so send nothing, just return ok
-        assert!(friend.send_nodes_req_packets(&server, ping_interval).wait().is_ok());
-
-        let ping_interval = Duration::from_secs(0);
-
         // Now send packet
-        assert!(friend.send_nodes_req_packets(&server, ping_interval).wait().is_ok());
+        assert!(friend.send_nodes_req_packets(&server).wait().is_ok());
 
         rx.take(2).map(|received| {
             let (packet, addr) = received;
@@ -286,10 +275,8 @@ mod tests {
         let (tx, rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
         let server = Server::new(tx, pk, sk.clone());
 
-        let ping_interval = Duration::from_secs(0);
-
         // Test with no close_nodes entry, send nothing, but return ok
-        assert!(friend.send_nodes_req_packets(&server, ping_interval).wait().is_ok());
+        assert!(friend.send_nodes_req_packets(&server).wait().is_ok());
 
         // Now, test with close_nodes entry
         let (node_pk1, node_sk1) = gen_keypair();
@@ -303,10 +290,8 @@ mod tests {
             saddr: "127.0.0.1:33446".parse().unwrap(),
         }));
 
-        let ping_interval = Duration::from_secs(10);
-
         // Now send packet
-        assert!(friend.send_nodes_req_packets(&server, ping_interval).wait().is_ok());
+        assert!(friend.send_nodes_req_packets(&server).wait().is_ok());
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr) = received.unwrap();

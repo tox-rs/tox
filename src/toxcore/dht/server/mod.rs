@@ -53,6 +53,8 @@ pub const NAT_PING_REQ_INTERVAL: u64 = 3;
 pub const ONION_REFRESH_KEY_INTERVAL: u64 = 7200;
 /// Interval in seconds for random NodesRequest
 pub const NODES_REQ_INTERVAL: u64 = 20;
+/// Interval in seconds for ping
+pub const PING_INTERVAL: u64 = 60;
 
 /**
 Own DHT node data.
@@ -135,8 +137,6 @@ pub struct ConfigArgs {
     pub kill_node_timeout: u64,
     /// timeout in seconds for PingRequest and NodesRequest
     pub ping_timeout: u64,
-    /// interval in seconds for ping
-    pub ping_interval: u64,
 }
 
 impl Default for ConfigArgs {
@@ -144,7 +144,6 @@ impl Default for ConfigArgs {
         ConfigArgs {
             kill_node_timeout: 182,
             ping_timeout: 5,
-            ping_interval: 60,
         }
     }
 }
@@ -215,7 +214,7 @@ impl Server {
         self.refresh_onion_key();
 
         let ping_bootstrap_nodes = self.ping_bootstrap_nodes();
-        let ping_and_get_close_nodes = self.ping_and_get_close_nodes(Duration::from_secs(self.config.ping_interval));
+        let ping_and_get_close_nodes = self.ping_and_get_close_nodes();
         let send_nodes_req_random = self.send_nodes_req_random();
         let send_nodes_req_to_friends = self.send_nodes_req_to_friends();
 
@@ -261,7 +260,7 @@ impl Server {
 
         let nodes_sender = friends.iter_mut()
             .map(|friend| {
-                friend.send_nodes_req_packets(self, Duration::from_secs(self.config.ping_interval))
+                friend.send_nodes_req_packets(self)
             });
 
         let nodes_stream = stream::futures_unordered(nodes_sender).then(|_| Ok(()));
@@ -293,7 +292,7 @@ impl Server {
     }
 
     // every 60 seconds DHT node send ping(NodesRequest) to all nodes which is in close list
-    fn ping_and_get_close_nodes(&self, ping_interval: Duration) -> IoFuture<()> {
+    fn ping_and_get_close_nodes(&self) -> IoFuture<()> {
         let close_nodes = self.close_nodes.read();
 
         let nodes_sender = close_nodes.iter()
@@ -303,10 +302,10 @@ impl Server {
                 (node, client.clone())
             })
             .filter(|&(_node, ref client)|
-                client.last_ping_req_time.elapsed() >= ping_interval
+                client.last_ping_req_time.map_or(true, |time| time.elapsed() >= Duration::from_secs(PING_INTERVAL))
             )
             .map(|(node, mut client)| {
-                client.last_ping_req_time = Instant::now();
+                client.last_ping_req_time = Some(Instant::now());
                 let res = self.send_nodes_req(node.clone().into(), self.pk, &mut client);
                 self.ping_map.write().deref_mut().insert(node.pk, client);
                 res
@@ -2395,7 +2394,6 @@ mod tests {
         let args = ConfigArgs {
             kill_node_timeout: 10,
             ping_timeout: 10,
-            ping_interval: 0,
         };
 
         alice.set_config_values(args);
@@ -2456,7 +2454,6 @@ mod tests {
         let args = ConfigArgs {
             kill_node_timeout: 0, // time out seconds for remove client
             ping_timeout: 10,
-            ping_interval: 0,
         };
 
         alice.set_config_values(args);
@@ -2482,7 +2479,6 @@ mod tests {
         let args = ConfigArgs {
             kill_node_timeout: 10, // time out seconds for remove client
             ping_timeout: 10,
-            ping_interval: 0,
         };
 
         alice.set_config_values(args);
@@ -2565,7 +2561,6 @@ mod tests {
         let args = ConfigArgs {
             kill_node_timeout: 10,
             ping_timeout: 10,
-            ping_interval: 0,
         };
 
         alice.set_config_values(args);
@@ -2606,7 +2601,6 @@ mod tests {
         let args = ConfigArgs {
             kill_node_timeout: 10,
             ping_timeout: 10,
-            ping_interval: 0,
         };
 
         alice.set_config_values(args);
@@ -2647,7 +2641,6 @@ mod tests {
         let args = ConfigArgs {
             kill_node_timeout: 10,
             ping_timeout: 10,
-            ping_interval: 0,
         };
 
         alice.set_config_values(args);
@@ -2656,7 +2649,6 @@ mod tests {
         let args = ConfigArgs {
             kill_node_timeout: 10,
             ping_timeout: 10,
-            ping_interval: 0,
         };
 
         alice.set_config_values(args);
@@ -2698,7 +2690,6 @@ mod tests {
         let args = ConfigArgs {
             kill_node_timeout: 10,
             ping_timeout: 10,
-            ping_interval: 0,
         };
 
         alice.set_config_values(args);
@@ -2741,7 +2732,6 @@ mod tests {
         let args = ConfigArgs {
             kill_node_timeout: 10,
             ping_timeout: 10,
-            ping_interval: 0,
         };
         alice.set_config_values(args);
 

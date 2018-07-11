@@ -16,7 +16,7 @@ pub struct PingData {
     /// last received ping/nodes-response time
     pub last_resp_time: Instant,
     /// last sent ping-req time
-    pub last_ping_req_time: Instant,
+    pub last_ping_req_time: Option<Instant>,
 }
 
 impl PingData {
@@ -25,7 +25,7 @@ impl PingData {
         PingData {
             ping_hash: HashMap::new(),
             last_resp_time: Instant::now(),
-            last_ping_req_time: Instant::now(),
+            last_ping_req_time: None,
         }
     }
     /// set new random ping id to the client and return it
