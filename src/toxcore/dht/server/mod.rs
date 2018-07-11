@@ -137,8 +137,6 @@ pub struct ConfigArgs {
     pub ping_interval: u64,
     /// interval in seconds for random NodesRequest
     pub nodes_req_interval: u64,
-    /// interval in seconds for NatPingRequest
-    pub nat_ping_req_interval: u64,
 }
 
 impl Default for ConfigArgs {
@@ -148,7 +146,6 @@ impl Default for ConfigArgs {
             ping_timeout: 5,
             ping_interval: 60,
             nodes_req_interval: 20,
-            nat_ping_req_interval: 3,
         }
     }
 }
@@ -225,7 +222,7 @@ impl Server {
 
         let ping_sender = self.send_pings();
 
-        let send_nat_ping_req = self.send_nat_ping_req(Duration::from_secs(self.config.nat_ping_req_interval));
+        let send_nat_ping_req = self.send_nat_ping_req();
 
         let res = future::join_all(vec![ping_bootstrap_nodes,
                                         ping_and_get_close_nodes,
@@ -421,7 +418,7 @@ impl Server {
     }
 
     // send NatPingRequests to all of my friends and do hole punching.
-    fn send_nat_ping_req(&self, nat_ping_req_interval: Duration) -> IoFuture<()> {
+    fn send_nat_ping_req(&self) -> IoFuture<()> {
         let mut friends = self.friends.write();
 
         if friends.is_empty() {
@@ -432,7 +429,7 @@ impl Server {
             .map(|friend| {
                 let addrs_of_clients = friend.get_addrs_of_clients(self.is_ipv6_mode);
                 // try hole punching
-                friend.hole_punch.try_nat_punch(&self, friend.pk, addrs_of_clients, nat_ping_req_interval);
+                friend.hole_punch.try_nat_punch(&self, friend.pk, addrs_of_clients);
 
                 let payload = DhtRequestPayload::NatPingRequest(NatPingRequest {
                     id: friend.hole_punch.ping_id,
@@ -444,8 +441,8 @@ impl Server {
                     payload
                 ));
 
-                if friend.hole_punch.last_send_ping_time.elapsed() >= nat_ping_req_interval {
-                    friend.hole_punch.last_send_ping_time = Instant::now();
+                if friend.hole_punch.last_send_ping_time.map_or(true, |time| time.elapsed() >= Duration::from_secs(NAT_PING_PUNCHING_INTERVAL)) {
+                    friend.hole_punch.last_send_ping_time = Some(Instant::now());
                     self.send_nat_ping_req_inner(friend, nat_ping_req_packet)
                 } else {
                     Box::new(future::ok(()))
@@ -2402,7 +2399,6 @@ mod tests {
             ping_timeout: 10,
             ping_interval: 0,
             nodes_req_interval: 0,
-            nat_ping_req_interval: 0,
         };
 
         alice.set_config_values(args);
@@ -2465,7 +2461,6 @@ mod tests {
             ping_timeout: 10,
             ping_interval: 0,
             nodes_req_interval: 0,
-            nat_ping_req_interval: 10,
         };
 
         alice.set_config_values(args);
@@ -2493,7 +2488,6 @@ mod tests {
             ping_timeout: 10,
             ping_interval: 0,
             nodes_req_interval: 0,
-            nat_ping_req_interval: 10,
         };
 
         alice.set_config_values(args);
@@ -2578,7 +2572,6 @@ mod tests {
             ping_timeout: 10,
             ping_interval: 0,
             nodes_req_interval: 0,
-            nat_ping_req_interval: 10,
         };
 
         alice.set_config_values(args);
@@ -2621,7 +2614,6 @@ mod tests {
             ping_timeout: 10,
             ping_interval: 0,
             nodes_req_interval: 0,
-            nat_ping_req_interval: 10,
         };
 
         alice.set_config_values(args);
@@ -2664,7 +2656,6 @@ mod tests {
             ping_timeout: 10,
             ping_interval: 0,
             nodes_req_interval: 0,
-            nat_ping_req_interval: 10,
         };
 
         alice.set_config_values(args);
@@ -2675,7 +2666,6 @@ mod tests {
             ping_timeout: 10,
             ping_interval: 0,
             nodes_req_interval: 0,
-            nat_ping_req_interval: 10,
         };
 
         alice.set_config_values(args);
@@ -2719,7 +2709,6 @@ mod tests {
             ping_timeout: 10,
             ping_interval: 0,
             nodes_req_interval: 0,
-            nat_ping_req_interval: 10,
         };
 
         alice.set_config_values(args);
@@ -2764,7 +2753,6 @@ mod tests {
             ping_timeout: 10,
             ping_interval: 0,
             nodes_req_interval: 0,
-            nat_ping_req_interval: 10,
         };
 
         // test with ipv4 mode

@@ -38,10 +38,10 @@ pub struct HolePunching {
     /// last timestamp of receiving NatPingResponse packet
     pub last_recv_ping_time: Instant,
     /// last timestamp of sending NatPingRequest packet
-    pub last_send_ping_time: Instant,
+    pub last_send_ping_time: Option<Instant>,
     /// last timestamp of trying hole punch
     /// it is used to send NatPingRequest every 3 seconds
-    pub last_punching_time: Instant,
+    pub last_punching_time: Option<Instant>,
     /// factor variable for guessing NAT port
     pub first_punching_index: u32,
     /// another factor variable for guessing NAT port
@@ -59,8 +59,8 @@ impl HolePunching {
             is_punching_done: true,
             num_punch_tries: 0,
             last_recv_ping_time: Instant::now(),
-            last_send_ping_time: Instant::now(),
-            last_punching_time: Instant::now(),
+            last_send_ping_time: None,
+            last_punching_time: None,
             first_punching_index: 0,
             last_punching_index: 0,
             ping_id: HolePunching::new_ping_id(),
@@ -78,11 +78,10 @@ impl HolePunching {
     }
 
     /// send NatPingRequest and if condition is true, do hole punch
-    pub fn try_nat_punch(&mut self, server: &Server, friend_pk: PublicKey, addrs: Vec<SocketAddr>,
-                         nat_ping_req_interval: Duration) -> IoFuture<()> {
+    pub fn try_nat_punch(&mut self, server: &Server, friend_pk: PublicKey, addrs: Vec<SocketAddr>) -> IoFuture<()> {
         if !self.is_punching_done &&
-            self.last_punching_time.elapsed() >= nat_ping_req_interval &&
-            self.last_recv_ping_time.elapsed() <= nat_ping_req_interval * 2 {
+            self.last_punching_time.map_or(true, |time| time.elapsed() >= Duration::from_secs(NAT_PING_PUNCHING_INTERVAL)) &&
+            self.last_recv_ping_time.elapsed() <= Duration::from_secs(NAT_PING_PUNCHING_INTERVAL) * 2 {
                 let ip = match HolePunching::get_common_ip(&addrs, MAX_CLIENTS_PER_FRIEND / 2) {
                     // A friend can have maximum 8 close node.
                     // If 4 or more close nodes have same IP(with different ports), we consider friend is behind NAT.
@@ -91,7 +90,7 @@ impl HolePunching {
                     Some(ip) => ip,
                 };
 
-                if self.last_punching_time.elapsed() > Duration::from_secs(RESET_PUNCH_INTERVAL) {
+                if self.last_punching_time.map_or(true, |time| time.elapsed() > Duration::from_secs(RESET_PUNCH_INTERVAL)) {
                     self.num_punch_tries = 0;
                     self.first_punching_index = 0;
                     self.last_punching_index = 0;
@@ -101,7 +100,7 @@ impl HolePunching {
 
                 let res = self.punch(ports_to_try, ip, server, friend_pk);
 
-                self.last_punching_time = Instant::now();
+                self.last_punching_time = Some(Instant::now());
                 self.is_punching_done = true;
 
                 res
@@ -238,7 +237,6 @@ mod tests {
     use super::*;
     use toxcore::dht::packet::*;
     use futures::sync::mpsc;
-    use std::thread;
 
     #[test]
     fn hole_punch_new_test() {
@@ -258,9 +256,8 @@ mod tests {
 
         let mut hole_punch = HolePunching::new();
         hole_punch.is_punching_done = false;
-        thread::sleep(Duration::from_millis(1));
 
-        assert!(hole_punch.try_nat_punch(&alice, friend_pk, addrs, Duration::from_millis(1)).wait().is_ok());
+        assert!(hole_punch.try_nat_punch(&alice, friend_pk, addrs).wait().is_ok());
     }
 
     #[test]
@@ -278,9 +275,8 @@ mod tests {
 
         let mut hole_punch = HolePunching::new();
         hole_punch.is_punching_done = false;
-        thread::sleep(Duration::from_millis(1));
 
-        assert!(hole_punch.try_nat_punch(&alice, friend_pk, addrs, Duration::from_millis(1)).wait().is_ok());
+        assert!(hole_punch.try_nat_punch(&alice, friend_pk, addrs).wait().is_ok());
     }
 
     #[test]
@@ -304,9 +300,8 @@ mod tests {
 
         let mut hole_punch = HolePunching::new();
         hole_punch.is_punching_done = false;
-        thread::sleep(Duration::from_millis(1));
 
-        assert!(hole_punch.try_nat_punch(&alice, friend_pk, addrs, Duration::from_millis(1)).wait().is_ok());
+        assert!(hole_punch.try_nat_punch(&alice, friend_pk, addrs).wait().is_ok());
     }
 
     #[test]
@@ -329,9 +324,8 @@ mod tests {
 
         let mut hole_punch = HolePunching::new();
         hole_punch.is_punching_done = false;
-        thread::sleep(Duration::from_millis(1));
 
-        assert!(hole_punch.try_nat_punch(&alice, friend_pk, addrs, Duration::from_millis(1)).wait().is_ok());
+        assert!(hole_punch.try_nat_punch(&alice, friend_pk, addrs).wait().is_ok());
     }
 
     #[test]
@@ -354,9 +348,8 @@ mod tests {
 
         let mut hole_punch = HolePunching::new();
         hole_punch.is_punching_done = false;
-        thread::sleep(Duration::from_millis(150));
 
-        hole_punch.try_nat_punch(&alice, friend_pk, addrs, Duration::from_millis(150)).wait().unwrap();
+        hole_punch.try_nat_punch(&alice, friend_pk, addrs).wait().unwrap();
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, _addr_to_send) = received.unwrap();
@@ -395,9 +388,8 @@ mod tests {
         let mut hole_punch = HolePunching::new();
         hole_punch.is_punching_done = false;
         hole_punch.num_punch_tries = MAX_NORMAL_PUNCHING_TRIES + 1;
-        thread::sleep(Duration::from_millis(150));
 
-        hole_punch.try_nat_punch(&alice, friend_pk, addrs, Duration::from_millis(150)).wait().unwrap();
+        hole_punch.try_nat_punch(&alice, friend_pk, addrs).wait().unwrap();
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, _addr_to_send) = received.unwrap();
