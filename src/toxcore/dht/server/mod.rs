@@ -18,7 +18,6 @@ use std::collections::HashMap;
 use std::ops::DerefMut;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use std::ops::Deref;
 use std::mem;
 
 use toxcore::time::*;
@@ -289,10 +288,16 @@ impl Server {
         Box::new(nodes_stream.for_each(|()| Ok(())))
     }
 
-    // every 20 seconds DHT node send NodesRequest to random node which is in close list
+    /// Send `NodesRequest` packet to a random good node every 20 seconds or if
+    /// it was sent less than `NODES_REQ_INTERVAL`. This function should be
+    /// called every second.
     fn send_nodes_req_random(&self) -> IoFuture<()> {
+        if clock_elapsed(*self.last_nodes_req_time.read()) < Duration::from_secs(NODES_REQ_INTERVAL) &&
+            *self.bootstrap_times.read() >= MAX_BOOTSTRAP_TIMES {
+            return Box::new(future::ok(()));
+        }
+
         let close_nodes = self.close_nodes.read();
-        let mut ping_map = self.ping_map.write();
 
         let good_nodes = close_nodes.iter()
             .filter(|&node| !node.is_bad_node_timed_out())
@@ -300,12 +305,10 @@ impl Server {
             .map(|node| node.into())
             .collect::<Vec<PackedNode>>();
 
-        if !good_nodes.is_empty()
-            && self.last_nodes_req_time.read().deref().elapsed() >= Duration::from_secs(NODES_REQ_INTERVAL)
-            && *self.bootstrap_times.read().deref() < MAX_BOOTSTRAP_TIMES {
+        if !good_nodes.is_empty() {
+            let mut ping_map = self.ping_map.write();
 
-            let num_nodes = good_nodes.len();
-            let mut random_node = random_u32() as usize % num_nodes;
+            let mut random_node = random_u32() as usize % good_nodes.len();
             // increase probability of sending packet to a close node (has lower index)
             if random_node != 0 {
                 random_node -= random_u32() as usize % (random_node + 1);
@@ -313,13 +316,13 @@ impl Server {
 
             let random_node = good_nodes[random_node];
 
+            let ping_data = ping_map.entry(random_node.pk).or_insert_with(PingData::new);
 
-            let client = ping_map.entry(random_node.pk).or_insert_with(PingData::new);
+            let res = self.send_nodes_req(random_node, self.pk, ping_data);
 
-            let res = self.send_nodes_req(random_node, self.pk, client);
+            *self.bootstrap_times.write() += 1;
+            *self.last_nodes_req_time.write() = Instant::now();
 
-            *self.bootstrap_times.write().deref_mut() += 1;
-            *self.last_nodes_req_time.write().deref_mut() = Instant::now();
             res
         } else {
             Box::new(future::ok(()))
@@ -2370,7 +2373,7 @@ mod tests {
                 let nat_ping_req_payload = nat_ping_req.get_payload(&friend_sk1).unwrap();
                 let nat_ping_req_payload = unpack!(nat_ping_req_payload, DhtRequestPayload::NatPingRequest);
 
-                assert_eq!(alice.friends.read().deref()[0].hole_punch.ping_id, nat_ping_req_payload.id);
+                assert_eq!(alice.friends.read()[0].hole_punch.ping_id, nat_ping_req_payload.id);
                 break;
             }
             rx = rx1;

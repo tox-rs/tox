@@ -8,6 +8,7 @@ use std::net::SocketAddr;
 
 use futures::{future, Future, stream, Stream};
 
+use toxcore::time::*;
 use toxcore::dht::packed_node::*;
 use toxcore::dht::kbucket::*;
 use toxcore::crypto_core::*;
@@ -103,16 +104,18 @@ impl DhtFriend {
 
     // send NodesRequest to random node which is in close list
     fn send_nodes_req_random(&mut self, server: &Server) -> IoFuture<()> {
-        let mut ping_map = server.get_ping_map().write();
+        if self.last_nodes_req_time.map_or(false, |time| clock_elapsed(time) < Duration::from_secs(NODES_REQ_INTERVAL)) &&
+            self.bootstrap_times >= MAX_BOOTSTRAP_TIMES {
+            return Box::new(future::ok(()));
+        }
 
         let good_nodes = self.close_nodes.nodes.iter()
             .filter(|&node| !node.is_bad_node_timed_out())
             .map(|node| node.clone().into())
             .collect::<Vec<PackedNode>>();
 
-        if !good_nodes.is_empty()
-            && self.last_nodes_req_time.map_or(true, |time| time.elapsed() >= Duration::from_secs(NODES_REQ_INTERVAL))
-            && self.bootstrap_times < MAX_BOOTSTRAP_TIMES {
+        if !good_nodes.is_empty() {
+            let mut ping_map = server.get_ping_map().write();
 
             let num_nodes = good_nodes.len();
             let mut random_node = random_u32() as usize % num_nodes;
