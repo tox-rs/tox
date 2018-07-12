@@ -31,6 +31,7 @@ use toxcore::onion::onion_announce::*;
 use toxcore::dht::server::client::*;
 use toxcore::io_tokio::*;
 use toxcore::dht::dht_friend::*;
+use toxcore::dht::dht_node::*;
 use toxcore::dht::server::hole_punching::*;
 use toxcore::tcp::packet::OnionRequest;
 use toxcore::dht::server::ping_sender::*;
@@ -113,8 +114,6 @@ pub struct Server {
     tox_core_version: u32,
     // message used in BootstrapInfo
     motd: Vec<u8>,
-    /// values in config file
-    pub config: ConfigArgs,
     // `OnionResponse1` packets that have TCP protocol kind inside onion return
     // should be redirected to TCP sender trough this sink
     // None if there is no TCP relay
@@ -126,21 +125,6 @@ pub struct Server {
     net_crypto: Option<NetCrypto>,
     lan_discovery_enabled: bool,
     is_ipv6_mode: bool,
-}
-
-/// Struct for grouping parameters to Server's main loop
-#[derive(Copy, Clone)]
-pub struct ConfigArgs {
-    /// timeout in seconds for remove clients in ping_map
-    pub kill_node_timeout: u64,
-}
-
-impl Default for ConfigArgs {
-    fn default() -> ConfigArgs {
-        ConfigArgs {
-            kill_node_timeout: 182,
-        }
-    }
 }
 
 impl Server {
@@ -166,7 +150,6 @@ impl Server {
             ping_sender: Arc::new(RwLock::new(PingSender::new())),
             tox_core_version: 0,
             motd: Vec::new(),
-            config: ConfigArgs::default(),
             tcp_onion_sink: None,
             net_crypto: None,
             lan_discovery_enabled: true,
@@ -197,14 +180,9 @@ impl Server {
         friends.push(friend);
     }
 
-    /// set various config values
-    pub fn set_config_values(&mut self, config: ConfigArgs) {
-        self.config = config;
-    }
-
     /// main loop of dht server, call this function every second
     fn dht_main_loop(&self) -> IoFuture<()> {
-        self.remove_timedout_clients(Duration::from_secs(self.config.kill_node_timeout));
+        self.remove_timedout_clients();
         self.remove_timedout_ping_ids();
         self.refresh_onion_key();
 
@@ -350,23 +328,21 @@ impl Server {
 
     // remove timed-out clients,
     // close_nodes entry should be remain even if offline timed out, so after online, server try to ping again.
-    fn remove_timedout_clients(&self, timeout: Duration) -> IoFuture<()> {
+    fn remove_timedout_clients(&self) {
         let mut ping_map = self.ping_map.write();
 
         ping_map.retain(|&_pk, ref client|
-            client.last_resp_time.elapsed() <= timeout);
-        Box::new(future::ok(()))
+            clock_elapsed(client.last_resp_time) <= Duration::from_secs(BAD_NODE_TIMEOUT)
+        );
     }
 
     // remove PING_TIMEOUT timed out ping_ids of PingHash
-    fn remove_timedout_ping_ids(&self) -> IoFuture<()> {
+    fn remove_timedout_ping_ids(&self) {
         let mut ping_map = self.ping_map.write();
         ping_map.iter_mut()
             .for_each(|(_pk, client)|
                 client.clear_timedout_pings()
             );
-
-        Box::new( future::ok(()) )
     }
 
     /// Send PingRequest to node
@@ -2374,7 +2350,7 @@ mod tests {
     // send_nat_ping_req()
     #[test]
     fn server_send_nat_ping_req_test() {
-        let (mut alice, _precomp, _bob_pk, _bob_sk, mut rx, _addr) = create_node();
+        let (alice, _precomp, _bob_pk, _bob_sk, mut rx, _addr) = create_node();
 
         let (friend_pk1, friend_sk1) = gen_keypair();
         let friend_pk2 = gen_keypair().0;
@@ -2384,11 +2360,6 @@ mod tests {
         friend.close_nodes.try_add(&friend_pk1, &pn);
         alice.add_friend(friend);
 
-        let args = ConfigArgs {
-            kill_node_timeout: 10,
-        };
-
-        alice.set_config_values(args);
         alice.dht_main_loop().wait().unwrap();
 
         loop {
@@ -2436,50 +2407,34 @@ mod tests {
 
     // remove_timedout_clients(), case of client removed
     #[test]
-    fn server_remove_timedout_clients_removed_test() {
-        let (mut alice, _precomp, bob_pk, _bob_sk, _rx, _addr) = create_node();
+    fn server_remove_timed_out_pings_test() {
+        let (alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
 
-        let node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &bob_pk);
+        let (node_pk_1, _node_sk_1) = gen_keypair();
+        let (node_pk_2, _node_sk_1) = gen_keypair();
 
-        alice.try_add_to_close_nodes(&node);
+        let ping_data = PingData::new();
 
-        let args = ConfigArgs {
-            kill_node_timeout: 0, // time out seconds for remove client
-        };
+        let time = ping_data.last_resp_time;
+        let mut enter = tokio_executor::enter().unwrap();
+        let clock_1 = Clock::new_with_now(ConstNow(
+            time + Duration::from_secs(BAD_NODE_TIMEOUT / 2)
+        ));
+        let clock_2 = Clock::new_with_now(ConstNow(
+            time + Duration::from_secs(BAD_NODE_TIMEOUT + 1)
+        ));
 
-        alice.set_config_values(args);
-        alice.dht_main_loop().wait().unwrap(); // send NodesRequest
-        alice.close_nodes.write().remove(&node.pk);
-        alice.dht_main_loop().wait().unwrap(); // remove client
+        alice.ping_map.write().insert(node_pk_1, ping_data);
 
-        let ping_map = alice.ping_map.read();
+        with_default(&clock_1, &mut enter, |_| {
+            alice.ping_map.write().insert(node_pk_2, PingData::new());
+        });
 
-        // after client be removed
-        assert!(!ping_map.contains_key(&bob_pk));
-    }
-
-    // remove_timedout_clients(), case of client remained
-    #[test]
-    fn server_remove_timedout_clients_remained_test() {
-        let (mut alice, _precomp, bob_pk, _bob_sk, _rx, _addr) = create_node();
-
-        let node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &bob_pk);
-
-        alice.try_add_to_close_nodes(&node);
-
-        let args = ConfigArgs {
-            kill_node_timeout: 10, // time out seconds for remove client
-        };
-
-        alice.set_config_values(args);
-        alice.dht_main_loop().wait().unwrap(); // send NodesRequest
-        alice.close_nodes.write().remove(&node.pk);
-        alice.dht_main_loop().wait().unwrap(); // remove client, but not timed out
-
-        let ping_map = alice.ping_map.read();
-
-        // client should be remained
-        assert!(ping_map.contains_key(&bob_pk));
+        with_default(&clock_2, &mut enter, |_| {
+            alice.dht_main_loop().wait().unwrap();
+            assert!(!alice.ping_map.read().contains_key(&node_pk_1));
+            assert!(alice.ping_map.read().contains_key(&node_pk_2));
+        });
     }
 
     #[test]
@@ -2539,7 +2494,7 @@ mod tests {
 
     #[test]
     fn server_ping_bootstrap_nodes_test() {
-        let (mut alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
+        let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         let (ping_pk, ping_sk) = gen_keypair();
 
         let pn = PackedNode::new(false, SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &ping_pk);
@@ -2548,11 +2503,6 @@ mod tests {
         let pn = PackedNode::new(false, SocketAddr::V4("127.0.0.1:33445".parse().unwrap()), &bob_pk);
         assert!(alice.bootstrap_nodes.write().deref_mut().try_add(&alice.pk, &pn));
 
-        let args = ConfigArgs {
-            kill_node_timeout: 10,
-        };
-
-        alice.set_config_values(args);
         alice.dht_main_loop().wait().unwrap();
 
         let mut ping_map = alice.ping_map.write();
@@ -2576,7 +2526,7 @@ mod tests {
 
     #[test]
     fn server_ping_and_get_close_nodes_test() {
-        let (mut alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
+        let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         let (ping_pk, ping_sk) = gen_keypair();
 
         let pn = PackedNode::new(false, SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &ping_pk);
@@ -2585,11 +2535,6 @@ mod tests {
         let pn = PackedNode::new(false, SocketAddr::V4("127.0.0.1:33445".parse().unwrap()), &bob_pk);
         assert!(alice.close_nodes.write().deref_mut().try_add(&pn));
 
-        let args = ConfigArgs {
-            kill_node_timeout: 10,
-        };
-
-        alice.set_config_values(args);
         alice.dht_main_loop().wait().unwrap();
 
         let mut ping_map = alice.ping_map.write();
@@ -2613,7 +2558,7 @@ mod tests {
 
     #[test]
     fn server_send_nodes_req_random_test() {
-        let (mut alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
+        let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         let (ping_pk, ping_sk) = gen_keypair();
 
         let pn = PackedNode::new(false, SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &ping_pk);
@@ -2622,18 +2567,6 @@ mod tests {
         let pn = PackedNode::new(false, SocketAddr::V4("127.0.0.1:33445".parse().unwrap()), &bob_pk);
         assert!(alice.close_nodes.write().deref_mut().try_add(&pn));
 
-        let args = ConfigArgs {
-            kill_node_timeout: 10,
-        };
-
-        alice.set_config_values(args);
-        alice.dht_main_loop().wait().unwrap();
-
-        let args = ConfigArgs {
-            kill_node_timeout: 10,
-        };
-
-        alice.set_config_values(args);
         alice.dht_main_loop().wait().unwrap();
 
         let mut ping_map = alice.ping_map.write();
@@ -2657,7 +2590,7 @@ mod tests {
 
     #[test]
     fn server_send_nodes_req_packets_test() {
-        let (mut alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
+        let (alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
         let friend_pk1 = gen_keypair().0;
         let friend_pk2 = gen_keypair().0;
 
@@ -2667,11 +2600,6 @@ mod tests {
         let friend = DhtFriend::new(friend_pk2, 0);
         alice.add_friend(friend);
 
-        let args = ConfigArgs {
-            kill_node_timeout: 10,
-        };
-
-        alice.set_config_values(args);
         alice.dht_main_loop().wait().unwrap();
     }
 
@@ -2707,11 +2635,6 @@ mod tests {
 
         let pn = PackedNode::new(false, SocketAddr::V6("[FF::01]:33445".parse().unwrap()), &bob_pk);
         assert!(alice.close_nodes.write().deref_mut().try_add(&pn));
-
-        let args = ConfigArgs {
-            kill_node_timeout: 10,
-        };
-        alice.set_config_values(args);
 
         let pn = PackedNode::new(false, SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &ping_pk);
         assert!(alice.close_nodes.write().deref_mut().try_add(&pn));

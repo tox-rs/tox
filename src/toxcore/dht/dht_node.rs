@@ -15,7 +15,7 @@ use toxcore::crypto_core::*;
 use toxcore::dht::packed_node::*;
 use toxcore::dht::kbucket::*;
 
-/// timeout in seconds for offline node
+/// The number of seconds for a non responsive node to become bad.
 pub const BAD_NODE_TIMEOUT: u64 = 182;
 
 /** Status of node in bucket.

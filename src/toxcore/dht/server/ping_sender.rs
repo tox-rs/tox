@@ -124,12 +124,7 @@ mod tests {
     fn ping_try_add_test() {
         let (pk, sk) = gen_keypair();
         let (tx, _rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
-        let mut server = Server::new(tx, pk, sk);
-        let args = ConfigArgs {
-            kill_node_timeout: 10,
-        };
-
-        server.set_config_values(args);
+        let server = Server::new(tx, pk, sk);
 
         let mut ping = PingSender::new();
 
