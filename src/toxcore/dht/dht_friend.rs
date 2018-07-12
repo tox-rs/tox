@@ -72,7 +72,7 @@ impl DhtFriend {
         let nodes_sender = bootstrap_nodes.iter()
             .map(|node| {
                 let client = ping_map.entry(node.pk).or_insert_with(PingData::new);
-                server.send_nodes_req(*node, self.pk, client)
+                server.send_nodes_req(*node, self.pk, client.insert_new_ping_id())
             });
 
         let nodes_stream = stream::futures_unordered(nodes_sender).then(|_| Ok(()));
@@ -91,7 +91,7 @@ impl DhtFriend {
 
                 if client.last_ping_req_time.map_or(true, |time| time.elapsed() >= Duration::from_secs(PING_INTERVAL)) {
                     client.last_ping_req_time = Some(Instant::now());
-                    server.send_nodes_req(*node, self.pk, client)
+                    server.send_nodes_req(*node, self.pk, client.insert_new_ping_id())
                 } else {
                     Box::new(future::ok(()))
                 }
@@ -128,7 +128,7 @@ impl DhtFriend {
 
             let client = ping_map.entry(random_node.pk).or_insert_with(PingData::new);
 
-            let res = server.send_nodes_req(random_node, self.pk, client);
+            let res = server.send_nodes_req(random_node, self.pk, client.insert_new_ping_id());
             self.bootstrap_times += 1;
             self.last_nodes_req_time = Some(Instant::now());
 

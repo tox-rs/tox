@@ -255,7 +255,7 @@ impl Server {
             .map(|node| {
                 let client = ping_map.entry(node.pk).or_insert_with(PingData::new);
 
-                self.send_nodes_req(*node, self.pk, client)
+                self.send_nodes_req(*node, self.pk, client.insert_new_ping_id())
             });
 
         let nodes_stream = stream::futures_unordered(nodes_sender).then(|_| Ok(()));
@@ -278,7 +278,7 @@ impl Server {
             )
             .map(|(node, mut client)| {
                 client.last_ping_req_time = Some(Instant::now());
-                let res = self.send_nodes_req(node.clone().into(), self.pk, &mut client);
+                let res = self.send_nodes_req(node.clone().into(), self.pk, client.insert_new_ping_id());
                 self.ping_map.write().deref_mut().insert(node.pk, client);
                 res
             });
@@ -318,7 +318,7 @@ impl Server {
 
             let ping_data = ping_map.entry(random_node.pk).or_insert_with(PingData::new);
 
-            let res = self.send_nodes_req(random_node, self.pk, ping_data);
+            let res = self.send_nodes_req(random_node, self.pk, ping_data.insert_new_ping_id());
 
             *self.bootstrap_times.write() += 1;
             *self.last_nodes_req_time.write() = Instant::now();
@@ -365,7 +365,7 @@ impl Server {
     }
 
     /// Send NodesRequest to peer
-    pub fn send_nodes_req(&self, target_peer: PackedNode, search_pk: PublicKey, client: &mut PingData) -> IoFuture<()> {
+    pub fn send_nodes_req(&self, target_peer: PackedNode, search_pk: PublicKey, ping_id: u64) -> IoFuture<()> {
         // Check if packet is going to be sent to ourself.
         if self.pk == target_peer.pk {
             return Box::new(
@@ -377,7 +377,7 @@ impl Server {
 
         let payload = NodesRequestPayload {
             pk: search_pk,
-            id: client.insert_new_ping_id(),
+            id: ping_id,
         };
         let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(
             &precompute(&target_peer.pk, &self.sk),
@@ -874,7 +874,7 @@ impl Server {
         let ping_map = ping_map.deref_mut();
         let client = ping_map.entry(packet.pk).or_insert_with(PingData::new);
 
-        self.send_nodes_req(target_node, self.pk, client)
+        self.send_nodes_req(target_node, self.pk, client.insert_new_ping_id())
     }
     /**
     handle received OnionRequest0 packet, then create OnionRequest1 packet
@@ -2339,7 +2339,7 @@ mod tests {
              pk: bob_pk,
              saddr: "127.0.0.1:12345".parse().unwrap(),
          };
-         assert!(alice.send_nodes_req(target_node, alice.pk, &mut PingData::new()).wait().is_ok());
+         assert!(alice.send_nodes_req(target_node, alice.pk, 42).wait().is_ok());
 
          let node = PackedNode {
              pk: gen_keypair().0,
@@ -2347,7 +2347,7 @@ mod tests {
          };
          alice.try_add_to_close_nodes(&node);
 
-         assert!(alice.send_nodes_req(target_node, alice.pk, &mut PingData::new()).wait().is_ok());
+         assert!(alice.send_nodes_req(target_node, alice.pk, 42).wait().is_ok());
      }
 
     // send_nat_ping_req()

@@ -63,7 +63,7 @@ impl DaemonState {
             .map(|node| {
                 let client = ping_map.entry(node.pk).or_insert_with(PingData::new);
 
-                server.send_nodes_req(*node, server.pk, client)
+                server.send_nodes_req(*node, server.pk, client.insert_new_ping_id())
             });
 
         let nodes_stream = stream::futures_unordered(nodes_sender).then(|_| Ok(()));
