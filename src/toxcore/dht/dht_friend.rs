@@ -156,7 +156,6 @@ impl DhtFriend {
 mod tests {
     use super::*;
     use toxcore::dht::packet::*;
-    use toxcore::binary_io::*;
     use futures::sync::mpsc;
     use std::ops::DerefMut;
     use futures::Future;
@@ -189,11 +188,8 @@ mod tests {
 
         assert!(friend.send_nodes_req_packets(&server).wait().is_ok());
 
-        rx.take(2).map(|received| {
-            let (packet, addr) = received;
-            let mut buf = [0; 512];
-            let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
-            let (_, nodes_req) = NodesRequest::from_bytes(&buf[..size]).unwrap();
+        rx.take(2).map(|(packet, addr)| {
+            let nodes_req = unpack!(packet, DhtPacket::NodesRequest);
 
             let ping_map = server.get_ping_map();
             let mut ping_map = ping_map.write();
@@ -239,11 +235,8 @@ mod tests {
         // Now send packet
         assert!(friend.send_nodes_req_packets(&server).wait().is_ok());
 
-        rx.take(2).map(|received| {
-            let (packet, addr) = received;
-            let mut buf = [0; 512];
-            let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
-            let (_, nodes_req) = NodesRequest::from_bytes(&buf[..size]).unwrap();
+        rx.take(2).map(|(packet, addr)| {
+            let nodes_req = unpack!(packet, DhtPacket::NodesRequest);
 
             let ping_map = server.get_ping_map();
             let mut ping_map = ping_map.write();
@@ -291,9 +284,7 @@ mod tests {
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr) = received.unwrap();
-        let mut buf = [0; 512];
-        let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
-        let (_, nodes_req) = NodesRequest::from_bytes(&buf[..size]).unwrap();
+        let nodes_req = unpack!(packet, DhtPacket::NodesRequest);
 
         let ping_map = server.get_ping_map();
         let mut ping_map = ping_map.write();

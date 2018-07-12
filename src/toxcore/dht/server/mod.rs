@@ -2645,11 +2645,8 @@ mod tests {
 
         let mut ping_map = alice.ping_map.write();
 
-        rx.take(2).map(|received| {
-            let (packet, addr) = received;
-            let mut buf = [0; 512];
-            let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
-            let (_, nodes_req) = NodesRequest::from_bytes(&buf[..size]).unwrap();
+        rx.take(2).map(|(packet, addr)| {
+            let nodes_req = unpack!(packet, DhtPacket::NodesRequest);
             if addr == SocketAddr::V6("[FF::01]:33445".parse().unwrap()) {
                 let client = ping_map.get_mut(&bob_pk).unwrap();
                 let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
