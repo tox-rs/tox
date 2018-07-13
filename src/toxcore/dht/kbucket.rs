@@ -513,6 +513,13 @@ impl Kbucket {
             .flat_map(|bucket| bucket.nodes.iter())
     }
 
+    /// Create mutable iterator over [`DhtNode`](./struct.DhtNode.html)s in
+    /// `Kbucket`.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut DhtNode> {
+        self.buckets.iter_mut()
+            .flat_map(|bucket| bucket.nodes.iter_mut())
+    }
+
     /// set bad_node_timeout in seconds
     pub fn set_bad_node_timeout(&mut self, bad_node_timeout: u64) {
         self.buckets.iter_mut().for_each(|bucket| bucket.set_bad_node_timeout(bad_node_timeout));
@@ -1038,6 +1045,41 @@ mod tests {
                 let enext = e_iter.next();
                 if let Some(knext) = k_iter.next() {
                     let knext = Some(knext);
+                    assert_eq!(enext, knext);
+                    if enext.is_none() {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+
+    quickcheck! {
+        fn kbucket_iter_mut_next_test(pns: Vec<PackedNode>) -> () {
+            let (pk, _) = gen_keypair();
+            let mut kbucket = Kbucket::new(&pk);
+            // empty always returns None
+            assert!(kbucket.iter_mut().next().is_none());
+
+            for node in &pns {
+                kbucket.try_add(node);
+            }
+
+            let mut expect = Vec::new();
+            for bucket in &kbucket.buckets {
+                for node in &bucket.nodes {
+                    expect.push(node.clone());
+                }
+            }
+
+            let mut e_iter = expect.iter();
+            let mut k_iter = kbucket.iter_mut();
+            loop {
+                let enext = e_iter.next();
+                if let Some(knext) = k_iter.next() {
+                    let knext = Some(&*knext);
                     assert_eq!(enext, knext);
                     if enext.is_none() {
                         break;
