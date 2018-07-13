@@ -55,7 +55,7 @@ impl PingSender {
         // if node already exists in close list and not timed out, then don't send PingRequest
         let close_nodes = server.close_nodes.read();
 
-        match close_nodes.find_node(&node.pk) {
+        match close_nodes.get_node(&node.pk) {
             Some(ref node_in_close_list) if !node_in_close_list.is_bad_node_timed_out() => return Box::new(future::ok(false)),
             _ => {},
         };
@@ -179,12 +179,9 @@ mod tests {
         let (packet, _addr) = received.unwrap();
 
         let ping_req = unpack!(packet, DhtPacket::PingRequest);
-
-        let ping_map = server.get_ping_map();
-        let mut ping_map = ping_map.write();
-
-        let client = ping_map.get_mut(&pn.pk).unwrap();
         let ping_req_payload = ping_req.get_payload(&pn_sk).unwrap();
-        assert!(client.check_ping_id(ping_req_payload.id));
+
+        let mut request_queue = server.request_queue.write();
+        assert!(request_queue.check_ping_id(pn.pk, ping_req_payload.id));
     }
 }

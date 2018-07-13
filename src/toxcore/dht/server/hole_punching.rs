@@ -358,12 +358,8 @@ mod tests {
 
         let ping_req_payload = ping_req.get_payload(&friend_sk).unwrap();
 
-        let ping_map = alice.get_ping_map();
-        let mut ping_map = ping_map.write();
-
-        let client = ping_map.get_mut(&friend_pk).unwrap();
-
-        assert!(client.check_ping_id(ping_req_payload.id));
+        let mut request_queue = alice.request_queue.write();
+        assert!(request_queue.check_ping_id(friend_pk, ping_req_payload.id));
     }
 
     #[test]
@@ -397,11 +393,7 @@ mod tests {
 
         let ping_req_payload = ping_req.get_payload(&friend_sk).unwrap();
 
-        let ping_map = alice.get_ping_map();
-        let mut ping_map = ping_map.write();
-
-        let client = ping_map.get_mut(&friend_pk).unwrap();
-
-        assert!(client.check_ping_id(ping_req_payload.id));
+        let mut request_queue = alice.request_queue.write();
+        assert!(request_queue.check_ping_id(friend_pk, ping_req_payload.id));
     }
 }

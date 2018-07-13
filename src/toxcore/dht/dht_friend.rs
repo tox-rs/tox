@@ -13,7 +13,6 @@ use toxcore::dht::packed_node::*;
 use toxcore::dht::kbucket::*;
 use toxcore::crypto_core::*;
 use toxcore::dht::server::*;
-use toxcore::dht::server::client::*;
 use toxcore::io_tokio::*;
 use toxcore::dht::server::hole_punching::*;
 
@@ -66,14 +65,13 @@ impl DhtFriend {
         let mut bootstrap_nodes = Bucket::new(None);
         mem::swap(&mut bootstrap_nodes, &mut self.bootstrap_nodes);
 
-        let mut ping_map = server.get_ping_map().write();
+        let mut request_queue = server.request_queue.write();
 
         let bootstrap_nodes = bootstrap_nodes.to_packed_node();
         let nodes_sender = bootstrap_nodes.iter()
-            .map(|node| {
-                let client = ping_map.entry(node.pk).or_insert_with(PingData::new);
-                server.send_nodes_req(*node, self.pk, client.insert_new_ping_id())
-            });
+            .map(|node|
+                server.send_nodes_req(*node, self.pk, request_queue.new_ping_id(node.pk))
+            );
 
         let nodes_stream = stream::futures_unordered(nodes_sender).then(|_| Ok(()));
 
@@ -82,16 +80,14 @@ impl DhtFriend {
 
     // ping to close nodes of friend
     fn ping_and_get_close_nodes(&mut self, server: &Server) -> IoFuture<()> {
-        let mut ping_map = server.get_ping_map().write();
+        let mut request_queue = server.request_queue.write();
 
-        let close_nodes = self.close_nodes.to_packed_node();
-        let nodes_sender = close_nodes.iter()
+        let pk = self.pk;
+        let nodes_sender = self.close_nodes.nodes.iter_mut()
             .map(|node| {
-                let client = ping_map.entry(node.pk).or_insert_with(PingData::new);
-
-                if client.last_ping_req_time.map_or(true, |time| time.elapsed() >= Duration::from_secs(PING_INTERVAL)) {
-                    client.last_ping_req_time = Some(Instant::now());
-                    server.send_nodes_req(*node, self.pk, client.insert_new_ping_id())
+                if node.last_ping_req_time.map_or(true, |time| time.elapsed() >= Duration::from_secs(PING_INTERVAL)) {
+                    node.last_ping_req_time = Some(Instant::now());
+                    server.send_nodes_req(node.clone().into(), pk, request_queue.new_ping_id(node.pk))
                 } else {
                     Box::new(future::ok(()))
                 }
@@ -115,7 +111,7 @@ impl DhtFriend {
             .collect::<Vec<PackedNode>>();
 
         if !good_nodes.is_empty() {
-            let mut ping_map = server.get_ping_map().write();
+            let mut request_queue = server.request_queue.write();
 
             let num_nodes = good_nodes.len();
             let mut random_node = random_u32() as usize % num_nodes;
@@ -126,9 +122,7 @@ impl DhtFriend {
 
             let random_node = good_nodes[random_node];
 
-            let client = ping_map.entry(random_node.pk).or_insert_with(PingData::new);
-
-            let res = server.send_nodes_req(random_node, self.pk, client.insert_new_ping_id());
+            let res = server.send_nodes_req(random_node, self.pk, request_queue.new_ping_id(random_node.pk));
             self.bootstrap_times += 1;
             self.last_nodes_req_time = Some(Instant::now());
 
@@ -160,7 +154,6 @@ mod tests {
     use super::*;
     use toxcore::dht::packet::*;
     use futures::sync::mpsc;
-    use std::ops::DerefMut;
     use futures::Future;
 
     #[test]
@@ -194,18 +187,14 @@ mod tests {
         rx.take(2).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, DhtPacket::NodesRequest);
 
-            let ping_map = server.get_ping_map();
-            let mut ping_map = ping_map.write();
-            let ping_map = ping_map.deref_mut();
+            let mut request_queue = server.request_queue.write();
 
             if addr == SocketAddr::V4("127.0.0.1:33445".parse().unwrap()) {
-                let client = ping_map.get_mut(&node_pk1).unwrap();
                 let nodes_req_payload = nodes_req.get_payload(&node_sk1).unwrap();
-                assert!(client.check_ping_id(nodes_req_payload.id));
+                assert!(request_queue.check_ping_id(node_pk1, nodes_req_payload.id));
             } else {
-                let client = ping_map.get_mut(&node_pk2).unwrap();
                 let nodes_req_payload = nodes_req.get_payload(&node_sk2).unwrap();
-                assert!(client.check_ping_id(nodes_req_payload.id));
+                assert!(request_queue.check_ping_id(node_pk2, nodes_req_payload.id));
             }
         }).collect().wait().unwrap();
     }
@@ -241,18 +230,14 @@ mod tests {
         rx.take(2).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, DhtPacket::NodesRequest);
 
-            let ping_map = server.get_ping_map();
-            let mut ping_map = ping_map.write();
-            let ping_map = ping_map.deref_mut();
+            let mut request_queue = server.request_queue.write();
 
             if addr == SocketAddr::V4("127.0.0.1:33445".parse().unwrap()) {
-                let client = ping_map.get_mut(&node_pk1).unwrap();
                 let nodes_req_payload = nodes_req.get_payload(&node_sk1).unwrap();
-                assert!(client.check_ping_id(nodes_req_payload.id));
+                assert!(request_queue.check_ping_id(node_pk1, nodes_req_payload.id));
             } else {
-                let client = ping_map.get_mut(&node_pk2).unwrap();
                 let nodes_req_payload = nodes_req.get_payload(&node_sk2).unwrap();
-                assert!(client.check_ping_id(nodes_req_payload.id));
+                assert!(request_queue.check_ping_id(node_pk2, nodes_req_payload.id));
             }
         }).collect().wait().unwrap();
     }
@@ -289,18 +274,14 @@ mod tests {
         let (packet, addr) = received.unwrap();
         let nodes_req = unpack!(packet, DhtPacket::NodesRequest);
 
-        let ping_map = server.get_ping_map();
-        let mut ping_map = ping_map.write();
-        let ping_map = ping_map.deref_mut();
+        let mut request_queue = server.request_queue.write();
 
         if addr == SocketAddr::V4("127.0.0.1:33445".parse().unwrap()) {
-            let client = ping_map.get_mut(&node_pk1).unwrap();
             let nodes_req_payload = nodes_req.get_payload(&node_sk1).unwrap();
-            assert!(client.check_ping_id(nodes_req_payload.id));
+            assert!(request_queue.check_ping_id(node_pk1, nodes_req_payload.id));
         } else {
-            let client = ping_map.get_mut(&node_pk2).unwrap();
             let nodes_req_payload = nodes_req.get_payload(&node_sk2).unwrap();
-            assert!(client.check_ping_id(nodes_req_payload.id));
+            assert!(request_queue.check_ping_id(node_pk2, nodes_req_payload.id));
         }
     }
 

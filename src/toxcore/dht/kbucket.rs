@@ -15,16 +15,15 @@ PK; and additionally used to store nodes closest to friends.
 [`BUCKET_DEFAULT_SIZE`]: ./constant.BUCKET_DEFAULT_SIZE.html
 */
 
+use std::net::SocketAddr;
+use std::cmp::{Ord, Ordering};
+use std::convert::Into;
+use std::time::Instant;
+
 use toxcore::crypto_core::*;
 use toxcore::dht::dht_node::*;
 use toxcore::dht::packed_node::*;
 use toxcore::dht::ip_port::IsGlobal;
-use toxcore::dht::dht_node::BAD_NODE_TIMEOUT;
-use std::cmp::{Ord, Ordering};
-use std::net::{SocketAddr, SocketAddrV4};
-use std::time::{Duration, Instant};
-use std::convert::Into;
-use std::ops::Sub;
 
 /** Calculate the [`k-bucket`](./struct.Kbucket.html) index of a PK compared
 to "own" PK.
@@ -67,30 +66,7 @@ impl Into<PackedNode> for DhtNode {
 
 impl Into<DhtNode> for PackedNode {
     fn into(self) -> DhtNode {
-        let (saddr_v4, saddr_v6) = match self.saddr {
-            SocketAddr::V4(v4) => (Some(v4), None),
-            SocketAddr::V6(v6) => {
-                if let Some(converted_ip4) = v6.ip().to_ipv4() {
-                    (Some(SocketAddrV4::new(converted_ip4, v6.port())), None)
-                } else {
-                    (None, Some(v6))
-                }
-            },
-        };
-
-        let (last_resp_time_v4, last_resp_time_v6) = if saddr_v4.is_some() {
-            (Instant::now(), Instant::now().sub(Duration::from_secs(BAD_NODE_TIMEOUT)))
-        } else {
-            (Instant::now().sub(Duration::from_secs(BAD_NODE_TIMEOUT)), Instant::now())
-        };
-
-        DhtNode {
-            pk: self.pk,
-            saddr_v4,
-            saddr_v6,
-            last_resp_time_v4,
-            last_resp_time_v6,
-        }
+        DhtNode::new(self)
     }
 }
 
@@ -400,22 +376,21 @@ impl Kbucket {
         )
     }
 
-    /// find peer which has pk
-    pub fn get_node(&self, pk: &PublicKey, is_ipv6_mode: bool) -> Option<SocketAddr> {
-        self.bucket_index(pk).and_then(|index|
-            self.buckets[index]
-                .find(&self.pk, pk)
-                .map(|node_index| self.buckets[index].nodes[node_index].get_socket_addr(is_ipv6_mode))
-                .and_then(|sock| sock)
-        )
-    }
-
     /// return peer which has pk
-    pub fn find_node(&self, pk: &PublicKey) -> Option<&DhtNode> {
+    pub fn get_node(&self, pk: &PublicKey) -> Option<&DhtNode> {
         self.bucket_index(pk).and_then(|index|
             self.buckets[index]
                 .find(&self.pk, pk)
                 .map(|node_index| &self.buckets[index].nodes[node_index])
+        )
+    }
+
+    /// return peer which has pk
+    pub fn get_node_mut(&mut self, pk: &PublicKey) -> Option<&mut DhtNode> {
+        self.bucket_index(pk).and_then(|index|
+            self.buckets[index]
+                .find(&self.pk, pk)
+                .map(move |node_index| &mut self.buckets[index].nodes[node_index])
         )
     }
 
@@ -485,7 +460,7 @@ impl Kbucket {
         for buc in &*self.buckets {
             for node in &*buc.nodes {
                 if let Some(sock) = node.get_socket_addr(self.is_ipv6_mode) {
-                    if !IsGlobal::is_global(&sock.ip()) && only_global_ip {
+                    if only_global_ip && !IsGlobal::is_global(&sock.ip()) {
                         continue;
                     }
                 } else {

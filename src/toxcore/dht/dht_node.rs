@@ -86,6 +86,8 @@ pub struct DhtNode {
     pub last_resp_time_v4: Instant,
     /// last received ping/nodes-response time for IPv6
     pub last_resp_time_v6: Instant,
+    /// last sent ping-req time
+    pub last_ping_req_time: Option<Instant>,
 }
 
 impl DhtNode {
@@ -114,6 +116,7 @@ impl DhtNode {
             saddr_v6,
             last_resp_time_v4,
             last_resp_time_v6,
+            last_ping_req_time: None,
         }
     }
 
