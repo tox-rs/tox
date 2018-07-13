@@ -507,48 +507,15 @@ impl Kbucket {
         self.buckets.iter().all(|bucket| bucket.is_empty())
     }
 
-    /// Create iterator over [`PackedNode`](./struct.PackedNode.html)s in
-    /// `Kbucket`.
-    pub fn iter(&self) -> KbucketIter {
-        KbucketIter {
-            pos_b: 0,
-            pos_pn: 0,
-            kbucket: &self,
-        }
+    /// Create iterator over [`DhtNode`](./struct.DhtNode.html)s in `Kbucket`.
+    pub fn iter(&self) -> impl Iterator<Item = &DhtNode> {
+        self.buckets.iter()
+            .flat_map(|bucket| bucket.nodes.iter())
     }
 
     /// set bad_node_timeout in seconds
     pub fn set_bad_node_timeout(&mut self, bad_node_timeout: u64) {
         self.buckets.iter_mut().for_each(|bucket| bucket.set_bad_node_timeout(bad_node_timeout));
-    }
-}
-
-/// Iterator over `DhtNode`s in `Kbucket`.
-pub struct KbucketIter<'a> {
-    pos_b: usize,
-    pos_pn: usize,
-    kbucket: &'a Kbucket,
-}
-
-impl<'a> Iterator for KbucketIter<'a> {
-    type Item = &'a DhtNode;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.pos_b < self.kbucket.buckets.len() {
-            match self.kbucket.buckets[self.pos_b].nodes.get(self.pos_pn) {
-                Some(s) => {
-                    self.pos_pn += 1;
-                    return Some(s);
-                },
-                None => {
-                    self.pos_b += 1;
-                    self.pos_pn = 0;
-                },
-            };
-        } else {
-            return None;
-        }
-        self.next()
     }
 }
 
