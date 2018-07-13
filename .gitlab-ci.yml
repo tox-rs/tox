@@ -70,8 +70,8 @@ macos:stable:
     cargo test --verbose
     cargo doc
 
-linux:v1-25-0:
-  image: rustdocker/rust:1.25.0
+linux:v1-26-0:
+  image: rustdocker/rust:1.26.0
   before_script: *linux_before_script
   script: *linux_script
   after_script:
@@ -120,7 +120,7 @@ linux:nightly:
     - docker
 
 other:kcov-and-check-commit-message:
-  image: rustdocker/rust:1.25.0
+  image: rustdocker/rust:1.26.0
   before_script: *linux_before_script
   script:
     ### export sha
@@ -143,7 +143,7 @@ other:kcov-and-check-commit-message:
       export ROOT_DIR=`pwd`
       rm -rf target/kcov || echo 'target/kcov not exist'
 
-    ### build kcov for 1.25.0
+    ### build kcov for 1.26.0
     - |
       sudo apt-get remove kcov -y || echo 'ok'
       sudo apt-get -o dir::cache::archives="$APT_CACHE_DIR" update -yq
