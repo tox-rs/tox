@@ -191,7 +191,10 @@ impl Server {
     }
 
     /// enable/disacle IPv6 mode of DHT node
-    pub fn enable_ipv6_mode(&mut self, enable: bool) { self.is_ipv6_mode = enable; }
+    pub fn enable_ipv6_mode(&mut self, enable: bool) {
+        self.is_ipv6_mode = enable;
+        self.close_nodes.write().is_ipv6_mode = enable;
+    }
 
     /// enable/disable processing LanDiscovery packet received
     pub fn enable_lan_discovery(&mut self, enable: bool) {
@@ -483,7 +486,7 @@ impl Server {
 
         let nats_sender = friends.iter_mut()
             .map(|friend| {
-                let addrs_of_clients = friend.get_addrs_of_clients();
+                let addrs_of_clients = friend.get_addrs_of_clients(self.is_ipv6_mode);
                 // try hole punching
                 friend.hole_punch.try_nat_punch(&self, friend.pk, addrs_of_clients, nat_ping_req_interval);
 
@@ -514,8 +517,10 @@ impl Server {
     // actual sending function of NatPingRequest.
     fn send_nat_ping_req_inner(&self, friend: &DhtFriend, nat_ping_req_packet: DhtPacket) -> IoFuture<()> {
         let nats_sender = friend.close_nodes.nodes.iter()
-            .map(|node| {
-                self.send_to(node.get_socket_addr(), nat_ping_req_packet.clone())
+            .map(|node| node.get_socket_addr(self.is_ipv6_mode))
+            .filter_map(|addr| addr)
+            .map(|addr| {
+                self.send_to(addr, nat_ping_req_packet.clone())
             });
 
         let nats_stream = stream::futures_unordered(nats_sender).then(|_| Ok(()));
@@ -719,11 +724,31 @@ impl Server {
             Ok(payload) => payload,
         };
 
-        let close_nodes = close_nodes.get_closest(&self.pk, IsGlobal::is_global(&addr.ip()));
+        let close_nodes = close_nodes.get_closest(&payload.pk, IsGlobal::is_global(&addr.ip()));
+
+        let mut collected_bucket = Bucket::new(Some(4));
+
+        close_nodes.iter()
+            .for_each(|node| {
+                collected_bucket.try_add(&payload.pk, node);
+            });
+
+        self.friends.read().iter()
+            .for_each(|friend| friend.close_nodes.nodes.iter().cloned()
+                .for_each(|node| {
+                    collected_bucket.try_add(&payload.pk, &node.into());
+                })
+            );
+
+        let collected_nodes = collected_bucket.nodes.into_iter()
+            .map(|node| node.into())
+            .collect::<Vec<PackedNode>>();
+
         let resp_payload = NodesResponsePayload {
-            nodes: close_nodes,
+            nodes: collected_nodes,
             id: payload.id,
         };
+
         let nodes_resp = DhtPacket::NodesResponse(NodesResponse::new(
             &precompute(&packet.pk, &self.sk),
             &self.pk,
@@ -856,7 +881,7 @@ impl Server {
             }
         } else {
             let close_nodes = self.close_nodes.read();
-            if let Some(addr) = close_nodes.get_node(&packet.rpk) { // search close_nodes to find target peer
+            if let Some(addr) = close_nodes.get_node(&packet.rpk, self.is_ipv6_mode) { // search close_nodes to find target peer
                 let packet = DhtPacket::DhtRequest(packet);
                 self.send_to(addr, packet)
             } else { // do nothing
@@ -1435,7 +1460,7 @@ mod tests {
 
         let server_close_nodes = alice.close_nodes.read();
 
-        assert_eq!(server_close_nodes.get_node(&bob_pk), close_nodes.get_node(&bob_pk));
+        assert_eq!(server_close_nodes.get_node(&bob_pk, true), close_nodes.get_node(&bob_pk, true));
     }
 
     #[test]

@@ -18,6 +18,7 @@ use toxcore::io_tokio::*;
 use toxcore::dht::server::hole_punching::*;
 
 /// Hold friend related info.
+#[derive(Clone, Debug)]
 pub struct DhtFriend {
     /// Public key of friend
     pub pk: PublicKey,
@@ -153,9 +154,11 @@ impl DhtFriend {
     }
 
     /// get Socket Address list of a friend, a friend can have multi IP address bacause of NAT
-    pub fn get_addrs_of_clients(&self) -> Vec<SocketAddr> {
+    pub fn get_addrs_of_clients(&self, is_ipv6_mode: bool) -> Vec<SocketAddr> {
         self.close_nodes.nodes.iter()
-            .map(|node| node.get_socket_addr())
+            .map(|node| node.get_socket_addr(is_ipv6_mode))
+            .filter(|addr| addr.is_some())
+            .map(|addr| addr.unwrap())
             .collect::<Vec<SocketAddr>>()
     }
 }
@@ -412,6 +415,6 @@ mod tests {
             saddr: "127.0.0.1:33445".parse().unwrap(),
         }));
 
-        assert_eq!(friend.get_addrs_of_clients(), vec!["127.0.0.1:33445".parse().unwrap()]);
+        assert_eq!(friend.get_addrs_of_clients(true), vec!["127.0.0.1:33445".parse().unwrap()]);
     }
 }

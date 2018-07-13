@@ -20,7 +20,7 @@ use toxcore::dht::dht_node::*;
 use toxcore::dht::packed_node::*;
 use toxcore::dht::ip_port::IsGlobal;
 use std::cmp::{Ord, Ordering};
-use std::net::SocketAddr;
+use std::net::{SocketAddr, SocketAddrV4};
 use std::time::{Duration, Instant};
 use std::convert::Into;
 use std::ops::Sub;
@@ -71,12 +71,19 @@ impl Into<DhtNode> for PackedNode {
     fn into(self) -> DhtNode {
         let (saddr_v4, saddr_v6) = match self.saddr {
             SocketAddr::V4(v4) => (Some(v4), None),
-            SocketAddr::V6(v6) => (None, Some(v6)),
+            SocketAddr::V6(v6) => {
+                if let Some(converted_ip4) = v6.ip().to_ipv4() {
+                    (Some(SocketAddrV4::new(converted_ip4, v6.port())), None)
+                } else {
+                    (None, Some(v6))
+                }
+            },
         };
 
-        let (last_resp_time_v4, last_resp_time_v6) = match self.saddr {
-            SocketAddr::V4(_v4) => (Instant::now(), Instant::now().sub(Duration::from_secs(BAD_NODE_TIMEOUT))),
-            SocketAddr::V6(_v6) => (Instant::now().sub(Duration::from_secs(BAD_NODE_TIMEOUT)), Instant::now()),
+        let (last_resp_time_v4, last_resp_time_v6) = if saddr_v4.is_some() {
+            (Instant::now(), Instant::now().sub(Duration::from_secs(BAD_NODE_TIMEOUT)))
+        } else {
+            (Instant::now().sub(Duration::from_secs(BAD_NODE_TIMEOUT)), Instant::now())
         };
 
         DhtNode {
@@ -366,6 +373,8 @@ Further reading: [Tox spec](https://zetok.github.io/tox-spec#k-buckets).
 pub struct Kbucket {
     /// `PublicKey` for which `Kbucket` holds close nodes.
     pk: PublicKey,
+    /// flag for Dht server is running in IPv6 mode.
+    pub is_ipv6_mode: bool,
 
     /// List of [`Bucket`](./struct.Bucket.html)s.
     pub buckets: Vec<Bucket>,
@@ -387,6 +396,7 @@ impl Kbucket {
         trace!(target: "Kbucket", "Creating new Kbucket with PK: {:?}", pk);
         Kbucket {
             pk: *pk,
+            is_ipv6_mode: false,
             buckets: vec![Bucket::new(None); KBUCKET_MAX_ENTRIES as usize]
         }
     }
@@ -402,11 +412,12 @@ impl Kbucket {
     }
 
     /// find peer which has pk
-    pub fn get_node(&self, pk: &PublicKey) -> Option<SocketAddr> {
+    pub fn get_node(&self, pk: &PublicKey, is_ipv6_mode: bool) -> Option<SocketAddr> {
         self.bucket_index(pk).and_then(|index|
             self.buckets[index]
                 .find(&self.pk, pk)
-                .map(|node_index| self.buckets[index].nodes[node_index].get_socket_addr())
+                .map(|node_index| self.buckets[index].nodes[node_index].get_socket_addr(is_ipv6_mode))
+                .and_then(|sock| sock)
         )
     }
 
@@ -484,10 +495,13 @@ impl Kbucket {
         let mut bucket = Bucket::new(Some(4));
         for buc in &*self.buckets {
             for node in &*buc.nodes {
-                if !IsGlobal::is_global(&node.get_socket_addr().ip()) && only_global_ip {
+                if let Some(sock) = node.get_socket_addr(self.is_ipv6_mode) {
+                    if !IsGlobal::is_global(&sock.ip()) && only_global_ip {
+                        continue;
+                    }
+                } else {
                     continue;
                 }
-
                 bucket.try_add(pk, &node.clone().into());
             }
         }
@@ -839,6 +853,8 @@ mod tests {
     #[test]
     fn dht_kbucket_get_closest_test() {
         fn with_kbucket(kb: Kbucket, a: u64, b: u64, c: u64, d: u64) {
+            let mut kb = kb;
+            kb.is_ipv6_mode = true;
             let pk = nums_to_pk(a, b, c, d);
             assert!(kb.get_closest(&pk, true).len() <= 4);
             assert_eq!(kb.get_closest(&pk, true), kb.get_closest(&pk, true));
@@ -858,6 +874,7 @@ mod tests {
 
             let pk = nums_to_pk(a, b, c, d);
             let mut kbucket = Kbucket::new(&pk);
+            kbucket.is_ipv6_mode = true;
 
             // check whether number of correct nodes that are returned is right
             let correctness = |should, kbc: &Kbucket| {
@@ -1033,6 +1050,7 @@ mod tests {
 
             let mut kbucket = Kbucket {
                 pk,
+                is_ipv6_mode: false,
                 buckets: vec![Bucket::new(Some(2)); KBUCKET_MAX_ENTRIES as usize],
             };
 

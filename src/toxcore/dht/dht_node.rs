@@ -93,12 +93,19 @@ impl DhtNode {
     pub fn new(pn: PackedNode) -> DhtNode {
         let (saddr_v4, saddr_v6) = match pn.saddr {
             SocketAddr::V4(v4) => (Some(v4), None),
-            SocketAddr::V6(v6) => (None, Some(v6)),
+            SocketAddr::V6(v6) => {
+                if let Some(converted_ip4) = v6.ip().to_ipv4() {
+                    (Some(SocketAddrV4::new(converted_ip4, v6.port())), None)
+                } else {
+                    (None, Some(v6))
+                }
+            },
         };
 
-        let (last_resp_time_v4, last_resp_time_v6) = match pn.saddr {
-            SocketAddr::V4(_v4) => (Instant::now(), Instant::now().sub(Duration::from_secs(BAD_NODE_TIMEOUT))),
-            SocketAddr::V6(_v6) => (Instant::now().sub(Duration::from_secs(BAD_NODE_TIMEOUT)), Instant::now()),
+        let (last_resp_time_v4, last_resp_time_v6) = if saddr_v4.is_some() {
+            (Instant::now(), Instant::now().sub(Duration::from_secs(BAD_NODE_TIMEOUT)))
+        } else {
+            (Instant::now().sub(Duration::from_secs(BAD_NODE_TIMEOUT)), Instant::now())
         };
 
         DhtNode {
@@ -126,19 +133,27 @@ impl DhtNode {
     }
 
     /// return SocketAddr for DhtNode
-    pub fn get_socket_addr(&self) -> SocketAddr {
-        if self.saddr_v6.is_some() && self.saddr_v4.is_some() {
-            if self.last_resp_time_v4 >= self.last_resp_time_v6 {
-                SocketAddr::V4(self.saddr_v4.unwrap())
+    pub fn get_socket_addr(&self, is_ipv6_mode: bool) -> Option<SocketAddr> {
+        if is_ipv6_mode {
+            if self.saddr_v6.is_some() && self.saddr_v4.is_some() {
+                if self.last_resp_time_v4 >= self.last_resp_time_v6 {
+                    Some(SocketAddr::V4(self.saddr_v4.unwrap()))
+                } else {
+                    Some(SocketAddr::V6(self.saddr_v6.unwrap()))
+                }
+            } else if self.saddr_v4.is_some() {
+                Some(SocketAddr::V4(self.saddr_v4.unwrap()))
+            } else if self.saddr_v6.is_some() {
+                Some(SocketAddr::V6(self.saddr_v6.unwrap()))
             } else {
-                SocketAddr::V6(self.saddr_v6.unwrap())
+                None
             }
-        } else if self.saddr_v4.is_some() {
-            SocketAddr::V4(self.saddr_v4.unwrap())
-        } else if self.saddr_v6.is_some() {
-            SocketAddr::V6(self.saddr_v6.unwrap())
-        } else {
-            panic!("saddr_v4 and saddr_v6 in DhtNode are all None");
+        } else { // IPv4 only mode
+            if self.saddr_v4.is_some() {
+                Some(SocketAddr::V4(self.saddr_v4.unwrap()))
+            } else {
+                None
+            }
         }
     }
 }
