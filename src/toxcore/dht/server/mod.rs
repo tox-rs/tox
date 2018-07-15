@@ -281,7 +281,7 @@ impl Server {
         let close_nodes = self.close_nodes.read();
 
         let good_nodes = close_nodes.iter()
-            .filter(|&node| !node.is_bad_node_timed_out())
+            .filter(|&node| !node.is_bad())
             .cloned()
             .map(|node| node.into())
             .collect::<Vec<PackedNode>>();

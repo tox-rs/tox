@@ -106,7 +106,7 @@ impl DhtFriend {
         }
 
         let good_nodes = self.close_nodes.nodes.iter()
-            .filter(|&node| !node.is_bad_node_timed_out())
+            .filter(|&node| !node.is_bad())
             .map(|node| node.clone().into())
             .collect::<Vec<PackedNode>>();
 

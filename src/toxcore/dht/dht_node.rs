@@ -18,20 +18,6 @@ use toxcore::dht::kbucket::*;
 /// The number of seconds for a non responsive node to become bad.
 pub const BAD_NODE_TIMEOUT: u64 = 182;
 
-/** Status of node in bucket.
-Good means it is online and responded within 162 seconds
-Bad means it is probably offline and did not responded for over 162 seconds
-When new peer is added to bucket, Bad status node should be replace.
-If there are no Bad nodes in bucket, node which is farther than peer is replaced.
-*/
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum NodeStatus {
-    /// online
-    Good,
-    /// maybe offline
-    Bad,
-}
-
 /// check distance of PK1 and PK2 from base_PK including status of node
 pub trait ReplaceOrder {
     /// Check distance of PK1 and Pk2 including status of node
@@ -39,32 +25,20 @@ pub trait ReplaceOrder {
 }
 
 impl ReplaceOrder for PublicKey {
-    fn replace_order(&self,
-                     node1: &DhtNode,
-                     node2: &DhtNode) -> Ordering {
-
+    fn replace_order(&self, node1: &DhtNode, node2: &DhtNode) -> Ordering {
         trace!(target: "Distance", "Comparing distance between PKs. and status of node");
-        match node1.calc_status() {
-            NodeStatus::Good => {
-                match node2.calc_status() {
-                    NodeStatus::Good => { // Good, Good
-                        self.distance(&node1.pk, &node2.pk)
-                    },
-                    NodeStatus::Bad => { // Good, Bad
-                        Ordering::Less // Good is closer
-                    },
-                }
-            },
-            NodeStatus::Bad => {
-                match node2.calc_status() {
-                    NodeStatus::Good => { // Bad, Good
-                        Ordering::Greater // Bad is farther
-                    },
-                    NodeStatus::Bad => { // Bad, Bad
-                        self.distance(&node1.pk, &node2.pk)
-                    },
-                }
-            },
+        if node1.is_bad() {
+            if node2.is_bad() {
+                self.distance(&node1.pk, &node2.pk) // both bad
+            } else {
+                Ordering::Greater // bad, good
+            }
+        } else {
+            if node2.is_bad() {
+                Ordering::Less // good, bad
+            } else {
+                self.distance(&node1.pk, &node2.pk) // both good
+            }
         }
     }
 }
@@ -120,19 +94,11 @@ impl DhtNode {
         }
     }
 
-    /// calc. status of node
-    pub fn calc_status(&self) -> NodeStatus {
-        if self.last_resp_time_v4.elapsed() > Duration::from_secs(BAD_NODE_TIMEOUT) &&
-            self.last_resp_time_v6.elapsed() > Duration::from_secs(BAD_NODE_TIMEOUT) {
-            NodeStatus::Bad
-        } else {
-            NodeStatus::Good
-        }
-    }
-
-    /// check it the node is timed out
-    pub fn is_bad_node_timed_out(&self) -> bool {
-        self.calc_status() == NodeStatus::Bad
+    /// Check if the node is timed out i.e. it does not answer both on IPv4 and
+    /// IPv6 addresses for `BAD_NODE_TIMEOUT` seconds.
+    pub fn is_bad(&self) -> bool {
+        self.last_resp_time_v4.elapsed() > Duration::from_secs(BAD_NODE_TIMEOUT) &&
+            self.last_resp_time_v6.elapsed() > Duration::from_secs(BAD_NODE_TIMEOUT)
     }
 
     /// return SocketAddr for DhtNode
