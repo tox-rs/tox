@@ -157,8 +157,7 @@ impl DhtFriend {
     pub fn get_addrs_of_clients(&self, is_ipv6_mode: bool) -> Vec<SocketAddr> {
         self.close_nodes.nodes.iter()
             .map(|node| node.get_socket_addr(is_ipv6_mode))
-            .filter(|addr| addr.is_some())
-            .map(|addr| addr.unwrap())
+            .filter_map(|addr| addr)
             .collect::<Vec<SocketAddr>>()
     }
 }
@@ -414,7 +413,25 @@ mod tests {
             pk: node_pk1,
             saddr: "127.0.0.1:33445".parse().unwrap(),
         }));
+        let (node_pk2, _node_sk2) = gen_keypair();
+        assert!(friend.close_nodes.try_add(&friend_pk, &PackedNode {
+            pk: node_pk2,
+            saddr: "[2001:db8::1]:33445".parse().unwrap(),
+        }));
+        let (node_pk3, _node_sk3) = gen_keypair();
+        assert!(friend.close_nodes.try_add(&friend_pk, &PackedNode {
+            pk: node_pk3,
+            saddr: "127.0.0.2:33445".parse().unwrap(),
+        }));
+        let (node_pk4, _node_sk4) = gen_keypair();
+        assert!(friend.close_nodes.try_add(&friend_pk, &PackedNode {
+            pk: node_pk4,
+            saddr: "127.0.0.3:33445".parse().unwrap(),
+        }));
 
-        assert_eq!(friend.get_addrs_of_clients(true), vec!["127.0.0.1:33445".parse().unwrap()]);
+        assert!(friend.get_addrs_of_clients(true).contains(&"127.0.0.1:33445".parse().unwrap()));
+        assert!(friend.get_addrs_of_clients(true).contains(&"127.0.0.2:33445".parse().unwrap()));
+        assert!(friend.get_addrs_of_clients(true).contains(&"127.0.0.3:33445".parse().unwrap()));
+        assert!(friend.get_addrs_of_clients(true).contains(&"[2001:db8::1]:33445".parse().unwrap()));
     }
 }

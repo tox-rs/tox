@@ -135,24 +135,30 @@ impl DhtNode {
     /// return SocketAddr for DhtNode
     pub fn get_socket_addr(&self, is_ipv6_mode: bool) -> Option<SocketAddr> {
         if is_ipv6_mode {
-            if self.saddr_v6.is_some() && self.saddr_v4.is_some() {
-                if self.last_resp_time_v4 >= self.last_resp_time_v6 {
-                    Some(SocketAddr::V4(self.saddr_v4.unwrap()))
-                } else {
-                    Some(SocketAddr::V6(self.saddr_v6.unwrap()))
-                }
-            } else if self.saddr_v4.is_some() {
-                Some(SocketAddr::V4(self.saddr_v4.unwrap()))
-            } else if self.saddr_v6.is_some() {
-                Some(SocketAddr::V6(self.saddr_v6.unwrap()))
-            } else {
-                None
+            match self.saddr_v6 {
+                Some(v6) => {
+                    match self.saddr_v4 {
+                        Some(v4) => {
+                            if self.last_resp_time_v4 >= self.last_resp_time_v6 {
+                                Some(SocketAddr::V4(v4))
+                            } else {
+                                Some(SocketAddr::V6(v6))
+                            }
+                        },
+                        None => Some(SocketAddr::V6(v6)),
+                    }
+                },
+                None => {
+                    match self.saddr_v4 {
+                        Some(v4) => Some(SocketAddr::V4(v4)),
+                        None => None,
+                    }
+                },
             }
-        } else { // IPv4 only mode
-            if self.saddr_v4.is_some() {
-                Some(SocketAddr::V4(self.saddr_v4.unwrap()))
-            } else {
-                None
+        } else {
+            match self.saddr_v4 {
+                Some(v4) => Some(SocketAddr::V4(v4)),
+                None => None,
             }
         }
     }
