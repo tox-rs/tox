@@ -37,7 +37,7 @@ issue / pull request should be filled on the reference repository.
 | libsodium | >=1.0.13 |
 
 ## Building
-Fairly simple. You'll need [Rust] >= 1.24.0 and [libsodium].
+Fairly simple. You'll need [Rust] >= 1.26.0 and [libsodium].
 
 When you'll have deps, build debug version with
 ```bash

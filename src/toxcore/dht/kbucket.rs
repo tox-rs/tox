@@ -507,48 +507,22 @@ impl Kbucket {
         self.buckets.iter().all(|bucket| bucket.is_empty())
     }
 
-    /// Create iterator over [`PackedNode`](./struct.PackedNode.html)s in
+    /// Create iterator over [`DhtNode`](./struct.DhtNode.html)s in `Kbucket`.
+    pub fn iter(&self) -> impl Iterator<Item = &DhtNode> {
+        self.buckets.iter()
+            .flat_map(|bucket| bucket.nodes.iter())
+    }
+
+    /// Create mutable iterator over [`DhtNode`](./struct.DhtNode.html)s in
     /// `Kbucket`.
-    pub fn iter(&self) -> KbucketIter {
-        KbucketIter {
-            pos_b: 0,
-            pos_pn: 0,
-            buckets: self.clone().buckets,
-        }
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut DhtNode> {
+        self.buckets.iter_mut()
+            .flat_map(|bucket| bucket.nodes.iter_mut())
     }
 
     /// set bad_node_timeout in seconds
     pub fn set_bad_node_timeout(&mut self, bad_node_timeout: u64) {
         self.buckets.iter_mut().for_each(|bucket| bucket.set_bad_node_timeout(bad_node_timeout));
-    }
-}
-
-/// Iterator over `DhtNode`s in `Kbucket`.
-pub struct KbucketIter {
-    pos_b: usize,
-    pos_pn: usize,
-    buckets: Vec<Bucket>,
-}
-
-impl Iterator for KbucketIter {
-    type Item = PackedNode;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.pos_b < self.buckets.len() {
-            match self.buckets[self.pos_b].nodes.get(self.pos_pn) {
-                Some(s) => {
-                    self.pos_pn += 1;
-                    return Some(s.clone().into());
-                },
-                None => {
-                    self.pos_b += 1;
-                    self.pos_pn = 0;
-                },
-            };
-        } else {
-            return None;
-        }
-        self.next()
     }
 }
 
@@ -1061,7 +1035,7 @@ mod tests {
             let mut expect = Vec::new();
             for bucket in &kbucket.buckets {
                 for node in &bucket.nodes {
-                    expect.push(node.clone().into());
+                    expect.push(node.clone());
                 }
             }
 
@@ -1070,7 +1044,42 @@ mod tests {
             loop {
                 let enext = e_iter.next();
                 if let Some(knext) = k_iter.next() {
-                    let knext = Some(&knext);
+                    let knext = Some(knext);
+                    assert_eq!(enext, knext);
+                    if enext.is_none() {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+
+    quickcheck! {
+        fn kbucket_iter_mut_next_test(pns: Vec<PackedNode>) -> () {
+            let (pk, _) = gen_keypair();
+            let mut kbucket = Kbucket::new(&pk);
+            // empty always returns None
+            assert!(kbucket.iter_mut().next().is_none());
+
+            for node in &pns {
+                kbucket.try_add(node);
+            }
+
+            let mut expect = Vec::new();
+            for bucket in &kbucket.buckets {
+                for node in &bucket.nodes {
+                    expect.push(node.clone());
+                }
+            }
+
+            let mut e_iter = expect.iter();
+            let mut k_iter = kbucket.iter_mut();
+            loop {
+                let enext = e_iter.next();
+                if let Some(knext) = k_iter.next() {
+                    let knext = Some(&*knext);
                     assert_eq!(enext, knext);
                     if enext.is_none() {
                         break;
