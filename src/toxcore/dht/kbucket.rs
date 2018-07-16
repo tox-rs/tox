@@ -302,9 +302,9 @@ impl Bucket {
         }
     }
 
-    /// convert vector of DhtNode to vector of PackedNode
-    pub fn to_packed_node(&self) -> Vec<PackedNode> {
-        self.nodes.iter().map(|node| node.clone().into()).collect::<Vec<PackedNode>>()
+    /// Get vector of `PackedNode`s that `Bucket` has.
+    pub fn to_packed(&self) -> Vec<PackedNode> {
+        self.nodes.iter().map(|node| node.clone().into()).collect()
     }
 }
 
@@ -366,7 +366,7 @@ impl Kbucket {
         }
     }
 
-    /// find peer which has pk
+    /// Find indices of `DhtNode` by it's `PublicKey`.
     #[cfg(test)]
     fn find(&self, pk: &PublicKey) -> Option<(usize, usize)> {
         self.bucket_index(pk).and_then(|index|
@@ -376,7 +376,7 @@ impl Kbucket {
         )
     }
 
-    /// return peer which has pk
+    /// Get reference to a `DhtNode` by it's `PublicKey`.
     pub fn get_node(&self, pk: &PublicKey) -> Option<&DhtNode> {
         self.bucket_index(pk).and_then(|index|
             self.buckets[index]
@@ -385,7 +385,7 @@ impl Kbucket {
         )
     }
 
-    /// return peer which has pk
+    /// Get mutable reference to a `DhtNode` by it's `PublicKey`.
     pub fn get_node_mut(&mut self, pk: &PublicKey) -> Option<&mut DhtNode> {
         self.bucket_index(pk).and_then(|index|
             self.buckets[index]
@@ -471,7 +471,7 @@ impl Kbucket {
         }
         trace!("Returning nodes: {:?}", &bucket.nodes);
 
-        bucket.to_packed_node()
+        bucket.to_packed()
     }
 
     /**
@@ -1107,7 +1107,7 @@ mod tests {
 
         assert!(bucket.try_add(&pk,&pn));
 
-        let res_pn = bucket.to_packed_node();
+        let res_pn = bucket.to_packed();
 
         assert_eq!(pn, res_pn[0]);
     }

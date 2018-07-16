@@ -239,7 +239,7 @@ impl Server {
 
         let mut request_queue = self.request_queue.write();
 
-        let bootstrap_nodes = bootstrap_nodes.to_packed_node();
+        let bootstrap_nodes = bootstrap_nodes.to_packed();
         let nodes_sender = bootstrap_nodes.iter()
             .map(|node|
                 self.send_nodes_req(*node, self.pk, request_queue.new_ping_id(node.pk))
