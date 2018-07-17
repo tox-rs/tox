@@ -6,13 +6,16 @@ Even GOOD node is farther than BAD node, BAD node should be replaced.
 Here, GOOD node is the node responded within 162 seconds, BAD node is the node not responded over 162 seconds.
 */
 
-use std::net::SocketAddr;
+use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::time::{Duration, Instant};
 use std::cmp::Ordering;
+use std::ops::Sub;
+
 use toxcore::crypto_core::*;
 use toxcore::dht::packed_node::*;
 use toxcore::dht::kbucket::*;
 use toxcore::dht::server::*;
+use toxcore::dht::kbucket::BAD_NODE_TIMEOUT;
 
 /** Status of node in bucket.
 Good means it is online and responded within 162 seconds
@@ -73,27 +76,51 @@ If both node is Good node, then we compare PK's distance.
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DhtNode {
-    /// Socket addr of node.
-    pub saddr: SocketAddr,
+    /// Socket addr of node for IPv4.
+    pub saddr_v4: Option<SocketAddrV4>,
+    /// Socket addr of node for IPv6.
+    pub saddr_v6: Option<SocketAddrV6>,
     /// Public Key of the node.
     pub pk: PublicKey,
-    /// last received ping/nodes-response time
-    pub last_resp_time: Instant,
+    /// last received ping/nodes-response time for IPv4
+    pub last_resp_time_v4: Instant,
+    /// last received ping/nodes-response time for IPv6
+    pub last_resp_time_v6: Instant,
 }
 
 impl DhtNode {
     /// create DhtNode object
     pub fn new(pn: PackedNode) -> DhtNode {
+        let (saddr_v4, saddr_v6) = match pn.saddr {
+            SocketAddr::V4(v4) => (Some(v4), None),
+            SocketAddr::V6(v6) => {
+                if let Some(converted_ip4) = v6.ip().to_ipv4() {
+                    (Some(SocketAddrV4::new(converted_ip4, v6.port())), None)
+                } else {
+                    (None, Some(v6))
+                }
+            },
+        };
+
+        let (last_resp_time_v4, last_resp_time_v6) = if saddr_v4.is_some() {
+            (Instant::now(), Instant::now().sub(Duration::from_secs(BAD_NODE_TIMEOUT)))
+        } else {
+            (Instant::now().sub(Duration::from_secs(BAD_NODE_TIMEOUT)), Instant::now())
+        };
+
         DhtNode {
             pk: pn.pk,
-            saddr: pn.saddr,
-            last_resp_time: Instant::now(),
+            saddr_v4,
+            saddr_v6,
+            last_resp_time_v4,
+            last_resp_time_v6,
         }
     }
 
     /// calc. status of node
     pub fn calc_status(&self, bad_node_timeout: Duration) -> NodeStatus {
-        if self.last_resp_time.elapsed() > bad_node_timeout {
+        if self.last_resp_time_v4.elapsed() > bad_node_timeout &&
+            self.last_resp_time_v6.elapsed() > bad_node_timeout {
             NodeStatus::Bad
         } else {
             NodeStatus::Good
@@ -102,10 +129,39 @@ impl DhtNode {
 
     /// check it the node is timed out
     pub fn is_bad_node_timed_out(&self, server: &Server) -> bool {
-        self.last_resp_time.elapsed() > Duration::from_secs(server.config.bad_node_timeout)
+        self.calc_status(Duration::from_secs(server.config.bad_node_timeout)) == NodeStatus::Bad
     }
 
-
+    /// return SocketAddr for DhtNode
+    pub fn get_socket_addr(&self, is_ipv6_mode: bool) -> Option<SocketAddr> {
+        if is_ipv6_mode {
+            match self.saddr_v6 {
+                Some(v6) => {
+                    match self.saddr_v4 {
+                        Some(v4) => {
+                            if self.last_resp_time_v4 >= self.last_resp_time_v6 {
+                                Some(SocketAddr::V4(v4))
+                            } else {
+                                Some(SocketAddr::V6(v6))
+                            }
+                        },
+                        None => Some(SocketAddr::V6(v6)),
+                    }
+                },
+                None => {
+                    match self.saddr_v4 {
+                        Some(v4) => Some(SocketAddr::V4(v4)),
+                        None => None,
+                    }
+                },
+            }
+        } else {
+            match self.saddr_v4 {
+                Some(v4) => Some(SocketAddr::V4(v4)),
+                None => None,
+            }
+        }
+    }
 }
 
 #[cfg(test)]

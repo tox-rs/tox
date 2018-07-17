@@ -29,6 +29,7 @@ const MAX_NORMAL_PUNCHING_TRIES: u32 = 5;
 pub const MAX_CLIENTS_PER_FRIEND: u32 = 8;
 
 /// Structure for hole punch
+#[derive(Clone, Debug)]
 pub struct HolePunching {
     /// flag for hole punching is done or not.
     pub is_punching_done: bool,

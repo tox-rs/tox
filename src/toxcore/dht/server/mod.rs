@@ -13,7 +13,7 @@ use parking_lot::RwLock;
 use tokio::timer::Interval;
 
 use std::io::{ErrorKind, Error};
-use std::net::SocketAddr;
+use std::net::{SocketAddr, IpAddr};
 use std::collections::HashMap;
 use std::ops::DerefMut;
 use std::sync::Arc;
@@ -123,6 +123,7 @@ pub struct Server {
     // have to handle related packets
     net_crypto: Option<NetCrypto>,
     lan_discovery_enabled: bool,
+    is_ipv6_mode: bool,
 }
 
 /// Struct for grouping parameters to Server's main loop
@@ -185,7 +186,14 @@ impl Server {
             tcp_onion_sink: None,
             net_crypto: None,
             lan_discovery_enabled: true,
+            is_ipv6_mode: false,
         }
+    }
+
+    /// enable/disacle IPv6 mode of DHT node
+    pub fn enable_ipv6_mode(&mut self, enable: bool) {
+        self.is_ipv6_mode = enable;
+        self.close_nodes.write().is_ipv6_mode = enable;
     }
 
     /// enable/disable processing LanDiscovery packet received
@@ -478,7 +486,7 @@ impl Server {
 
         let nats_sender = friends.iter_mut()
             .map(|friend| {
-                let addrs_of_clients = friend.get_addrs_of_clients();
+                let addrs_of_clients = friend.get_addrs_of_clients(self.is_ipv6_mode);
                 // try hole punching
                 friend.hole_punch.try_nat_punch(&self, friend.pk, addrs_of_clients, nat_ping_req_interval);
 
@@ -509,8 +517,10 @@ impl Server {
     // actual sending function of NatPingRequest.
     fn send_nat_ping_req_inner(&self, friend: &DhtFriend, nat_ping_req_packet: DhtPacket) -> IoFuture<()> {
         let nats_sender = friend.close_nodes.nodes.iter()
-            .map(|node| {
-                self.send_to(node.saddr, nat_ping_req_packet.clone())
+            .map(|node| node.get_socket_addr(self.is_ipv6_mode))
+            .filter_map(|addr| addr)
+            .map(|addr| {
+                self.send_to(addr, nat_ping_req_packet.clone())
             });
 
         let nats_stream = stream::futures_unordered(nats_sender).then(|_| Ok(()));
@@ -607,6 +617,25 @@ impl Server {
 
     /// actual send method
     fn send_to(&self, addr: SocketAddr, packet: DhtPacket) -> IoFuture<()> {
+        if self.is_ipv6_mode {// DHT node is running in ipv6 mode
+            match addr.ip() {
+                IpAddr::V4(ip) => {
+                    let ip_v6 = ip.to_ipv6_mapped();
+                    let addr = SocketAddr::new(IpAddr::V6(ip_v6), addr.port());
+                    return send_to(&self.tx, (packet, addr));
+                },
+                IpAddr::V6(_ip) => {},
+            }
+        } else { // DHT node is running in ipv4 mode
+            if addr.is_ipv6() {
+                debug!("DHT node is running in ipv4 mode but target node's socket is ipv6 address");
+                return Box::new(future::err(Error::new(
+                    ErrorKind::Other,
+                    "DHT node is running in ipv4 mode but target node's socket is ipv6 address"
+                )))
+            }
+        }
+
         send_to(&self.tx, (packet, addr))
     }
 
@@ -695,11 +724,31 @@ impl Server {
             Ok(payload) => payload,
         };
 
-        let close_nodes = close_nodes.get_closest(&self.pk, IsGlobal::is_global(&addr.ip()));
+        let close_nodes = close_nodes.get_closest(&payload.pk, IsGlobal::is_global(&addr.ip()));
+
+        let mut collected_bucket = Bucket::new(Some(4));
+
+        close_nodes.iter()
+            .for_each(|node| {
+                collected_bucket.try_add(&payload.pk, node);
+            });
+
+        self.friends.read().iter()
+            .for_each(|friend| friend.close_nodes.nodes.iter().cloned()
+                .for_each(|node| {
+                    collected_bucket.try_add(&payload.pk, &node.into());
+                })
+            );
+
+        let collected_nodes = collected_bucket.nodes.into_iter()
+            .map(|node| node.into())
+            .collect::<Vec<PackedNode>>();
+
         let resp_payload = NodesResponsePayload {
-            nodes: close_nodes,
+            nodes: collected_nodes,
             id: payload.id,
         };
+
         let nodes_resp = DhtPacket::NodesResponse(NodesResponse::new(
             &precompute(&packet.pk, &self.sk),
             &self.pk,
@@ -832,7 +881,7 @@ impl Server {
             }
         } else {
             let close_nodes = self.close_nodes.read();
-            if let Some(addr) = close_nodes.get_node(&packet.rpk) { // search close_nodes to find target peer
+            if let Some(addr) = close_nodes.get_node(&packet.rpk, self.is_ipv6_mode) { // search close_nodes to find target peer
                 let packet = DhtPacket::DhtRequest(packet);
                 self.send_to(addr, packet)
             } else { // do nothing
@@ -1411,7 +1460,7 @@ mod tests {
 
         let server_close_nodes = alice.close_nodes.read();
 
-        assert_eq!(server_close_nodes.get_node(&bob_pk), close_nodes.get_node(&bob_pk));
+        assert_eq!(server_close_nodes.get_node(&bob_pk, true), close_nodes.get_node(&bob_pk, true));
     }
 
     #[test]
@@ -2764,5 +2813,65 @@ mod tests {
 
         alice.enable_lan_discovery(false);
         assert_eq!(alice.lan_discovery_enabled, false);
+    }
+
+    #[test]
+    fn server_enable_ipv6_mode_test() {
+        let (mut alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
+
+        alice.enable_ipv6_mode(true);
+        assert_eq!(alice.is_ipv6_mode, true);
+    }
+
+    #[test]
+    fn server_send_to_test() {
+        let (mut alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
+        let (ping_pk, ping_sk) = gen_keypair();
+
+        let pn = PackedNode::new(false, SocketAddr::V6("[FF::01]:33445".parse().unwrap()), &bob_pk);
+        assert!(alice.close_nodes.write().deref_mut().try_add(&pn));
+
+        let args = ConfigArgs {
+            kill_node_timeout: 10,
+            ping_timeout: 10,
+            ping_interval: 0,
+            bad_node_timeout: 10,
+            nodes_req_interval: 0,
+            nat_ping_req_interval: 10,
+            ping_iter_interval: 2,
+        };
+
+        // test with ipv4 mode
+        // packet sending will be fail, because running in IPv4 mode but try to sending to IPv6 node
+        alice.set_config_values(args);
+        alice.enable_ipv6_mode(false);
+        assert!(alice.dht_main_loop().wait().is_err());
+
+        let pn = PackedNode::new(false, SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &ping_pk);
+        assert!(alice.close_nodes.write().deref_mut().try_add(&pn));
+
+        // test with ipv6 mode
+        alice.enable_ipv6_mode(true);
+        alice.dht_main_loop().wait().unwrap();
+
+        let mut ping_map = alice.ping_map.write();
+
+        rx.take(2).map(|received| {
+            let (packet, addr) = received;
+            let mut buf = [0; 512];
+            let (_, size) = packet.to_bytes((&mut buf, 0)).unwrap();
+            let (_, nodes_req) = NodesRequest::from_bytes(&buf[..size]).unwrap();
+            if addr == SocketAddr::V6("[FF::01]:33445".parse().unwrap()) {
+                let client = ping_map.get_mut(&bob_pk).unwrap();
+                let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
+                let dur = Duration::from_secs(PING_TIMEOUT);
+                assert!(client.check_ping_id(nodes_req_payload.id, dur));
+            } else {
+                let client = ping_map.get_mut(&ping_pk).unwrap();
+                let nodes_req_payload = nodes_req.get_payload(&ping_sk).unwrap();
+                let dur = Duration::from_secs(PING_TIMEOUT);
+                assert!(client.check_ping_id(nodes_req_payload.id, dur));
+            }
+        }).collect().wait().unwrap();
     }
 }
