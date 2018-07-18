@@ -85,6 +85,15 @@ fn random_u64_test() {
     assert!(a != b);
 }
 
+#[test]
+fn random_usize_test() {
+    let a = random_usize();
+    let b = random_usize();
+    assert!(a != 0);
+    assert!(b != 0);
+    // The probability to fail equals 2.9*10^-39
+    assert!(a != b);
+}
 
 #[test]
 fn public_key_valid_test() {

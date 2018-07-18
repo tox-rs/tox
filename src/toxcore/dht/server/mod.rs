@@ -289,10 +289,10 @@ impl Server {
         if !good_nodes.is_empty() {
             let mut request_queue = self.request_queue.write();
 
-            let mut random_node = random_u32() as usize % good_nodes.len();
+            let mut random_node = random_usize() % good_nodes.len();
             // increase probability of sending packet to a close node (has lower index)
             if random_node != 0 {
-                random_node -= random_u32() as usize % (random_node + 1);
+                random_node -= random_usize() % (random_node + 1);
             }
 
             let random_node = good_nodes[random_node];

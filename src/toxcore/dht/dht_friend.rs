@@ -114,10 +114,10 @@ impl DhtFriend {
             let mut request_queue = server.request_queue.write();
 
             let num_nodes = good_nodes.len();
-            let mut random_node = random_u32() as usize % num_nodes;
+            let mut random_node = random_usize() % num_nodes;
             // increase probability of sending packet to a close node (has lower index)
             if random_node != 0 {
-                random_node -= random_u32() as usize % (random_node + 1);
+                random_node -= random_usize() % (random_node + 1);
             }
 
             let random_node = good_nodes[random_node];

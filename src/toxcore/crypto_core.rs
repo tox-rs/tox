@@ -60,6 +60,19 @@ pub fn random_u64() -> u64 {
     NativeEndian::read_u64(&array)
 }
 
+/// Return a random number.
+#[cfg(target_pointer_width = "32")]
+pub fn random_usize() -> usize {
+    trace!("Generating random usize");
+    random_u32() as usize
+}
+
+/// Return a random number.
+#[cfg(target_pointer_width = "64")]
+pub fn random_usize() -> usize {
+    trace!("Generating random usize");
+    random_u64() as usize
+}
 
 /** Check if Tox public key `PUBLICKEYBYTES` is valid. Should be used only for
     input validation.
