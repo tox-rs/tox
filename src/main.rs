@@ -21,6 +21,7 @@ use std::os::unix::fs::OpenOptionsExt;
 
 use futures::sync::mpsc;
 use futures::{future, Future, Sink, Stream};
+use futures::future::Either;
 use itertools::Itertools;
 use log::LevelFilter;
 use tokio::executor::thread_pool;
@@ -141,6 +142,15 @@ fn create_onion_streams() -> (TcpOnion, UdpOnion) {
 }
 
 fn run_tcp(cli_config: &CliConfig, dht_sk: SecretKey, tcp_onion: TcpOnion) -> impl Future<Item = (), Error = Error> {
+    if cli_config.tcp_addrs.is_empty() {
+        // If TCP address is not specified don't start TCP server and only drop
+        // all onion packets from DHT server
+        let tcp_onion_future = tcp_onion.rx
+            .map_err(|()| Error::from(ErrorKind::UnexpectedEof))
+            .for_each(|_| future::ok(()));
+        return Either::A(tcp_onion_future)
+    }
+
     let mut tcp_server = TcpServer::new();
     tcp_server.set_udp_onion_sink(tcp_onion.tx);
     let tcp_server_c = tcp_server.clone();
@@ -166,11 +176,22 @@ fn run_tcp(cli_config: &CliConfig, dht_sk: SecretKey, tcp_onion: TcpOnion) -> im
 
     info!("Running TCP relay on {}", cli_config.tcp_addrs.iter().format(","));
 
-    tcp_server_future.select(tcp_onion_future).map(|_| ()).map_err(|(e, _)| e)
+    Either::B(tcp_server_future
+        .join(tcp_onion_future)
+        .map(|_| ()))
 }
 
 fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_onion: UdpOnion) -> impl Future<Item = (), Error = Error> {
-    let udp_addr = cli_config.udp_addr;
+    let udp_addr = if let Some(udp_addr) = cli_config.udp_addr {
+        udp_addr
+    } else {
+        // If UDP address is not specified don't start DHT server and only drop
+        // all onion packets from TCP server
+        let udp_onion_future = udp_onion.rx
+            .map_err(|()| Error::from(ErrorKind::UnexpectedEof))
+            .for_each(|_| future::ok(()));
+        return Either::A(udp_onion_future)
+    };
 
     let socket = bind_socket(udp_addr);
     let (sink, stream) = UdpFramed::new(socket, DhtCodec).split();
@@ -244,11 +265,11 @@ fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_on
 
     info!("Running DHT server on {}", udp_addr);
 
-    network_reader
+    Either::B(network_reader
         .select(network_writer).map(|_| ()).map_err(|(e, _)| e)
         .select(server.run()).map(|_| ()).map_err(|(e, _)| e)
         .select(lan_discovery_future).map(|_| ()).map_err(|(e, _)| e)
-        .select(udp_onion_future).map(|_| ()).map_err(|(e, _)| e)
+        .join(udp_onion_future).map(|_| ()))
 }
 
 fn main() {
