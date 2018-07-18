@@ -15,9 +15,11 @@ use toxcore::dht::kbucket::*;
 use toxcore::dht::server::*;
 use toxcore::io_tokio::IoFuture;
 
+const TIME_TO_PING: u64 = 2;
+
 /// Hold data for sending PingRequest
 pub struct PingSender {
-    last_time_send_ping: Instant,
+    last_time_send_ping: Option<Instant>,
     nodes_to_send_ping: Bucket,
 }
 
@@ -25,7 +27,7 @@ impl PingSender {
     /// new PingSender object
     pub fn new() -> Self {
         PingSender {
-            last_time_send_ping: Instant::now(),
+            last_time_send_ping: None,
             nodes_to_send_ping: Bucket::new(None),
         }
     }
@@ -43,8 +45,8 @@ impl PingSender {
         self.nodes_to_send_ping.nodes.iter().any(|peer| peer.pk == node.pk)
     }
 
-    fn can_send_pings(&self, iterate_interval: Duration) -> bool {
-        self.last_time_send_ping.elapsed() >= iterate_interval
+    fn can_send_pings(&self) -> bool {
+        self.last_time_send_ping.map_or(true, |time| time.elapsed() >= Duration::from_secs(TIME_TO_PING))
     }
 
     /// try to add node to list to send PingRequest
@@ -53,8 +55,8 @@ impl PingSender {
         // if node already exists in close list and not timed out, then don't send PingRequest
         let close_nodes = server.close_nodes.read();
 
-        match close_nodes.find_node(&node.pk) {
-            Some(ref node_in_close_list) if !node_in_close_list.is_bad_node_timed_out(server) => return Box::new(future::ok(false)),
+        match close_nodes.get_node(&node.pk) {
+            Some(ref node_in_close_list) if !node_in_close_list.is_bad() => return Box::new(future::ok(false)),
             _ => {},
         };
 
@@ -83,13 +85,13 @@ impl PingSender {
     }
 
     /// send PingRequest to all nodes in list
-    pub fn send_pings(&mut self, server: &Server, iterate_interval: Duration) -> IoFuture<()> {
-        if !self.can_send_pings(iterate_interval) {
+    pub fn send_pings(&mut self, server: &Server) -> IoFuture<()> {
+        if !self.can_send_pings() {
             return Box::new(future::ok(()))
         }
 
         let nodes_to_send_ping = mem::replace(&mut self.nodes_to_send_ping, Bucket::new(None));
-        self.last_time_send_ping = Instant::now();
+        self.last_time_send_ping = Some(Instant::now());
 
         let ping_sender = nodes_to_send_ping.nodes.iter().map(|node| {
             server.send_ping_req(&(node.clone()).into())
@@ -122,18 +124,7 @@ mod tests {
     fn ping_try_add_test() {
         let (pk, sk) = gen_keypair();
         let (tx, _rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
-        let mut server = Server::new(tx, pk, sk);
-        let args = ConfigArgs {
-            kill_node_timeout: 10,
-            ping_timeout: 10,
-            ping_interval: 0,
-            bad_node_timeout: 10,
-            nodes_req_interval: 0,
-            nat_ping_req_interval: 0,
-            ping_iter_interval: 0,
-        };
-
-        server.set_config_values(args);
+        let server = Server::new(tx, pk, sk);
 
         let mut ping = PingSender::new();
 
@@ -180,21 +171,17 @@ mod tests {
             saddr: "127.0.0.1:33445".parse().unwrap(),
         };
 
-        ping.try_add(&server,&pn).wait().unwrap();
+        ping.try_add(&server, &pn).wait().unwrap();
 
-        ping.send_pings(&server, Duration::from_secs(0)).wait().unwrap();
+        ping.send_pings(&server).wait().unwrap();
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, _addr) = received.unwrap();
 
         let ping_req = unpack!(packet, DhtPacket::PingRequest);
-
-        let ping_map = server.get_ping_map();
-        let mut ping_map = ping_map.write();
-
-        let client = ping_map.get_mut(&pn.pk).unwrap();
         let ping_req_payload = ping_req.get_payload(&pn_sk).unwrap();
-        let dur = Duration::from_secs(PING_TIMEOUT);
-        assert!(client.check_ping_id(ping_req_payload.id, dur));
+
+        let mut request_queue = server.request_queue.write();
+        assert!(request_queue.check_ping_id(pn.pk, ping_req_payload.id));
     }
 }

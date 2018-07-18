@@ -10,7 +10,6 @@ use futures::{future, Stream, stream};
 
 use toxcore::dht::server::*;
 use toxcore::dht::packed_node::*;
-use toxcore::dht::server::client::*;
 use toxcore::state_format::old::*;
 use toxcore::binary_io::*;
 use toxcore::io_tokio::*;
@@ -58,13 +57,11 @@ impl DaemonState {
             ),
         };
 
-        let mut ping_map = server.ping_map.write();
+        let mut request_queue = server.request_queue.write();
         let nodes_sender = nodes.iter()
-            .map(|node| {
-                let client = ping_map.entry(node.pk).or_insert_with(PingData::new);
-
-                server.send_nodes_req(*node, server.pk, client)
-            });
+            .map(|node|
+                server.send_nodes_req(*node, server.pk, request_queue.new_ping_id(node.pk))
+            );
 
         let nodes_stream = stream::futures_unordered(nodes_sender).then(|_| Ok(()));
         Box::new(nodes_stream.for_each(|()| Ok(())))
