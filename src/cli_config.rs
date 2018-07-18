@@ -34,7 +34,7 @@ impl FromStr for ThreadsConfig {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct CliConfig {
     /// UDP address to run DHT node
-    pub udp_addr: SocketAddr,
+    pub udp_addr: Option<SocketAddr>,
     /// TCP addresses to run TCP relay
     pub tcp_addrs: Vec<SocketAddr>,
     /// DHT SecretKey
@@ -63,7 +63,7 @@ pub fn cli_parse() -> CliConfig {
             .long("udp-address")
             .help("UDP address to run DHT node")
             .takes_value(true)
-            .default_value("0.0.0.0:33445"))
+            .required_unless("tcp-address"))
         .arg(Arg::with_name("tcp-address")
             .short("t")
             .long("tcp-address")
@@ -71,7 +71,7 @@ pub fn cli_parse() -> CliConfig {
             .multiple(true)
             .takes_value(true)
             .use_delimiter(true)
-            .default_value("0.0.0.0:33445"))
+            .required_unless("udp-address"))
         .arg(Arg::with_name("secret-key")
             .short("s")
             .long("secret-key")
@@ -120,9 +120,17 @@ pub fn cli_parse() -> CliConfig {
             .help("Disable LAN discovery"))
         .get_matches();
 
-    let udp_addr = value_t!(matches.value_of("udp-address"), SocketAddr).unwrap_or_else(|e| e.exit());
+    let udp_addr = if matches.is_present("udp-address") {
+        Some(value_t!(matches.value_of("udp-address"), SocketAddr).unwrap_or_else(|e| e.exit()))
+    } else {
+        None
+    };
 
-    let tcp_addrs = values_t!(matches.values_of("tcp-address"), SocketAddr).unwrap_or_else(|e| e.exit());
+    let tcp_addrs = if matches.is_present("tcp-address") {
+        values_t!(matches.values_of("tcp-address"), SocketAddr).unwrap_or_else(|e| e.exit())
+    } else {
+        Vec::new()
+    };
 
     let sk = matches.value_of("secret-key").map(|s| {
         let sk_bytes: [u8; 32] = FromHex::from_hex(s).expect("Invalid DHT secret key");
