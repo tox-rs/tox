@@ -132,14 +132,6 @@ impl DhtFriend {
         }
     }
 
-    /// add node to bootstrap_nodes and friend's close_nodes
-    pub fn add_to_close(&mut self, node: &PackedNode) ->IoFuture<()> {
-        self.bootstrap_nodes.try_add(&self.pk, node);
-        self.close_nodes.try_add(&self.pk, node);
-
-        Box::new(future::ok(()))
-    }
-
     /// get Socket Address list of a friend, a friend can have multi IP address bacause of NAT
     pub fn get_addrs_of_clients(&self, is_ipv6_mode: bool) -> Vec<SocketAddr> {
         self.close_nodes.nodes.iter()
@@ -283,24 +275,6 @@ mod tests {
             let nodes_req_payload = nodes_req.get_payload(&node_sk2).unwrap();
             assert!(request_queue.check_ping_id(node_pk2, nodes_req_payload.id));
         }
-    }
-
-    #[test]
-    fn friend_add_to_close_test() {
-        crypto_init();
-
-        let (friend_pk, _friend_sk) = gen_keypair();
-        let mut friend = DhtFriend::new(friend_pk, 0);
-
-        let node_pk = gen_keypair().0;
-
-        friend.add_to_close(&PackedNode {
-            pk: node_pk,
-            saddr: "127.0.0.1:33446".parse().unwrap(),
-        });
-
-        assert!(friend.close_nodes.contains(&node_pk));
-        assert!(friend.bootstrap_nodes.contains(&node_pk));
     }
 
     #[test]

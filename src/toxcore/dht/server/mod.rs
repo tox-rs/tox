@@ -419,7 +419,7 @@ impl Server {
             },
             DhtPacket::NodesResponse(packet) => {
                 debug!("Received NodesResponse");
-                self.handle_nodes_resp(packet)
+                self.handle_nodes_resp(packet, addr)
             },
             DhtPacket::CookieRequest(packet) => {
                 debug!("Received CookieRequest");
@@ -565,18 +565,15 @@ impl Server {
 
         if request_queue.check_ping_id(packet.pk, payload.id) {
             let mut close_nodes = self.close_nodes.write();
-            if let Some(node) = close_nodes.get_node_mut(&packet.pk) {
-                if addr.is_ipv4() {
-                    node.last_resp_time_v4 = Instant::now();
-                } else {
-                    node.last_resp_time_v6 = Instant::now();
-                }
-                Box::new( future::ok(()) )
-            } else {
-                Box::new( future::err(
-                    Error::new(ErrorKind::Other, "Node from PingResponse does not exist")
-                ))
+            let mut friends = self.friends.write();
+
+            let pn = PackedNode::new(addr, &packet.pk);
+            close_nodes.try_add(&pn);
+            for friend in friends.iter_mut() {
+                friend.close_nodes.try_add(&friend.pk, &pn);
             }
+
+            Box::new( future::ok(()) )
         } else {
             Box::new( future::err(
                 Error::new(ErrorKind::Other, "PingResponse.ping_id does not match")
@@ -643,7 +640,7 @@ impl Server {
     /**
     handle received NodesResponse from peer.
     */
-    fn handle_nodes_resp(&self, packet: NodesResponse) -> IoFuture<()> {
+    fn handle_nodes_resp(&self, packet: NodesResponse, addr: SocketAddr) -> IoFuture<()> {
         let payload = packet.get_payload(&self.sk);
         let payload = match payload {
             Err(e) => return Box::new(future::err(e)),
@@ -654,15 +651,27 @@ impl Server {
 
         if request_queue.check_ping_id(packet.pk, payload.id) {
             let mut close_nodes = self.close_nodes.write();
-            let mut bootstrap_nodes = self.bootstrap_nodes.write();
             let mut friends = self.friends.write();
+            let mut bootstrap_nodes = self.bootstrap_nodes.write();
 
+            // Add node that sent NodesResponse to close nodes lists
+            let pn = PackedNode::new(addr, &packet.pk);
+            close_nodes.try_add(&pn);
+            for friend in friends.iter_mut() {
+                friend.close_nodes.try_add(&friend.pk, &pn);
+            }
+
+            // Process nodes from NodesResponse
             for node in &payload.nodes {
-                close_nodes.try_add(node);
-                bootstrap_nodes.try_add(&self.pk, node);
-                friends.iter_mut().for_each(|friend| {
-                    friend.add_to_close(node);
-                });
+                if close_nodes.can_add(node) {
+                    bootstrap_nodes.try_add(&self.pk, node);
+                }
+
+                for friend in friends.iter_mut() {
+                    if friend.close_nodes.can_add(&friend.pk, node) {
+                        friend.bootstrap_nodes.try_add(&friend.pk, node);
+                    }
+                }
             }
             Box::new( future::ok(()) )
         } else {
@@ -1287,23 +1296,18 @@ mod tests {
     fn server_handle_nodes_resp_test() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
-        let node = vec![PackedNode::new(addr, &bob_pk)];
+        let node = PackedNode::new(SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &gen_keypair().0);
 
         let ping_id = alice.request_queue.write().new_ping_id(bob_pk);
 
-        let resp_payload = NodesResponsePayload { nodes: node, id: ping_id };
+        let resp_payload = NodesResponsePayload { nodes: vec![node], id: ping_id };
         let nodes_resp = DhtPacket::NodesResponse(NodesResponse::new(&precomp, &bob_pk, resp_payload.clone()));
 
         assert!(alice.handle_packet(nodes_resp, addr).wait().is_ok());
 
-        let mut close_nodes = Kbucket::new(&alice.pk);
-        for pn in &resp_payload.nodes {
-            close_nodes.try_add(pn);
-        }
+        let bootstrap_nodes = alice.bootstrap_nodes.read();
 
-        let server_close_nodes = alice.close_nodes.read();
-
-        assert_eq!(server_close_nodes.get_node(&bob_pk).unwrap().pk, close_nodes.get_node(&bob_pk).unwrap().pk);
+        assert!(bootstrap_nodes.to_packed().contains(&node));
     }
 
     #[test]
