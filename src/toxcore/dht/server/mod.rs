@@ -1188,7 +1188,7 @@ mod tests {
     fn server_handle_ping_resp_test() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
-        let packed_node = PackedNode::new(false, addr, &bob_pk);
+        let packed_node = PackedNode::new(addr, &bob_pk);
         assert!(alice.try_add_to_close_nodes(&packed_node));
 
         let ping_id = alice.request_queue.write().new_ping_id(bob_pk);
@@ -1205,7 +1205,7 @@ mod tests {
     fn server_handle_ping_resp_invalid_payload_test() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
-        let packed_node = PackedNode::new(false, addr, &bob_pk);
+        let packed_node = PackedNode::new(addr, &bob_pk);
         assert!(alice.try_add_to_close_nodes(&packed_node));
 
         let ping_id = alice.request_queue.write().new_ping_id(bob_pk);
@@ -1220,7 +1220,7 @@ mod tests {
     fn server_handle_ping_resp_ping_id_is_0_test() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
-        let packed_node = PackedNode::new(false, addr, &bob_pk);
+        let packed_node = PackedNode::new(addr, &bob_pk);
         assert!(alice.try_add_to_close_nodes(&packed_node));
 
         let prs = PingResponsePayload { id: 0 };
@@ -1233,7 +1233,7 @@ mod tests {
     fn server_handle_ping_resp_invalid_ping_id_test() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
-        let packed_node = PackedNode::new(false, addr, &bob_pk);
+        let packed_node = PackedNode::new(addr, &bob_pk);
         assert!(alice.try_add_to_close_nodes(&packed_node));
 
         let ping_id = alice.request_queue.write().new_ping_id(bob_pk);
@@ -1250,7 +1250,7 @@ mod tests {
         let (alice, precomp, bob_pk, bob_sk, rx, addr) = create_node();
 
         // success case
-        let packed_node = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &bob_pk);
+        let packed_node = PackedNode::new(SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &bob_pk);
 
         assert!(alice.try_add_to_close_nodes(&packed_node));
 
@@ -1287,7 +1287,7 @@ mod tests {
     fn server_handle_nodes_resp_test() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
-        let node = vec![PackedNode::new(false, addr, &bob_pk)];
+        let node = vec![PackedNode::new(addr, &bob_pk)];
 
         let ping_id = alice.request_queue.write().new_ping_id(bob_pk);
 
@@ -1312,7 +1312,7 @@ mod tests {
 
         // error case, can't decrypt
         let resp_payload = NodesResponsePayload { nodes: vec![
-            PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &gen_keypair().0)
+            PackedNode::new(SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &gen_keypair().0)
         ], id: 38 };
         let nodes_resp = DhtPacket::NodesResponse(NodesResponse::new(&precomp, &alice.pk, resp_payload));
 
@@ -1324,7 +1324,7 @@ mod tests {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let resp_payload = NodesResponsePayload { nodes: vec![
-            PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &gen_keypair().0)
+            PackedNode::new(SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &gen_keypair().0)
         ], id: 0 };
         let nodes_resp = DhtPacket::NodesResponse(NodesResponse::new(&precomp, &bob_pk, resp_payload));
 
@@ -1338,7 +1338,7 @@ mod tests {
         let ping_id = alice.request_queue.write().new_ping_id(bob_pk);
 
         let resp_payload = NodesResponsePayload { nodes: vec![
-            PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &gen_keypair().0)
+            PackedNode::new(SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &gen_keypair().0)
         ], id: ping_id + 1 };
         let nodes_resp = DhtPacket::NodesResponse(NodesResponse::new(&precomp, &bob_pk, resp_payload));
 
@@ -1470,7 +1470,7 @@ mod tests {
         let precomp = precompute(&charlie_pk, &bob_sk);
 
         // if receiver' pk != node's pk and receiver's pk exists in close_nodes, returns ok()
-        let pn = PackedNode::new(false, SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &charlie_pk);
+        let pn = PackedNode::new(SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &charlie_pk);
         alice.try_add_to_close_nodes(&pn);
 
         let nat_req = NatPingRequest { id: 42 };
@@ -1526,7 +1526,7 @@ mod tests {
         let (friend_pk1, _friend_sk1) = gen_keypair();
 
         let mut friend = DhtFriend::new(bob_pk, 0);
-        let pn = PackedNode::new(false, SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &friend_pk1);
+        let pn = PackedNode::new(SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &friend_pk1);
         friend.close_nodes.try_add(&bob_pk, &pn);
         let ping_id = friend.hole_punch.ping_id;
         alice.add_friend(friend);
@@ -2277,7 +2277,7 @@ mod tests {
         let friend_pk2 = gen_keypair().0;
 
         let mut friend = DhtFriend::new(friend_pk1, 0);
-        let pn = PackedNode::new(false, SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &friend_pk2);
+        let pn = PackedNode::new(SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &friend_pk2);
         friend.close_nodes.try_add(&friend_pk1, &pn);
         alice.add_friend(friend);
 
@@ -2386,10 +2386,10 @@ mod tests {
         let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         let (ping_pk, ping_sk) = gen_keypair();
 
-        let pn = PackedNode::new(false, SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &ping_pk);
+        let pn = PackedNode::new(SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &ping_pk);
         assert!(alice.bootstrap_nodes.write().deref_mut().try_add(&alice.pk, &pn));
 
-        let pn = PackedNode::new(false, SocketAddr::V4("127.0.0.1:33445".parse().unwrap()), &bob_pk);
+        let pn = PackedNode::new(SocketAddr::V4("127.0.0.1:33445".parse().unwrap()), &bob_pk);
         assert!(alice.bootstrap_nodes.write().deref_mut().try_add(&alice.pk, &pn));
 
         alice.dht_main_loop().wait().unwrap();
@@ -2413,10 +2413,10 @@ mod tests {
         let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         let (ping_pk, ping_sk) = gen_keypair();
 
-        let pn = PackedNode::new(false, SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &ping_pk);
+        let pn = PackedNode::new(SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &ping_pk);
         assert!(alice.close_nodes.write().deref_mut().try_add(&pn));
 
-        let pn = PackedNode::new(false, SocketAddr::V4("127.0.0.1:33445".parse().unwrap()), &bob_pk);
+        let pn = PackedNode::new(SocketAddr::V4("127.0.0.1:33445".parse().unwrap()), &bob_pk);
         assert!(alice.close_nodes.write().deref_mut().try_add(&pn));
 
         alice.dht_main_loop().wait().unwrap();
@@ -2440,10 +2440,10 @@ mod tests {
         let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         let (ping_pk, ping_sk) = gen_keypair();
 
-        let pn = PackedNode::new(false, SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &ping_pk);
+        let pn = PackedNode::new(SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &ping_pk);
         assert!(alice.close_nodes.write().deref_mut().try_add(&pn));
 
-        let pn = PackedNode::new(false, SocketAddr::V4("127.0.0.1:33445".parse().unwrap()), &bob_pk);
+        let pn = PackedNode::new(SocketAddr::V4("127.0.0.1:33445".parse().unwrap()), &bob_pk);
         assert!(alice.close_nodes.write().deref_mut().try_add(&pn));
 
         alice.dht_main_loop().wait().unwrap();
@@ -2507,10 +2507,10 @@ mod tests {
         let (mut alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         let (ping_pk, ping_sk) = gen_keypair();
 
-        let pn = PackedNode::new(false, SocketAddr::V6("[FF::01]:33445".parse().unwrap()), &bob_pk);
+        let pn = PackedNode::new(SocketAddr::V6("[FF::01]:33445".parse().unwrap()), &bob_pk);
         assert!(alice.close_nodes.write().deref_mut().try_add(&pn));
 
-        let pn = PackedNode::new(false, SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &ping_pk);
+        let pn = PackedNode::new(SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &ping_pk);
         assert!(alice.close_nodes.write().deref_mut().try_add(&pn));
 
         // test with ipv6 mode

@@ -87,16 +87,11 @@ impl FromBytes for PackedNode {
 }
 
 impl PackedNode {
-    /** New `PackedNode`.
-
-    `udp` - whether UDP or TCP should be used. UDP is used for DHT nodes,
-    whereas TCP is used for TCP relays. When `true`, UDP is used, otherwise
-    TCP is used.
-    */
-    pub fn new(udp: bool, saddr: SocketAddr, pk: &PublicKey) -> Self {
+    /// Create new `PackedNode`.
+    pub fn new(saddr: SocketAddr, pk: &PublicKey) -> Self {
         debug!(target: "PackedNode", "Creating new PackedNode.");
-        trace!(target: "PackedNode", "With args: udp: {}, saddr: {:?}, PK: {:?}",
-            udp, &saddr, pk);
+        trace!(target: "PackedNode", "With args: saddr: {:?}, PK: {:?}",
+            &saddr, pk);
 
         PackedNode { saddr, pk: *pk }
     }
@@ -150,13 +145,13 @@ mod tests {
                 let addr = Ipv4Addr::new(g.gen(), g.gen(), g.gen(), g.gen());
                 let saddr = SocketAddrV4::new(addr, g.gen());
 
-                PackedNode::new(g.gen(), SocketAddr::V4(saddr), &pk)
+                PackedNode::new(SocketAddr::V4(saddr), &pk)
             } else {
                 let addr = Ipv6Addr::new(g.gen(), g.gen(), g.gen(), g.gen(),
                                         g.gen(), g.gen(), g.gen(), g.gen());
                 let saddr = SocketAddrV6::new(addr, g.gen(), 0, 0);
 
-                PackedNode::new(g.gen(), SocketAddr::V6(saddr), &pk)
+                PackedNode::new(SocketAddr::V6(saddr), &pk)
             }
         }
     }
@@ -166,7 +161,7 @@ mod tests {
         fn with_params(saddr: SocketAddr) {
             let (pk, _sk) = gen_keypair();
 
-            let a = PackedNode::new(true, saddr, &pk);
+            let a = PackedNode::new(saddr, &pk);
             let b = PackedNode {
                 saddr,
                 pk,

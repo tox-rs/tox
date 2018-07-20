@@ -908,21 +908,21 @@ mod tests {
             let addr = Ipv4Addr::new(0, 0, 0, 0);
             let saddr = SocketAddrV4::new(addr, 0);
 
-            let n0_base_pk = PackedNode::new(false, SocketAddr::V4(saddr), &base_pk);
+            let n0_base_pk = PackedNode::new(SocketAddr::V4(saddr), &base_pk);
             assert!(!kbucket.try_add(&n0_base_pk));
             kbucket.remove(&base_pk);
 
             pk_bytes[5] = 1;
             let pk1 = PublicKey(pk_bytes);
-            let n1 = PackedNode::new(false, SocketAddr::V4(saddr), &pk1);
+            let n1 = PackedNode::new(SocketAddr::V4(saddr), &pk1);
 
             pk_bytes[10] = 2;
             let pk2 = PublicKey(pk_bytes);
-            let n2 = PackedNode::new(false, SocketAddr::V4(saddr), &pk2);
+            let n2 = PackedNode::new(SocketAddr::V4(saddr), &pk2);
 
             pk_bytes[14] = 4;
             let pk3 = PublicKey(pk_bytes);
-            let n3 = PackedNode::new(false, SocketAddr::V4(saddr), &pk3);
+            let n3 = PackedNode::new(SocketAddr::V4(saddr), &pk3);
 
             assert!(pk1 > pk2);
             assert!(pk2 < pk3);

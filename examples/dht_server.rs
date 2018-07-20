@@ -132,7 +132,7 @@ fn main() {
         let bootstrap_pk = PublicKey::from_slice(&bootstrap_pk_bytes).unwrap();
 
         let saddr: SocketAddr = saddr.parse().unwrap();
-        let bootstrap_pn = PackedNode::new(true, saddr, &bootstrap_pk);
+        let bootstrap_pn = PackedNode::new(saddr, &bootstrap_pk);
         assert!(server_obj.try_add_to_close_nodes(&bootstrap_pn));
     }
 

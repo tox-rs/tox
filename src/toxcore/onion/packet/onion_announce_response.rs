@@ -187,7 +187,7 @@ mod tests {
             announce_status: AnnounceStatus::Found,
             ping_id_or_pk: sha256::hash(&[1, 2, 3]),
             nodes: vec![
-                PackedNode::new(false, SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
+                PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
             ]
         }
     );
@@ -201,7 +201,7 @@ mod tests {
             announce_status: AnnounceStatus::Found,
             ping_id_or_pk: sha256::hash(&[1, 2, 3]),
             nodes: vec![
-                PackedNode::new(false, SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
+                PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
             ]
         };
         // encode payload with shared secret
@@ -222,7 +222,7 @@ mod tests {
             announce_status: AnnounceStatus::Found,
             ping_id_or_pk: sha256::hash(&[1, 2, 3]),
             nodes: vec![
-                PackedNode::new(false, SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
+                PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
             ]
         };
         // encode payload with shared secret

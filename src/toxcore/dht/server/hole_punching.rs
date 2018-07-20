@@ -158,7 +158,7 @@ impl HolePunching {
                 let port = (ports[index] as i16 + delta) as u16;
 
                 server.send_ping_req(
-                    &PackedNode::new(false, SocketAddr::new(ip, port), &friend_pk)
+                    &PackedNode::new(SocketAddr::new(ip, port), &friend_pk)
                 )
             });
 
@@ -205,7 +205,7 @@ impl HolePunching {
 
         let first_hole_punching = if num_same_port == num_ports {
             server.send_ping_req(
-                &PackedNode::new(false, SocketAddr::new(ip, first_port), &friend_pk)
+                &PackedNode::new(SocketAddr::new(ip, first_port), &friend_pk)
             )
         } else {
             let res = self.first_hole_punching(ports, ip, server, friend_pk);
