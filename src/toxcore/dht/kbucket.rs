@@ -183,9 +183,7 @@ impl Bucket {
         trace!(target: "Bucket", "With bucket: {:?}; PK: {:?} and new node: {:?}",
             self, base_pk, new_node);
 
-        let dht_node: DhtNode = (*new_node).into();
-
-        match self.nodes.binary_search_by(|n| base_pk.replace_order(n, &dht_node)) {
+        match self.nodes.binary_search_by(|n| base_pk.distance(&n.pk, &new_node.pk)) {
             Ok(index) => {
                 debug!(target: "Bucket",
                     "Updated: the node was already in the bucket.");
@@ -204,15 +202,27 @@ impl Bucket {
             Err(index) if index == self.nodes.len() => {
                 // index is pointing past the end
                 if self.is_full() {
-                    debug!(target: "Bucket",
-                        "Node is too distant to add to the bucket.");
-                    false
+                    match self.nodes.iter().rposition(|n| n.is_bad()) {
+                        Some(index) => {
+                            debug!(target: "Bucket",
+                                "No free space left in the bucket, the last bad node removed.");
+                            // replace the farthest bad node
+                            self.nodes.remove(index);
+                            self.nodes.push((*new_node).into());
+                            true
+                        },
+                        None => {
+                            debug!(target: "Bucket",
+                                "Node is too distant to add to the bucket.");
+                            false
+                        },
+                    }
                 } else {
                     // distance to the PK was bigger than the other keys, but
                     // there's still free space in the bucket for a node
                     debug!(target: "Bucket",
                         "Node inserted at the end of the bucket.");
-                    self.nodes.push(dht_node);
+                    self.nodes.push((*new_node).into());
                     true
                 }
             },
@@ -224,7 +234,7 @@ impl Bucket {
                     self.nodes.pop();
                 }
                 debug!(target: "Bucket", "Node inserted inside the bucket.");
-                self.nodes.insert(index, dht_node);
+                self.nodes.insert(index, (*new_node).into());
                 true
             },
         }
@@ -291,13 +301,10 @@ impl Bucket {
     [`PackedNode`]: ./struct.PackedNode.html
     */
     pub fn can_add(&self, base_pk: &PublicKey, new_node: &PackedNode) -> bool {
-        let new_node: DhtNode = (*new_node).into();
-
-        match self.nodes.binary_search_by(|n| base_pk.replace_order(n, &new_node)) {
-            Ok(_index) => false, // node already exist in bucket, so can't add node
-            Err(index) if index == self.nodes.len() => { // can't find node in bucket
-                !self.is_full()
-            },
+        match self.nodes.binary_search_by(|n| base_pk.distance(&n.pk, &new_node.pk)) {
+            Ok(index) => self.nodes[index].is_bad(), // if node is bad then we'd want to update it's address
+            Err(index) if index == self.nodes.len() => // can't find node in bucket
+                !self.is_full() || self.nodes.iter().any(|n| n.is_bad()),
             Err(_index) => true, // node is not found in bucket, so can add node
         }
     }
@@ -542,6 +549,12 @@ mod tests {
         SocketAddr,
         SocketAddrV4,
     };
+    use std::time::Duration;
+
+    use tokio_executor;
+    use tokio_timer::clock::*;
+
+    use toxcore::time::ConstNow;
 
     /// Get a PK from 4 `u64`s.
     fn nums_to_pk(a: u64, b: u64, c: u64, d: u64) -> PublicKey {
@@ -652,13 +665,24 @@ mod tests {
                 return TestResult::discard()
             }
 
-            let mut node = Bucket::new(Some(1));
+            let mut bucket = Bucket::new(Some(1));
 
-            assert_eq!(true, node.try_add(&pk, &n1));
-            assert_eq!(false, node.try_add(&pk, &n2));
+            assert!(bucket.try_add(&pk, &n1));
+            assert!(!bucket.try_add(&pk, &n2));
 
             // updating node
-            assert_eq!(true, node.try_add(&pk, &n1));
+            assert!(bucket.try_add(&pk, &n1));
+
+            let mut enter = tokio_executor::enter().unwrap();
+            let clock = Clock::new_with_now(ConstNow(
+                Instant::now() + Duration::from_secs(BAD_NODE_TIMEOUT + 1)
+            ));
+
+            // replacing bad node
+            with_default(&clock, &mut enter, |_| {
+                assert!(bucket.try_add(&pk, &n2));
+            });
+
             TestResult::passed()
         }
         quickcheck(with_nodes as fn(PackedNode, PackedNode) -> TestResult);
