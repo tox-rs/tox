@@ -8,40 +8,15 @@ Here, GOOD node is the node responded within 162 seconds, BAD node is the node n
 
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::time::{Duration, Instant};
-use std::cmp::Ordering;
 use std::ops::Sub;
 
 use toxcore::crypto_core::*;
 use toxcore::dht::packed_node::*;
-use toxcore::dht::kbucket::*;
+use toxcore::time::*;
 
 /// The number of seconds for a non responsive node to become bad.
 pub const BAD_NODE_TIMEOUT: u64 = 182;
 
-/// check distance of PK1 and PK2 from base_PK including status of node
-pub trait ReplaceOrder {
-    /// Check distance of PK1 and Pk2 including status of node
-    fn replace_order(&self, &DhtNode, &DhtNode) -> Ordering;
-}
-
-impl ReplaceOrder for PublicKey {
-    fn replace_order(&self, node1: &DhtNode, node2: &DhtNode) -> Ordering {
-        trace!(target: "Distance", "Comparing distance between PKs. and status of node");
-        if node1.is_bad() {
-            if node2.is_bad() {
-                self.distance(&node1.pk, &node2.pk) // both bad
-            } else {
-                Ordering::Greater // bad, good
-            }
-        } else {
-            if node2.is_bad() {
-                Ordering::Less // good, bad
-            } else {
-                self.distance(&node1.pk, &node2.pk) // both good
-            }
-        }
-    }
-}
 /** Struct used by Bucket, DHT maintains close node list, when we got new node,
 we should make decision to add new node to close node list, or not.
 the PK's distance and status of node help making decision.
@@ -79,9 +54,9 @@ impl DhtNode {
         };
 
         let (last_resp_time_v4, last_resp_time_v6) = if saddr_v4.is_some() {
-            (Instant::now(), Instant::now().sub(Duration::from_secs(BAD_NODE_TIMEOUT)))
+            (clock_now(), clock_now().sub(Duration::from_secs(BAD_NODE_TIMEOUT)))
         } else {
-            (Instant::now().sub(Duration::from_secs(BAD_NODE_TIMEOUT)), Instant::now())
+            (clock_now().sub(Duration::from_secs(BAD_NODE_TIMEOUT)), clock_now())
         };
 
         DhtNode {
@@ -97,8 +72,8 @@ impl DhtNode {
     /// Check if the node is timed out i.e. it does not answer both on IPv4 and
     /// IPv6 addresses for `BAD_NODE_TIMEOUT` seconds.
     pub fn is_bad(&self) -> bool {
-        self.last_resp_time_v4.elapsed() > Duration::from_secs(BAD_NODE_TIMEOUT) &&
-            self.last_resp_time_v6.elapsed() > Duration::from_secs(BAD_NODE_TIMEOUT)
+        clock_elapsed(self.last_resp_time_v4) > Duration::from_secs(BAD_NODE_TIMEOUT) &&
+            clock_elapsed(self.last_resp_time_v6) > Duration::from_secs(BAD_NODE_TIMEOUT)
     }
 
     /// return SocketAddr for DhtNode
@@ -137,6 +112,8 @@ impl DhtNode {
 mod tests {
     use super::*;
     use quickcheck::quickcheck;
+
+    use toxcore::dht::kbucket::Bucket;
 
     #[test]
     fn dht_node_clonable() {
