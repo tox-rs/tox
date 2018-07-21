@@ -37,6 +37,12 @@ to a keys file can be specified via `--keys-file` argument. If file doesn't
 exist it will be created with automatically generated keys. The format of this
 file is compatible with `tox-bootstrapd`.
 
+You may also extract the key from the file:
+
+```sh
+hexdump -s32 -e '32/1 "%02x" "\n"' ./key
+```
+
 ### Secret key
 
 Secret key is a hexadecimal string of size 32 bytes. It can be specified via
