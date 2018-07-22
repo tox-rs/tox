@@ -151,7 +151,7 @@ mod tests {
         assert!(ping.nodes_to_send_ping.is_empty());
 
         // node is a friend, do not be added to ping list
-        server.add_friend(DhtFriend::new(pn.pk, BOOTSTRAP_TIMES));
+        server.add_friend(DhtFriend::new(pn.pk));
 
         ping.try_add(&server,&pn).wait().unwrap();
 

@@ -1144,7 +1144,7 @@ mod tests {
     fn add_friend_test() {
         let (alice, _precomp, bob_pk, _bob_sk, _rx, _addr) = create_node();
 
-        let friend = DhtFriend::new(bob_pk, 0);
+        let friend = DhtFriend::new(bob_pk);
         alice.add_friend(friend);
     }
 
@@ -1529,7 +1529,7 @@ mod tests {
         // success case
         let (friend_pk1, _friend_sk1) = gen_keypair();
 
-        let mut friend = DhtFriend::new(bob_pk, 0);
+        let mut friend = DhtFriend::new(bob_pk);
         let pn = PackedNode::new(SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &friend_pk1);
         friend.close_nodes.try_add(&bob_pk, &pn);
         let ping_id = friend.hole_punch.ping_id;
@@ -2280,7 +2280,7 @@ mod tests {
         let (friend_pk1, friend_sk1) = gen_keypair();
         let friend_pk2 = gen_keypair().0;
 
-        let mut friend = DhtFriend::new(friend_pk1, 0);
+        let mut friend = DhtFriend::new(friend_pk1);
         let pn = PackedNode::new(SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &friend_pk2);
         friend.close_nodes.try_add(&friend_pk1, &pn);
         alice.add_friend(friend);
@@ -2472,10 +2472,10 @@ mod tests {
         let friend_pk1 = gen_keypair().0;
         let friend_pk2 = gen_keypair().0;
 
-        let friend = DhtFriend::new(friend_pk1, 0);
+        let friend = DhtFriend::new(friend_pk1);
         alice.add_friend(friend);
 
-        let friend = DhtFriend::new(friend_pk2, 0);
+        let friend = DhtFriend::new(friend_pk2);
         alice.add_friend(friend);
 
         alice.dht_main_loop().wait().unwrap();

@@ -34,14 +34,13 @@ pub struct DhtFriend {
 }
 
 impl DhtFriend {
-    /// Create new DhtFriend object
-    /// Maximum bootstrap_times is 5, if you want to bootstrap 2 times, set bootstrap_times to 3.
-    pub fn new(pk: PublicKey, bootstrap_times: u32) -> Self {
+    /// Create new `DhtFriend`.
+    pub fn new(pk: PublicKey) -> Self {
         DhtFriend {
             pk,
             close_nodes: Bucket::new(None),
             last_nodes_req_time: None,
-            bootstrap_times,
+            bootstrap_times: 0,
             bootstrap_nodes: Bucket::new(None),
             hole_punch: HolePunching::new(),
         }
@@ -150,7 +149,7 @@ mod tests {
 
     #[test]
     fn friend_new_test() {
-        let _ = DhtFriend::new(gen_keypair().0, 0);
+        let _ = DhtFriend::new(gen_keypair().0);
     }
 
     #[test]
@@ -158,7 +157,7 @@ mod tests {
         crypto_init();
 
         let (friend_pk, _friend_sk) = gen_keypair();
-        let mut friend = DhtFriend::new(friend_pk, 0);
+        let mut friend = DhtFriend::new(friend_pk);
         let (pk, sk) = gen_keypair();
         let (tx, rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
         let server = Server::new(tx, pk, sk.clone());
@@ -196,7 +195,7 @@ mod tests {
         crypto_init();
 
         let (friend_pk, _friend_sk) = gen_keypair();
-        let mut friend = DhtFriend::new(friend_pk, 0);
+        let mut friend = DhtFriend::new(friend_pk);
         let (pk, sk) = gen_keypair();
         let (tx, rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
         let server = Server::new(tx, pk, sk.clone());
@@ -239,7 +238,7 @@ mod tests {
         crypto_init();
 
         let (friend_pk, _friend_sk) = gen_keypair();
-        let mut friend = DhtFriend::new(friend_pk, 0);
+        let mut friend = DhtFriend::new(friend_pk);
         let (pk, sk) = gen_keypair();
         let (tx, rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
         let server = Server::new(tx, pk, sk.clone());
@@ -280,7 +279,7 @@ mod tests {
     #[test]
     fn friend_get_addrs_of_clients_test() {
         let (friend_pk, _friend_sk) = gen_keypair();
-        let mut friend = DhtFriend::new(friend_pk, 0);
+        let mut friend = DhtFriend::new(friend_pk);
 
         let (node_pk1, _node_sk1) = gen_keypair();
         assert!(friend.close_nodes.try_add(&friend_pk, &PackedNode {
