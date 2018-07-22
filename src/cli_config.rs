@@ -2,7 +2,7 @@ use std::net::{SocketAddr, ToSocketAddrs};
 use std::num::ParseIntError;
 use std::str::FromStr;
 
-use clap::{Arg, App, AppSettings};
+use clap::{App, AppSettings, Arg, ArgGroup};
 use hex::FromHex;
 use itertools::Itertools;
 use tox::toxcore::crypto_core::*;
@@ -72,20 +72,19 @@ pub fn cli_parse() -> CliConfig {
             .takes_value(true)
             .use_delimiter(true)
             .required_unless("udp-address"))
+        .group(ArgGroup::with_name("credentials")
+            .args(&["secret-key", "keys-file"])
+            .required(true))
         .arg(Arg::with_name("secret-key")
             .short("s")
             .long("secret-key")
             .help("DHT secret key")
-            .takes_value(true)
-            .required(true)
-            .conflicts_with("keys-file"))
+            .takes_value(true))
         .arg(Arg::with_name("keys-file")
             .short("k")
             .long("keys-file")
             .help("Path to the file where DHT keys are stored")
-            .takes_value(true)
-            .required(true)
-            .conflicts_with("secret-key"))
+            .takes_value(true))
         .arg(Arg::with_name("bootstrap-node")
             .short("b")
             .long("bootstrap-node")
