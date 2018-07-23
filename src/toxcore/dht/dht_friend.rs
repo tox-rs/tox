@@ -46,6 +46,15 @@ impl DhtFriend {
         }
     }
 
+    /// IP address is known when `DhtFriend` has node in close nodes list with
+    /// the same `PublicKey`.
+    pub fn is_ip_known(&self) -> bool {
+        // Since nodes in Bucket are sorted by distance to our PublicKey the
+        // node with the same PublicKey will be always the first
+        self.close_nodes.nodes.first()
+            .map_or(false, |node| node.pk == self.pk)
+    }
+
     /// send NodesRequest packet to bootstap_nodes, close list
     pub fn send_nodes_req_packets(&mut self, server: &Server) -> IoFuture<()> {
         let ping_bootstrap_nodes = self.ping_bootstrap_nodes(server);

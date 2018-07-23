@@ -300,9 +300,12 @@ impl Bucket {
     [`Bucket`]: ./struct.Bucket.html
     [`PackedNode`]: ./struct.PackedNode.html
     */
-    pub fn can_add(&self, base_pk: &PublicKey, new_node: &PackedNode) -> bool {
+    pub fn can_add(&self, base_pk: &PublicKey, new_node: &PackedNode) -> bool { // TODO: synchronize result with try_add?
         match self.nodes.binary_search_by(|n| base_pk.distance(&n.pk, &new_node.pk)) {
-            Ok(index) => self.nodes[index].is_bad(), // if node is bad then we'd want to update it's address
+            Ok(index) => // if node is bad then we'd want to update it's address
+                self.nodes[index].is_bad() ||
+                    self.nodes[index].saddr_v4.map(SocketAddr::V4) != Some(new_node.saddr) &&
+                    self.nodes[index].saddr_v6.map(SocketAddr::V6) != Some(new_node.saddr),
             Err(index) if index == self.nodes.len() => // can't find node in bucket
                 !self.is_full() || self.nodes.iter().any(|n| n.is_bad()),
             Err(_index) => true, // node is not found in bucket, so can add node

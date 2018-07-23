@@ -3,7 +3,6 @@ Functionality needed to work as a DHT node.
 This module works on top of other modules.
 */
 
-pub mod ping_sender;
 pub mod hole_punching;
 
 use futures::{Future, Sink, Stream, future, stream};
@@ -30,7 +29,6 @@ use toxcore::io_tokio::*;
 use toxcore::dht::dht_friend::*;
 use toxcore::dht::server::hole_punching::*;
 use toxcore::tcp::packet::OnionRequest;
-use toxcore::dht::server::ping_sender::*;
 use toxcore::net_crypto::*;
 use toxcore::dht::ip_port::IsGlobal;
 
@@ -52,6 +50,10 @@ pub const NODES_REQ_INTERVAL: u64 = 20;
 pub const PING_INTERVAL: u64 = 60;
 /// Ping timeout in seconds
 pub const PING_TIMEOUT: u64 = 5;
+/// Maximum newly announced nodes to ping per `TIME_TO_PING` seconds.
+pub const MAX_TO_PING: u8 = 32;
+/// How often in seconds to ping newly announced nodes.
+pub const TIME_TO_PING: u64 = 2;
 
 /**
 Own DHT node data.
@@ -107,7 +109,13 @@ pub struct Server {
     // setting this value to 0 will do sending 5 times
     bootstrap_times: Arc<RwLock<u32>>,
     last_nodes_req_time: Arc<RwLock<Instant>>,
-    ping_sender: Arc<RwLock<PingSender>>,
+    /// List of nodes to send `PingRequest`. When we receive `PingRequest` or
+    /// `NodesRequest` packet from a new node we should send `PingRequest` to
+    /// this node to check if it's capable of handling our requests. But instead
+    /// of instant sending `PingRequest` we will add the node to this list which
+    /// is processed every `TIME_TO_PING` seconds. The purpose of this is to
+    /// prevent amplification attacks.
+    nodes_to_send_ping: Arc<RwLock<Bucket>>,
     // toxcore version used in BootstrapInfo
     tox_core_version: u32,
     // message used in BootstrapInfo
@@ -145,7 +153,7 @@ impl Server {
             bootstrap_nodes: Arc::new(RwLock::new(Bucket::new(None))),
             bootstrap_times: Arc::new(RwLock::new(0)),
             last_nodes_req_time: Arc::new(RwLock::new(Instant::now())),
-            ping_sender: Arc::new(RwLock::new(PingSender::new())),
+            nodes_to_send_ping: Arc::new(RwLock::new(Bucket::new(Some(MAX_TO_PING)))),
             tox_core_version: 0,
             motd: Vec::new(),
             tcp_onion_sink: None,
@@ -183,24 +191,29 @@ impl Server {
         let send_nodes_req_random = self.send_nodes_req_random();
         let send_nodes_req_to_friends = self.send_nodes_req_to_friends();
 
-        let ping_sender = self.send_pings();
-
         let send_nat_ping_req = self.send_nat_ping_req();
 
         let res = future::join_all(vec![ping_bootstrap_nodes,
                                         ping_and_get_close_nodes,
                                         send_nodes_req_random,
                                         send_nodes_req_to_friends,
-                                        ping_sender,
                                         send_nat_ping_req])
             .map(|_| ());
 
         Box::new(res)
     }
 
-    /// Run DHT main loop periodically. Result future will never be completed
+    /// Run DHT periodical tasks. Result future will never be completed
     /// successfully.
     pub fn run(self) -> IoFuture<()> {
+        let future = self.clone().run_pings_sending()
+            .join(self.run_main_loop()).map(|_| ());
+        Box::new(future)
+    }
+
+    /// Run DHT main loop periodically. Result future will never be completed
+    /// successfully.
+    fn run_main_loop(self) -> IoFuture<()> {
         let interval = Duration::from_secs(1);
         let wakeups = Interval::new(Instant::now(), interval);
         let future = wakeups
@@ -212,11 +225,56 @@ impl Server {
         Box::new(future)
     }
 
-    // send PingRequest using Ping object
-    fn send_pings(&self) -> IoFuture<()> {
-        let mut ping_sender = self.ping_sender.write();
+    /// Run ping sending periodically. Result future will never be completed
+    /// successfully.
+    fn run_pings_sending(self) -> IoFuture<()> {
+        let interval = Duration::from_secs(TIME_TO_PING);
+        let wakeups = Interval::new(Instant::now() + interval, interval);
+        let future = wakeups
+            .map_err(|e| Error::new(ErrorKind::Other, format!("Ping timer error: {:?}", e)))
+            .for_each(move |_instant| {
+                trace!("Pings sending wake up");
+                self.send_pings()
+            });
+        Box::new(future)
+    }
 
-        ping_sender.send_pings(&self)
+    /// Send `PingRequest` packets to nodes from `nodes_to_send_ping` list.
+    fn send_pings(&self) -> IoFuture<()> {
+        let nodes_to_send_ping = mem::replace(
+            self.nodes_to_send_ping.write().deref_mut(),
+            Bucket::new(Some(MAX_TO_PING))
+        );
+
+        if nodes_to_send_ping.nodes.is_empty() {
+            return Box::new(future::ok(()))
+        }
+
+        let futures = nodes_to_send_ping.nodes.into_iter().map(|node|
+            self.send_ping_req(&(node.clone()).into())
+        ).collect::<Vec<_>>();
+
+        Box::new(future::join_all(futures).map(|_| ()))
+    }
+
+    fn ping_add(&self, node: &PackedNode) -> IoFuture<()> {
+        let close_nodes = self.close_nodes.read();
+
+        if !close_nodes.can_add(node) {
+            return Box::new(future::ok(()))
+        }
+
+        let friends = self.friends.read();
+
+        // If node is friend and we don't know friend's IP address yet then send
+        // PingRequest immediately and unconditionally
+        if friends.iter().any(|friend| friend.pk == node.pk && !friend.is_ip_known()) {
+            return Box::new(self.send_ping_req(node))
+        }
+
+        self.nodes_to_send_ping.write().try_add(&self.pk, node);
+
+        Box::new(future::ok(()))
     }
 
     // send NodesRequest to friends
@@ -538,8 +596,7 @@ impl Server {
 
         // node is added if it's PK is closer than nodes in ping list
         // the result of try_add is ignored, if it is not added, then PingRequest is not sent to the node.
-        Box::new(self.ping_sender.write().try_add(&self, &node_to_ping)
-            .map(|_| ())
+        Box::new(self.ping_add(&node_to_ping)
             .join(self.send_to(addr, ping_resp))
             .map(|_| ())
         )
@@ -631,8 +688,7 @@ impl Server {
 
         // node is added if it's PK is closer than nodes in ping list
         // the result of try_add is ignored, if it is not added, then PingRequest is not sent to the node.
-        Box::new(self.ping_sender.write().try_add(&self, &node_to_ping)
-            .map(|_| ())
+        Box::new(self.ping_add(&node_to_ping)
             .join(self.send_to(addr, nodes_resp))
             .map(|_| ())
         )
