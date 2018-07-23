@@ -11,6 +11,7 @@ use std::io::{Error, ErrorKind};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
+use std::time::Instant;
 
 use futures::{Sink, Stream, Future, future, stream};
 use futures::sync::mpsc;
@@ -259,9 +260,11 @@ impl Server {
                     "PongResponse.ping_id == 0"
             )))
         }
-        let state = self.state.read();
-        if let Some(client_a) = state.connected_clients.get(pk) {
+        let mut state = self.state.write();
+        if let Some(client_a) = state.connected_clients.get_mut(pk) {
             if packet.ping_id == client_a.ping_id() {
+                client_a.set_last_pong_resp(Instant::now());
+
                 Box::new( future::ok(()) )
             } else {
                 Box::new( future::err(
@@ -365,6 +368,25 @@ impl Server {
             Box::new( future::ok(()) )
         }
     }
+    /** Send pings to all connected clients
+    */
+    pub fn send_pings(&self) -> IoFuture<()> {
+        let mut state = self.state.write();
+
+        state.connected_clients.iter()
+            .filter(|(_key, client)| client.is_pong_timedout())
+            .for_each(|(key, _client)| {
+                self.shutdown_client(key);
+            });
+
+        let ping_sender = state.connected_clients.iter_mut()
+            .filter(|(_key, client)| client.is_ping_interval_passed())
+            .map(|(_key, client)| client.send_ping_request());
+
+        let ping_stream = stream::futures_unordered(ping_sender).then(|_| Ok(()));
+
+        Box::new(ping_stream.for_each(|()| Ok(())))
+    }
 }
 
 #[cfg(test)]
@@ -375,10 +397,18 @@ mod tests {
     use ::toxcore::onion::packet::*;
     use ::toxcore::tcp::packet::*;
     use ::toxcore::tcp::server::{Client, Server};
+    use toxcore::tcp::server::client::TCP_PING_FREQUENCY;
+
     use futures::sync::mpsc;
     use futures::{Stream, Future};
     use quickcheck::{Arbitrary, StdGen};
     use std::net::{IpAddr, Ipv4Addr};
+    use std::time::{Instant, Duration};
+
+    use tokio_executor;
+    use tokio_timer::clock::*;
+
+    use toxcore::time::ConstNow;
 
     #[test]
     fn server_is_clonable() {
@@ -1236,5 +1266,38 @@ mod tests {
             .handle_packet(&client_pk_1, Packet::OnionRequest(request))
             .wait();
         assert!(handle_res.is_err());
+    }
+    #[test]
+    fn tcp_send_pings_test() {
+        let server = Server::new();
+
+        // client #1
+        let (client_1, rx_1) = create_random_client();
+        server.insert(client_1);
+
+        // client #2
+        let (client_2, rx_2) = create_random_client();
+        server.insert(client_2);
+
+        // client #3
+        let (client_3, rx_3) = create_random_client();
+        server.insert(client_3);
+
+        let now = Instant::now();
+
+        let mut enter = tokio_executor::enter().unwrap();
+        // time when all entries is needed to send PingRequest
+        let clock_1 = Clock::new_with_now(ConstNow(
+            now + Duration::from_secs(TCP_PING_FREQUENCY + 1)
+        ));
+
+        with_default(&clock_1, &mut enter, |_| {
+            let sender_res = server.send_pings().wait();
+            assert!(sender_res.is_ok());
+        });
+
+        let (_packet, _rx_1) = rx_1.into_future().wait().unwrap();
+        let (_packet, _rx_2) = rx_2.into_future().wait().unwrap();
+        let (_packet, _rx_3) = rx_3.into_future().wait().unwrap();
     }
 }
