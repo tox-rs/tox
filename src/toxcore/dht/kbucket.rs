@@ -18,12 +18,12 @@ PK; and additionally used to store nodes closest to friends.
 use std::net::SocketAddr;
 use std::cmp::{Ord, Ordering};
 use std::convert::Into;
-use std::time::Instant;
 
 use toxcore::crypto_core::*;
 use toxcore::dht::dht_node::*;
 use toxcore::dht::packed_node::*;
 use toxcore::dht::ip_port::IsGlobal;
+use toxcore::time::*;
 
 /** Calculate the [`k-bucket`](./struct.Kbucket.html) index of a PK compared
 to "own" PK.
@@ -190,11 +190,11 @@ impl Bucket {
                 match new_node.saddr {
                     SocketAddr::V4(sock_v4) => {
                         self.nodes[index].saddr_v4 = Some(sock_v4);
-                        self.nodes[index].last_resp_time_v4 = Instant::now();
+                        self.nodes[index].last_resp_time_v4 = Some(clock_now());
                     },
                     SocketAddr::V6(sock_v6) => {
                         self.nodes[index].saddr_v6 = Some(sock_v6);
-                        self.nodes[index].last_resp_time_v6 = Instant::now();
+                        self.nodes[index].last_resp_time_v6 = Some(clock_now());
                     }
                 }
                 true
@@ -552,7 +552,7 @@ mod tests {
         SocketAddr,
         SocketAddrV4,
     };
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use tokio_executor;
     use tokio_timer::clock::*;
