@@ -13,8 +13,14 @@ use toxcore::crypto_core::*;
 use toxcore::dht::packed_node::*;
 use toxcore::time::*;
 
+/// Ping interval in seconds for each node in our lists.
+pub const PING_INTERVAL: u64 = 60;
+
 /// The number of seconds for a non responsive node to become bad.
-pub const BAD_NODE_TIMEOUT: u64 = 182;
+pub const BAD_NODE_TIMEOUT: u64 = PING_INTERVAL * 2 + 2;
+
+/// The timeout after which a node is discarded completely.
+pub const KILL_NODE_TIMEOUT: u64 = BAD_NODE_TIMEOUT + PING_INTERVAL;
 
 /** Struct used by Bucket, DHT maintains close node list, when we got new node,
 we should make decision to add new node to close node list, or not.
@@ -68,11 +74,23 @@ impl DhtNode {
         }
     }
 
-    /// Check if the node is timed out i.e. it does not answer both on IPv4 and
-    /// IPv6 addresses for `BAD_NODE_TIMEOUT` seconds.
+    /// Check if the node is considered bad i.e. it does not answer both on IPv4
+    /// and IPv6 addresses for `BAD_NODE_TIMEOUT` seconds.
     pub fn is_bad(&self) -> bool {
         self.last_resp_time_v4.map_or(true, |time| clock_elapsed(time) > Duration::from_secs(BAD_NODE_TIMEOUT)) &&
             self.last_resp_time_v6.map_or(true, |time| clock_elapsed(time) > Duration::from_secs(BAD_NODE_TIMEOUT))
+    }
+
+    /// Check if the node is considered discarded i.e. it does not answer both
+    /// on IPv4 and IPv6 addresses for `KILL_NODE_TIMEOUT` seconds.
+    pub fn is_discarded(&self) -> bool {
+        self.last_resp_time_v4.map_or(true, |time| clock_elapsed(time) > Duration::from_secs(KILL_NODE_TIMEOUT)) &&
+            self.last_resp_time_v6.map_or(true, |time| clock_elapsed(time) > Duration::from_secs(KILL_NODE_TIMEOUT))
+    }
+
+    /// Check if `PING_INTERVAL` is passed after last ping request.
+    pub fn is_ping_interval_passed(&self) -> bool {
+        self.last_ping_req_time.map_or(true, |time| time.elapsed() >= Duration::from_secs(PING_INTERVAL))
     }
 
     /// return SocketAddr for DhtNode

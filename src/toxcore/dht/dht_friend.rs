@@ -92,13 +92,10 @@ impl DhtFriend {
 
         let pk = self.pk;
         let nodes_sender = self.close_nodes.nodes.iter_mut()
+            .filter(|node| !node.is_discarded() && node.is_ping_interval_passed())
             .map(|node| {
-                if node.last_ping_req_time.map_or(true, |time| time.elapsed() >= Duration::from_secs(PING_INTERVAL)) {
-                    node.last_ping_req_time = Some(Instant::now());
-                    server.send_nodes_req(node.clone().into(), pk, request_queue.new_ping_id(node.pk))
-                } else {
-                    Box::new(future::ok(()))
-                }
+                node.last_ping_req_time = Some(Instant::now());
+                server.send_nodes_req(node.clone().into(), pk, request_queue.new_ping_id(node.pk))
             });
 
         let nodes_stream = stream::futures_unordered(nodes_sender).then(|_| Ok(()));
@@ -114,7 +111,7 @@ impl DhtFriend {
         }
 
         let good_nodes = self.close_nodes.nodes.iter()
-            .filter(|&node| !node.is_bad())
+            .filter(|&node| !node.is_discarded())
             .map(|node| node.clone().into())
             .collect::<Vec<PackedNode>>();
 

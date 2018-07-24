@@ -46,8 +46,6 @@ pub const NAT_PING_REQ_INTERVAL: u64 = 3;
 pub const ONION_REFRESH_KEY_INTERVAL: u64 = 7200;
 /// Interval in seconds for random NodesRequest
 pub const NODES_REQ_INTERVAL: u64 = 20;
-/// Interval in seconds for ping
-pub const PING_INTERVAL: u64 = 60;
 /// Ping timeout in seconds
 pub const PING_TIMEOUT: u64 = 5;
 /// Maximum newly announced nodes to ping per `TIME_TO_PING` seconds.
@@ -314,9 +312,7 @@ impl Server {
         let mut request_queue = self.request_queue.write();
 
         let nodes_sender = close_nodes.iter_mut()
-            .filter(|node|
-                node.last_ping_req_time.map_or(true, |time| time.elapsed() >= Duration::from_secs(PING_INTERVAL))
-            )
+            .filter(|node| !node.is_discarded() && node.is_ping_interval_passed())
             .map(|node| {
                 node.last_ping_req_time = Some(Instant::now());
                 self.send_nodes_req(node.clone().into(), self.pk, request_queue.new_ping_id(node.pk))
@@ -339,7 +335,7 @@ impl Server {
         let close_nodes = self.close_nodes.read();
 
         let good_nodes = close_nodes.iter()
-            .filter(|&node| !node.is_bad())
+            .filter(|&node| !node.is_discarded())
             .cloned()
             .map(|node| node.into())
             .collect::<Vec<PackedNode>>();
