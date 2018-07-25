@@ -95,8 +95,6 @@ pub struct Server {
     pub close_nodes: Arc<RwLock<Kbucket>>,
     // symmetric key used for onion return encryption
     onion_symmetric_key: Arc<RwLock<secretbox::Key>>,
-    // time when onion key was generated
-    onion_symmetric_key_time: Arc<RwLock<Instant>>,
     // onion announce struct to handle onion packets
     onion_announce: Arc<RwLock<OnionAnnounce>>,
     /// friends vector of dht node
@@ -146,7 +144,6 @@ impl Server {
             request_queue: Arc::new(RwLock::new(RequestQueue::new(Duration::from_secs(PING_TIMEOUT)))),
             close_nodes: Arc::new(RwLock::new(Kbucket::new(&pk))),
             onion_symmetric_key: Arc::new(RwLock::new(secretbox::gen_key())),
-            onion_symmetric_key_time: Arc::new(RwLock::new(clock_now())),
             onion_announce: Arc::new(RwLock::new(OnionAnnounce::new(pk))),
             friends: Arc::new(RwLock::new(Vec::new())),
             bootstrap_nodes: Arc::new(RwLock::new(Bucket::new(None))),
@@ -194,8 +191,6 @@ impl Server {
             }
         }
 
-        self.refresh_onion_key();
-
         let mut request_queue = self.request_queue.write();
         let mut bootstrap_nodes = self.bootstrap_nodes.write();
         let mut close_nodes = self.close_nodes.write();
@@ -239,8 +234,10 @@ impl Server {
     /// Run DHT periodical tasks. Result future will never be completed
     /// successfully.
     pub fn run(self) -> IoFuture<()> {
-        let future = self.clone().run_pings_sending()
-            .join(self.run_main_loop()).map(|_| ());
+        let future = self.clone().run_pings_sending().join3(
+            self.clone().run_onion_key_refresing(),
+            self.run_main_loop()
+        ).map(|_| ());
         Box::new(future)
     }
 
@@ -254,6 +251,21 @@ impl Server {
             .for_each(move |_instant| {
                 trace!("DHT server wake up");
                 self.dht_main_loop()
+            });
+        Box::new(future)
+    }
+
+    /// Refresh onion symmetric key periodically. Result future will never be
+    /// completed successfully.
+    fn run_onion_key_refresing(self) -> IoFuture<()> {
+        let interval = Duration::from_secs(ONION_REFRESH_KEY_INTERVAL);
+        let wakeups = Interval::new(Instant::now() + interval, interval);
+        let future = wakeups
+            .map_err(|e| Error::new(ErrorKind::Other, format!("DHT server timer error: {:?}", e)))
+            .for_each(move |_instant| {
+                trace!("Refreshing onion key");
+                self.refresh_onion_key();
+                future::ok(())
             });
         Box::new(future)
     }
@@ -1100,10 +1112,7 @@ impl Server {
     }
     /// refresh onion symmetric key to enforce onion paths expiration
     fn refresh_onion_key(&self) {
-        if clock_elapsed(*self.onion_symmetric_key_time.read()) >= Duration::from_secs(ONION_REFRESH_KEY_INTERVAL) {
-            *self.onion_symmetric_key_time.write() = clock_now();
-            *self.onion_symmetric_key.write() = secretbox::gen_key();
-        }
+        *self.onion_symmetric_key.write() = secretbox::gen_key();
     }
     /// add PackedNode object to close_nodes as a thread-safe manner
     pub fn try_add_to_close_nodes(&self, pn: &PackedNode) -> bool {
@@ -1157,10 +1166,6 @@ mod tests {
 
     use futures::Future;
     use std::net::SocketAddr;
-    use tokio_executor;
-    use tokio_timer::clock::*;
-
-    use toxcore::time::ConstNow;
 
     const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - secretbox::NONCEBYTES;
     const ONION_RETURN_2_PAYLOAD_SIZE: usize = ONION_RETURN_2_SIZE - secretbox::NONCEBYTES;
@@ -2391,16 +2396,8 @@ mod tests {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
 
         let onion_symmetric_key = alice.onion_symmetric_key.read().clone();
-        let onion_symmetric_key_time = alice.onion_symmetric_key_time.read().clone();
 
-        let mut enter = tokio_executor::enter().unwrap();
-        let clock = Clock::new_with_now(ConstNow(
-            onion_symmetric_key_time + Duration::from_secs(ONION_REFRESH_KEY_INTERVAL)
-        ));
-
-        with_default(&clock, &mut enter, |_| {
-            alice.refresh_onion_key();
-        });
+        alice.refresh_onion_key();
 
         assert!(*alice.onion_symmetric_key.read() != onion_symmetric_key)
     }
