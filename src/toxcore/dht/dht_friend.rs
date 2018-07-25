@@ -10,6 +10,9 @@ use toxcore::dht::kbucket::*;
 use toxcore::crypto_core::*;
 use toxcore::dht::server::hole_punching::*;
 
+/// Number of close nodes each friend has.
+pub const FRIEND_CLOSE_NODES_COUNT: u8 = 4;
+
 /// Hold friend related info.
 #[derive(Clone, Debug)]
 pub struct DhtFriend {
@@ -32,7 +35,7 @@ impl DhtFriend {
     pub fn new(pk: PublicKey) -> Self {
         DhtFriend {
             pk,
-            close_nodes: Bucket::new(None),
+            close_nodes: Bucket::new(Some(FRIEND_CLOSE_NODES_COUNT)),
             last_nodes_req_time: clock_now(),
             bootstrap_times: 0,
             bootstrap_nodes: Bucket::new(None),

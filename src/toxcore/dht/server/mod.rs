@@ -313,7 +313,8 @@ impl Server {
     // send NodesRequest to nodes gotten by NodesResponse
     // this is the checking if the node is alive(ping)
     fn ping_bootstrap_nodes(&self, request_queue: &mut RequestQueue, bootstrap_nodes: &mut Bucket, pk: PublicKey) -> IoFuture<()> {
-        let bootstrap_nodes = mem::replace(bootstrap_nodes, Bucket::new(None));
+        let capacity = bootstrap_nodes.capacity;
+        let bootstrap_nodes = mem::replace(bootstrap_nodes, Bucket::new(Some(capacity)));
 
         let futures = bootstrap_nodes.nodes.iter().map(|node| {
             let ping_id = request_queue.new_ping_id(node.pk);
