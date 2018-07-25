@@ -27,6 +27,7 @@ use toxcore::onion::onion_announce::*;
 use toxcore::dht::request_queue::*;
 use toxcore::io_tokio::*;
 use toxcore::dht::dht_friend::*;
+use toxcore::dht::dht_node::*;
 use toxcore::dht::server::hole_punching::*;
 use toxcore::tcp::packet::OnionRequest;
 use toxcore::net_crypto::*;
@@ -181,24 +182,58 @@ impl Server {
 
     /// main loop of dht server, call this function every second
     fn dht_main_loop(&self) -> IoFuture<()> {
-        self.request_queue.write().clear_timed_out();
+        // Check if we should send `NodesRequest` packet to a random node. This
+        // request is sent every second 5 times and then every 20 seconds.
+        fn send_random_request(last_nodes_req_time: &mut Instant, bootstrap_times: &mut u32) -> bool {
+            if clock_elapsed(*last_nodes_req_time) > Duration::from_secs(NODES_REQ_INTERVAL) || *bootstrap_times < MAX_BOOTSTRAP_TIMES {
+                *bootstrap_times += 1;
+                *last_nodes_req_time = clock_now();
+                true
+            } else {
+                false
+            }
+        }
+
         self.refresh_onion_key();
 
-        let ping_bootstrap_nodes = self.ping_bootstrap_nodes();
-        let ping_and_get_close_nodes = self.ping_and_get_close_nodes();
-        let send_nodes_req_random = self.send_nodes_req_random();
-        let send_nodes_req_to_friends = self.send_nodes_req_to_friends();
+        let mut request_queue = self.request_queue.write();
+        let mut bootstrap_nodes = self.bootstrap_nodes.write();
+        let mut close_nodes = self.close_nodes.write();
+        let mut friends = self.friends.write();
 
-        let send_nat_ping_req = self.send_nat_ping_req();
+        request_queue.clear_timed_out();
 
-        let res = future::join_all(vec![ping_bootstrap_nodes,
-                                        ping_and_get_close_nodes,
-                                        send_nodes_req_random,
-                                        send_nodes_req_to_friends,
-                                        send_nat_ping_req])
-            .map(|_| ());
+        // Send NodesRequest packets to nodes from the Server
+        let ping_bootstrap_nodes = self.ping_bootstrap_nodes(&mut request_queue, &mut bootstrap_nodes, self.pk);
+        let ping_and_get_close_nodes = self.ping_and_get_close_nodes(&mut request_queue, close_nodes.iter_mut(), self.pk);
+        let send_nodes_req_random = if send_random_request(&mut self.last_nodes_req_time.write(), &mut self.bootstrap_times.write()) {
+            self.send_nodes_req_random(&mut request_queue, close_nodes.iter(), self.pk)
+        } else {
+            Box::new(future::ok(()))
+        };
 
-        Box::new(res)
+        // Send NodesRequest packets to nodes from every DhtFriend
+        let send_nodes_req_to_friends = friends.iter_mut().map(|friend| {
+            let ping_bootstrap_nodes = self.ping_bootstrap_nodes(&mut request_queue, &mut friend.bootstrap_nodes, friend.pk);
+            let ping_and_get_close_nodes = self.ping_and_get_close_nodes(&mut request_queue, friend.close_nodes.nodes.iter_mut(), friend.pk);
+            let send_nodes_req_random = if send_random_request(&mut friend.last_nodes_req_time, &mut friend.bootstrap_times) {
+                self.send_nodes_req_random(&mut request_queue, friend.close_nodes.nodes.iter(), friend.pk)
+            } else {
+                Box::new(future::ok(()))
+            };
+            ping_bootstrap_nodes.join3(ping_and_get_close_nodes, send_nodes_req_random)
+        }).collect::<Vec<_>>();
+
+        let send_nat_ping_req = self.send_nat_ping_req(&mut friends);
+
+        let future = ping_bootstrap_nodes.join5(
+            ping_and_get_close_nodes,
+            send_nodes_req_random,
+            future::join_all(send_nodes_req_to_friends),
+            send_nat_ping_req
+        ).map(|_| ());
+
+        Box::new(future)
     }
 
     /// Run DHT periodical tasks. Result future will never be completed
@@ -275,91 +310,61 @@ impl Server {
         Box::new(future::ok(()))
     }
 
-    // send NodesRequest to friends
-    fn send_nodes_req_to_friends(&self) -> IoFuture<()> {
-        let mut friends = self.friends.write();
-
-        let nodes_sender = friends.iter_mut()
-            .map(|friend| {
-                friend.send_nodes_req_packets(self)
-            });
-
-        let nodes_stream = stream::futures_unordered(nodes_sender).then(|_| Ok(()));
-        Box::new(nodes_stream.for_each(|()| Ok(())))
-    }
-
     // send NodesRequest to nodes gotten by NodesResponse
     // this is the checking if the node is alive(ping)
-    fn ping_bootstrap_nodes(&self) -> IoFuture<()> {
-        let bootstrap_nodes = mem::replace(self.bootstrap_nodes.write().deref_mut(), Bucket::new(None));
+    fn ping_bootstrap_nodes(&self, request_queue: &mut RequestQueue, bootstrap_nodes: &mut Bucket, pk: PublicKey) -> IoFuture<()> {
+        let bootstrap_nodes = mem::replace(bootstrap_nodes, Bucket::new(None));
 
-        let mut request_queue = self.request_queue.write();
+        let futures = bootstrap_nodes.nodes.iter().map(|node| {
+            let ping_id = request_queue.new_ping_id(node.pk);
+            self.send_nodes_req(node.clone().into(), pk, ping_id)
+        }).collect::<Vec<_>>();
 
-        let bootstrap_nodes = bootstrap_nodes.to_packed();
-        let nodes_sender = bootstrap_nodes.iter()
-            .map(|node|
-                self.send_nodes_req(*node, self.pk, request_queue.new_ping_id(node.pk))
-            );
-
-        let nodes_stream = stream::futures_unordered(nodes_sender).then(|_| Ok(()));
-
-        Box::new(nodes_stream.for_each(|()| Ok(())))
+        Box::new(future::join_all(futures).map(|_| ()))
     }
 
     // every 60 seconds DHT node send ping(NodesRequest) to all nodes which is in close list
-    fn ping_and_get_close_nodes(&self) -> IoFuture<()> {
-        let mut close_nodes = self.close_nodes.write();
-        let mut request_queue = self.request_queue.write();
-
-        let nodes_sender = close_nodes.iter_mut()
+    fn ping_and_get_close_nodes<'a, T>(&self, request_queue: &mut RequestQueue, nodes: T, pk: PublicKey) -> IoFuture<()>
+        where T: Iterator<Item = &'a mut DhtNode>
+    {
+        let futures = nodes
             .filter(|node| !node.is_discarded() && node.is_ping_interval_passed())
             .map(|node| {
                 node.last_ping_req_time = Some(Instant::now());
-                self.send_nodes_req(node.clone().into(), self.pk, request_queue.new_ping_id(node.pk))
-            });
+                let ping_id = request_queue.new_ping_id(node.pk);
+                self.send_nodes_req(node.clone().into(), pk, ping_id)
+            })
+            .collect::<Vec<_>>();
 
-        let nodes_stream = stream::futures_unordered(nodes_sender).then(|_| Ok(()));
-
-        Box::new(nodes_stream.for_each(|()| Ok(())))
+        Box::new(future::join_all(futures).map(|_| ()))
     }
 
     /// Send `NodesRequest` packet to a random good node every 20 seconds or if
     /// it was sent less than `NODES_REQ_INTERVAL`. This function should be
     /// called every second.
-    fn send_nodes_req_random(&self) -> IoFuture<()> {
-        if clock_elapsed(*self.last_nodes_req_time.read()) < Duration::from_secs(NODES_REQ_INTERVAL) &&
-            *self.bootstrap_times.read() >= MAX_BOOTSTRAP_TIMES {
-            return Box::new(future::ok(()));
-        }
-
-        let close_nodes = self.close_nodes.read();
-
-        let good_nodes = close_nodes.iter()
+    fn send_nodes_req_random<'a, T>(&self, request_queue: &mut RequestQueue, nodes: T, pk: PublicKey) -> IoFuture<()>
+        where T: Iterator<Item = &'a DhtNode>
+    {
+        let good_nodes = nodes
             .filter(|&node| !node.is_discarded())
             .cloned()
             .map(|node| node.into())
             .collect::<Vec<PackedNode>>();
 
-        if !good_nodes.is_empty() {
-            let mut request_queue = self.request_queue.write();
-
-            let mut random_node = random_usize() % good_nodes.len();
-            // increase probability of sending packet to a close node (has lower index)
-            if random_node != 0 {
-                random_node -= random_usize() % (random_node + 1);
-            }
-
-            let random_node = good_nodes[random_node];
-
-            let res = self.send_nodes_req(random_node, self.pk, request_queue.new_ping_id(random_node.pk));
-
-            *self.bootstrap_times.write() += 1;
-            *self.last_nodes_req_time.write() = Instant::now();
-
-            res
-        } else {
-            Box::new(future::ok(()))
+        if good_nodes.is_empty() {
+            return Box::new(future::ok(()))
         }
+
+        let mut random_node_idx = random_usize() % good_nodes.len();
+        // Increase probability of sending packet to a close node (has lower index)
+        if random_node_idx != 0 {
+            random_node_idx -= random_usize() % (random_node_idx + 1);
+        }
+
+        let random_node = good_nodes[random_node_idx];
+
+        let ping_id = request_queue.new_ping_id(random_node.pk);
+        self.send_nodes_req(random_node, pk, ping_id)
     }
 
     /// Send PingRequest to node
@@ -402,9 +407,7 @@ impl Server {
     }
 
     // send NatPingRequests to all of my friends and do hole punching.
-    fn send_nat_ping_req(&self) -> IoFuture<()> {
-        let mut friends = self.friends.write();
-
+    fn send_nat_ping_req(&self, friends: &mut Vec<DhtFriend>) -> IoFuture<()> {
         if friends.is_empty() {
             return Box::new(future::ok(()))
         }
