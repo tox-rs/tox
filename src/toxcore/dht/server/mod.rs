@@ -81,30 +81,32 @@ removed from temporary list and added to the Close List.
 */
 #[derive(Clone)]
 pub struct Server {
-    /// secret key
+    /// DHT `SecretKey`.
     pub sk: SecretKey,
-    /// public key
+    /// DHT `PublicKey`.
     pub pk: PublicKey,
-    /// tx split of channel to send packet to this peer via udp socket
+    /// Tx split of a channel to send packets to this peer via UDP socket.
     pub tx: Tx,
-    /// option for hole punching
+    /// Whether hole punching to friends is enabled.
     pub is_hole_punching_enabled: bool,
-    /// store ping object which has sent request packet to peer
+    /// Struct that stores and manages requests IDs and timeouts.
     pub request_queue: Arc<RwLock<RequestQueue>>,
-    /// Close List (contains nodes close to own DHT PK)
+    /// Close nodes list which contains nodes close to own DHT `PublicKey`.
     pub close_nodes: Arc<RwLock<Kbucket>>,
-    // symmetric key used for onion return encryption
+    /// Symmetric key used for onion return encryption.
     onion_symmetric_key: Arc<RwLock<secretbox::Key>>,
-    // onion announce struct to handle onion packets
+    /// Onion announce struct to handle `OnionAnnounce` and `OnionData` packets.
     onion_announce: Arc<RwLock<OnionAnnounce>>,
-    /// friends vector of dht node
-    pub friends: Arc<RwLock<Vec<DhtFriend>>>,
-    // nodes vector for bootstrap
+    /// Friends list used to store friends related data like close nodes per
+    /// friend, hole punching status, etc.
+    friends: Arc<RwLock<Vec<DhtFriend>>>,
+    /// List of nodes to send `NodesRequest` packet.
     bootstrap_nodes: Arc<RwLock<Bucket>>,
-    // count for sending NodesRequest to random node which is in close node
-    // maximum value is 5, so setting this value to 2 will do sending 3 times
-    // setting this value to 0 will do sending 5 times
+    /// How many times we sent `NodesRequest` packet to a random node from close
+    /// nodes list.
     bootstrap_times: Arc<RwLock<u32>>,
+    /// Time when we sent `NodesRequest` packet to a random node from close
+    /// nodes list.
     last_nodes_req_time: Arc<RwLock<Instant>>,
     /// List of nodes to send `PingRequest`. When we receive `PingRequest` or
     /// `NodesRequest` packet from a new node we should send `PingRequest` to
@@ -113,27 +115,29 @@ pub struct Server {
     /// is processed every `TIME_TO_PING` seconds. The purpose of this is to
     /// prevent amplification attacks.
     nodes_to_send_ping: Arc<RwLock<Bucket>>,
-    // toxcore version used in BootstrapInfo
+    /// Version of tox core which will be sent with `BootstrapInfo` packet.
     tox_core_version: u32,
-    // message used in BootstrapInfo
+    /// Message  of the day which will be sent with `BootstrapInfo` packet.
     motd: Vec<u8>,
-    // `OnionResponse1` packets that have TCP protocol kind inside onion return
-    // should be redirected to TCP sender trough this sink
-    // None if there is no TCP relay
+    /// `OnionResponse1` packets that have TCP protocol kind inside onion return
+    /// should be redirected to TCP sender trough this sink
+    /// None if there is no TCP relay
     tcp_onion_sink: Option<TcpOnionTx>,
-    // Net crypto module that handles `CookieRequest`, `CookieResponse`,
-    // `CryptoHandshake` and `CryptoData` packets. It can be `None` in case of
-    // pure bootstrap server when we don't have friends and therefore don't
-    // have to handle related packets
+    /// Net crypto module that handles `CookieRequest`, `CookieResponse`,
+    /// `CryptoHandshake` and `CryptoData` packets. It can be `None` in case of
+    /// pure bootstrap server when we don't have friends and therefore don't
+    /// have to handle related packets.
     net_crypto: Option<NetCrypto>,
+    /// If LAN discovery is enabled `Server` will handle `LanDiscovery` packets
+    /// and send `NodesRequest` packets in reply.
     lan_discovery_enabled: bool,
+    /// If IPv6 mode is enabled `Server` will send packets to IPv6 addresses. If
+    /// it's disabled such packets will be dropped.
     is_ipv6_mode: bool,
 }
 
 impl Server {
-    /**
-    Create new `Server` instance.
-    */
+    /// Create new `Server` instance.
     pub fn new(tx: Tx, pk: PublicKey, sk: SecretKey) -> Server {
         debug!("Created new Server instance");
         Server {
@@ -159,25 +163,28 @@ impl Server {
         }
     }
 
-    /// enable/disacle IPv6 mode of DHT node
+    /// Enable/disable IPv6 mode of DHT server.
     pub fn enable_ipv6_mode(&mut self, enable: bool) {
         self.is_ipv6_mode = enable;
         self.close_nodes.write().is_ipv6_mode = enable;
     }
 
-    /// enable/disable processing LanDiscovery packet received
+    /// Enable/disable `LanDiscovery` packets handling.
     pub fn enable_lan_discovery(&mut self, enable: bool) {
         self.lan_discovery_enabled = enable;
     }
 
-    /// add friend
+    /// Add a friend.
     pub fn add_friend(&self, friend: DhtFriend) {
         let mut friends = self.friends.write();
 
         friends.push(friend);
     }
 
-    /// main loop of dht server, call this function every second
+    /// The main loop of DHT server which should be called every second. This
+    /// method iterates over all nodes from close nodes list, close nodes of
+    /// friends and bootstrap nodes and sends `NodesRequest` packets if
+    /// necessary.
     fn dht_main_loop(&self) -> IoFuture<()> {
         // Check if we should send `NodesRequest` packet to a random node. This
         // request is sent every second 5 times and then every 20 seconds.
@@ -200,7 +207,7 @@ impl Server {
 
         // Send NodesRequest packets to nodes from the Server
         let ping_bootstrap_nodes = self.ping_bootstrap_nodes(&mut request_queue, &mut bootstrap_nodes, self.pk);
-        let ping_and_get_close_nodes = self.ping_and_get_close_nodes(&mut request_queue, close_nodes.iter_mut(), self.pk);
+        let ping_close_nodes = self.ping_close_nodes(&mut request_queue, close_nodes.iter_mut(), self.pk);
         let send_nodes_req_random = if send_random_request(&mut self.last_nodes_req_time.write(), &mut self.bootstrap_times.write()) {
             self.send_nodes_req_random(&mut request_queue, close_nodes.iter(), self.pk)
         } else {
@@ -210,19 +217,19 @@ impl Server {
         // Send NodesRequest packets to nodes from every DhtFriend
         let send_nodes_req_to_friends = friends.iter_mut().map(|friend| {
             let ping_bootstrap_nodes = self.ping_bootstrap_nodes(&mut request_queue, &mut friend.bootstrap_nodes, friend.pk);
-            let ping_and_get_close_nodes = self.ping_and_get_close_nodes(&mut request_queue, friend.close_nodes.nodes.iter_mut(), friend.pk);
+            let ping_close_nodes = self.ping_close_nodes(&mut request_queue, friend.close_nodes.nodes.iter_mut(), friend.pk);
             let send_nodes_req_random = if send_random_request(&mut friend.last_nodes_req_time, &mut friend.bootstrap_times) {
                 self.send_nodes_req_random(&mut request_queue, friend.close_nodes.nodes.iter(), friend.pk)
             } else {
                 Box::new(future::ok(()))
             };
-            ping_bootstrap_nodes.join3(ping_and_get_close_nodes, send_nodes_req_random)
+            ping_bootstrap_nodes.join3(ping_close_nodes, send_nodes_req_random)
         }).collect::<Vec<_>>();
 
         let send_nat_ping_req = self.send_nat_ping_req(&mut friends);
 
         let future = ping_bootstrap_nodes.join5(
-            ping_and_get_close_nodes,
+            ping_close_nodes,
             send_nodes_req_random,
             future::join_all(send_nodes_req_to_friends),
             send_nat_ping_req
@@ -295,13 +302,20 @@ impl Server {
             return Box::new(future::ok(()))
         }
 
-        let futures = nodes_to_send_ping.nodes.into_iter().map(|node|
-            self.send_ping_req(&(node.clone()).into())
-        ).collect::<Vec<_>>();
+        let mut request_queue = self.request_queue.write();
+
+        let futures = nodes_to_send_ping.nodes.into_iter().map(|node| {
+            let ping_id = request_queue.new_ping_id(node.pk);
+            self.send_ping_req(&(node.clone()).into(), ping_id)
+        }).collect::<Vec<_>>();
 
         Box::new(future::join_all(futures).map(|_| ()))
     }
 
+    /// Add node to a `nodes_to_send_ping` list to send ping later. If node is
+    /// a friend and we don't know it's address then this method will send
+    /// `PingRequest` immediately instead of adding to a `nodes_to_send_ping`
+    /// list.
     fn ping_add(&self, node: &PackedNode) -> IoFuture<()> {
         let close_nodes = self.close_nodes.read();
 
@@ -313,8 +327,10 @@ impl Server {
 
         // If node is friend and we don't know friend's IP address yet then send
         // PingRequest immediately and unconditionally
-        if friends.iter().any(|friend| friend.pk == node.pk && !friend.is_ip_known()) {
-            return Box::new(self.send_ping_req(node))
+        if friends.iter().any(|friend| friend.pk == node.pk && !friend.is_addr_known()) {
+            let mut request_queue = self.request_queue.write();
+            let ping_id = request_queue.new_ping_id(node.pk);
+            return Box::new(self.send_ping_req(node, ping_id))
         }
 
         self.nodes_to_send_ping.write().try_add(&self.pk, node);
@@ -322,8 +338,9 @@ impl Server {
         Box::new(future::ok(()))
     }
 
-    // send NodesRequest to nodes gotten by NodesResponse
-    // this is the checking if the node is alive(ping)
+    /// Send `NodesRequest` packets to nodes from bootstrap list. This is
+    /// necessary to check whether node is alive before adding it to close
+    /// nodes lists.
     fn ping_bootstrap_nodes(&self, request_queue: &mut RequestQueue, bootstrap_nodes: &mut Bucket, pk: PublicKey) -> IoFuture<()> {
         let capacity = bootstrap_nodes.capacity;
         let bootstrap_nodes = mem::replace(bootstrap_nodes, Bucket::new(Some(capacity)));
@@ -336,8 +353,9 @@ impl Server {
         Box::new(future::join_all(futures).map(|_| ()))
     }
 
-    // every 60 seconds DHT node send ping(NodesRequest) to all nodes which is in close list
-    fn ping_and_get_close_nodes<'a, T>(&self, request_queue: &mut RequestQueue, nodes: T, pk: PublicKey) -> IoFuture<()>
+    /// Iterate over nodes from close nodes list and send `NodesRequest` packets
+    /// to them if necessary.
+    fn ping_close_nodes<'a, T>(&self, request_queue: &mut RequestQueue, nodes: T, pk: PublicKey) -> IoFuture<()>
         where T: Iterator<Item = &'a mut DhtNode>
     {
         let futures = nodes
@@ -365,6 +383,7 @@ impl Server {
             .collect::<Vec<PackedNode>>();
 
         if good_nodes.is_empty() {
+            // Random request should be sent only to good nodes
             return Box::new(future::ok(()))
         }
 
@@ -380,12 +399,10 @@ impl Server {
         self.send_nodes_req(random_node, pk, ping_id)
     }
 
-    /// Send PingRequest to node
-    pub fn send_ping_req(&self, node: &PackedNode) -> IoFuture<()> {
-        let mut request_queue = self.request_queue.write();
-
+    /// Send `PingRequest` packet to the node.
+    pub fn send_ping_req(&self, node: &PackedNode, ping_id: u64) -> IoFuture<()> {
         let payload = PingRequestPayload {
-            id: request_queue.new_ping_id(node.pk),
+            id: ping_id,
         };
         let ping_req = DhtPacket::PingRequest(PingRequest::new(
             &precompute(&node.pk, &self.sk),
@@ -395,9 +412,9 @@ impl Server {
         self.send_to(node.saddr, ping_req)
     }
 
-    /// Send NodesRequest to peer
+    /// Send `NodesRequest` packet to the node.
     pub fn send_nodes_req(&self, target_peer: PackedNode, search_pk: PublicKey, ping_id: u64) -> IoFuture<()> {
-        // Check if packet is going to be sent to ourself.
+        // Check if packet is going to be sent to ourselves.
         if self.pk == target_peer.pk {
             return Box::new(
                 future::err(
@@ -469,10 +486,7 @@ impl Server {
         Box::new(nats_stream.for_each(|()| Ok(())))
     }
 
-    /**
-    Function to handle incoming packets. If there is a response packet,
-    send back it to the peer.
-    */
+    /// Function to handle incoming packets and send responses if necessary.
     pub fn handle_packet(&self, packet: DhtPacket, addr: SocketAddr) -> IoFuture<()> {
         match packet {
             DhtPacket::PingRequest(packet) => {
@@ -556,7 +570,8 @@ impl Server {
         }
     }
 
-    /// actual send method
+    /// Send UDP packet to specified address. The packet will be dropped if IPv6
+    /// mode is disabled but the address is IPv6 address.
     fn send_to(&self, addr: SocketAddr, packet: DhtPacket) -> IoFuture<()> {
         if self.is_ipv6_mode {// DHT node is running in ipv6 mode
             match addr.ip() {
@@ -580,13 +595,11 @@ impl Server {
         send_to(&self.tx, (packet, addr))
     }
 
-    /**
-    handle received PingRequest packet, then create PingResponse packet
-    and send back it to the peer.
-    */
+    /// Handle received `PingRequest` packet and response with `PingResponse`
+    /// packet. If node that sent this packet is not present in close nodes list
+    /// and can be added there then it will be added to ping list.
     fn handle_ping_req(&self, packet: PingRequest, addr: SocketAddr) -> IoFuture<()> {
-        let payload = packet.get_payload(&self.sk);
-        let payload = match payload {
+        let payload = match packet.get_payload(&self.sk) {
             Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
@@ -600,25 +613,16 @@ impl Server {
             resp_payload
         ));
 
-        // send PingRequest
-        let node_to_ping = PackedNode {
-            pk: packet.pk,
-            saddr: addr,
-        };
-
-        // node is added if it's PK is closer than nodes in ping list
-        // the result of try_add is ignored, if it is not added, then PingRequest is not sent to the node.
-        Box::new(self.ping_add(&node_to_ping)
+        Box::new(self.ping_add(&PackedNode::new(addr, &packet.pk))
             .join(self.send_to(addr, ping_resp))
             .map(|_| ())
         )
     }
-    /**
-    handle received PingResponse packet. If ping_id is correct, try_add peer to close_nodes.
-    */
+
+    /// Handle received `PingResponse` packet and if it's correct add the node
+    /// that sent this packet to close nodes lists.
     fn handle_ping_resp(&self, packet: PingResponse, addr: SocketAddr) -> IoFuture<()> {
-        let payload = packet.get_payload(&self.sk);
-        let payload = match payload {
+        let payload = match packet.get_payload(&self.sk) {
             Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
@@ -649,12 +653,12 @@ impl Server {
             ))
         }
     }
-    /**
-    handle received NodesRequest packet, responds with NodesResponse
-    */
+
+    /// Handle received `NodesRequest` packet and respond with `NodesResponse`
+    /// packet. If node that sent this packet is not present in close nodes list
+    /// and can be added there then it will be added to ping list.
     fn handle_nodes_req(&self, packet: NodesRequest, addr: SocketAddr) -> IoFuture<()> {
-        let payload = packet.get_payload(&self.sk);
-        let payload = match payload {
+        let payload = match packet.get_payload(&self.sk) {
             Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
@@ -685,32 +689,24 @@ impl Server {
             nodes: collected_nodes,
             id: payload.id,
         };
-
         let nodes_resp = DhtPacket::NodesResponse(NodesResponse::new(
             &precompute(&packet.pk, &self.sk),
             &self.pk,
             resp_payload
         ));
 
-        // send PingRequest
-        let node_to_ping = PackedNode {
-            pk: packet.pk,
-            saddr: addr,
-        };
-
-        // node is added if it's PK is closer than nodes in ping list
-        // the result of try_add is ignored, if it is not added, then PingRequest is not sent to the node.
-        Box::new(self.ping_add(&node_to_ping)
+        Box::new(self.ping_add(&PackedNode::new(addr, &packet.pk))
             .join(self.send_to(addr, nodes_resp))
             .map(|_| ())
         )
     }
-    /**
-    handle received NodesResponse from peer.
-    */
+
+    /// Handle received `NodesResponse` packet and if it's correct add the node
+    /// that sent this packet to close nodes lists. Nodes from response will be
+    /// added to bootstrap nodes list to send `NodesRequest` packet to them
+    /// later.
     fn handle_nodes_resp(&self, packet: NodesResponse, addr: SocketAddr) -> IoFuture<()> {
-        let payload = packet.get_payload(&self.sk);
-        let payload = match payload {
+        let payload = match packet.get_payload(&self.sk) {
             Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
@@ -749,8 +745,8 @@ impl Server {
         }
     }
 
-    /** handle received CookieRequest and pass it to net_crypto module
-    */
+    /// Handle received `CookieRequest` packet and pass it to `net_crypto`
+    /// module.
     fn handle_cookie_request(&self, packet: CookieRequest, addr: SocketAddr) -> IoFuture<()> {
         if let Some(ref net_crypto) = self.net_crypto {
             net_crypto.handle_udp_cookie_request(packet, addr)
@@ -761,8 +757,8 @@ impl Server {
         }
     }
 
-    /** handle received CookieResponse and pass it to net_crypto module
-    */
+    /// Handle received `CookieResponse` packet and pass it to `net_crypto`
+    /// module.
     fn handle_cookie_response(&self, packet: CookieResponse, addr: SocketAddr) -> IoFuture<()> {
         if let Some(ref net_crypto) = self.net_crypto {
             net_crypto.handle_udp_cookie_response(packet, addr)
@@ -773,8 +769,8 @@ impl Server {
         }
     }
 
-    /** handle received CryptoHandshake and pass it to net_crypto module
-    */
+    /// Handle received `CryptoHandshake` packet and pass it to `net_crypto`
+    /// module.
     fn handle_crypto_handshake(&self, packet: CryptoHandshake, addr: SocketAddr) -> IoFuture<()> {
         if let Some(ref net_crypto) = self.net_crypto {
             net_crypto.handle_udp_crypto_handshake(packet, addr)
@@ -785,10 +781,8 @@ impl Server {
         }
     }
 
-    /**
-    handle received DhtRequest, resend if it's sent for someone else, parse and
-    handle payload if it's sent for us
-    */
+    /// Handle received `DhtRequest` packet, redirect it if it's sent for
+    /// someone else or parse it and handle the payload if it's sent for us.
     fn handle_dht_req(&self, packet: DhtRequest, addr: SocketAddr) -> IoFuture<()> {
         if packet.rpk == self.pk { // the target peer is me
             let payload = packet.get_payload(&self.sk);
@@ -857,7 +851,6 @@ impl Server {
                            "Can't find friend"
                 ))),
             Some(friend) => friend,
-
         };
 
         if payload.id == 0 {
@@ -878,10 +871,9 @@ impl Server {
             ))
         }
     }
-    /**
-    handle received LanDiscovery packet, then create NodesRequest packet
-    and send back it to the peer.
-    */
+
+    /// Handle received `LanDiscovery` packet and response with `NodesRequest`
+    /// packet.
     fn handle_lan_discovery(&self, packet: LanDiscovery, addr: SocketAddr) -> IoFuture<()> {
         // LanDiscovery is optional
         if !self.lan_discovery_enabled {
@@ -902,10 +894,9 @@ impl Server {
 
         self.send_nodes_req(target_node, self.pk, request_queue.new_ping_id(packet.pk))
     }
-    /**
-    handle received OnionRequest0 packet, then create OnionRequest1 packet
-    and send it to the next peer.
-    */
+
+    /// Handle received `OnionRequest0` packet and send `OnionRequest1` packet
+    /// to the next peer.
     fn handle_onion_request_0(&self, packet: OnionRequest0, addr: SocketAddr) -> IoFuture<()> {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let shared_secret = precompute(&packet.temporary_pk, &self.sk);
@@ -928,10 +919,9 @@ impl Server {
         });
         self.send_to(payload.ip_port.to_saddr(), next_packet)
     }
-    /**
-    handle received OnionRequest1 packet, then create OnionRequest2 packet
-    and send it to the next peer.
-    */
+
+    /// Handle received `OnionRequest1` packet and send `OnionRequest2` packet
+    /// to the next peer.
     fn handle_onion_request_1(&self, packet: OnionRequest1, addr: SocketAddr) -> IoFuture<()> {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let shared_secret = precompute(&packet.temporary_pk, &self.sk);
@@ -954,10 +944,9 @@ impl Server {
         });
         self.send_to(payload.ip_port.to_saddr(), next_packet)
     }
-    /**
-    handle received OnionRequest2 packet, then create OnionAnnounceRequest
-    or OnionDataRequest packet and send it to the next peer.
-    */
+
+    /// Handle received `OnionRequest2` packet and send `OnionAnnounceRequest`
+    /// or `OnionDataRequest` packet to the next peer.
     fn handle_onion_request_2(&self, packet: OnionRequest2, addr: SocketAddr) -> IoFuture<()> {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let shared_secret = precompute(&packet.temporary_pk, &self.sk);
@@ -984,10 +973,9 @@ impl Server {
         };
         self.send_to(payload.ip_port.to_saddr(), next_packet)
     }
-    /**
-    handle received OnionAnnounceRequest packet and send OnionAnnounceResponse
-    packet back if request succeed.
-    */
+
+    /// Handle received `OnionAnnounceRequest` packet and response with
+    /// `OnionAnnounceResponse` packet if the request succeed.
     fn handle_onion_announce_request(&self, packet: OnionAnnounceRequest, addr: SocketAddr) -> IoFuture<()> {
         let mut onion_announce = self.onion_announce.write();
         let close_nodes = self.close_nodes.read();
@@ -1001,10 +989,10 @@ impl Server {
             Err(e) => Box::new(future::err(e))
         }
     }
-    /**
-    handle received OnionDataRequest packet and send OnionResponse3 with inner
-    OnionDataResponse to destination node through its onion path.
-    */
+
+    /// Handle received `OnionDataRequest` packet and send `OnionResponse3`
+    /// packet with inner `OnionDataResponse` to destination node through its
+    /// onion path.
     fn handle_onion_data_request(&self, packet: OnionDataRequest) -> IoFuture<()> {
         let onion_announce = self.onion_announce.read();
         match onion_announce.handle_data_request(packet) {
@@ -1012,10 +1000,9 @@ impl Server {
             Err(e) => Box::new(future::err(e))
         }
     }
-    /**
-    handle received OnionResponse3 packet, then create OnionResponse2 packet
-    and send it to the next peer which address is stored in encrypted onion return.
-    */
+
+    /// Handle received `OnionResponse3` packet and send `OnionResponse2` packet
+    /// to the next peer which address is stored in encrypted onion return.
     fn handle_onion_response_3(&self, packet: OnionResponse3) -> IoFuture<()> {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let payload = packet.onion_return.get_payload(&onion_symmetric_key);
@@ -1037,10 +1024,9 @@ impl Server {
             )))
         }
     }
-    /**
-    handle received OnionResponse2 packet, then create OnionResponse1 packet
-    and send it to the next peer which address is stored in encrypted onion return.
-    */
+
+    /// Handle received `OnionResponse2` packet and send `OnionResponse1` packet
+    /// to the next peer which address is stored in encrypted onion return.
     fn handle_onion_response_2(&self, packet: OnionResponse2) -> IoFuture<()> {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let payload = packet.onion_return.get_payload(&onion_symmetric_key);
@@ -1062,11 +1048,10 @@ impl Server {
             )))
         }
     }
-    /**
-    handle received OnionResponse1 packet, then create OnionAnnounceResponse
-    or OnionDataResponse packet and send it to the next peer which address
-    is stored in encrypted onion return.
-    */
+
+    /// Handle received `OnionResponse1` packet and send `OnionAnnounceResponse`
+    /// or `OnionDataResponse` packet to the next peer which address is stored
+    /// in encrypted onion return.
     fn handle_onion_response_1(&self, packet: OnionResponse1) -> IoFuture<()> {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let payload = packet.onion_return.get_payload(&onion_symmetric_key);
@@ -1110,17 +1095,20 @@ impl Server {
             )))
         }
     }
-    /// refresh onion symmetric key to enforce onion paths expiration
+
+    /// Refresh onion symmetric key to enforce onion paths expiration.
     fn refresh_onion_key(&self) {
         *self.onion_symmetric_key.write() = secretbox::gen_key();
     }
-    /// add PackedNode object to close_nodes as a thread-safe manner
+
+    /// Add `PackedNode` to close nodes list.
     pub fn try_add_to_close_nodes(&self, pn: &PackedNode) -> bool {
         let mut close_nodes = self.close_nodes.write();
         close_nodes.try_add(pn)
     }
-    /// handle OnionRequest from TCP relay and send OnionRequest1 packet
-    /// to the next node in the onion path
+
+    /// Handle `OnionRequest` from TCP relay and send `OnionRequest1` packet
+    /// to the next node in the onion path.
     pub fn handle_tcp_onion_request(&self, packet: OnionRequest, addr: SocketAddr) -> IoFuture<()> {
         let onion_symmetric_key = self.onion_symmetric_key.read();
 
@@ -1137,7 +1125,8 @@ impl Server {
         });
         self.send_to(packet.ip_port.to_saddr(), next_packet)
     }
-    // handle BootstrapInfo, respond with BootstrapInfo
+
+    /// Handle `BootstrapInfo` packet and response with `BootstrapInfo` packet.
     fn handle_bootstrap_info(&self, _packet: BootstrapInfo, addr: SocketAddr) -> IoFuture<()> {
         let packet = DhtPacket::BootstrapInfo(BootstrapInfo {
             version: self.tox_core_version,
@@ -1145,16 +1134,19 @@ impl Server {
         });
         self.send_to(addr, packet)
     }
-    /// set toxcore verson and motd
+
+    /// Set toxcore version and message of the day.
     pub fn set_bootstrap_info(&mut self, version: u32, motd: Vec<u8>) {
         self.tox_core_version = version;
         self.motd = motd;
     }
-    /// set TCP sink for onion packets
+
+    /// Set TCP sink for onion packets.
     pub fn set_tcp_onion_sink(&mut self, tcp_onion_sink: TcpOnionTx) {
         self.tcp_onion_sink = Some(tcp_onion_sink)
     }
-    /// set net crypto module
+
+    /// Set `net_crypto` module.
     pub fn set_net_crypto(&mut self, net_crypto: NetCrypto) {
         self.net_crypto = Some(net_crypto);
     }

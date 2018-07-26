@@ -16,17 +16,21 @@ pub const FRIEND_CLOSE_NODES_COUNT: u8 = 4;
 /// Hold friend related info.
 #[derive(Clone, Debug)]
 pub struct DhtFriend {
-    /// Public key of friend
+    /// Friend's `PublicKey`.
     pub pk: PublicKey,
-    /// close nodes of friend
+    /// Friend's close nodes. If this list contains a node with the same
+    /// `PublicKey` as the friend has this means that we know friend's IP
+    /// address and successfully reached him.
     pub close_nodes: Bucket,
-    /// Last time of NodesRequest packet sent
+    /// Time when we sent `NodesRequest` packet to a random node from close
+    /// nodes list.
     pub last_nodes_req_time: Instant,
-    /// Counter for bootstappings.
+    /// How many times we sent `NodesRequest` packet to a random node from close
+    /// nodes list.
     pub bootstrap_times: u32,
-    /// Nodes to bootstrap.
+    /// List of nodes to send `NodesRequest` packet.
     pub bootstrap_nodes: Bucket,
-    /// struct for hole punching
+    /// Struct for hole punching.
     pub hole_punch: HolePunching,
 }
 
@@ -45,7 +49,7 @@ impl DhtFriend {
 
     /// IP address is known when `DhtFriend` has node in close nodes list with
     /// the same `PublicKey`.
-    pub fn is_ip_known(&self) -> bool {
+    pub fn is_addr_known(&self) -> bool {
         // Since nodes in Bucket are sorted by distance to our PublicKey the
         // node with the same PublicKey will be always the first
         self.close_nodes.nodes.first()

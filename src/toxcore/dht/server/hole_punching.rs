@@ -145,6 +145,8 @@ impl HolePunching {
     // punch using first_punching_index
     // do hole punching for typical NAT, but last_hole_punching do hole punching on more precise ports
     fn first_hole_punching(&mut self, ports: Vec<u16>, ip: IpAddr, server: &Server, friend_pk: PublicKey) -> IoFuture<()> {
+        let mut request_queue = server.request_queue.write();
+
         let num_ports = ports.len();
         let first_punching_index = self.first_punching_index;
         let ping_sender = (0..MAX_PORTS_TO_PUNCH)
@@ -158,7 +160,8 @@ impl HolePunching {
                 let port = (ports[index] as i16 + delta) as u16;
 
                 server.send_ping_req(
-                    &PackedNode::new(SocketAddr::new(ip, port), &friend_pk)
+                    &PackedNode::new(SocketAddr::new(ip, port), &friend_pk),
+                    request_queue.new_ping_id(friend_pk)
                 )
             });
 
@@ -170,6 +173,8 @@ impl HolePunching {
     // do punch using last_punching_index
     // do hole punchng on more precise ports.
     fn last_hole_punching(&mut self, ip: IpAddr, server: &Server, friend_pk: PublicKey) -> IoFuture<()> {
+        let mut request_queue = server.request_queue.write();
+
         let port: u32 = 1024;
 
         let last_punching_index = self.last_punching_index;
@@ -180,10 +185,8 @@ impl HolePunching {
                 let it = i + last_punching_index;
                 let port = port + it;
                 server.send_ping_req(
-                    &PackedNode {
-                        pk: friend_pk,
-                        saddr: SocketAddr::new(ip, port as u16),
-                    }
+                    &PackedNode::new(SocketAddr::new(ip, port as u16), &friend_pk),
+                    request_queue.new_ping_id(friend_pk)
                 )
             });
 
@@ -204,8 +207,10 @@ impl HolePunching {
         let num_same_port = ports.iter().filter(|port| **port == first_port).count();
 
         let first_hole_punching = if num_same_port == num_ports {
+            let mut request_queue = server.request_queue.write();
             server.send_ping_req(
-                &PackedNode::new(SocketAddr::new(ip, first_port), &friend_pk)
+                &PackedNode::new(SocketAddr::new(ip, first_port), &friend_pk),
+                request_queue.new_ping_id(friend_pk)
             )
         } else {
             let res = self.first_hole_punching(ports, ip, server, friend_pk);
