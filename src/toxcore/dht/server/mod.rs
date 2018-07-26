@@ -713,6 +713,8 @@ impl Server {
         let mut request_queue = self.request_queue.write();
 
         if request_queue.check_ping_id(packet.pk, payload.id) {
+            trace!("Received nodes with NodesResponse from {}: {:?}", addr, payload.nodes);
+
             let mut close_nodes = self.close_nodes.write();
             let mut friends = self.friends.write();
             let mut bootstrap_nodes = self.bootstrap_nodes.write();
