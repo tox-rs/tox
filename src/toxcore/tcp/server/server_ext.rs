@@ -8,7 +8,6 @@ use futures::{future, Future, Sink, Stream};
 use tokio::net::TcpStream;
 use tokio::util::FutureExt;
 use tokio_codec::Framed;
-use tokio::timer::Interval;
 
 use toxcore::crypto_core::*;
 use toxcore::io_tokio::IoFuture;
@@ -80,18 +79,8 @@ impl ServerExt for Server {
                 )
                 .map(|(_from_client, _sink_err)| ());
 
-            let interval = Duration::from_secs(1);
-            let wakeups = Interval::new(Instant::now(), interval);
-            let ping_sender = wakeups
-                .map_err(|e| Error::new(ErrorKind::Other, format!("TCP ping sender timer error: {:?}", e)))
-                .for_each(move |_instant| {
-                    trace!("Tcp server ping sender wake up");
-                    self.send_pings()
-                });
-
             processor
                 .select(reader).map(|_| ()).map_err(|(e, _)| e)
-                .select(ping_sender).map(|_| ()).map_err(|(e, _)| e)
                 .select(writer).map(|_| ()).map_err(|(e, _)| e)
         });
 
