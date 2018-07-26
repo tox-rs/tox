@@ -6,6 +6,7 @@ use toxcore::tcp::packet::*;
 use toxcore::io_tokio::*;
 use toxcore::onion::packet::InnerOnionResponse;
 use toxcore::time::*;
+use toxcore::utils::*;
 
 use std::net::IpAddr;
 use std::slice::Iter;
@@ -227,11 +228,7 @@ impl Client {
     /** Construct PingRequest and send it to Client
     */
     pub fn send_ping_request(&mut self) -> IoFuture<()> {
-        let mut ping_id = 0;
-
-        while(ping_id == 0) {
-            ping_id = random_u64();
-        }
+        let ping_id = gen_ping_id();
 
         self.last_pinged = Instant::now();
         self.ping_id = ping_id;

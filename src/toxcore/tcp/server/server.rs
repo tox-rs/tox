@@ -368,16 +368,29 @@ impl Server {
             Box::new( future::ok(()) )
         }
     }
-    /** Send pings to all connected clients
+    /* Remove timedout connected clients
+    */
+    fn remove_timedout_clients(&self) -> IoFuture<()> {
+        let keys = self.state.read().connected_clients.iter()
+            .filter(|(_key, client)| client.is_pong_timedout())
+            .map(|(key, _client)| *key)
+            .collect::<Vec<PublicKey>>();
+
+        let remove_timedouts = keys.iter()
+            .map(|key| {
+                self.shutdown_client(key)
+            });
+
+        let remove_stream = stream::futures_unordered(remove_timedouts).then(|_| Ok(()));
+
+        Box::new(remove_stream.for_each(Ok))
+    }
+    /** Send pings to all connected clients and terminate all timed out clients.
     */
     pub fn send_pings(&self) -> IoFuture<()> {
-        let mut state = self.state.write();
+        let remove_timedouts = self.remove_timedout_clients();
 
-        state.connected_clients.iter()
-            .filter(|(_key, client)| client.is_pong_timedout())
-            .for_each(|(key, _client)| {
-                self.shutdown_client(key);
-            });
+        let mut state = self.state.write();
 
         let ping_sender = state.connected_clients.iter_mut()
             .filter(|(_key, client)| client.is_ping_interval_passed())
@@ -385,7 +398,10 @@ impl Server {
 
         let ping_stream = stream::futures_unordered(ping_sender).then(|_| Ok(()));
 
-        Box::new(ping_stream.for_each(|()| Ok(())))
+        let res = remove_timedouts
+            .and_then(|_| ping_stream.for_each(Ok));
+
+        Box::new(res)
     }
 }
 
@@ -397,7 +413,7 @@ mod tests {
     use ::toxcore::onion::packet::*;
     use ::toxcore::tcp::packet::*;
     use ::toxcore::tcp::server::{Client, Server};
-    use toxcore::tcp::server::client::TCP_PING_FREQUENCY;
+    use toxcore::tcp::server::client::*;
 
     use futures::sync::mpsc;
     use futures::{Stream, Future};
@@ -1273,14 +1289,17 @@ mod tests {
 
         // client #1
         let (client_1, rx_1) = create_random_client();
+        let pk_1 = client_1.pk();
         server.insert(client_1);
 
         // client #2
         let (client_2, rx_2) = create_random_client();
+        let pk_2 = client_2.pk();
         server.insert(client_2);
 
         // client #3
         let (client_3, rx_3) = create_random_client();
+        let pk_3 = client_3.pk();
         server.insert(client_3);
 
         let now = Instant::now();
@@ -1296,8 +1315,48 @@ mod tests {
             assert!(sender_res.is_ok());
         });
 
-        let (_packet, _rx_1) = rx_1.into_future().wait().unwrap();
-        let (_packet, _rx_2) = rx_2.into_future().wait().unwrap();
-        let (_packet, _rx_3) = rx_3.into_future().wait().unwrap();
+        let (packet, _rx_1) = rx_1.into_future().wait().unwrap();
+        assert_eq!(packet.unwrap(), Packet::PingRequest(
+            PingRequest { ping_id: server.state.read().connected_clients.get(&pk_1).unwrap().ping_id() }
+        ));
+        let (packet, _rx_2) = rx_2.into_future().wait().unwrap();
+        assert_eq!(packet.unwrap(), Packet::PingRequest(
+            PingRequest { ping_id: server.state.read().connected_clients.get(&pk_2).unwrap().ping_id() }
+        ));
+        let (packet, _rx_3) = rx_3.into_future().wait().unwrap();
+        assert_eq!(packet.unwrap(), Packet::PingRequest(
+            PingRequest { ping_id: server.state.read().connected_clients.get(&pk_3).unwrap().ping_id() }
+        ));
+    }
+    #[test]
+    fn tcp_send_remove_timedouts() {
+        let server = Server::new();
+
+        // client #1
+        let (client_1, _rx_1) = create_random_client();
+        server.insert(client_1);
+
+        // client #2
+        let (client_2, _rx_2) = create_random_client();
+        server.insert(client_2);
+
+        // client #3
+        let (client_3, _rx_3) = create_random_client();
+        server.insert(client_3);
+
+        let now = Instant::now();
+
+        let mut enter = tokio_executor::enter().unwrap();
+        // time when all entries is timedout and should be removed
+        let clock_1 = Clock::new_with_now(ConstNow(
+            now + Duration::from_secs(TCP_PING_FREQUENCY + TCP_PING_TIMEOUT + 1)
+        ));
+
+        with_default(&clock_1, &mut enter, |_| {
+            let sender_res = server.send_pings().wait();
+            assert!(sender_res.is_ok());
+        });
+
+        assert!(server.state.read().connected_clients.is_empty())
     }
 }
