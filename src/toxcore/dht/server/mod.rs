@@ -573,26 +573,25 @@ impl Server {
     /// Send UDP packet to specified address. The packet will be dropped if IPv6
     /// mode is disabled but the address is IPv6 address.
     fn send_to(&self, addr: SocketAddr, packet: DhtPacket) -> IoFuture<()> {
-        if self.is_ipv6_mode {// DHT node is running in ipv6 mode
+        if self.is_ipv6_mode {
             match addr.ip() {
                 IpAddr::V4(ip) => {
                     let ip_v6 = ip.to_ipv6_mapped();
                     let addr = SocketAddr::new(IpAddr::V6(ip_v6), addr.port());
-                    return send_to(&self.tx, (packet, addr));
+                    send_to(&self.tx, (packet, addr))
                 },
-                IpAddr::V6(_ip) => {},
+                IpAddr::V6(_ip) => {
+                    send_to(&self.tx, (packet, addr))
+                },
             }
-        } else { // DHT node is running in ipv4 mode
-            if addr.is_ipv6() {
-                debug!("DHT node is running in ipv4 mode but target node's socket is ipv6 address");
-                return Box::new(future::err(Error::new(
-                    ErrorKind::Other,
-                    "DHT node is running in ipv4 mode but target node's socket is ipv6 address"
-                )))
+        } else {
+            if addr.is_ipv4() {
+                send_to(&self.tx, (packet, addr))
+            } else {
+                debug!("Attempting to send packet to IPv6 address wile DHT node is running in IPv4 mode");
+                Box::new(future::ok(()))
             }
         }
-
-        send_to(&self.tx, (packet, addr))
     }
 
     /// Handle received `PingRequest` packet and response with `PingResponse`
