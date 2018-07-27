@@ -86,14 +86,14 @@ consider helping :wink:
         - [x] ping requests & responses
         - [x] nodes requests & responses
         - [x] CookieRequest
-        - [ ] CookieResponse (parsed but ignored)
-        - [ ] CryptoHandshake (parsed but ignored)
-        - [ ] CryptoData (parsed but ignored)
+        - [x] CookieResponse
+        - [x] CryptoHandshake
+        - [x] CryptoData
         - [x] LanDiscovery
         - [x] OnionRequest[0,1,2]
         - [x] OnionResponse[3,2,1]
         - [x] OnionAnnounceRequest & OnionDataRequest
-        - [ ] OnionAnnounceResponse & OnionDataResponse (parsed but ignored)
+        - [ ] OnionAnnounceResponse & OnionDataResponse (need onion client)
         - [x] BootstrapInfo
         - [x] NAT ping requests & responses
     - [ ] TCP Relay
