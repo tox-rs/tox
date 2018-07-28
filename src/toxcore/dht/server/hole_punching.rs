@@ -13,6 +13,7 @@ use toxcore::crypto_core::*;
 use toxcore::dht::server::*;
 use toxcore::dht::packed_node::*;
 use toxcore::io_tokio::IoFuture;
+use toxcore::utils::*;
 
 /// Interval in seconds for sending NatPingRequest
 pub const NAT_PING_PUNCHING_INTERVAL: u64 = 3;
@@ -63,17 +64,7 @@ impl HolePunching {
             last_punching_time: None,
             first_punching_index: 0,
             last_punching_index: 0,
-            ping_id: HolePunching::new_ping_id(),
-        }
-    }
-
-    // get new ping id for NatPingRequest packet
-    fn new_ping_id() -> u64 {
-        loop {
-            let ping_id = random_u64();
-            if ping_id != 0 {
-                return ping_id;
-            }
+            ping_id: gen_ping_id(),
         }
     }
 

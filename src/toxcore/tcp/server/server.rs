@@ -11,6 +11,7 @@ use std::io::{Error, ErrorKind};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
+use std::time::Instant;
 
 use futures::{Sink, Stream, Future, future, stream};
 use futures::sync::mpsc;
@@ -98,13 +99,19 @@ impl Server {
     */
     pub fn shutdown_client(&self, pk: &PublicKey) -> IoFuture<()> {
         let mut state = self.state.write();
+        self.shutdown_client_inner(pk, &mut state)
+    }
+
+    /** Actual shutdown is done here.
+    */
+    fn shutdown_client_inner(&self, pk: &PublicKey, state: &mut ServerState) -> IoFuture<()> {
         let client_a = if let Some(client_a) = state.connected_clients.remove(pk) {
             client_a
         } else {
-            return Box::new( future::err(
+            return Box::new(future::err(
                 Error::new(ErrorKind::Other,
-                    "Cannot find client by pk to shutdown it"
-            )))
+                           "Cannot find client by pk to shutdown it"
+                )))
         };
         state.keys_by_addr.remove(&(client_a.ip_addr(), client_a.port()));
         let notifications = client_a.iter_links()
@@ -118,16 +125,15 @@ impl Server {
                         client_b.send_disconnect_notification(a_id_in_client_b)
                     } else {
                         // Current client is not linked in client_b
-                        Box::new( future::ok(()) )
+                        Box::new(future::ok(()))
                     }
                 } else {
                     // client_b is not connected to the server
-                    Box::new( future::ok(()) )
+                    Box::new(future::ok(()))
                 }
             });
-        Box::new( stream::futures_unordered(notifications).for_each(Ok) )
+        Box::new(stream::futures_unordered(notifications).for_each(Ok))
     }
-
     // Here start the impl of `handle_***` methods
 
     fn handle_route_request(&self, pk: &PublicKey, packet: RouteRequest) -> IoFuture<()> {
@@ -150,10 +156,10 @@ impl Server {
                     return client_a.send_route_response(&packet.pk, 0)
                 }
             } else {
-                return Box::new( future::err(
+                return Box::new(future::err(
                     Error::new(ErrorKind::Other,
-                        "RouteRequest: no such PK"
-                )))
+                               "RouteRequest: no such PK"
+                    )))
             }
         };
         let client_a = &state.connected_clients[pk];
@@ -259,9 +265,11 @@ impl Server {
                     "PongResponse.ping_id == 0"
             )))
         }
-        let state = self.state.read();
-        if let Some(client_a) = state.connected_clients.get(pk) {
+        let mut state = self.state.write();
+        if let Some(client_a) = state.connected_clients.get_mut(pk) {
             if packet.ping_id == client_a.ping_id() {
+                client_a.set_last_pong_resp(Instant::now());
+
                 Box::new( future::ok(()) )
             } else {
                 Box::new( future::err(
@@ -365,6 +373,41 @@ impl Server {
             Box::new( future::ok(()) )
         }
     }
+    /* Remove timedout connected clients
+    */
+    fn remove_timedout_clients(&self, state: &mut ServerState) -> IoFuture<()> {
+        let keys = state.connected_clients.iter()
+            .filter(|(_key, client)| client.is_pong_timedout())
+            .map(|(key, _client)| *key)
+            .collect::<Vec<PublicKey>>();
+
+        let remove_timedouts = keys.iter()
+            .map(|key| {
+                self.shutdown_client_inner(key, state)
+            });
+
+        let remove_stream = stream::futures_unordered(remove_timedouts).then(|_| Ok(()));
+
+        Box::new(remove_stream.for_each(Ok))
+    }
+    /** Send pings to all connected clients and terminate all timed out clients.
+    */
+    pub fn send_pings(&self) -> IoFuture<()> {
+        let mut state = self.state.write();
+
+        let remove_timedouts = self.remove_timedout_clients(&mut state);
+
+        let ping_sender = state.connected_clients.iter_mut()
+            .filter(|(_key, client)| client.is_ping_interval_passed())
+            .map(|(_key, client)| client.send_ping_request());
+
+        let ping_stream = stream::futures_unordered(ping_sender).then(|_| Ok(()));
+
+        let res = remove_timedouts
+            .and_then(|_| ping_stream.for_each(Ok));
+
+        Box::new(res)
+    }
 }
 
 #[cfg(test)]
@@ -375,10 +418,19 @@ mod tests {
     use ::toxcore::onion::packet::*;
     use ::toxcore::tcp::packet::*;
     use ::toxcore::tcp::server::{Client, Server};
+    use toxcore::tcp::server::client::*;
+
     use futures::sync::mpsc;
     use futures::{Stream, Future};
     use quickcheck::{Arbitrary, StdGen};
     use std::net::{IpAddr, Ipv4Addr};
+    use std::time::{Instant, Duration};
+
+    use tokio_executor;
+    use tokio_timer::clock::*;
+
+    use toxcore::time::ConstNow;
+    use toxcore::time::*;
 
     #[test]
     fn server_is_clonable() {
@@ -1236,5 +1288,87 @@ mod tests {
             .handle_packet(&client_pk_1, Packet::OnionRequest(request))
             .wait();
         assert!(handle_res.is_err());
+    }
+    #[test]
+    fn tcp_send_pings_test() {
+        let server = Server::new();
+
+        // client #1
+        let (client_1, rx_1) = create_random_client();
+        let pk_1 = client_1.pk();
+        server.insert(client_1);
+
+        // client #2
+        let (client_2, rx_2) = create_random_client();
+        let pk_2 = client_2.pk();
+        server.insert(client_2);
+
+        // client #3
+        let (client_3, rx_3) = create_random_client();
+        let pk_3 = client_3.pk();
+        server.insert(client_3);
+
+        let now = Instant::now();
+
+        let mut enter = tokio_executor::enter().unwrap();
+        // time when all entries is needed to send PingRequest
+        let clock_1 = Clock::new_with_now(ConstNow(
+            now + Duration::from_secs(TCP_PING_FREQUENCY + 1)
+        ));
+
+        with_default(&clock_1, &mut enter, |_| {
+            let sender_res = server.send_pings().wait();
+            assert!(sender_res.is_ok());
+        });
+
+        let (packet, _rx_1) = rx_1.into_future().wait().unwrap();
+        assert_eq!(packet.unwrap(), Packet::PingRequest(
+            PingRequest { ping_id: server.state.read().connected_clients.get(&pk_1).unwrap().ping_id() }
+        ));
+        let (packet, _rx_2) = rx_2.into_future().wait().unwrap();
+        assert_eq!(packet.unwrap(), Packet::PingRequest(
+            PingRequest { ping_id: server.state.read().connected_clients.get(&pk_2).unwrap().ping_id() }
+        ));
+        let (packet, _rx_3) = rx_3.into_future().wait().unwrap();
+        assert_eq!(packet.unwrap(), Packet::PingRequest(
+            PingRequest { ping_id: server.state.read().connected_clients.get(&pk_3).unwrap().ping_id() }
+        ));
+    }
+    #[test]
+    fn tcp_send_remove_timedouts() {
+        let server = Server::new();
+
+        // client #1
+        let (client_1, _rx_1) = create_random_client();
+        let pk_1 = client_1.pk();
+        server.insert(client_1);
+
+        // client #2
+        let (client_2, _rx_2) = create_random_client();
+        let pk_2 = client_2.pk();
+        server.insert(client_2);
+
+        // client #3
+        let (mut client_3, _rx_3) = create_random_client();
+        let pk_3 = client_3.pk();
+
+        let now = Instant::now();
+
+        let mut enter = tokio_executor::enter().unwrap();
+        // time when all entries is timedout and should be removed
+        let clock_1 = Clock::new_with_now(ConstNow(
+            now + Duration::from_secs(TCP_PING_FREQUENCY + TCP_PING_TIMEOUT + 1)
+        ));
+
+        with_default(&clock_1, &mut enter, |_| {
+            client_3.set_last_pong_resp(clock_now());
+            server.insert(client_3);
+            let sender_res = server.send_pings().wait();
+            assert!(sender_res.is_ok());
+        });
+
+        assert!(!server.state.read().connected_clients.contains_key(&pk_1));
+        assert!(!server.state.read().connected_clients.contains_key(&pk_2));
+        assert!(server.state.read().connected_clients.contains_key(&pk_3));
     }
 }
