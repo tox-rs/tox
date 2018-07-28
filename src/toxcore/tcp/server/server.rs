@@ -99,13 +99,19 @@ impl Server {
     */
     pub fn shutdown_client(&self, pk: &PublicKey) -> IoFuture<()> {
         let mut state = self.state.write();
+        self.shutdown_client_inner(pk, &mut state)
+    }
+
+    /** Actual shutdown is done here.
+    */
+    fn shutdown_client_inner(&self, pk: &PublicKey, state: &mut ServerState) -> IoFuture<()> {
         let client_a = if let Some(client_a) = state.connected_clients.remove(pk) {
             client_a
         } else {
-            return Box::new( future::err(
+            return Box::new(future::err(
                 Error::new(ErrorKind::Other,
-                    "Cannot find client by pk to shutdown it"
-            )))
+                           "Cannot find client by pk to shutdown it"
+                )))
         };
         state.keys_by_addr.remove(&(client_a.ip_addr(), client_a.port()));
         let notifications = client_a.iter_links()
@@ -119,16 +125,15 @@ impl Server {
                         client_b.send_disconnect_notification(a_id_in_client_b)
                     } else {
                         // Current client is not linked in client_b
-                        Box::new( future::ok(()) )
+                        Box::new(future::ok(()))
                     }
                 } else {
                     // client_b is not connected to the server
-                    Box::new( future::ok(()) )
+                    Box::new(future::ok(()))
                 }
             });
-        Box::new( stream::futures_unordered(notifications).for_each(Ok) )
+        Box::new(stream::futures_unordered(notifications).for_each(Ok))
     }
-
     // Here start the impl of `handle_***` methods
 
     fn handle_route_request(&self, pk: &PublicKey, packet: RouteRequest) -> IoFuture<()> {
@@ -151,10 +156,10 @@ impl Server {
                     return client_a.send_route_response(&packet.pk, 0)
                 }
             } else {
-                return Box::new( future::err(
+                return Box::new(future::err(
                     Error::new(ErrorKind::Other,
-                        "RouteRequest: no such PK"
-                )))
+                               "RouteRequest: no such PK"
+                    )))
             }
         };
         let client_a = &state.connected_clients[pk];
@@ -370,15 +375,15 @@ impl Server {
     }
     /* Remove timedout connected clients
     */
-    fn remove_timedout_clients(&self) -> IoFuture<()> {
-        let keys = self.state.read().connected_clients.iter()
+    fn remove_timedout_clients(&self, state: &mut ServerState) -> IoFuture<()> {
+        let keys = state.connected_clients.iter()
             .filter(|(_key, client)| client.is_pong_timedout())
             .map(|(key, _client)| *key)
             .collect::<Vec<PublicKey>>();
 
         let remove_timedouts = keys.iter()
             .map(|key| {
-                self.shutdown_client(key)
+                self.shutdown_client_inner(key, state)
             });
 
         let remove_stream = stream::futures_unordered(remove_timedouts).then(|_| Ok(()));
@@ -388,9 +393,9 @@ impl Server {
     /** Send pings to all connected clients and terminate all timed out clients.
     */
     pub fn send_pings(&self) -> IoFuture<()> {
-        let remove_timedouts = self.remove_timedout_clients();
-
         let mut state = self.state.write();
+
+        let remove_timedouts = self.remove_timedout_clients(&mut state);
 
         let ping_sender = state.connected_clients.iter_mut()
             .filter(|(_key, client)| client.is_ping_interval_passed())
@@ -425,6 +430,7 @@ mod tests {
     use tokio_timer::clock::*;
 
     use toxcore::time::ConstNow;
+    use toxcore::time::*;
 
     #[test]
     fn server_is_clonable() {
@@ -1334,15 +1340,17 @@ mod tests {
 
         // client #1
         let (client_1, _rx_1) = create_random_client();
+        let pk_1 = client_1.pk();
         server.insert(client_1);
 
         // client #2
         let (client_2, _rx_2) = create_random_client();
+        let pk_2 = client_2.pk();
         server.insert(client_2);
 
         // client #3
-        let (client_3, _rx_3) = create_random_client();
-        server.insert(client_3);
+        let (mut client_3, _rx_3) = create_random_client();
+        let pk_3 = client_3.pk();
 
         let now = Instant::now();
 
@@ -1353,10 +1361,14 @@ mod tests {
         ));
 
         with_default(&clock_1, &mut enter, |_| {
+            client_3.set_last_pong_resp(clock_now());
+            server.insert(client_3);
             let sender_res = server.send_pings().wait();
             assert!(sender_res.is_ok());
         });
 
-        assert!(server.state.read().connected_clients.is_empty())
+        assert!(!server.state.read().connected_clients.contains_key(&pk_1));
+        assert!(!server.state.read().connected_clients.contains_key(&pk_2));
+        assert!(server.state.read().connected_clients.contains_key(&pk_3));
     }
 }
