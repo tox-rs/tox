@@ -18,12 +18,12 @@ PK; and additionally used to store nodes closest to friends.
 use std::net::SocketAddr;
 use std::cmp::{Ord, Ordering};
 use std::convert::Into;
-use std::time::Instant;
 
 use toxcore::crypto_core::*;
 use toxcore::dht::dht_node::*;
 use toxcore::dht::packed_node::*;
 use toxcore::dht::ip_port::IsGlobal;
+use toxcore::time::*;
 
 /** Calculate the [`k-bucket`](./struct.Kbucket.html) index of a PK compared
 to "own" PK.
@@ -190,11 +190,11 @@ impl Bucket {
                 match new_node.saddr {
                     SocketAddr::V4(sock_v4) => {
                         self.nodes[index].saddr_v4 = Some(sock_v4);
-                        self.nodes[index].last_resp_time_v4 = Instant::now();
+                        self.nodes[index].last_resp_time_v4 = Some(clock_now());
                     },
                     SocketAddr::V6(sock_v6) => {
                         self.nodes[index].saddr_v6 = Some(sock_v6);
-                        self.nodes[index].last_resp_time_v6 = Instant::now();
+                        self.nodes[index].last_resp_time_v6 = Some(clock_now());
                     }
                 }
                 true
@@ -300,9 +300,12 @@ impl Bucket {
     [`Bucket`]: ./struct.Bucket.html
     [`PackedNode`]: ./struct.PackedNode.html
     */
-    pub fn can_add(&self, base_pk: &PublicKey, new_node: &PackedNode) -> bool {
+    pub fn can_add(&self, base_pk: &PublicKey, new_node: &PackedNode) -> bool { // TODO: synchronize result with try_add?
         match self.nodes.binary_search_by(|n| base_pk.distance(&n.pk, &new_node.pk)) {
-            Ok(index) => self.nodes[index].is_bad(), // if node is bad then we'd want to update it's address
+            Ok(index) => // if node is bad then we'd want to update it's address
+                self.nodes[index].is_bad() ||
+                    self.nodes[index].saddr_v4.map(SocketAddr::V4) != Some(new_node.saddr) &&
+                    self.nodes[index].saddr_v6.map(SocketAddr::V6) != Some(new_node.saddr),
             Err(index) if index == self.nodes.len() => // can't find node in bucket
                 !self.is_full() || self.nodes.iter().any(|n| n.is_bad()),
             Err(_index) => true, // node is not found in bucket, so can add node
@@ -549,7 +552,7 @@ mod tests {
         SocketAddr,
         SocketAddrV4,
     };
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use tokio_executor;
     use tokio_timer::clock::*;
@@ -908,21 +911,21 @@ mod tests {
             let addr = Ipv4Addr::new(0, 0, 0, 0);
             let saddr = SocketAddrV4::new(addr, 0);
 
-            let n0_base_pk = PackedNode::new(false, SocketAddr::V4(saddr), &base_pk);
+            let n0_base_pk = PackedNode::new(SocketAddr::V4(saddr), &base_pk);
             assert!(!kbucket.try_add(&n0_base_pk));
             kbucket.remove(&base_pk);
 
             pk_bytes[5] = 1;
             let pk1 = PublicKey(pk_bytes);
-            let n1 = PackedNode::new(false, SocketAddr::V4(saddr), &pk1);
+            let n1 = PackedNode::new(SocketAddr::V4(saddr), &pk1);
 
             pk_bytes[10] = 2;
             let pk2 = PublicKey(pk_bytes);
-            let n2 = PackedNode::new(false, SocketAddr::V4(saddr), &pk2);
+            let n2 = PackedNode::new(SocketAddr::V4(saddr), &pk2);
 
             pk_bytes[14] = 4;
             let pk3 = PublicKey(pk_bytes);
-            let n3 = PackedNode::new(false, SocketAddr::V4(saddr), &pk3);
+            let n3 = PackedNode::new(SocketAddr::V4(saddr), &pk3);
 
             assert!(pk1 > pk2);
             assert!(pk2 < pk3);

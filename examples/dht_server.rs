@@ -132,7 +132,7 @@ fn main() {
         let bootstrap_pk = PublicKey::from_slice(&bootstrap_pk_bytes).unwrap();
 
         let saddr: SocketAddr = saddr.parse().unwrap();
-        let bootstrap_pn = PackedNode::new(true, saddr, &bootstrap_pk);
+        let bootstrap_pn = PackedNode::new(saddr, &bootstrap_pk);
         assert!(server_obj.try_add_to_close_nodes(&bootstrap_pn));
     }
 
@@ -142,7 +142,7 @@ fn main() {
     // create PK from bytes
     let friend_pk = PublicKey::from_slice(&friend_pk_bytes).unwrap();
     // add_friend with args, PK is friend_pk, bootstrap_time initial value is 0, so do bootstrapping 5 times
-    server_obj.add_friend(DhtFriend::new(friend_pk, 0));
+    server_obj.add_friend(DhtFriend::new(friend_pk));
     // set bootstrap info
     server_obj.set_bootstrap_info(07032018, "This is tox-rs".as_bytes().to_owned());
 

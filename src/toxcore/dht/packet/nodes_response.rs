@@ -167,7 +167,7 @@ mod tests {
     encode_decode_test!(
         nodes_response_payload_encode_decode,
         NodesResponsePayload { nodes: vec![
-            PackedNode::new(false, SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
+            PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
         ], id: 42 }
     );
 
@@ -177,7 +177,7 @@ mod tests {
         nodes_response_payload_encrypt_decrypt,
         NodesResponse,
         NodesResponsePayload { nodes: vec![
-            PackedNode::new(false, SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
+            PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
         ], id: 42 }
     );
 
@@ -185,7 +185,7 @@ mod tests {
         nodes_response_payload_encrypt_decrypt_invalid_key,
         NodesResponse,
         NodesResponsePayload { nodes: vec![
-            PackedNode::new(false, SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
+            PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
         ], id: 42 }
     );
 
