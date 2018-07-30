@@ -222,7 +222,7 @@ fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_on
     }
 
     for &node in &cli_config.bootstrap_nodes {
-        assert!(server.try_add_to_close_nodes(&node));
+        server.try_add_to_close_nodes(&node);
     }
 
     // The server task asynchronously iterates over and processes each
