@@ -154,7 +154,7 @@ pub fn cli_parse() -> CliConfig {
                 .expect("Invalid node address")
                 .next()
                 .expect("Invalid node address");
-            PackedNode::new(true, saddr, &bootstrap_pk)
+            PackedNode::new(saddr, &bootstrap_pk)
         })
         .collect();
 
