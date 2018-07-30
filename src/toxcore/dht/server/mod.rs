@@ -6,6 +6,7 @@ This module works on top of other modules.
 pub mod hole_punching;
 
 use futures::{Future, Sink, Stream, future, stream};
+use futures::future::join_all;
 use futures::sync::mpsc;
 use parking_lot::RwLock;
 use tokio::timer::Interval;
@@ -329,7 +330,7 @@ impl Server {
         if friends.iter().any(|friend| friend.pk == node.pk && !friend.is_addr_known()) {
             let mut request_queue = self.request_queue.write();
             let ping_id = request_queue.new_ping_id(node.pk);
-            return Box::new(self.send_ping_req(node, ping_id))
+            return Box::new(self.send_ping_req(&(*node).into(), ping_id))
         }
 
         self.nodes_to_send_ping.write().try_add(&self.pk, node);
@@ -346,7 +347,7 @@ impl Server {
 
         let futures = bootstrap_nodes.nodes.iter().map(|node| {
             let ping_id = request_queue.new_ping_id(node.pk);
-            self.send_nodes_req(node.clone().into(), pk, ping_id)
+            self.send_nodes_req(node, pk, ping_id)
         }).collect::<Vec<_>>();
 
         Box::new(future::join_all(futures).map(|_| ()))
@@ -362,7 +363,7 @@ impl Server {
             .map(|node| {
                 node.update_ping_req_time();
                 let ping_id = request_queue.new_ping_id(node.pk);
-                self.send_nodes_req(node.clone().into(), pk, ping_id)
+                self.send_nodes_req(node, pk, ping_id)
             })
             .collect::<Vec<_>>();
 
@@ -378,8 +379,8 @@ impl Server {
         let good_nodes = nodes
             .filter(|&node| !node.is_discarded())
             .cloned()
-            .map(|node| node.into())
-            .collect::<Vec<PackedNode>>();
+            .map(|node| node)
+            .collect::<Vec<DhtNode>>();
 
         if good_nodes.is_empty() {
             // Random request should be sent only to good nodes
@@ -392,14 +393,14 @@ impl Server {
             random_node_idx -= random_usize() % (random_node_idx + 1);
         }
 
-        let random_node = good_nodes[random_node_idx];
+        let random_node = &good_nodes[random_node_idx];
 
         let ping_id = request_queue.new_ping_id(random_node.pk);
-        self.send_nodes_req(random_node, pk, ping_id)
+        self.send_nodes_req(&random_node, pk, ping_id)
     }
 
     /// Send `PingRequest` packet to the node.
-    pub fn send_ping_req(&self, node: &PackedNode, ping_id: u64) -> IoFuture<()> {
+    pub fn send_ping_req(&self, node: &DhtNode, ping_id: u64) -> IoFuture<()> {
         let payload = PingRequestPayload {
             id: ping_id,
         };
@@ -408,11 +409,11 @@ impl Server {
             &self.pk,
             payload
         ));
-        self.send_to(node.saddr, ping_req)
+        self.send_to(node, ping_req)
     }
 
     /// Send `NodesRequest` packet to the node.
-    pub fn send_nodes_req(&self, target_peer: PackedNode, search_pk: PublicKey, ping_id: u64) -> IoFuture<()> {
+    pub fn send_nodes_req(&self, target_peer: &DhtNode, search_pk: PublicKey, ping_id: u64) -> IoFuture<()> {
         // Check if packet is going to be sent to ourselves.
         if self.pk == target_peer.pk {
             return Box::new(
@@ -432,7 +433,7 @@ impl Server {
             payload
         ));
 
-        self.send_to(target_peer.saddr, nodes_req)
+        self.send_to(target_peer, nodes_req)
     }
 
     // send NatPingRequests to all of my friends and do hole punching.
@@ -474,10 +475,8 @@ impl Server {
     // actual sending function of NatPingRequest.
     fn send_nat_ping_req_inner(&self, friend: &DhtFriend, nat_ping_req_packet: DhtPacket) -> IoFuture<()> {
         let nats_sender = friend.close_nodes.nodes.iter()
-            .map(|node| node.get_socket_addr(self.is_ipv6_mode))
-            .filter_map(|addr| addr)
-            .map(|addr| {
-                self.send_to(addr, nat_ping_req_packet.clone())
+            .map(|node| {
+                self.send_to(node, nat_ping_req_packet.clone())
             });
 
         let nats_stream = stream::futures_unordered(nats_sender).then(|_| Ok(()));
@@ -569,28 +568,33 @@ impl Server {
         }
     }
 
-    /// Send UDP packet to specified address. The packet will be dropped if IPv6
-    /// mode is disabled but the address is IPv6 address.
-    fn send_to(&self, addr: SocketAddr, packet: DhtPacket) -> IoFuture<()> {
-        if self.is_ipv6_mode {
-            match addr.ip() {
-                IpAddr::V4(ip) => {
-                    let ip_v6 = ip.to_ipv6_mapped();
-                    let addr = SocketAddr::new(IpAddr::V6(ip_v6), addr.port());
-                    send_to(&self.tx, (packet, addr))
-                },
-                IpAddr::V6(_ip) => {
-                    send_to(&self.tx, (packet, addr))
-                },
-            }
-        } else {
-            if addr.is_ipv4() {
-                send_to(&self.tx, (packet, addr))
-            } else {
-                debug!("Attempting to send packet to IPv6 address wile DHT node is running in IPv4 mode");
-                Box::new(future::ok(()))
-            }
+    /// Send UDP packet node. If the node has both IPv4 and IPv6 addresses,
+    /// then it sends packet to both addresses.
+    fn send_to(&self, node: &DhtNode, packet: DhtPacket) -> IoFuture<()> {
+        let mut futures = Vec::new();
+
+        if self.is_ipv6_mode {// DHT node is running in ipv6 mode
+            if let Some(sock_v6) = node.saddr_v6 {
+                futures.push(send_to(&self.tx, (packet.clone(), SocketAddr::V6(sock_v6))));
+            } else {};
+
+            if let Some(sock_v4) = node.saddr_v4 {
+                let ip_v6 = sock_v4.ip().to_ipv6_mapped();
+                let addr = SocketAddr::new(IpAddr::V6(ip_v6), sock_v4.port());
+                futures.push(send_to(&self.tx, (packet, addr)));
+            } else {};
+        } else { // DHT node is running in ipv4 mode
+            if let Some(sock_v4) = node.saddr_v4 {
+                futures.push(send_to(&self.tx, (packet, SocketAddr::V4(sock_v4))));
+            } else {};
         }
+
+        Box::new(join_all(futures).map(|_| ()))
+    }
+
+    /// Send UDP packet to specified address.
+    fn send_to_resp(&self, addr: SocketAddr, packet: DhtPacket) -> IoFuture<()> {
+        send_to(&self.tx, (packet, addr))
     }
 
     /// Handle received `PingRequest` packet and response with `PingResponse`
@@ -612,10 +616,9 @@ impl Server {
         ));
 
         Box::new(self.ping_add(&PackedNode::new(addr, &packet.pk))
-            .join(self.send_to(addr, ping_resp))
+            .join(self.send_to_resp(addr, ping_resp))
             .map(|_| ())
-        )
-    }
+        )    }
 
     /// Handle received `PingResponse` packet and if it's correct add the node
     /// that sent this packet to close nodes lists.
@@ -694,7 +697,7 @@ impl Server {
         ));
 
         Box::new(self.ping_add(&PackedNode::new(addr, &packet.pk))
-            .join(self.send_to(addr, nodes_resp))
+            .join(self.send_to_resp(addr, nodes_resp))
             .map(|_| ())
         )
     }
@@ -829,12 +832,8 @@ impl Server {
         } else {
             let close_nodes = self.close_nodes.read();
             if let Some(node) = close_nodes.get_node(&packet.rpk) { // search close_nodes to find target peer
-                if let Some(addr) = node.get_socket_addr(self.is_ipv6_mode) {
-                    let packet = DhtPacket::DhtRequest(packet);
-                    self.send_to(addr, packet)
-                } else {
-                    Box::new( future::ok(()) )
-                }
+                let packet = DhtPacket::DhtRequest(packet);
+                self.send_to(node, packet)
             } else {
                 Box::new( future::ok(()) )
             }
@@ -854,7 +853,7 @@ impl Server {
             &self.pk,
             resp_payload
         ));
-        self.send_to(addr, nat_ping_resp)
+        self.send_to_resp(addr, nat_ping_resp)
     }
 
     /**
@@ -909,9 +908,9 @@ impl Server {
         let target_node = PackedNode {
             saddr: addr,
             pk: packet.pk,
-        };
+        }.into();
 
-        self.send_nodes_req(target_node, self.pk, request_queue.new_ping_id(packet.pk))
+        self.send_nodes_req(&target_node, self.pk, request_queue.new_ping_id(packet.pk))
     }
 
     /// Handle received `OnionRequest0` packet and send `OnionRequest1` packet
@@ -936,7 +935,7 @@ impl Server {
             payload: payload.inner,
             onion_return
         });
-        self.send_to(payload.ip_port.to_saddr(), next_packet)
+        self.send_to_resp(payload.ip_port.to_saddr(), next_packet)
     }
 
     /// Handle received `OnionRequest1` packet and send `OnionRequest2` packet
@@ -961,7 +960,7 @@ impl Server {
             payload: payload.inner,
             onion_return
         });
-        self.send_to(payload.ip_port.to_saddr(), next_packet)
+        self.send_to_resp(payload.ip_port.to_saddr(), next_packet)
     }
 
     /// Handle received `OnionRequest2` packet and send `OnionAnnounceRequest`
@@ -990,7 +989,7 @@ impl Server {
                 onion_return
             }),
         };
-        self.send_to(payload.ip_port.to_saddr(), next_packet)
+        self.send_to_resp(payload.ip_port.to_saddr(), next_packet)
     }
 
     /// Handle received `OnionAnnounceRequest` packet and response with
@@ -1001,7 +1000,7 @@ impl Server {
         let onion_return = packet.onion_return.clone();
         let response = onion_announce.handle_onion_announce_request(packet, &self.sk, &close_nodes, addr);
         match response {
-            Ok(response) => self.send_to(addr, DhtPacket::OnionResponse3(OnionResponse3 {
+            Ok(response) => self.send_to_resp(addr, DhtPacket::OnionResponse3(OnionResponse3 {
                 onion_return,
                 payload: InnerOnionResponse::OnionAnnounceResponse(response)
             })),
@@ -1015,7 +1014,7 @@ impl Server {
     fn handle_onion_data_request(&self, packet: OnionDataRequest) -> IoFuture<()> {
         let onion_announce = self.onion_announce.read();
         match onion_announce.handle_data_request(packet) {
-            Ok((response, addr)) => self.send_to(addr, DhtPacket::OnionResponse3(response)),
+            Ok((response, addr)) => self.send_to_resp(addr, DhtPacket::OnionResponse3(response)),
             Err(e) => Box::new(future::err(e))
         }
     }
@@ -1035,7 +1034,7 @@ impl Server {
                 onion_return: next_onion_return,
                 payload: packet.payload
             });
-            self.send_to(ip_port.to_saddr(), next_packet)
+            self.send_to_resp(ip_port.to_saddr(), next_packet)
         } else {
             Box::new( future::err(
                 Error::new(ErrorKind::Other,
@@ -1059,7 +1058,7 @@ impl Server {
                 onion_return: next_onion_return,
                 payload: packet.payload
             });
-            self.send_to(ip_port.to_saddr(), next_packet)
+            self.send_to_resp(ip_port.to_saddr(), next_packet)
         } else {
             Box::new( future::err(
                 Error::new(ErrorKind::Other,
@@ -1086,7 +1085,7 @@ impl Server {
                         InnerOnionResponse::OnionAnnounceResponse(inner) => DhtPacket::OnionAnnounceResponse(inner),
                         InnerOnionResponse::OnionDataResponse(inner) => DhtPacket::OnionDataResponse(inner),
                     };
-                    self.send_to(ip_port.to_saddr(), next_packet)
+                    self.send_to_resp(ip_port.to_saddr(), next_packet)
                 },
                 ProtocolType::TCP => {
                     if let Some(ref tcp_onion_sink) = self.tcp_onion_sink {
@@ -1142,7 +1141,7 @@ impl Server {
             payload: packet.payload,
             onion_return
         });
-        self.send_to(packet.ip_port.to_saddr(), next_packet)
+        self.send_to_resp(packet.ip_port.to_saddr(), next_packet)
     }
 
     /// Handle `BootstrapInfo` packet and response with `BootstrapInfo` packet.
@@ -1151,7 +1150,7 @@ impl Server {
             version: self.tox_core_version,
             motd: self.motd.clone(),
         });
-        self.send_to(addr, packet)
+        self.send_to_resp(addr, packet)
     }
 
     /// Set toxcore version and message of the day.
