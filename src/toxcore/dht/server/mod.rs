@@ -443,7 +443,7 @@ impl Server {
 
         let nats_sender = friends.iter_mut()
             .map(|friend| {
-                let addrs_of_clients = friend.get_addrs_of_clients(self.is_ipv6_mode);
+                let addrs_of_clients = friend.get_addrs_of_clients();
                 // try hole punching
                 friend.hole_punch.try_nat_punch(&self, friend.pk, addrs_of_clients);
 
@@ -736,6 +736,8 @@ impl Server {
                         friend.bootstrap_nodes.try_add(&friend.pk, node);
                     }
                 }
+
+                self.update_returned_sock(node, &mut close_nodes, &mut friends);
             }
             Box::new( future::ok(()) )
         } else {
@@ -743,6 +745,24 @@ impl Server {
                 Error::new(ErrorKind::Other, "NodesResponse.ping_id does not match")
             ))
         }
+    }
+
+    /// Update returned socket address and time of receiving packet
+    fn update_returned_sock(&self, node: &PackedNode, close_nodes: &mut Kbucket, friends: &mut Vec<DhtFriend>) {
+        if self.pk == node.pk {
+            if let Some(node_to_update) = close_nodes.get_node_mut(&node.pk) {
+                node_to_update.update_returned_sock(node.saddr);
+            } else {}
+        }
+
+        friends.iter_mut()
+            .for_each(|friend| {
+                if friend.pk == node.pk {
+                    if let Some(node_to_update) = friend.close_nodes.get_node_mut(&friend.pk, &node.pk) {
+                        node_to_update.update_returned_sock(node.saddr);
+                    } else {}
+                } else {}
+            })
     }
 
     /// Handle received `CookieRequest` packet and pass it to `net_crypto`

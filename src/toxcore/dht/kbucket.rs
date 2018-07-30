@@ -15,7 +15,6 @@ PK; and additionally used to store nodes closest to friends.
 [`BUCKET_DEFAULT_SIZE`]: ./constant.BUCKET_DEFAULT_SIZE.html
 */
 
-use std::net::SocketAddr;
 use std::cmp::{Ord, Ordering};
 use std::convert::Into;
 
@@ -51,10 +50,10 @@ pub fn kbucket_index(&PublicKey(ref own_pk): &PublicKey,
 
 impl Into<PackedNode> for DhtNode {
     fn into(self) -> PackedNode {
-        let saddr = if self.saddr_v6.is_none() {
-            SocketAddr::V4(self.saddr_v4.expect("into() PackedNode fails"))
+        let saddr = if self.assoc4.saddr.is_none() {
+            self.assoc6.saddr.expect("into() PackedNode fails")
         } else {
-            SocketAddr::V6(self.saddr_v6.expect("into() PackedNode fails"))
+            self.assoc4.saddr.expect("into() PackedNode fails")
         };
 
         PackedNode {
@@ -157,6 +156,12 @@ impl Bucket {
         self.nodes.binary_search_by(|n| base_pk.distance(&n.pk, pk)).ok()
     }
 
+    /// Get mutable reference to a `DhtNode` by it's `PublicKey`.
+    pub fn get_node_mut(&mut self, base_pk: &PublicKey, pk: &PublicKey) -> Option<&mut DhtNode> {
+        self.find(base_pk, pk)
+            .map(move |node_index| &mut self.nodes[node_index])
+    }
+
     /**
     Try to add [`PackedNode`] to the bucket.
 
@@ -187,15 +192,12 @@ impl Bucket {
             Ok(index) => {
                 debug!(target: "Bucket",
                     "Updated: the node was already in the bucket.");
-                match new_node.saddr {
-                    SocketAddr::V4(sock_v4) => {
-                        self.nodes[index].saddr_v4 = Some(sock_v4);
-                        self.nodes[index].last_resp_time_v4 = Some(clock_now());
-                    },
-                    SocketAddr::V6(sock_v6) => {
-                        self.nodes[index].saddr_v6 = Some(sock_v6);
-                        self.nodes[index].last_resp_time_v6 = Some(clock_now());
-                    }
+                if new_node.saddr.is_ipv4() {
+                    self.nodes[index].assoc4.saddr = Some(new_node.saddr);
+                    self.nodes[index].assoc4.last_resp_time = Some(clock_now());
+                } else {
+                    self.nodes[index].assoc6.saddr = Some(new_node.saddr);
+                    self.nodes[index].assoc6.last_resp_time = Some(clock_now());
                 }
                 true
             },
@@ -304,8 +306,8 @@ impl Bucket {
         match self.nodes.binary_search_by(|n| base_pk.distance(&n.pk, &new_node.pk)) {
             Ok(index) => // if node is bad then we'd want to update it's address
                 self.nodes[index].is_bad() ||
-                    self.nodes[index].saddr_v4.map(SocketAddr::V4) != Some(new_node.saddr) &&
-                    self.nodes[index].saddr_v6.map(SocketAddr::V6) != Some(new_node.saddr),
+                    self.nodes[index].assoc4.saddr != Some(new_node.saddr) &&
+                    self.nodes[index].assoc6.saddr != Some(new_node.saddr),
             Err(index) if index == self.nodes.len() => // can't find node in bucket
                 !self.is_full() || self.nodes.iter().any(|n| n.is_bad()),
             Err(_index) => true, // node is not found in bucket, so can add node

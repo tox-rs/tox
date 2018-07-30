@@ -57,11 +57,37 @@ impl DhtFriend {
     }
 
     /// get Socket Address list of a friend, a friend can have multi IP address bacause of NAT
-    pub fn get_addrs_of_clients(&self, is_ipv6_mode: bool) -> Vec<SocketAddr> {
+    pub fn get_addrs_of_clients(&self) -> Vec<SocketAddr> {
+        let mut sock_v4 = Vec::new();
+        let mut sock_v6 = Vec::new();
+        let mut direct_connected = false;
+
         self.close_nodes.nodes.iter()
-            .map(|node| node.get_socket_addr(is_ipv6_mode))
-            .filter_map(|addr| addr)
-            .collect::<Vec<SocketAddr>>()
+            .for_each(|node| {
+                if let Some(v6) = node.assoc6.ret_saddr {
+                    if !node.assoc6.is_bad() {
+                        sock_v6.push(v6);
+                    }
+                }
+
+                if let Some(v4) = node.assoc4.ret_saddr {
+                    if !node.assoc4.is_bad() {
+                        sock_v4.push(v4);
+                    }
+                }
+
+                if self.pk == node.pk && (!node.assoc4.is_bad() || !node.assoc6.is_bad()) {
+                    direct_connected = true;
+                }
+            });
+
+        if direct_connected {
+            Vec::new()
+        } else if sock_v6.len() > sock_v4.len() {
+            sock_v6
+        } else {
+            sock_v4
+        }
     }
 }
 
@@ -69,42 +95,8 @@ impl DhtFriend {
 mod tests {
     use super::*;
 
-    use toxcore::dht::packed_node::*;
-
     #[test]
     fn friend_new_test() {
         let _ = DhtFriend::new(gen_keypair().0);
-    }
-
-    #[test]
-    fn friend_get_addrs_of_clients_test() {
-        let (friend_pk, _friend_sk) = gen_keypair();
-        let mut friend = DhtFriend::new(friend_pk);
-
-        let (node_pk1, _node_sk1) = gen_keypair();
-        assert!(friend.close_nodes.try_add(&friend_pk, &PackedNode {
-            pk: node_pk1,
-            saddr: "127.0.0.1:33445".parse().unwrap(),
-        }));
-        let (node_pk2, _node_sk2) = gen_keypair();
-        assert!(friend.close_nodes.try_add(&friend_pk, &PackedNode {
-            pk: node_pk2,
-            saddr: "[2001:db8::1]:33445".parse().unwrap(),
-        }));
-        let (node_pk3, _node_sk3) = gen_keypair();
-        assert!(friend.close_nodes.try_add(&friend_pk, &PackedNode {
-            pk: node_pk3,
-            saddr: "127.0.0.2:33445".parse().unwrap(),
-        }));
-        let (node_pk4, _node_sk4) = gen_keypair();
-        assert!(friend.close_nodes.try_add(&friend_pk, &PackedNode {
-            pk: node_pk4,
-            saddr: "127.0.0.3:33445".parse().unwrap(),
-        }));
-
-        assert!(friend.get_addrs_of_clients(true).contains(&"127.0.0.1:33445".parse().unwrap()));
-        assert!(friend.get_addrs_of_clients(true).contains(&"127.0.0.2:33445".parse().unwrap()));
-        assert!(friend.get_addrs_of_clients(true).contains(&"127.0.0.3:33445".parse().unwrap()));
-        assert!(friend.get_addrs_of_clients(true).contains(&"[2001:db8::1]:33445".parse().unwrap()));
     }
 }
