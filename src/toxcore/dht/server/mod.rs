@@ -360,7 +360,7 @@ impl Server {
         let futures = nodes
             .filter(|node| !node.is_discarded() && node.is_ping_interval_passed())
             .map(|node| {
-                node.last_ping_req_time = Some(clock_now());
+                node.update_ping_req_time();
                 let ping_id = request_queue.new_ping_id(node.pk);
                 self.send_nodes_req(node.clone().into(), pk, ping_id)
             })
@@ -737,7 +737,7 @@ impl Server {
                     }
                 }
 
-                self.update_returned_sock(node, &packet.pk, &mut close_nodes, &mut friends);
+                self.update_returned_addr(node, &packet.pk, &mut close_nodes, &mut friends);
             }
             Box::new( future::ok(()) )
         } else {
@@ -748,21 +748,20 @@ impl Server {
     }
 
     /// Update returned socket address and time of receiving packet
-    fn update_returned_sock(&self, node: &PackedNode, packet_pk: &PublicKey, close_nodes: &mut Kbucket, friends: &mut Vec<DhtFriend>) {
+    fn update_returned_addr(&self, node: &PackedNode, packet_pk: &PublicKey, close_nodes: &mut Kbucket, friends: &mut Vec<DhtFriend>) {
         if self.pk == node.pk {
             if let Some(node_to_update) = close_nodes.get_node_mut(packet_pk) {
-                node_to_update.update_returned_sock(node.saddr);
+                node_to_update.update_returned_addr(node.saddr);
             }
         }
 
         friends.iter_mut()
-            .for_each(|friend| {
-                if friend.pk == node.pk {
-                    if let Some(node_to_update) = friend.close_nodes.get_node_mut(&friend.pk, packet_pk) {
-                        node_to_update.update_returned_sock(node.saddr);
-                    }
+            .find(|friend| friend.pk == node.pk)
+            .map(|friend| {
+                if let Some(node_to_update) = friend.close_nodes.get_node_mut(&friend.pk, packet_pk) {
+                    node_to_update.update_returned_addr(node.saddr);
                 }
-            })
+            });
     }
 
     /// Handle received `CookieRequest` packet and pass it to `net_crypto`
@@ -1351,7 +1350,7 @@ mod tests {
 
         // Node that sent PingResponse should be added to close nodes list and
         // have updated last_resp_time
-        assert_eq!(node.last_resp_time_v4.unwrap(), time);
+        assert_eq!(node.assoc4.last_resp_time.unwrap(), time);
     }
 
     #[test]
@@ -1571,7 +1570,7 @@ mod tests {
 
         // Node that sent NodesResponse should be added to close nodes list and
         // have updated last_resp_time
-        assert_eq!(node.last_resp_time_v4.unwrap(), time);
+        assert_eq!(node.assoc4.last_resp_time.unwrap(), time);
     }
 
     #[test]
@@ -2764,7 +2763,8 @@ mod tests {
             assert!(close_nodes.try_add(&pn));
             let node = close_nodes.get_node_mut(&bob_pk).unwrap();
             // Set last_ping_req_time so that only random request will be sent
-            node.last_ping_req_time = Some(Instant::now());
+            node.assoc4.last_ping_req_time = Some(clock_now());
+            node.assoc6.last_ping_req_time = Some(clock_now());
         }
 
         let now = Instant::now();
@@ -2882,7 +2882,8 @@ mod tests {
         let pn = PackedNode::new("127.0.0.1:33445".parse().unwrap(), &bob_pk);
         assert!(friend.close_nodes.try_add(&friend_pk, &pn));
         // Set last_ping_req_time so that only random request will be sent
-        friend.close_nodes.nodes[0].last_ping_req_time = Some(Instant::now());
+        friend.close_nodes.nodes[0].assoc4.last_ping_req_time = Some(clock_now());
+        friend.close_nodes.nodes[0].assoc6.last_ping_req_time = Some(clock_now());
 
         alice.add_friend(friend);
 

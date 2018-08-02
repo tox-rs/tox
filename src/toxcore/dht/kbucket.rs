@@ -17,6 +17,7 @@ PK; and additionally used to store nodes closest to friends.
 
 use std::cmp::{Ord, Ordering};
 use std::convert::Into;
+use std::net::SocketAddr;
 
 use toxcore::crypto_core::*;
 use toxcore::dht::dht_node::*;
@@ -51,9 +52,9 @@ pub fn kbucket_index(&PublicKey(ref own_pk): &PublicKey,
 impl Into<PackedNode> for DhtNode {
     fn into(self) -> PackedNode {
         let saddr = if self.assoc4.saddr.is_none() {
-            self.assoc6.saddr.expect("into() PackedNode fails")
+            SocketAddr::V6(self.assoc6.saddr.expect("into() PackedNode fails"))
         } else {
-            self.assoc4.saddr.expect("into() PackedNode fails")
+            SocketAddr::V4(self.assoc4.saddr.expect("into() PackedNode fails"))
         };
 
         PackedNode {
@@ -192,12 +193,15 @@ impl Bucket {
             Ok(index) => {
                 debug!(target: "Bucket",
                     "Updated: the node was already in the bucket.");
-                if new_node.saddr.is_ipv4() {
-                    self.nodes[index].assoc4.saddr = Some(new_node.saddr);
-                    self.nodes[index].assoc4.last_resp_time = Some(clock_now());
-                } else {
-                    self.nodes[index].assoc6.saddr = Some(new_node.saddr);
-                    self.nodes[index].assoc6.last_resp_time = Some(clock_now());
+                match new_node.saddr {
+                    SocketAddr::V4(sock_v4) => {
+                        self.nodes[index].assoc4.saddr = Some(sock_v4);
+                        self.nodes[index].assoc4.last_resp_time = Some(clock_now());
+                    },
+                    SocketAddr::V6(sock_v6) => {
+                        self.nodes[index].assoc6.saddr = Some(sock_v6);
+                        self.nodes[index].assoc6.last_resp_time = Some(clock_now());
+                    }
                 }
                 true
             },
@@ -306,8 +310,8 @@ impl Bucket {
         match self.nodes.binary_search_by(|n| base_pk.distance(&n.pk, &new_node.pk)) {
             Ok(index) => // if node is bad then we'd want to update it's address
                 self.nodes[index].is_bad() ||
-                    self.nodes[index].assoc4.saddr != Some(new_node.saddr) &&
-                    self.nodes[index].assoc6.saddr != Some(new_node.saddr),
+                    self.nodes[index].assoc4.saddr.map(SocketAddr::V4) != Some(new_node.saddr) &&
+                        self.nodes[index].assoc6.saddr.map(SocketAddr::V6) != Some(new_node.saddr),
             Err(index) if index == self.nodes.len() => // can't find node in bucket
                 !self.is_full() || self.nodes.iter().any(|n| n.is_bad()),
             Err(_index) => true, // node is not found in bucket, so can add node

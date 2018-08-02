@@ -9,6 +9,7 @@ use toxcore::time::*;
 use toxcore::dht::kbucket::*;
 use toxcore::crypto_core::*;
 use toxcore::dht::server::hole_punching::*;
+use toxcore::dht::dht_node::*;
 
 /// Number of close nodes each friend has.
 pub const FRIEND_CLOSE_NODES_COUNT: u8 = 4;
@@ -58,33 +59,31 @@ impl DhtFriend {
 
     /// get Socket Address list of a friend, a friend can have multi IP address bacause of NAT
     pub fn get_addrs_of_clients(&self) -> Vec<SocketAddr> {
-        let mut socks = Vec::new();
-        let mut direct_connected = false;
+        let mut addrs = Vec::new();
 
-        self.close_nodes.nodes.iter()
-            .for_each(|node| {
-                if let Some(v6) = node.assoc6.ret_saddr {
-                    if !node.assoc6.is_bad() {
-                        socks.push(v6);
-                    }
+        let good_nodes = self.close_nodes.nodes.iter()
+            .filter(|node| !node.is_bad())
+            .cloned()
+            .collect::<Vec<DhtNode>>();
+
+        for node in good_nodes {
+            if let Some(v6) = node.assoc6.ret_saddr {
+                if !node.assoc6.is_bad() {
+                    addrs.push(SocketAddr::V6(v6));
                 }
+            }
 
-                if let Some(v4) = node.assoc4.ret_saddr {
-                    if !node.assoc4.is_bad() {
-                        socks.push(v4);
-                    }
+            if let Some(v4) = node.assoc4.ret_saddr {
+                if !node.assoc4.is_bad() {
+                    addrs.push(SocketAddr::V4(v4));
                 }
+            }
 
-                if self.pk == node.pk && (!node.assoc4.is_bad() || !node.assoc6.is_bad()) {
-                    direct_connected = true;
-                }
-            });
-
-        if direct_connected {
-            Vec::new()
-        } else {
-            socks
+            if self.pk == node.pk {
+                return Vec::new();
+            }
         }
+        addrs
     }
 }
 
