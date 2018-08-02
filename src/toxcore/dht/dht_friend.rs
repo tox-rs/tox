@@ -58,21 +58,20 @@ impl DhtFriend {
 
     /// get Socket Address list of a friend, a friend can have multi IP address bacause of NAT
     pub fn get_addrs_of_clients(&self) -> Vec<SocketAddr> {
-        let mut sock_v4 = Vec::new();
-        let mut sock_v6 = Vec::new();
+        let mut socks = Vec::new();
         let mut direct_connected = false;
 
         self.close_nodes.nodes.iter()
             .for_each(|node| {
                 if let Some(v6) = node.assoc6.ret_saddr {
                     if !node.assoc6.is_bad() {
-                        sock_v6.push(v6);
+                        socks.push(v6);
                     }
                 }
 
                 if let Some(v4) = node.assoc4.ret_saddr {
                     if !node.assoc4.is_bad() {
-                        sock_v4.push(v4);
+                        socks.push(v4);
                     }
                 }
 
@@ -83,10 +82,8 @@ impl DhtFriend {
 
         if direct_connected {
             Vec::new()
-        } else if sock_v6.len() > sock_v4.len() {
-            sock_v6
         } else {
-            sock_v4
+            socks
         }
     }
 }

@@ -737,7 +737,7 @@ impl Server {
                     }
                 }
 
-                self.update_returned_sock(node, &mut close_nodes, &mut friends);
+                self.update_returned_sock(node, &packet.pk, &mut close_nodes, &mut friends);
             }
             Box::new( future::ok(()) )
         } else {
@@ -748,20 +748,20 @@ impl Server {
     }
 
     /// Update returned socket address and time of receiving packet
-    fn update_returned_sock(&self, node: &PackedNode, close_nodes: &mut Kbucket, friends: &mut Vec<DhtFriend>) {
+    fn update_returned_sock(&self, node: &PackedNode, packet_pk: &PublicKey, close_nodes: &mut Kbucket, friends: &mut Vec<DhtFriend>) {
         if self.pk == node.pk {
-            if let Some(node_to_update) = close_nodes.get_node_mut(&node.pk) {
+            if let Some(node_to_update) = close_nodes.get_node_mut(packet_pk) {
                 node_to_update.update_returned_sock(node.saddr);
-            } else {}
+            }
         }
 
         friends.iter_mut()
             .for_each(|friend| {
                 if friend.pk == node.pk {
-                    if let Some(node_to_update) = friend.close_nodes.get_node_mut(&friend.pk, &node.pk) {
+                    if let Some(node_to_update) = friend.close_nodes.get_node_mut(&friend.pk, packet_pk) {
                         node_to_update.update_returned_sock(node.saddr);
-                    } else {}
-                } else {}
+                    }
+                }
             })
     }
 
