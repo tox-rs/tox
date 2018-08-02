@@ -530,6 +530,12 @@ impl Kbucket {
         self.buckets.iter_mut()
             .flat_map(|bucket| bucket.nodes.iter_mut())
     }
+
+    /// Check if all nodes in Kbucket are discarded
+    pub fn is_all_discarded(&self) -> bool {
+        self.iter()
+            .all(|node| node.is_discarded())
+    }
 }
 
 #[cfg(test)]
