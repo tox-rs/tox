@@ -121,7 +121,10 @@ consider helping :wink:
 
 ## License
 
-Licensed under MIT. For details, see [LICENSE](/LICENSE).
+Dual licensed under the MIT or GPLv3+ licenses. You may use this project under the
+terms of either the MIT License or the GNU General Public License (GPL) Version 3+.
+
+For details, see [LICENSE-MIT](/LICENSE) and [LICENSE-GPL](/LICENSE-GPL).
 
 [libsodium]: https://github.com/jedisct1/libsodium
 [Reference source repository]: https://github.com/zetok/tox-spec
