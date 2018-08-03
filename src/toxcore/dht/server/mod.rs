@@ -576,17 +576,17 @@ impl Server {
         if self.is_ipv6_mode {// DHT node is running in ipv6 mode
             if let Some(sock_v6) = node.saddr_v6 {
                 futures.push(send_to(&self.tx, (packet.clone(), SocketAddr::V6(sock_v6))));
-            } else {};
+            };
 
             if let Some(sock_v4) = node.saddr_v4 {
                 let ip_v6 = sock_v4.ip().to_ipv6_mapped();
                 let addr = SocketAddr::new(IpAddr::V6(ip_v6), sock_v4.port());
                 futures.push(send_to(&self.tx, (packet, addr)));
-            } else {};
+            };
         } else { // DHT node is running in ipv4 mode
             if let Some(sock_v4) = node.saddr_v4 {
                 futures.push(send_to(&self.tx, (packet, SocketAddr::V4(sock_v4))));
-            } else {};
+            };
         }
 
         Box::new(join_all(futures).map(|_| ()))
