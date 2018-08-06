@@ -37,13 +37,13 @@ pub struct DhtFriend {
 
 impl DhtFriend {
     /// Create new `DhtFriend`.
-    pub fn new(pk: PublicKey, is_ipv6_enabled: bool) -> Self {
+    pub fn new(pk: PublicKey) -> Self {
         DhtFriend {
             pk,
-            close_nodes: Bucket::new(Some(FRIEND_CLOSE_NODES_COUNT), is_ipv6_enabled),
+            close_nodes: Bucket::new(Some(FRIEND_CLOSE_NODES_COUNT)),
             last_nodes_req_time: clock_now(),
             bootstrap_times: 0,
-            bootstrap_nodes: Bucket::new(None, is_ipv6_enabled),
+            bootstrap_nodes: Bucket::new(None),
             hole_punch: HolePunching::new(),
         }
     }
@@ -93,6 +93,6 @@ mod tests {
 
     #[test]
     fn friend_new_test() {
-        let _ = DhtFriend::new(gen_keypair().0, true);
+        let _ = DhtFriend::new(gen_keypair().0);
     }
 }

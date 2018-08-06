@@ -138,7 +138,7 @@ pub struct Server {
 
 impl Server {
     /// Create new `Server` instance.
-    pub fn new(tx: Tx, pk: PublicKey, sk: SecretKey, is_ipv6_enabled: bool) -> Server {
+    pub fn new(tx: Tx, pk: PublicKey, sk: SecretKey) -> Server {
         debug!("Created new Server instance");
         Server {
             sk,
@@ -146,11 +146,11 @@ impl Server {
             tx,
             is_hole_punching_enabled: true,
             request_queue: Arc::new(RwLock::new(RequestQueue::new(Duration::from_secs(PING_TIMEOUT)))),
-            close_nodes: Arc::new(RwLock::new(Kbucket::new(&pk, false))),
+            close_nodes: Arc::new(RwLock::new(Kbucket::new(&pk))),
             onion_symmetric_key: Arc::new(RwLock::new(secretbox::gen_key())),
             onion_announce: Arc::new(RwLock::new(OnionAnnounce::new(pk))),
             friends: Arc::new(RwLock::new(Vec::new())),
-            bootstrap_nodes: Arc::new(RwLock::new(Bucket::new(None, is_ipv6_enabled))),
+            bootstrap_nodes: Arc::new(RwLock::new(Bucket::new(None))),
             bootstrap_times: Arc::new(RwLock::new(0)),
             last_nodes_req_time: Arc::new(RwLock::new(clock_now())),
             nodes_to_send_ping: Arc::new(RwLock::new(Bucket::new(Some(MAX_TO_PING)))),
@@ -159,8 +159,14 @@ impl Server {
             tcp_onion_sink: None,
             net_crypto: None,
             lan_discovery_enabled: true,
-            is_ipv6_enabled,
+            is_ipv6_enabled: false,
         }
+    }
+
+    /// Enable/disable IPv6 mode of DHT server.
+    pub fn enable_ipv6_mode(&mut self, enable: bool) {
+        self.is_ipv6_enabled = enable;
+        self.close_nodes.write().is_ipv6_enabled = enable;
     }
 
     /// Enable/disable `LanDiscovery` packets handling.
@@ -300,7 +306,7 @@ impl Server {
 
         let futures = nodes_to_send_ping.nodes.into_iter().map(|node| {
             let ping_id = request_queue.new_ping_id(node.pk);
-            self.send_ping_req(&(node.clone()).into(), ping_id)
+            self.send_ping_req(&node.clone(), ping_id)
         }).collect::<Vec<_>>();
 
         Box::new(future::join_all(futures).map(|_| ()))
@@ -337,7 +343,7 @@ impl Server {
     /// nodes lists.
     fn ping_bootstrap_nodes(&self, request_queue: &mut RequestQueue, bootstrap_nodes: &mut Bucket, pk: PublicKey) -> IoFuture<()> {
         let capacity = bootstrap_nodes.capacity;
-        let bootstrap_nodes = mem::replace(bootstrap_nodes, Bucket::new(Some(capacity), self.is_ipv6_enabled));
+        let bootstrap_nodes = mem::replace(bootstrap_nodes, Bucket::new(Some(capacity)));
 
         let futures = bootstrap_nodes.nodes.iter().map(|node| {
             let ping_id = request_queue.new_ping_id(node.pk);
@@ -373,7 +379,6 @@ impl Server {
         let good_nodes = nodes
             .filter(|&node| !node.is_discarded())
             .cloned()
-            .map(|node| node)
             .collect::<Vec<DhtNode>>();
 
         if good_nodes.is_empty() {
@@ -438,7 +443,7 @@ impl Server {
 
         let nats_sender = friends.iter_mut()
             .map(|friend| {
-                let addrs_of_clients = friend.get_addrs_of_clients(self.is_ipv6_enabled);
+                let addrs_of_clients = friend.get_addrs_of_clients();
                 // try hole punching
                 friend.hole_punch.try_nat_punch(&self, friend.pk, addrs_of_clients);
 
@@ -568,19 +573,17 @@ impl Server {
         let mut futures = Vec::new();
 
         if self.is_ipv6_enabled {// DHT node is running in ipv6 mode
-            if let Some(sock_v6) = node.saddr_v6 {
+            if let Some(sock_v6) = node.assoc6.saddr {
                 futures.push(send_to(&self.tx, (packet.clone(), SocketAddr::V6(sock_v6))));
             };
 
-            if let Some(sock_v4) = node.saddr_v4 {
+            if let Some(sock_v4) = node.assoc4.saddr {
                 let ip_v6 = sock_v4.ip().to_ipv6_mapped();
                 let addr = SocketAddr::new(IpAddr::V6(ip_v6), sock_v4.port());
                 futures.push(send_to(&self.tx, (packet, addr)));
             };
-        } else { // DHT node is running in ipv4 mode
-            if let Some(sock_v4) = node.saddr_v4 {
+        } else if let Some(sock_v4) = node.assoc4.saddr { // DHT node is running in ipv4 mode
                 futures.push(send_to(&self.tx, (packet, SocketAddr::V4(sock_v4))));
-            };
         }
 
         if futures.is_empty() {
@@ -666,7 +669,7 @@ impl Server {
 
         let close_nodes = close_nodes.get_closest(&payload.pk, IsGlobal::is_global(&addr.ip()));
 
-        let mut collected_bucket = Bucket::new(Some(4), self.is_ipv6_enabled);
+        let mut collected_bucket = Bucket::new(Some(4));
 
         close_nodes.iter()
             .for_each(|node| {
@@ -676,12 +679,14 @@ impl Server {
         self.friends.read().iter()
             .for_each(|friend| friend.close_nodes.nodes.iter().cloned()
                 .for_each(|node| {
-                    collected_bucket.try_add(&payload.pk, &node.to_packed_node(self.is_ipv6_enabled));
+                    if let Some(pn) = node.to_packed_node(self.is_ipv6_enabled) {
+                        collected_bucket.try_add(&payload.pk, &pn);
+                    }
                 })
             );
 
         let collected_nodes = collected_bucket.nodes.into_iter()
-            .map(|node| node.to_packed_node(self.is_ipv6_enabled))
+            .flat_map(|node| node.to_packed_node(self.is_ipv6_enabled))
             .collect::<Vec<PackedNode>>();
 
         let resp_payload = NodesResponsePayload {
@@ -756,13 +761,11 @@ impl Server {
             }
         }
 
-        friends.iter_mut()
-            .find(|friend| friend.pk == node.pk)
-            .map(|friend| {
-                if let Some(node_to_update) = friend.close_nodes.get_node_mut(&friend.pk, packet_pk) {
-                    node_to_update.update_returned_addr(node.saddr);
-                }
-            });
+        if let Some(friend) = friends.iter_mut().find(|friend| friend.pk == node.pk) {
+            if let Some(node_to_update) = friend.close_nodes.get_node_mut(&friend.pk, packet_pk) {
+                node_to_update.update_returned_addr(node.saddr);
+            }
+        }
     }
 
     /// Handle received `CookieRequest` packet and pass it to `net_crypto`
@@ -1190,11 +1193,11 @@ mod tests {
 
         let (pk, sk) = gen_keypair();
         let (tx, rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
-        let alice = Server::new(tx, pk, sk, true);
+        let alice = Server::new(tx, pk, sk);
         let (bob_pk, bob_sk) = gen_keypair();
         let precomp = precompute(&alice.pk, &bob_sk);
 
-        let addr: SocketAddr = "[::ffff:127.0.0.1]:12346".parse().unwrap();
+        let addr: SocketAddr = "127.0.0.1:12346".parse().unwrap();
         (alice, precomp, bob_pk, bob_sk, rx, addr)
     }
 
@@ -1212,7 +1215,7 @@ mod tests {
     fn add_friend_test() {
         let (alice, _precomp, bob_pk, _bob_sk, _rx, _addr) = create_node();
 
-        let friend = DhtFriend::new(bob_pk, true);
+        let friend = DhtFriend::new(bob_pk);
         alice.add_friend(friend);
     }
 
@@ -1614,7 +1617,7 @@ mod tests {
     fn handle_cookie_request() {
         let (udp_tx, udp_rx) = mpsc::unbounded();
         let (dht_pk, dht_sk) = gen_keypair();
-        let mut alice = Server::new(udp_tx.clone(), dht_pk, dht_sk.clone(), true);
+        let mut alice = Server::new(udp_tx.clone(), dht_pk, dht_sk.clone());
 
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
@@ -2924,7 +2927,15 @@ mod tests {
         let (mut alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
 
         alice.enable_ipv6_mode(true);
-        assert_eq!(alice.is_ipv6_mode, true);
+        assert_eq!(alice.is_ipv6_enabled, true);
+    }
+
+    #[test]
+    fn server_enable_ipv6_mode_test() {
+        let (mut alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
+
+        alice.enable_ipv6_mode(true);
+        assert_eq!(alice.is_ipv6_enabled, true);
     }
 
     #[test]
@@ -2938,6 +2949,8 @@ mod tests {
         let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &ping_pk);
         assert!(alice.close_nodes.write().try_add(&pn));
 
+        // test with ipv6 mode
+        alice.enable_ipv6_mode(true);
         alice.dht_main_loop().wait().unwrap();
 
         let mut request_queue = alice.request_queue.write();

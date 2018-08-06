@@ -141,7 +141,7 @@ impl DhtNode {
     /// return SocketAddr for DhtNode
     pub fn get_socket_addr(&self, is_ipv6_enabled: bool) -> Option<SocketAddr> {
         if is_ipv6_enabled {
-            match self.saddr_v6 {
+            match self.assoc6.saddr {
                 Some(v6) => {
                     match self.assoc4.saddr {
                         Some(v4) => {
@@ -155,12 +155,34 @@ impl DhtNode {
                     }
                 },
                 None => {
-                    self.assoc4.saddr.map(Into::into)
+                    match self.assoc4.saddr {
+                        Some(v4) => Some(SocketAddr::V4(v4)),
+                        None => {
+                            warn!("get_socket_addr: failed to get address of DhtNode");
+                            None
+                        },
+                    }
                 },
             }
         } else {
-            self.assoc4.saddr.map(Into::into)
+            match self.assoc4.saddr {
+                Some(v4) => Some(SocketAddr::V4(v4)),
+                None => {
+                    warn!("get_socket_addr: failed to get address of DhtNode");
+                    None
+                },
+            }
         }
+    }
+
+    /// convert Dhtnode to PackedNode object based on is_ipv6_enabled flag
+    pub fn to_packed_node(&self, is_ipv6_enabled: bool) -> Option<PackedNode> {
+        self.get_socket_addr(is_ipv6_enabled)
+            .map(|saddr|
+                PackedNode {
+                    pk: self.pk,
+                    saddr,
+                })
     }
 
     /// Update time for ping request, Server sends packets to both IPv4 and IPv6 addresses if exist.
@@ -173,36 +195,19 @@ impl DhtNode {
         }
     }
 
-    /// convert Dhtnode to PackedNode object based on is_ipv6_enabled flag
-    pub fn to_packed_node(self, is_ipv6_enabled: bool) -> PackedNode {
-        let saddr = if is_ipv6_enabled {
-            match self.saddr_v6 {
-                Some(v6) => {
-                    match self.saddr_v4 {
-                        Some(v4) => {
-                            if self.last_resp_time_v6 > self.last_resp_time_v4 {
-                                SocketAddr::V6(v6)
-                            } else {
-                                SocketAddr::V4(v4)
-                            }
-                        },
-                        None => SocketAddr::V6(v6),
-                    }
-                },
-                None => {
-                    SocketAddr::V4(self.saddr_v4.expect("to_packed_node() fails"))
-                },
-            }
-        } else {
-            SocketAddr::V4(self.saddr_v4.expect("to_packed_node() fails"))
-        };
-
-        PackedNode {
-            pk: self.pk,
-            saddr,
+    /// Update returned socket address and time of receiving packet
+    pub fn update_returned_addr(&mut self, addr: SocketAddr) {
+        match addr {
+            SocketAddr::V4(v4) => {
+                self.assoc4.ret_saddr = Some(v4);
+                self.assoc4.ret_last_resp_time = Some(clock_now());
+            },
+            SocketAddr::V6(v6) => {
+                self.assoc6.ret_saddr = Some(v6);
+                self.assoc6.ret_last_resp_time = Some(clock_now());
+            },
         }
     }
-
 }
 
 #[cfg(test)]
@@ -228,7 +233,7 @@ mod tests {
                       n4: PackedNode, n5: PackedNode, n6: PackedNode,
                       n7: PackedNode, n8: PackedNode) {
             let pk = PublicKey([0; PUBLICKEYBYTES]);
-            let mut bucket = Bucket::new(None, true);
+            let mut bucket = Bucket::new(None);
             assert_eq!(true, bucket.try_add(&pk, &n1));
             assert_eq!(true, bucket.try_add(&pk, &n2));
             assert_eq!(true, bucket.try_add(&pk, &n3));
