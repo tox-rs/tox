@@ -49,21 +49,6 @@ pub fn kbucket_index(&PublicKey(ref own_pk): &PublicKey,
     None  // PKs are equal
 }
 
-impl Into<PackedNode> for DhtNode {
-    fn into(self) -> PackedNode {
-        let saddr = if self.assoc4.saddr.is_none() {
-            SocketAddr::V6(self.assoc6.saddr.expect("into() PackedNode fails"))
-        } else {
-            SocketAddr::V4(self.assoc4.saddr.expect("into() PackedNode fails"))
-        };
-
-        PackedNode {
-            pk: self.pk,
-            saddr,
-        }
-    }
-}
-
 impl Into<DhtNode> for PackedNode {
     fn into(self) -> DhtNode {
         DhtNode::new(self)
@@ -115,6 +100,8 @@ pub struct Bucket {
     pub capacity: u8,
     /// Nodes that bucket has, sorted by distance to PK.
     pub nodes: Vec<DhtNode>,
+    /// Flag for ipv6 enabled or not
+    pub is_ipv6_enabled: bool,
 }
 
 /// Default number of nodes that bucket can hold.
@@ -129,7 +116,7 @@ impl Bucket {
 
     [`BUCKET_DEFAULT_SIZE`]: ./constant.BUCKET_DEFAULT_SIZE.html
     */
-    pub fn new(num: Option<u8>) -> Self {
+    pub fn new(num: Option<u8>, is_ipv6_enabled: bool) -> Self {
         trace!(target: "Bucket", "Creating a new Bucket.");
         match num {
             None => {
@@ -137,17 +124,19 @@ impl Bucket {
                 Bucket {
                     capacity: BUCKET_DEFAULT_SIZE as u8,
                     nodes: Vec::with_capacity(BUCKET_DEFAULT_SIZE),
+                    is_ipv6_enabled
                 }
             },
             Some(0) => {
                 debug!("Treating Some(0) as None");
-                Bucket::new(None)
+                Bucket::new(None, is_ipv6_enabled)
             },
             Some(n) => {
                 trace!("Creating a new Bucket with capacity: {}", n);
                 Bucket {
                     capacity: n,
                     nodes: Vec::with_capacity(n as usize),
+                    is_ipv6_enabled,
                 }
             }
         }
@@ -320,7 +309,7 @@ impl Bucket {
 
     /// Get vector of `PackedNode`s that `Bucket` has.
     pub fn to_packed(&self) -> Vec<PackedNode> {
-        self.nodes.iter().map(|node| node.clone().into()).collect()
+        self.nodes.iter().map(|node| node.clone().to_packed_node(self.is_ipv6_enabled)).collect()
     }
 }
 
@@ -329,14 +318,14 @@ Equivalent to calling [`Bucket::new()`] with `None`:
 
 ```
 # use tox::toxcore::dht::kbucket::Bucket;
-assert_eq!(Bucket::new(None), Bucket::default());
+assert_eq!(Bucket::new(None, false), Bucket::default());
 ```
 
 [`Bucket::new()`]: ./struct.Bucket.html#method.new
 */
 impl Default for Bucket {
     fn default() -> Self {
-        Bucket::new(Some(BUCKET_DEFAULT_SIZE as u8))
+        Bucket::new(Some(BUCKET_DEFAULT_SIZE as u8), false)
     }
 }
 
@@ -355,7 +344,7 @@ pub struct Kbucket {
     /// `PublicKey` for which `Kbucket` holds close nodes.
     pk: PublicKey,
     /// flag for Dht server is running in IPv6 mode.
-    pub is_ipv6_mode: bool,
+    pub is_ipv6_enabled: bool,
 
     /// List of [`Bucket`](./struct.Bucket.html)s.
     pub buckets: Vec<Bucket>,
@@ -373,12 +362,12 @@ pub const KBUCKET_MAX_ENTRIES: u8 = ::std::u8::MAX;
 
 impl Kbucket {
     /// Create a new `Kbucket`.
-    pub fn new(pk: &PublicKey) -> Self {
+    pub fn new(pk: &PublicKey, is_ipv6_enabled: bool) -> Self {
         trace!(target: "Kbucket", "Creating new Kbucket with PK: {:?}", pk);
         Kbucket {
             pk: *pk,
-            is_ipv6_mode: false,
-            buckets: vec![Bucket::new(None); KBUCKET_MAX_ENTRIES as usize]
+            is_ipv6_enabled,
+            buckets: vec![Bucket::new(None, is_ipv6_enabled); KBUCKET_MAX_ENTRIES as usize]
         }
     }
 
@@ -482,7 +471,7 @@ impl Kbucket {
                 } else {
                     continue;
                 }
-                bucket.try_add(pk, &node.clone().into());
+                bucket.try_add(pk, &node.clone().to_packed_node(true));
             }
         }
         trace!("Returning nodes: {:?}", &bucket.nodes);
@@ -616,11 +605,11 @@ mod tests {
     #[test]
     fn dht_bucket_new_test() {
         fn check_with_capacity(num: Option<u8>, expected_capacity: usize) {
-            let bucket1 = Bucket::new(num);
+            let bucket1 = Bucket::new(num, true);
             assert_eq!(expected_capacity, bucket1.capacity());
 
             // check if always the same with same parameters
-            let bucket2 = Bucket::new(num);
+            let bucket2 = Bucket::new(num, true);
             assert_eq!(bucket1, bucket2);
         }
         check_with_capacity(None, BUCKET_DEFAULT_SIZE);
@@ -646,7 +635,7 @@ mod tests {
                     n4: PackedNode, n5: PackedNode, n6: PackedNode,
                     n7: PackedNode, n8: PackedNode) {
             let pk = PublicKey([0; PUBLICKEYBYTES]);
-            let mut bucket = Bucket::new(None);
+            let mut bucket = Bucket::new(None, true);
             assert_eq!(true, bucket.try_add(&pk, &n1));
             assert_eq!(true, bucket.try_add(&pk, &n2));
             assert_eq!(true, bucket.try_add(&pk, &n3));
@@ -674,7 +663,7 @@ mod tests {
                 return TestResult::discard()
             }
 
-            let mut bucket = Bucket::new(Some(1));
+            let mut bucket = Bucket::new(Some(1), true);
 
             assert!(bucket.try_add(&pk, &n1));
             assert!(!bucket.try_add(&pk, &n2));
@@ -705,7 +694,7 @@ mod tests {
             let mut rng = StdGen::new(ChaChaRng::new_unseeded(), rng_num);
 
             let base_pk = PublicKey([0; PUBLICKEYBYTES]);
-            let mut bucket = Bucket::new(Some(bucket_size));
+            let mut bucket = Bucket::new(Some(bucket_size), true);
 
             let non_existent_node: PackedNode = Arbitrary::arbitrary(&mut rng);
             bucket.remove(&base_pk, &non_existent_node.pk);  // "removing" non-existent node
@@ -743,7 +732,7 @@ mod tests {
                 return TestResult::discard()
             }
 
-            let mut bucket = Bucket::new(None);
+            let mut bucket = Bucket::new(None, true);
             assert_eq!(true, bucket.is_empty());
 
             let pk = nums_to_pk(p1, p2, p3, p4);
@@ -767,7 +756,7 @@ mod tests {
             g.fill_bytes(&mut pk);
             let pk = PublicKey([0; PUBLICKEYBYTES]);
 
-            let mut kbucket = Kbucket::new(&pk);
+            let mut kbucket = Kbucket::new(&pk, true);
 
             // might want to add some buckets
             for _ in 0..(g.gen_range(0, KBUCKET_MAX_ENTRIES as usize *
@@ -784,7 +773,7 @@ mod tests {
     fn dht_kbucket_new_test() {
         fn with_pk(a: u64, b: u64, c: u64, d: u64) {
             let pk = nums_to_pk(a, b, c, d);
-            let kbucket = Kbucket::new(&pk);
+            let kbucket = Kbucket::new(&pk, true);
             assert_eq!(pk, kbucket.pk);
         }
         quickcheck(with_pk as fn(u64, u64, u64, u64));
@@ -796,7 +785,7 @@ mod tests {
     fn dht_kbucket_try_add_test() {
         fn with_pns(pns: Vec<PackedNode>, p1: u64, p2: u64, p3: u64, p4: u64) {
             let pk = nums_to_pk(p1, p2, p3, p4);
-            let mut kbucket = Kbucket::new(&pk);
+            let mut kbucket = Kbucket::new(&pk, true);
             for node in pns {
                 // result may vary, so discard it
                 // TODO: can be done better?
@@ -820,7 +809,7 @@ mod tests {
             let pk = nums_to_pk(random_u64(), random_u64(), random_u64(),
                     random_u64());
 
-            let mut kbucket = Kbucket::new(&pk);
+            let mut kbucket = Kbucket::new(&pk, true);
 
             // Fill Kbucked with nodes
             for node in &nodes {
@@ -846,7 +835,7 @@ mod tests {
     fn dht_kbucket_get_closest_test() {
         fn with_kbucket(kb: Kbucket, a: u64, b: u64, c: u64, d: u64) {
             let mut kb = kb;
-            kb.is_ipv6_mode = true;
+            kb.is_ipv6_enabled = true;
             let pk = nums_to_pk(a, b, c, d);
             assert!(kb.get_closest(&pk, true).len() <= 4);
             assert_eq!(kb.get_closest(&pk, true), kb.get_closest(&pk, true));
@@ -865,8 +854,7 @@ mod tests {
             }
 
             let pk = nums_to_pk(a, b, c, d);
-            let mut kbucket = Kbucket::new(&pk);
-            kbucket.is_ipv6_mode = true;
+            let mut kbucket = Kbucket::new(&pk, true);
 
             // check whether number of correct nodes that are returned is right
             let correctness = |should, kbc: &Kbucket| {
@@ -912,7 +900,7 @@ mod tests {
             pk_bytes[0] = 1;
             let base_pk = PublicKey(pk_bytes);
 
-            let mut kbucket = Kbucket::new(&base_pk);
+            let mut kbucket = Kbucket::new(&base_pk, true);
 
             let addr = Ipv4Addr::new(0, 0, 0, 0);
             let saddr = SocketAddrV4::new(addr, 0);
@@ -1009,7 +997,7 @@ mod tests {
             if pns.is_empty() { return TestResult::discard() }
 
             let (pk, _) = gen_keypair();
-            let mut kbucket = Kbucket::new(&pk);
+            let mut kbucket = Kbucket::new(&pk, true);
             assert!(!kbucket.contains(&pk));
             assert!(pns.iter().all(|pn| !kbucket.contains(&pn.pk)));
 
@@ -1042,8 +1030,8 @@ mod tests {
 
             let mut kbucket = Kbucket {
                 pk,
-                is_ipv6_mode: false,
-                buckets: vec![Bucket::new(Some(2)); KBUCKET_MAX_ENTRIES as usize],
+                is_ipv6_enabled: false,
+                buckets: vec![Bucket::new(Some(2), true); KBUCKET_MAX_ENTRIES as usize],
             };
 
             for node in pns {
@@ -1061,7 +1049,7 @@ mod tests {
     quickcheck! {
         fn kbucket_iter_next_test(pns: Vec<PackedNode>) -> () {
             let (pk, _) = gen_keypair();
-            let mut kbucket = Kbucket::new(&pk);
+            let mut kbucket = Kbucket::new(&pk, true);
             // empty always returns None
             assert!(kbucket.iter().next().is_none());
 
@@ -1096,7 +1084,7 @@ mod tests {
     quickcheck! {
         fn kbucket_iter_mut_next_test(pns: Vec<PackedNode>) -> () {
             let (pk, _) = gen_keypair();
-            let mut kbucket = Kbucket::new(&pk);
+            let mut kbucket = Kbucket::new(&pk, true);
             // empty always returns None
             assert!(kbucket.iter_mut().next().is_none());
 
@@ -1131,7 +1119,7 @@ mod tests {
     #[test]
     fn kbucket_to_packed_node_test() {
         let (pk, _) = gen_keypair();
-        let mut bucket = Bucket::new(None);
+        let mut bucket = Bucket::new(None, true);
 
         let pn = PackedNode {
             pk: gen_keypair().0,

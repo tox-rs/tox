@@ -37,7 +37,7 @@ impl DaemonState {
 
         let nodes = close_nodes.iter()
             .cloned()
-            .map(|node| node.into())
+            .map(|node| node.to_packed_node(server.is_ipv6_enabled))
             .collect::<Vec<PackedNode>>();
 
         let mut buf = [0u8; DHT_STATE_BUFFER_SIZE];
@@ -92,9 +92,9 @@ mod tests {
     fn daemon_state_serialize_deserialize_test() {
         let (pk, sk) = gen_keypair();
         let (tx, rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
-        let alice = Server::new(tx, pk, sk);
+        let alice = Server::new(tx, pk, sk, true);
 
-        let addr_org = "1.2.3.4:1234".parse().unwrap();
+        let addr_org = "[::ffff:1.2.3.4]:1234".parse().unwrap();
         let pk_org = gen_keypair().0;
         let pn = PackedNode { pk: pk_org, saddr: addr_org };
         alice.close_nodes.write().try_add(&pn);

@@ -700,7 +700,7 @@ mod tests {
             onion_return
         };
 
-        let kbucket = Kbucket::new(&dht_pk);
+        let kbucket = Kbucket::new(&dht_pk, true);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
 
@@ -745,7 +745,7 @@ mod tests {
             onion_return
         };
 
-        let kbucket = Kbucket::new(&dht_pk);
+        let kbucket = Kbucket::new(&dht_pk, true);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
 
@@ -794,7 +794,7 @@ mod tests {
             onion_return
         };
 
-        let kbucket = Kbucket::new(&dht_pk);
+        let kbucket = Kbucket::new(&dht_pk, true);
 
         let response = onion_announce.handle_onion_announce_request(request, &dht_sk, &kbucket, addr).unwrap();
 
@@ -837,7 +837,7 @@ mod tests {
             onion_return
         };
 
-        let kbucket = Kbucket::new(&dht_pk);
+        let kbucket = Kbucket::new(&dht_pk, true);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
 

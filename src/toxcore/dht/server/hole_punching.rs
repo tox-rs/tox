@@ -246,7 +246,7 @@ mod tests {
         let (pk, sk) = gen_keypair();
         let (friend_pk, _friend_sk) = gen_keypair();
         let (tx, _rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
-        let alice = Server::new(tx, pk, sk);
+        let alice = Server::new(tx, pk, sk, true);
 
         let addrs = vec![];
 
@@ -261,7 +261,7 @@ mod tests {
         let (pk, sk) = gen_keypair();
         let (friend_pk, _friend_sk) = gen_keypair();
         let (tx, _rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
-        let alice = Server::new(tx, pk, sk);
+        let alice = Server::new(tx, pk, sk, true);
 
         let addrs = vec![
             "127.0.0.1:11111".parse().unwrap(),
@@ -280,7 +280,7 @@ mod tests {
         let (pk, sk) = gen_keypair();
         let (friend_pk, _friend_sk) = gen_keypair();
         let (tx, _rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
-        let alice = Server::new(tx, pk, sk);
+        let alice = Server::new(tx, pk, sk, true);
 
         let addrs = vec![
             "127.0.0.1:11111".parse().unwrap(),
@@ -305,7 +305,7 @@ mod tests {
         let (pk, sk) = gen_keypair();
         let (friend_pk, _friend_sk) = gen_keypair();
         let (tx, _rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
-        let alice = Server::new(tx, pk, sk);
+        let alice = Server::new(tx, pk, sk, true);
         let addrs = vec![
             "127.0.0.1:11111".parse().unwrap(),
             "127.0.0.1:22222".parse().unwrap(),
@@ -329,7 +329,7 @@ mod tests {
         let (pk, sk) = gen_keypair();
         let (friend_pk, friend_sk) = gen_keypair();
         let (tx, rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
-        let alice = Server::new(tx, pk, sk);
+        let alice = Server::new(tx, pk, sk, true);
         let addrs = vec![
             "127.0.0.1:11111".parse().unwrap(),
             "127.0.0.1:22222".parse().unwrap(),
@@ -363,7 +363,7 @@ mod tests {
         let (pk, sk) = gen_keypair();
         let (friend_pk, friend_sk) = gen_keypair();
         let (tx, rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
-        let alice = Server::new(tx, pk, sk);
+        let alice = Server::new(tx, pk, sk, true);
         let addrs = vec![
             "127.0.0.1:11111".parse().unwrap(),
             "127.0.0.1:22222".parse().unwrap(),

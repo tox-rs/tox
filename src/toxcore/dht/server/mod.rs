@@ -133,12 +133,12 @@ pub struct Server {
     lan_discovery_enabled: bool,
     /// If IPv6 mode is enabled `Server` will send packets to IPv6 addresses. If
     /// it's disabled such packets will be dropped.
-    is_ipv6_mode: bool,
+    pub is_ipv6_enabled: bool,
 }
 
 impl Server {
     /// Create new `Server` instance.
-    pub fn new(tx: Tx, pk: PublicKey, sk: SecretKey) -> Server {
+    pub fn new(tx: Tx, pk: PublicKey, sk: SecretKey, is_ipv6_enabled: bool) -> Server {
         debug!("Created new Server instance");
         Server {
             sk,
@@ -146,11 +146,11 @@ impl Server {
             tx,
             is_hole_punching_enabled: true,
             request_queue: Arc::new(RwLock::new(RequestQueue::new(Duration::from_secs(PING_TIMEOUT)))),
-            close_nodes: Arc::new(RwLock::new(Kbucket::new(&pk))),
+            close_nodes: Arc::new(RwLock::new(Kbucket::new(&pk, false))),
             onion_symmetric_key: Arc::new(RwLock::new(secretbox::gen_key())),
             onion_announce: Arc::new(RwLock::new(OnionAnnounce::new(pk))),
             friends: Arc::new(RwLock::new(Vec::new())),
-            bootstrap_nodes: Arc::new(RwLock::new(Bucket::new(None))),
+            bootstrap_nodes: Arc::new(RwLock::new(Bucket::new(None, is_ipv6_enabled))),
             bootstrap_times: Arc::new(RwLock::new(0)),
             last_nodes_req_time: Arc::new(RwLock::new(clock_now())),
             nodes_to_send_ping: Arc::new(RwLock::new(Bucket::new(Some(MAX_TO_PING)))),
@@ -159,14 +159,8 @@ impl Server {
             tcp_onion_sink: None,
             net_crypto: None,
             lan_discovery_enabled: true,
-            is_ipv6_mode: false,
+            is_ipv6_enabled,
         }
-    }
-
-    /// Enable/disable IPv6 mode of DHT server.
-    pub fn enable_ipv6_mode(&mut self, enable: bool) {
-        self.is_ipv6_mode = enable;
-        self.close_nodes.write().is_ipv6_mode = enable;
     }
 
     /// Enable/disable `LanDiscovery` packets handling.
@@ -343,7 +337,7 @@ impl Server {
     /// nodes lists.
     fn ping_bootstrap_nodes(&self, request_queue: &mut RequestQueue, bootstrap_nodes: &mut Bucket, pk: PublicKey) -> IoFuture<()> {
         let capacity = bootstrap_nodes.capacity;
-        let bootstrap_nodes = mem::replace(bootstrap_nodes, Bucket::new(Some(capacity)));
+        let bootstrap_nodes = mem::replace(bootstrap_nodes, Bucket::new(Some(capacity), self.is_ipv6_enabled));
 
         let futures = bootstrap_nodes.nodes.iter().map(|node| {
             let ping_id = request_queue.new_ping_id(node.pk);
@@ -409,7 +403,7 @@ impl Server {
             &self.pk,
             payload
         ));
-        self.send_to(node, ping_req)
+        self.send_to_node(node, ping_req)
     }
 
     /// Send `NodesRequest` packet to the node.
@@ -433,7 +427,7 @@ impl Server {
             payload
         ));
 
-        self.send_to(target_peer, nodes_req)
+        self.send_to_node(target_peer, nodes_req)
     }
 
     // send NatPingRequests to all of my friends and do hole punching.
@@ -444,7 +438,7 @@ impl Server {
 
         let nats_sender = friends.iter_mut()
             .map(|friend| {
-                let addrs_of_clients = friend.get_addrs_of_clients();
+                let addrs_of_clients = friend.get_addrs_of_clients(self.is_ipv6_enabled);
                 // try hole punching
                 friend.hole_punch.try_nat_punch(&self, friend.pk, addrs_of_clients);
 
@@ -476,7 +470,7 @@ impl Server {
     fn send_nat_ping_req_inner(&self, friend: &DhtFriend, nat_ping_req_packet: DhtPacket) -> IoFuture<()> {
         let nats_sender = friend.close_nodes.nodes.iter()
             .map(|node| {
-                self.send_to(node, nat_ping_req_packet.clone())
+                self.send_to_node(node, nat_ping_req_packet.clone())
             });
 
         let nats_stream = stream::futures_unordered(nats_sender).then(|_| Ok(()));
@@ -570,10 +564,10 @@ impl Server {
 
     /// Send UDP packet node. If the node has both IPv4 and IPv6 addresses,
     /// then it sends packet to both addresses.
-    fn send_to(&self, node: &DhtNode, packet: DhtPacket) -> IoFuture<()> {
+    fn send_to_node(&self, node: &DhtNode, packet: DhtPacket) -> IoFuture<()> {
         let mut futures = Vec::new();
 
-        if self.is_ipv6_mode {// DHT node is running in ipv6 mode
+        if self.is_ipv6_enabled {// DHT node is running in ipv6 mode
             if let Some(sock_v6) = node.saddr_v6 {
                 futures.push(send_to(&self.tx, (packet.clone(), SocketAddr::V6(sock_v6))));
             };
@@ -589,11 +583,15 @@ impl Server {
             };
         }
 
+        if futures.is_empty() {
+            warn!("Trying to send a packet to node but could not find appropriate address");
+        }
+
         Box::new(join_all(futures).map(|_| ()))
     }
 
     /// Send UDP packet to specified address.
-    fn send_to_resp(&self, addr: SocketAddr, packet: DhtPacket) -> IoFuture<()> {
+    fn send_to_direct(&self, addr: SocketAddr, packet: DhtPacket) -> IoFuture<()> {
         send_to(&self.tx, (packet, addr))
     }
 
@@ -616,7 +614,7 @@ impl Server {
         ));
 
         Box::new(self.ping_add(&PackedNode::new(addr, &packet.pk))
-            .join(self.send_to_resp(addr, ping_resp))
+            .join(self.send_to_direct(addr, ping_resp))
             .map(|_| ())
         )    }
 
@@ -668,7 +666,7 @@ impl Server {
 
         let close_nodes = close_nodes.get_closest(&payload.pk, IsGlobal::is_global(&addr.ip()));
 
-        let mut collected_bucket = Bucket::new(Some(4));
+        let mut collected_bucket = Bucket::new(Some(4), self.is_ipv6_enabled);
 
         close_nodes.iter()
             .for_each(|node| {
@@ -678,12 +676,12 @@ impl Server {
         self.friends.read().iter()
             .for_each(|friend| friend.close_nodes.nodes.iter().cloned()
                 .for_each(|node| {
-                    collected_bucket.try_add(&payload.pk, &node.into());
+                    collected_bucket.try_add(&payload.pk, &node.to_packed_node(self.is_ipv6_enabled));
                 })
             );
 
         let collected_nodes = collected_bucket.nodes.into_iter()
-            .map(|node| node.into())
+            .map(|node| node.to_packed_node(self.is_ipv6_enabled))
             .collect::<Vec<PackedNode>>();
 
         let resp_payload = NodesResponsePayload {
@@ -697,7 +695,7 @@ impl Server {
         ));
 
         Box::new(self.ping_add(&PackedNode::new(addr, &packet.pk))
-            .join(self.send_to_resp(addr, nodes_resp))
+            .join(self.send_to_direct(addr, nodes_resp))
             .map(|_| ())
         )
     }
@@ -833,7 +831,7 @@ impl Server {
             let close_nodes = self.close_nodes.read();
             if let Some(node) = close_nodes.get_node(&packet.rpk) { // search close_nodes to find target peer
                 let packet = DhtPacket::DhtRequest(packet);
-                self.send_to(node, packet)
+                self.send_to_node(node, packet)
             } else {
                 Box::new( future::ok(()) )
             }
@@ -853,7 +851,7 @@ impl Server {
             &self.pk,
             resp_payload
         ));
-        self.send_to_resp(addr, nat_ping_resp)
+        self.send_to_direct(addr, nat_ping_resp)
     }
 
     /**
@@ -935,7 +933,7 @@ impl Server {
             payload: payload.inner,
             onion_return
         });
-        self.send_to_resp(payload.ip_port.to_saddr(), next_packet)
+        self.send_to_direct(payload.ip_port.to_saddr(), next_packet)
     }
 
     /// Handle received `OnionRequest1` packet and send `OnionRequest2` packet
@@ -960,7 +958,7 @@ impl Server {
             payload: payload.inner,
             onion_return
         });
-        self.send_to_resp(payload.ip_port.to_saddr(), next_packet)
+        self.send_to_direct(payload.ip_port.to_saddr(), next_packet)
     }
 
     /// Handle received `OnionRequest2` packet and send `OnionAnnounceRequest`
@@ -989,7 +987,7 @@ impl Server {
                 onion_return
             }),
         };
-        self.send_to_resp(payload.ip_port.to_saddr(), next_packet)
+        self.send_to_direct(payload.ip_port.to_saddr(), next_packet)
     }
 
     /// Handle received `OnionAnnounceRequest` packet and response with
@@ -1000,7 +998,7 @@ impl Server {
         let onion_return = packet.onion_return.clone();
         let response = onion_announce.handle_onion_announce_request(packet, &self.sk, &close_nodes, addr);
         match response {
-            Ok(response) => self.send_to_resp(addr, DhtPacket::OnionResponse3(OnionResponse3 {
+            Ok(response) => self.send_to_direct(addr, DhtPacket::OnionResponse3(OnionResponse3 {
                 onion_return,
                 payload: InnerOnionResponse::OnionAnnounceResponse(response)
             })),
@@ -1014,7 +1012,7 @@ impl Server {
     fn handle_onion_data_request(&self, packet: OnionDataRequest) -> IoFuture<()> {
         let onion_announce = self.onion_announce.read();
         match onion_announce.handle_data_request(packet) {
-            Ok((response, addr)) => self.send_to_resp(addr, DhtPacket::OnionResponse3(response)),
+            Ok((response, addr)) => self.send_to_direct(addr, DhtPacket::OnionResponse3(response)),
             Err(e) => Box::new(future::err(e))
         }
     }
@@ -1034,7 +1032,7 @@ impl Server {
                 onion_return: next_onion_return,
                 payload: packet.payload
             });
-            self.send_to_resp(ip_port.to_saddr(), next_packet)
+            self.send_to_direct(ip_port.to_saddr(), next_packet)
         } else {
             Box::new( future::err(
                 Error::new(ErrorKind::Other,
@@ -1058,7 +1056,7 @@ impl Server {
                 onion_return: next_onion_return,
                 payload: packet.payload
             });
-            self.send_to_resp(ip_port.to_saddr(), next_packet)
+            self.send_to_direct(ip_port.to_saddr(), next_packet)
         } else {
             Box::new( future::err(
                 Error::new(ErrorKind::Other,
@@ -1085,7 +1083,7 @@ impl Server {
                         InnerOnionResponse::OnionAnnounceResponse(inner) => DhtPacket::OnionAnnounceResponse(inner),
                         InnerOnionResponse::OnionDataResponse(inner) => DhtPacket::OnionDataResponse(inner),
                     };
-                    self.send_to_resp(ip_port.to_saddr(), next_packet)
+                    self.send_to_direct(ip_port.to_saddr(), next_packet)
                 },
                 ProtocolType::TCP => {
                     if let Some(ref tcp_onion_sink) = self.tcp_onion_sink {
@@ -1141,7 +1139,7 @@ impl Server {
             payload: packet.payload,
             onion_return
         });
-        self.send_to_resp(packet.ip_port.to_saddr(), next_packet)
+        self.send_to_direct(packet.ip_port.to_saddr(), next_packet)
     }
 
     /// Handle `BootstrapInfo` packet and response with `BootstrapInfo` packet.
@@ -1150,7 +1148,7 @@ impl Server {
             version: self.tox_core_version,
             motd: self.motd.clone(),
         });
-        self.send_to_resp(addr, packet)
+        self.send_to_direct(addr, packet)
     }
 
     /// Set toxcore version and message of the day.
@@ -1192,11 +1190,11 @@ mod tests {
 
         let (pk, sk) = gen_keypair();
         let (tx, rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
-        let alice = Server::new(tx, pk, sk);
+        let alice = Server::new(tx, pk, sk, true);
         let (bob_pk, bob_sk) = gen_keypair();
         let precomp = precompute(&alice.pk, &bob_sk);
 
-        let addr: SocketAddr = "127.0.0.1:12346".parse().unwrap();
+        let addr: SocketAddr = "[::ffff:127.0.0.1]:12346".parse().unwrap();
         (alice, precomp, bob_pk, bob_sk, rx, addr)
     }
 
@@ -1214,7 +1212,7 @@ mod tests {
     fn add_friend_test() {
         let (alice, _precomp, bob_pk, _bob_sk, _rx, _addr) = create_node();
 
-        let friend = DhtFriend::new(bob_pk);
+        let friend = DhtFriend::new(bob_pk, true);
         alice.add_friend(friend);
     }
 
@@ -1616,7 +1614,7 @@ mod tests {
     fn handle_cookie_request() {
         let (udp_tx, udp_rx) = mpsc::unbounded();
         let (dht_pk, dht_sk) = gen_keypair();
-        let mut alice = Server::new(udp_tx.clone(), dht_pk, dht_sk.clone());
+        let mut alice = Server::new(udp_tx.clone(), dht_pk, dht_sk.clone(), true);
 
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
@@ -2940,8 +2938,6 @@ mod tests {
         let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &ping_pk);
         assert!(alice.close_nodes.write().try_add(&pn));
 
-        // test with ipv6 mode
-        alice.enable_ipv6_mode(true);
         alice.dht_main_loop().wait().unwrap();
 
         let mut request_queue = alice.request_queue.write();
