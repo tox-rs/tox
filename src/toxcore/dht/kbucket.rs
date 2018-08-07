@@ -251,7 +251,7 @@ impl Bucket {
     */
     pub fn remove(&mut self, base_pk: &PublicKey, node_pk: &PublicKey) {
         trace!(target: "Bucket", "Removing DhtNode with PK: {:?}", node_pk);
-        match self.nodes.binary_search_by(|n| base_pk.distance(&n.pk, node_pk) ) {
+        match self.nodes.binary_search_by(|n| base_pk.distance(&n.pk, node_pk)) {
             Ok(index) => {
                 self.nodes.remove(index);
             },
@@ -262,8 +262,8 @@ impl Bucket {
     }
 
     /// Check if node with given PK is in the `Bucket`.
-    pub fn contains(&self, pk: &PublicKey) -> bool {
-        self.nodes.iter().any(|n| &n.pk == pk)
+    pub fn contains(&self, base_pk: &PublicKey, pk: &PublicKey) -> bool {
+        self.nodes.binary_search_by(|n| base_pk.distance(&n.pk, pk)).is_ok()
     }
 
     /// Get the capacity of the Bucket.
@@ -491,7 +491,7 @@ impl Kbucket {
     */
     pub fn contains(&self, pk: &PublicKey) -> bool {
         match self.bucket_index(pk) {
-            Some(i) => self.buckets[i].contains(pk),
+            Some(i) => self.buckets[i].contains(&self.pk, pk),
             None => false,
         }
     }
