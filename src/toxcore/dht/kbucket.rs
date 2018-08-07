@@ -467,8 +467,8 @@ impl Kbucket {
         // create a new Bucket with associated pk, and add nodes that are close
         // to the PK
         let mut bucket = Bucket::new(Some(4));
-        for buc in &*self.buckets {
-            for node in &*buc.nodes {
+        for buc in &self.buckets {
+            for node in buc.nodes.iter().filter(|node| !node.is_bad()) {
                 if let Some(sock) = node.get_socket_addr(self.is_ipv6_mode) {
                     if only_global_ip && !IsGlobal::is_global(&sock.ip()) {
                         continue;
