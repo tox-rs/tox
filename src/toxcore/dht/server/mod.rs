@@ -12,7 +12,6 @@ use tokio::timer::Interval;
 
 use std::io::{ErrorKind, Error};
 use std::net::{SocketAddr, IpAddr};
-use std::ops::DerefMut;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::mem;
@@ -152,7 +151,7 @@ impl Server {
             friends: Arc::new(RwLock::new(Vec::new())),
             bootstrap_nodes: Arc::new(RwLock::new(Bucket::new(None))),
             bootstrap_times: Arc::new(RwLock::new(0)),
-            last_nodes_req_time: Arc::new(RwLock::new(Instant::now())),
+            last_nodes_req_time: Arc::new(RwLock::new(clock_now())),
             nodes_to_send_ping: Arc::new(RwLock::new(Bucket::new(Some(MAX_TO_PING)))),
             tox_core_version: 0,
             motd: Vec::new(),
@@ -294,7 +293,7 @@ impl Server {
     /// Send `PingRequest` packets to nodes from `nodes_to_send_ping` list.
     fn send_pings(&self) -> IoFuture<()> {
         let nodes_to_send_ping = mem::replace(
-            self.nodes_to_send_ping.write().deref_mut(),
+            &mut *self.nodes_to_send_ping.write(),
             Bucket::new(Some(MAX_TO_PING))
         );
 
@@ -361,7 +360,7 @@ impl Server {
         let futures = nodes
             .filter(|node| !node.is_discarded() && node.is_ping_interval_passed())
             .map(|node| {
-                node.last_ping_req_time = Some(Instant::now());
+                node.last_ping_req_time = Some(clock_now());
                 let ping_id = request_queue.new_ping_id(node.pk);
                 self.send_nodes_req(node.clone().into(), pk, ping_id)
             })
@@ -458,8 +457,8 @@ impl Server {
                     payload
                 ));
 
-                if friend.hole_punch.last_send_ping_time.map_or(true, |time| time.elapsed() >= Duration::from_secs(NAT_PING_PUNCHING_INTERVAL)) {
-                    friend.hole_punch.last_send_ping_time = Some(Instant::now());
+                if friend.hole_punch.last_send_ping_time.map_or(true, |time| clock_elapsed(time) >= Duration::from_secs(NAT_PING_PUNCHING_INTERVAL)) {
+                    friend.hole_punch.last_send_ping_time = Some(clock_now());
                     self.send_nat_ping_req_inner(friend, nat_ping_req_packet)
                 } else {
                     Box::new(future::ok(()))
@@ -861,7 +860,7 @@ impl Server {
             )))
         }
 
-        if friend.hole_punch.last_recv_ping_time.elapsed() < send_nat_ping_interval &&
+        if clock_elapsed(friend.hole_punch.last_recv_ping_time) < send_nat_ping_interval &&
             friend.hole_punch.ping_id == payload.id {
             // enable hole punching
             friend.hole_punch.is_punching_done = false;
@@ -1160,6 +1159,11 @@ mod tests {
     use futures::Future;
     use std::net::SocketAddr;
 
+    use tokio_executor;
+    use tokio_timer::clock::*;
+
+    use toxcore::time::ConstNow;
+
     const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - secretbox::NONCEBYTES;
     const ONION_RETURN_2_PAYLOAD_SIZE: usize = ONION_RETURN_2_SIZE - secretbox::NONCEBYTES;
     const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - secretbox::NONCEBYTES;
@@ -1180,18 +1184,12 @@ mod tests {
 
     #[test]
     fn server_is_clonable() {
-        let (alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
-        let _ = alice.clone();
-    }
-
-    // new()
-    #[test]
-    fn server_new_test() {
         crypto_init();
-
         let (pk, sk) = gen_keypair();
-        let tx: Tx = mpsc::unbounded().0;
-        let _ = Server::new(tx, pk, sk);
+        let (tx, _rx) = mpsc::unbounded();
+        let server = Server::new(tx, pk, sk);
+
+        let _ = server.clone();
     }
 
     #[test]
@@ -1202,27 +1200,43 @@ mod tests {
         alice.add_friend(friend);
     }
 
-    // test handle_packet() with BootstrapInfo packet type
+    // handle_bootstrap_info
     #[test]
-    fn server_handle_packet_with_bootstrap_info_packet_test() {
-        let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
+    fn handle_bootstrap_info() {
+        let (mut alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
+
+        let version = 42;
+        let motd = b"motd".to_vec();
+
+        alice.set_bootstrap_info(version, motd.clone());
+
         let packet = DhtPacket::BootstrapInfo(BootstrapInfo {
             version: 00,
-            motd: b"Hello".to_owned().to_vec(),
+            motd: b"Hello".to_vec(),
         });
-        assert!(alice.handle_packet(packet, addr).wait().is_ok());
+
+        alice.handle_packet(packet, addr).wait().unwrap();
+
+        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (packet, addr_to_send) = received.unwrap();
+
+        assert_eq!(addr_to_send, addr);
+
+        let bootstrap_info = unpack!(packet, DhtPacket::BootstrapInfo);
+
+        assert_eq!(bootstrap_info.version, version);
+        assert_eq!(bootstrap_info.motd, motd);
     }
 
-    // handle_ping_req()
+    // handle_ping_req
     #[test]
-    fn server_handle_ping_req_test() {
+    fn handle_ping_req() {
         let (alice, precomp, bob_pk, bob_sk, rx, addr) = create_node();
 
-        // handle ping request, request from bob peer
         let req_payload = PingRequestPayload { id: 42 };
         let ping_req = DhtPacket::PingRequest(PingRequest::new(&precomp, &bob_pk, req_payload));
 
-        assert!(alice.handle_packet(ping_req, addr).wait().is_ok());
+        alice.handle_packet(ping_req, addr).wait().unwrap();
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -1233,23 +1247,60 @@ mod tests {
         let ping_resp_payload = ping_resp.get_payload(&bob_sk).unwrap();
 
         assert_eq!(ping_resp_payload.id, req_payload.id);
+
+        assert!(alice.nodes_to_send_ping.read().contains(&alice.pk, &bob_pk));
     }
 
     #[test]
-    fn server_handle_ping_req_invalid_payload_test() {
+    fn handle_ping_req_from_friend_with_unknown_addr() {
+        let (alice, precomp, bob_pk, bob_sk, rx, addr) = create_node();
+
+        let friend = DhtFriend::new(bob_pk);
+        alice.add_friend(friend);
+
+        let req_payload = PingRequestPayload { id: 42 };
+        let ping_req = DhtPacket::PingRequest(PingRequest::new(&precomp, &bob_pk, req_payload));
+
+        alice.handle_packet(ping_req, addr).wait().unwrap();
+
+        let mut request_queue = alice.request_queue.write();
+
+        rx.take(2).map(|(packet, addr_to_send)| {
+            assert_eq!(addr_to_send, addr);
+
+            if let DhtPacket::PingResponse(ping_resp) = packet {
+                let ping_resp_payload = ping_resp.get_payload(&bob_sk).unwrap();
+                assert_eq!(ping_resp_payload.id, req_payload.id);
+            } else {
+                let ping_req = unpack!(packet, DhtPacket::PingRequest);
+                let ping_req_payload = ping_req.get_payload(&bob_sk).unwrap();
+                assert!(request_queue.check_ping_id(bob_pk, ping_req_payload.id));
+            }
+        }).collect().wait().unwrap();
+
+        // In case of friend with yet unknown address we should send ping
+        // request immediately instead of adding node to nodes_to_send_ping list
+        assert!(!alice.nodes_to_send_ping.read().contains(&alice.pk, &bob_pk));
+    }
+
+    #[test]
+    fn handle_ping_req_invalid_payload() {
         let (alice, precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
-        // error case: can't decrypt
+        // can't be decrypted payload since packet contains wrong key
         let req_payload = PingRequestPayload { id: 42 };
         let ping_req = DhtPacket::PingRequest(PingRequest::new(&precomp, &alice.pk, req_payload));
 
         assert!(alice.handle_packet(ping_req, addr).wait().is_err());
     }
 
-    // handle_ping_resp()
+    // handle_ping_resp
     #[test]
-    fn server_handle_ping_resp_test() {
+    fn handle_ping_resp() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
+
+        let friend = DhtFriend::new(bob_pk);
+        alice.add_friend(friend);
 
         let packed_node = PackedNode::new(addr, &bob_pk);
         assert!(alice.try_add_to_close_nodes(&packed_node));
@@ -1259,13 +1310,32 @@ mod tests {
         let resp_payload = PingResponsePayload { id: ping_id };
         let ping_resp = DhtPacket::PingResponse(PingResponse::new(&precomp, &bob_pk, resp_payload));
 
-        assert!(alice.handle_packet(ping_resp, addr).wait().is_ok());
+        let time = Instant::now() + Duration::from_secs(1);
 
-        //TODO: check node resp time
+        let mut enter = tokio_executor::enter().unwrap();
+        let clock = Clock::new_with_now(ConstNow(time));
+
+        with_default(&clock, &mut enter, |_| {
+            alice.handle_packet(ping_resp, addr).wait().unwrap();
+        });
+
+        let friends = alice.friends.read();
+        let friend = friends.first().unwrap();
+
+        // All nodes from PingResponse should be added to bootstrap nodes list
+        // of each friend
+        assert!(friend.close_nodes.contains(&bob_pk, &bob_pk));
+
+        let close_nodes = alice.close_nodes.read();
+        let node = close_nodes.get_node(&bob_pk).unwrap();
+
+        // Node that sent PingResponse should be added to close nodes list and
+        // have updated last_resp_time
+        assert_eq!(node.last_resp_time_v4.unwrap(), time);
     }
 
     #[test]
-    fn server_handle_ping_resp_invalid_payload_test() {
+    fn handle_ping_resp_invalid_payload() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let packed_node = PackedNode::new(addr, &bob_pk);
@@ -1273,27 +1343,28 @@ mod tests {
 
         let ping_id = alice.request_queue.write().new_ping_id(bob_pk);
 
-        let prs = PingResponsePayload { id: ping_id };
-        let ping_resp = DhtPacket::PingResponse(PingResponse::new(&precomp, &alice.pk, prs));
+        // can't be decrypted payload since packet contains wrong key
+        let payload = PingResponsePayload { id: ping_id };
+        let ping_resp = DhtPacket::PingResponse(PingResponse::new(&precomp, &alice.pk, payload));
 
         assert!(alice.handle_packet(ping_resp, addr).wait().is_err());
     }
 
     #[test]
-    fn server_handle_ping_resp_ping_id_is_0_test() {
+    fn handle_ping_resp_ping_id_is_0() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let packed_node = PackedNode::new(addr, &bob_pk);
         assert!(alice.try_add_to_close_nodes(&packed_node));
 
-        let prs = PingResponsePayload { id: 0 };
-        let ping_resp = DhtPacket::PingResponse(PingResponse::new(&precomp, &bob_pk, prs));
+        let payload = PingResponsePayload { id: 0 };
+        let ping_resp = DhtPacket::PingResponse(PingResponse::new(&precomp, &bob_pk, payload));
 
         assert!(alice.handle_packet(ping_resp, addr).wait().is_err());
     }
 
     #[test]
-    fn server_handle_ping_resp_invalid_ping_id_test() {
+    fn handle_ping_resp_invalid_ping_id() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let packed_node = PackedNode::new(addr, &bob_pk);
@@ -1301,26 +1372,25 @@ mod tests {
 
         let ping_id = alice.request_queue.write().new_ping_id(bob_pk);
 
-        let prs = PingResponsePayload { id: ping_id + 1 };
-        let ping_resp = DhtPacket::PingResponse(PingResponse::new(&precomp, &bob_pk, prs));
+        let payload = PingResponsePayload { id: ping_id + 1 };
+        let ping_resp = DhtPacket::PingResponse(PingResponse::new(&precomp, &bob_pk, payload));
 
         assert!(alice.handle_packet(ping_resp, addr).wait().is_err());
     }
 
-    // handle_nodes_req()
+    // handle_nodes_req
     #[test]
-    fn server_handle_nodes_req_test() {
+    fn handle_nodes_req() {
         let (alice, precomp, bob_pk, bob_sk, rx, addr) = create_node();
 
-        // success case
-        let packed_node = PackedNode::new(SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &bob_pk);
+        let packed_node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &bob_pk);
 
         assert!(alice.try_add_to_close_nodes(&packed_node));
 
         let req_payload = NodesRequestPayload { pk: bob_pk, id: 42 };
         let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(&precomp, &bob_pk, req_payload));
 
-        assert!(alice.handle_packet(nodes_req, addr).wait().is_ok());
+        alice.handle_packet(nodes_req, addr).wait().unwrap();
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -1328,49 +1398,169 @@ mod tests {
         assert_eq!(addr_to_send, addr);
 
         let nodes_resp = unpack!(packet, DhtPacket::NodesResponse);
-
         let nodes_resp_payload = nodes_resp.get_payload(&bob_sk).unwrap();
 
         assert_eq!(nodes_resp_payload.id, req_payload.id);
+        assert_eq!(nodes_resp_payload.nodes, vec!(packed_node));
+
+        assert!(alice.nodes_to_send_ping.read().contains(&alice.pk, &bob_pk));
     }
 
     #[test]
-    fn server_handle_nodes_req_invalid_payload_test() {
+    fn handle_nodes_req_should_return_nodes_from_friends() {
+        let (alice, precomp, bob_pk, bob_sk, rx, addr) = create_node();
+
+        let mut friend = DhtFriend::new(bob_pk);
+
+        let packed_node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &bob_pk);
+        assert!(friend.close_nodes.try_add(&bob_pk, &packed_node));
+
+        alice.add_friend(friend);
+
+        let req_payload = NodesRequestPayload { pk: bob_pk, id: 42 };
+        let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(&precomp, &bob_pk, req_payload));
+
+        alice.handle_packet(nodes_req, addr).wait().unwrap();
+
+        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (packet, addr_to_send) = received.unwrap();
+
+        assert_eq!(addr_to_send, addr);
+
+        let nodes_resp = unpack!(packet, DhtPacket::NodesResponse);
+        let nodes_resp_payload = nodes_resp.get_payload(&bob_sk).unwrap();
+
+        assert_eq!(nodes_resp_payload.id, req_payload.id);
+        assert_eq!(nodes_resp_payload.nodes, vec!(packed_node));
+
+        assert!(alice.nodes_to_send_ping.read().contains(&alice.pk, &bob_pk));
+    }
+
+    #[test]
+    fn handle_nodes_req_should_not_return_bad_nodes() {
+        let (alice, precomp, bob_pk, bob_sk, rx, addr) = create_node();
+
+        let packed_node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &bob_pk);
+
+        assert!(alice.try_add_to_close_nodes(&packed_node));
+
+        let req_payload = NodesRequestPayload { pk: bob_pk, id: 42 };
+        let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(&precomp, &bob_pk, req_payload));
+
+        let time = Instant::now() + Duration::from_secs(BAD_NODE_TIMEOUT + 1);
+
+        let mut enter = tokio_executor::enter().unwrap();
+        let clock = Clock::new_with_now(ConstNow(time));
+
+        with_default(&clock, &mut enter, |_| {
+            alice.handle_packet(nodes_req, addr).wait().unwrap();
+        });
+
+        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (packet, addr_to_send) = received.unwrap();
+
+        assert_eq!(addr_to_send, addr);
+
+        let nodes_resp = unpack!(packet, DhtPacket::NodesResponse);
+        let nodes_resp_payload = nodes_resp.get_payload(&bob_sk).unwrap();
+
+        assert_eq!(nodes_resp_payload.id, req_payload.id);
+        assert!(nodes_resp_payload.nodes.is_empty());
+
+        assert!(alice.nodes_to_send_ping.read().contains(&alice.pk, &bob_pk));
+    }
+
+    #[test]
+    fn handle_nodes_req_should_not_return_lan_nodes_when_address_is_global() {
+        let (alice, precomp, bob_pk, bob_sk, rx, _addr) = create_node();
+        let addr = "8.10.8.10:12345".parse().unwrap();
+
+        let packed_node = PackedNode::new("192.168.42.42:12345".parse().unwrap(), &bob_pk);
+
+        assert!(alice.try_add_to_close_nodes(&packed_node));
+
+        let req_payload = NodesRequestPayload { pk: bob_pk, id: 42 };
+        let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(&precomp, &bob_pk, req_payload));
+
+        alice.handle_packet(nodes_req, addr).wait().unwrap();
+
+        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (packet, addr_to_send) = received.unwrap();
+
+        assert_eq!(addr_to_send, addr);
+
+        let nodes_resp = unpack!(packet, DhtPacket::NodesResponse);
+        let nodes_resp_payload = nodes_resp.get_payload(&bob_sk).unwrap();
+
+        assert_eq!(nodes_resp_payload.id, req_payload.id);
+        assert!(nodes_resp_payload.nodes.is_empty());
+
+        assert!(alice.nodes_to_send_ping.read().contains(&alice.pk, &bob_pk));
+    }
+
+    #[test]
+    fn handle_nodes_req_invalid_payload() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
-        // error case, can't decrypt
+        // can't be decrypted payload since packet contains wrong key
         let req_payload = NodesRequestPayload { pk: bob_pk, id: 42 };
         let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(&precomp, &alice.pk, req_payload));
 
         assert!(alice.handle_packet(nodes_req, addr).wait().is_err());
     }
 
-    // handle_nodes_resp()
+    // handle_nodes_resp
     #[test]
-    fn server_handle_nodes_resp_test() {
+    fn handle_nodes_resp() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
-        let node = PackedNode::new(SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &gen_keypair().0);
+        let friend = DhtFriend::new(bob_pk);
+        alice.add_friend(friend);
+
+        let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
 
         let ping_id = alice.request_queue.write().new_ping_id(bob_pk);
 
         let resp_payload = NodesResponsePayload { nodes: vec![node], id: ping_id };
         let nodes_resp = DhtPacket::NodesResponse(NodesResponse::new(&precomp, &bob_pk, resp_payload.clone()));
 
-        assert!(alice.handle_packet(nodes_resp, addr).wait().is_ok());
+        let time = Instant::now() + Duration::from_secs(1);
 
-        let bootstrap_nodes = alice.bootstrap_nodes.read();
+        let mut enter = tokio_executor::enter().unwrap();
+        let clock = Clock::new_with_now(ConstNow(time));
 
-        assert!(bootstrap_nodes.to_packed().contains(&node));
+        with_default(&clock, &mut enter, |_| {
+            alice.handle_packet(nodes_resp, addr).wait().unwrap();
+        });
+
+        // All nodes from NodesResponse should be added to bootstrap nodes list
+        assert!(alice.bootstrap_nodes.read().contains(&alice.pk, &node.pk));
+
+        let friends = alice.friends.read();
+        let friend = friends.first().unwrap();
+
+        // Node that sent NodesResponse should be added to close nodes list of
+        // each friend
+        assert!(friend.bootstrap_nodes.contains(&bob_pk, &node.pk));
+        // All nodes from NodesResponse should be added to bootstrap nodes list
+        // of each friend
+        assert!(friend.close_nodes.contains(&bob_pk, &bob_pk));
+
+        let close_nodes = alice.close_nodes.read();
+        let node = close_nodes.get_node(&bob_pk).unwrap();
+
+        // Node that sent NodesResponse should be added to close nodes list and
+        // have updated last_resp_time
+        assert_eq!(node.last_resp_time_v4.unwrap(), time);
     }
 
     #[test]
-    fn server_handle_nodes_resp_invalid_payload_test() {
+    fn handle_nodes_resp_invalid_payload() {
         let (alice, precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
-        // error case, can't decrypt
+        // can't be decrypted payload since packet contains wrong key
         let resp_payload = NodesResponsePayload { nodes: vec![
-            PackedNode::new(SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &gen_keypair().0)
+            PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0)
         ], id: 38 };
         let nodes_resp = DhtPacket::NodesResponse(NodesResponse::new(&precomp, &alice.pk, resp_payload));
 
@@ -1378,11 +1568,11 @@ mod tests {
     }
 
     #[test]
-    fn server_handle_nodes_resp_ping_id_is_0_test() {
+    fn handle_nodes_resp_ping_id_is_0() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let resp_payload = NodesResponsePayload { nodes: vec![
-            PackedNode::new(SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &gen_keypair().0)
+            PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0)
         ], id: 0 };
         let nodes_resp = DhtPacket::NodesResponse(NodesResponse::new(&precomp, &bob_pk, resp_payload));
 
@@ -1390,13 +1580,13 @@ mod tests {
     }
 
     #[test]
-    fn server_handle_nodes_resp_invalid_ping_id_test() {
+    fn handle_nodes_resp_invalid_ping_id() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let ping_id = alice.request_queue.write().new_ping_id(bob_pk);
 
         let resp_payload = NodesResponsePayload { nodes: vec![
-            PackedNode::new(SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &gen_keypair().0)
+            PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0)
         ], id: ping_id + 1 };
         let nodes_resp = DhtPacket::NodesResponse(NodesResponse::new(&precomp, &bob_pk, resp_payload));
 
@@ -1405,7 +1595,7 @@ mod tests {
 
     // handle_cookie_request
     #[test]
-    fn handle_cookie_request_test() {
+    fn handle_cookie_request() {
         let (udp_tx, udp_rx) = mpsc::unbounded();
         let (dht_pk, dht_sk) = gen_keypair();
         let mut alice = Server::new(udp_tx.clone(), dht_pk, dht_sk.clone());
@@ -1438,7 +1628,7 @@ mod tests {
         };
         let cookie_request = DhtPacket::CookieRequest(CookieRequest::new(&precomp, &bob_pk, cookie_request_payload));
 
-        assert!(alice.handle_packet(cookie_request, addr).wait().is_ok());
+        alice.handle_packet(cookie_request, addr).wait().unwrap();
 
         let (received, _udp_rx) = udp_rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -1452,7 +1642,7 @@ mod tests {
     }
 
     #[test]
-    fn handle_cookie_request_uninitialized_test() {
+    fn handle_cookie_request_uninitialized() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let (bob_real_pk, _bob_real_sk) = gen_keypair();
@@ -1468,7 +1658,7 @@ mod tests {
 
     // handle_cookie_response
     #[test]
-    fn handle_cookie_response_uninitialized_test() {
+    fn handle_cookie_response_uninitialized() {
         let (alice, precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let cookie = EncryptedCookie {
@@ -1486,7 +1676,7 @@ mod tests {
 
     // handle_crypto_handshake
     #[test]
-    fn handle_crypto_handshake_uninitialized_test() {
+    fn handle_crypto_handshake_uninitialized() {
         let (alice, precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let cookie = EncryptedCookie {
@@ -1506,8 +1696,8 @@ mod tests {
 
     // handle_dht_req
     #[test]
-    fn server_handle_dht_req_for_unknown_node_test() {
-        let (alice, _precomp, bob_pk, bob_sk, _rx, addr) = create_node();
+    fn handle_dht_req_for_unknown_node() {
+        let (alice, _precomp, bob_pk, bob_sk, rx, addr) = create_node();
 
         let (charlie_pk, _charlie_sk) = gen_keypair();
         let precomp = precompute(&charlie_pk, &bob_sk);
@@ -1517,29 +1707,41 @@ mod tests {
         let nat_payload = DhtRequestPayload::NatPingRequest(nat_req);
         let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &charlie_pk, &bob_pk, nat_payload));
 
-        assert!(alice.handle_packet(dht_req, addr).wait().is_ok());
+        alice.handle_packet(dht_req, addr).wait().unwrap();
+
+        // Necessary to drop tx so that rx.collect() can be finished
+        drop(alice);
+
+        assert!(rx.collect().wait().unwrap().is_empty());
     }
 
     #[test]
-    fn server_handle_dht_req_for_known_node_test() {
-        let (alice, _precomp, bob_pk, bob_sk, _rx, addr) = create_node();
+    fn handle_dht_req_for_known_node() {
+        let (alice, _precomp, bob_pk, bob_sk, rx, addr) = create_node();
 
+        let charlie_addr = "1.2.3.4:12345".parse().unwrap();
         let (charlie_pk, _charlie_sk) = gen_keypair();
         let precomp = precompute(&charlie_pk, &bob_sk);
 
         // if receiver' pk != node's pk and receiver's pk exists in close_nodes, returns ok()
-        let pn = PackedNode::new(SocketAddr::V4("127.0.0.1:12345".parse().unwrap()), &charlie_pk);
+        let pn = PackedNode::new(charlie_addr, &charlie_pk);
         alice.try_add_to_close_nodes(&pn);
 
         let nat_req = NatPingRequest { id: 42 };
         let nat_payload = DhtRequestPayload::NatPingRequest(nat_req);
         let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &charlie_pk, &bob_pk, nat_payload));
 
-        assert!(alice.handle_packet(dht_req, addr).wait().is_ok());
+        alice.handle_packet(dht_req.clone(), addr).wait().unwrap();
+
+        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (packet, addr_to_send) = received.unwrap();
+
+        assert_eq!(addr_to_send, charlie_addr);
+        assert_eq!(packet, dht_req);
     }
 
     #[test]
-    fn server_handle_dht_req_invalid_payload() {
+    fn handle_dht_req_invalid_payload() {
         let (alice, _precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let dht_req = DhtPacket::DhtRequest(DhtRequest {
@@ -1552,16 +1754,16 @@ mod tests {
         assert!(alice.handle_packet(dht_req, addr).wait().is_err());
     }
 
-    // handle nat ping request
+    // handle_nat_ping_request
     #[test]
-    fn server_handle_nat_ping_req_test() {
+    fn handle_nat_ping_req() {
         let (alice, precomp, bob_pk, bob_sk, rx, addr) = create_node();
 
         let nat_req = NatPingRequest { id: 42 };
         let nat_payload = DhtRequestPayload::NatPingRequest(nat_req);
         let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, nat_payload));
 
-        assert!(alice.handle_packet(dht_req, addr).wait().is_ok());
+        alice.handle_packet(dht_req, addr).wait().unwrap();
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -1575,16 +1777,16 @@ mod tests {
         assert_eq!(nat_ping_resp_payload.id, nat_req.id);
     }
 
-    // handle nat ping response
+    // handle_nat_ping_response
     #[test]
-    fn server_handle_nat_ping_resp_test() {
+    fn handle_nat_ping_resp() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         // success case
         let (friend_pk1, _friend_sk1) = gen_keypair();
 
         let mut friend = DhtFriend::new(bob_pk);
-        let pn = PackedNode::new(SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &friend_pk1);
+        let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &friend_pk1);
         friend.close_nodes.try_add(&bob_pk, &pn);
         let ping_id = friend.hole_punch.ping_id;
         alice.add_friend(friend);
@@ -1593,11 +1795,11 @@ mod tests {
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
         let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, nat_payload));
 
-        assert!(alice.handle_packet(dht_req, addr).wait().is_ok());
+        alice.handle_packet(dht_req, addr).wait().unwrap();
     }
 
     #[test]
-    fn server_handle_nat_ping_resp_ping_id_is_0_test() {
+    fn handle_nat_ping_resp_ping_id_is_0() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         // error case, ping_id = 0
@@ -1609,7 +1811,7 @@ mod tests {
     }
 
     #[test]
-    fn server_handle_nat_ping_resp_invalid_ping_id_test() {
+    fn handle_nat_ping_resp_invalid_ping_id() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         // error case, incorrect ping_id
@@ -1624,7 +1826,7 @@ mod tests {
 
     // handle_onion_request_0
     #[test]
-    fn server_handle_onion_request_0_test() {
+    fn handle_onion_request_0() {
         let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
 
         let temporary_pk = gen_keypair().0;
@@ -1641,7 +1843,7 @@ mod tests {
         };
         let packet = DhtPacket::OnionRequest0(OnionRequest0::new(&precomp, &bob_pk, payload));
 
-        assert!(alice.handle_packet(packet, addr).wait().is_ok());
+        alice.handle_packet(packet, addr).wait().unwrap();
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -1660,7 +1862,7 @@ mod tests {
     }
 
     #[test]
-    fn server_handle_onion_request_0_invalid_payload_test() {
+    fn handle_onion_request_0_invalid_payload() {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let packet = DhtPacket::OnionRequest0(OnionRequest0 {
@@ -1674,7 +1876,7 @@ mod tests {
 
     // handle_onion_request_1
     #[test]
-    fn server_handle_onion_request_1_test() {
+    fn handle_onion_request_1() {
         let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
 
         let temporary_pk = gen_keypair().0;
@@ -1695,7 +1897,7 @@ mod tests {
         };
         let packet = DhtPacket::OnionRequest1(OnionRequest1::new(&precomp, &bob_pk, payload, onion_return));
 
-        assert!(alice.handle_packet(packet, addr).wait().is_ok());
+        alice.handle_packet(packet, addr).wait().unwrap();
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -1714,7 +1916,7 @@ mod tests {
     }
 
     #[test]
-    fn server_handle_onion_request_1_invalid_payload_test() {
+    fn handle_onion_request_1_invalid_payload() {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let packet = DhtPacket::OnionRequest1(OnionRequest1 {
@@ -1732,7 +1934,7 @@ mod tests {
 
     // handle_onion_request_2
     #[test]
-    fn server_handle_onion_request_2_with_onion_announce_request_test() {
+    fn handle_onion_request_2_with_onion_announce_request() {
         let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
 
         let inner = InnerOnionAnnounceRequest {
@@ -1755,7 +1957,7 @@ mod tests {
         };
         let packet = DhtPacket::OnionRequest2(OnionRequest2::new(&precomp, &bob_pk, payload, onion_return));
 
-        assert!(alice.handle_packet(packet, addr).wait().is_ok());
+        alice.handle_packet(packet, addr).wait().unwrap();
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -1773,7 +1975,7 @@ mod tests {
     }
 
     #[test]
-    fn server_handle_onion_request_2_with_onion_data_request_test() {
+    fn handle_onion_request_2_with_onion_data_request() {
         let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
 
         let inner = InnerOnionDataRequest {
@@ -1797,7 +1999,7 @@ mod tests {
         };
         let packet = DhtPacket::OnionRequest2(OnionRequest2::new(&precomp, &bob_pk, payload, onion_return));
 
-        assert!(alice.handle_packet(packet, addr).wait().is_ok());
+        alice.handle_packet(packet, addr).wait().unwrap();
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -1815,7 +2017,7 @@ mod tests {
     }
 
     #[test]
-    fn server_handle_onion_request_2_invalid_payload_test() {
+    fn handle_onion_request_2_invalid_payload() {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let packet = DhtPacket::OnionRequest2(OnionRequest2 {
@@ -1833,7 +2035,7 @@ mod tests {
 
     // handle_onion_announce_request
     #[test]
-    fn server_handle_onion_announce_request_test() {
+    fn handle_onion_announce_request() {
         let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
 
         let sendback_data = 42;
@@ -1853,7 +2055,7 @@ mod tests {
             onion_return: onion_return.clone()
         });
 
-        assert!(alice.handle_packet(packet, addr).wait().is_ok());
+        alice.handle_packet(packet, addr).wait().unwrap();
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -1875,7 +2077,7 @@ mod tests {
 
     // handle_onion_data_request
     #[test]
-    fn server_handle_onion_data_request_test() {
+    fn handle_onion_data_request() {
         let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
 
         // get ping id
@@ -1896,7 +2098,7 @@ mod tests {
             onion_return: onion_return.clone()
         });
 
-        assert!(alice.handle_packet(packet, addr).wait().is_ok());
+        alice.handle_packet(packet, addr).wait().unwrap();
 
         let (received, rx) = rx.into_future().wait().unwrap();
         let (packet, _addr_to_send) = received.unwrap();
@@ -1919,7 +2121,7 @@ mod tests {
             onion_return: onion_return.clone()
         });
 
-        assert!(alice.handle_packet(packet, addr).wait().is_ok());
+        alice.handle_packet(packet, addr).wait().unwrap();
 
         // send onion data request
 
@@ -1937,7 +2139,7 @@ mod tests {
             onion_return: onion_return.clone()
         });
 
-        assert!(alice.handle_packet(packet, addr).wait().is_ok());
+        alice.handle_packet(packet, addr).wait().unwrap();
 
         let (received, _rx) = rx.skip(1).into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -1957,7 +2159,7 @@ mod tests {
 
     // handle_onion_response_3
     #[test]
-    fn server_handle_onion_response_3_test() {
+    fn handle_onion_response_3() {
         let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
 
         let onion_symmetric_key = alice.onion_symmetric_key.read();
@@ -1982,7 +2184,7 @@ mod tests {
             payload: payload.clone()
         });
 
-        assert!(alice.handle_packet(packet, addr).wait().is_ok());
+        alice.handle_packet(packet, addr).wait().unwrap();
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -1996,7 +2198,7 @@ mod tests {
     }
 
     #[test]
-    fn server_handle_onion_response_3_invalid_onion_return_test() {
+    fn handle_onion_response_3_invalid_onion_return() {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let onion_return = OnionReturn {
@@ -2017,7 +2219,7 @@ mod tests {
     }
 
     #[test]
-    fn server_handle_onion_response_3_invalid_next_onion_return_test() {
+    fn handle_onion_response_3_invalid_next_onion_return() {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let onion_symmetric_key = alice.onion_symmetric_key.read();
@@ -2043,7 +2245,7 @@ mod tests {
 
     // handle_onion_response_2
     #[test]
-    fn server_handle_onion_response_2_test() {
+    fn handle_onion_response_2() {
         let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
 
         let onion_symmetric_key = alice.onion_symmetric_key.read();
@@ -2068,7 +2270,7 @@ mod tests {
             payload: payload.clone()
         });
 
-        assert!(alice.handle_packet(packet, addr).wait().is_ok());
+        alice.handle_packet(packet, addr).wait().unwrap();
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -2082,7 +2284,7 @@ mod tests {
     }
 
     #[test]
-    fn server_handle_onion_response_2_invalid_onion_return_test() {
+    fn handle_onion_response_2_invalid_onion_return() {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let onion_return = OnionReturn {
@@ -2103,7 +2305,7 @@ mod tests {
     }
 
     #[test]
-    fn server_handle_onion_response_2_invalid_next_onion_return_test() {
+    fn handle_onion_response_2_invalid_next_onion_return() {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let onion_symmetric_key = alice.onion_symmetric_key.read();
@@ -2129,7 +2331,7 @@ mod tests {
 
     // handle_onion_response_1
     #[test]
-    fn server_handle_onion_response_1_with_onion_announce_response_test() {
+    fn handle_onion_response_1_with_onion_announce_response() {
         let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
 
         let onion_symmetric_key = alice.onion_symmetric_key.read();
@@ -2150,7 +2352,7 @@ mod tests {
             payload: InnerOnionResponse::OnionAnnounceResponse(inner.clone())
         });
 
-        assert!(alice.handle_packet(packet, addr).wait().is_ok());
+        alice.handle_packet(packet, addr).wait().unwrap();
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -2184,7 +2386,7 @@ mod tests {
             payload: InnerOnionResponse::OnionDataResponse(inner.clone())
         });
 
-        assert!(alice.handle_packet(packet, addr).wait().is_ok());
+        alice.handle_packet(packet, addr).wait().unwrap();
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -2197,7 +2399,7 @@ mod tests {
     }
 
     #[test]
-    fn server_handle_onion_response_1_redirect_to_tcp_test() {
+    fn handle_onion_response_1_redirect_to_tcp() {
         let (mut alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
         let (tcp_onion_tx, tcp_onion_rx) = mpsc::unbounded::<(InnerOnionResponse, SocketAddr)>();
         alice.set_tcp_onion_sink(tcp_onion_tx);
@@ -2222,7 +2424,7 @@ mod tests {
             payload: inner.clone()
         });
 
-        assert!(alice.handle_packet(packet, addr).wait().is_ok());
+        alice.handle_packet(packet, addr).wait().unwrap();
 
         let (received, _tcp_onion_rx) = tcp_onion_rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -2232,7 +2434,7 @@ mod tests {
     }
 
     #[test]
-    fn server_handle_onion_response_1_can_not_redirect_to_tcp_test() {
+    fn handle_onion_response_1_can_not_redirect_to_tcp() {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let onion_symmetric_key = alice.onion_symmetric_key.read();
@@ -2257,7 +2459,7 @@ mod tests {
     }
 
     #[test]
-    fn server_handle_onion_response_1_invalid_onion_return_test() {
+    fn handle_onion_response_1_invalid_onion_return() {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let onion_return = OnionReturn {
@@ -2278,7 +2480,7 @@ mod tests {
     }
 
     #[test]
-    fn server_handle_onion_response_1_invalid_next_onion_return_test() {
+    fn handle_onion_response_1_invalid_next_onion_return() {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let onion_symmetric_key = alice.onion_symmetric_key.read();
@@ -2306,36 +2508,16 @@ mod tests {
         assert!(alice.handle_packet(packet, addr).wait().is_err());
     }
 
-     // send_nodes_req()
-     #[test]
-     fn server_send_nodes_req_test() {
-         let (alice, _precomp, bob_pk, _bob_sk, _rx, _addr) = create_node();
-
-         let target_node = PackedNode {
-             pk: bob_pk,
-             saddr: "127.0.0.1:12345".parse().unwrap(),
-         };
-         assert!(alice.send_nodes_req(target_node, alice.pk, 42).wait().is_ok());
-
-         let node = PackedNode {
-             pk: gen_keypair().0,
-             saddr: "127.0.0.1:12347".parse().unwrap(),
-         };
-         alice.try_add_to_close_nodes(&node);
-
-         assert!(alice.send_nodes_req(target_node, alice.pk, 42).wait().is_ok());
-     }
-
     // send_nat_ping_req()
     #[test]
-    fn server_send_nat_ping_req_test() {
+    fn send_nat_ping_req() {
         let (alice, _precomp, _bob_pk, _bob_sk, mut rx, _addr) = create_node();
 
         let (friend_pk1, friend_sk1) = gen_keypair();
         let friend_pk2 = gen_keypair().0;
 
         let mut friend = DhtFriend::new(friend_pk1);
-        let pn = PackedNode::new(SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &friend_pk2);
+        let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &friend_pk2);
         friend.close_nodes.try_add(&friend_pk1, &pn);
         alice.add_friend(friend);
 
@@ -2356,13 +2538,14 @@ mod tests {
         }
     }
 
+    // handle_lan_discovery
     #[test]
-    fn server_handle_lan_discovery_test() {
+    fn handle_lan_discovery() {
         let (alice, _precomp, bob_pk, bob_sk, rx, addr) = create_node();
 
         let lan = DhtPacket::LanDiscovery(LanDiscovery { pk: bob_pk });
 
-        assert!(alice.handle_packet(lan, addr).wait().is_ok());
+        alice.handle_packet(lan, addr).wait().unwrap();
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -2370,22 +2553,44 @@ mod tests {
         assert_eq!(addr_to_send, addr);
 
         let nodes_req = unpack!(packet, DhtPacket::NodesRequest);
-        let _nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
+        let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
 
-        assert_eq!(nodes_req.pk, alice.pk);
+        assert_eq!(nodes_req_payload.pk, alice.pk);
     }
 
     #[test]
-    fn server_handle_lan_discovery_for_ourselves_test() {
-        let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
+    fn handle_lan_discovery_for_ourselves() {
+        let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
 
         let lan = DhtPacket::LanDiscovery(LanDiscovery { pk: alice.pk });
 
-        assert!(alice.handle_packet(lan, addr).wait().is_ok());
+        alice.handle_packet(lan, addr).wait().unwrap();
+
+        // Necessary to drop tx so that rx.collect() can be finished
+        drop(alice);
+
+        assert!(rx.collect().wait().unwrap().is_empty());
     }
 
     #[test]
-    fn refresh_onion_key_test() {
+    fn handle_lan_discovery_when_disabled() {
+        let (mut alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
+
+        alice.enable_lan_discovery(false);
+        assert_eq!(alice.lan_discovery_enabled, false);
+
+        let lan = DhtPacket::LanDiscovery(LanDiscovery { pk: alice.pk });
+
+        alice.handle_packet(lan, addr).wait().unwrap();
+
+        // Necessary to drop tx so that rx.collect() can be finished
+        drop(alice);
+
+        assert!(rx.collect().wait().unwrap().is_empty());
+    }
+
+    #[test]
+    fn refresh_onion_key() {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
 
         let onion_symmetric_key = alice.onion_symmetric_key.read().clone();
@@ -2396,7 +2601,7 @@ mod tests {
     }
 
     #[test]
-    fn server_handle_tcp_onion_request_test() {
+    fn handle_tcp_onion_request() {
         let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
 
         let temporary_pk = gen_keypair().0;
@@ -2413,7 +2618,7 @@ mod tests {
             payload: payload.clone()
         };
 
-        assert!(alice.handle_tcp_onion_request(packet, addr).wait().is_ok());
+        alice.handle_tcp_onion_request(packet, addr).wait().unwrap();
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -2432,15 +2637,15 @@ mod tests {
     }
 
     #[test]
-    fn server_ping_bootstrap_nodes_test() {
+    fn ping_bootstrap_nodes() {
         let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         let (ping_pk, ping_sk) = gen_keypair();
 
-        let pn = PackedNode::new(SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &ping_pk);
-        assert!(alice.bootstrap_nodes.write().deref_mut().try_add(&alice.pk, &pn));
+        let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &ping_pk);
+        assert!(alice.bootstrap_nodes.write().try_add(&alice.pk, &pn));
 
-        let pn = PackedNode::new(SocketAddr::V4("127.0.0.1:33445".parse().unwrap()), &bob_pk);
-        assert!(alice.bootstrap_nodes.write().deref_mut().try_add(&alice.pk, &pn));
+        let pn = PackedNode::new("127.0.0.1:33445".parse().unwrap(), &bob_pk);
+        assert!(alice.bootstrap_nodes.write().try_add(&alice.pk, &pn));
 
         alice.dht_main_loop().wait().unwrap();
 
@@ -2448,104 +2653,256 @@ mod tests {
 
         rx.take(2).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, DhtPacket::NodesRequest);
-            if addr == SocketAddr::V4("127.0.0.1:33445".parse().unwrap()) {
+            if addr == "127.0.0.1:33445".parse().unwrap() {
                 let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
                 assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
+                assert_eq!(nodes_req_payload.pk, alice.pk);
             } else {
                 let nodes_req_payload = nodes_req.get_payload(&ping_sk).unwrap();
                 assert!(request_queue.check_ping_id(ping_pk, nodes_req_payload.id));
+                assert_eq!(nodes_req_payload.pk, alice.pk);
             }
         }).collect().wait().unwrap();
     }
 
     #[test]
-    fn server_ping_and_get_close_nodes_test() {
+    fn ping_nodes_from_nodes_to_send_ping_list() {
         let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         let (ping_pk, ping_sk) = gen_keypair();
 
-        let pn = PackedNode::new(SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &ping_pk);
-        assert!(alice.close_nodes.write().deref_mut().try_add(&pn));
+        let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &ping_pk);
+        assert!(alice.nodes_to_send_ping.write().try_add(&alice.pk, &pn));
 
-        let pn = PackedNode::new(SocketAddr::V4("127.0.0.1:33445".parse().unwrap()), &bob_pk);
-        assert!(alice.close_nodes.write().deref_mut().try_add(&pn));
+        let pn = PackedNode::new("127.0.0.1:33445".parse().unwrap(), &bob_pk);
+        assert!(alice.nodes_to_send_ping.write().try_add(&alice.pk, &pn));
+
+        alice.send_pings().wait().unwrap();
+
+        let mut request_queue = alice.request_queue.write();
+
+        rx.take(2).map(|(packet, addr)| {
+            let nodes_req = unpack!(packet, DhtPacket::PingRequest);
+            if addr == "127.0.0.1:33445".parse().unwrap() {
+                let ping_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
+                assert!(request_queue.check_ping_id(bob_pk, ping_req_payload.id));
+            } else {
+                let ping_req_payload = nodes_req.get_payload(&ping_sk).unwrap();
+                assert!(request_queue.check_ping_id(ping_pk, ping_req_payload.id));
+            }
+        }).collect().wait().unwrap();
+    }
+
+    #[test]
+    fn ping_nodes_when_nodes_to_send_ping_list_is_empty() {
+        let (alice, _precomp, _bob_pk, _bob_sk, rx, _addr) = create_node();
+
+        alice.send_pings().wait().unwrap();
+
+        // Necessary to drop tx so that rx.collect() can be finished
+        drop(alice);
+
+        assert!(rx.collect().wait().unwrap().is_empty());
+    }
+
+    #[test]
+    fn ping_close_nodes() {
+        let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
+        let (ping_pk, ping_sk) = gen_keypair();
+
+        let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &ping_pk);
+        assert!(alice.close_nodes.write().try_add(&pn));
+
+        let pn = PackedNode::new("127.0.0.1:33445".parse().unwrap(), &bob_pk);
+        assert!(alice.close_nodes.write().try_add(&pn));
 
         alice.dht_main_loop().wait().unwrap();
 
         let mut request_queue = alice.request_queue.write();
 
-        rx.take(2).map(|(packet, addr)| {
+        // 3 = 2 packets sent by ping_close_nodes + 1 packet sent by send_nodes_req_random
+        rx.take(3).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, DhtPacket::NodesRequest);
-            if addr == SocketAddr::V4("127.0.0.1:33445".parse().unwrap()) {
+            if addr == "127.0.0.1:33445".parse().unwrap() {
                 let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
                 assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
+                assert_eq!(nodes_req_payload.pk, alice.pk);
             } else {
                 let nodes_req_payload = nodes_req.get_payload(&ping_sk).unwrap();
                 assert!(request_queue.check_ping_id(ping_pk, nodes_req_payload.id));
+                assert_eq!(nodes_req_payload.pk, alice.pk);
             }
         }).collect().wait().unwrap();
     }
 
     #[test]
-    fn server_send_nodes_req_random_test() {
+    fn send_nodes_req_random_periodicity() {
+        let (alice, _precomp, bob_pk, _bob_sk, mut rx, _addr) = create_node();
+
+        {
+            let mut close_nodes = alice.close_nodes.write();
+            let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &bob_pk);
+            assert!(close_nodes.try_add(&pn));
+            let node = close_nodes.get_node_mut(&bob_pk).unwrap();
+            // Set last_ping_req_time so that only random request will be sent
+            node.last_ping_req_time = Some(Instant::now());
+        }
+
+        let now = Instant::now();
+        let mut enter = tokio_executor::enter().unwrap();
+
+        // Random request should be sent every second MAX_BOOTSTRAP_TIMES times
+        // This loop will produce MAX_BOOTSTRAP_TIMES random packets
+        for i in 0 .. MAX_BOOTSTRAP_TIMES {
+            let clock = Clock::new_with_now(ConstNow(now + Duration::from_secs(u64::from(i))));
+
+            with_default(&clock, &mut enter, |_| {
+                alice.dht_main_loop().wait().unwrap();
+            });
+
+            let (received, rx1) = rx.into_future().wait().unwrap();
+            let (packet, _) = received.unwrap();
+
+            unpack!(packet, DhtPacket::NodesRequest);
+
+            rx = rx1;
+        }
+
+        // Random packet won't be sent anymore if NODES_REQ_INTERVAL is not passed
+        let clock = Clock::new_with_now(ConstNow(
+            now + Duration::from_secs(u64::from(MAX_BOOTSTRAP_TIMES))
+        ));
+        with_default(&clock, &mut enter, |_| {
+            alice.dht_main_loop().wait().unwrap();
+        });
+
+        // Necessary to drop tx so that rx.collect() can be finished
+        drop(alice);
+
+        assert!(rx.collect().wait().unwrap().is_empty());
+    }
+
+    #[test]
+    fn ping_bootstrap_nodes_of_friend() {
         let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         let (ping_pk, ping_sk) = gen_keypair();
 
-        let pn = PackedNode::new(SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &ping_pk);
-        assert!(alice.close_nodes.write().deref_mut().try_add(&pn));
+        let friend_pk = gen_keypair().0;
 
-        let pn = PackedNode::new(SocketAddr::V4("127.0.0.1:33445".parse().unwrap()), &bob_pk);
-        assert!(alice.close_nodes.write().deref_mut().try_add(&pn));
+        let mut friend = DhtFriend::new(friend_pk);
 
-        alice.dht_main_loop().wait().unwrap();
+        let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &ping_pk);
+        assert!(friend.bootstrap_nodes.try_add(&alice.pk, &pn));
 
-        let mut request_queue = alice.request_queue.write();
+        let pn = PackedNode::new("127.0.0.1:33445".parse().unwrap(), &bob_pk);
+        assert!(friend.bootstrap_nodes.try_add(&alice.pk, &pn));
 
-        rx.take(2).map(|(packet, addr)| {
-            let nodes_req = unpack!(packet, DhtPacket::NodesRequest);
-            if addr == SocketAddr::V4("127.0.0.1:33445".parse().unwrap()) {
-                let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
-                assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
-            } else {
-                let nodes_req_payload = nodes_req.get_payload(&ping_sk).unwrap();
-                assert!(request_queue.check_ping_id(ping_pk, nodes_req_payload.id));
-            }
-        }).collect().wait().unwrap();
-    }
-
-    #[test]
-    fn server_send_nodes_req_packets_test() {
-        let (alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
-        let friend_pk1 = gen_keypair().0;
-        let friend_pk2 = gen_keypair().0;
-
-        let friend = DhtFriend::new(friend_pk1);
         alice.add_friend(friend);
 
-        let friend = DhtFriend::new(friend_pk2);
+        alice.dht_main_loop().wait().unwrap();
+
+        let mut request_queue = alice.request_queue.write();
+
+        rx.take(2).map(|(packet, addr)| {
+            let nodes_req = unpack!(packet, DhtPacket::NodesRequest);
+            if addr == "127.0.0.1:33445".parse().unwrap() {
+                let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
+                assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
+                assert_eq!(nodes_req_payload.pk, friend_pk);
+            } else {
+                let nodes_req_payload = nodes_req.get_payload(&ping_sk).unwrap();
+                assert!(request_queue.check_ping_id(ping_pk, nodes_req_payload.id));
+                assert_eq!(nodes_req_payload.pk, friend_pk);
+            }
+        }).collect().wait().unwrap();
+    }
+
+    #[test]
+    fn ping_close_nodes_of_friend() {
+        let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
+        let (ping_pk, ping_sk) = gen_keypair();
+
+        let friend_pk = gen_keypair().0;
+
+        let mut friend = DhtFriend::new(friend_pk);
+
+        let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &ping_pk);
+        assert!(friend.close_nodes.try_add(&friend_pk, &pn));
+
+        let pn = PackedNode::new("127.0.0.1:33445".parse().unwrap(), &bob_pk);
+        assert!(friend.close_nodes.try_add(&friend_pk, &pn));
+
         alice.add_friend(friend);
 
         alice.dht_main_loop().wait().unwrap();
+
+        let mut request_queue = alice.request_queue.write();
+
+        // 3 = 2 packets sent by ping_close_nodes + 1 packet sent by send_nodes_req_random
+        rx.take(3).map(|(packet, addr)| {
+            let nodes_req = unpack!(packet, DhtPacket::NodesRequest);
+            if addr == "127.0.0.1:33445".parse().unwrap() {
+                let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
+                assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
+                assert_eq!(nodes_req_payload.pk, friend_pk);
+            } else {
+                let nodes_req_payload = nodes_req.get_payload(&ping_sk).unwrap();
+                assert!(request_queue.check_ping_id(ping_pk, nodes_req_payload.id));
+                assert_eq!(nodes_req_payload.pk, friend_pk);
+            }
+        }).collect().wait().unwrap();
     }
 
     #[test]
-    fn server_set_bootstrap_info_test() {
-        let (mut alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
+    fn send_nodes_req_random_friend_periodicity() {
+        let (alice, _precomp, bob_pk, _bob_sk, mut rx, _addr) = create_node();
 
-        alice.set_bootstrap_info(42, "test".as_bytes().to_owned());
-        assert_eq!(alice.tox_core_version, 42);
-        assert_eq!(alice.motd, "test".as_bytes().to_owned());
+        let friend_pk = gen_keypair().0;
+        let mut friend = DhtFriend::new(friend_pk);
+
+        let pn = PackedNode::new("127.0.0.1:33445".parse().unwrap(), &bob_pk);
+        assert!(friend.close_nodes.try_add(&friend_pk, &pn));
+        // Set last_ping_req_time so that only random request will be sent
+        friend.close_nodes.nodes[0].last_ping_req_time = Some(Instant::now());
+
+        alice.add_friend(friend);
+
+        let now = Instant::now();
+        let mut enter = tokio_executor::enter().unwrap();
+
+        // Random request should be sent every second MAX_BOOTSTRAP_TIMES times
+        // This loop will produce MAX_BOOTSTRAP_TIMES random packets
+        for i in 0 .. MAX_BOOTSTRAP_TIMES {
+            let clock = Clock::new_with_now(ConstNow(now + Duration::from_secs(u64::from(i))));
+
+            with_default(&clock, &mut enter, |_| {
+                alice.friends.write()[0].hole_punch.last_send_ping_time = Some(clock_now());
+                alice.dht_main_loop().wait().unwrap();
+            });
+
+            let (received, rx1) = rx.into_future().wait().unwrap();
+            let (packet, _) = received.unwrap();
+
+            unpack!(packet, DhtPacket::NodesRequest);
+
+            rx = rx1;
+        }
+
+        // Random packet won't be sent anymore if NODES_REQ_INTERVAL is not passed
+        let clock = Clock::new_with_now(ConstNow(
+            now + Duration::from_secs(u64::from(MAX_BOOTSTRAP_TIMES))
+        ));
+        with_default(&clock, &mut enter, |_| {
+            alice.dht_main_loop().wait().unwrap();
+        });
+
+        // Necessary to drop tx so that rx.collect() can be finished
+        drop(alice);
+
+        assert!(rx.collect().wait().unwrap().is_empty());
     }
 
     #[test]
-    fn server_enable_lan_discovery_test() {
-        let (mut alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
-
-        alice.enable_lan_discovery(false);
-        assert_eq!(alice.lan_discovery_enabled, false);
-    }
-
-    #[test]
-    fn server_enable_ipv6_mode_test() {
+    fn enable_ipv6_mode() {
         let (mut alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
 
         alice.enable_ipv6_mode(true);
@@ -2553,15 +2910,15 @@ mod tests {
     }
 
     #[test]
-    fn server_send_to_test() {
+    fn send_to() {
         let (mut alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         let (ping_pk, ping_sk) = gen_keypair();
 
-        let pn = PackedNode::new(SocketAddr::V6("[FF::01]:33445".parse().unwrap()), &bob_pk);
-        assert!(alice.close_nodes.write().deref_mut().try_add(&pn));
+        let pn = PackedNode::new("[FF::01]:33445".parse().unwrap(), &bob_pk);
+        assert!(alice.close_nodes.write().try_add(&pn));
 
-        let pn = PackedNode::new(SocketAddr::V4("127.1.1.1:12345".parse().unwrap()), &ping_pk);
-        assert!(alice.close_nodes.write().deref_mut().try_add(&pn));
+        let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &ping_pk);
+        assert!(alice.close_nodes.write().try_add(&pn));
 
         // test with ipv6 mode
         alice.enable_ipv6_mode(true);
@@ -2571,7 +2928,7 @@ mod tests {
 
         rx.take(2).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, DhtPacket::NodesRequest);
-            if addr == SocketAddr::V6("[FF::01]:33445".parse().unwrap()) {
+            if addr == "[FF::01]:33445".parse().unwrap() {
                 let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
                 assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
             } else {

@@ -90,7 +90,7 @@ impl DhtNode {
 
     /// Check if `PING_INTERVAL` is passed after last ping request.
     pub fn is_ping_interval_passed(&self) -> bool {
-        self.last_ping_req_time.map_or(true, |time| time.elapsed() >= Duration::from_secs(PING_INTERVAL))
+        self.last_ping_req_time.map_or(true, |time| clock_elapsed(time) >= Duration::from_secs(PING_INTERVAL))
     }
 
     /// return SocketAddr for DhtNode
