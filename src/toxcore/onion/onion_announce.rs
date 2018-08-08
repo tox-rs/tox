@@ -10,6 +10,7 @@ use toxcore::crypto_core::*;
 use toxcore::time::*;
 use toxcore::onion::packet::*;
 use toxcore::dht::kbucket::{Distance, Kbucket};
+use toxcore::dht::ip_port::IsGlobal;
 
 /// Number of secret random bytes to make onion ping id unique for each node.
 pub const SECRET_BYTES_SIZE: usize = 32;
@@ -307,7 +308,7 @@ impl OnionAnnounce {
         let response_payload = OnionAnnounceResponsePayload {
             announce_status,
             ping_id_or_pk,
-            nodes: kbucket.get_closest(&payload.search_pk, true)
+            nodes: kbucket.get_closest(&payload.search_pk, IsGlobal::is_global(&addr.ip()))
         };
         let response = OnionAnnounceResponse::new(&shared_secret, payload.sendback_data, response_payload);
 
