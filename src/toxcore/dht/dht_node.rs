@@ -22,6 +22,50 @@ pub const BAD_NODE_TIMEOUT: u64 = PING_INTERVAL * 2 + 2;
 /// The timeout after which a node is discarded completely.
 pub const KILL_NODE_TIMEOUT: u64 = BAD_NODE_TIMEOUT + PING_INTERVAL;
 
+/// Struct conatains SocketAddrs and timestamps for sending and receiving packet
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SockAndTime<T> {
+    /// Socket addr of node
+    pub saddr: Option<T>,
+    /// Last received ping/nodes-response time
+    pub last_resp_time: Option<Instant>,
+    /// Last sent ping-req time
+    pub last_ping_req_time: Option<Instant>,
+    /// Returned by this node. Either our friend or us
+    pub ret_saddr: Option<T>,
+    /// Last time for receiving returned packet
+    pub ret_last_resp_time: Option<Instant>,
+}
+
+impl<T> SockAndTime<T> {
+    /// Create SockAndTime object
+    pub fn new(saddr: Option<T>, last_resp_time: Option<Instant>) -> Self {
+        SockAndTime {
+            saddr,
+            last_resp_time,
+            last_ping_req_time: None,
+            ret_saddr: None,
+            ret_last_resp_time: None,
+        }
+    }
+    /// Check if the address is considered bad i.e. it does not answer on
+    /// addresses for `BAD_NODE_TIMEOUT` seconds.
+    pub fn is_bad(&self) -> bool {
+        self.last_resp_time.map_or(true, |time| clock_elapsed(time) > Duration::from_secs(BAD_NODE_TIMEOUT))
+    }
+
+    /// Check if the node is considered discarded i.e. it does not answer on
+    /// addresses for `KILL_NODE_TIMEOUT` seconds.
+    pub fn is_discarded(&self) -> bool {
+        self.last_resp_time.map_or(true, |time| clock_elapsed(time) > Duration::from_secs(KILL_NODE_TIMEOUT))
+    }
+
+    /// Check if `PING_INTERVAL` is passed after last ping request.
+    pub fn is_ping_interval_passed(&self) -> bool {
+        self.last_ping_req_time.map_or(true, |time| clock_elapsed(time) >= Duration::from_secs(PING_INTERVAL))
+    }
+}
+
 /** Struct used by Bucket, DHT maintains close node list, when we got new node,
 we should make decision to add new node to close node list, or not.
 the PK's distance and status of node help making decision.
@@ -30,18 +74,12 @@ If both node is Good node, then we compare PK's distance.
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DhtNode {
-    /// Socket addr of node for IPv4.
-    pub saddr_v4: Option<SocketAddrV4>,
-    /// Socket addr of node for IPv6.
-    pub saddr_v6: Option<SocketAddrV6>,
+    /// Socket addr and times of node for IPv4.
+    pub assoc4: SockAndTime<SocketAddrV4>,
+    /// Socket addr and times of node for IPv6.
+    pub assoc6: SockAndTime<SocketAddrV6>,
     /// Public Key of the node.
     pub pk: PublicKey,
-    /// last received ping/nodes-response time for IPv4
-    pub last_resp_time_v4: Option<Instant>,
-    /// last received ping/nodes-response time for IPv6
-    pub last_resp_time_v6: Option<Instant>,
-    /// last sent ping-req time
-    pub last_ping_req_time: Option<Instant>,
 }
 
 impl DhtNode {
@@ -66,41 +104,48 @@ impl DhtNode {
 
         DhtNode {
             pk: pn.pk,
-            saddr_v4,
-            saddr_v6,
-            last_resp_time_v4,
-            last_resp_time_v6,
-            last_ping_req_time: None,
+            assoc4: SockAndTime::new(saddr_v4, last_resp_time_v4),
+            assoc6: SockAndTime::new(saddr_v6, last_resp_time_v6),
         }
     }
 
     /// Check if the node is considered bad i.e. it does not answer both on IPv4
     /// and IPv6 addresses for `BAD_NODE_TIMEOUT` seconds.
     pub fn is_bad(&self) -> bool {
-        self.last_resp_time_v4.map_or(true, |time| clock_elapsed(time) > Duration::from_secs(BAD_NODE_TIMEOUT)) &&
-            self.last_resp_time_v6.map_or(true, |time| clock_elapsed(time) > Duration::from_secs(BAD_NODE_TIMEOUT))
+        self.is_ipv4_bad() && self.is_ipv6_bad()
+    }
+
+    /// Check if the IPv4 address is considered bad i.e. it does not answer on IPv4
+    /// addresses for `BAD_NODE_TIMEOUT` seconds.
+    fn is_ipv4_bad(&self) -> bool {
+        self.assoc4.is_bad()
+    }
+
+    /// Check if the IPv6 address is considered bad i.e. it does not answer on IPv6
+    /// addresses for `BAD_NODE_TIMEOUT` seconds.
+    fn is_ipv6_bad(&self) -> bool {
+        self.assoc6.is_bad()
     }
 
     /// Check if the node is considered discarded i.e. it does not answer both
     /// on IPv4 and IPv6 addresses for `KILL_NODE_TIMEOUT` seconds.
     pub fn is_discarded(&self) -> bool {
-        self.last_resp_time_v4.map_or(true, |time| clock_elapsed(time) > Duration::from_secs(KILL_NODE_TIMEOUT)) &&
-            self.last_resp_time_v6.map_or(true, |time| clock_elapsed(time) > Duration::from_secs(KILL_NODE_TIMEOUT))
+        self.assoc4.is_discarded() && self.assoc6.is_discarded()
     }
 
     /// Check if `PING_INTERVAL` is passed after last ping request.
     pub fn is_ping_interval_passed(&self) -> bool {
-        self.last_ping_req_time.map_or(true, |time| clock_elapsed(time) >= Duration::from_secs(PING_INTERVAL))
+        self.assoc4.is_ping_interval_passed() || self.assoc6.is_ping_interval_passed()
     }
 
     /// return SocketAddr for DhtNode
     pub fn get_socket_addr(&self, is_ipv6_mode: bool) -> Option<SocketAddr> {
         if is_ipv6_mode {
-            match self.saddr_v6 {
+            match self.assoc6.saddr {
                 Some(v6) => {
-                    match self.saddr_v4 {
+                    match self.assoc4.saddr {
                         Some(v4) => {
-                            if self.last_resp_time_v4 >= self.last_resp_time_v6 {
+                            if self.assoc4.last_resp_time >= self.assoc6.last_resp_time {
                                 Some(SocketAddr::V4(v4))
                             } else {
                                 Some(SocketAddr::V6(v6))
@@ -110,17 +155,35 @@ impl DhtNode {
                     }
                 },
                 None => {
-                    match self.saddr_v4 {
-                        Some(v4) => Some(SocketAddr::V4(v4)),
-                        None => None,
-                    }
+                    self.assoc4.saddr.map(Into::into)
                 },
             }
         } else {
-            match self.saddr_v4 {
-                Some(v4) => Some(SocketAddr::V4(v4)),
-                None => None,
-            }
+            self.assoc4.saddr.map(Into::into)
+        }
+    }
+
+    /// Update time for ping request, Server sends packets to both IPv4 and IPv6 addresses if exist.
+    pub fn update_ping_req_time(&mut self) {
+        if self.assoc4.saddr.is_some() {
+            self.assoc4.last_ping_req_time = Some(clock_now());
+        }
+        if self.assoc6.saddr.is_some() {
+            self.assoc6.last_ping_req_time = Some(clock_now());
+        }
+    }
+
+    /// Update returned socket address and time of receiving packet
+    pub fn update_returned_addr(&mut self, addr: SocketAddr) {
+        match addr {
+            SocketAddr::V4(v4) => {
+                self.assoc4.ret_saddr = Some(v4);
+                self.assoc4.ret_last_resp_time = Some(clock_now());
+            },
+            SocketAddr::V6(v6) => {
+                self.assoc6.ret_saddr = Some(v6);
+                self.assoc6.ret_last_resp_time = Some(clock_now());
+            },
         }
     }
 }

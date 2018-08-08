@@ -91,7 +91,7 @@ impl HolePunching {
 
                 let res = self.punch(ports_to_try, ip, server, friend_pk);
 
-                self.last_punching_time = Some(Instant::now());
+                self.last_punching_time = Some(clock_now());
                 self.is_punching_done = true;
 
                 res
