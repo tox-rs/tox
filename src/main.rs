@@ -209,6 +209,7 @@ fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_on
     server.set_bootstrap_info(07032018, cli_config.motd.as_bytes().to_owned());
     server.enable_lan_discovery(cli_config.lan_discovery_enabled);
     server.set_tcp_onion_sink(udp_onion.tx);
+    server.enable_ipv6_mode(udp_addr.is_ipv6());
 
     let server_c = server.clone();
     let udp_onion_future = udp_onion.rx
