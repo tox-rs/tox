@@ -189,7 +189,7 @@ impl Server {
         // request is sent every second 5 times and then every 20 seconds.
         fn send_random_request(last_nodes_req_time: &mut Instant, bootstrap_times: &mut u32) -> bool {
             if clock_elapsed(*last_nodes_req_time) > Duration::from_secs(NODES_REQ_INTERVAL) || *bootstrap_times < MAX_BOOTSTRAP_TIMES {
-                *bootstrap_times += 1;
+                *bootstrap_times = bootstrap_times.saturating_add(1);
                 *last_nodes_req_time = clock_now();
                 true
             } else {
