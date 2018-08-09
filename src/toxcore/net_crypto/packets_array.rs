@@ -2,7 +2,7 @@
 */
 
 use std::io::{Error, ErrorKind};
-use std::{iter, mem};
+use std::iter;
 
 /// Maximum size of receiving and sending packet buffers.
 ///
@@ -112,13 +112,10 @@ impl<T> PacketsArray<T> {
         }
 
         let i = real_index(self.buffer_start);
-
-        if self.buffer[i].is_none() {
-            return None
-        }
-
-        let result = mem::replace(&mut self.buffer[i], None);
-        self.buffer_start = self.buffer_start.overflowing_add(1).0;
+        let result = self.buffer[i].take();
+        if result.is_some() {
+            self.buffer_start = self.buffer_start.overflowing_add(1).0;
+        };
         result.map(|packet| *packet)
     }
 
@@ -153,7 +150,7 @@ impl<T> PacketsArray<T> {
             return None
         }
 
-        mem::replace(&mut self.buffer[real_index(index)], None).map(|packet| *packet)
+        self.buffer[real_index(index)].take().map(|packet| *packet)
     }
 
     /// Set end index when it gets known

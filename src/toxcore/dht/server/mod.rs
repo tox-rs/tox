@@ -1048,7 +1048,7 @@ impl Server {
         } else {
             Box::new( future::err(
                 Error::new(ErrorKind::Other,
-                    format!("OnionResponse3 next_onion_return is none")
+                    "OnionResponse3 next_onion_return is none".to_string()
             )))
         }
     }
@@ -1072,7 +1072,7 @@ impl Server {
         } else {
             Box::new( future::err(
                 Error::new(ErrorKind::Other,
-                    format!("OnionResponse2 next_onion_return is none")
+                    "OnionResponse2 next_onion_return is none".to_string()
             )))
         }
     }
@@ -1111,7 +1111,7 @@ impl Server {
                     } else {
                         Box::new( future::err(
                             Error::new(ErrorKind::Other,
-                                format!("OnionResponse1 can't be redirected to TCP relay")
+                                "OnionResponse1 can't be redirected to TCP relay".to_string()
                         )))
                     }
                 },
@@ -1119,7 +1119,7 @@ impl Server {
         } else {
             Box::new( future::err(
                 Error::new(ErrorKind::Other,
-                    format!("OnionResponse1 next_onion_return is some")
+                    "OnionResponse1 next_onion_return is some".to_string()
             )))
         }
     }

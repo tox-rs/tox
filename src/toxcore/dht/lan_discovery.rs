@@ -60,14 +60,16 @@ impl LanDiscoverySender {
     /// Get broadcast addresses for host's network interfaces.
     fn get_ipv4_broadcast_addrs() -> Vec<IpAddr> {
         let ifs = get_if_addrs::get_if_addrs().expect("no network interface");
-        ifs.iter().filter_map(|interface|
-            match interface.addr {
-                IfAddr::V4(ref addr) => addr.broadcast,
-                _ => None,
-            }
-        ).map(|addr|
-            IpAddr::V4(addr)
-        ).collect()
+        ifs
+            .iter()
+            .filter_map(|interface|
+                match interface.addr {
+                    IfAddr::V4(ref addr) => addr.broadcast,
+                    _ => None,
+                }
+            )
+            .map(Into::into)
+            .collect()
     }
 
     /// Get broadcast addresses depending on IP version.
