@@ -49,21 +49,6 @@ pub fn kbucket_index(&PublicKey(ref own_pk): &PublicKey,
     None  // PKs are equal
 }
 
-impl Into<PackedNode> for DhtNode {
-    fn into(self) -> PackedNode {
-        let saddr = if self.assoc4.saddr.is_none() {
-            SocketAddr::V6(self.assoc6.saddr.expect("into() PackedNode fails"))
-        } else {
-            SocketAddr::V4(self.assoc4.saddr.expect("into() PackedNode fails"))
-        };
-
-        PackedNode {
-            pk: self.pk,
-            saddr,
-        }
-    }
-}
-
 impl Into<DhtNode> for PackedNode {
     fn into(self) -> DhtNode {
         DhtNode::new(self)
@@ -319,8 +304,9 @@ impl Bucket {
     }
 
     /// Get vector of `PackedNode`s that `Bucket` has.
-    pub fn to_packed(&self) -> Vec<PackedNode> {
-        self.nodes.iter().map(|node| node.clone().into()).collect()
+    pub fn to_packed(&self, is_ipv6_enabled: bool) -> Vec<PackedNode> {
+        self.nodes.iter().flat_map(|node| node.clone().to_packed_node(is_ipv6_enabled))
+            .collect()
     }
 }
 
@@ -355,7 +341,7 @@ pub struct Kbucket {
     /// `PublicKey` for which `Kbucket` holds close nodes.
     pk: PublicKey,
     /// flag for Dht server is running in IPv6 mode.
-    pub is_ipv6_mode: bool,
+    pub is_ipv6_enabled: bool,
 
     /// List of [`Bucket`](./struct.Bucket.html)s.
     pub buckets: Vec<Bucket>,
@@ -377,7 +363,7 @@ impl Kbucket {
         trace!(target: "Kbucket", "Creating new Kbucket with PK: {:?}", pk);
         Kbucket {
             pk: *pk,
-            is_ipv6_mode: false,
+            is_ipv6_enabled: false,
             buckets: vec![Bucket::new(None); KBUCKET_MAX_ENTRIES as usize]
         }
     }
@@ -475,19 +461,21 @@ impl Kbucket {
         let mut bucket = Bucket::new(Some(4));
         for buc in &self.buckets {
             for node in buc.nodes.iter().filter(|node| !node.is_bad()) {
-                if let Some(sock) = node.get_socket_addr(self.is_ipv6_mode) {
+                if let Some(sock) = node.get_socket_addr(self.is_ipv6_enabled) {
                     if only_global_ip && !IsGlobal::is_global(&sock.ip()) {
                         continue;
                     }
                 } else {
                     continue;
                 }
-                bucket.try_add(pk, &node.clone().into());
+                if let Some(pn) = node.clone().to_packed_node(self.is_ipv6_enabled) {
+                    bucket.try_add(pk, &pn);
+                }
             }
         }
         trace!("Returning nodes: {:?}", &bucket.nodes);
 
-        bucket.to_packed()
+        bucket.to_packed(self.is_ipv6_enabled)
     }
 
     /**
@@ -846,7 +834,7 @@ mod tests {
     fn dht_kbucket_get_closest_test() {
         fn with_kbucket(kb: Kbucket, a: u64, b: u64, c: u64, d: u64) {
             let mut kb = kb;
-            kb.is_ipv6_mode = true;
+            kb.is_ipv6_enabled = true;
             let pk = nums_to_pk(a, b, c, d);
             assert!(kb.get_closest(&pk, true).len() <= 4);
             assert_eq!(kb.get_closest(&pk, true), kb.get_closest(&pk, true));
@@ -866,7 +854,7 @@ mod tests {
 
             let pk = nums_to_pk(a, b, c, d);
             let mut kbucket = Kbucket::new(&pk);
-            kbucket.is_ipv6_mode = true;
+            kbucket.is_ipv6_enabled = true;
 
             // check whether number of correct nodes that are returned is right
             let correctness = |should, kbc: &Kbucket| {
@@ -1042,7 +1030,7 @@ mod tests {
 
             let mut kbucket = Kbucket {
                 pk,
-                is_ipv6_mode: false,
+                is_ipv6_enabled: false,
                 buckets: vec![Bucket::new(Some(2)); KBUCKET_MAX_ENTRIES as usize],
             };
 
@@ -1140,7 +1128,7 @@ mod tests {
 
         assert!(bucket.try_add(&pk,&pn));
 
-        let res_pn = bucket.to_packed();
+        let res_pn = bucket.to_packed(false);
 
         assert_eq!(pn, res_pn[0]);
     }

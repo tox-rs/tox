@@ -15,11 +15,11 @@ use toxcore::binary_io::*;
 use toxcore::io_tokio::*;
 use toxcore::dht::kbucket::*;
 
-/// serialize or deserialize states of DHT close lists
+/// Serialize or deserialize states of DHT close lists
 #[derive(Clone, Debug)]
 pub struct DaemonState;
 
-/// close list has DhtNode, but when we access it with iter(), DhtNode is reformed to PackedNode
+/// Close list has DhtNode, but when we access it with iter(), DhtNode is reformed to PackedNode
 pub const DHT_STATE_BUFFER_SIZE: usize =
     // Bucket size
     (
@@ -31,13 +31,13 @@ pub const DHT_STATE_BUFFER_SIZE: usize =
     ) * KBUCKET_MAX_ENTRIES as usize; // 255
 
 impl DaemonState {
-    /// serialize DHT states, old means that the format of seriaization is old version
+    /// Serialize DHT states, old means that the format of seriaization is old version
     pub fn serialize_old(server: &Server) -> Vec<u8> {
         let close_nodes = server.close_nodes.read();
 
         let nodes = close_nodes.iter()
             .cloned()
-            .map(|node| node.into())
+            .flat_map(|node| node.to_packed_node(server.is_ipv6_enabled()))
             .collect::<Vec<PackedNode>>();
 
         let mut buf = [0u8; DHT_STATE_BUFFER_SIZE];
@@ -46,7 +46,7 @@ impl DaemonState {
         buf[..buf_len].to_vec()
     }
 
-    /// deserialize DHT close list and then re-setup close list, old means that the format of deserialization is old version
+    /// Deserialize DHT close list and then re-setup close list, old means that the format of deserialization is old version
     pub fn deserialize_old(server: &Server, serialized_data: Vec<u8>) -> IoFuture<()> {
         let nodes = match DhtState::from_bytes(&serialized_data) {
             IResult::Done(_, DhtState(nodes)) => nodes,
@@ -60,7 +60,7 @@ impl DaemonState {
         let mut request_queue = server.request_queue.write();
         let nodes_sender = nodes.iter()
             .map(|node|
-                server.send_nodes_req(*node, server.pk, request_queue.new_ping_id(node.pk))
+                server.send_nodes_req(&mut request_queue, &(*node).into(), server.pk)
             );
 
         let nodes_stream = stream::futures_unordered(nodes_sender).then(|_| Ok(()));
