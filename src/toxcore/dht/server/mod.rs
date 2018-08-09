@@ -12,7 +12,7 @@ use parking_lot::RwLock;
 use tokio::timer::Interval;
 
 use std::io::{ErrorKind, Error};
-use std::net::{SocketAddr, IpAddr};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::mem;
@@ -170,7 +170,7 @@ impl Server {
     }
 
     /// Get is_ipv6_enabled member variable
-    pub fn get_is_ipv6_enabled(&self) -> bool {
+    pub fn is_ipv6_enabled(&self) -> bool {
         self.is_ipv6_enabled
     }
 
@@ -356,7 +356,7 @@ impl Server {
         let bootstrap_nodes = mem::replace(bootstrap_nodes, Bucket::new(Some(capacity)));
 
         let futures = bootstrap_nodes.nodes.iter().map(|node| {
-            self.send_nodes_req(node, pk, request_queue)
+            self.send_nodes_req(request_queue, node, pk)
         }).collect::<Vec<_>>();
 
         Box::new(future::join_all(futures).map(|_| ()))
@@ -371,7 +371,7 @@ impl Server {
             .filter(|node| !node.is_discarded() && node.is_ping_interval_passed())
             .map(|node| {
                 node.update_ping_req_time();
-                self.send_nodes_req(node, pk, request_queue)
+                self.send_nodes_req(request_queue, node, pk)
             })
             .collect::<Vec<_>>();
 
@@ -402,7 +402,7 @@ impl Server {
 
         let random_node = &good_nodes[random_node_idx];
 
-        self.send_nodes_req(&random_node, pk, request_queue)
+        self.send_nodes_req(request_queue, &random_node, pk)
     }
 
     /// Send `PingRequest` packet to the node.
@@ -419,7 +419,7 @@ impl Server {
     }
 
     /// Send `NodesRequest` packet to the node.
-    pub fn send_nodes_req(&self, target_peer: &DhtNode, search_pk: PublicKey, request_queue: &mut RequestQueue) -> IoFuture<()> {
+    pub fn send_nodes_req(&self, request_queue: &mut RequestQueue, target_peer: &DhtNode, search_pk: PublicKey) -> IoFuture<()> {
         // Check if packet is going to be sent to ourselves.
         if self.pk == target_peer.pk {
             return Box::new(
@@ -429,26 +429,14 @@ impl Server {
             )
         }
 
-        let mut futures = Vec::new();
+        let addrs = target_peer.get_all_addrs(self.is_ipv6_enabled);
 
-        if self.is_ipv6_enabled {
-            if let Some(v6) = target_peer.assoc6.saddr {
+        let futures = addrs.into_iter()
+            .map(|addr| {
                 let ping_id = request_queue.new_ping_id(target_peer.pk);
-                futures.push(self.send_nodes_req_inner(SocketAddr::V6(v6), target_peer.pk, search_pk, ping_id));
-            }
-
-            if let Some(v4) = target_peer.assoc4.saddr {
-                let ping_id = request_queue.new_ping_id(target_peer.pk);
-                futures.push(self.send_nodes_req_inner(SocketAddr::V4(v4), target_peer.pk, search_pk, ping_id));
-            }
-        } else if let Some(v4) = target_peer.assoc4.saddr {
-            let ping_id = request_queue.new_ping_id(target_peer.pk);
-            futures.push(self.send_nodes_req_inner(SocketAddr::V4(v4), target_peer.pk, search_pk, ping_id));
-        }
-
-        if futures.is_empty() {
-            warn!("Can't find target address in send_nodes_req");
-        }
+                self.send_nodes_req_inner(addr, target_peer.pk, search_pk, ping_id)
+            })
+            .collect::<Vec<_>>();
 
         Box::new(join_all(futures).map(|_| ()))
     }
@@ -603,25 +591,13 @@ impl Server {
     /// Send UDP packet node. If the node has both IPv4 and IPv6 addresses,
     /// then it sends packet to both addresses.
     fn send_to_node(&self, node: &DhtNode, packet: DhtPacket) -> IoFuture<()> {
-        let mut futures = Vec::new();
+        let addrs = node.get_all_addrs(self.is_ipv6_enabled);
 
-        if self.is_ipv6_enabled {// DHT node is running in ipv6 mode
-            if let Some(sock_v6) = node.assoc6.saddr {
-                futures.push(send_to(&self.tx, (packet.clone(), SocketAddr::V6(sock_v6))));
-            };
-
-            if let Some(sock_v4) = node.assoc4.saddr {
-                let ip_v6 = sock_v4.ip().to_ipv6_mapped();
-                let addr = SocketAddr::new(IpAddr::V6(ip_v6), sock_v4.port());
-                futures.push(send_to(&self.tx, (packet, addr)));
-            };
-        } else if let Some(sock_v4) = node.assoc4.saddr { // DHT node is running in ipv4 mode
-            futures.push(send_to(&self.tx, (packet, SocketAddr::V4(sock_v4))));
-        }
-
-        if futures.is_empty() {
-            warn!("Trying to send a packet to node but could not find appropriate address");
-        }
+        let futures = addrs.into_iter()
+            .map(|addr| {
+                send_to(&self.tx, (packet.clone(), addr))
+            })
+            .collect::<Vec<_>>();
 
         Box::new(join_all(futures).map(|_| ()))
     }
@@ -944,7 +920,7 @@ impl Server {
             pk: packet.pk,
         }.into();
 
-        self.send_nodes_req(&target_node, self.pk, &mut request_queue)
+        self.send_nodes_req(&mut request_queue, &target_node, self.pk)
     }
 
     /// Handle received `OnionRequest0` packet and send `OnionRequest1` packet

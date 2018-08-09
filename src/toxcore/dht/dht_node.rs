@@ -138,9 +138,9 @@ impl DhtNode {
         self.assoc4.is_ping_interval_passed() || self.assoc6.is_ping_interval_passed()
     }
 
-    /// return SocketAddr for DhtNode
+    /// Return SocketAddr for DhtNode
     pub fn get_socket_addr(&self, is_ipv6_enabled: bool) -> Option<SocketAddr> {
-        if is_ipv6_enabled {
+        let addr = if is_ipv6_enabled {
             match self.assoc6.saddr {
                 Some(v6) => {
                     match self.assoc4.saddr {
@@ -154,22 +154,37 @@ impl DhtNode {
                         None => Some(SocketAddr::V6(v6)),
                     }
                 },
-                None => self.assoc4.saddr.map(Into::into)
-                    .or_else(|| {
-                        warn!("get_socket_addr: failed to get address of DhtNode");
-                        None
-                    }),
+                None => self.assoc4.saddr.map(Into::into),
             }
         } else {
             self.assoc4.saddr.map(Into::into)
-                .or_else(|| {
-                    warn!("get_socket_addr: failed to get address of DhtNode");
-                    None
-                })
+        };
+
+        if addr.is_none() {
+            warn!("get_socket_addr: failed to get address of DhtNode");
         }
+
+        addr
     }
 
-    /// convert Dhtnode to PackedNode object based on is_ipv6_enabled flag
+    /// Returns all available socket addresses of DhtNode
+    pub fn get_all_addrs(&self, is_ipv6_enabled: bool) -> Vec<SocketAddr> {
+        let addrs = if is_ipv6_enabled {// DHT node is running in ipv6 mode
+            self.assoc4.saddr.into_iter().map(SocketAddr::V4)
+                .chain(self.assoc6.saddr.into_iter().map(SocketAddr::V6))
+                .collect()
+        } else { // DHT node is running in ipv4 mode
+            self.assoc4.saddr.into_iter().map(SocketAddr::V4).collect::<Vec<_>>()
+        };
+
+        if addrs.is_empty() {
+            warn!("Can't find target address in DhtNode");
+        }
+
+        addrs
+    }
+
+    /// Convert Dhtnode to PackedNode object based on is_ipv6_enabled flag
     pub fn to_packed_node(&self, is_ipv6_enabled: bool) -> Option<PackedNode> {
         self.get_socket_addr(is_ipv6_enabled)
             .map(|saddr|
