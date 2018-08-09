@@ -133,7 +133,7 @@ pub struct Server {
     lan_discovery_enabled: bool,
     /// If IPv6 mode is enabled `Server` will send packets to IPv6 addresses. If
     /// it's disabled such packets will be dropped.
-    pub is_ipv6_enabled: bool,
+    is_ipv6_enabled: bool,
 }
 
 impl Server {
@@ -167,6 +167,11 @@ impl Server {
     pub fn enable_ipv6_mode(&mut self, enable: bool) {
         self.is_ipv6_enabled = enable;
         self.close_nodes.write().is_ipv6_enabled = enable;
+    }
+
+    /// Get is_ipv6_enabled member variable
+    pub fn get_is_ipv6_enabled(&self) -> bool {
+        self.is_ipv6_enabled
     }
 
     /// Enable/disable `LanDiscovery` packets handling.
@@ -306,7 +311,12 @@ impl Server {
 
         let futures = nodes_to_send_ping.nodes.into_iter().map(|node| {
             let ping_id = request_queue.new_ping_id(node.pk);
-            self.send_ping_req(&node.clone(), ping_id)
+            if let Some(node) = node.to_packed_node(self.is_ipv6_enabled) {
+                self.send_ping_req(&node, ping_id)
+            } else {
+                warn!("to_packed_node fails in send_pings");
+                Box::new(future::ok(()))
+            }
         }).collect::<Vec<_>>();
 
         Box::new(future::join_all(futures).map(|_| ()))
@@ -330,7 +340,7 @@ impl Server {
         if friends.iter().any(|friend| friend.pk == node.pk && !friend.is_addr_known()) {
             let mut request_queue = self.request_queue.write();
             let ping_id = request_queue.new_ping_id(node.pk);
-            return Box::new(self.send_ping_req(&(*node).into(), ping_id))
+            return Box::new(self.send_ping_req(node, ping_id))
         }
 
         self.nodes_to_send_ping.write().try_add(&self.pk, node);
@@ -346,8 +356,7 @@ impl Server {
         let bootstrap_nodes = mem::replace(bootstrap_nodes, Bucket::new(Some(capacity)));
 
         let futures = bootstrap_nodes.nodes.iter().map(|node| {
-            let ping_id = request_queue.new_ping_id(node.pk);
-            self.send_nodes_req(node, pk, ping_id)
+            self.send_nodes_req(node, pk, request_queue)
         }).collect::<Vec<_>>();
 
         Box::new(future::join_all(futures).map(|_| ()))
@@ -362,8 +371,7 @@ impl Server {
             .filter(|node| !node.is_discarded() && node.is_ping_interval_passed())
             .map(|node| {
                 node.update_ping_req_time();
-                let ping_id = request_queue.new_ping_id(node.pk);
-                self.send_nodes_req(node, pk, ping_id)
+                self.send_nodes_req(node, pk, request_queue)
             })
             .collect::<Vec<_>>();
 
@@ -394,12 +402,11 @@ impl Server {
 
         let random_node = &good_nodes[random_node_idx];
 
-        let ping_id = request_queue.new_ping_id(random_node.pk);
-        self.send_nodes_req(&random_node, pk, ping_id)
+        self.send_nodes_req(&random_node, pk, request_queue)
     }
 
     /// Send `PingRequest` packet to the node.
-    pub fn send_ping_req(&self, node: &DhtNode, ping_id: u64) -> IoFuture<()> {
+    pub fn send_ping_req(&self, node: &PackedNode, ping_id: u64) -> IoFuture<()> {
         let payload = PingRequestPayload {
             id: ping_id,
         };
@@ -408,11 +415,11 @@ impl Server {
             &self.pk,
             payload
         ));
-        self.send_to_node(node, ping_req)
+        self.send_to_direct(node.saddr, ping_req)
     }
 
     /// Send `NodesRequest` packet to the node.
-    pub fn send_nodes_req(&self, target_peer: &DhtNode, search_pk: PublicKey, ping_id: u64) -> IoFuture<()> {
+    pub fn send_nodes_req(&self, target_peer: &DhtNode, search_pk: PublicKey, request_queue: &mut RequestQueue) -> IoFuture<()> {
         // Check if packet is going to be sent to ourselves.
         if self.pk == target_peer.pk {
             return Box::new(
@@ -422,17 +429,43 @@ impl Server {
             )
         }
 
+        let mut futures = Vec::new();
+
+        if self.is_ipv6_enabled {
+            if let Some(v6) = target_peer.assoc6.saddr {
+                let ping_id = request_queue.new_ping_id(target_peer.pk);
+                futures.push(self.send_nodes_req_inner(SocketAddr::V6(v6), target_peer.pk, search_pk, ping_id));
+            }
+
+            if let Some(v4) = target_peer.assoc4.saddr {
+                let ping_id = request_queue.new_ping_id(target_peer.pk);
+                futures.push(self.send_nodes_req_inner(SocketAddr::V4(v4), target_peer.pk, search_pk, ping_id));
+            }
+        } else if let Some(v4) = target_peer.assoc4.saddr {
+            let ping_id = request_queue.new_ping_id(target_peer.pk);
+            futures.push(self.send_nodes_req_inner(SocketAddr::V4(v4), target_peer.pk, search_pk, ping_id));
+        }
+
+        if futures.is_empty() {
+            warn!("Can't find target address in send_nodes_req");
+        }
+
+        Box::new(join_all(futures).map(|_| ()))
+    }
+
+    // Actual send `NodesRequest` packet to the node.
+    fn send_nodes_req_inner(&self, addr: SocketAddr, target_peer_pk: PublicKey, search_pk: PublicKey, ping_id: u64) -> IoFuture<()> {
         let payload = NodesRequestPayload {
             pk: search_pk,
             id: ping_id,
         };
         let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(
-            &precompute(&target_peer.pk, &self.sk),
+            &precompute(&target_peer_pk, &self.sk),
             &self.pk,
             payload
         ));
 
-        self.send_to_node(target_peer, nodes_req)
+        self.send_to_direct(addr, nodes_req)
     }
 
     // send NatPingRequests to all of my friends and do hole punching.
@@ -583,7 +616,7 @@ impl Server {
                 futures.push(send_to(&self.tx, (packet, addr)));
             };
         } else if let Some(sock_v4) = node.assoc4.saddr { // DHT node is running in ipv4 mode
-                futures.push(send_to(&self.tx, (packet, SocketAddr::V4(sock_v4))));
+            futures.push(send_to(&self.tx, (packet, SocketAddr::V4(sock_v4))));
         }
 
         if futures.is_empty() {
@@ -911,7 +944,7 @@ impl Server {
             pk: packet.pk,
         }.into();
 
-        self.send_nodes_req(&target_node, self.pk, request_queue.new_ping_id(packet.pk))
+        self.send_nodes_req(&target_node, self.pk, &mut request_queue)
     }
 
     /// Handle received `OnionRequest0` packet and send `OnionRequest1` packet

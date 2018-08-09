@@ -37,7 +37,7 @@ impl DaemonState {
 
         let nodes = close_nodes.iter()
             .cloned()
-            .flat_map(|node| node.to_packed_node(server.is_ipv6_enabled))
+            .flat_map(|node| node.to_packed_node(server.get_is_ipv6_enabled()))
             .collect::<Vec<PackedNode>>();
 
         let mut buf = [0u8; DHT_STATE_BUFFER_SIZE];
@@ -60,7 +60,7 @@ impl DaemonState {
         let mut request_queue = server.request_queue.write();
         let nodes_sender = nodes.iter()
             .map(|node|
-                server.send_nodes_req(&(*node).into(), server.pk, request_queue.new_ping_id(node.pk))
+                server.send_nodes_req(&(*node).into(), server.pk, &mut request_queue)
             );
 
         let nodes_stream = stream::futures_unordered(nodes_sender).then(|_| Ok(()));

@@ -154,24 +154,18 @@ impl DhtNode {
                         None => Some(SocketAddr::V6(v6)),
                     }
                 },
-                None => {
-                    match self.assoc4.saddr {
-                        Some(v4) => Some(SocketAddr::V4(v4)),
-                        None => {
-                            warn!("get_socket_addr: failed to get address of DhtNode");
-                            None
-                        },
-                    }
-                },
+                None => self.assoc4.saddr.map(Into::into)
+                    .or_else(|| {
+                        warn!("get_socket_addr: failed to get address of DhtNode");
+                        None
+                    }),
             }
         } else {
-            match self.assoc4.saddr {
-                Some(v4) => Some(SocketAddr::V4(v4)),
-                None => {
+            self.assoc4.saddr.map(Into::into)
+                .or_else(|| {
                     warn!("get_socket_addr: failed to get address of DhtNode");
                     None
-                },
-            }
+                })
         }
     }
 
