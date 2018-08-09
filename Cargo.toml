@@ -28,7 +28,6 @@ coveralls = { repository = "tox-rs/tox" }
 maintenance = { status = "actively-developed" }
 
 [dependencies]
-clippy = { version = "<= 0.1.0", optional = true }
 bytes = "0.4"
 byteorder = "1"
 futures = "0.1"
