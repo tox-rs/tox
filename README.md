@@ -55,18 +55,17 @@ cargo doc
 They will be located under `target/doc/`
 
 ### With clippy
-To build with support for [clippy](https://github.com/rust-lang-nursery/rust-clippy)
-(linting), you need nightly Rust. Usually the latest available version is
-required.
+To check for [clippy](https://github.com/rust-lang-nursery/rust-clippy) warnings
+(linting), you need nightly Rust with `clippy-preview` component.
 
-To build:
+To check:
 ```bash
-cargo build --features "clippy"
+cargo clippy --all
 ```
 
-To build & test:
+To check with tests:
 ```bash
-cargo test --features "clippy"
+cargo clippy --all --tests
 ```
 
 
