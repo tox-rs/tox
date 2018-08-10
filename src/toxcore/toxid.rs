@@ -18,7 +18,7 @@ use toxcore::crypto_core::*;
 
     https://zetok.github.io/tox-spec/#tox-id , 4th paragraph.
 */
-pub fn xor_checksum(lhs: &[u8; 2], rhs: &[u8; 2]) -> [u8; 2] {
+pub fn xor_checksum(lhs: [u8; 2], rhs: [u8; 2]) -> [u8; 2] {
     [lhs[0] ^ rhs[0], lhs[1] ^ rhs[1]]
 }
 
@@ -156,15 +156,15 @@ impl ToxId {
     let (pk, _) = gen_keypair();
     let nospam = NoSpam::new();
 
-    let _checksum = ToxId::checksum(&pk, &nospam);
+    let _checksum = ToxId::checksum(&pk, nospam);
 
     assert_eq!(ToxId::checksum(&PublicKey([0; PUBLICKEYBYTES]),
-               &NoSpam([0; NOSPAMBYTES])), [0; 2]);
+               NoSpam([0; NOSPAMBYTES])), [0; 2]);
     assert_eq!(ToxId::checksum(&PublicKey([0xff; PUBLICKEYBYTES]),
-               &NoSpam([0xff; NOSPAMBYTES])), [0; 2]);
+               NoSpam([0xff; NOSPAMBYTES])), [0; 2]);
     ```
     */
-    pub fn checksum(&PublicKey(ref pk): &PublicKey, nospam: &NoSpam) -> [u8; 2] {
+    pub fn checksum(&PublicKey(ref pk): &PublicKey, nospam: NoSpam) -> [u8; 2] {
         let mut bytes = Vec::with_capacity(TOXIDBYTES - 2);
         bytes.extend_from_slice(pk);
         bytes.extend_from_slice(nospam.0.as_ref());
@@ -172,7 +172,7 @@ impl ToxId {
         let mut checksum = [0; 2];
 
         for pair in bytes.chunks(2) {
-            checksum = xor_checksum(&checksum, &[pair[0], pair[1]]);
+            checksum = xor_checksum(checksum, [pair[0], pair[1]]);
         }
         checksum
     }
@@ -191,7 +191,7 @@ impl ToxId {
     */
     pub fn new(pk: PublicKey) -> Self {
         let nospam = NoSpam::new();
-        let checksum = Self::checksum(&pk, &nospam);
+        let checksum = Self::checksum(&pk, nospam);
         ToxId { pk, nospam, checksum }
     }
 
@@ -230,7 +230,7 @@ impl ToxId {
         } else {
             self.nospam = NoSpam::new();
         }
-        self.checksum = Self::checksum(&self.pk, &self.nospam);
+        self.checksum = Self::checksum(&self.pk, self.nospam);
     }
 }
 
@@ -334,7 +334,7 @@ mod tests {
     // NoSpam::
 
     #[cfg(test)]
-    fn no_spam_no_empty(ns: &NoSpam) {
+    fn no_spam_no_empty(ns: NoSpam) {
         // shouldn't be empty, unless your PRNG is crappy
         assert!(ns.0 != [0; NOSPAMBYTES])
     }
@@ -344,7 +344,7 @@ mod tests {
     #[test]
     fn no_spam_new_test() {
         let ns = NoSpam::new();
-        no_spam_no_empty(&ns);
+        no_spam_no_empty(ns);
     }
 
     // NoSpam::default()
@@ -352,7 +352,7 @@ mod tests {
     #[test]
     fn no_spam_default_test() {
         let ns = NoSpam::default();
-        no_spam_no_empty(&ns);
+        no_spam_no_empty(ns);
     }
 
     // NoSpam::fmt()
