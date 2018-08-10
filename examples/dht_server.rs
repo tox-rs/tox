@@ -101,7 +101,7 @@ fn main() {
             Err(ref e) => {
                 error!("packet receive error = {:?}", e);
                 // ignore packet decode errors
-                e.cause().downcast_ref::<DecodeError>().is_none()
+                e.as_fail().downcast_ref::<DecodeError>().is_none()
             }
         }
     ).then(|event: Result<_, ()>|

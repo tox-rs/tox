@@ -1323,15 +1323,15 @@ mod tests {
 
         let (packet, _rx_1) = rx_1.into_future().wait().unwrap();
         assert_eq!(packet.unwrap(), Packet::PingRequest(
-            PingRequest { ping_id: server.state.read().connected_clients.get(&pk_1).unwrap().ping_id() }
+            PingRequest { ping_id: server.state.read().connected_clients[&pk_1].ping_id() }
         ));
         let (packet, _rx_2) = rx_2.into_future().wait().unwrap();
         assert_eq!(packet.unwrap(), Packet::PingRequest(
-            PingRequest { ping_id: server.state.read().connected_clients.get(&pk_2).unwrap().ping_id() }
+            PingRequest { ping_id: server.state.read().connected_clients[&pk_2].ping_id() }
         ));
         let (packet, _rx_3) = rx_3.into_future().wait().unwrap();
         assert_eq!(packet.unwrap(), Packet::PingRequest(
-            PingRequest { ping_id: server.state.read().connected_clients.get(&pk_3).unwrap().ping_id() }
+            PingRequest { ping_id: server.state.read().connected_clients[&pk_3].ping_id() }
         ));
     }
     #[test]

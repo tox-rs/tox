@@ -128,7 +128,7 @@ mod tests {
 
         let ping_id = queue.new_ping_id(pk);
 
-        let time = *queue.ping_map.get(&(pk, ping_id)).unwrap();
+        let time = queue.ping_map[&(pk, ping_id)];
         let mut enter = tokio_executor::enter().unwrap();
         let clock = Clock::new_with_now(ConstNow(
             time + Duration::from_secs(43)
@@ -146,7 +146,7 @@ mod tests {
 
         let ping_id_1 = queue.new_ping_id(pk);
 
-        let time = *queue.ping_map.get(&(pk, ping_id_1)).unwrap();
+        let time = queue.ping_map[&(pk, ping_id_1)];
         let mut enter = tokio_executor::enter().unwrap();
         let clock_1 = Clock::new_with_now(ConstNow(
             time + Duration::from_secs(21)
