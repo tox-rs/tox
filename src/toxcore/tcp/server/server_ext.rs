@@ -49,7 +49,7 @@ impl ServerExt for Server {
             let ServerProcessor { from_client_tx, to_client_rx, processor } =
                 ServerProcessor::create(
                     server_c,
-                    client_pk.clone(),
+                    client_pk,
                     addr.ip(),
                     addr.port()
                 );
@@ -61,9 +61,9 @@ impl ServerExt for Server {
                     trace!("Send TCP packet {:?} to {:?}", client_pk, packet);
                     to_client.send(packet)
                         .deadline(Instant::now() + Duration::from_secs(30))
-                        .map_err(|_|
+                        .map_err(|e|
                             Error::new(ErrorKind::Other,
-                                format!("Writer timed out"))
+                                format!("Writer timed out {}", e))
                         )
                 })
                 // drop to_client when to_client_rx stream is exhausted
