@@ -32,6 +32,7 @@ use toxcore::dht::server::hole_punching::*;
 use toxcore::tcp::packet::OnionRequest;
 use toxcore::net_crypto::*;
 use toxcore::dht::ip_port::IsGlobal;
+use toxcore::utils::*;
 
 /// Shorthand for the transmit half of the message channel.
 type Tx = mpsc::UnboundedSender<(DhtPacket, SocketAddr)>;
@@ -237,7 +238,7 @@ impl Server {
             ping_bootstrap_nodes.join3(ping_close_nodes, send_nodes_req_random)
         }).collect::<Vec<_>>();
 
-        let send_nat_ping_req = self.send_nat_ping_req(&mut friends);
+        let send_nat_ping_req = self.send_nat_ping_req(&mut request_queue, &mut friends);
 
         let future = ping_bootstrap_nodes.join5(
             ping_close_nodes,
@@ -492,77 +493,90 @@ impl Server {
 
         let addrs = target_peer.get_all_addrs(self.is_ipv6_enabled);
 
-        let futures = addrs.into_iter()
-            .map(|addr| {
-                let ping_id = request_queue.new_ping_id(target_peer.pk);
-                self.send_nodes_req_inner(addr, target_peer.pk, search_pk, ping_id)
+        let futures = addrs.into_iter().map(|addr| {
+            let ping_id = request_queue.new_ping_id(target_peer.pk);
+            let payload = NodesRequestPayload {
+                pk: search_pk,
+                id: ping_id,
+            };
+            let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(
+                &precompute(&target_peer.pk, &self.sk),
+                &self.pk,
+                payload
+            ));
+
+            self.send_to_direct(addr, nodes_req)
+        }).collect::<Vec<_>>();
+
+        Box::new(join_all(futures).map(|_| ()))
+    }
+
+    /// Send `NatPingRequest` packet to all friends and try to punch holes.
+    fn send_nat_ping_req(&self, request_queue: &mut RequestQueue, friends: &mut Vec<DhtFriend>) -> IoFuture<()> {
+        let futures = friends.iter_mut()
+            .filter(|friend| !friend.is_addr_known())
+            .map(|friend| {
+                let addrs = friend.get_returned_addrs();
+                (friend, addrs)
+            })
+            // Send NatPingRequest and try to punch holes only if we have enough
+            // close nodes connected to a friend
+            .filter(|(_, addrs)| addrs.len() >= FRIEND_CLOSE_NODES_COUNT as usize / 2)
+            .map(|(friend, addrs)| {
+                let punch_future = self.punch_holes(request_queue, friend, addrs);
+
+                if friend.hole_punch.last_send_ping_time.map_or(true, |time| clock_elapsed(time) >= Duration::from_secs(PUNCH_INTERVAL)) {
+                    friend.hole_punch.last_send_ping_time = Some(clock_now());
+                    let payload = DhtRequestPayload::NatPingRequest(NatPingRequest {
+                        id: friend.hole_punch.ping_id,
+                    });
+                    let nat_ping_req_packet = DhtRequest::new(
+                        &precompute(&friend.pk, &self.sk),
+                        &friend.pk,
+                        &self.pk,
+                        payload
+                    );
+                    let nat_ping_future = self.send_nat_ping_req_inner(friend, nat_ping_req_packet);
+
+                    Box::new(punch_future.join(nat_ping_future).map(|_| ()))
+                } else {
+                    punch_future
+                }
             })
             .collect::<Vec<_>>();
 
         Box::new(join_all(futures).map(|_| ()))
     }
 
-    // Actual send `NodesRequest` packet to the node.
-    fn send_nodes_req_inner(&self, addr: SocketAddr, target_peer_pk: PublicKey, search_pk: PublicKey, ping_id: u64) -> IoFuture<()> {
-        let payload = NodesRequestPayload {
-            pk: search_pk,
-            id: ping_id,
-        };
-        let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(
-            &precompute(&target_peer_pk, &self.sk),
-            &self.pk,
-            payload
-        ));
+    /// Try to punch holes to specified friend.
+    fn punch_holes(&self, request_queue: &mut RequestQueue, friend: &mut DhtFriend, returned_addrs: Vec<SocketAddr>) -> IoFuture<()> {
+        let punch_addrs = friend.hole_punch.next_punch_addrs(returned_addrs);
 
-        self.send_to_direct(addr, nodes_req)
+        let packets = punch_addrs.into_iter().map(|addr| {
+            let payload = PingRequestPayload {
+                id: request_queue.new_ping_id(friend.pk),
+            };
+            let packet = DhtPacket::PingRequest(PingRequest::new(
+                &precompute(&friend.pk, &self.sk),
+                &self.pk,
+                payload
+            ));
+
+            (packet, addr)
+        }).collect::<Vec<_>>();
+
+        send_all_to(&self.tx, stream::iter_ok(packets))
     }
 
-    // send NatPingRequests to all of my friends and do hole punching.
-    fn send_nat_ping_req(&self, friends: &mut Vec<DhtFriend>) -> IoFuture<()> {
-        if friends.is_empty() {
-            return Box::new(future::ok(()))
-        }
+    /// Send `NatPingRequest` packet to all close nodes of friend in the hope
+    /// that they will redirect it to this friend.
+    fn send_nat_ping_req_inner(&self, friend: &DhtFriend, nat_ping_req_packet: DhtRequest) -> IoFuture<()> {
+        let packet = DhtPacket::DhtRequest(nat_ping_req_packet);
+        let futures = friend.close_nodes.nodes.iter().map(|node| {
+            self.send_to_node(node, packet.clone())
+        }).collect::<Vec<_>>();
 
-        let nats_sender = friends.iter_mut()
-            .map(|friend| {
-                let addrs_of_clients = friend.get_addrs_of_clients();
-                // try hole punching
-                friend.hole_punch.try_nat_punch(&self, friend.pk, addrs_of_clients);
-
-                let payload = DhtRequestPayload::NatPingRequest(NatPingRequest {
-                    id: friend.hole_punch.ping_id,
-                });
-                let nat_ping_req_packet = DhtPacket::DhtRequest(DhtRequest::new(
-                    &precompute(&friend.pk, &self.sk),
-                    &friend.pk,
-                    &self.pk,
-                    payload
-                ));
-
-                if friend.hole_punch.last_send_ping_time.map_or(true, |time| clock_elapsed(time) >= Duration::from_secs(NAT_PING_PUNCHING_INTERVAL)) {
-                    friend.hole_punch.last_send_ping_time = Some(clock_now());
-                    self.send_nat_ping_req_inner(friend, nat_ping_req_packet)
-                } else {
-                    Box::new(future::ok(()))
-                }
-
-            });
-
-        let nats_stream = stream::futures_unordered(nats_sender).then(|_| Ok(()));
-
-        Box::new(nats_stream.for_each(|()| Ok(())))
-    }
-
-    // actual sending function of NatPingRequest.
-    fn send_nat_ping_req_inner(&self, friend: &DhtFriend, nat_ping_req_packet: DhtPacket) -> IoFuture<()> {
-        let nats_sender = friend.close_nodes.nodes.iter()
-            .map(|node| {
-                self.send_to_node(node, nat_ping_req_packet.clone())
-            });
-
-        let nats_stream = stream::futures_unordered(nats_sender).then(|_| Ok(()));
-
-        Box::new(nats_stream.for_each(|()| Ok(())))
+        Box::new(join_all(futures).map(|_| ()))
     }
 
     /// Function to handle incoming packets and send responses if necessary.
@@ -891,8 +905,7 @@ impl Server {
                 },
                 DhtRequestPayload::NatPingResponse(nat_payload) => {
                     debug!("Received nat ping response");
-                    let timeout_dur = Duration::from_secs(NAT_PING_PUNCHING_INTERVAL);
-                    self.handle_nat_ping_resp(nat_payload, &packet.spk, timeout_dur)
+                    self.handle_nat_ping_resp(nat_payload, &packet.spk)
                 },
                 DhtRequestPayload::DhtPkAnnounce(_dht_pk_payload) => {
                     debug!("Received DHT PublicKey Announce");
@@ -911,10 +924,23 @@ impl Server {
         }
     }
 
-    /**
-    handle received NatPingRequest packet, respond with NatPingResponse
-    */
+    /// Handle received `NatPingRequest` packet and respond with
+    /// `NatPingResponse` packet.
     fn handle_nat_ping_req(&self, payload: NatPingRequest, spk: &PublicKey, addr: SocketAddr) -> IoFuture<()> {
+        let mut friends = self.friends.write();
+
+        let friend = friends.iter_mut()
+            .find(|friend| friend.pk == *spk);
+        let friend = match friend {
+            None => return Box::new( future::err(
+                Error::new(ErrorKind::Other,
+                           "Can't find friend"
+                ))),
+            Some(friend) => friend,
+        };
+
+        friend.hole_punch.last_recv_ping_time = clock_now();
+
         let resp_payload = DhtRequestPayload::NatPingResponse(NatPingResponse {
             id: payload.id,
         });
@@ -927,11 +953,18 @@ impl Server {
         self.send_to_direct(addr, nat_ping_resp)
     }
 
-    /**
-    handle received NatPingResponse packet, enable hole-punching
-    */
-    fn handle_nat_ping_resp(&self, payload: NatPingResponse, spk: &PublicKey, send_nat_ping_interval: Duration) -> IoFuture<()> {
+    /// Handle received `NatPingResponse` packet and enable hole punching if
+    /// it's correct.
+    fn handle_nat_ping_resp(&self, payload: NatPingResponse, spk: &PublicKey) -> IoFuture<()> {
+        if payload.id == 0 {
+            return Box::new( future::err(
+                Error::new(ErrorKind::Other,
+                    "NodesResponse.ping_id == 0"
+            )))
+        }
+
         let mut friends = self.friends.write();
+
         let friend = friends.iter_mut()
             .find(|friend| friend.pk == *spk);
         let friend = match friend {
@@ -942,16 +975,13 @@ impl Server {
             Some(friend) => friend,
         };
 
-        if payload.id == 0 {
-            return Box::new( future::err(
-                Error::new(ErrorKind::Other,
-                    "NodesResponse.ping_id == 0"
-            )))
-        }
-
-        if clock_elapsed(friend.hole_punch.last_recv_ping_time) < send_nat_ping_interval &&
-            friend.hole_punch.ping_id == payload.id {
-            // enable hole punching
+        if friend.hole_punch.ping_id == payload.id {
+            // Refresh ping id for the next NatPingRequest
+            friend.hole_punch.ping_id = gen_ping_id();
+            // We send NatPingRequest packet only if we are not directly
+            // connected to a friend but we have several nodes that connected
+            // to him. If we received NatPingResponse that means that this
+            // friend is likely behind NAT so we should try to punch holes.
             friend.hole_punch.is_punching_done = false;
             Box::new( future::ok(()) )
         } else {
@@ -1849,11 +1879,20 @@ mod tests {
     fn handle_nat_ping_req() {
         let (alice, precomp, bob_pk, bob_sk, rx, addr) = create_node();
 
+        let friend = DhtFriend::new(bob_pk);
+        alice.add_friend(friend);
+
         let nat_req = NatPingRequest { id: 42 };
         let nat_payload = DhtRequestPayload::NatPingRequest(nat_req);
         let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, nat_payload));
 
-        alice.handle_packet(dht_req, addr).wait().unwrap();
+        let mut enter = tokio_executor::enter().unwrap();
+        let time = Instant::now() + Duration::from_secs(1);
+        let clock = Clock::new_with_now(ConstNow(time));
+
+        with_default(&clock, &mut enter, |_| {
+            alice.handle_packet(dht_req, addr).wait().unwrap();
+        });
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -1865,6 +1904,10 @@ mod tests {
         let nat_ping_resp_payload = unpack!(dht_payload, DhtRequestPayload::NatPingResponse);
 
         assert_eq!(nat_ping_resp_payload.id, nat_req.id);
+
+        let friends = alice.friends.read();
+
+        assert_eq!(friends[0].hole_punch.last_recv_ping_time, time);
     }
 
     // handle_nat_ping_response
@@ -1872,12 +1915,7 @@ mod tests {
     fn handle_nat_ping_resp() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
-        // success case
-        let (friend_pk1, _friend_sk1) = gen_keypair();
-
-        let mut friend = DhtFriend::new(bob_pk);
-        let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &friend_pk1);
-        friend.close_nodes.try_add(&bob_pk, &pn);
+        let friend = DhtFriend::new(bob_pk);
         let ping_id = friend.hole_punch.ping_id;
         alice.add_friend(friend);
 
@@ -1886,6 +1924,10 @@ mod tests {
         let dht_req = DhtPacket::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, nat_payload));
 
         alice.handle_packet(dht_req, addr).wait().unwrap();
+
+        let friends = alice.friends.read();
+
+        assert!(!friends[0].hole_punch.is_punching_done);
     }
 
     #[test]
@@ -2603,12 +2645,20 @@ mod tests {
     fn send_nat_ping_req() {
         let (alice, _precomp, _bob_pk, _bob_sk, mut rx, _addr) = create_node();
 
-        let (friend_pk1, friend_sk1) = gen_keypair();
-        let friend_pk2 = gen_keypair().0;
+        let (friend_pk, friend_sk) = gen_keypair();
 
-        let mut friend = DhtFriend::new(friend_pk1);
-        let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &friend_pk2);
-        friend.close_nodes.try_add(&friend_pk1, &pn);
+        let nodes = [
+            PackedNode::new("127.1.1.1:12345".parse().unwrap(), &gen_keypair().0),
+            PackedNode::new("127.1.1.2:12345".parse().unwrap(), &gen_keypair().0),
+            PackedNode::new("127.1.1.3:12345".parse().unwrap(), &gen_keypair().0),
+            PackedNode::new("127.1.1.4:12345".parse().unwrap(), &gen_keypair().0),
+        ];
+        let mut friend = DhtFriend::new(friend_pk);
+        for node in &nodes {
+            friend.close_nodes.try_add(&friend_pk, &node);
+            let dht_node = friend.close_nodes.get_node_mut(&friend_pk, &node.pk).unwrap();
+            dht_node.update_returned_addr(node.saddr);
+        }
         alice.add_friend(friend);
 
         alice.dht_main_loop().wait().unwrap();
@@ -2618,7 +2668,7 @@ mod tests {
             let (packet, _addr_to_send) = received.unwrap();
 
             if let DhtPacket::DhtRequest(nat_ping_req) = packet {
-                let nat_ping_req_payload = nat_ping_req.get_payload(&friend_sk1).unwrap();
+                let nat_ping_req_payload = nat_ping_req.get_payload(&friend_sk).unwrap();
                 let nat_ping_req_payload = unpack!(nat_ping_req_payload, DhtRequestPayload::NatPingRequest);
 
                 assert_eq!(alice.friends.read()[0].hole_punch.ping_id, nat_ping_req_payload.id);

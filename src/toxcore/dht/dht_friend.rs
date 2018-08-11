@@ -9,10 +9,11 @@ use toxcore::time::*;
 use toxcore::dht::kbucket::*;
 use toxcore::crypto_core::*;
 use toxcore::dht::server::hole_punching::*;
-use toxcore::dht::dht_node::*;
 
 /// Number of bootstrap nodes each friend has.
 pub const FRIEND_BOOTSTRAP_NODES_COUNT: u8 = 4;
+/// Maximum close nodes friend can have.
+pub const FRIEND_CLOSE_NODES_COUNT: u8 = 8;
 
 /// Hold friend related info.
 #[derive(Clone, Debug)]
@@ -40,7 +41,7 @@ impl DhtFriend {
     pub fn new(pk: PublicKey) -> Self {
         DhtFriend {
             pk,
-            close_nodes: Bucket::new(None),
+            close_nodes: Bucket::new(Some(FRIEND_CLOSE_NODES_COUNT)),
             last_nodes_req_time: clock_now(),
             bootstrap_times: 0,
             bootstrap_nodes: Bucket::new(Some(FRIEND_BOOTSTRAP_NODES_COUNT)),
@@ -57,16 +58,12 @@ impl DhtFriend {
             .map_or(false, |node| node.pk == self.pk)
     }
 
-    /// get Socket Address list of a friend, a friend can have multi IP address bacause of NAT
-    pub fn get_addrs_of_clients(&self) -> Vec<SocketAddr> {
+    /// Get addresses of friend that returned by his close nodes. Close nodes
+    /// may return different addresses in case if this friend is behind NAT.
+    pub fn get_returned_addrs(&self) -> Vec<SocketAddr> {
         let mut addrs = Vec::new();
 
-        let good_nodes = self.close_nodes.nodes.iter()
-            .filter(|node| !node.is_bad())
-            .cloned()
-            .collect::<Vec<DhtNode>>();
-
-        for node in good_nodes {
+        for node in &self.close_nodes.nodes {
             if let Some(v6) = node.assoc6.ret_saddr {
                 if !node.assoc6.is_bad() {
                     addrs.push(SocketAddr::V6(v6));
@@ -78,11 +75,8 @@ impl DhtFriend {
                     addrs.push(SocketAddr::V4(v4));
                 }
             }
-
-            if self.pk == node.pk {
-                return Vec::new();
-            }
         }
+
         addrs
     }
 }
