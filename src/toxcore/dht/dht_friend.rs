@@ -85,8 +85,100 @@ impl DhtFriend {
 mod tests {
     use super::*;
 
+    use std::time::Duration;
+
+    use tokio_executor;
+    use tokio_timer::clock::*;
+
+    use toxcore::dht::dht_node::*;
+    use toxcore::dht::packed_node::*;
+    use toxcore::time::ConstNow;
+
     #[test]
-    fn friend_new_test() {
-        let _ = DhtFriend::new(gen_keypair().0);
+    fn addr_is_unknown() {
+        let pk = gen_keypair().0;
+        let mut friend = DhtFriend::new(pk);
+
+        assert!(friend.close_nodes.try_add(&pk, &PackedNode::new("192.168.1.1:12345".parse().unwrap(), &gen_keypair().0)));
+        assert!(friend.close_nodes.try_add(&pk, &PackedNode::new("192.168.1.2:12345".parse().unwrap(), &gen_keypair().0)));
+
+        assert!(!friend.is_addr_known())
+    }
+
+    #[test]
+    fn addr_is_known() {
+        let pk = gen_keypair().0;
+        let mut friend = DhtFriend::new(pk);
+
+        assert!(friend.close_nodes.try_add(&pk, &PackedNode::new("192.168.1.1:12345".parse().unwrap(), &gen_keypair().0)));
+        assert!(friend.close_nodes.try_add(&pk, &PackedNode::new("192.168.1.2:12345".parse().unwrap(), &gen_keypair().0)));
+
+        assert!(friend.close_nodes.try_add(&pk, &PackedNode::new("192.168.1.3:12345".parse().unwrap(), &pk)));
+
+        assert!(friend.is_addr_known())
+    }
+
+    #[test]
+    fn get_returned_addrs() {
+        let pk = gen_keypair().0;
+        let mut friend = DhtFriend::new(pk);
+
+        let nodes = [
+            PackedNode::new("192.168.1.1:12345".parse().unwrap(), &gen_keypair().0),
+            PackedNode::new("192.168.1.2:12345".parse().unwrap(), &gen_keypair().0),
+            PackedNode::new("192.168.1.3:12345".parse().unwrap(), &gen_keypair().0),
+        ];
+        let addrs: Vec<SocketAddr> = vec![
+            "192.168.2.1:12345".parse().unwrap(),
+            "192.168.2.2:12345".parse().unwrap(),
+            "192.168.2.3:12345".parse().unwrap(),
+        ];
+
+        for (&node, &addr) in nodes.iter().zip(addrs.iter()) {
+            friend.close_nodes.try_add(&pk, &node);
+            let dht_node = friend.close_nodes.get_node_mut(&pk, &node.pk).unwrap();
+            dht_node.update_returned_addr(addr);
+        }
+
+        let returned_addrs = friend.get_returned_addrs();
+
+        use std::collections::HashSet;
+
+        let addrs_set = addrs.into_iter().collect::<HashSet<_>>();
+        let returned_addrs_set = returned_addrs.into_iter().collect::<HashSet<_>>();
+
+        assert_eq!(returned_addrs_set, addrs_set);
+    }
+
+    #[test]
+    fn get_returned_addrs_timed_out() {
+        let pk = gen_keypair().0;
+        let mut friend = DhtFriend::new(pk);
+
+        let nodes = [
+            PackedNode::new("192.168.1.1:12345".parse().unwrap(), &gen_keypair().0),
+            PackedNode::new("192.168.1.2:12345".parse().unwrap(), &gen_keypair().0),
+            PackedNode::new("192.168.1.3:12345".parse().unwrap(), &gen_keypair().0),
+        ];
+        let addrs: Vec<SocketAddr> = vec![
+            "192.168.2.1:12345".parse().unwrap(),
+            "192.168.2.2:12345".parse().unwrap(),
+            "192.168.2.3:12345".parse().unwrap(),
+        ];
+
+        for (&node, &addr) in nodes.iter().zip(addrs.iter()) {
+            friend.close_nodes.try_add(&pk, &node);
+            let dht_node = friend.close_nodes.get_node_mut(&pk, &node.pk).unwrap();
+            dht_node.update_returned_addr(addr);
+        }
+
+        let mut enter = tokio_executor::enter().unwrap();
+        let clock = Clock::new_with_now(ConstNow(
+            Instant::now() + Duration::from_secs(BAD_NODE_TIMEOUT + 1)
+        ));
+
+        with_default(&clock, &mut enter, |_| {
+            assert!(friend.get_returned_addrs().is_empty());
+        });
     }
 }
