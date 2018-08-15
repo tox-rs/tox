@@ -58,7 +58,7 @@ impl ServerExt for Server {
             let writer = to_client_rx
                 .map_err(|()| Error::from(ErrorKind::UnexpectedEof))
                 .fold(to_client, move |to_client, packet| {
-                    trace!("Send TCP packet {:?} to {:?}", client_pk, packet);
+                    trace!("Sending TCP packet {:?} to {:?}", packet, client_pk);
                     to_client.send(packet)
                         .deadline(Instant::now() + Duration::from_secs(30))
                         .map_err(|e|
