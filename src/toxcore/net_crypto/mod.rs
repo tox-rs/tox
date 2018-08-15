@@ -1625,7 +1625,11 @@ mod tests {
         assert_eq!(received_peer_real_pk, peer_real_pk);
         assert_eq!(received_data, vec![PACKET_ID_LOSSY_RANGE_START, 1, 2, 3]);
 
-        assert_eq!(connection.rtt, Duration::from_millis(250));
+        // avoid problems with floating point arithmetic
+        assert!(
+            connection.rtt > Duration::from_millis(249)
+                && connection.rtt < Duration::from_millis(251)
+        );
     }
 
     #[test]
@@ -1943,7 +1947,11 @@ mod tests {
         assert!(connection.send_array.get(7).is_none());
         assert!(connection.send_array.get(1024).unwrap().requested);
 
-        assert_eq!(connection.rtt, Duration::from_millis(250));
+        // avoid problems with floating point arithmetic
+        assert!(
+            connection.rtt > Duration::from_millis(249)
+                && connection.rtt < Duration::from_millis(251)
+        );
     }
 
     #[test]
