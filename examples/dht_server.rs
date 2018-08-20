@@ -89,7 +89,7 @@ fn main() {
 
         let saddr: SocketAddr = saddr.parse().unwrap();
         let bootstrap_pn = PackedNode::new(saddr, &bootstrap_pk);
-        assert!(server.try_add_to_close_nodes(&bootstrap_pn));
+        server.add_initial_bootstrap(bootstrap_pn);
     }
 
     // The server task asynchronously iterates over and processes each

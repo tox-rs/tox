@@ -53,6 +53,8 @@ pub const PING_TIMEOUT: u64 = 5;
 pub const MAX_TO_PING: u8 = 32;
 /// How often in seconds to ping newly announced nodes.
 pub const TIME_TO_PING: u64 = 2;
+/// How often in seconds to ping initial bootstrap nodes
+pub const BOOTSTRAP_INTERVAL: u64 = 1;
 
 /**
 Own DHT node data.
@@ -134,6 +136,9 @@ pub struct Server {
     /// If IPv6 mode is enabled `Server` will send packets to IPv6 addresses. If
     /// it's disabled such packets will be dropped.
     is_ipv6_enabled: bool,
+    /// Initial bootstrapping object. It stores initial bootstrap nodes and retry bootstrapping
+    /// until at least one entry inserted to close_nodes
+    initial_bootstrap: Vec<PackedNode>,
 }
 
 impl Server {
@@ -160,6 +165,7 @@ impl Server {
             net_crypto: None,
             lan_discovery_enabled: true,
             is_ipv6_enabled: false,
+            initial_bootstrap: Vec::new(),
         }
     }
 
@@ -246,11 +252,60 @@ impl Server {
     /// Run DHT periodical tasks. Result future will never be completed
     /// successfully.
     pub fn run(self) -> IoFuture<()> {
-        let future = self.clone().run_pings_sending().join3(
+        let future = self.clone().run_pings_sending().join4(
             self.clone().run_onion_key_refresing(),
-            self.run_main_loop()
+            self.clone().run_main_loop(),
+            self.clone().run_recover_network_error()
         ).map(|_| ());
         Box::new(future)
+    }
+
+    /// Store bootstap nodes
+    pub fn add_initial_bootstrap(&mut self, pn: PackedNode) {
+        self.initial_bootstrap.push(pn);
+    }
+
+    /// Run initial bootstapping, It continues to sending NodesRequest to bootstrap nodes
+    /// until at least one entry inserted to Kbucket
+    /// and send NodesRequest to nodes in Kbucket if all nodes are discarded.
+    /// All nodes in Kbucket are discarded means that network is not available for a while.
+    fn run_recover_network_error(self) -> IoFuture<()> {
+        let interval = Duration::from_secs(BOOTSTRAP_INTERVAL);
+        let wakeups = Interval::new(Instant::now(), interval);
+        let self_c = self.clone();
+        let future = wakeups
+            .map_err(|e| Error::new(ErrorKind::Other, format!("Bootstrap timer error: {:?}", e)))
+            .take_while(move |_| future::ok(self.is_kbucket_empty() || self.is_all_discarded()))
+            .for_each(move |_instant| {
+                trace!("Bootstrap wake up");
+                self_c.send_bootstrap_and_ping()
+            });
+        Box::new(future)
+    }
+
+    fn is_kbucket_empty(&self) -> bool {
+        self.close_nodes.read().is_empty()
+    }
+    fn is_all_discarded(&self) -> bool {
+        self.close_nodes.read().is_all_discarded()
+    }
+
+    /// Send NodesRequest to initial bootstapping nodes and nodes in Kbucket.
+    fn send_bootstrap_and_ping(&self) -> IoFuture<()> {
+        // Send NodesRequest to bootstrap nodes
+        let mut request_queue = self.request_queue.write();
+        let bootstrap_futures = self.initial_bootstrap.iter().cloned()
+            .map(|node| self.send_nodes_req(&mut request_queue, &node.into(), self.pk))
+            .collect::<Vec<_>>();
+
+        let close_nodes = self.close_nodes.read();
+        let mut futures = close_nodes.iter()
+            .map(|node| self.send_nodes_req(&mut request_queue, &node, self.pk))
+            .collect::<Vec<_>>();
+
+        futures.extend(bootstrap_futures);
+
+        Box::new(join_all(futures).map(|_| ()))
     }
 
     /// Run DHT main loop periodically. Result future will never be completed
@@ -2940,14 +2995,6 @@ mod tests {
     }
 
     #[test]
-    fn server_enable_ipv6_mode_test() {
-        let (mut alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
-
-        alice.enable_ipv6_mode(true);
-        assert_eq!(alice.is_ipv6_enabled, true);
-    }
-
-    #[test]
     fn send_to() {
         let (mut alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         let (ping_pk, ping_sk) = gen_keypair();
@@ -2974,5 +3021,71 @@ mod tests {
                 assert!(request_queue.check_ping_id(ping_pk, nodes_req_payload.id));
             }
         }).collect().wait().unwrap();
+    }
+
+    #[test]
+    fn send_bootstrap_and_ping() {
+        let (mut alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
+        let (ping_pk, ping_sk) = gen_keypair();
+
+        let pn = PackedNode::new("[FF::01]:33445".parse().unwrap(), &bob_pk);
+        alice.add_initial_bootstrap(pn);
+
+        let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &ping_pk);
+        alice.add_initial_bootstrap(pn);
+
+        // test with ipv6 mode
+        alice.enable_ipv6_mode(true);
+        alice.clone().send_bootstrap_and_ping().wait().unwrap();
+
+        let mut request_queue = alice.request_queue.write();
+
+        rx.take(2).map(|(packet, addr)| {
+            let nodes_req = unpack!(packet, DhtPacket::NodesRequest);
+            if addr == "[FF::01]:33445".parse().unwrap() {
+                let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
+                assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
+            } else {
+                let nodes_req_payload = nodes_req.get_payload(&ping_sk).unwrap();
+                assert!(request_queue.check_ping_id(ping_pk, nodes_req_payload.id));
+            }
+        }).collect().wait().unwrap();
+    }
+
+    #[test]
+    fn send_bootstrap_and_ping_with_discarded() {
+        let (mut alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
+        let (ping_pk, ping_sk) = gen_keypair();
+
+        let pn = PackedNode::new("[FF::01]:33445".parse().unwrap(), &bob_pk);
+        alice.try_add_to_close_nodes(&pn);
+
+        let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &ping_pk);
+        alice.try_add_to_close_nodes(&pn);
+
+        // test with ipv6 mode
+        alice.enable_ipv6_mode(true);
+
+        let time = Instant::now() + Duration::from_secs(KILL_NODE_TIMEOUT + 1);
+
+        let mut enter = tokio_executor::enter().unwrap();
+        let clock = Clock::new_with_now(ConstNow(time));
+
+        with_default(&clock, &mut enter, |_| {
+            alice.clone().send_bootstrap_and_ping().wait().unwrap();
+
+            let mut request_queue = alice.request_queue.write();
+
+            rx.take(2).map(|(packet, addr)| {
+                let nodes_req = unpack!(packet, DhtPacket::NodesRequest);
+                if addr == "[FF::01]:33445".parse().unwrap() {
+                    let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
+                    assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
+                } else {
+                    let nodes_req_payload = nodes_req.get_payload(&ping_sk).unwrap();
+                    assert!(request_queue.check_ping_id(ping_pk, nodes_req_payload.id));
+                }
+            }).collect().wait().unwrap();
+        });
     }
 }
