@@ -1138,4 +1138,64 @@ mod tests {
 
         assert_eq!(pn, res_pn[0]);
     }
+
+    #[test]
+    fn bucket_get_node_mut() {
+        let (pk, _) = gen_keypair();
+        let mut bucket = Bucket::new(None);
+
+        let pn = PackedNode {
+            pk: gen_keypair().0,
+            saddr: "127.0.0.1:33445".parse().unwrap(),
+        };
+
+        assert!(bucket.try_add(&pk,&pn));
+
+        let get_pk = gen_keypair().0;
+
+        let pn = PackedNode {
+            pk: get_pk,
+            saddr: "127.0.0.1:33445".parse().unwrap(),
+        };
+
+        assert!(bucket.try_add(&pk,&pn));
+
+        let res_pn = bucket.get_node_mut(&pk, &get_pk);
+
+        res_pn.unwrap();
+    }
+
+    #[test]
+    fn bucket_default() {
+        let bucket = Bucket::default();
+
+        assert_eq!(bucket.capacity(), BUCKET_DEFAULT_SIZE as usize);
+    }
+
+    #[test]
+    fn kbucket_is_all_discarded() {
+        let (pk, _) = gen_keypair();
+        let mut kbucket = Kbucket::new(&pk);
+
+        let pn = PackedNode {
+            pk: gen_keypair().0,
+            saddr: "127.0.0.1:33445".parse().unwrap(),
+        };
+        assert!(kbucket.try_add(&pn));
+
+        let pn = PackedNode {
+            pk: gen_keypair().0,
+            saddr: "127.0.0.1:12345".parse().unwrap(),
+        };
+        assert!(kbucket.try_add(&pn));
+
+        let time = Instant::now() + Duration::from_secs(KILL_NODE_TIMEOUT + 1);
+
+        let mut enter = tokio_executor::enter().unwrap();
+        let clock = Clock::new_with_now(ConstNow(time));
+
+        with_default(&clock, &mut enter, |_| {
+            assert!(kbucket.is_all_discarded());
+        });
+    }
 }

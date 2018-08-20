@@ -294,7 +294,7 @@ impl Server {
     fn send_bootstrap_and_ping(&self) -> IoFuture<()> {
         // Send NodesRequest to bootstrap nodes
         let mut request_queue = self.request_queue.write();
-        let mut bootstrap_futures = self.initial_bootstrap.iter().cloned()
+        let bootstrap_futures = self.initial_bootstrap.iter().cloned()
             .map(|node| self.send_nodes_req(&mut request_queue, &node.into(), self.pk))
             .collect::<Vec<_>>();
 
@@ -303,7 +303,7 @@ impl Server {
             .map(|node| self.send_nodes_req(&mut request_queue, &node, self.pk))
             .collect::<Vec<_>>();
 
-        futures.append(&mut bootstrap_futures);
+        futures.extend(bootstrap_futures);
 
         Box::new(join_all(futures).map(|_| ()))
     }
