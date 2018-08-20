@@ -271,21 +271,27 @@ impl Server {
     /// All nodes in Kbucket are discarded means that network is not available for a while.
     fn run_recover_network_error(self) -> IoFuture<()> {
         let interval = Duration::from_secs(BOOTSTRAP_INTERVAL);
+
         let wakeups = Interval::new(Instant::now(), interval);
-        let self_c = self.clone();
+
         let future = wakeups
             .map_err(|e| Error::new(ErrorKind::Other, format!("Bootstrap timer error: {:?}", e)))
-            .take_while(move |_| future::ok(self.is_kbucket_empty() || self.is_all_discarded()))
             .for_each(move |_instant| {
                 trace!("Bootstrap wake up");
-                self_c.send_bootstrap_and_ping()
+                if self.is_kbucket_empty() || self.is_all_discarded() {
+                    self.send_bootstrap_and_ping()
+                } else {
+                    Box::new(future::ok(()))
+                }
             });
+
         Box::new(future)
     }
 
     fn is_kbucket_empty(&self) -> bool {
         self.close_nodes.read().is_empty()
     }
+
     fn is_all_discarded(&self) -> bool {
         self.close_nodes.read().is_all_discarded()
     }
