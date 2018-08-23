@@ -59,9 +59,7 @@ impl DaemonState {
 
         let mut request_queue = server.request_queue.write();
         let nodes_sender = nodes.iter()
-            .map(|node|
-                server.send_nodes_req(&mut request_queue, &(*node).into(), server.pk)
-            );
+            .map(|node| server.send_nodes_req(node, &mut request_queue, server.pk));
 
         let nodes_stream = stream::futures_unordered(nodes_sender).then(|_| Ok(()));
         Box::new(nodes_stream.for_each(|()| Ok(())))
