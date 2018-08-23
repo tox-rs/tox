@@ -1191,7 +1191,8 @@ impl Server {
     }
 
     /// Add `PackedNode` to close nodes list.
-    pub fn try_add_to_close_nodes(&self, pn: &PackedNode) -> bool {
+    #[cfg(test)]
+    fn try_add_to_close_nodes(&self, pn: &PackedNode) -> bool {
         let mut close_nodes = self.close_nodes.write();
         close_nodes.try_add(pn)
     }
