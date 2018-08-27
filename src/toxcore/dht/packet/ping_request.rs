@@ -156,7 +156,7 @@ impl ToBytes for PingRequestPayload {
 #[cfg(test)]
 mod tests {
     use toxcore::dht::packet::ping_request::*;
-    use toxcore::dht::packet::DhtPacket;
+    use toxcore::dht::packet::Packet;
 
     encode_decode_test!(
         ping_request_payload_encode_decode,

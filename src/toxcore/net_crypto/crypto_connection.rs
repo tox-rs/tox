@@ -69,11 +69,11 @@ impl StatusPacket {
         }
     }
 
-    /// Get `DhtPacket` that should be sent every second
-    pub fn dht_packet(&self) -> DhtPacket {
+    /// Get `Packet` that should be sent every second
+    pub fn dht_packet(&self) -> Packet {
         match self.packet {
-            StatusPacketEnum::CookieRequest(ref packet) => DhtPacket::CookieRequest(packet.clone()),
-            StatusPacketEnum::CryptoHandshake(ref packet) => DhtPacket::CryptoHandshake(packet.clone()),
+            StatusPacketEnum::CookieRequest(ref packet) => Packet::CookieRequest(packet.clone()),
+            StatusPacketEnum::CryptoHandshake(ref packet) => Packet::CryptoHandshake(packet.clone()),
         }
     }
 
@@ -322,7 +322,7 @@ impl CryptoConnection {
 
     /// Get `CookieRequest` or `CryptoHandshake` if it should be sent depending
     /// on connection status and update sent counter
-    pub fn packet_to_send(&mut self) -> Option<DhtPacket> {
+    pub fn packet_to_send(&mut self) -> Option<Packet> {
         match self.status {
             ConnectionStatus::CookieRequesting { ref mut packet, .. }
             | ConnectionStatus::HandshakeSending { ref mut packet, .. }

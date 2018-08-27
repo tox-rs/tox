@@ -89,7 +89,7 @@ mod tests {
     #[test]
     fn daemon_state_serialize_deserialize_test() {
         let (pk, sk) = gen_keypair();
-        let (tx, rx) = mpsc::unbounded::<(DhtPacket, SocketAddr)>();
+        let (tx, rx) = mpsc::unbounded::<(Packet, SocketAddr)>();
         let alice = Server::new(tx, pk, sk);
 
         let addr_org = "1.2.3.4:1234".parse().unwrap();
@@ -105,7 +105,7 @@ mod tests {
 
         assert_eq!(addr_to_send, addr_org);
 
-        let sending_packet = unpack!(packet, DhtPacket::NodesRequest);
+        let sending_packet = unpack!(packet, Packet::NodesRequest);
 
         assert_eq!(sending_packet.pk, pk);
 

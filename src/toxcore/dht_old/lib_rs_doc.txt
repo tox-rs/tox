@@ -44,8 +44,8 @@ fn main() {
     // now create Ping request
     let ping = &PingReq::new();
 
-    // with Ping packet create DhtPacket, and serialize it to bytes
-    let dhtpacket = DhtPacket::new(&precomp, &pk, &nonce, ping).to_bytes();
+    // with Ping packet create Packet, and serialize it to bytes
+    let dhtpacket = Packet::new(&precomp, &pk, &nonce, ping).to_bytes();
 
     // and since packet is ready, prepare the network part;
     // bind to given address and port in given range
@@ -53,7 +53,7 @@ fn main() {
     let socket = bind_udp("0.0.0.0".parse().unwrap(), 33445..33546, &handle)
         .expect("Failed to bind to socket!");
 
-    // send DhtPacket via socket to the node (Imppy's)
+    // send Packet via socket to the node (Imppy's)
     let sent_bytes = socket.send_dgram(&dhtpacket,
                  "51.15.37.145:33445".parse().unwrap());
     let (socket, _) = reactor.run(sent_bytes)
@@ -69,8 +69,8 @@ fn main() {
     let (_socket, buf, n_bytes, _sender) = reactor.run(future_data)
         .expect("Failed to receive data");
 
-    // try to deserialize received bytes as `DhtPacket`
-    let recv_packet = match DhtPacket::from_bytes(&buf[..n_bytes]) {
+    // try to deserialize received bytes as `Packet`
+    let recv_packet = match Packet::from_bytes(&buf[..n_bytes]) {
         Some(p) => p,
         // if parsing fails ↓
         None => panic!("Received packet could not have been parsed!\n{:?}",

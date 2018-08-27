@@ -5,7 +5,7 @@ macro_rules! dht_packet_encode_decode (
     ($test:ident, $packet:ident) => (
         encode_decode_test!(
             $test,
-            DhtPacket::$packet($packet {
+            Packet::$packet($packet {
                 pk: gen_keypair().0,
                 nonce: gen_nonce(),
                 payload: vec![42; 123],

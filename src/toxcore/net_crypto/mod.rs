@@ -34,7 +34,7 @@ use toxcore::dht::packet::*;
 use toxcore::io_tokio::*;
 use toxcore::time::*;
 
-/// Maximum size of `DhtPacket` when we try to send it to UDP address even if
+/// Maximum size of `Packet` when we try to send it to UDP address even if
 /// it's considered dead.
 const DHT_ATTEMPT_MAX_PACKET_LENGTH: usize = 95;
 
@@ -64,7 +64,7 @@ const PACKET_ID_LOSSY_RANGE_END: u8 = 254;
 
 /// Shorthand for the transmit half of the message channel for sending DHT
 /// packets.
-type UdpTx = mpsc::UnboundedSender<(DhtPacket, SocketAddr)>;
+type UdpTx = mpsc::UnboundedSender<(Packet, SocketAddr)>;
 
 /// Shorthand for the transmit half of the message channel for sending DHT
 /// `PublicKey` when it gets known. The first key is a long term key, the second
@@ -158,8 +158,8 @@ impl NetCrypto {
         }
     }
 
-    /// Send `DhtPacket` packet to UDP socket
-    fn send_to_udp(&self, addr: SocketAddr, packet: DhtPacket) -> IoFuture<()> {
+    /// Send `Packet` packet to UDP socket
+    fn send_to_udp(&self, addr: SocketAddr, packet: Packet) -> IoFuture<()> {
         send_to(&self.udp_tx, (packet, addr))
     }
 
@@ -193,7 +193,7 @@ impl NetCrypto {
     /// Handle `CookieRequest` packet received from UDP socket
     pub fn handle_udp_cookie_request(&self, packet: CookieRequest, addr: SocketAddr) -> IoFuture<()> {
         match self.handle_cookie_request(packet) {
-            Ok(response) => self.send_to_udp(addr, DhtPacket::CookieResponse(response)),
+            Ok(response) => self.send_to_udp(addr, Packet::CookieResponse(response)),
             Err(e) => Box::new(future::err(e))
         }
     }
@@ -562,7 +562,7 @@ impl NetCrypto {
     }
 
     /// Send packet to crypto connection choosing TCP or UDP protocol
-    fn send_packet(&self, packet: DhtPacket, connection: &mut CryptoConnection) -> IoFuture<()> {
+    fn send_packet(&self, packet: Packet, connection: &mut CryptoConnection) -> IoFuture<()> {
         if let Some(addr) = connection.udp_addr {
             if connection.is_udp_alive() {
                 return self.send_to_udp(addr, packet)
@@ -762,7 +762,7 @@ mod tests {
 
         let (received, _udp_rx) = udp_rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
-        let cookie_response = unpack!(packet, DhtPacket::CookieResponse);
+        let cookie_response = unpack!(packet, Packet::CookieResponse);
 
         assert_eq!(addr_to_send, addr);
 
@@ -841,7 +841,7 @@ mod tests {
         assert!(net_crypto.handle_cookie_response(&mut connection, cookie_response).wait().is_ok());
 
         let packet = unpack!(connection.status, ConnectionStatus::HandshakeSending, packet);
-        let packet = unpack!(packet.dht_packet(), DhtPacket::CryptoHandshake);
+        let packet = unpack!(packet.dht_packet(), Packet::CryptoHandshake);
         assert_eq!(packet.cookie, cookie);
 
         let payload = packet.get_payload(&connection.dht_precomputed_key).unwrap();
@@ -979,7 +979,7 @@ mod tests {
         let connection = connections.get(&peer_real_pk).unwrap().read().clone();
 
         let packet = unpack!(connection.status, ConnectionStatus::HandshakeSending, packet);
-        let packet = unpack!(packet.dht_packet(), DhtPacket::CryptoHandshake);
+        let packet = unpack!(packet.dht_packet(), Packet::CryptoHandshake);
         assert_eq!(packet.cookie, cookie);
 
         let payload = packet.get_payload(&dht_precomputed_key).unwrap();
@@ -1069,7 +1069,7 @@ mod tests {
         assert_eq!(peer_session_pk, session_pk);
 
         let packet = unpack!(connection.status, ConnectionStatus::NotConfirmed, packet);
-        let packet = unpack!(packet.dht_packet(), DhtPacket::CryptoHandshake);
+        let packet = unpack!(packet.dht_packet(), Packet::CryptoHandshake);
         assert_eq!(packet.cookie, cookie);
 
         let payload = packet.get_payload(&connection.dht_precomputed_key).unwrap();
@@ -1137,7 +1137,7 @@ mod tests {
 
         // cookie should not be updated
         let packet = unpack!(connection.status, ConnectionStatus::NotConfirmed, packet);
-        let packet = unpack!(packet.dht_packet(), DhtPacket::CryptoHandshake);
+        let packet = unpack!(packet.dht_packet(), Packet::CryptoHandshake);
         assert_eq!(packet.cookie, cookie);
 
         let payload = packet.get_payload(&connection.dht_precomputed_key).unwrap();
@@ -1426,7 +1426,7 @@ mod tests {
         assert_eq!(peer_session_pk, session_pk);
 
         let packet = unpack!(connection.status, ConnectionStatus::NotConfirmed, packet);
-        let packet = unpack!(packet.dht_packet(), DhtPacket::CryptoHandshake);
+        let packet = unpack!(packet.dht_packet(), Packet::CryptoHandshake);
         assert_eq!(packet.cookie, cookie);
 
         let payload = packet.get_payload(&dht_precomputed_key).unwrap();
@@ -2282,7 +2282,7 @@ mod tests {
         connection.udp_addr = Some(addr);
         connection.update_udp_received_time();
 
-        let packet = DhtPacket::CryptoData(CryptoData {
+        let packet = Packet::CryptoData(CryptoData {
             nonce_last_bytes: 123,
             payload: vec![42; DHT_ATTEMPT_MAX_PACKET_LENGTH]
         });
@@ -2321,7 +2321,7 @@ mod tests {
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.udp_addr = Some(addr);
 
-        let packet = DhtPacket::CryptoData(CryptoData {
+        let packet = Packet::CryptoData(CryptoData {
             nonce_last_bytes: 123,
             payload: vec![42; DHT_ATTEMPT_MAX_PACKET_LENGTH - 3] // 1 byte of packet kind and 2 bytes of nonce
         });
@@ -2362,7 +2362,7 @@ mod tests {
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.udp_addr = Some(addr);
 
-        let packet = DhtPacket::CryptoData(CryptoData {
+        let packet = Packet::CryptoData(CryptoData {
             nonce_last_bytes: 123,
             payload: vec![42; DHT_ATTEMPT_MAX_PACKET_LENGTH]
         });
@@ -2394,7 +2394,7 @@ mod tests {
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
         let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
-        let packet = DhtPacket::CryptoData(CryptoData {
+        let packet = Packet::CryptoData(CryptoData {
             nonce_last_bytes: 123,
             payload: vec![42; DHT_ATTEMPT_MAX_PACKET_LENGTH]
         });
