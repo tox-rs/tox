@@ -279,7 +279,8 @@ impl Server {
             .map_err(|e| Error::new(ErrorKind::Other, format!("Bootstrap timer error: {:?}", e)))
             .for_each(move |_instant| {
                 trace!("Bootstrap wake up");
-                if self.is_kbucket_empty() || self.is_all_discarded() {
+                let close_nodes = self.close_nodes.read();
+                if close_nodes.is_empty() || close_nodes.is_all_discarded() {
                     self.send_bootstrap_and_ping()
                 } else {
                     Box::new(future::ok(()))
@@ -289,28 +290,17 @@ impl Server {
         Box::new(future)
     }
 
-    fn is_kbucket_empty(&self) -> bool {
-        self.close_nodes.read().is_empty()
-    }
-
-    fn is_all_discarded(&self) -> bool {
-        self.close_nodes.read().is_all_discarded()
-    }
-
     /// Send NodesRequest to initial bootstapping nodes and nodes in Kbucket.
     fn send_bootstrap_and_ping(&self) -> IoFuture<()> {
-        // Send NodesRequest to bootstrap nodes
         let mut request_queue = self.request_queue.write();
-        let bootstrap_futures = self.initial_bootstrap.iter().cloned()
-            .map(|node| self.send_nodes_req(&mut request_queue, &node.into(), self.pk))
-            .collect::<Vec<_>>();
-
         let close_nodes = self.close_nodes.read();
-        let mut futures = close_nodes.iter()
-            .map(|node| self.send_nodes_req(&mut request_queue, &node, self.pk))
-            .collect::<Vec<_>>();
 
-        futures.extend(bootstrap_futures);
+        let futures = close_nodes
+            .iter()
+            .flat_map(|node| node.to_all_packed_nodes(self.is_ipv6_enabled))
+            .chain(self.initial_bootstrap.iter().cloned())
+            .map(|node| self.send_nodes_req(&node, &mut request_queue, self.pk))
+            .collect::<Vec<_>>();
 
         Box::new(join_all(futures).map(|_| ()))
     }
@@ -372,9 +362,8 @@ impl Server {
         let mut request_queue = self.request_queue.write();
 
         let futures = nodes_to_send_ping.nodes.into_iter().map(|node| {
-            let ping_id = request_queue.new_ping_id(node.pk);
             if let Some(node) = node.to_packed_node(self.is_ipv6_enabled) {
-                self.send_ping_req(&node, ping_id)
+                self.send_ping_req(&node, &mut request_queue)
             } else {
                 warn!("to_packed_node fails in send_pings");
                 Box::new(future::ok(()))
@@ -400,9 +389,7 @@ impl Server {
         // If node is friend and we don't know friend's IP address yet then send
         // PingRequest immediately and unconditionally
         if friends.iter().any(|friend| friend.pk == node.pk && !friend.is_addr_known()) {
-            let mut request_queue = self.request_queue.write();
-            let ping_id = request_queue.new_ping_id(node.pk);
-            return Box::new(self.send_ping_req(node, ping_id))
+            return Box::new(self.send_ping_req(node, &mut self.request_queue.write()))
         }
 
         self.nodes_to_send_ping.write().try_add(&self.pk, node);
@@ -417,9 +404,11 @@ impl Server {
         let capacity = bootstrap_nodes.capacity;
         let bootstrap_nodes = mem::replace(bootstrap_nodes, Bucket::new(Some(capacity)));
 
-        let futures = bootstrap_nodes.nodes.iter().map(|node| {
-            self.send_nodes_req(request_queue, node, pk)
-        }).collect::<Vec<_>>();
+        let futures = bootstrap_nodes.nodes
+            .iter()
+            .flat_map(|node| node.to_all_packed_nodes(self.is_ipv6_enabled))
+            .map(|node| self.send_nodes_req(&node, request_queue, pk))
+            .collect::<Vec<_>>();
 
         Box::new(future::join_all(futures).map(|_| ()))
     }
@@ -430,11 +419,16 @@ impl Server {
         where T: Iterator<Item = &'a mut DhtNode>
     {
         let futures = nodes
-            .filter(|node| !node.is_discarded() && node.is_ping_interval_passed())
-            .map(|node| {
-                node.update_ping_req_time();
-                self.send_nodes_req(request_queue, node, pk)
+            .flat_map(|node| {
+                let ping_addr_v4 = node.assoc4
+                    .ping_addr()
+                    .map(|addr| PackedNode::new(addr.into(), &node.pk));
+                let ping_addr_v6 = node.assoc6
+                    .ping_addr()
+                    .map(|addr| PackedNode::new(addr.into(), &node.pk));
+                ping_addr_v4.into_iter().chain(ping_addr_v6.into_iter())
             })
+            .map(|node| self.send_nodes_req(&node, request_queue, pk))
             .collect::<Vec<_>>();
 
         Box::new(future::join_all(futures).map(|_| ()))
@@ -447,9 +441,9 @@ impl Server {
         where T: Iterator<Item = &'a DhtNode>
     {
         let good_nodes = nodes
-            .filter(|&node| !node.is_discarded())
-            .cloned()
-            .collect::<Vec<DhtNode>>();
+            .filter(|&node| !node.is_bad())
+            .flat_map(|node| node.to_all_packed_nodes(self.is_ipv6_enabled))
+            .collect::<Vec<_>>();
 
         if good_nodes.is_empty() {
             // Random request should be sent only to good nodes
@@ -464,13 +458,13 @@ impl Server {
 
         let random_node = &good_nodes[random_node_idx];
 
-        self.send_nodes_req(request_queue, &random_node, pk)
+        self.send_nodes_req(&random_node, request_queue, pk)
     }
 
     /// Send `PingRequest` packet to the node.
-    pub fn send_ping_req(&self, node: &PackedNode, ping_id: u64) -> IoFuture<()> {
+    pub fn send_ping_req(&self, node: &PackedNode, request_queue: &mut RequestQueue) -> IoFuture<()> {
         let payload = PingRequestPayload {
-            id: ping_id,
+            id: request_queue.new_ping_id(node.pk),
         };
         let ping_req = DhtPacket::PingRequest(PingRequest::new(
             &precompute(&node.pk, &self.sk),
@@ -481,9 +475,9 @@ impl Server {
     }
 
     /// Send `NodesRequest` packet to the node.
-    pub fn send_nodes_req(&self, request_queue: &mut RequestQueue, target_peer: &DhtNode, search_pk: PublicKey) -> IoFuture<()> {
+    pub fn send_nodes_req(&self, node: &PackedNode, request_queue: &mut RequestQueue, search_pk: PublicKey) -> IoFuture<()> {
         // Check if packet is going to be sent to ourselves.
-        if self.pk == target_peer.pk {
+        if self.pk == node.pk {
             return Box::new(
                 future::err(
                     Error::new(ErrorKind::Other, "friend's pk is mine")
@@ -491,24 +485,16 @@ impl Server {
             )
         }
 
-        let addrs = target_peer.get_all_addrs(self.is_ipv6_enabled);
-
-        let futures = addrs.into_iter().map(|addr| {
-            let ping_id = request_queue.new_ping_id(target_peer.pk);
-            let payload = NodesRequestPayload {
-                pk: search_pk,
-                id: ping_id,
-            };
-            let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(
-                &precompute(&target_peer.pk, &self.sk),
-                &self.pk,
-                payload
-            ));
-
-            self.send_to_direct(addr, nodes_req)
-        }).collect::<Vec<_>>();
-
-        Box::new(join_all(futures).map(|_| ()))
+        let payload = NodesRequestPayload {
+            pk: search_pk,
+            id: request_queue.new_ping_id(node.pk),
+        };
+        let nodes_req = DhtPacket::NodesRequest(NodesRequest::new(
+            &precompute(&node.pk, &self.sk),
+            &self.pk,
+            payload
+        ));
+        self.send_to_direct(node.saddr, nodes_req)
     }
 
     /// Send `NatPingRequest` packet to all friends and try to punch holes.
@@ -1004,14 +990,7 @@ impl Server {
             return Box::new(future::ok(()));
         }
 
-        let mut request_queue = self.request_queue.write();
-
-        let target_node = PackedNode {
-            saddr: addr,
-            pk: packet.pk,
-        }.into();
-
-        self.send_nodes_req(&mut request_queue, &target_node, self.pk)
+        self.send_nodes_req(&PackedNode::new(addr, &packet.pk), &mut self.request_queue.write(), self.pk)
     }
 
     /// Handle received `OnionRequest0` packet and send `OnionRequest1` packet

@@ -6,7 +6,7 @@ Even GOOD node is farther than BAD node, BAD node should be replaced.
 Here, GOOD node is the node responded within 162 seconds, BAD node is the node not responded over 162 seconds.
 */
 
-use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs};
 use std::time::{Duration, Instant};
 
 use toxcore::crypto_core::*;
@@ -24,7 +24,7 @@ pub const KILL_NODE_TIMEOUT: u64 = BAD_NODE_TIMEOUT + PING_INTERVAL;
 
 /// Struct conatains SocketAddrs and timestamps for sending and receiving packet
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SockAndTime<T> {
+pub struct SockAndTime<T: ToSocketAddrs + Copy> {
     /// Socket addr of node
     pub saddr: Option<T>,
     /// Last received ping/nodes-response time
@@ -37,7 +37,7 @@ pub struct SockAndTime<T> {
     pub ret_last_resp_time: Option<Instant>,
 }
 
-impl<T> SockAndTime<T> {
+impl<T: ToSocketAddrs + Copy> SockAndTime<T> {
     /// Create SockAndTime object
     pub fn new(saddr: Option<T>, last_resp_time: Option<Instant>) -> Self {
         SockAndTime {
@@ -63,6 +63,20 @@ impl<T> SockAndTime<T> {
     /// Check if `PING_INTERVAL` is passed after last ping request.
     pub fn is_ping_interval_passed(&self) -> bool {
         self.last_ping_req_time.map_or(true, |time| clock_elapsed(time) >= Duration::from_secs(PING_INTERVAL))
+    }
+
+    /// Get address if it should be pinged and update `last_ping_req_time`.
+    pub fn ping_addr(&mut self) -> Option<T> {
+        if let Some(saddr) = self.saddr {
+            if !self.is_discarded() && self.is_ping_interval_passed() {
+                self.last_ping_req_time = Some(clock_now());
+                Some(saddr)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
 }
 
@@ -112,30 +126,13 @@ impl DhtNode {
     /// Check if the node is considered bad i.e. it does not answer both on IPv4
     /// and IPv6 addresses for `BAD_NODE_TIMEOUT` seconds.
     pub fn is_bad(&self) -> bool {
-        self.is_ipv4_bad() && self.is_ipv6_bad()
-    }
-
-    /// Check if the IPv4 address is considered bad i.e. it does not answer on IPv4
-    /// addresses for `BAD_NODE_TIMEOUT` seconds.
-    fn is_ipv4_bad(&self) -> bool {
-        self.assoc4.is_bad()
-    }
-
-    /// Check if the IPv6 address is considered bad i.e. it does not answer on IPv6
-    /// addresses for `BAD_NODE_TIMEOUT` seconds.
-    fn is_ipv6_bad(&self) -> bool {
-        self.assoc6.is_bad()
+        self.assoc4.is_bad() && self.assoc6.is_bad()
     }
 
     /// Check if the node is considered discarded i.e. it does not answer both
     /// on IPv4 and IPv6 addresses for `KILL_NODE_TIMEOUT` seconds.
     pub fn is_discarded(&self) -> bool {
         self.assoc4.is_discarded() && self.assoc6.is_discarded()
-    }
-
-    /// Check if `PING_INTERVAL` is passed after last ping request.
-    pub fn is_ping_interval_passed(&self) -> bool {
-        self.assoc4.is_ping_interval_passed() || self.assoc6.is_ping_interval_passed()
     }
 
     /// Return SocketAddr for DhtNode
@@ -184,24 +181,19 @@ impl DhtNode {
         addrs
     }
 
-    /// Convert Dhtnode to PackedNode object based on is_ipv6_enabled flag
+    /// Convert `DhtNode` to `PackedNode` based on `is_ipv6_enabled` flag.
     pub fn to_packed_node(&self, is_ipv6_enabled: bool) -> Option<PackedNode> {
         self.get_socket_addr(is_ipv6_enabled)
-            .map(|saddr|
-                PackedNode {
-                    pk: self.pk,
-                    saddr,
-                })
+            .map(|addr| PackedNode::new(addr, &self.pk))
     }
 
-    /// Update time for ping request, Server sends packets to both IPv4 and IPv6 addresses if exist.
-    pub fn update_ping_req_time(&mut self) {
-        if self.assoc4.saddr.is_some() {
-            self.assoc4.last_ping_req_time = Some(clock_now());
-        }
-        if self.assoc6.saddr.is_some() {
-            self.assoc6.last_ping_req_time = Some(clock_now());
-        }
+    /// Convert `DhtNode` to list of `PackedNode` which can contain IPv4 and
+    /// IPv6 addresses.
+    pub fn to_all_packed_nodes(&self, is_ipv6_enabled: bool) -> Vec<PackedNode> {
+        self.get_all_addrs(is_ipv6_enabled)
+            .into_iter()
+            .map(|addr| PackedNode::new(addr, &self.pk))
+            .collect()
     }
 
     /// Update returned socket address and time of receiving packet
