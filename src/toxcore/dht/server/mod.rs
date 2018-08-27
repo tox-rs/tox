@@ -256,7 +256,7 @@ impl Server {
         let future = self.clone().run_pings_sending().join4(
             self.clone().run_onion_key_refresing(),
             self.clone().run_main_loop(),
-            self.clone().run_recover_network_error()
+            self.run_bootstrap_requests_sending()
         ).map(|_| ());
         Box::new(future)
     }
@@ -266,34 +266,34 @@ impl Server {
         self.initial_bootstrap.push(pn);
     }
 
-    /// Run initial bootstapping, It continues to sending NodesRequest to bootstrap nodes
-    /// until at least one entry inserted to Kbucket
-    /// and send NodesRequest to nodes in Kbucket if all nodes are discarded.
-    /// All nodes in Kbucket are discarded means that network is not available for a while.
-    fn run_recover_network_error(self) -> IoFuture<()> {
+    /// Run initial bootstrapping. It sends `NodesRequest` packet to bootstrap
+    /// nodes periodically if all nodes in Kbucket are discarded (including the
+    /// case when it's empty). It has to be an endless loop because we might
+    /// loose the network connection and thereby loose all nodes in Kbucket.
+    fn run_bootstrap_requests_sending(self) -> IoFuture<()> {
         let interval = Duration::from_secs(BOOTSTRAP_INTERVAL);
-
         let wakeups = Interval::new(Instant::now(), interval);
 
         let future = wakeups
             .map_err(|e| Error::new(ErrorKind::Other, format!("Bootstrap timer error: {:?}", e)))
             .for_each(move |_instant| {
                 trace!("Bootstrap wake up");
-                let close_nodes = self.close_nodes.read();
-                if close_nodes.is_empty() || close_nodes.is_all_discarded() {
-                    self.send_bootstrap_and_ping()
-                } else {
-                    Box::new(future::ok(()))
-                }
+                self.send_bootstrap_requests()
             });
 
         Box::new(future)
     }
 
-    /// Send NodesRequest to initial bootstapping nodes and nodes in Kbucket.
-    fn send_bootstrap_and_ping(&self) -> IoFuture<()> {
+    /// Check if all nodes in Kbucket are discarded (including the case when
+    /// it's empty) and if so then send `NodesRequest` packet to nodes from
+    /// initial bootstrap list and from Kbucket.
+    fn send_bootstrap_requests(&self) -> IoFuture<()> {
         let mut request_queue = self.request_queue.write();
         let close_nodes = self.close_nodes.read();
+
+        if !close_nodes.is_all_discarded() {
+            return Box::new(future::ok(()));
+        }
 
         let futures = close_nodes
             .iter()
@@ -3060,7 +3060,7 @@ mod tests {
     }
 
     #[test]
-    fn send_bootstrap_and_ping() {
+    fn send_bootstrap_requests() {
         let (mut alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         let (ping_pk, ping_sk) = gen_keypair();
 
@@ -3072,7 +3072,7 @@ mod tests {
 
         // test with ipv6 mode
         alice.enable_ipv6_mode(true);
-        alice.clone().send_bootstrap_and_ping().wait().unwrap();
+        alice.send_bootstrap_requests().wait().unwrap();
 
         let mut request_queue = alice.request_queue.write();
 
@@ -3089,7 +3089,28 @@ mod tests {
     }
 
     #[test]
-    fn send_bootstrap_and_ping_with_discarded() {
+    fn send_bootstrap_requests_when_kbucket_has_good_node() {
+        let (mut alice, _precomp, bob_pk, _bob_sk, rx, _addr) = create_node();
+        let (ping_pk, _ping_sk) = gen_keypair();
+
+        let pn = PackedNode::new("[FF::01]:33445".parse().unwrap(), &bob_pk);
+        alice.add_initial_bootstrap(pn);
+
+        let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &ping_pk);
+        alice.try_add_to_close_nodes(&pn);
+
+        // test with ipv6 mode
+        alice.enable_ipv6_mode(true);
+        alice.send_bootstrap_requests().wait().unwrap();
+
+        // Necessary to drop tx so that rx.collect() can be finished
+        drop(alice);
+
+        assert!(rx.collect().wait().unwrap().is_empty());
+    }
+
+    #[test]
+    fn send_bootstrap_requests_with_discarded() {
         let (mut alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         let (ping_pk, ping_sk) = gen_keypair();
 
@@ -3108,7 +3129,7 @@ mod tests {
         let clock = Clock::new_with_now(ConstNow(time));
 
         with_default(&clock, &mut enter, |_| {
-            alice.clone().send_bootstrap_and_ping().wait().unwrap();
+            alice.send_bootstrap_requests().wait().unwrap();
 
             let mut request_queue = alice.request_queue.write();
 
