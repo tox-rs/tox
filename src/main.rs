@@ -7,6 +7,8 @@ extern crate hex;
 extern crate itertools;
 #[macro_use]
 extern crate log;
+#[cfg(unix)]
+extern crate syslog;
 extern crate tokio;
 extern crate tokio_codec;
 extern crate tox;
@@ -34,6 +36,8 @@ use tox::toxcore::dht::lan_discovery::LanDiscoverySender;
 use tox::toxcore::onion::packet::InnerOnionResponse;
 use tox::toxcore::tcp::packet::OnionRequest;
 use tox::toxcore::tcp::server::{Server as TcpServer, ServerExt};
+#[cfg(unix)]
+use syslog::Facility;
 
 use cli_config::*;
 
@@ -274,15 +278,25 @@ fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_on
 }
 
 fn main() {
-    env_logger::Builder::from_default_env()
-        .filter_level(LevelFilter::Info)
-        .init();
-
     if !crypto_init() {
         panic!("Crypto initialization failed.");
     }
 
     let cli_config = cli_parse();
+
+    match cli_config.log_type {
+        LogType::Stderr => {
+            env_logger::Builder::from_default_env()
+                .filter_level(LevelFilter::Info)
+                .init();
+        },
+        #[cfg(unix)]
+        LogType::Syslog => {
+            syslog::init(Facility::LOG_USER, LevelFilter::Info, None)
+                .expect("Failed to initialize syslog backend.");
+        },
+        LogType::None => { },
+    }
 
     let (dht_pk, dht_sk) = if let Some(ref sk) = cli_config.sk {
         (sk.public_key(), sk.clone())
