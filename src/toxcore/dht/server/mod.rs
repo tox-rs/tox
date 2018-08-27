@@ -40,21 +40,23 @@ type Tx = mpsc::UnboundedSender<(Packet, SocketAddr)>;
 /// Shorthand for the transmit half of the TCP onion channel.
 type TcpOnionTx = mpsc::UnboundedSender<(InnerOnionResponse, SocketAddr)>;
 
-/// Number of Nodes Req sending times to find close nodes
+/// Number of random `NodesRequest` packet to send every second one per second.
+/// After random requests count exceeds this number `NODES_REQ_INTERVAL` will be
+/// used.
 pub const MAX_BOOTSTRAP_TIMES: u32 = 5;
-/// Interval in seconds of sending NatPingRequest packet
+/// Interval in seconds of sending `NatPingRequest` packet.
 pub const NAT_PING_REQ_INTERVAL: u64 = 3;
-/// How often onion key should be refreshed
+/// How often onion key should be refreshed.
 pub const ONION_REFRESH_KEY_INTERVAL: u64 = 7200;
-/// Interval in seconds for random NodesRequest
+/// Interval in seconds for random `NodesRequest`.
 pub const NODES_REQ_INTERVAL: u64 = 20;
-/// Ping timeout in seconds
+/// Ping timeout in seconds.
 pub const PING_TIMEOUT: u64 = 5;
 /// Maximum newly announced nodes to ping per `TIME_TO_PING` seconds.
 pub const MAX_TO_PING: u8 = 32;
 /// How often in seconds to ping newly announced nodes.
 pub const TIME_TO_PING: u64 = 2;
-/// How often in seconds to ping initial bootstrap nodes
+/// How often in seconds to ping initial bootstrap nodes.
 pub const BOOTSTRAP_INTERVAL: u64 = 1;
 
 /**
@@ -103,11 +105,16 @@ pub struct Server {
     /// Friends list used to store friends related data like close nodes per
     /// friend, hole punching status, etc.
     friends: Arc<RwLock<Vec<DhtFriend>>>,
-    /// List of nodes to send `NodesRequest` packet.
-    bootstrap_nodes: Arc<RwLock<Bucket>>,
+    /// List of nodes to send `NodesRequest` packet. When we `NodesResponse`
+    /// packet we should send `NodesRequest` to all nodes from the response to
+    /// check if they are capable of handling our requests and to continue
+    /// bootstrapping. But instead of instant sending `NodesRequest` we will add
+    /// the node to this list which is processed every second. The purpose of
+    /// this is to prevent amplification attacks.
+    nodes_to_bootstrap: Arc<RwLock<Bucket>>,
     /// How many times we sent `NodesRequest` packet to a random node from close
     /// nodes list.
-    bootstrap_times: Arc<RwLock<u32>>,
+    random_requests_count: Arc<RwLock<u32>>,
     /// Time when we sent `NodesRequest` packet to a random node from close
     /// nodes list.
     last_nodes_req_time: Arc<RwLock<Instant>>,
@@ -117,7 +124,7 @@ pub struct Server {
     /// of instant sending `PingRequest` we will add the node to this list which
     /// is processed every `TIME_TO_PING` seconds. The purpose of this is to
     /// prevent amplification attacks.
-    nodes_to_send_ping: Arc<RwLock<Bucket>>,
+    nodes_to_ping: Arc<RwLock<Bucket>>,
     /// Version of tox core which will be sent with `BootstrapInfo` packet.
     tox_core_version: u32,
     /// Message  of the day which will be sent with `BootstrapInfo` packet.
@@ -137,8 +144,9 @@ pub struct Server {
     /// If IPv6 mode is enabled `Server` will send packets to IPv6 addresses. If
     /// it's disabled such packets will be dropped.
     is_ipv6_enabled: bool,
-    /// Initial bootstrapping object. It stores initial bootstrap nodes and retry bootstrapping
-    /// until at least one entry inserted to close_nodes
+    /// Initial bootstrap nodes list. We send `NodesRequest` packet to each node
+    /// from this list if Kbucket doesn't have good (or bad but not discarded)
+    /// nodes.
     initial_bootstrap: Vec<PackedNode>,
 }
 
@@ -156,10 +164,10 @@ impl Server {
             onion_symmetric_key: Arc::new(RwLock::new(secretbox::gen_key())),
             onion_announce: Arc::new(RwLock::new(OnionAnnounce::new(pk))),
             friends: Arc::new(RwLock::new(Vec::new())),
-            bootstrap_nodes: Arc::new(RwLock::new(Bucket::new(None))),
-            bootstrap_times: Arc::new(RwLock::new(0)),
+            nodes_to_bootstrap: Arc::new(RwLock::new(Bucket::new(None))),
+            random_requests_count: Arc::new(RwLock::new(0)),
             last_nodes_req_time: Arc::new(RwLock::new(clock_now())),
-            nodes_to_send_ping: Arc::new(RwLock::new(Bucket::new(Some(MAX_TO_PING)))),
+            nodes_to_ping: Arc::new(RwLock::new(Bucket::new(Some(MAX_TO_PING)))),
             tox_core_version: 0,
             motd: Vec::new(),
             tcp_onion_sink: None,
@@ -200,9 +208,9 @@ impl Server {
     fn dht_main_loop(&self) -> IoFuture<()> {
         // Check if we should send `NodesRequest` packet to a random node. This
         // request is sent every second 5 times and then every 20 seconds.
-        fn send_random_request(last_nodes_req_time: &mut Instant, bootstrap_times: &mut u32) -> bool {
-            if clock_elapsed(*last_nodes_req_time) > Duration::from_secs(NODES_REQ_INTERVAL) || *bootstrap_times < MAX_BOOTSTRAP_TIMES {
-                *bootstrap_times = bootstrap_times.saturating_add(1);
+        fn send_random_request(last_nodes_req_time: &mut Instant, random_requests_count: &mut u32) -> bool {
+            if clock_elapsed(*last_nodes_req_time) > Duration::from_secs(NODES_REQ_INTERVAL) || *random_requests_count < MAX_BOOTSTRAP_TIMES {
+                *random_requests_count = random_requests_count.saturating_add(1);
                 *last_nodes_req_time = clock_now();
                 true
             } else {
@@ -211,16 +219,16 @@ impl Server {
         }
 
         let mut request_queue = self.request_queue.write();
-        let mut bootstrap_nodes = self.bootstrap_nodes.write();
+        let mut nodes_to_bootstrap = self.nodes_to_bootstrap.write();
         let mut close_nodes = self.close_nodes.write();
         let mut friends = self.friends.write();
 
         request_queue.clear_timed_out();
 
         // Send NodesRequest packets to nodes from the Server
-        let ping_bootstrap_nodes = self.ping_bootstrap_nodes(&mut request_queue, &mut bootstrap_nodes, self.pk);
+        let ping_nodes_to_bootstrap = self.ping_nodes_to_bootstrap(&mut request_queue, &mut nodes_to_bootstrap, self.pk);
         let ping_close_nodes = self.ping_close_nodes(&mut request_queue, close_nodes.iter_mut(), self.pk);
-        let send_nodes_req_random = if send_random_request(&mut self.last_nodes_req_time.write(), &mut self.bootstrap_times.write()) {
+        let send_nodes_req_random = if send_random_request(&mut self.last_nodes_req_time.write(), &mut self.random_requests_count.write()) {
             self.send_nodes_req_random(&mut request_queue, close_nodes.iter(), self.pk)
         } else {
             Box::new(future::ok(()))
@@ -228,19 +236,19 @@ impl Server {
 
         // Send NodesRequest packets to nodes from every DhtFriend
         let send_nodes_req_to_friends = friends.iter_mut().map(|friend| {
-            let ping_bootstrap_nodes = self.ping_bootstrap_nodes(&mut request_queue, &mut friend.bootstrap_nodes, friend.pk);
+            let ping_nodes_to_bootstrap = self.ping_nodes_to_bootstrap(&mut request_queue, &mut friend.nodes_to_bootstrap, friend.pk);
             let ping_close_nodes = self.ping_close_nodes(&mut request_queue, friend.close_nodes.nodes.iter_mut(), friend.pk);
-            let send_nodes_req_random = if send_random_request(&mut friend.last_nodes_req_time, &mut friend.bootstrap_times) {
+            let send_nodes_req_random = if send_random_request(&mut friend.last_nodes_req_time, &mut friend.random_requests_count) {
                 self.send_nodes_req_random(&mut request_queue, friend.close_nodes.nodes.iter(), friend.pk)
             } else {
                 Box::new(future::ok(()))
             };
-            ping_bootstrap_nodes.join3(ping_close_nodes, send_nodes_req_random)
+            ping_nodes_to_bootstrap.join3(ping_close_nodes, send_nodes_req_random)
         }).collect::<Vec<_>>();
 
         let send_nat_ping_req = self.send_nat_ping_req(&mut request_queue, &mut friends);
 
-        let future = ping_bootstrap_nodes.join5(
+        let future = ping_nodes_to_bootstrap.join5(
             ping_close_nodes,
             send_nodes_req_random,
             future::join_all(send_nodes_req_to_friends),
@@ -348,20 +356,20 @@ impl Server {
         Box::new(future)
     }
 
-    /// Send `PingRequest` packets to nodes from `nodes_to_send_ping` list.
+    /// Send `PingRequest` packets to nodes from `nodes_to_ping` list.
     fn send_pings(&self) -> IoFuture<()> {
-        let nodes_to_send_ping = mem::replace(
-            &mut *self.nodes_to_send_ping.write(),
+        let nodes_to_ping = mem::replace(
+            &mut *self.nodes_to_ping.write(),
             Bucket::new(Some(MAX_TO_PING))
         );
 
-        if nodes_to_send_ping.nodes.is_empty() {
+        if nodes_to_ping.nodes.is_empty() {
             return Box::new(future::ok(()))
         }
 
         let mut request_queue = self.request_queue.write();
 
-        let futures = nodes_to_send_ping.nodes.into_iter().map(|node| {
+        let futures = nodes_to_ping.nodes.into_iter().map(|node| {
             if let Some(node) = node.to_packed_node(self.is_ipv6_enabled) {
                 self.send_ping_req(&node, &mut request_queue)
             } else {
@@ -373,9 +381,9 @@ impl Server {
         Box::new(future::join_all(futures).map(|_| ()))
     }
 
-    /// Add node to a `nodes_to_send_ping` list to send ping later. If node is
+    /// Add node to a `nodes_to_ping` list to send ping later. If node is
     /// a friend and we don't know it's address then this method will send
-    /// `PingRequest` immediately instead of adding to a `nodes_to_send_ping`
+    /// `PingRequest` immediately instead of adding to a `nodes_to_ping`
     /// list.
     fn ping_add(&self, node: &PackedNode) -> IoFuture<()> {
         let close_nodes = self.close_nodes.read();
@@ -392,7 +400,7 @@ impl Server {
             return Box::new(self.send_ping_req(node, &mut self.request_queue.write()))
         }
 
-        self.nodes_to_send_ping.write().try_add(&self.pk, node);
+        self.nodes_to_ping.write().try_add(&self.pk, node);
 
         Box::new(future::ok(()))
     }
@@ -400,11 +408,11 @@ impl Server {
     /// Send `NodesRequest` packets to nodes from bootstrap list. This is
     /// necessary to check whether node is alive before adding it to close
     /// nodes lists.
-    fn ping_bootstrap_nodes(&self, request_queue: &mut RequestQueue, bootstrap_nodes: &mut Bucket, pk: PublicKey) -> IoFuture<()> {
-        let capacity = bootstrap_nodes.capacity;
-        let bootstrap_nodes = mem::replace(bootstrap_nodes, Bucket::new(Some(capacity)));
+    fn ping_nodes_to_bootstrap(&self, request_queue: &mut RequestQueue, nodes_to_bootstrap: &mut Bucket, pk: PublicKey) -> IoFuture<()> {
+        let capacity = nodes_to_bootstrap.capacity;
+        let nodes_to_bootstrap = mem::replace(nodes_to_bootstrap, Bucket::new(Some(capacity)));
 
-        let futures = bootstrap_nodes.nodes
+        let futures = nodes_to_bootstrap.nodes
             .iter()
             .flat_map(|node| node.to_all_packed_nodes(self.is_ipv6_enabled))
             .map(|node| self.send_nodes_req(&node, request_queue, pk))
@@ -792,7 +800,7 @@ impl Server {
 
             let mut close_nodes = self.close_nodes.write();
             let mut friends = self.friends.write();
-            let mut bootstrap_nodes = self.bootstrap_nodes.write();
+            let mut nodes_to_bootstrap = self.nodes_to_bootstrap.write();
 
             // Add node that sent NodesResponse to close nodes lists
             let pn = PackedNode::new(addr, &packet.pk);
@@ -804,12 +812,12 @@ impl Server {
             // Process nodes from NodesResponse
             for node in &payload.nodes {
                 if close_nodes.can_add(node) {
-                    bootstrap_nodes.try_add(&self.pk, node);
+                    nodes_to_bootstrap.try_add(&self.pk, node);
                 }
 
                 for friend in friends.iter_mut() {
                     if friend.close_nodes.can_add(&friend.pk, node) {
-                        friend.bootstrap_nodes.try_add(&friend.pk, node);
+                        friend.nodes_to_bootstrap.try_add(&friend.pk, node);
                     }
                 }
 
@@ -1347,7 +1355,7 @@ mod tests {
 
         assert_eq!(ping_resp_payload.id, req_payload.id);
 
-        assert!(alice.nodes_to_send_ping.read().contains(&alice.pk, &bob_pk));
+        assert!(alice.nodes_to_ping.read().contains(&alice.pk, &bob_pk));
     }
 
     #[test]
@@ -1378,8 +1386,8 @@ mod tests {
         }).collect().wait().unwrap();
 
         // In case of friend with yet unknown address we should send ping
-        // request immediately instead of adding node to nodes_to_send_ping list
-        assert!(!alice.nodes_to_send_ping.read().contains(&alice.pk, &bob_pk));
+        // request immediately instead of adding node to nodes_to_ping list
+        assert!(!alice.nodes_to_ping.read().contains(&alice.pk, &bob_pk));
     }
 
     #[test]
@@ -1502,7 +1510,7 @@ mod tests {
         assert_eq!(nodes_resp_payload.id, req_payload.id);
         assert_eq!(nodes_resp_payload.nodes, vec!(packed_node));
 
-        assert!(alice.nodes_to_send_ping.read().contains(&alice.pk, &bob_pk));
+        assert!(alice.nodes_to_ping.read().contains(&alice.pk, &bob_pk));
     }
 
     #[test]
@@ -1532,7 +1540,7 @@ mod tests {
         assert_eq!(nodes_resp_payload.id, req_payload.id);
         assert_eq!(nodes_resp_payload.nodes, vec!(packed_node));
 
-        assert!(alice.nodes_to_send_ping.read().contains(&alice.pk, &bob_pk));
+        assert!(alice.nodes_to_ping.read().contains(&alice.pk, &bob_pk));
     }
 
     #[test]
@@ -1566,7 +1574,7 @@ mod tests {
         assert_eq!(nodes_resp_payload.id, req_payload.id);
         assert!(nodes_resp_payload.nodes.is_empty());
 
-        assert!(alice.nodes_to_send_ping.read().contains(&alice.pk, &bob_pk));
+        assert!(alice.nodes_to_ping.read().contains(&alice.pk, &bob_pk));
     }
 
     #[test]
@@ -1594,7 +1602,7 @@ mod tests {
         assert_eq!(nodes_resp_payload.id, req_payload.id);
         assert!(nodes_resp_payload.nodes.is_empty());
 
-        assert!(alice.nodes_to_send_ping.read().contains(&alice.pk, &bob_pk));
+        assert!(alice.nodes_to_ping.read().contains(&alice.pk, &bob_pk));
     }
 
     #[test]
@@ -1633,14 +1641,14 @@ mod tests {
         });
 
         // All nodes from NodesResponse should be added to bootstrap nodes list
-        assert!(alice.bootstrap_nodes.read().contains(&alice.pk, &node.pk));
+        assert!(alice.nodes_to_bootstrap.read().contains(&alice.pk, &node.pk));
 
         let friends = alice.friends.read();
         let friend = friends.first().unwrap();
 
         // Node that sent NodesResponse should be added to close nodes list of
         // each friend
-        assert!(friend.bootstrap_nodes.contains(&bob_pk, &node.pk));
+        assert!(friend.nodes_to_bootstrap.contains(&bob_pk, &node.pk));
         // All nodes from NodesResponse should be added to bootstrap nodes list
         // of each friend
         assert!(friend.close_nodes.contains(&bob_pk, &bob_pk));
@@ -2756,15 +2764,15 @@ mod tests {
     }
 
     #[test]
-    fn ping_bootstrap_nodes() {
+    fn ping_nodes_to_bootstrap() {
         let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         let (node_pk, node_sk) = gen_keypair();
 
         let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &node_pk);
-        assert!(alice.bootstrap_nodes.write().try_add(&alice.pk, &pn));
+        assert!(alice.nodes_to_bootstrap.write().try_add(&alice.pk, &pn));
 
         let pn = PackedNode::new("127.0.0.1:33445".parse().unwrap(), &bob_pk);
-        assert!(alice.bootstrap_nodes.write().try_add(&alice.pk, &pn));
+        assert!(alice.nodes_to_bootstrap.write().try_add(&alice.pk, &pn));
 
         alice.dht_main_loop().wait().unwrap();
 
@@ -2785,15 +2793,15 @@ mod tests {
     }
 
     #[test]
-    fn ping_nodes_from_nodes_to_send_ping_list() {
+    fn ping_nodes_from_nodes_to_ping_list() {
         let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         let (node_pk, node_sk) = gen_keypair();
 
         let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &node_pk);
-        assert!(alice.nodes_to_send_ping.write().try_add(&alice.pk, &pn));
+        assert!(alice.nodes_to_ping.write().try_add(&alice.pk, &pn));
 
         let pn = PackedNode::new("127.0.0.1:33445".parse().unwrap(), &bob_pk);
-        assert!(alice.nodes_to_send_ping.write().try_add(&alice.pk, &pn));
+        assert!(alice.nodes_to_ping.write().try_add(&alice.pk, &pn));
 
         alice.send_pings().wait().unwrap();
 
@@ -2812,7 +2820,7 @@ mod tests {
     }
 
     #[test]
-    fn ping_nodes_when_nodes_to_send_ping_list_is_empty() {
+    fn ping_nodes_when_nodes_to_ping_list_is_empty() {
         let (alice, _precomp, _bob_pk, _bob_sk, rx, _addr) = create_node();
 
         alice.send_pings().wait().unwrap();
@@ -2902,7 +2910,7 @@ mod tests {
     }
 
     #[test]
-    fn ping_bootstrap_nodes_of_friend() {
+    fn ping_nodes_to_bootstrap_of_friend() {
         let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         let (node_pk, node_sk) = gen_keypair();
 
@@ -2911,10 +2919,10 @@ mod tests {
         let mut friend = DhtFriend::new(friend_pk);
 
         let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &node_pk);
-        assert!(friend.bootstrap_nodes.try_add(&alice.pk, &pn));
+        assert!(friend.nodes_to_bootstrap.try_add(&alice.pk, &pn));
 
         let pn = PackedNode::new("127.0.0.1:33445".parse().unwrap(), &bob_pk);
-        assert!(friend.bootstrap_nodes.try_add(&alice.pk, &pn));
+        assert!(friend.nodes_to_bootstrap.try_add(&alice.pk, &pn));
 
         alice.add_friend(friend);
 

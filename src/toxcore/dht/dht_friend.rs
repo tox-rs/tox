@@ -29,9 +29,9 @@ pub struct DhtFriend {
     pub last_nodes_req_time: Instant,
     /// How many times we sent `NodesRequest` packet to a random node from close
     /// nodes list.
-    pub bootstrap_times: u32,
+    pub random_requests_count: u32,
     /// List of nodes to send `NodesRequest` packet.
-    pub bootstrap_nodes: Bucket,
+    pub nodes_to_bootstrap: Bucket,
     /// Struct for hole punching.
     pub hole_punch: HolePunching,
 }
@@ -43,8 +43,8 @@ impl DhtFriend {
             pk,
             close_nodes: Bucket::new(Some(FRIEND_CLOSE_NODES_COUNT)),
             last_nodes_req_time: clock_now(),
-            bootstrap_times: 0,
-            bootstrap_nodes: Bucket::new(Some(FRIEND_BOOTSTRAP_NODES_COUNT)),
+            random_requests_count: 0,
+            nodes_to_bootstrap: Bucket::new(Some(FRIEND_BOOTSTRAP_NODES_COUNT)),
             hole_punch: HolePunching::new(),
         }
     }
