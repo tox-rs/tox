@@ -2758,9 +2758,9 @@ mod tests {
     #[test]
     fn ping_bootstrap_nodes() {
         let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
-        let (ping_pk, ping_sk) = gen_keypair();
+        let (node_pk, node_sk) = gen_keypair();
 
-        let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &ping_pk);
+        let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &node_pk);
         assert!(alice.bootstrap_nodes.write().try_add(&alice.pk, &pn));
 
         let pn = PackedNode::new("127.0.0.1:33445".parse().unwrap(), &bob_pk);
@@ -2777,8 +2777,8 @@ mod tests {
                 assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
                 assert_eq!(nodes_req_payload.pk, alice.pk);
             } else {
-                let nodes_req_payload = nodes_req.get_payload(&ping_sk).unwrap();
-                assert!(request_queue.check_ping_id(ping_pk, nodes_req_payload.id));
+                let nodes_req_payload = nodes_req.get_payload(&node_sk).unwrap();
+                assert!(request_queue.check_ping_id(node_pk, nodes_req_payload.id));
                 assert_eq!(nodes_req_payload.pk, alice.pk);
             }
         }).collect().wait().unwrap();
@@ -2787,9 +2787,9 @@ mod tests {
     #[test]
     fn ping_nodes_from_nodes_to_send_ping_list() {
         let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
-        let (ping_pk, ping_sk) = gen_keypair();
+        let (node_pk, node_sk) = gen_keypair();
 
-        let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &ping_pk);
+        let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &node_pk);
         assert!(alice.nodes_to_send_ping.write().try_add(&alice.pk, &pn));
 
         let pn = PackedNode::new("127.0.0.1:33445".parse().unwrap(), &bob_pk);
@@ -2805,8 +2805,8 @@ mod tests {
                 let ping_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
                 assert!(request_queue.check_ping_id(bob_pk, ping_req_payload.id));
             } else {
-                let ping_req_payload = nodes_req.get_payload(&ping_sk).unwrap();
-                assert!(request_queue.check_ping_id(ping_pk, ping_req_payload.id));
+                let ping_req_payload = nodes_req.get_payload(&node_sk).unwrap();
+                assert!(request_queue.check_ping_id(node_pk, ping_req_payload.id));
             }
         }).collect().wait().unwrap();
     }
@@ -2826,9 +2826,9 @@ mod tests {
     #[test]
     fn ping_close_nodes() {
         let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
-        let (ping_pk, ping_sk) = gen_keypair();
+        let (node_pk, node_sk) = gen_keypair();
 
-        let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &ping_pk);
+        let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &node_pk);
         assert!(alice.close_nodes.write().try_add(&pn));
 
         let pn = PackedNode::new("127.0.0.1:33445".parse().unwrap(), &bob_pk);
@@ -2846,8 +2846,8 @@ mod tests {
                 assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
                 assert_eq!(nodes_req_payload.pk, alice.pk);
             } else {
-                let nodes_req_payload = nodes_req.get_payload(&ping_sk).unwrap();
-                assert!(request_queue.check_ping_id(ping_pk, nodes_req_payload.id));
+                let nodes_req_payload = nodes_req.get_payload(&node_sk).unwrap();
+                assert!(request_queue.check_ping_id(node_pk, nodes_req_payload.id));
                 assert_eq!(nodes_req_payload.pk, alice.pk);
             }
         }).collect().wait().unwrap();
@@ -2904,13 +2904,13 @@ mod tests {
     #[test]
     fn ping_bootstrap_nodes_of_friend() {
         let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
-        let (ping_pk, ping_sk) = gen_keypair();
+        let (node_pk, node_sk) = gen_keypair();
 
         let friend_pk = gen_keypair().0;
 
         let mut friend = DhtFriend::new(friend_pk);
 
-        let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &ping_pk);
+        let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &node_pk);
         assert!(friend.bootstrap_nodes.try_add(&alice.pk, &pn));
 
         let pn = PackedNode::new("127.0.0.1:33445".parse().unwrap(), &bob_pk);
@@ -2929,8 +2929,8 @@ mod tests {
                 assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
                 assert_eq!(nodes_req_payload.pk, friend_pk);
             } else {
-                let nodes_req_payload = nodes_req.get_payload(&ping_sk).unwrap();
-                assert!(request_queue.check_ping_id(ping_pk, nodes_req_payload.id));
+                let nodes_req_payload = nodes_req.get_payload(&node_sk).unwrap();
+                assert!(request_queue.check_ping_id(node_pk, nodes_req_payload.id));
                 assert_eq!(nodes_req_payload.pk, friend_pk);
             }
         }).collect().wait().unwrap();
@@ -2939,13 +2939,13 @@ mod tests {
     #[test]
     fn ping_close_nodes_of_friend() {
         let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
-        let (ping_pk, ping_sk) = gen_keypair();
+        let (node_pk, node_sk) = gen_keypair();
 
         let friend_pk = gen_keypair().0;
 
         let mut friend = DhtFriend::new(friend_pk);
 
-        let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &ping_pk);
+        let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &node_pk);
         assert!(friend.close_nodes.try_add(&friend_pk, &pn));
 
         let pn = PackedNode::new("127.0.0.1:33445".parse().unwrap(), &bob_pk);
@@ -2965,8 +2965,8 @@ mod tests {
                 assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
                 assert_eq!(nodes_req_payload.pk, friend_pk);
             } else {
-                let nodes_req_payload = nodes_req.get_payload(&ping_sk).unwrap();
-                assert!(request_queue.check_ping_id(ping_pk, nodes_req_payload.id));
+                let nodes_req_payload = nodes_req.get_payload(&node_sk).unwrap();
+                assert!(request_queue.check_ping_id(node_pk, nodes_req_payload.id));
                 assert_eq!(nodes_req_payload.pk, friend_pk);
             }
         }).collect().wait().unwrap();
@@ -3033,12 +3033,12 @@ mod tests {
     #[test]
     fn send_to() {
         let (mut alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
-        let (ping_pk, ping_sk) = gen_keypair();
+        let (node_pk, node_sk) = gen_keypair();
 
         let pn = PackedNode::new("[FF::01]:33445".parse().unwrap(), &bob_pk);
         assert!(alice.close_nodes.write().try_add(&pn));
 
-        let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &ping_pk);
+        let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &node_pk);
         assert!(alice.close_nodes.write().try_add(&pn));
 
         // test with ipv6 mode
@@ -3053,8 +3053,8 @@ mod tests {
                 let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
                 assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
             } else {
-                let nodes_req_payload = nodes_req.get_payload(&ping_sk).unwrap();
-                assert!(request_queue.check_ping_id(ping_pk, nodes_req_payload.id));
+                let nodes_req_payload = nodes_req.get_payload(&node_sk).unwrap();
+                assert!(request_queue.check_ping_id(node_pk, nodes_req_payload.id));
             }
         }).collect().wait().unwrap();
     }
@@ -3062,12 +3062,12 @@ mod tests {
     #[test]
     fn send_bootstrap_requests() {
         let (mut alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
-        let (ping_pk, ping_sk) = gen_keypair();
+        let (node_pk, node_sk) = gen_keypair();
 
         let pn = PackedNode::new("[FF::01]:33445".parse().unwrap(), &bob_pk);
         alice.add_initial_bootstrap(pn);
 
-        let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &ping_pk);
+        let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &node_pk);
         alice.add_initial_bootstrap(pn);
 
         // test with ipv6 mode
@@ -3082,8 +3082,8 @@ mod tests {
                 let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
                 assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
             } else {
-                let nodes_req_payload = nodes_req.get_payload(&ping_sk).unwrap();
-                assert!(request_queue.check_ping_id(ping_pk, nodes_req_payload.id));
+                let nodes_req_payload = nodes_req.get_payload(&node_sk).unwrap();
+                assert!(request_queue.check_ping_id(node_pk, nodes_req_payload.id));
             }
         }).collect().wait().unwrap();
     }
@@ -3091,12 +3091,12 @@ mod tests {
     #[test]
     fn send_bootstrap_requests_when_kbucket_has_good_node() {
         let (mut alice, _precomp, bob_pk, _bob_sk, rx, _addr) = create_node();
-        let (ping_pk, _ping_sk) = gen_keypair();
+        let (node_pk, _node_sk) = gen_keypair();
 
         let pn = PackedNode::new("[FF::01]:33445".parse().unwrap(), &bob_pk);
         alice.add_initial_bootstrap(pn);
 
-        let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &ping_pk);
+        let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &node_pk);
         alice.try_add_to_close_nodes(&pn);
 
         // test with ipv6 mode
@@ -3112,12 +3112,12 @@ mod tests {
     #[test]
     fn send_bootstrap_requests_with_discarded() {
         let (mut alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
-        let (ping_pk, ping_sk) = gen_keypair();
+        let (node_pk, node_sk) = gen_keypair();
 
         let pn = PackedNode::new("[FF::01]:33445".parse().unwrap(), &bob_pk);
         alice.try_add_to_close_nodes(&pn);
 
-        let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &ping_pk);
+        let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &node_pk);
         alice.try_add_to_close_nodes(&pn);
 
         // test with ipv6 mode
@@ -3139,8 +3139,8 @@ mod tests {
                     let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
                     assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
                 } else {
-                    let nodes_req_payload = nodes_req.get_payload(&ping_sk).unwrap();
-                    assert!(request_queue.check_ping_id(ping_pk, nodes_req_payload.id));
+                    let nodes_req_payload = nodes_req.get_payload(&node_sk).unwrap();
+                    assert!(request_queue.check_ping_id(node_pk, nodes_req_payload.id));
                 }
             }).collect().wait().unwrap();
         });
