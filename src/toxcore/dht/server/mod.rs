@@ -509,11 +509,8 @@ impl Server {
     pub fn send_nodes_req(&self, node: &PackedNode, request_queue: &mut RequestQueue, search_pk: PublicKey) -> IoFuture<()> {
         // Check if packet is going to be sent to ourselves.
         if self.pk == node.pk {
-            return Box::new(
-                future::err(
-                    Error::new(ErrorKind::Other, "friend's pk is mine")
-                )
-            )
+            trace!("Attempt to send NodesRequest to ourselves.");
+            return Box::new(future::ok(()))
         }
 
         let payload = NodesRequestPayload {
