@@ -1,13 +1,14 @@
-/*! Extension trait for run TCP server on `TcpStream`
+/*! Extension trait for run TCP server on `TcpStream` and ping sender
 */
 
 use std::io::{Error, ErrorKind};
 use std::time::{Duration, Instant};
 
 use futures::{future, Future, Sink, Stream};
-use tokio::net::TcpStream;
+use tokio::net::{TcpStream, TcpListener};
 use tokio::util::FutureExt;
 use tokio_codec::Framed;
+use tokio::timer::Interval;
 
 use toxcore::crypto_core::*;
 use toxcore::io_tokio::IoFuture;
@@ -15,14 +16,56 @@ use toxcore::tcp::codec::Codec;
 use toxcore::tcp::handshake::make_server_handshake;
 use toxcore::tcp::server::{Server, ServerProcessor};
 
-/// Extension trait for running TCP server on incoming `TcpStream`
+/// Interval in seconds for Tcp Ping sender
+const TCP_PING_INTERVAL: u64 = 1;
+
+/// Extension trait for running TCP server on incoming `TcpStream` and ping sender
 pub trait ServerExt {
+    /// Running TCP ping sender and incoming `TcpStream`
+    fn run(self: Self, listner: TcpListener, dht_sk: SecretKey) -> IoFuture<()>;
     /// Running TCP server on incoming `TcpStream`
-    fn run(self: Self, stream: TcpStream, dht_sk: SecretKey) -> IoFuture<()>;
+    fn run_connection(self: Self, stream: TcpStream, dht_sk: SecretKey) -> IoFuture<()>;
 }
 
 impl ServerExt for Server {
-    fn run(self: Self, stream: TcpStream, dht_sk: SecretKey) -> IoFuture<()> {
+    fn run(self: Self, listner: TcpListener, dht_sk: SecretKey) -> IoFuture<()> {
+        let self_c = self.clone();
+
+        let future = listner.incoming()
+            .for_each(move |stream|
+                self.clone().run_connection(stream, dht_sk.clone())
+            )
+            .map_err(|err| {
+                // All tasks must have an `Error` type of `()`. This forces error
+                // handling and helps avoid silencing failures.
+                //
+                // In our example, we are only going to log the error to STDOUT.
+                warn!("Server error = {:?}", err);
+                err
+            });
+
+        let interval = Duration::from_secs(TCP_PING_INTERVAL);
+        let wakeups = Interval::new(Instant::now(), interval);
+        let ping_sender = wakeups
+            .map_err(|e| {
+                warn!("TCP ping sender timer error: {:?}", e);
+                Error::new(ErrorKind::Other, e)
+            })
+            .for_each(move |_instant| {
+                trace!("Tcp server ping sender wake up");
+                self_c.send_pings()
+            })
+;
+
+        let future = future
+            .select(ping_sender)
+            .map(|_| ()).map_err(|(e, _)| e)
+            .map_err(|e| Error::new(ErrorKind::Other, e));
+
+        Box::new(future)
+    }
+
+    fn run_connection(self: Self, stream: TcpStream, dht_sk: SecretKey) -> IoFuture<()> {
         let addr = match stream.peer_addr() {
             Ok(addr) => addr,
             Err(e) => {
@@ -93,14 +136,13 @@ mod tests {
     use super::*;
 
     use tokio;
-    use tokio::net::TcpListener;
 
     use toxcore::tcp::codec::Codec;
     use toxcore::tcp::handshake::make_client_handshake;
     use toxcore::tcp::packet::{Packet, PingRequest, PongResponse};
 
     #[test]
-    fn run() {
+    fn run_connection() {
         let (client_pk, client_sk) = gen_keypair();
         let (server_pk, server_sk) = gen_keypair();
 
@@ -111,7 +153,7 @@ mod tests {
             .map_err(|(e, _other_incomings)| e)
             .map(|(connection, _other_incomings)| connection.unwrap())
             .and_then(move |stream|
-                Server::new().run(stream, server_sk)
+                Server::new().run_connection(stream, server_sk)
             );
 
         let client = TcpStream::connect(&addr)
