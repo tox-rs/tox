@@ -32,7 +32,7 @@ pub const END_PORT: u16 = 33546;
 pub const LAN_DISCOVERY_INTERVAL: u64 = 10;
 
 /// Shorthand for the transmit half of the message channel.
-type Tx = mpsc::UnboundedSender<(DhtPacket, SocketAddr)>;
+type Tx = mpsc::UnboundedSender<(Packet, SocketAddr)>;
 
 /// LAN discovery struct
 pub struct LanDiscoverySender {
@@ -112,7 +112,7 @@ impl LanDiscoverySender {
     /// Send `LanDiscovery` packets.
     fn send(&mut self) -> IoFuture<()> {
         let addrs = self.get_broadcast_socket_addrs();
-        let lan_packet = DhtPacket::LanDiscovery(LanDiscovery {
+        let lan_packet = Packet::LanDiscovery(LanDiscovery {
             pk: self.dht_pk,
         });
 
@@ -170,7 +170,7 @@ mod tests {
             let (received, rx1) = rx.into_future().wait().unwrap();
             let (packet, _addr) = received.unwrap();
 
-            let lan_discovery = unpack!(packet, DhtPacket::LanDiscovery);
+            let lan_discovery = unpack!(packet, Packet::LanDiscovery);
 
             assert_eq!(lan_discovery.pk, dht_pk);
 
@@ -193,7 +193,7 @@ mod tests {
             let (received, rx1) = rx.into_future().wait().unwrap();
             let (packet, _addr) = received.unwrap();
 
-            let lan_discovery = unpack!(packet, DhtPacket::LanDiscovery);
+            let lan_discovery = unpack!(packet, Packet::LanDiscovery);
 
             assert_eq!(lan_discovery.pk, dht_pk);
 
@@ -218,7 +218,7 @@ mod tests {
             let (received, rx1) = rx.into_future().wait().unwrap();
             let (packet, _addr) = received.unwrap();
 
-            let lan_discovery = unpack!(packet, DhtPacket::LanDiscovery);
+            let lan_discovery = unpack!(packet, Packet::LanDiscovery);
 
             assert_eq!(lan_discovery.pk, dht_pk);
 

@@ -37,7 +37,7 @@ use toxcore::onion::packet::*;
 /** DHT packet enum that encapsulates all types of DHT packets.
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum DhtPacket {
+pub enum Packet {
     /// [`PingRequest`](./struct.PingRequest.html) structure.
     PingRequest(PingRequest),
     /// [`PingResponse`](./struct.PingResponse.html) structure.
@@ -82,56 +82,56 @@ pub enum DhtPacket {
     BootstrapInfo(BootstrapInfo)
 }
 
-impl ToBytes for DhtPacket {
+impl ToBytes for Packet {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         match *self {
-            DhtPacket::PingRequest(ref p) => p.to_bytes(buf),
-            DhtPacket::PingResponse(ref p) => p.to_bytes(buf),
-            DhtPacket::NodesRequest(ref p) => p.to_bytes(buf),
-            DhtPacket::NodesResponse(ref p) => p.to_bytes(buf),
-            DhtPacket::CookieRequest(ref p) => p.to_bytes(buf),
-            DhtPacket::CookieResponse(ref p) => p.to_bytes(buf),
-            DhtPacket::CryptoHandshake(ref p) => p.to_bytes(buf),
-            DhtPacket::CryptoData(ref p) => p.to_bytes(buf),
-            DhtPacket::DhtRequest(ref p) => p.to_bytes(buf),
-            DhtPacket::LanDiscovery(ref p) => p.to_bytes(buf),
-            DhtPacket::OnionRequest0(ref p) => p.to_bytes(buf),
-            DhtPacket::OnionRequest1(ref p) => p.to_bytes(buf),
-            DhtPacket::OnionRequest2(ref p) => p.to_bytes(buf),
-            DhtPacket::OnionAnnounceRequest(ref p) => p.to_bytes(buf),
-            DhtPacket::OnionAnnounceResponse(ref p) => p.to_bytes(buf),
-            DhtPacket::OnionDataRequest(ref p) => p.to_bytes(buf),
-            DhtPacket::OnionDataResponse(ref p) => p.to_bytes(buf),
-            DhtPacket::OnionResponse3(ref p) => p.to_bytes(buf),
-            DhtPacket::OnionResponse2(ref p) => p.to_bytes(buf),
-            DhtPacket::OnionResponse1(ref p) => p.to_bytes(buf),
-            DhtPacket::BootstrapInfo(ref p) => p.to_bytes(buf)
+            Packet::PingRequest(ref p) => p.to_bytes(buf),
+            Packet::PingResponse(ref p) => p.to_bytes(buf),
+            Packet::NodesRequest(ref p) => p.to_bytes(buf),
+            Packet::NodesResponse(ref p) => p.to_bytes(buf),
+            Packet::CookieRequest(ref p) => p.to_bytes(buf),
+            Packet::CookieResponse(ref p) => p.to_bytes(buf),
+            Packet::CryptoHandshake(ref p) => p.to_bytes(buf),
+            Packet::CryptoData(ref p) => p.to_bytes(buf),
+            Packet::DhtRequest(ref p) => p.to_bytes(buf),
+            Packet::LanDiscovery(ref p) => p.to_bytes(buf),
+            Packet::OnionRequest0(ref p) => p.to_bytes(buf),
+            Packet::OnionRequest1(ref p) => p.to_bytes(buf),
+            Packet::OnionRequest2(ref p) => p.to_bytes(buf),
+            Packet::OnionAnnounceRequest(ref p) => p.to_bytes(buf),
+            Packet::OnionAnnounceResponse(ref p) => p.to_bytes(buf),
+            Packet::OnionDataRequest(ref p) => p.to_bytes(buf),
+            Packet::OnionDataResponse(ref p) => p.to_bytes(buf),
+            Packet::OnionResponse3(ref p) => p.to_bytes(buf),
+            Packet::OnionResponse2(ref p) => p.to_bytes(buf),
+            Packet::OnionResponse1(ref p) => p.to_bytes(buf),
+            Packet::BootstrapInfo(ref p) => p.to_bytes(buf)
         }
     }
 }
 
-impl FromBytes for DhtPacket {
-    named!(from_bytes<DhtPacket>, alt!(
-        map!(PingRequest::from_bytes, DhtPacket::PingRequest) |
-        map!(PingResponse::from_bytes, DhtPacket::PingResponse) |
-        map!(NodesRequest::from_bytes, DhtPacket::NodesRequest) |
-        map!(NodesResponse::from_bytes, DhtPacket::NodesResponse) |
-        map!(CookieRequest::from_bytes, DhtPacket::CookieRequest) |
-        map!(CookieResponse::from_bytes, DhtPacket::CookieResponse) |
-        map!(CryptoHandshake::from_bytes, DhtPacket::CryptoHandshake) |
-        map!(CryptoData::from_bytes, DhtPacket::CryptoData) |
-        map!(DhtRequest::from_bytes, DhtPacket::DhtRequest) |
-        map!(LanDiscovery::from_bytes, DhtPacket::LanDiscovery) |
-        map!(OnionRequest0::from_bytes, DhtPacket::OnionRequest0) |
-        map!(OnionRequest1::from_bytes, DhtPacket::OnionRequest1) |
-        map!(OnionRequest2::from_bytes, DhtPacket::OnionRequest2) |
-        map!(OnionAnnounceRequest::from_bytes, DhtPacket::OnionAnnounceRequest) |
-        map!(OnionAnnounceResponse::from_bytes, DhtPacket::OnionAnnounceResponse) |
-        map!(OnionDataRequest::from_bytes, DhtPacket::OnionDataRequest) |
-        map!(OnionDataResponse::from_bytes, DhtPacket::OnionDataResponse) |
-        map!(OnionResponse3::from_bytes, DhtPacket::OnionResponse3) |
-        map!(OnionResponse2::from_bytes, DhtPacket::OnionResponse2) |
-        map!(OnionResponse1::from_bytes, DhtPacket::OnionResponse1) |
-        map!(BootstrapInfo::from_bytes, DhtPacket::BootstrapInfo)
+impl FromBytes for Packet {
+    named!(from_bytes<Packet>, alt!(
+        map!(PingRequest::from_bytes, Packet::PingRequest) |
+        map!(PingResponse::from_bytes, Packet::PingResponse) |
+        map!(NodesRequest::from_bytes, Packet::NodesRequest) |
+        map!(NodesResponse::from_bytes, Packet::NodesResponse) |
+        map!(CookieRequest::from_bytes, Packet::CookieRequest) |
+        map!(CookieResponse::from_bytes, Packet::CookieResponse) |
+        map!(CryptoHandshake::from_bytes, Packet::CryptoHandshake) |
+        map!(CryptoData::from_bytes, Packet::CryptoData) |
+        map!(DhtRequest::from_bytes, Packet::DhtRequest) |
+        map!(LanDiscovery::from_bytes, Packet::LanDiscovery) |
+        map!(OnionRequest0::from_bytes, Packet::OnionRequest0) |
+        map!(OnionRequest1::from_bytes, Packet::OnionRequest1) |
+        map!(OnionRequest2::from_bytes, Packet::OnionRequest2) |
+        map!(OnionAnnounceRequest::from_bytes, Packet::OnionAnnounceRequest) |
+        map!(OnionAnnounceResponse::from_bytes, Packet::OnionAnnounceResponse) |
+        map!(OnionDataRequest::from_bytes, Packet::OnionDataRequest) |
+        map!(OnionDataResponse::from_bytes, Packet::OnionDataResponse) |
+        map!(OnionResponse3::from_bytes, Packet::OnionResponse3) |
+        map!(OnionResponse2::from_bytes, Packet::OnionResponse2) |
+        map!(OnionResponse1::from_bytes, Packet::OnionResponse1) |
+        map!(BootstrapInfo::from_bytes, Packet::BootstrapInfo)
     ));
 }

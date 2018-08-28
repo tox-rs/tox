@@ -161,7 +161,7 @@ impl FromBytes for NodesResponsePayload {
 #[cfg(test)]
 mod tests {
     use toxcore::dht::packet::nodes_response::*;
-    use toxcore::dht::packet::DhtPacket;
+    use toxcore::dht::packet::Packet;
     use std::net::SocketAddr;
 
     encode_decode_test!(
