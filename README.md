@@ -26,6 +26,8 @@ packets you can change log level to `trace` for `tox_node`:
 RUST_LOG=tox_node=trace cargo run --release
 ```
 
+Also it's possible to use syslog via `--log-type` parameter.
+
 ## Keys generation
 
 In order to run node you have to provide either secret key or path to a keys file.

@@ -30,6 +30,29 @@ impl FromStr for ThreadsConfig {
     }
 }
 
+#[cfg(unix)]
+arg_enum! {
+    /// Specifies where to write logs.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub enum LogType {
+        Stderr,
+        Stdout,
+        Syslog,
+        None,
+    }
+}
+
+#[cfg(not(unix))]
+arg_enum! {
+    /// Specifies where to write logs.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub enum LogType {
+        Stderr,
+        Stdout,
+        None,
+    }
+}
+
 /// Config parsed from command line arguments.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct CliConfig {
@@ -45,6 +68,8 @@ pub struct CliConfig {
     pub bootstrap_nodes: Vec<PackedNode>,
     /// Number of threads for execution.
     pub threads_config: ThreadsConfig,
+    /// Specifies where to write logs.
+    pub log_type: LogType,
     /// Message of the day
     pub motd: String,
     /// Whether LAN discovery is enabled
@@ -101,6 +126,13 @@ pub fn cli_parse() -> CliConfig {
                    number of CPU cores")
             .takes_value(true)
             .default_value("1"))
+        .arg(Arg::with_name("log-type")
+            .short("l")
+            .long("log-type")
+            .help("Where to write logs")
+            .takes_value(true)
+            .default_value("Stderr")
+            .possible_values(&LogType::variants()))
         .arg(Arg::with_name("motd")
             .short("m")
             .long("motd")
@@ -160,6 +192,8 @@ pub fn cli_parse() -> CliConfig {
 
     let threads_config = value_t!(matches.value_of("threads"), ThreadsConfig).unwrap_or_else(|e| e.exit());
 
+    let log_type = value_t!(matches.value_of("log-type"), LogType).unwrap_or_else(|e| e.exit());
+
     let motd = value_t!(matches.value_of("motd"), String).unwrap_or_else(|e| e.exit());
 
     let lan_discovery_enabled = !matches.is_present("no-lan");
@@ -171,6 +205,7 @@ pub fn cli_parse() -> CliConfig {
         keys_file,
         bootstrap_nodes,
         threads_config,
+        log_type,
         motd,
         lan_discovery_enabled,
     }
