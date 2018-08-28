@@ -290,6 +290,12 @@ fn main() {
                 .filter_level(LevelFilter::Info)
                 .init();
         },
+        LogType::Stdout => {
+            env_logger::Builder::from_default_env()
+                .target(env_logger::fmt::Target::Stdout)
+                .filter_level(LevelFilter::Info)
+                .init();
+        },
         #[cfg(unix)]
         LogType::Syslog => {
             syslog::init(Facility::LOG_USER, LevelFilter::Info, None)

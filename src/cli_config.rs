@@ -36,6 +36,7 @@ arg_enum! {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub enum LogType {
         Stderr,
+        Stdout,
         Syslog,
         None,
     }
@@ -47,6 +48,7 @@ arg_enum! {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub enum LogType {
         Stderr,
+        Stdout,
         None,
     }
 }
