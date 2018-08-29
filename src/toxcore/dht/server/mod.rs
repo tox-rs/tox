@@ -58,6 +58,8 @@ pub const MAX_TO_PING: u8 = 32;
 pub const TIME_TO_PING: u64 = 2;
 /// How often in seconds to ping initial bootstrap nodes.
 pub const BOOTSTRAP_INTERVAL: u64 = 1;
+/// Number of fake friends that server has.
+pub const FAKE_FRIENDS_NUMBER: usize = 2;
 
 /**
 Own DHT node data.
@@ -103,7 +105,8 @@ pub struct Server {
     /// Onion announce struct to handle `OnionAnnounce` and `OnionData` packets.
     onion_announce: Arc<RwLock<OnionAnnounce>>,
     /// Friends list used to store friends related data like close nodes per
-    /// friend, hole punching status, etc.
+    /// friend, hole punching status, etc. First FAKE_FRIENDS_NUMBER friends
+    /// are fake with random public key.
     friends: Arc<RwLock<Vec<DhtFriend>>>,
     /// List of nodes to send `NodesRequest` packet. When we `NodesResponse`
     /// packet we should send `NodesRequest` to all nodes from the response to
@@ -154,6 +157,26 @@ impl Server {
     /// Create new `Server` instance.
     pub fn new(tx: Tx, pk: PublicKey, sk: SecretKey) -> Server {
         debug!("Created new Server instance");
+
+        // Adding 2 fake friends with random public key. It serves two purposes:
+        // - server will send NodesRequest packets with these 2 random keys
+        //   periodically thereby it will fill Kbucket with farther nodes and
+        //   speed up bootstrap process.
+        // - close nodes of these two friends can be used as pool of random
+        //   nodes for onion client.
+        // It's the same way as c-toxcore acts but it's not the best way. So it
+        // has to be rewritten in a more cleaner and safer manner. See this
+        // proposal to get some thoughts how it could be done:
+        // https://github.com/zugz/tox-onionPathsProposal/blob/master/onionPathsProposal.md
+        let mut friends = Vec::with_capacity(FAKE_FRIENDS_NUMBER);
+        for _ in 0 .. FAKE_FRIENDS_NUMBER {
+            friends.push(DhtFriend::new(gen_keypair().0));
+        }
+        // TODO: replace with iter::repeat_with on 1.28 rust:
+        // let friends = iter::repeat_with(|| DhtFriend::new(gen_keypair().0))
+        //     .take(FAKE_FRIENDS_NUMBER)
+        //     .collect();
+
         Server {
             sk,
             pk,
@@ -163,7 +186,7 @@ impl Server {
             close_nodes: Arc::new(RwLock::new(Kbucket::new(&pk))),
             onion_symmetric_key: Arc::new(RwLock::new(secretbox::gen_key())),
             onion_announce: Arc::new(RwLock::new(OnionAnnounce::new(pk))),
-            friends: Arc::new(RwLock::new(Vec::new())),
+            friends: Arc::new(RwLock::new(friends)),
             nodes_to_bootstrap: Arc::new(RwLock::new(Bucket::new(None))),
             random_requests_count: Arc::new(RwLock::new(0)),
             last_nodes_req_time: Arc::new(RwLock::new(clock_now())),
@@ -486,11 +509,8 @@ impl Server {
     pub fn send_nodes_req(&self, node: &PackedNode, request_queue: &mut RequestQueue, search_pk: PublicKey) -> IoFuture<()> {
         // Check if packet is going to be sent to ourselves.
         if self.pk == node.pk {
-            return Box::new(
-                future::err(
-                    Error::new(ErrorKind::Other, "friend's pk is mine")
-                )
-            )
+            trace!("Attempt to send NodesRequest to ourselves.");
+            return Box::new(future::ok(()))
         }
 
         let payload = NodesRequestPayload {
@@ -508,6 +528,8 @@ impl Server {
     /// Send `NatPingRequest` packet to all friends and try to punch holes.
     fn send_nat_ping_req(&self, request_queue: &mut RequestQueue, friends: &mut Vec<DhtFriend>) -> IoFuture<()> {
         let futures = friends.iter_mut()
+            // we don't want to punch holes to fake friends under any circumstances
+            .skip(FAKE_FRIENDS_NUMBER)
             .filter(|friend| !friend.is_addr_known())
             .map(|friend| {
                 let addrs = friend.get_returned_addrs();
@@ -1894,7 +1916,7 @@ mod tests {
 
         let friends = alice.friends.read();
 
-        assert_eq!(friends[0].hole_punch.last_recv_ping_time, time);
+        assert_eq!(friends[FAKE_FRIENDS_NUMBER].hole_punch.last_recv_ping_time, time);
     }
 
     // handle_nat_ping_response
@@ -1914,7 +1936,7 @@ mod tests {
 
         let friends = alice.friends.read();
 
-        assert!(!friends[0].hole_punch.is_punching_done);
+        assert!(!friends[FAKE_FRIENDS_NUMBER].hole_punch.is_punching_done);
     }
 
     #[test]
@@ -2658,7 +2680,7 @@ mod tests {
                 let nat_ping_req_payload = nat_ping_req.get_payload(&friend_sk).unwrap();
                 let nat_ping_req_payload = unpack!(nat_ping_req_payload, DhtRequestPayload::NatPingRequest);
 
-                assert_eq!(alice.friends.read()[0].hole_punch.ping_id, nat_ping_req_payload.id);
+                assert_eq!(alice.friends.read()[FAKE_FRIENDS_NUMBER].hole_punch.ping_id, nat_ping_req_payload.id);
                 break;
             }
             rx = rx1;
@@ -3004,7 +3026,7 @@ mod tests {
             let clock = Clock::new_with_now(ConstNow(now + Duration::from_secs(u64::from(i))));
 
             with_default(&clock, &mut enter, |_| {
-                alice.friends.write()[0].hole_punch.last_send_ping_time = Some(clock_now());
+                alice.friends.write()[FAKE_FRIENDS_NUMBER].hole_punch.last_send_ping_time = Some(clock_now());
                 alice.dht_main_loop().wait().unwrap();
             });
 
