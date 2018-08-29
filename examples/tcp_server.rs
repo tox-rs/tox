@@ -10,12 +10,8 @@ extern crate env_logger;
 use tox::toxcore::crypto_core::*;
 use tox::toxcore::tcp::server::{Server, ServerExt};
 
-use std::time::{Duration, Instant};
-
-use futures::prelude::*;
-
 use tokio::net::TcpListener;
-use tokio::timer::Interval;
+use futures::Future;
 
 fn main() {
     env_logger::init();
@@ -35,32 +31,9 @@ fn main() {
     info!("Listening on addr={}, {:?}", addr, &server_pk);
 
     let server = Server::new();
-    let server_c = server.clone();
 
-    let future = listener.incoming()
-        .for_each(move |stream|
-            server.clone().run(stream, server_sk.clone())
-        )
-        .map_err(|err| {
-            // All tasks must have an `Error` type of `()`. This forces error
-            // handling and helps avoid silencing failures.
-            //
-            // In our example, we are only going to log the error to STDOUT.
-            println!("Server error = {:?}", err);
-        });
-
-    let interval = Duration::from_secs(1);
-    let wakeups = Interval::new(Instant::now(), interval);
-    let ping_sender = wakeups
-        .map_err(|e| println!("TCP ping sender timer error: {:?}", e))
-        .for_each(move |_instant| {
-            trace!("Tcp server ping sender wake up");
-            server_c.send_pings()
-                .map_err(|_| ())
-        });
-
-    let future = future
-        .select(ping_sender).map(|_| ()).map_err(|(e, _)| e);
+    let future = server.run(listener, server_sk)
+        .map_err(|_| ());
 
     tokio::run(future);
 }
