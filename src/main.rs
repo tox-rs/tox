@@ -157,17 +157,15 @@ fn run_tcp(cli_config: &CliConfig, dht_sk: SecretKey, tcp_onion: TcpOnion) -> im
 
     let mut tcp_server = TcpServer::new();
     tcp_server.set_udp_onion_sink(tcp_onion.tx);
+
     let tcp_server_c = tcp_server.clone();
     let tcp_server_futures = cli_config.tcp_addrs.iter().map(move |&addr| {
         let tcp_server_c = tcp_server_c.clone();
         let dht_sk = dht_sk.clone();
-        TcpListener::bind(&addr)
-            .expect("Failed to bind TCP listener")
-            .incoming()
-            .for_each(move |stream|
-                tcp_server_c.clone().run(stream, dht_sk.clone())
-            )
+        let listener = TcpListener::bind(&addr).expect("Failed to bind TCP listener");
+        tcp_server_c.run(listener, dht_sk)
     });
+
     let tcp_server_future = future::select_all(tcp_server_futures)
         .map(|_| ())
         .map_err(|(e, _, _)| e);
@@ -239,7 +237,7 @@ fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_on
             Err(ref e) => {
                 error!("packet receive error = {:?}", e);
                 // ignore packet decode errors
-                e.cause().downcast_ref::<DecodeError>().is_none()
+                e.as_fail().downcast_ref::<DecodeError>().is_none()
             }
         }
     ).then(|event: Result<_, ()>|
