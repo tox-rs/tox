@@ -27,7 +27,7 @@ pub const DHT_STATE_BUFFER_SIZE: usize =
         (
             32 + // PK size
             19   // SocketAddr maximum size
-        ) * BUCKET_DEFAULT_SIZE // num of DhtNodes per Bucket : 8
+        ) * BUCKET_DEFAULT_SIZE as usize // num of DhtNodes per Bucket : 8
     ) * KBUCKET_MAX_ENTRIES as usize; // 255
 
 impl DaemonState {

@@ -1,8 +1,7 @@
 /*!
 Structure for holding nodes.
 
-Number of nodes it can contain is set during creation. If not set (aka `None`
-is supplied), number of nodes defaults to [`BUCKET_DEFAULT_SIZE`].
+Number of nodes it can contain is set during creation.
 
 Nodes stored in `Bucket` are in [`DhtNode`](./struct.DhtNode.html)
 format.
@@ -11,8 +10,6 @@ Used in [`Kbucket`](./struct.Kbucket.html) for storing nodes close to given
 PK; and additionally used to store nodes closest to friends.
 
 [Spec definition](https://zetok.github.io/tox-spec#updating-k-buckets).
-
-[`BUCKET_DEFAULT_SIZE`]: ./constant.BUCKET_DEFAULT_SIZE.html
 */
 
 use std::cmp::{Ord, Ordering};
@@ -81,8 +78,7 @@ impl Distance for PublicKey {
 /**
 Structure for holding nodes.
 
-Number of nodes it can contain is set during creation. If not set (aka `None`
-is supplied), number of nodes defaults to [`BUCKET_DEFAULT_SIZE`].
+Number of nodes it can contain is set during creation.
 
 Nodes stored in `Bucket` are in [`DhtNode`](./struct.DhtNode.html)
 format.
@@ -91,8 +87,6 @@ Used in [`Kbucket`](./struct.Kbucket.html) for storing nodes close to given
 PK; and additionally used to store nodes closest to friends.
 
 [Spec definition](https://zetok.github.io/tox-spec#updating-k-buckets).
-
-[`BUCKET_DEFAULT_SIZE`]: ./constant.BUCKET_DEFAULT_SIZE.html
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Bucket {
@@ -103,38 +97,18 @@ pub struct Bucket {
 }
 
 /// Default number of nodes that bucket can hold.
-pub const BUCKET_DEFAULT_SIZE: usize = 8;
+pub const BUCKET_DEFAULT_SIZE: u8 = 8;
 
 impl Bucket {
     /** Create a new `Bucket` to store nodes close to the `PublicKey`.
 
-    Can hold up to `num` nodes if number is supplied. If `None` is
-    supplied, holds up to [`BUCKET_DEFAULT_SIZE`] nodes. If `Some(0)`
-    is supplied, it is treated as `None`.
-
-    [`BUCKET_DEFAULT_SIZE`]: ./constant.BUCKET_DEFAULT_SIZE.html
+    Can hold up to `capacity` nodes.
     */
-    pub fn new(num: Option<u8>) -> Self {
-        trace!(target: "Bucket", "Creating a new Bucket.");
-        match num {
-            None => {
-                trace!("Creating a new Bucket with default capacity.");
-                Bucket {
-                    capacity: BUCKET_DEFAULT_SIZE as u8,
-                    nodes: Vec::with_capacity(BUCKET_DEFAULT_SIZE),
-                }
-            },
-            Some(0) => {
-                debug!("Treating Some(0) as None");
-                Bucket::new(None)
-            },
-            Some(n) => {
-                trace!("Creating a new Bucket with capacity: {}", n);
-                Bucket {
-                    capacity: n,
-                    nodes: Vec::with_capacity(n as usize),
-                }
-            }
+    pub fn new(capacity: u8) -> Self {
+        trace!("Creating a new Bucket with capacity: {}", capacity);
+        Bucket {
+            capacity,
+            nodes: Vec::with_capacity(capacity as usize),
         }
     }
 
@@ -310,22 +284,6 @@ impl Bucket {
     }
 }
 
-/**
-Equivalent to calling [`Bucket::new()`] with `None`:
-
-```
-# use tox::toxcore::dht::kbucket::Bucket;
-assert_eq!(Bucket::new(None), Bucket::default());
-```
-
-[`Bucket::new()`]: ./struct.Bucket.html#method.new
-*/
-impl Default for Bucket {
-    fn default() -> Self {
-        Bucket::new(Some(BUCKET_DEFAULT_SIZE as u8))
-    }
-}
-
 /** K-buckets structure to hold up to
 [`KBUCKET_MAX_ENTRIES`](./constant.KBUCKET_MAX_ENTRIES.html) *
 [`BUCKET_DEFAULT_SIZE`](./constant.BUCKET_DEFAULT_SIZE.html) nodes close to
@@ -364,7 +322,7 @@ impl Kbucket {
         Kbucket {
             pk: *pk,
             is_ipv6_enabled: false,
-            buckets: vec![Bucket::new(None); KBUCKET_MAX_ENTRIES as usize]
+            buckets: vec![Bucket::new(BUCKET_DEFAULT_SIZE); KBUCKET_MAX_ENTRIES as usize]
         }
     }
 
@@ -458,7 +416,7 @@ impl Kbucket {
         trace!(target: "Kbucket", "With PK: {:?} and self: {:?}", pk, self);
         // create a new Bucket with associated pk, and add nodes that are close
         // to the PK
-        let mut bucket = Bucket::new(Some(4));
+        let mut bucket = Bucket::new(4);
         for buc in &self.buckets {
             for node in buc.nodes.iter().filter(|node| !node.is_bad()) {
                 if let Some(sock) = node.get_socket_addr(self.is_ipv6_enabled) {
@@ -605,33 +563,6 @@ mod tests {
 
     // Bucket::
 
-    // Bucket::new()
-
-    #[test]
-    fn dht_bucket_new_test() {
-        fn check_with_capacity(num: Option<u8>, expected_capacity: usize) {
-            let bucket1 = Bucket::new(num);
-            assert_eq!(expected_capacity, bucket1.capacity());
-
-            // check if always the same with same parameters
-            let bucket2 = Bucket::new(num);
-            assert_eq!(bucket1, bucket2);
-        }
-        check_with_capacity(None, BUCKET_DEFAULT_SIZE);
-        check_with_capacity(Some(0), BUCKET_DEFAULT_SIZE);
-
-        fn wrapped_check(num: u8) -> TestResult {
-            // check Some(n) where n > 0
-            if num == 0 {
-                return TestResult::discard()
-            }
-            check_with_capacity(Some(num), num as usize);
-            TestResult::passed()
-        }
-        quickcheck(wrapped_check as fn(u8) -> TestResult);
-        wrapped_check(0);
-    }
-
     // Bucket::try_add()
 
     #[test]
@@ -640,7 +571,7 @@ mod tests {
                     n4: PackedNode, n5: PackedNode, n6: PackedNode,
                     n7: PackedNode, n8: PackedNode) {
             let pk = PublicKey([0; PUBLICKEYBYTES]);
-            let mut bucket = Bucket::new(None);
+            let mut bucket = Bucket::new(BUCKET_DEFAULT_SIZE);
             assert_eq!(true, bucket.try_add(&pk, &n1));
             assert_eq!(true, bucket.try_add(&pk, &n2));
             assert_eq!(true, bucket.try_add(&pk, &n3));
@@ -668,7 +599,7 @@ mod tests {
                 return TestResult::discard()
             }
 
-            let mut bucket = Bucket::new(Some(1));
+            let mut bucket = Bucket::new(1);
 
             assert!(bucket.try_add(&pk, &n1));
             assert!(!bucket.try_add(&pk, &n2));
@@ -695,11 +626,15 @@ mod tests {
 
     #[test]
     fn dht_bucket_remove_test() {
-        fn with_nodes(num: u8, bucket_size: u8, rng_num: usize) {
+        fn with_nodes(num: u8, bucket_size: u8, rng_num: usize) -> TestResult {
+            if bucket_size == 0 {
+                return TestResult::discard()
+            }
+
             let mut rng = StdGen::new(ChaChaRng::new_unseeded(), rng_num);
 
             let base_pk = PublicKey([0; PUBLICKEYBYTES]);
-            let mut bucket = Bucket::new(Some(bucket_size));
+            let mut bucket = Bucket::new(bucket_size);
 
             let non_existent_node: PackedNode = Arbitrary::arbitrary(&mut rng);
             bucket.remove(&base_pk, &non_existent_node.pk);  // "removing" non-existent node
@@ -721,8 +656,10 @@ mod tests {
                 bucket.remove(&base_pk, &node.pk);
             }
             assert_eq!(true, bucket.is_empty());
+
+            TestResult::passed()
         }
-        quickcheck(with_nodes as fn(u8, u8, usize))
+        quickcheck(with_nodes as fn(u8, u8, usize) -> TestResult)
     }
 
 
@@ -731,13 +668,13 @@ mod tests {
     #[test]
     fn dht_bucket_is_empty_test() {
         fn with_pns(pns: Vec<PackedNode>, p1: u64, p2: u64, p3: u64, p4: u64) -> TestResult {
-            if pns.len() > BUCKET_DEFAULT_SIZE {
+            if pns.len() > BUCKET_DEFAULT_SIZE as usize {
                 // it's possible that not all nodes will be inserted if
                 // len > BUCKET_DEFAULT_SIZE
                 return TestResult::discard()
             }
 
-            let mut bucket = Bucket::new(None);
+            let mut bucket = Bucket::new(BUCKET_DEFAULT_SIZE);
             assert_eq!(true, bucket.is_empty());
 
             let pk = nums_to_pk(p1, p2, p3, p4);
@@ -805,7 +742,7 @@ mod tests {
     #[test]
     fn dht_kbucket_remove_test() {
         fn with_nodes(nodes: Vec<PackedNode>) -> TestResult {
-            if nodes.len() > BUCKET_DEFAULT_SIZE {
+            if nodes.len() > BUCKET_DEFAULT_SIZE as usize {
                 // it's possible that not all nodes will be inserted if
                 // len > BUCKET_DEFAULT_SIZE
                 return TestResult::discard()
@@ -1037,7 +974,7 @@ mod tests {
             let mut kbucket = Kbucket {
                 pk,
                 is_ipv6_enabled: false,
-                buckets: vec![Bucket::new(Some(2)); KBUCKET_MAX_ENTRIES as usize],
+                buckets: vec![Bucket::new(2); KBUCKET_MAX_ENTRIES as usize],
             };
 
             for node in pns {
@@ -1125,7 +1062,7 @@ mod tests {
     #[test]
     fn kbucket_to_packed_node_test() {
         let (pk, _) = gen_keypair();
-        let mut bucket = Bucket::new(None);
+        let mut bucket = Bucket::new(BUCKET_DEFAULT_SIZE);
 
         let pn = PackedNode {
             pk: gen_keypair().0,
@@ -1142,7 +1079,7 @@ mod tests {
     #[test]
     fn bucket_get_node_mut() {
         let (pk, _) = gen_keypair();
-        let mut bucket = Bucket::new(None);
+        let mut bucket = Bucket::new(BUCKET_DEFAULT_SIZE);
 
         let pn = PackedNode {
             pk: gen_keypair().0,
@@ -1163,13 +1100,6 @@ mod tests {
         let res_pn = bucket.get_node_mut(&pk, &get_pk);
 
         res_pn.unwrap();
-    }
-
-    #[test]
-    fn bucket_default() {
-        let bucket = Bucket::default();
-
-        assert_eq!(bucket.capacity(), BUCKET_DEFAULT_SIZE as usize);
     }
 
     #[test]
