@@ -234,17 +234,17 @@ mod tests {
                       n7: PackedNode, n8: PackedNode) {
             let pk = PublicKey([0; PUBLICKEYBYTES]);
             let mut bucket = Bucket::new(BUCKET_DEFAULT_SIZE);
-            assert_eq!(true, bucket.try_add(&pk, &n1));
-            assert_eq!(true, bucket.try_add(&pk, &n2));
-            assert_eq!(true, bucket.try_add(&pk, &n3));
-            assert_eq!(true, bucket.try_add(&pk, &n4));
-            assert_eq!(true, bucket.try_add(&pk, &n5));
-            assert_eq!(true, bucket.try_add(&pk, &n6));
-            assert_eq!(true, bucket.try_add(&pk, &n7));
-            assert_eq!(true, bucket.try_add(&pk, &n8));
+            assert_eq!(true, bucket.try_add(&pk, &n1, true));
+            assert_eq!(true, bucket.try_add(&pk, &n2, true));
+            assert_eq!(true, bucket.try_add(&pk, &n3, true));
+            assert_eq!(true, bucket.try_add(&pk, &n4, true));
+            assert_eq!(true, bucket.try_add(&pk, &n5, true));
+            assert_eq!(true, bucket.try_add(&pk, &n6, true));
+            assert_eq!(true, bucket.try_add(&pk, &n7, true));
+            assert_eq!(true, bucket.try_add(&pk, &n8, true));
 
             // updating bucket
-            assert_eq!(true, bucket.try_add(&pk, &n1));
+            assert_eq!(true, bucket.try_add(&pk, &n1, true));
         }
         quickcheck(with_nodes as fn(PackedNode, PackedNode, PackedNode, PackedNode,
                                     PackedNode, PackedNode, PackedNode, PackedNode));

@@ -99,8 +99,8 @@ mod tests {
         let pk = gen_keypair().0;
         let mut friend = DhtFriend::new(pk);
 
-        assert!(friend.close_nodes.try_add(&pk, &PackedNode::new("192.168.1.1:12345".parse().unwrap(), &gen_keypair().0)));
-        assert!(friend.close_nodes.try_add(&pk, &PackedNode::new("192.168.1.2:12345".parse().unwrap(), &gen_keypair().0)));
+        assert!(friend.close_nodes.try_add(&pk, &PackedNode::new("192.168.1.1:12345".parse().unwrap(), &gen_keypair().0), true));
+        assert!(friend.close_nodes.try_add(&pk, &PackedNode::new("192.168.1.2:12345".parse().unwrap(), &gen_keypair().0), true));
 
         assert!(!friend.is_addr_known())
     }
@@ -110,10 +110,10 @@ mod tests {
         let pk = gen_keypair().0;
         let mut friend = DhtFriend::new(pk);
 
-        assert!(friend.close_nodes.try_add(&pk, &PackedNode::new("192.168.1.1:12345".parse().unwrap(), &gen_keypair().0)));
-        assert!(friend.close_nodes.try_add(&pk, &PackedNode::new("192.168.1.2:12345".parse().unwrap(), &gen_keypair().0)));
+        assert!(friend.close_nodes.try_add(&pk, &PackedNode::new("192.168.1.1:12345".parse().unwrap(), &gen_keypair().0), true));
+        assert!(friend.close_nodes.try_add(&pk, &PackedNode::new("192.168.1.2:12345".parse().unwrap(), &gen_keypair().0), true));
 
-        assert!(friend.close_nodes.try_add(&pk, &PackedNode::new("192.168.1.3:12345".parse().unwrap(), &pk)));
+        assert!(friend.close_nodes.try_add(&pk, &PackedNode::new("192.168.1.3:12345".parse().unwrap(), &pk), true));
 
         assert!(friend.is_addr_known())
     }
@@ -135,7 +135,7 @@ mod tests {
         ];
 
         for (&node, &addr) in nodes.iter().zip(addrs.iter()) {
-            friend.close_nodes.try_add(&pk, &node);
+            friend.close_nodes.try_add(&pk, &node, true);
             let dht_node = friend.close_nodes.get_node_mut(&pk, &node.pk).unwrap();
             dht_node.update_returned_addr(addr);
         }
@@ -167,7 +167,7 @@ mod tests {
         ];
 
         for (&node, &addr) in nodes.iter().zip(addrs.iter()) {
-            friend.close_nodes.try_add(&pk, &node);
+            friend.close_nodes.try_add(&pk, &node, true);
             let dht_node = friend.close_nodes.get_node_mut(&pk, &node.pk).unwrap();
             dht_node.update_returned_addr(addr);
         }

@@ -128,11 +128,11 @@ impl Bucket {
     - If the [`PackedNode`] with given `PublicKey` is already in the `Bucket`,
       the [`PackedNode`] is updated (since its `SocketAddr` can differ).
     - If bucket is not full, node is appended.
-    - If bucket is full, node's closeness is compared to nodes already
-      in bucket, and if it's closer than some node, it prepends that
-      node, and last node is removed from the list.
-    - If the node being added is farther away than the nodes in the bucket,
-      it isn't added and `false` is returned.
+    - If bucket is full and `evict` is `true`, node's closeness is compared to
+      nodes already in bucket, and if it's closer than some node, it prepends
+      that node, and last node is removed from the list.
+    - If the node being added is farther away than the nodes in the bucket or
+      `evict` is `false`, it isn't added and `false` is returned.
 
     Note that you must pass the same `base_pk` each call or the internal
     state will be undefined.
@@ -141,9 +141,7 @@ impl Bucket {
 
     [`PackedNode`]: ../packed_node/struct.PackedNode.html
     */
-    pub fn try_add(&mut self, base_pk: &PublicKey, new_node: &PackedNode)
-        -> bool
-    {
+    pub fn try_add(&mut self, base_pk: &PublicKey, new_node: &PackedNode, evict: bool) -> bool {
         debug!(target: "Bucket", "Trying to add PackedNode.");
         trace!(target: "Bucket", "With bucket: {:?}; PK: {:?} and new node: {:?}",
             self, base_pk, new_node);
@@ -164,8 +162,10 @@ impl Bucket {
                 }
                 true
             },
-            Err(index) if index == self.nodes.len() => {
+            Err(index) if !evict || index == self.nodes.len() => {
                 // index is pointing past the end
+                // we are not going to evict the farthest node or the current
+                // node is the farthest one
                 if self.is_full() {
                     match self.nodes.iter().rposition(|n| n.is_bad()) {
                         Some(index) => {
@@ -178,7 +178,7 @@ impl Bucket {
                         },
                         None => {
                             debug!(target: "Bucket",
-                                "Node is too distant to add to the bucket.");
+                                "Node can't be added to the bucket.");
                             false
                         },
                     }
@@ -186,13 +186,14 @@ impl Bucket {
                     // distance to the PK was bigger than the other keys, but
                     // there's still free space in the bucket for a node
                     debug!(target: "Bucket",
-                        "Node inserted at the end of the bucket.");
-                    self.nodes.push((*new_node).into());
+                        "Node inserted inside the bucket.");
+                    self.nodes.insert(index, (*new_node).into());
                     true
                 }
             },
             Err(index) => {
                 // index is pointing inside the list
+                // we are going to evict the farthest node if the bucket is full
                 if self.is_full() {
                     debug!(target: "Bucket",
                         "No free space left in the bucket, the last node removed.");
@@ -265,15 +266,22 @@ impl Bucket {
     [`Bucket`]: ./struct.Bucket.html
     [`PackedNode`]: ./struct.PackedNode.html
     */
-    pub fn can_add(&self, base_pk: &PublicKey, new_node: &PackedNode) -> bool { // TODO: synchronize result with try_add?
+    pub fn can_add(&self, base_pk: &PublicKey, new_node: &PackedNode, evict: bool) -> bool { // TODO: synchronize result with try_add?
         match self.nodes.binary_search_by(|n| base_pk.distance(&n.pk, &new_node.pk)) {
-            Ok(index) => // if node is bad then we'd want to update it's address
+            Ok(index) =>
+                // if node is bad then we'd want to update it's address
                 self.nodes[index].is_bad() ||
                     self.nodes[index].assoc4.saddr.map(SocketAddr::V4) != Some(new_node.saddr) &&
                         self.nodes[index].assoc6.saddr.map(SocketAddr::V6) != Some(new_node.saddr),
-            Err(index) if index == self.nodes.len() => // can't find node in bucket
+            Err(index) if !evict || index == self.nodes.len() =>
+                // can't find node in the bucket
+                // we are not going to evict the farthest node or the current
+                // node is the farthest one
                 !self.is_full() || self.nodes.iter().any(|n| n.is_bad()),
-            Err(_index) => true, // node is not found in bucket, so can add node
+            Err(_index) =>
+                // can't find node in the bucket
+                // we are going to evict the farthest node if the bucket is full
+                true,
         }
     }
 
@@ -382,7 +390,7 @@ impl Kbucket {
         trace!(target: "Kbucket", "With PN: {:?}; and self: {:?}", node, self);
 
         match self.bucket_index(&node.pk) {
-            Some(index) => self.buckets[index].try_add(&self.pk, node),
+            Some(index) => self.buckets[index].try_add(&self.pk, node, /* evict */ false),
             None => {
                 trace!("Failed to add node: {:?}", node);
                 false
@@ -427,7 +435,7 @@ impl Kbucket {
                     continue;
                 }
                 if let Some(pn) = node.clone().to_packed_node(self.is_ipv6_enabled) {
-                    bucket.try_add(pk, &pn);
+                    bucket.try_add(pk, &pn, /* evict */ true);
                 }
             }
         }
@@ -463,7 +471,7 @@ impl Kbucket {
         match self.bucket_index(&new_node.pk) {
             None => false,
             Some(i) =>
-                self.buckets[i].can_add(&self.pk, new_node),
+                self.buckets[i].can_add(&self.pk, new_node, /* evict */ false),
         }
     }
 
@@ -572,17 +580,17 @@ mod tests {
                     n7: PackedNode, n8: PackedNode) {
             let pk = PublicKey([0; PUBLICKEYBYTES]);
             let mut bucket = Bucket::new(BUCKET_DEFAULT_SIZE);
-            assert_eq!(true, bucket.try_add(&pk, &n1));
-            assert_eq!(true, bucket.try_add(&pk, &n2));
-            assert_eq!(true, bucket.try_add(&pk, &n3));
-            assert_eq!(true, bucket.try_add(&pk, &n4));
-            assert_eq!(true, bucket.try_add(&pk, &n5));
-            assert_eq!(true, bucket.try_add(&pk, &n6));
-            assert_eq!(true, bucket.try_add(&pk, &n7));
-            assert_eq!(true, bucket.try_add(&pk, &n8));
+            assert_eq!(true, bucket.try_add(&pk, &n1, true));
+            assert_eq!(true, bucket.try_add(&pk, &n2, true));
+            assert_eq!(true, bucket.try_add(&pk, &n3, true));
+            assert_eq!(true, bucket.try_add(&pk, &n4, true));
+            assert_eq!(true, bucket.try_add(&pk, &n5, true));
+            assert_eq!(true, bucket.try_add(&pk, &n6, true));
+            assert_eq!(true, bucket.try_add(&pk, &n7, true));
+            assert_eq!(true, bucket.try_add(&pk, &n8, true));
 
             // updating bucket
-            assert_eq!(true, bucket.try_add(&pk, &n1));
+            assert_eq!(true, bucket.try_add(&pk, &n1, true));
 
             // TODO: check whether adding a closest node will always work
         }
@@ -601,11 +609,11 @@ mod tests {
 
             let mut bucket = Bucket::new(1);
 
-            assert!(bucket.try_add(&pk, &n1));
-            assert!(!bucket.try_add(&pk, &n2));
+            assert!(bucket.try_add(&pk, &n1, true));
+            assert!(!bucket.try_add(&pk, &n2, true));
 
             // updating node
-            assert!(bucket.try_add(&pk, &n1));
+            assert!(bucket.try_add(&pk, &n1, true));
 
             let mut enter = tokio_executor::enter().unwrap();
             let clock = Clock::new_with_now(ConstNow(
@@ -614,7 +622,7 @@ mod tests {
 
             // replacing bad node
             with_default(&clock, &mut enter, |_| {
-                assert!(bucket.try_add(&pk, &n2));
+                assert!(bucket.try_add(&pk, &n2, true));
             });
 
             TestResult::passed()
@@ -642,7 +650,7 @@ mod tests {
 
             let nodes = vec![Arbitrary::arbitrary(&mut rng); num as usize];
             for node in &nodes {
-                bucket.try_add(&base_pk, node);
+                bucket.try_add(&base_pk, node, true);
             }
             if num == 0 {
                 // nothing was added
@@ -679,7 +687,7 @@ mod tests {
 
             let pk = nums_to_pk(p1, p2, p3, p4);
             for n in &pns {
-                assert!(bucket.try_add(&pk, n));
+                assert!(bucket.try_add(&pk, n, true));
             }
             if !pns.is_empty() {
                 assert_eq!(false, bucket.is_empty());
@@ -1069,7 +1077,7 @@ mod tests {
             saddr: "127.0.0.1:33445".parse().unwrap(),
         };
 
-        assert!(bucket.try_add(&pk,&pn));
+        assert!(bucket.try_add(&pk, &pn, true));
 
         let res_pn = bucket.to_packed(false);
 
@@ -1086,7 +1094,7 @@ mod tests {
             saddr: "127.0.0.1:33445".parse().unwrap(),
         };
 
-        assert!(bucket.try_add(&pk,&pn));
+        assert!(bucket.try_add(&pk, &pn, true));
 
         let get_pk = gen_keypair().0;
 
@@ -1095,7 +1103,7 @@ mod tests {
             saddr: "127.0.0.1:33445".parse().unwrap(),
         };
 
-        assert!(bucket.try_add(&pk,&pn));
+        assert!(bucket.try_add(&pk, &pn, true));
 
         let res_pn = bucket.get_node_mut(&pk, &get_pk);
 
