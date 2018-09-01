@@ -781,7 +781,7 @@ impl Server {
             let pn = PackedNode::new(addr, &packet.pk);
             close_nodes.try_add(&pn);
             for friend in friends.iter_mut() {
-                friend.close_nodes.try_add(&friend.pk, &pn, /* evict */ true);
+                friend.try_add_to_close(&pn);
             }
 
             Box::new( future::ok(()) )
@@ -842,7 +842,7 @@ impl Server {
             let pn = PackedNode::new(addr, &packet.pk);
             close_nodes.try_add(&pn);
             for friend in friends.iter_mut() {
-                friend.close_nodes.try_add(&friend.pk, &pn, /* evict */ true);
+                friend.try_add_to_close(&pn);
             }
 
             // Process nodes from NodesResponse
@@ -852,7 +852,7 @@ impl Server {
                 }
 
                 for friend in friends.iter_mut() {
-                    if friend.close_nodes.can_add(&friend.pk, node, /* evict */ true) {
+                    if friend.can_add_to_close(node) {
                         friend.nodes_to_bootstrap.try_add(&friend.pk, node, /* evict */ true);
                     }
                 }
@@ -1560,7 +1560,7 @@ mod tests {
         alice.add_friend(bob_pk);
 
         let packed_node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &bob_pk);
-        assert!(alice.friends.write()[FAKE_FRIENDS_NUMBER].close_nodes.try_add(&bob_pk, &packed_node, true));
+        assert!(alice.friends.write()[FAKE_FRIENDS_NUMBER].try_add_to_close(&packed_node));
 
         let req_payload = NodesRequestPayload { pk: bob_pk, id: 42 };
         let nodes_req = Packet::NodesRequest(NodesRequest::new(&precomp, &bob_pk, req_payload));
@@ -2679,7 +2679,7 @@ mod tests {
         {
             let friends = &mut alice.friends.write();
             for node in &nodes {
-                friends[FAKE_FRIENDS_NUMBER].close_nodes.try_add(&friend_pk, &node, true);
+                friends[FAKE_FRIENDS_NUMBER].try_add_to_close(&node);
                 let dht_node = friends[FAKE_FRIENDS_NUMBER].close_nodes.get_node_mut(&friend_pk, &node.pk).unwrap();
                 dht_node.update_returned_addr(node.saddr);
             }
@@ -2989,10 +2989,10 @@ mod tests {
         alice.add_friend(friend_pk);
 
         let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &node_pk);
-        assert!(alice.friends.write()[FAKE_FRIENDS_NUMBER].close_nodes.try_add(&friend_pk, &pn, true));
+        assert!(alice.friends.write()[FAKE_FRIENDS_NUMBER].try_add_to_close(&pn));
 
         let pn = PackedNode::new("127.0.0.1:33445".parse().unwrap(), &bob_pk);
-        assert!(alice.friends.write()[FAKE_FRIENDS_NUMBER].close_nodes.try_add(&friend_pk, &pn, true));
+        assert!(alice.friends.write()[FAKE_FRIENDS_NUMBER].try_add_to_close(&pn));
 
         alice.dht_main_loop().wait().unwrap();
 
@@ -3021,7 +3021,7 @@ mod tests {
         alice.add_friend(friend_pk);
 
         let pn = PackedNode::new("127.0.0.1:33445".parse().unwrap(), &bob_pk);
-        assert!(alice.friends.write()[FAKE_FRIENDS_NUMBER].close_nodes.try_add(&friend_pk, &pn, true));
+        assert!(alice.friends.write()[FAKE_FRIENDS_NUMBER].try_add_to_close(&pn));
         // Set last_ping_req_time so that only random request will be sent
         alice.friends.write()[FAKE_FRIENDS_NUMBER].close_nodes.nodes[0].assoc4.last_ping_req_time = Some(clock_now());
         alice.friends.write()[FAKE_FRIENDS_NUMBER].close_nodes.nodes[0].assoc6.last_ping_req_time = Some(clock_now());
