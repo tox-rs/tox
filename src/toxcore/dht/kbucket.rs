@@ -167,7 +167,10 @@ impl Bucket {
                 // we are not going to evict the farthest node or the current
                 // node is the farthest one
                 if self.is_full() {
-                    match self.nodes.iter().rposition(|n| n.is_bad()) {
+                    let index = self.nodes.iter().rposition(|n| n.is_discarded()).or_else(||
+                        self.nodes.iter().rposition(|n| n.is_bad())
+                    );
+                    match index {
                         Some(index) => {
                             debug!(target: "Bucket",
                                 "No free space left in the bucket, the last bad node removed.");
