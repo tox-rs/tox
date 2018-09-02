@@ -39,7 +39,12 @@ pub struct SockAndTime<T: ToSocketAddrs + Copy> {
 
 impl<T: ToSocketAddrs + Copy> SockAndTime<T> {
     /// Create SockAndTime object
-    pub fn new(saddr: Option<T>, last_resp_time: Option<Instant>) -> Self {
+    pub fn new(saddr: Option<T>) -> Self {
+        let last_resp_time = if saddr.is_some() {
+            Some(clock_now())
+        } else {
+            None
+        };
         SockAndTime {
             saddr,
             last_resp_time,
@@ -110,16 +115,10 @@ impl DhtNode {
             },
         };
 
-        let (last_resp_time_v4, last_resp_time_v6) = if saddr_v4.is_some() {
-            (Some(clock_now()), None)
-        } else {
-            (None, Some(clock_now()))
-        };
-
         DhtNode {
             pk: pn.pk,
-            assoc4: SockAndTime::new(saddr_v4, last_resp_time_v4),
-            assoc6: SockAndTime::new(saddr_v6, last_resp_time_v6),
+            assoc4: SockAndTime::new(saddr_v4),
+            assoc6: SockAndTime::new(saddr_v6),
         }
     }
 
