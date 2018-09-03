@@ -54,6 +54,8 @@ pub const NODES_REQ_INTERVAL: u64 = 20;
 pub const PING_TIMEOUT: u64 = 5;
 /// Maximum newly announced nodes to ping per `TIME_TO_PING` seconds.
 pub const MAX_TO_PING: u8 = 32;
+/// Maximum nodes to send `NodesRequest` packet.
+pub const MAX_TO_BOOTSTRAP: u8 = 8;
 /// How often in seconds to ping newly announced nodes.
 pub const TIME_TO_PING: u64 = 2;
 /// How often in seconds to ping initial bootstrap nodes.
@@ -187,10 +189,10 @@ impl Server {
             onion_symmetric_key: Arc::new(RwLock::new(secretbox::gen_key())),
             onion_announce: Arc::new(RwLock::new(OnionAnnounce::new(pk))),
             friends: Arc::new(RwLock::new(friends)),
-            nodes_to_bootstrap: Arc::new(RwLock::new(Bucket::new(None))),
+            nodes_to_bootstrap: Arc::new(RwLock::new(Bucket::new(MAX_TO_BOOTSTRAP))),
             random_requests_count: Arc::new(RwLock::new(0)),
             last_nodes_req_time: Arc::new(RwLock::new(clock_now())),
-            nodes_to_ping: Arc::new(RwLock::new(Bucket::new(Some(MAX_TO_PING)))),
+            nodes_to_ping: Arc::new(RwLock::new(Bucket::new(MAX_TO_PING))),
             tox_core_version: 0,
             motd: Vec::new(),
             tcp_onion_sink: None,
@@ -383,7 +385,7 @@ impl Server {
     fn send_pings(&self) -> IoFuture<()> {
         let nodes_to_ping = mem::replace(
             &mut *self.nodes_to_ping.write(),
-            Bucket::new(Some(MAX_TO_PING))
+            Bucket::new(MAX_TO_PING)
         );
 
         if nodes_to_ping.nodes.is_empty() {
@@ -433,7 +435,7 @@ impl Server {
     /// nodes lists.
     fn ping_nodes_to_bootstrap(&self, request_queue: &mut RequestQueue, nodes_to_bootstrap: &mut Bucket, pk: PublicKey) -> IoFuture<()> {
         let capacity = nodes_to_bootstrap.capacity;
-        let nodes_to_bootstrap = mem::replace(nodes_to_bootstrap, Bucket::new(Some(capacity)));
+        let nodes_to_bootstrap = mem::replace(nodes_to_bootstrap, Bucket::new(capacity));
 
         let futures = nodes_to_bootstrap.nodes
             .iter()
@@ -769,7 +771,7 @@ impl Server {
 
         let close_nodes = close_nodes.get_closest(&payload.pk, IsGlobal::is_global(&addr.ip()));
 
-        let mut collected_bucket = Bucket::new(Some(4));
+        let mut collected_bucket = Bucket::new(4);
 
         close_nodes.iter()
             .for_each(|node| {

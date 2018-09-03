@@ -215,7 +215,7 @@ mod tests {
     use super::*;
     use quickcheck::quickcheck;
 
-    use toxcore::dht::kbucket::Bucket;
+    use toxcore::dht::kbucket::*;
 
     #[test]
     fn dht_node_clonable() {
@@ -233,7 +233,7 @@ mod tests {
                       n4: PackedNode, n5: PackedNode, n6: PackedNode,
                       n7: PackedNode, n8: PackedNode) {
             let pk = PublicKey([0; PUBLICKEYBYTES]);
-            let mut bucket = Bucket::new(None);
+            let mut bucket = Bucket::new(BUCKET_DEFAULT_SIZE);
             assert_eq!(true, bucket.try_add(&pk, &n1));
             assert_eq!(true, bucket.try_add(&pk, &n2));
             assert_eq!(true, bucket.try_add(&pk, &n3));

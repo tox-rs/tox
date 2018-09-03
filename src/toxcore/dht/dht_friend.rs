@@ -41,10 +41,10 @@ impl DhtFriend {
     pub fn new(pk: PublicKey) -> Self {
         DhtFriend {
             pk,
-            close_nodes: Bucket::new(Some(FRIEND_CLOSE_NODES_COUNT)),
+            close_nodes: Bucket::new(FRIEND_CLOSE_NODES_COUNT),
             last_nodes_req_time: clock_now(),
             random_requests_count: 0,
-            nodes_to_bootstrap: Bucket::new(Some(FRIEND_BOOTSTRAP_NODES_COUNT)),
+            nodes_to_bootstrap: Bucket::new(FRIEND_BOOTSTRAP_NODES_COUNT),
             hole_punch: HolePunching::new(),
         }
     }
