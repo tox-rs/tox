@@ -429,7 +429,6 @@ mod tests {
     use tokio_executor;
     use tokio_timer::clock::*;
 
-    use toxcore::time::ConstNow;
     use toxcore::time::*;
 
     #[test]

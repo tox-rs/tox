@@ -130,6 +130,12 @@ mod tests {
     use toxcore::tcp::handshake::make_client_handshake;
     use toxcore::tcp::packet::{Packet, PingRequest, PongResponse};
 
+    use tokio_executor;
+    use tokio_timer::clock::*;
+
+    use toxcore::time::*;
+    use toxcore::tcp::server::client::*;
+
     #[test]
     fn run_connection() {
         let (client_pk, client_sk) = gen_keypair();
@@ -189,6 +195,10 @@ mod tests {
         let listener = TcpListener::bind(&addr).unwrap();
         let server = Server::new().run(listener, server_sk);
 
+        let now = Instant::now();
+        let mut_now = MutNow::new(now);
+        let mut_now_c = mut_now.clone();
+
         let client = TcpStream::connect(&addr)
             .and_then(move |socket| {
                 make_client_handshake(socket, client_pk, client_sk, server_pk)
@@ -201,15 +211,16 @@ mod tests {
                 });
                 to_server.send(packet).map(|_| from_server)
             })
-            .and_then(|from_server| {
+            .and_then(move |from_server| {
                 from_server.into_future()
-                    .map(|(packet, from_server_c)| {
+                    .map(move |(packet, from_server_c)| {
                         assert_eq!(packet.unwrap(), Packet::PongResponse(PongResponse {
                             ping_id: 42
                         }));
+                        // Set time when the client should be pinged
+                        mut_now_c.set(now + Duration::from_secs(TCP_PING_FREQUENCY + 1));
                         from_server_c
                     })
-                    .map(|from_server_c| from_server_c)
                     .map_err(|(e, _)| e)
             })
             .and_then(|from_server| {
@@ -218,8 +229,7 @@ mod tests {
                         let _ping_packet = unpack!(packet.unwrap(), Packet::PingRequest);
                     })
                     .map_err(|(e, _)| e)
-            })
-            .map(|_| ());
+            });
 
         let both = server.select(client)
             .then(|r| {
@@ -228,6 +238,10 @@ mod tests {
             })
             .map(|_| ()).map_err(|_| ());
 
-        tokio::run(both);
+        let mut enter = tokio_executor::enter().unwrap();
+        let clock = Clock::new_with_now(mut_now);
+        with_default(&clock, &mut enter, |_| {
+            tokio::run(both);
+        });
     }
 }

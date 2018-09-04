@@ -62,8 +62,8 @@ impl Client {
             tx,
             links: [None; 240],
             ping_id: 0,
-            last_pinged: Instant::now(),
-            last_pong_resp: Instant::now()
+            last_pinged: clock_now(),
+            last_pong_resp: clock_now()
         }
     }
 
