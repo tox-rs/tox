@@ -96,6 +96,30 @@ impl PackedNode {
         PackedNode { saddr, pk: *pk }
     }
 
+    /// to_bytes for TCP
+    pub fn to_tcp_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_if_else!(self.saddr.is_ipv4(), gen_be_u8!(130), gen_be_u8!(138)) >>
+            gen_call!(|buf, addr| IpAddr::to_bytes(addr, buf), &self.saddr.ip()) >>
+            gen_be_u16!(self.saddr.port()) >>
+            gen_slice!(self.pk.as_ref())
+        )
+    }
+
+    named!(
+        #[allow(unused_variables)]
+        #[doc = "from_bytes for TCP."],
+        pub from_tcp_bytes<PackedNode>, do_parse!(
+            addr: switch!(le_u8,
+                130  => map!(Ipv4Addr::from_bytes, IpAddr::V4) |
+                138 => map!(Ipv6Addr::from_bytes, IpAddr::V6)
+            ) >>
+            port: be_u16 >>
+            saddr: value!(SocketAddr::new(addr, port)) >>
+            pk: call!(PublicKey::from_bytes) >>
+            (PackedNode { saddr, pk })
+        ));
+
     /// Get an IP type from the `PackedNode`.
     pub fn ip_type(&self) -> u8 {
         trace!(target: "PackedNode", "Getting IP type from PackedNode.");
