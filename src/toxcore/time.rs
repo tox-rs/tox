@@ -1,7 +1,11 @@
 //! Functions to work with time
 
+#[cfg(test)]
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, Instant, UNIX_EPOCH};
 
+#[cfg(test)]
+use parking_lot::RwLock;
 #[cfg(test)]
 use tokio_timer::clock;
 #[cfg(test)]
@@ -43,6 +47,35 @@ pub struct ConstNow(pub Instant);
 impl Now for ConstNow {
     fn now(&self) -> Instant {
         self.0
+    }
+}
+
+/// Mutable mock for `tokio_timer::clock::now()`
+#[cfg(test)]
+#[derive(Clone)]
+pub struct MutNow {
+    instant: Arc<RwLock<Instant>>,
+}
+
+#[cfg(test)]
+impl MutNow {
+    /// Create new `MutNow`.
+    pub fn new(instant: Instant) -> MutNow {
+        MutNow {
+            instant: Arc::new(RwLock::new(instant)),
+        }
+    }
+
+    /// Set new `Instant` to return.
+    pub fn set(&self, instant: Instant) {
+        *self.instant.write() = instant;
+    }
+}
+
+#[cfg(test)]
+impl Now for MutNow {
+    fn now(&self) -> Instant {
+        *self.instant.read()
     }
 }
 
