@@ -27,7 +27,6 @@ extern crate cookie_factory;
 extern crate sodiumoxide;
 
 #[cfg(test)]
-#[macro_use]
 extern crate quickcheck;
 
 extern crate tokio;
