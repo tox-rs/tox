@@ -1,9 +1,9 @@
-/*! IdAlive struct
+/*! Alive struct
 */
 
 use toxcore::binary_io::*;
 
-/** IdAlive is a struct that holds nothing.
+/** Alive is a struct that holds nothing.
 
 This packet is used to check if the friend is online by sending this packet
 every 8 seconds using net_crypto connection.
@@ -12,16 +12,16 @@ and destroyed.
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct IdAlive;
+pub struct Alive;
 
-impl FromBytes for IdAlive {
-    named!(from_bytes<IdAlive>, do_parse!(
+impl FromBytes for Alive {
+    named!(from_bytes<Alive>, do_parse!(
         tag!("\x10") >>
-        (IdAlive)
+        (Alive)
     ));
 }
 
-impl ToBytes for IdAlive {
+impl ToBytes for Alive {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x10)
@@ -34,8 +34,8 @@ mod tests {
     use super::*;
 
     encode_decode_test!(
-        id_alive_encode_decode,
-        IdAlive
+        alive_encode_decode,
+        Alive
     );
 
 }
