@@ -137,7 +137,11 @@ impl Bucket {
     Note that you must pass the same `base_pk` each call or the internal
     state will be undefined.
 
-    Returns `true` if node was added, `false` otherwise.
+    Returns `true` if node was added or updated, `false` otherwise.
+
+    Note that the result of this function doesn't always match the result of
+    `can_add` function. If node is already in the [`Bucket`], `can_add` will
+    return `true` only when it has different address or is in a bad state.
 
     [`PackedNode`]: ../packed_node/struct.PackedNode.html
     */
@@ -259,17 +263,26 @@ impl Bucket {
     }
 
     /**
-    Naive check whether a [`PackedNode`] can be added to the `Bucket`.
+    Check whether a [`PackedNode`] can be added to the `Bucket`.
 
-    Returns `true` if [`Bucket`] where node could be placed is not full
-    and node is not already in the [`Bucket`].
+    Returns `true` in one of the next conditions:
+      - [`Bucket`] where node could be placed is not full and node is not
+        already in the [`Bucket`]
+      - [`Bucket`] where node could be placed is full but node can evict a
+        farther node
+      - Node is already in the [`Bucket`] but has different address or in a bad
+        state
 
     Otherwise `false` is returned.
+
+    Note that the result of this function doesn't always match the result of
+    `try_add` function. `try_add` will always return `true` when node is already
+    in the [`Bucket`].
 
     [`Bucket`]: ./struct.Bucket.html
     [`PackedNode`]: ./struct.PackedNode.html
     */
-    pub fn can_add(&self, base_pk: &PublicKey, new_node: &PackedNode, evict: bool) -> bool { // TODO: synchronize result with try_add?
+    pub fn can_add(&self, base_pk: &PublicKey, new_node: &PackedNode, evict: bool) -> bool {
         match self.nodes.binary_search_by(|n| base_pk.distance(&n.pk, &new_node.pk)) {
             Ok(index) =>
                 // if node is bad then we'd want to update it's address
