@@ -488,15 +488,20 @@ impl Kbucket {
     }
 
     /// Create iterator over [`DhtNode`](./struct.DhtNode.html)s in `Kbucket`.
+    /// Nodes that this iterator produces are sorted by distance to a base
+    /// `PublicKey` (in ascending order).
     pub fn iter(&self) -> impl Iterator<Item = &DhtNode> {
         self.buckets.iter()
+            .rev()
             .flat_map(|bucket| bucket.nodes.iter())
     }
 
     /// Create mutable iterator over [`DhtNode`](./struct.DhtNode.html)s in
-    /// `Kbucket`.
+    /// `Kbucket`. Nodes that this iterator produces are sorted by distance to a
+    /// base `PublicKey` (in ascending order).
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut DhtNode> {
         self.buckets.iter_mut()
+            .rev()
             .flat_map(|bucket| bucket.nodes.iter_mut())
     }
 
