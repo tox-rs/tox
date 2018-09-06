@@ -220,8 +220,15 @@ impl Server {
     }
 
     /// Add a friend.
-    pub fn add_friend(&self, friend: DhtFriend) {
+    /// `node_to_bootstrap` of new friend is filled with close nodes for fast bootstrapping.
+    pub fn add_friend(&self, mut friend: DhtFriend) {
         let mut friends = self.friends.write();
+
+        let close_nodes = self.close_nodes.read().get_closest(&friend.pk, true);
+        close_nodes.iter()
+            .for_each(|node| {
+                friend.nodes_to_bootstrap.try_add(&friend.pk,node);
+            });
 
         friends.push(friend);
     }
