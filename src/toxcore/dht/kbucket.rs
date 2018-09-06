@@ -116,6 +116,12 @@ impl Bucket {
         self.nodes.binary_search_by(|n| base_pk.distance(&n.pk, pk)).ok()
     }
 
+    /// Get reference to a `DhtNode` by it's `PublicKey`.
+    pub fn get_node(&self, base_pk: &PublicKey, pk: &PublicKey) -> Option<&DhtNode> {
+        self.find(base_pk, pk)
+            .map(move |node_index| &self.nodes[node_index])
+    }
+
     /// Get mutable reference to a `DhtNode` by it's `PublicKey`.
     pub fn get_node_mut(&mut self, base_pk: &PublicKey, pk: &PublicKey) -> Option<&mut DhtNode> {
         self.find(base_pk, pk)
@@ -126,7 +132,7 @@ impl Bucket {
     Try to add [`PackedNode`] to the bucket.
 
     - If the [`PackedNode`] with given `PublicKey` is already in the `Bucket`,
-      the [`PackedNode`] is updated (since its `SocketAddr` can differ).
+      the [`DhtNode`] is updated (since its `SocketAddr` can differ).
     - If bucket is not full, node is appended.
     - If bucket is full and `evict` is `true`, node's closeness is compared to
       nodes already in bucket, and if it's closer than some node, it prepends
@@ -143,6 +149,7 @@ impl Bucket {
     `can_add` function. If node is already in the [`Bucket`], `can_add` will
     return `true` only when it has different address or is in a bad state.
 
+    [`DhtNode`]: ./struct.DhtNode.html
     [`PackedNode`]: ../packed_node/struct.PackedNode.html
     */
     pub fn try_add(&mut self, base_pk: &PublicKey, new_node: &PackedNode, evict: bool) -> bool {
@@ -222,14 +229,13 @@ impl Bucket {
 
     If there's no `DhtNode` with given PK, nothing is being done.
     */
-    pub fn remove(&mut self, base_pk: &PublicKey, node_pk: &PublicKey) {
+    pub fn remove(&mut self, base_pk: &PublicKey, node_pk: &PublicKey) -> Option<DhtNode> {
         trace!(target: "Bucket", "Removing DhtNode with PK: {:?}", node_pk);
         match self.nodes.binary_search_by(|n| base_pk.distance(&n.pk, node_pk)) {
-            Ok(index) => {
-                self.nodes.remove(index);
-            },
+            Ok(index) => Some(self.nodes.remove(index)),
             Err(_) => {
                 trace!("No DhtNode to remove with PK: {:?}", node_pk);
+                None
             }
         }
     }
@@ -299,6 +305,20 @@ impl Bucket {
                 // we are going to evict the farthest node if the bucket is full
                 true,
         }
+    }
+
+    /// Create iterator over [`DhtNode`](./struct.DhtNode.html)s in `Kbucket`.
+    /// Nodes that this iterator produces are sorted by distance to a base
+    /// `PublicKey` (in ascending order).
+    pub fn iter(&self) -> impl Iterator<Item = &DhtNode> {
+        self.nodes.iter()
+    }
+
+    /// Create mutable iterator over [`DhtNode`](./struct.DhtNode.html)s in
+    /// `Kbucket`. Nodes that this iterator produces are sorted by distance to a
+    /// base `PublicKey` (in ascending order).
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut DhtNode> {
+        self.nodes.iter_mut()
     }
 
     /// Get vector of `PackedNode`s that `Bucket` has.
@@ -416,13 +436,16 @@ impl Kbucket {
 
     /// Remove [`DhtNode`](./struct.DhtNode.html) with given PK from the
     /// `Kbucket`.
-    pub fn remove(&mut self, node_pk: &PublicKey) {
+    pub fn remove(&mut self, node_pk: &PublicKey) -> Option<DhtNode> {
         trace!(target: "Kbucket", "Removing PK: {:?} from Kbucket: {:?}", node_pk,
                 self);
 
         match self.bucket_index(node_pk) {
             Some(index) => self.buckets[index].remove(&self.pk, node_pk),
-            None => trace!("Failed to remove PK: {:?}", node_pk)
+            None => {
+                trace!("Failed to remove PK: {:?}", node_pk);
+                None
+            },
         }
     }
 
@@ -506,7 +529,7 @@ impl Kbucket {
     pub fn iter(&self) -> impl Iterator<Item = &DhtNode> {
         self.buckets.iter()
             .rev()
-            .flat_map(|bucket| bucket.nodes.iter())
+            .flat_map(|bucket| bucket.iter())
     }
 
     /// Create mutable iterator over [`DhtNode`](./struct.DhtNode.html)s in
@@ -515,7 +538,7 @@ impl Kbucket {
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut DhtNode> {
         self.buckets.iter_mut()
             .rev()
-            .flat_map(|bucket| bucket.nodes.iter_mut())
+            .flat_map(|bucket| bucket.iter_mut())
     }
 
     /// Check if all nodes in Kbucket are discarded
@@ -682,14 +705,14 @@ mod tests {
         );
 
         // "removing" non-existent node
-        bucket.remove(&pk, &node.pk);
+        assert!(bucket.remove(&pk, &node.pk).is_none());
         assert!(bucket.is_empty());
 
         assert!(bucket.try_add(&pk, &node, /* evict */ true));
 
         assert!(!bucket.is_empty());
 
-        bucket.remove(&pk, &node.pk);
+        assert!(bucket.remove(&pk, &node.pk).is_some());
 
         assert!(bucket.is_empty());
     }
@@ -730,6 +753,24 @@ mod tests {
         let nodes = bucket.to_packed(false);
 
         assert_eq!(nodes, vec!(pn));
+    }
+
+    // Bucket::get_node()
+
+    #[test]
+    fn bucket_get_node() {
+        let (pk, _) = gen_keypair();
+        let mut bucket = Bucket::new(BUCKET_DEFAULT_SIZE);
+
+        let node_pk = gen_keypair().0;
+
+        let pn = PackedNode {
+            pk: node_pk,
+            saddr: "127.0.0.1:33445".parse().unwrap(),
+        };
+
+        assert!(bucket.try_add(&pk, &pn, true));
+        assert!(bucket.get_node(&pk, &node_pk).is_some());
     }
 
     // Bucket::get_node_mut()
@@ -826,14 +867,14 @@ mod tests {
         );
 
         // "removing" non-existent node
-        kbucket.remove(&node.pk);
+        assert!(kbucket.remove(&node.pk).is_none());
         assert!(kbucket.is_empty());
 
         assert!(kbucket.try_add(&node));
 
         assert!(!kbucket.is_empty());
 
-        kbucket.remove(&node.pk);
+        assert!(kbucket.remove(&node.pk).is_some());
 
         assert!(kbucket.is_empty());
     }
