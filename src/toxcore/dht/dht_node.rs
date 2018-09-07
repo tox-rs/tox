@@ -213,9 +213,6 @@ impl DhtNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use quickcheck::quickcheck;
-
-    use toxcore::dht::kbucket::*;
 
     #[test]
     fn dht_node_clonable() {
@@ -225,28 +222,5 @@ mod tests {
         };
         let dht_node = DhtNode::new(pn);
         let _ = dht_node.clone();
-    }
-
-    #[test]
-    fn dht_node_bucket_try_add_test() {
-        fn with_nodes(n1: PackedNode, n2: PackedNode, n3: PackedNode,
-                      n4: PackedNode, n5: PackedNode, n6: PackedNode,
-                      n7: PackedNode, n8: PackedNode) {
-            let pk = PublicKey([0; PUBLICKEYBYTES]);
-            let mut bucket = Bucket::new(BUCKET_DEFAULT_SIZE);
-            assert_eq!(true, bucket.try_add(&pk, &n1));
-            assert_eq!(true, bucket.try_add(&pk, &n2));
-            assert_eq!(true, bucket.try_add(&pk, &n3));
-            assert_eq!(true, bucket.try_add(&pk, &n4));
-            assert_eq!(true, bucket.try_add(&pk, &n5));
-            assert_eq!(true, bucket.try_add(&pk, &n6));
-            assert_eq!(true, bucket.try_add(&pk, &n7));
-            assert_eq!(true, bucket.try_add(&pk, &n8));
-
-            // updating bucket
-            assert_eq!(true, bucket.try_add(&pk, &n1));
-        }
-        quickcheck(with_nodes as fn(PackedNode, PackedNode, PackedNode, PackedNode,
-                                    PackedNode, PackedNode, PackedNode, PackedNode));
     }
 }
