@@ -1,9 +1,10 @@
 [package]
 name = "tox-node"
-version = "0.0.2"
+version = "0.0.3"
 authors = [
   "Roman Proskuryakov <humbug@deeptown.org>",
   "Evgeny Kurnevsky <kurnevsky@gmail.com>",
+  "Namsoo CHO <nscho66@gmail.com>",
 ]
 readme = "README.md"
 description = "A server application to run tox node"
