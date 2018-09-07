@@ -36,8 +36,7 @@ impl DaemonState {
         let close_nodes = server.close_nodes.read();
 
         let nodes = close_nodes.iter()
-            .cloned()
-            .flat_map(|node| node.to_packed_node(server.is_ipv6_enabled()))
+            .flat_map(|node| node.to_packed_node())
             .collect::<Vec<PackedNode>>();
 
         let mut buf = [0u8; DHT_STATE_BUFFER_SIZE];

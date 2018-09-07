@@ -321,12 +321,6 @@ impl Bucket {
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut DhtNode> {
         self.nodes.iter_mut()
     }
-
-    /// Get vector of `PackedNode`s that `Bucket` has.
-    pub fn to_packed(&self, is_ipv6_enabled: bool) -> Vec<PackedNode> {
-        self.nodes.iter().flat_map(|node| node.clone().to_packed_node(is_ipv6_enabled))
-            .collect()
-    }
 }
 
 /** K-buckets structure to hold up to
@@ -343,9 +337,6 @@ Further reading: [Tox spec](https://zetok.github.io/tox-spec#k-buckets).
 pub struct Kbucket {
     /// `PublicKey` for which `Kbucket` holds close nodes.
     pk: PublicKey,
-    /// flag for Dht server is running in IPv6 mode.
-    pub is_ipv6_enabled: bool,
-
     /// List of [`Bucket`](./struct.Bucket.html)s.
     pub buckets: Vec<Bucket>,
 }
@@ -366,7 +357,6 @@ impl Kbucket {
         trace!(target: "Kbucket", "Creating new Kbucket with PK: {:?}", pk);
         Kbucket {
             pk: *pk,
-            is_ipv6_enabled: false,
             buckets: vec![Bucket::new(BUCKET_DEFAULT_SIZE); KBUCKET_MAX_ENTRIES as usize]
         }
     }
@@ -465,7 +455,7 @@ impl Kbucket {
 
         let mut queue = NodesQueue::new(4);
         for node in self.iter().filter(|node| !node.is_bad()) {
-            if let Some(pn) = node.to_packed_node(self.is_ipv6_enabled) {
+            if let Some(pn) = node.to_packed_node() {
                 if !only_global || IsGlobal::is_global(&pn.saddr.ip()) {
                     queue.try_add(pk, &pn);
                 }
@@ -726,25 +716,6 @@ mod tests {
         assert!(bucket.try_add(&pk, &node, /* evict */ true));
 
         assert!(!bucket.is_empty());
-    }
-
-    // Bucket::to_packed()
-
-    #[test]
-    fn bucket_to_packed() {
-        let (pk, _) = gen_keypair();
-        let mut bucket = Bucket::new(BUCKET_DEFAULT_SIZE);
-
-        let pn = PackedNode {
-            pk: gen_keypair().0,
-            saddr: "127.0.0.1:33445".parse().unwrap(),
-        };
-
-        assert!(bucket.try_add(&pk, &pn, /* evict */ true));
-
-        let nodes = bucket.to_packed(false);
-
-        assert_eq!(nodes, vec!(pn));
     }
 
     // Bucket::get_node()
