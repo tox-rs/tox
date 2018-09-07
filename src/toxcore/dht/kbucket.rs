@@ -20,6 +20,7 @@ use toxcore::crypto_core::*;
 use toxcore::dht::dht_node::*;
 use toxcore::dht::packed_node::*;
 use toxcore::dht::ip_port::IsGlobal;
+use toxcore::dht::nodes_queue::*;
 use toxcore::time::*;
 
 /** Calculate the [`k-bucket`](./struct.Kbucket.html) index of a PK compared
@@ -458,29 +459,20 @@ impl Kbucket {
 
     It should not contain LAN ip node if the request is from global ip.
     */
-    pub fn get_closest(&self, pk: &PublicKey, only_global_ip: bool) -> Vec<PackedNode> {
+    pub fn get_closest(&self, pk: &PublicKey, only_global: bool) -> NodesQueue {
         debug!(target: "Kbucket", "Getting closest nodes.");
         trace!(target: "Kbucket", "With PK: {:?} and self: {:?}", pk, self);
-        // create a new Bucket with associated pk, and add nodes that are close
-        // to the PK
-        let mut bucket = Bucket::new(4);
-        for buc in &self.buckets {
-            for node in buc.nodes.iter().filter(|node| !node.is_bad()) {
-                if let Some(sock) = node.get_socket_addr(self.is_ipv6_enabled) {
-                    if only_global_ip && !IsGlobal::is_global(&sock.ip()) {
-                        continue;
-                    }
-                } else {
-                    continue;
-                }
-                if let Some(pn) = node.clone().to_packed_node(self.is_ipv6_enabled) {
-                    bucket.try_add(pk, &pn, /* evict */ true);
+
+        let mut queue = NodesQueue::new(4);
+        for node in self.iter().filter(|node| !node.is_bad()) {
+            if let Some(pn) = node.to_packed_node(self.is_ipv6_enabled) {
+                if !only_global || IsGlobal::is_global(&pn.saddr.ip()) {
+                    queue.try_add(pk, &pn);
                 }
             }
         }
-        trace!("Returning nodes: {:?}", &bucket.nodes);
-
-        bucket.to_packed(self.is_ipv6_enabled)
+        trace!("Returning nodes: {:?}", queue);
+        queue
     }
 
     /**
@@ -895,11 +887,11 @@ mod tests {
             assert!(kbucket.try_add(&node_by_idx(i)));
         }
 
-        let closest = kbucket.get_closest(&PublicKey([0; PUBLICKEYBYTES]), true);
+        let closest: Vec<_> = kbucket.get_closest(&PublicKey([0; PUBLICKEYBYTES]), true).into();
         let should_be = (0 .. 4).map(node_by_idx).collect::<Vec<_>>();
         assert_eq!(closest, should_be);
 
-        let closest = kbucket.get_closest(&PublicKey([255; PUBLICKEYBYTES]), true);
+        let closest: Vec<_> = kbucket.get_closest(&PublicKey([255; PUBLICKEYBYTES]), true).into();
         let should_be = (4 .. 8).rev().map(node_by_idx).collect::<Vec<_>>();
         assert_eq!(closest, should_be);
     }

@@ -12,3 +12,4 @@ pub mod daemon_state;
 pub mod lan_discovery;
 pub mod ip_port;
 pub mod request_queue;
+pub mod nodes_queue;
