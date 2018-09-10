@@ -11,6 +11,7 @@ use std::net::{
     Ipv4Addr,
     Ipv6Addr,
     SocketAddr,
+    SocketAddrV4
 };
 
 use toxcore::binary_io::*;
@@ -82,18 +83,34 @@ impl FromBytes for PackedNode {
         port: be_u16 >>
         saddr: value!(SocketAddr::new(addr, port)) >>
         pk: call!(PublicKey::from_bytes) >>
-        (PackedNode { saddr, pk })
+        (PackedNode::new(saddr, &pk))
     ));
 }
 
 impl PackedNode {
-    /// Create new `PackedNode`.
+    /// Create new `PackedNode`. The IPv6 address will be converted to IPv4 if
+    /// it's IPv4-compatible or IPv4-mapped.
     pub fn new(saddr: SocketAddr, pk: &PublicKey) -> Self {
         debug!(target: "PackedNode", "Creating new PackedNode.");
         trace!(target: "PackedNode", "With args: saddr: {:?}, PK: {:?}",
             &saddr, pk);
 
-        PackedNode { saddr, pk: *pk }
+        PackedNode { saddr: PackedNode::to_ipv4(saddr), pk: *pk }
+    }
+
+    /// Convert IPv6 address to IPv4 if it's IPv4-compatible or IPv4-mapped.
+    /// Otherwise return original address.
+    fn to_ipv4(saddr: SocketAddr) -> SocketAddr {
+        match saddr {
+            SocketAddr::V4(v4) => SocketAddr::V4(v4),
+            SocketAddr::V6(v6) => {
+                if let Some(converted_ip4) = v6.ip().to_ipv4() {
+                    SocketAddr::V4(SocketAddrV4::new(converted_ip4, v6.port()))
+                } else {
+                    SocketAddr::V6(v6)
+                }
+            },
+        }
     }
 
     /// to_bytes for TCP
@@ -117,7 +134,7 @@ impl PackedNode {
             port: be_u16 >>
             saddr: value!(SocketAddr::new(addr, port)) >>
             pk: call!(PublicKey::from_bytes) >>
-            (PackedNode { saddr, pk })
+            (PackedNode::new(saddr, &pk))
         ));
 
     /// Get an IP type from the `PackedNode`.

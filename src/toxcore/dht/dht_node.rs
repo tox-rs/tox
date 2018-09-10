@@ -106,13 +106,7 @@ impl DhtNode {
     pub fn new(pn: PackedNode) -> DhtNode {
         let (saddr_v4, saddr_v6) = match pn.saddr {
             SocketAddr::V4(v4) => (Some(v4), None),
-            SocketAddr::V6(v6) => {
-                if let Some(converted_ip4) = v6.ip().to_ipv4() {
-                    (Some(SocketAddrV4::new(converted_ip4, v6.port())), None)
-                } else {
-                    (None, Some(v6))
-                }
-            },
+            SocketAddr::V6(v6) => (None, Some(v6)),
         };
 
         DhtNode {

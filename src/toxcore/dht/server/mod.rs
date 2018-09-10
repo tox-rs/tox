@@ -831,6 +831,10 @@ impl Server {
 
             // Process nodes from NodesResponse
             for node in &payload.nodes {
+                if !self.is_ipv6_enabled && node.saddr.is_ipv6() {
+                    continue;
+                }
+
                 if close_nodes.can_add(node) {
                     nodes_to_bootstrap.try_add(&self.pk, node);
                 }
