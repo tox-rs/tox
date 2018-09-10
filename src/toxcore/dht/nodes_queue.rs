@@ -167,3 +167,190 @@ impl Into<Vec<PackedNode>> for NodesQueue {
         self.nodes
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn try_add() {
+        let pk = PublicKey([0; PUBLICKEYBYTES]);
+        let mut queue = NodesQueue::new(8);
+
+        for i in 0 .. 8 {
+            let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + i as u16);
+            let node = PackedNode::new(addr, &PublicKey([i + 2; PUBLICKEYBYTES]));
+            assert!(queue.try_add(&pk, &node));
+        }
+
+        let closer_node = PackedNode::new(
+            "1.2.3.5:12345".parse().unwrap(),
+            &PublicKey([1; PUBLICKEYBYTES])
+        );
+        let farther_node = PackedNode::new(
+            "1.2.3.5:12346".parse().unwrap(),
+            &PublicKey([10; PUBLICKEYBYTES])
+        );
+        let existing_node = PackedNode::new(
+            "1.2.3.5:12347".parse().unwrap(),
+            &PublicKey([2; PUBLICKEYBYTES])
+        );
+
+        // can't add a new farther node
+        assert!(!queue.try_add(&pk, &farther_node));
+        // can add a new closer node
+        assert!(queue.try_add(&pk, &closer_node));
+        // can update a node
+        assert!(queue.try_add(&pk, &existing_node));
+    }
+
+    #[test]
+    fn can_add() {
+        let pk = PublicKey([0; PUBLICKEYBYTES]);
+        let mut queue = NodesQueue::new(8);
+
+        for i in 0 .. 8 {
+            let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + i as u16);
+            let node = PackedNode::new(addr, &PublicKey([i + 2; PUBLICKEYBYTES]));
+            assert!(queue.try_add(&pk, &node));
+        }
+
+        let closer_node = PackedNode::new(
+            "1.2.3.5:12345".parse().unwrap(),
+            &PublicKey([1; PUBLICKEYBYTES])
+        );
+        let farther_node = PackedNode::new(
+            "1.2.3.5:12346".parse().unwrap(),
+            &PublicKey([10; PUBLICKEYBYTES])
+        );
+        let existing_node_1 = PackedNode::new(
+            "1.2.3.4:12345".parse().unwrap(),
+            &PublicKey([2; PUBLICKEYBYTES])
+        );
+        let existing_node_2 = PackedNode::new(
+            "1.2.3.5:12347".parse().unwrap(),
+            &PublicKey([2; PUBLICKEYBYTES])
+        );
+
+        // can't add a new farther node
+        assert!(!queue.can_add(&pk, &farther_node));
+        // can add a new closer node
+        assert!(queue.can_add(&pk, &closer_node));
+        // can't add the same node
+        assert!(!queue.can_add(&pk, &existing_node_1));
+        // can update a node
+        assert!(queue.can_add(&pk, &existing_node_2));
+    }
+
+    #[test]
+    fn remove() {
+        let pk = PublicKey([0; PUBLICKEYBYTES]);
+        let mut queue = NodesQueue::new(8);
+
+        let node = PackedNode::new(
+            "1.2.3.4:12345".parse().unwrap(),
+            &PublicKey([1; PUBLICKEYBYTES])
+        );
+
+        // "removing" non-existent node
+        assert!(queue.remove(&pk, &node.pk).is_none());
+        assert!(queue.is_empty());
+
+        assert!(queue.try_add(&pk, &node));
+
+        assert!(!queue.is_empty());
+
+        assert!(queue.remove(&pk, &node.pk).is_some());
+
+        assert!(queue.is_empty());
+    }
+
+    #[test]
+    fn is_empty() {
+        let pk = PublicKey([0; PUBLICKEYBYTES]);
+        let mut queue = NodesQueue::new(8);
+
+        assert!(queue.is_empty());
+
+        let node = PackedNode::new(
+            "1.2.3.4:12345".parse().unwrap(),
+            &PublicKey([1; PUBLICKEYBYTES])
+        );
+
+        assert!(queue.try_add(&pk, &node));
+
+        assert!(!queue.is_empty());
+    }
+
+    #[test]
+    fn get_saddr() {
+        let (pk, _) = gen_keypair();
+        let mut queue = NodesQueue::new(8);
+
+        let node_saddr = "127.0.0.1:33445".parse().unwrap();
+        let node_pk = gen_keypair().0;
+
+        let pn = PackedNode {
+            pk: node_pk,
+            saddr: node_saddr,
+        };
+
+        assert!(queue.try_add(&pk, &pn));
+        assert_eq!(queue.get_saddr(&pk, &node_pk), Some(node_saddr));
+    }
+
+    #[test]
+    fn contains() {
+        let pk = PublicKey([0; PUBLICKEYBYTES]);
+        let mut queue = NodesQueue::new(8);
+
+        let node = PackedNode::new(
+            "1.2.3.4:12345".parse().unwrap(),
+            &PublicKey([1; PUBLICKEYBYTES])
+        );
+
+        assert!(!queue.contains(&pk, &node.pk));
+
+        assert!(queue.try_add(&pk, &node));
+
+        assert!(queue.contains(&pk, &node.pk));
+    }
+
+    #[test]
+    fn capacity() {
+        let queue = NodesQueue::new(8);
+
+        assert_eq!(queue.capacity(), 8);
+    }
+
+    #[test]
+    fn is_full() {
+        let pk = PublicKey([0; PUBLICKEYBYTES]);
+        let mut queue = NodesQueue::new(8);
+
+        for i in 0 .. 8 {
+            assert!(!queue.is_full());
+            let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + i as u16);
+            let node = PackedNode::new(addr, &PublicKey([i + 1; PUBLICKEYBYTES]));
+            assert!(queue.try_add(&pk, &node));
+        }
+
+        assert!(queue.is_full());
+    }
+
+    #[test]
+    fn iter() {
+        let pk = PublicKey([0; PUBLICKEYBYTES]);
+        let mut queue = NodesQueue::new(8);
+
+        for i in 0 .. 8 {
+            let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + i as u16);
+            let node = PackedNode::new(addr, &PublicKey([i + 1; PUBLICKEYBYTES]));
+            assert!(queue.try_add(&pk, &node));
+        }
+
+        let nodes_1: Vec<PackedNode> = queue.iter().cloned().collect();
+        let nodes_2: Vec<PackedNode> = queue.into();
+        assert_eq!(nodes_1, nodes_2);
+    }
+}
