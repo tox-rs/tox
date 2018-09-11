@@ -128,62 +128,45 @@ impl DhtNode {
         self.assoc4.is_discarded() && self.assoc6.is_discarded()
     }
 
-    /// Return SocketAddr for DhtNode
-    pub fn get_socket_addr(&self, is_ipv6_enabled: bool) -> Option<SocketAddr> {
-        let addr = if is_ipv6_enabled {
-            match self.assoc6.saddr {
-                Some(v6) => {
-                    match self.assoc4.saddr {
-                        Some(v4) => {
-                            if self.assoc4.last_resp_time >= self.assoc6.last_resp_time {
-                                Some(SocketAddr::V4(v4))
-                            } else {
-                                Some(SocketAddr::V6(v6))
-                            }
-                        },
-                        None => Some(SocketAddr::V6(v6)),
-                    }
-                },
-                None => self.assoc4.saddr.map(Into::into),
-            }
-        } else {
+    /// Return `SocketAddr` for `DhtNode` based on the last response time.
+    pub fn get_socket_addr(&self) -> Option<SocketAddr> {
+        let addr = if self.assoc4.last_resp_time >= self.assoc6.last_resp_time {
             self.assoc4.saddr.map(Into::into)
+        } else {
+            self.assoc6.saddr.map(Into::into)
         };
 
         if addr.is_none() {
-            warn!("get_socket_addr: failed to get address of DhtNode");
+            warn!("get_socket_addr: failed to get address of DhtNode!");
         }
 
         addr
     }
 
     /// Returns all available socket addresses of DhtNode
-    pub fn get_all_addrs(&self, is_ipv6_enabled: bool) -> Vec<SocketAddr> {
-        let addrs = if is_ipv6_enabled {// DHT node is running in ipv6 mode
-            self.assoc4.saddr.into_iter().map(SocketAddr::V4)
-                .chain(self.assoc6.saddr.into_iter().map(SocketAddr::V6))
-                .collect()
-        } else { // DHT node is running in ipv4 mode
-            self.assoc4.saddr.into_iter().map(SocketAddr::V4).collect::<Vec<_>>()
-        };
+    pub fn get_all_addrs(&self) -> Vec<SocketAddr> {
+        let addrs = self.assoc4.saddr.into_iter().map(SocketAddr::V4)
+            .chain(self.assoc6.saddr.into_iter().map(SocketAddr::V6))
+            .collect::<Vec<_>>();
 
         if addrs.is_empty() {
-            warn!("Can't find target address in DhtNode");
+            warn!("get_all_addrs: DhtNode doesn't have IP addresses!");
         }
 
         addrs
     }
 
-    /// Convert `DhtNode` to `PackedNode` based on `is_ipv6_enabled` flag.
-    pub fn to_packed_node(&self, is_ipv6_enabled: bool) -> Option<PackedNode> {
-        self.get_socket_addr(is_ipv6_enabled)
+    /// Convert `DhtNode` to `PackedNode`. The address is chosen based on the
+    /// last response time.
+    pub fn to_packed_node(&self) -> Option<PackedNode> {
+        self.get_socket_addr()
             .map(|addr| PackedNode::new(addr, &self.pk))
     }
 
     /// Convert `DhtNode` to list of `PackedNode` which can contain IPv4 and
     /// IPv6 addresses.
-    pub fn to_all_packed_nodes(&self, is_ipv6_enabled: bool) -> Vec<PackedNode> {
-        self.get_all_addrs(is_ipv6_enabled)
+    pub fn to_all_packed_nodes(&self) -> Vec<PackedNode> {
+        self.get_all_addrs()
             .into_iter()
             .map(|addr| PackedNode::new(addr, &self.pk))
             .collect()

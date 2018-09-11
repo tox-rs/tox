@@ -207,7 +207,6 @@ impl Server {
     /// Enable/disable IPv6 mode of DHT server.
     pub fn enable_ipv6_mode(&mut self, enable: bool) {
         self.is_ipv6_enabled = enable;
-        self.close_nodes.write().is_ipv6_enabled = enable;
     }
 
     /// Get is_ipv6_enabled member variable
@@ -228,7 +227,7 @@ impl Server {
         let mut queue = close_nodes.get_closest(base_pk, only_global);
 
         for node in friends.iter().flat_map(|friend| friend.close_nodes.iter()) {
-            if let Some(pn) = node.to_packed_node(self.is_ipv6_enabled) {
+            if let Some(pn) = node.to_packed_node() {
                 if !only_global || IsGlobal::is_global(&pn.saddr.ip()) {
                     queue.try_add(base_pk, &pn);
                 }
@@ -355,7 +354,7 @@ impl Server {
 
         let futures = close_nodes
             .iter()
-            .flat_map(|node| node.to_all_packed_nodes(self.is_ipv6_enabled))
+            .flat_map(|node| node.to_all_packed_nodes())
             .chain(self.initial_bootstrap.iter().cloned())
             .map(|node| self.send_nodes_req(&node, &mut request_queue, self.pk))
             .collect::<Vec<_>>();
@@ -493,7 +492,7 @@ impl Server {
     {
         let good_nodes = nodes
             .filter(|&node| !node.is_bad())
-            .flat_map(|node| node.to_all_packed_nodes(self.is_ipv6_enabled))
+            .flat_map(|node| node.to_all_packed_nodes())
             .collect::<Vec<_>>();
 
         if good_nodes.is_empty() {
@@ -702,7 +701,7 @@ impl Server {
     /// Send UDP packet node. If the node has both IPv4 and IPv6 addresses,
     /// then it sends packet to both addresses.
     fn send_to_node(&self, node: &DhtNode, packet: Packet) -> IoFuture<()> {
-        let addrs = node.get_all_addrs(self.is_ipv6_enabled);
+        let addrs = node.get_all_addrs();
 
         let futures = addrs.into_iter()
             .map(|addr| {
