@@ -1,3 +1,7 @@
+# 0.0.4 (September 11, 2018)
+
+* Use tox from crates.io (#22)
+
 # 0.0.3 (September 7, 2018)
 
 * download libsodium v1.0.16 (#20)
