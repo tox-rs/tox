@@ -55,15 +55,19 @@ impl ToBytes for FriendRequests {
     }
 }
 
+impl FriendRequests {
+    /// Create new FriendRequests object
+    pub fn new(nospam: NoSpam, message: Vec<u8>) -> Self {
+        FriendRequests { nospam, message }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     encode_decode_test!(
         friend_requests_encode_decode,
-        FriendRequests {
-            nospam: NoSpam::new(),
-            message: vec![1,2,3,4],
-        }
+        FriendRequests::new(NoSpam::new(), vec![1,2,3,4])
     );
 }

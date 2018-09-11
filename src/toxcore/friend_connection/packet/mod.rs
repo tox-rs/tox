@@ -40,3 +40,39 @@ impl FromBytes for Packet {
         map!(FriendRequests::from_bytes, Packet::FriendRequests)
     ));
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use toxcore::toxid::NoSpam;
+    use toxcore::crypto_core::*;
+    use toxcore::dht::packed_node::*;
+
+    encode_decode_test!(
+        packet_alive_encode_decode,
+        Packet::Alive(Alive)
+    );
+
+    encode_decode_test!(
+        packet_friend_requests_encode_decode,
+        Packet::FriendRequests(FriendRequests::new(NoSpam::new(), vec![1,2,3,4]))
+    );
+
+    encode_decode_test!(
+        packet_share_relays_encode_decode,
+        Packet::ShareRelays(ShareRelays::new(vec![
+            PackedNode {
+                saddr: "1.1.1.1:33445".parse().unwrap(),
+                pk: gen_keypair().0,
+            },
+            PackedNode {
+                saddr: "1.1.1.1:33446".parse().unwrap(),
+                pk: gen_keypair().0,
+            },
+            PackedNode {
+                saddr: "1.1.1.1:33447".parse().unwrap(),
+                pk: gen_keypair().0,
+            },
+        ]))
+    );
+}
