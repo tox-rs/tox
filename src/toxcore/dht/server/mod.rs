@@ -1105,18 +1105,39 @@ impl Server {
 
     /// Handle received `OnionAnnounceRequest` packet and response with
     /// `OnionAnnounceResponse` packet if the request succeed.
+    ///
+    /// The response packet will contain up to 4 closest to `search_pk` nodes
+    /// from kbucket. They are used to search closest to long term `PublicKey`
+    /// nodes to announce.
     fn handle_onion_announce_request(&self, packet: OnionAnnounceRequest, addr: SocketAddr) -> IoFuture<()> {
         let mut onion_announce = self.onion_announce.write();
-        let close_nodes = self.close_nodes.read();
-        let onion_return = packet.onion_return.clone();
-        let response = onion_announce.handle_onion_announce_request(packet, &self.sk, &close_nodes, addr);
-        match response {
-            Ok(response) => self.send_to_direct(addr, Packet::OnionResponse3(OnionResponse3 {
-                onion_return,
-                payload: InnerOnionResponse::OnionAnnounceResponse(response)
-            })),
-            Err(e) => Box::new(future::err(e))
-        }
+
+        let shared_secret = precompute(&packet.inner.pk, &self.sk);
+        let payload = match packet.inner.get_payload(&shared_secret) {
+            Err(e) => return Box::new(future::err(e)),
+            Ok(payload) => payload,
+        };
+
+        let (announce_status, ping_id_or_pk) = onion_announce.handle_onion_announce_request(
+            &payload,
+            packet.inner.pk,
+            packet.onion_return.clone(),
+            addr
+        );
+
+        let close_nodes = self.get_closest(&payload.search_pk, IsGlobal::is_global(&addr.ip()));
+
+        let response_payload = OnionAnnounceResponsePayload {
+            announce_status,
+            ping_id_or_pk,
+            nodes: close_nodes.into()
+        };
+        let response = OnionAnnounceResponse::new(&shared_secret, payload.sendback_data, response_payload);
+
+        self.send_to_direct(addr, Packet::OnionResponse3(OnionResponse3 {
+            onion_return: packet.onion_return,
+            payload: InnerOnionResponse::OnionAnnounceResponse(response)
+        }))
     }
 
     /// Handle received `OnionDataRequest` packet and send `OnionResponse3`
@@ -2214,6 +2235,27 @@ mod tests {
         let payload = response.get_payload(&precomp).unwrap();
 
         assert_eq!(payload.announce_status, AnnounceStatus::Failed);
+    }
+
+    #[test]
+    fn handle_onion_announce_request_invalid_payload() {
+        let (alice, _precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
+
+        let inner = InnerOnionAnnounceRequest {
+            nonce: gen_nonce(),
+            pk: bob_pk,
+            payload: vec![42; 123]
+        };
+        let onion_return = OnionReturn {
+            nonce: secretbox::gen_nonce(),
+            payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
+        };
+        let packet = Packet::OnionAnnounceRequest(OnionAnnounceRequest {
+            inner,
+            onion_return: onion_return.clone()
+        });
+
+        assert!(alice.handle_packet(packet, addr).wait().is_err());
     }
 
     // handle_onion_data_request
