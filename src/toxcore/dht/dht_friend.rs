@@ -7,6 +7,7 @@ use std::net::SocketAddr;
 
 use toxcore::time::*;
 use toxcore::dht::kbucket::*;
+use toxcore::dht::nodes_queue::*;
 use toxcore::crypto_core::*;
 use toxcore::dht::packed_node::*;
 use toxcore::dht::server::hole_punching::*;
@@ -32,7 +33,7 @@ pub struct DhtFriend {
     /// nodes list.
     pub random_requests_count: u32,
     /// List of nodes to send `NodesRequest` packet.
-    pub nodes_to_bootstrap: Bucket,
+    pub nodes_to_bootstrap: NodesQueue,
     /// Struct for hole punching.
     pub hole_punch: HolePunching,
 }
@@ -45,7 +46,7 @@ impl DhtFriend {
             close_nodes: Bucket::new(FRIEND_CLOSE_NODES_COUNT),
             last_nodes_req_time: clock_now(),
             random_requests_count: 0,
-            nodes_to_bootstrap: Bucket::new(FRIEND_BOOTSTRAP_NODES_COUNT),
+            nodes_to_bootstrap: NodesQueue::new(FRIEND_BOOTSTRAP_NODES_COUNT),
             hole_punch: HolePunching::new(),
         }
     }

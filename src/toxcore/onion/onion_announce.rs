@@ -305,10 +305,13 @@ impl OnionAnnounce {
             (AnnounceStatus::Failed, ping_id_2)
         };
 
+        // TODO: use Server::get_closest instead
+        let close_nodes = kbucket.get_closest(&payload.search_pk, IsGlobal::is_global(&addr.ip()));
+
         let response_payload = OnionAnnounceResponsePayload {
             announce_status,
             ping_id_or_pk,
-            nodes: kbucket.get_closest(&payload.search_pk, IsGlobal::is_global(&addr.ip()))
+            nodes: close_nodes.into()
         };
         let response = OnionAnnounceResponse::new(&shared_secret, payload.sendback_data, response_payload);
 
