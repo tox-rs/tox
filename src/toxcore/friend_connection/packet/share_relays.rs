@@ -32,6 +32,13 @@ impl FromBytes for ShareRelays {
     ));
 }
 
+impl ShareRelays {
+    /// Create new ShareRelays object
+    pub fn new(relays: Vec<PackedNode>) -> Self {
+        ShareRelays { relays }
+    }
+}
+
 impl ToBytes for ShareRelays {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
@@ -49,21 +56,19 @@ mod tests {
 
     encode_decode_test!(
         share_relays_encode_decode,
-        ShareRelays {
-            relays: vec![
-                PackedNode {
-                    saddr: "1.1.1.1:33445".parse().unwrap(),
-                    pk: gen_keypair().0,
-                },
-                PackedNode {
-                    saddr: "1.1.1.1:33446".parse().unwrap(),
-                    pk: gen_keypair().0,
-                },
-                PackedNode {
-                    saddr: "1.1.1.1:33447".parse().unwrap(),
-                    pk: gen_keypair().0,
-                },
-            ],
-        }
+        ShareRelays::new(vec![
+            PackedNode {
+                saddr: "1.1.1.1:33445".parse().unwrap(),
+                pk: gen_keypair().0,
+            },
+            PackedNode {
+                saddr: "1.1.1.1:33446".parse().unwrap(),
+                pk: gen_keypair().0,
+            },
+            PackedNode {
+                saddr: "1.1.1.1:33447".parse().unwrap(),
+                pk: gen_keypair().0,
+            },
+        ])
     );
 }
