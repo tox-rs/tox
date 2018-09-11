@@ -192,7 +192,10 @@ pub fn digest_as_pk(d: sha256::Digest) -> PublicKey {
 }
 
 impl FromBytes for PublicKey {
-    named!(from_bytes<PublicKey>, map_opt!(take!(PUBLICKEYBYTES), PublicKey::from_slice));
+    named!(from_bytes<PublicKey>, verify!(
+        map_opt!(take!(PUBLICKEYBYTES), PublicKey::from_slice),
+        |pk| public_key_valid(&pk)
+    ));
 }
 
 impl FromBytes for SecretKey {
