@@ -1,6 +1,6 @@
 [package]
 name = "tox-node"
-version = "0.0.3"
+version = "0.0.4"
 authors = [
   "Roman Proskuryakov <humbug@deeptown.org>",
   "Evgeny Kurnevsky <kurnevsky@gmail.com>",
