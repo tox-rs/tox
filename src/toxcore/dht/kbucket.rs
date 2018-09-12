@@ -6,7 +6,7 @@ Number of nodes it can contain is set during creation.
 Nodes stored in `Bucket` are in [`DhtNode`](./struct.DhtNode.html)
 format.
 
-Used in [`Kbucket`](./struct.Kbucket.html) for storing nodes close to given
+Used in [`Ktree`](./struct.Ktree.html) for storing nodes close to given
 PK; and additionally used to store nodes closest to friends.
 
 [Spec definition](https://zetok.github.io/tox-spec#updating-k-buckets).
@@ -23,7 +23,7 @@ use toxcore::dht::ip_port::IsGlobal;
 use toxcore::dht::nodes_queue::*;
 use toxcore::time::*;
 
-/** Calculate the [`k-bucket`](./struct.Kbucket.html) index of a PK compared
+/** Calculate the [`k-bucket`](./struct.Ktree.html) index of a PK compared
 to "own" PK.
 
 According to the [spec](https://zetok.github.io/tox-spec#bucket-index).
@@ -84,7 +84,7 @@ Number of nodes it can contain is set during creation.
 Nodes stored in `Bucket` are in [`DhtNode`](./struct.DhtNode.html)
 format.
 
-Used in [`Kbucket`](./struct.Kbucket.html) for storing nodes close to given
+Used in [`Ktree`](./struct.Ktree.html) for storing nodes close to given
 PK; and additionally used to store nodes closest to friends.
 
 [Spec definition](https://zetok.github.io/tox-spec#updating-k-buckets).
@@ -226,7 +226,7 @@ impl Bucket {
 
     Note that you must pass the same `base_pk` each call or the internal
     state will be undefined. Also `base_pk` must be equal to `base_pk` you added
-    a node with. Normally you don't call this function on your own but Kbucket does.
+    a node with. Normally you don't call this function on your own but Ktree does.
 
     If there's no `DhtNode` with given PK, nothing is being done.
     */
@@ -308,7 +308,7 @@ impl Bucket {
         }
     }
 
-    /// Create iterator over [`DhtNode`](./struct.DhtNode.html)s in `Kbucket`.
+    /// Create iterator over [`DhtNode`](./struct.DhtNode.html)s in `Ktree`.
     /// Nodes that this iterator produces are sorted by distance to a base
     /// `PublicKey` (in ascending order).
     pub fn iter(&self) -> impl Iterator<Item = &DhtNode> {
@@ -316,7 +316,7 @@ impl Bucket {
     }
 
     /// Create mutable iterator over [`DhtNode`](./struct.DhtNode.html)s in
-    /// `Kbucket`. Nodes that this iterator produces are sorted by distance to a
+    /// `Ktree`. Nodes that this iterator produces are sorted by distance to a
     /// base `PublicKey` (in ascending order).
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut DhtNode> {
         self.nodes.iter_mut()
@@ -334,28 +334,28 @@ one, while furthest is the first one.
 Further reading: [Tox spec](https://zetok.github.io/tox-spec#k-buckets).
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Kbucket {
-    /// `PublicKey` for which `Kbucket` holds close nodes.
+pub struct Ktree {
+    /// `PublicKey` for which `Ktree` holds close nodes.
     pk: PublicKey,
     /// List of [`Bucket`](./struct.Bucket.html)s.
     pub buckets: Vec<Bucket>,
 }
 
-/** Maximum number of [`Bucket`](./struct.Bucket.html)s that [`Kbucket`]
+/** Maximum number of [`Bucket`](./struct.Bucket.html)s that [`Ktree`]
 can hold.
 
 Realistically, not even half of that will be ever used, given how
 [index calculation](./fn.kbucket_index.html) works.
 
-[`Kbucket`]: ./struct.Kbucket.html
+[`Ktree`]: ./struct.Ktree.html
 */
 pub const KBUCKET_MAX_ENTRIES: u8 = ::std::u8::MAX;
 
-impl Kbucket {
-    /// Create a new `Kbucket`.
+impl Ktree {
+    /// Create a new `Ktree`.
     pub fn new(pk: &PublicKey) -> Self {
-        trace!(target: "Kbucket", "Creating new Kbucket with PK: {:?}", pk);
-        Kbucket {
+        trace!(target: "Ktree", "Creating new Ktree with PK: {:?}", pk);
+        Ktree {
             pk: *pk,
             buckets: vec![Bucket::new(BUCKET_DEFAULT_SIZE); KBUCKET_MAX_ENTRIES as usize]
         }
@@ -393,15 +393,15 @@ impl Kbucket {
         where the key could be inserted/removed.
 
     Same as [`kbucket index`](./fn.kbucket_index.html) but uses stored in
-    `Kbucket` public key.
+    `Ktree` public key.
 
-    Returns `None` only if supplied key is the same as stored in `Kbucket` key.
+    Returns `None` only if supplied key is the same as stored in `Ktree` key.
     */
     fn bucket_index(&self, pk: &PublicKey) -> Option<usize> {
         kbucket_index(&self.pk, pk).map(|index| index as usize)
     }
 
-    /** Add [`PackedNode`](./struct.PackedNode.html) to `Kbucket`.
+    /** Add [`PackedNode`](./struct.PackedNode.html) to `Ktree`.
 
     Node can be added only if:
 
@@ -413,8 +413,8 @@ impl Kbucket {
     Returns `true` if node was added successfully, `false` otherwise.
     */
     pub fn try_add(&mut self, node: &PackedNode) -> bool {
-        debug!(target: "Kbucket", "Trying to add PackedNode.");
-        trace!(target: "Kbucket", "With PN: {:?}; and self: {:?}", node, self);
+        debug!(target: "Ktree", "Trying to add PackedNode.");
+        trace!(target: "Ktree", "With PN: {:?}; and self: {:?}", node, self);
 
         match self.bucket_index(&node.pk) {
             Some(index) => self.buckets[index].try_add(&self.pk, node, /* evict */ false),
@@ -426,9 +426,9 @@ impl Kbucket {
     }
 
     /// Remove [`DhtNode`](./struct.DhtNode.html) with given PK from the
-    /// `Kbucket`.
+    /// `Ktree`.
     pub fn remove(&mut self, node_pk: &PublicKey) -> Option<DhtNode> {
-        trace!(target: "Kbucket", "Removing PK: {:?} from Kbucket: {:?}", node_pk,
+        trace!(target: "Ktree", "Removing PK: {:?} from Ktree: {:?}", node_pk,
                 self);
 
         match self.bucket_index(node_pk) {
@@ -444,14 +444,14 @@ impl Kbucket {
 
     Functionality for [`SendNodes`](./struct.SendNodes.html).
 
-    Returns less than 4 nodes only if `Kbucket` contains less than 4
+    Returns less than 4 nodes only if `Ktree` contains less than 4
     nodes.
 
     It should not contain LAN ip node if the request is from global ip.
     */
     pub fn get_closest(&self, pk: &PublicKey, only_global: bool) -> NodesQueue {
-        debug!(target: "Kbucket", "Getting closest nodes.");
-        trace!(target: "Kbucket", "With PK: {:?} and self: {:?}", pk, self);
+        debug!(target: "Ktree", "Getting closest nodes.");
+        trace!(target: "Ktree", "With PK: {:?} and self: {:?}", pk, self);
 
         let mut queue = NodesQueue::new(4);
         for node in self.iter().filter(|node| !node.is_bad()) {
@@ -466,7 +466,7 @@ impl Kbucket {
     }
 
     /**
-    Check if `Kbucket` contains [`PackedNode`] with given PK.
+    Check if `Ktree` contains [`PackedNode`] with given PK.
 
     [`PackedNode`]: ./struct.PackedNode.html
     */
@@ -478,7 +478,7 @@ impl Kbucket {
     }
 
     /**
-    Naive check whether a [`PackedNode`] can be added to the `Kbucket`.
+    Naive check whether a [`PackedNode`] can be added to the `Ktree`.
 
     Returns `true` if [`Bucket`] where node could be placed is not full
     and node is not already in the [`Bucket`].
@@ -496,7 +496,7 @@ impl Kbucket {
         }
     }
 
-    /** Check if `Kbucket` is empty.
+    /** Check if `Ktree` is empty.
 
     Returns `true` if all `buckets` are empty, `false`
     otherwise.
@@ -505,7 +505,7 @@ impl Kbucket {
         self.buckets.iter().all(|bucket| bucket.is_empty())
     }
 
-    /// Create iterator over [`DhtNode`](./struct.DhtNode.html)s in `Kbucket`.
+    /// Create iterator over [`DhtNode`](./struct.DhtNode.html)s in `Ktree`.
     /// Nodes that this iterator produces are sorted by distance to a base
     /// `PublicKey` (in ascending order).
     pub fn iter(&self) -> impl Iterator<Item = &DhtNode> {
@@ -515,7 +515,7 @@ impl Kbucket {
     }
 
     /// Create mutable iterator over [`DhtNode`](./struct.DhtNode.html)s in
-    /// `Kbucket`. Nodes that this iterator produces are sorted by distance to a
+    /// `Ktree`. Nodes that this iterator produces are sorted by distance to a
     /// base `PublicKey` (in ascending order).
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut DhtNode> {
         self.buckets.iter_mut()
@@ -523,7 +523,7 @@ impl Kbucket {
             .flat_map(|bucket| bucket.iter_mut())
     }
 
-    /// Check if all nodes in Kbucket are discarded
+    /// Check if all nodes in Ktree are discarded
     pub fn is_all_discarded(&self) -> bool {
         self.iter()
             .all(|node| node.is_discarded())
@@ -755,23 +755,23 @@ mod tests {
     }
 
 
-    // Kbucket::
+    // Ktree::
 
-    // Kbucket::new()
+    // Ktree::new()
 
     #[test]
-    fn kbucket_new() {
+    fn ktree_new() {
         let pk = gen_keypair().0;
-        let kbucket = Kbucket::new(&pk);
-        assert_eq!(pk, kbucket.pk);
+        let ktree = Ktree::new(&pk);
+        assert_eq!(pk, ktree.pk);
     }
 
-    // Kbucket::try_add()
+    // Ktree::try_add()
 
     #[test]
-    fn kbucket_try_add() {
+    fn ktree_try_add() {
         let pk = PublicKey([0; PUBLICKEYBYTES]);
-        let mut kbucket = Kbucket::new(&pk);
+        let mut ktree = Ktree::new(&pk);
 
         for i in 0 .. 8 {
             let mut pk = [i + 2; PUBLICKEYBYTES];
@@ -781,7 +781,7 @@ mod tests {
             let pk = PublicKey(pk);
             let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + i as u16);
             let node = PackedNode::new(addr, &pk);
-            assert!(kbucket.try_add(&node));
+            assert!(ktree.try_add(&node));
         }
 
         // first bucket if full so it can't accommodate one more node, even if
@@ -793,7 +793,7 @@ mod tests {
             "1.2.3.5:12345".parse().unwrap(),
             &pk
         );
-        assert!(!kbucket.try_add(&node));
+        assert!(!ktree.try_add(&node));
 
         // but nodes still can be added to other buckets
         let pk = PublicKey([1; PUBLICKEYBYTES]);
@@ -801,28 +801,28 @@ mod tests {
             "1.2.3.5:12346".parse().unwrap(),
             &pk
         );
-        assert!(kbucket.try_add(&node));
+        assert!(ktree.try_add(&node));
     }
 
     #[test]
-    fn kbucket_try_add_self() {
+    fn ktree_try_add_self() {
         let pk = PublicKey([0; PUBLICKEYBYTES]);
-        let mut kbucket = Kbucket::new(&pk);
+        let mut ktree = Ktree::new(&pk);
 
         let node = PackedNode::new(
             "1.2.3.5:12345".parse().unwrap(),
             &pk
         );
 
-        assert!(!kbucket.try_add(&node));
+        assert!(!ktree.try_add(&node));
     }
 
-    // Kbucket::remove()
+    // Ktree::remove()
 
     #[test]
-    fn kbucket_remove() {
+    fn ktree_remove() {
         let pk = PublicKey([0; PUBLICKEYBYTES]);
-        let mut kbucket = Kbucket::new(&pk);
+        let mut ktree = Ktree::new(&pk);
 
         let node = PackedNode::new(
             "1.2.3.4:12345".parse().unwrap(),
@@ -830,24 +830,24 @@ mod tests {
         );
 
         // "removing" non-existent node
-        assert!(kbucket.remove(&node.pk).is_none());
-        assert!(kbucket.is_empty());
+        assert!(ktree.remove(&node.pk).is_none());
+        assert!(ktree.is_empty());
 
-        assert!(kbucket.try_add(&node));
+        assert!(ktree.try_add(&node));
 
-        assert!(!kbucket.is_empty());
+        assert!(!ktree.is_empty());
 
-        assert!(kbucket.remove(&node.pk).is_some());
+        assert!(ktree.remove(&node.pk).is_some());
 
-        assert!(kbucket.is_empty());
+        assert!(ktree.is_empty());
     }
 
-    // Kbucket::get_closest()
+    // Ktree::get_closest()
 
     #[test]
-    fn kbucket_get_closest() {
+    fn ktree_get_closest() {
         let pk = PublicKey([0; PUBLICKEYBYTES]);
-        let mut kbucket = Kbucket::new(&pk);
+        let mut ktree = Ktree::new(&pk);
 
         fn node_by_idx(i: u8) -> PackedNode {
             let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + i as u16);
@@ -855,27 +855,27 @@ mod tests {
         }
 
         for i in 0 .. 8 {
-            assert!(kbucket.try_add(&node_by_idx(i)));
+            assert!(ktree.try_add(&node_by_idx(i)));
         }
 
-        let closest: Vec<_> = kbucket.get_closest(&PublicKey([0; PUBLICKEYBYTES]), true).into();
+        let closest: Vec<_> = ktree.get_closest(&PublicKey([0; PUBLICKEYBYTES]), true).into();
         let should_be = (0 .. 4).map(node_by_idx).collect::<Vec<_>>();
         assert_eq!(closest, should_be);
 
-        let closest: Vec<_> = kbucket.get_closest(&PublicKey([255; PUBLICKEYBYTES]), true).into();
+        let closest: Vec<_> = ktree.get_closest(&PublicKey([255; PUBLICKEYBYTES]), true).into();
         let should_be = (4 .. 8).rev().map(node_by_idx).collect::<Vec<_>>();
         assert_eq!(closest, should_be);
     }
 
-    // Kbucket::position()
+    // Ktree::position()
 
-    fn position_test_data() -> (Kbucket, PackedNode, PackedNode, PackedNode) {
+    fn position_test_data() -> (Ktree, PackedNode, PackedNode, PackedNode) {
         let mut pk_bytes = [3; PUBLICKEYBYTES];
 
         pk_bytes[0] = 1;
         let base_pk = PublicKey(pk_bytes);
 
-        let kbucket = Kbucket::new(&base_pk);
+        let ktree = Ktree::new(&base_pk);
 
         let addr = Ipv4Addr::new(0, 0, 0, 0);
         let saddr = SocketAddrV4::new(addr, 0);
@@ -896,187 +896,187 @@ mod tests {
         assert!(pk2 < pk3);
         assert!(pk1 > pk3);
 
-        (kbucket, n1, n2, n3)
+        (ktree, n1, n2, n3)
     }
 
     // Check that insertion order does not affect
-    // the result order in the kbucket
+    // the result order in the ktree
 
     #[test]
-    fn kbucket_position_straight_insertion() {
-        let (mut kbucket, n1, n2, n3) = position_test_data();
+    fn ktree_position_straight_insertion() {
+        let (mut ktree, n1, n2, n3) = position_test_data();
         // insert order: n1 n2 n3 maps to position
         // n1 => 0, n2 => 1, n3 => 2
-        kbucket.try_add(&n1);
-        kbucket.try_add(&n2);
-        kbucket.try_add(&n3);
-        assert_eq!(kbucket.find(&n1.pk), Some((46, 0)));
-        assert_eq!(kbucket.find(&n2.pk), Some((46, 1)));
-        assert_eq!(kbucket.find(&n3.pk), Some((46, 2)));
+        ktree.try_add(&n1);
+        ktree.try_add(&n2);
+        ktree.try_add(&n3);
+        assert_eq!(ktree.find(&n1.pk), Some((46, 0)));
+        assert_eq!(ktree.find(&n2.pk), Some((46, 1)));
+        assert_eq!(ktree.find(&n3.pk), Some((46, 2)));
     }
 
     #[test]
-    fn kbucket_position_reverse_insertion() {
-        let (mut kbucket, n1, n2, n3) = position_test_data();
+    fn ktree_position_reverse_insertion() {
+        let (mut ktree, n1, n2, n3) = position_test_data();
         // insert order: n3 n2 n1 maps to position
         // n1 => 0, n2 => 1, n3 => 2
-        kbucket.try_add(&n3);
-        kbucket.try_add(&n2);
-        kbucket.try_add(&n1);
-        assert_eq!(kbucket.find(&n1.pk), Some((46, 0)));
-        assert_eq!(kbucket.find(&n2.pk), Some((46, 1)));
-        assert_eq!(kbucket.find(&n3.pk), Some((46, 2)));
+        ktree.try_add(&n3);
+        ktree.try_add(&n2);
+        ktree.try_add(&n1);
+        assert_eq!(ktree.find(&n1.pk), Some((46, 0)));
+        assert_eq!(ktree.find(&n2.pk), Some((46, 1)));
+        assert_eq!(ktree.find(&n3.pk), Some((46, 2)));
     }
 
     // Check that removing order does not affect
     // the order of nodes inside
 
     #[test]
-    fn kbucket_position_remove_first() {
-        let (mut kbucket, n1, n2, n3) = position_test_data();
-        // prepare kbucket
-        kbucket.try_add(&n1); // => 0
-        kbucket.try_add(&n2); // => 1
-        kbucket.try_add(&n3); // => 2
+    fn ktree_position_remove_first() {
+        let (mut ktree, n1, n2, n3) = position_test_data();
+        // prepare ktree
+        ktree.try_add(&n1); // => 0
+        ktree.try_add(&n2); // => 1
+        ktree.try_add(&n3); // => 2
         // test removing from the beginning (n1 => 0)
-        kbucket.remove(&n1.pk);
-        assert_eq!(kbucket.find(&n1.pk), None);
-        assert_eq!(kbucket.find(&n2.pk), Some((46, 0)));
-        assert_eq!(kbucket.find(&n3.pk), Some((46, 1)));
+        ktree.remove(&n1.pk);
+        assert_eq!(ktree.find(&n1.pk), None);
+        assert_eq!(ktree.find(&n2.pk), Some((46, 0)));
+        assert_eq!(ktree.find(&n3.pk), Some((46, 1)));
     }
 
     #[test]
-    fn kbucket_position_remove_second() {
-        let (mut kbucket, n1, n2, n3) = position_test_data();
-        // prepare kbucket
-        kbucket.try_add(&n1); // => 0
-        kbucket.try_add(&n2); // => 1
-        kbucket.try_add(&n3); // => 2
+    fn ktree_position_remove_second() {
+        let (mut ktree, n1, n2, n3) = position_test_data();
+        // prepare ktree
+        ktree.try_add(&n1); // => 0
+        ktree.try_add(&n2); // => 1
+        ktree.try_add(&n3); // => 2
         // test removing from the middle (n2 => 1)
-        kbucket.remove(&n2.pk);
-        assert_eq!(kbucket.find(&n1.pk), Some((46, 0)));
-        assert_eq!(kbucket.find(&n2.pk), None);
-        assert_eq!(kbucket.find(&n3.pk), Some((46, 1)));
+        ktree.remove(&n2.pk);
+        assert_eq!(ktree.find(&n1.pk), Some((46, 0)));
+        assert_eq!(ktree.find(&n2.pk), None);
+        assert_eq!(ktree.find(&n3.pk), Some((46, 1)));
     }
 
     #[test]
-    fn kbucket_position_remove_third() {
-        let (mut kbucket, n1, n2, n3) = position_test_data();
-        // prepare kbucket
-        kbucket.try_add(&n1); // => 0
-        kbucket.try_add(&n2); // => 1
-        kbucket.try_add(&n3); // => 2
+    fn ktree_position_remove_third() {
+        let (mut ktree, n1, n2, n3) = position_test_data();
+        // prepare ktree
+        ktree.try_add(&n1); // => 0
+        ktree.try_add(&n2); // => 1
+        ktree.try_add(&n3); // => 2
         // test removing from the end (n3 => 2)
-        kbucket.remove(&n3.pk);
-        assert_eq!(kbucket.find(&n1.pk), Some((46, 0)));
-        assert_eq!(kbucket.find(&n2.pk), Some((46, 1)));
-        assert_eq!(kbucket.find(&n3.pk), None);
+        ktree.remove(&n3.pk);
+        assert_eq!(ktree.find(&n1.pk), Some((46, 0)));
+        assert_eq!(ktree.find(&n2.pk), Some((46, 1)));
+        assert_eq!(ktree.find(&n3.pk), None);
     }
 
-    // Kbucket::contains()
+    // Ktree::contains()
 
     #[test]
-    fn kbucket_contains() {
+    fn ktree_contains() {
         let (pk, _) = gen_keypair();
-        let mut kbucket = Kbucket::new(&pk);
+        let mut ktree = Ktree::new(&pk);
 
-        assert!(!kbucket.contains(&pk));
+        assert!(!ktree.contains(&pk));
 
         let node = PackedNode::new(
             "1.2.3.5:12345".parse().unwrap(),
             &gen_keypair().0
         );
 
-        assert!(!kbucket.contains(&node.pk));
-        assert!(kbucket.try_add(&node));
-        assert!(kbucket.contains(&node.pk));
+        assert!(!ktree.contains(&node.pk));
+        assert!(ktree.try_add(&node));
+        assert!(ktree.contains(&node.pk));
     }
 
-    // Kbucket::can_add()
+    // Ktree::can_add()
 
     #[test]
-    fn kbucket_can_add() {
+    fn ktree_can_add() {
         let (pk, _) = gen_keypair();
-        let mut kbucket = Kbucket::new(&pk);
+        let mut ktree = Ktree::new(&pk);
 
         let node = PackedNode::new(
             "1.2.3.5:12345".parse().unwrap(),
             &gen_keypair().0
         );
 
-        assert!(kbucket.can_add(&node));
-        assert!(kbucket.try_add(&node));
-        assert!(!kbucket.can_add(&node));
+        assert!(ktree.can_add(&node));
+        assert!(ktree.try_add(&node));
+        assert!(!ktree.can_add(&node));
     }
 
-    // Kbucket::iter()
+    // Ktree::iter()
 
     #[test]
-    fn kbucket_iter() {
+    fn ktree_iter() {
         let pk = PublicKey([0; PUBLICKEYBYTES]);
-        let mut kbucket = Kbucket::new(&pk);
+        let mut ktree = Ktree::new(&pk);
 
         // empty always returns None
-        assert!(kbucket.iter().next().is_none());
+        assert!(ktree.iter().next().is_none());
 
         for i in 0 .. 8 {
             let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + i as u16);
             let node = PackedNode::new(addr, &PublicKey([i + 1; PUBLICKEYBYTES]));
-            assert!(kbucket.try_add(&node));
+            assert!(ktree.try_add(&node));
         }
 
-        assert_eq!(kbucket.iter().count(), 8);
+        assert_eq!(ktree.iter().count(), 8);
 
         // iterator should produce sorted nodes
-        for (i, node) in kbucket.iter().enumerate() {
+        for (i, node) in ktree.iter().enumerate() {
             assert_eq!(node.pk, PublicKey([i as u8 + 1; PUBLICKEYBYTES]));
         }
     }
 
-    // Kbucket::iter_mut()
+    // Ktree::iter_mut()
 
     #[test]
-    fn kbucket_iter_mut() {
+    fn ktree_iter_mut() {
         let pk = PublicKey([0; PUBLICKEYBYTES]);
-        let mut kbucket = Kbucket::new(&pk);
+        let mut ktree = Ktree::new(&pk);
 
         // empty always returns None
-        assert!(kbucket.iter_mut().next().is_none());
+        assert!(ktree.iter_mut().next().is_none());
 
         for i in 0 .. 8 {
             let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + i as u16);
             let node = PackedNode::new(addr, &PublicKey([i + 1; PUBLICKEYBYTES]));
-            assert!(kbucket.try_add(&node));
+            assert!(ktree.try_add(&node));
         }
 
-        assert_eq!(kbucket.iter_mut().count(), 8);
+        assert_eq!(ktree.iter_mut().count(), 8);
 
         // iterator should produce sorted nodes
-        for (i, node) in kbucket.iter_mut().enumerate() {
+        for (i, node) in ktree.iter_mut().enumerate() {
             assert_eq!(node.pk, PublicKey([i as u8 + 1; PUBLICKEYBYTES]));
         }
     }
 
-    // Kbucket::is_all_discarded()
+    // Ktree::is_all_discarded()
 
     #[test]
-    fn kbucket_is_all_discarded() {
+    fn ktree_is_all_discarded() {
         let (pk, _) = gen_keypair();
-        let mut kbucket = Kbucket::new(&pk);
+        let mut ktree = Ktree::new(&pk);
 
         let pn = PackedNode {
             pk: gen_keypair().0,
             saddr: "127.0.0.1:33445".parse().unwrap(),
         };
-        assert!(kbucket.try_add(&pn));
+        assert!(ktree.try_add(&pn));
 
         let pn = PackedNode {
             pk: gen_keypair().0,
             saddr: "127.0.0.1:12345".parse().unwrap(),
         };
-        assert!(kbucket.try_add(&pn));
+        assert!(ktree.try_add(&pn));
 
-        assert!(!kbucket.is_all_discarded());
+        assert!(!ktree.is_all_discarded());
 
         let time = Instant::now() + Duration::from_secs(KILL_NODE_TIMEOUT + 1);
 
@@ -1084,7 +1084,7 @@ mod tests {
         let clock = Clock::new_with_now(ConstNow(time));
 
         with_default(&clock, &mut enter, |_| {
-            assert!(kbucket.is_all_discarded());
+            assert!(ktree.is_all_discarded());
         });
     }
 }

@@ -11,7 +11,7 @@ use toxcore::dht::codec::*;
 
 /** Nodes request packet struct. It's used to get up to 4 closest nodes to
 requested public key. Every 20 seconds DHT node sends `NodesRequest` packet to
-a random node in kbucket and its known friends list.
+a random node in ktree and its known friends list.
 
 https://zetok.github.io/tox-spec/#dht-packet
 

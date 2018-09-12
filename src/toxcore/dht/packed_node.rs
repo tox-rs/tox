@@ -1,7 +1,4 @@
-/*! A pair of Socket address & PublicKey.
-This struct object is inserted into KBucket.
-Socket address is something complex, because Ipv4, Ipv6, tcp and udp infomations are all contained
-in this type.
+/*! A pair of SocketAddr & PublicKey.
 */
 
 use nom::{le_u8, be_u16};

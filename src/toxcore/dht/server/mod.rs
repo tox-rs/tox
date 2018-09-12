@@ -71,12 +71,12 @@ Contains:
 
 - DHT public key
 - DHT secret key
-- Close List ([`Kbucket`] with nodes close to own DHT public key)
+- Close List ([`Ktree`] with nodes close to own DHT public key)
 
 Before a [`PackedNode`] is added to the Close List, it needs to be
 checked whether:
 
-- it can be added to [`Kbucket`] \(using [`Kbucket::can_add()`])
+- it can be added to [`Ktree`] \(using [`Ktree::can_add()`])
 - [`PackedNode`] is actually online
 
 Once the first check passes node is added to the temporary list, and
@@ -85,8 +85,8 @@ online. If the node responds correctly within [`PING_TIMEOUT`], it's
 removed from temporary list and added to the Close List.
 
 [`NodesRequest`]: ../dht/struct.NodesRequest.html
-[`Kbucket`]: ../dht/struct.Kbucket.html
-[`Kbucket::can_add()`]: ../dht/struct.Kbucket.html#method.can_add
+[`Ktree`]: ../dht/struct.Ktree.html
+[`Ktree::can_add()`]: ../dht/struct.Ktree.html#method.can_add
 [`PackedNode`]: ../dht/struct.PackedNode.html
 */
 #[derive(Clone)]
@@ -102,7 +102,7 @@ pub struct Server {
     /// Struct that stores and manages requests IDs and timeouts.
     pub request_queue: Arc<RwLock<RequestQueue>>,
     /// Close nodes list which contains nodes close to own DHT `PublicKey`.
-    pub close_nodes: Arc<RwLock<Kbucket>>,
+    pub close_nodes: Arc<RwLock<Ktree>>,
     /// Symmetric key used for onion return encryption.
     onion_symmetric_key: Arc<RwLock<secretbox::Key>>,
     /// Onion announce struct to handle `OnionAnnounce` and `OnionData` packets.
@@ -151,7 +151,7 @@ pub struct Server {
     /// it's disabled such packets will be dropped.
     is_ipv6_enabled: bool,
     /// Initial bootstrap nodes list. We send `NodesRequest` packet to each node
-    /// from this list if Kbucket doesn't have good (or bad but not discarded)
+    /// from this list if Ktree doesn't have good (or bad but not discarded)
     /// nodes.
     initial_bootstrap: Vec<PackedNode>,
 }
@@ -163,7 +163,7 @@ impl Server {
 
         // Adding 2 fake friends with random public key. It serves two purposes:
         // - server will send NodesRequest packets with these 2 random keys
-        //   periodically thereby it will fill Kbucket with farther nodes and
+        //   periodically thereby it will fill Ktree with farther nodes and
         //   speed up bootstrap process.
         // - close nodes of these two friends can be used as pool of random
         //   nodes for onion client.
@@ -186,7 +186,7 @@ impl Server {
             tx,
             is_hole_punching_enabled: true,
             request_queue: Arc::new(RwLock::new(RequestQueue::new(Duration::from_secs(PING_TIMEOUT)))),
-            close_nodes: Arc::new(RwLock::new(Kbucket::new(&pk))),
+            close_nodes: Arc::new(RwLock::new(Ktree::new(&pk))),
             onion_symmetric_key: Arc::new(RwLock::new(secretbox::gen_key())),
             onion_announce: Arc::new(RwLock::new(OnionAnnounce::new(pk))),
             friends: Arc::new(RwLock::new(friends)),
@@ -324,9 +324,9 @@ impl Server {
     }
 
     /// Run initial bootstrapping. It sends `NodesRequest` packet to bootstrap
-    /// nodes periodically if all nodes in Kbucket are discarded (including the
+    /// nodes periodically if all nodes in Ktree are discarded (including the
     /// case when it's empty). It has to be an endless loop because we might
-    /// loose the network connection and thereby loose all nodes in Kbucket.
+    /// loose the network connection and thereby loose all nodes in Ktree.
     fn run_bootstrap_requests_sending(self) -> IoFuture<()> {
         let interval = Duration::from_secs(BOOTSTRAP_INTERVAL);
         let wakeups = Interval::new(Instant::now(), interval);
@@ -341,9 +341,9 @@ impl Server {
         Box::new(future)
     }
 
-    /// Check if all nodes in Kbucket are discarded (including the case when
+    /// Check if all nodes in Ktree are discarded (including the case when
     /// it's empty) and if so then send `NodesRequest` packet to nodes from
-    /// initial bootstrap list and from Kbucket.
+    /// initial bootstrap list and from Ktree.
     fn send_bootstrap_requests(&self) -> IoFuture<()> {
         let mut request_queue = self.request_queue.write();
         let close_nodes = self.close_nodes.read();
@@ -855,7 +855,7 @@ impl Server {
     }
 
     /// Update returned socket address and time of receiving packet
-    fn update_returned_addr(&self, node: &PackedNode, packet_pk: &PublicKey, close_nodes: &mut Kbucket, friends: &mut Vec<DhtFriend>) {
+    fn update_returned_addr(&self, node: &PackedNode, packet_pk: &PublicKey, close_nodes: &mut Ktree, friends: &mut Vec<DhtFriend>) {
         if self.pk == node.pk {
             if let Some(node_to_update) = close_nodes.get_node_mut(packet_pk) {
                 node_to_update.update_returned_addr(node.saddr);
@@ -1107,7 +1107,7 @@ impl Server {
     /// `OnionAnnounceResponse` packet if the request succeed.
     ///
     /// The response packet will contain up to 4 closest to `search_pk` nodes
-    /// from kbucket. They are used to search closest to long term `PublicKey`
+    /// from ktree. They are used to search closest to long term `PublicKey`
     /// nodes to announce.
     fn handle_onion_announce_request(&self, packet: OnionAnnounceRequest, addr: SocketAddr) -> IoFuture<()> {
         let mut onion_announce = self.onion_announce.write();
@@ -3157,7 +3157,7 @@ mod tests {
     }
 
     #[test]
-    fn send_bootstrap_requests_when_kbucket_has_good_node() {
+    fn send_bootstrap_requests_when_ktree_has_good_node() {
         let (mut alice, _precomp, bob_pk, _bob_sk, rx, _addr) = create_node();
         let (node_pk, _node_sk) = gen_keypair();
 
