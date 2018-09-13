@@ -14,7 +14,7 @@ Number of nodes it can contain is set during creation.
 
 If `NodesQueue` is full farther nodes will be evicted when adding a closer node.
 
-The difference between `NodesQueue` and `Bucket` structs is that `Bucket` stores
+The difference between `NodesQueue` and `Kbucket` structs is that `Kbucket` stores
 `DhtNode` with a lot of additional info, uses this info to evict bad nodes and
 has additional parameter for eviction strategy.
 */
@@ -46,13 +46,13 @@ impl NodesQueue {
 
     /** Try to add [`PackedNode`] to the queue.
 
-    - If the [`PackedNode`] with given `PublicKey` is already in the `Bucket`,
+    - If the [`PackedNode`] with given `PublicKey` is already in the `Kbucket`,
       its address will be updated.
     - If the queue is not full, node is appended.
     - If the queue is full, node's closeness is compared to nodes already in
       the queue, and if it's closer than some node, it prepends that node, and
       last node is removed from the list.
-    - If the node being added is farther away than the nodes in the bucket, it
+    - If the node being added is farther away than the nodes in the kbucket, it
       isn't added and `false` is returned.
 
     Note that you must pass the same `base_pk` each call or the internal

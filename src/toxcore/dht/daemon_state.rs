@@ -21,13 +21,13 @@ pub struct DaemonState;
 
 /// Close list has DhtNode, but when we access it with iter(), DhtNode is reformed to PackedNode
 pub const DHT_STATE_BUFFER_SIZE: usize =
-    // Bucket size
+    // Kbucket size
     (
         // PackedNode size
         (
             32 + // PK size
             19   // SocketAddr maximum size
-        ) * BUCKET_DEFAULT_SIZE as usize // num of DhtNodes per Bucket : 8
+        ) * KBUCKET_DEFAULT_SIZE as usize // num of DhtNodes per Kbucket : 8
     ) * KBUCKET_MAX_ENTRIES as usize; // 255
 
 impl DaemonState {

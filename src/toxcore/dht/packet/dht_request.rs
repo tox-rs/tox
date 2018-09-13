@@ -12,7 +12,7 @@ use toxcore::dht::codec::*;
 /** DHT Request packet struct.
 DHT Request packet consists of NatPingRequest and NatPingResponse.
 When my known friend is not connected directly, send NatPingRequest to peers
-which is in Kbucket. When NatPingResponse arrives to me,
+which are in Ktree. When NatPingResponse arrives to me,
 it means that my known friend is also searching me, and running behind NAT,
 so start hole-punching.
 

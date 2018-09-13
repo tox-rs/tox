@@ -25,7 +25,7 @@ pub struct DhtFriend {
     /// Friend's close nodes. If this list contains a node with the same
     /// `PublicKey` as the friend has this means that we know friend's IP
     /// address and successfully reached him.
-    pub close_nodes: Bucket,
+    pub close_nodes: Kbucket,
     /// Time when we sent `NodesRequest` packet to a random node from close
     /// nodes list.
     pub last_nodes_req_time: Instant,
@@ -43,7 +43,7 @@ impl DhtFriend {
     pub fn new(pk: PublicKey) -> Self {
         DhtFriend {
             pk,
-            close_nodes: Bucket::new(FRIEND_CLOSE_NODES_COUNT),
+            close_nodes: Kbucket::new(FRIEND_CLOSE_NODES_COUNT),
             last_nodes_req_time: clock_now(),
             random_requests_count: 0,
             nodes_to_bootstrap: NodesQueue::new(FRIEND_BOOTSTRAP_NODES_COUNT),
@@ -54,7 +54,7 @@ impl DhtFriend {
     /// IP address is known when `DhtFriend` has node in close nodes list with
     /// the same `PublicKey`.
     pub fn is_addr_known(&self) -> bool {
-        // Since nodes in Bucket are sorted by distance to our PublicKey the
+        // Since nodes in Kbucket are sorted by distance to our PublicKey the
         // node with the same PublicKey will be always the first
         self.close_nodes.nodes.first()
             .map_or(false, |node| node.pk == self.pk)

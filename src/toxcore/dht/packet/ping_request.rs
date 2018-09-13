@@ -13,7 +13,7 @@ use toxcore::dht::codec::*;
 packet to peers to check whether it is alive. When `PingRequest` is received
 DHT node should respond with `PingResponse` that contains the same ping id
 inside it's encrypted payload as it got from `PingRequest`. If `PingResponse`
-doesn't arrive for 122 seconds the DHT node removes peer from kbucket and marks
+doesn't arrive for 122 seconds the DHT node removes peer from ktree and marks
 it as offline if the peer is known friend.
 
 https://zetok.github.io/tox-spec/#dht-packet
