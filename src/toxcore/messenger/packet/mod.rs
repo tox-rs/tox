@@ -5,9 +5,11 @@ use toxcore::binary_io::*;
 
 mod online;
 mod offline;
+mod nickname;
 
 pub use self::online::*;
 pub use self::offline::*;
+pub use self::nickname::*;
 
 /** Messenger packet enum that encapsulates all types of Messenger packets.
 */
@@ -17,6 +19,8 @@ pub enum Packet {
     Online(Online),
     /// [`Offline`](./struct.Offline.html) structure.
     Offline(Offline),
+    /// [`Nickname`](./struct.Nickname.html) structure.
+    Nickname(Nickname),
 }
 
 impl ToBytes for Packet {
@@ -24,6 +28,7 @@ impl ToBytes for Packet {
         match *self {
             Packet::Online(ref p) => p.to_bytes(buf),
             Packet::Offline(ref p) => p.to_bytes(buf),
+            Packet::Nickname(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -31,7 +36,8 @@ impl ToBytes for Packet {
 impl FromBytes for Packet {
     named!(from_bytes<Packet>, alt!(
         map!(Online::from_bytes, Packet::Online) |
-        map!(Offline::from_bytes, Packet::Offline)
+        map!(Offline::from_bytes, Packet::Offline) |
+        map!(Nickname::from_bytes, Packet::Nickname)
     ));
 }
 
@@ -47,5 +53,10 @@ mod tests {
     encode_decode_test!(
         packet_offline_encode_decode,
         Packet::Offline(Offline)
+    );
+
+    encode_decode_test!(
+        packet_nickname_encode_decode,
+        Packet::Nickname(Nickname::new("1234".to_string()))
     );
 }
