@@ -91,6 +91,8 @@ Used in [`Ktree`](./struct.Ktree.html) for storing nodes close to given
 PK; and additionally used to store nodes closest to friends.
 
 [Spec definition](https://zetok.github.io/tox-spec#updating-k-buckets).
+
+[Kademlia whitepaper](https://pdos.csail.mit.edu/~petar/papers/maymounkov-kademlia-lncs.pdf).
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Kbucket {
@@ -335,6 +337,9 @@ Buckets in ktree are sorted by closeness to the PK; closest bucket is the last
 one, while furthest is the first one.
 
 Further reading: [Tox spec](https://zetok.github.io/tox-spec#k-buckets).
+
+The name references to the kademlia binary tree from
+[Kademlia whitepaper](https://pdos.csail.mit.edu/~petar/papers/maymounkov-kademlia-lncs.pdf).
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Ktree {
