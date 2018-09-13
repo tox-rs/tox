@@ -2488,4 +2488,46 @@ mod tests {
         assert!(net_crypto.connections.read().is_empty());
         assert!(net_crypto.keys_by_addr.read().is_empty());
     }
+
+    #[test]
+    fn send_status_packet_established() {
+        let (udp_tx, udp_rx) = mpsc::unbounded();
+        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
+        let (lossless_tx, _lossless_rx) = mpsc::unbounded();
+        let (lossy_tx, _lossy_rx) = mpsc::unbounded();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, _real_sk) = gen_keypair();
+        let net_crypto = NetCrypto::new(NetCryptoNewArgs {
+            udp_tx,
+            dht_pk_tx,
+            lossless_tx,
+            lossy_tx,
+            dht_pk,
+            dht_sk: dht_sk.clone(),
+            real_pk
+        });
+
+        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+
+        let received_nonce = gen_nonce();
+        let (peer_session_pk, _peer_session_sk) = gen_keypair();
+        let (_session_pk, session_sk) = gen_keypair();
+        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        connection.status = ConnectionStatus::Established {
+            sent_nonce: gen_nonce(),
+            received_nonce,
+            peer_session_pk,
+            session_precomputed_key: session_precomputed_key,
+        };
+
+        // send status packet with connection.status is Established
+        assert!(net_crypto.send_status_packet(&mut connection).wait().is_ok());
+
+        // Necessary to drop udp_tx so that udp_rx.collect() can be finished
+        drop(net_crypto.udp_tx);
+
+        assert!(udp_rx.collect().wait().unwrap().is_empty());
+    }
 }
