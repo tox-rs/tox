@@ -7,10 +7,10 @@ Repo: https://github.com/tox-rs/tox
 
 // Turn off clippy warnings that gives false positives
 #![cfg_attr(feature = "cargo-clippy", allow(new_without_default, new_without_default_derive))]
-// Remove it when in will be fixed in nom parser
+// Remove it when it will be fixed in nom parser
 #![cfg_attr(feature = "cargo-clippy", allow(redundant_closure))]
 // Too many false positives in tests
-#![cfg_attr(feature = "cargo-clippy", allow(needless_pass_by_value))]
+#![cfg_attr(all(feature = "cargo-clippy", test), allow(needless_pass_by_value))]
 
 // FIXME update to nom 4 and remove this rule
 #![allow(unused_parens)]
