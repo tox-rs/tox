@@ -74,6 +74,7 @@ fn load_keys(mut file: File) -> (PublicKey, SecretKey) {
     file.read_exact(&mut buf).expect("Failed to read keys from the keys file");
     let pk = PublicKey::from_slice(&buf[..PUBLICKEYBYTES]).expect("Failed to read public key from the keys file");
     let sk = SecretKey::from_slice(&buf[PUBLICKEYBYTES..]).expect("Failed to read secret key from the keys file");
+    assert!(pk == sk.public_key(), "The loaded public key does not correspond to the loaded secret key");
     (pk, sk)
 }
 
