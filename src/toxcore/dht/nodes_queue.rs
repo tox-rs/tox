@@ -178,7 +178,7 @@ mod tests {
         let mut queue = NodesQueue::new(8);
 
         for i in 0 .. 8 {
-            let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + i as u16);
+            let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + u16::from(i));
             let node = PackedNode::new(addr, &PublicKey([i + 2; PUBLICKEYBYTES]));
             assert!(queue.try_add(&pk, &node));
         }
@@ -210,7 +210,7 @@ mod tests {
         let mut queue = NodesQueue::new(8);
 
         for i in 0 .. 8 {
-            let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + i as u16);
+            let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + u16::from(i));
             let node = PackedNode::new(addr, &PublicKey([i + 2; PUBLICKEYBYTES]));
             assert!(queue.try_add(&pk, &node));
         }
@@ -330,7 +330,7 @@ mod tests {
 
         for i in 0 .. 8 {
             assert!(!queue.is_full());
-            let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + i as u16);
+            let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + u16::from(i));
             let node = PackedNode::new(addr, &PublicKey([i + 1; PUBLICKEYBYTES]));
             assert!(queue.try_add(&pk, &node));
         }
@@ -344,7 +344,7 @@ mod tests {
         let mut queue = NodesQueue::new(8);
 
         for i in 0 .. 8 {
-            let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + i as u16);
+            let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + u16::from(i));
             let node = PackedNode::new(addr, &PublicKey([i + 1; PUBLICKEYBYTES]));
             assert!(queue.try_add(&pk, &node));
         }

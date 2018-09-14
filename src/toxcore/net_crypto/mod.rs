@@ -2519,7 +2519,7 @@ mod tests {
             sent_nonce: gen_nonce(),
             received_nonce,
             peer_session_pk,
-            session_precomputed_key: session_precomputed_key,
+            session_precomputed_key,
         };
 
         // send status packet with connection.status is Established

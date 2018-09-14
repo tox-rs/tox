@@ -199,7 +199,7 @@ mod tests {
         let mut friend = DhtFriend::new(pk);
 
         for i in 0 .. 8 {
-            let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + i as u16);
+            let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + u16::from(i));
             let node = PackedNode::new(addr, &PublicKey([i + 2; PUBLICKEYBYTES]));
             assert!(friend.try_add_to_close(&node));
         }

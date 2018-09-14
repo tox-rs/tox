@@ -596,7 +596,7 @@ mod tests {
         let mut kbucket = Kbucket::new(KBUCKET_DEFAULT_SIZE);
 
         for i in 0 .. 8 {
-            let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + i as u16);
+            let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + u16::from(i));
             let node = PackedNode::new(addr, &PublicKey([i + 2; PUBLICKEYBYTES]));
             assert!(kbucket.try_add(&pk, &node, /* evict */ false));
         }
@@ -787,7 +787,7 @@ mod tests {
             // into the first kbucket
             pk[0] = 255;
             let pk = PublicKey(pk);
-            let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + i as u16);
+            let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + u16::from(i));
             let node = PackedNode::new(addr, &pk);
             assert!(ktree.try_add(&node));
         }
@@ -858,7 +858,7 @@ mod tests {
         let mut ktree = Ktree::new(&pk);
 
         fn node_by_idx(i: u8) -> PackedNode {
-            let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + i as u16);
+            let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + u16::from(i));
             PackedNode::new(addr, &PublicKey([i + 1; PUBLICKEYBYTES]))
         }
 
@@ -1028,7 +1028,7 @@ mod tests {
         assert!(ktree.iter().next().is_none());
 
         for i in 0 .. 8 {
-            let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + i as u16);
+            let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + u16::from(i));
             let node = PackedNode::new(addr, &PublicKey([i + 1; PUBLICKEYBYTES]));
             assert!(ktree.try_add(&node));
         }
@@ -1052,7 +1052,7 @@ mod tests {
         assert!(ktree.iter_mut().next().is_none());
 
         for i in 0 .. 8 {
-            let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + i as u16);
+            let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + u16::from(i));
             let node = PackedNode::new(addr, &PublicKey([i + 1; PUBLICKEYBYTES]));
             assert!(ktree.try_add(&node));
         }
