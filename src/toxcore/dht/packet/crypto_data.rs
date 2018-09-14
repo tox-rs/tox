@@ -67,7 +67,7 @@ impl CryptoData {
     }
     /// Create `CryptoData` from `CryptoDataPayload` encrypting it with
     /// `shared_key`.
-    pub fn new(shared_secret: &PrecomputedKey, nonce: Nonce, payload: CryptoDataPayload) -> CryptoData {
+    pub fn new(shared_secret: &PrecomputedKey, nonce: Nonce, payload: &CryptoDataPayload) -> CryptoData {
         let mut buf = [0; MAX_CRYPTO_PACKET_SIZE - MACBYTES - 3];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
         let payload = seal_precomputed(&buf[..size], &nonce, shared_secret);
@@ -184,7 +184,7 @@ mod tests {
             data: vec![42; 123],
         };
         // encode payload with shared secret
-        let crypto_data = CryptoData::new(&shared_secret, nonce, payload.clone());
+        let crypto_data = CryptoData::new(&shared_secret, nonce, &payload);
         // payload length should be gradual
         assert_eq!(
             (crypto_data.payload.len() - MACBYTES - 8) % CRYPTO_MAX_PADDING,
@@ -210,7 +210,7 @@ mod tests {
             data: vec![42; 123],
         };
         // encode payload with shared secret
-        let crypto_data = CryptoData::new(&shared_secret, nonce, payload);
+        let crypto_data = CryptoData::new(&shared_secret, nonce, &payload);
         // payload length should be gradual
         assert_eq!(
             (crypto_data.payload.len() - MACBYTES - 8) % CRYPTO_MAX_PADDING,

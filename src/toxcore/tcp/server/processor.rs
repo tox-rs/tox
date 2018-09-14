@@ -46,11 +46,10 @@ impl ServerProcessor {
 
         // TODO ping request = each 30s send PingRequest to client
 
-        let server_c = server.clone();
         let processor = processor
             .then(move |r_processing| {
                 debug!("shutdown PK {:?}", &client_pk);
-                server_c.shutdown_client(&client_pk)
+                server.shutdown_client(&client_pk)
                     .then(move |r_shutdown| r_processing.and(r_shutdown))
             });
 

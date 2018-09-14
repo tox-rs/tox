@@ -23,7 +23,7 @@ macro_rules! dht_packet_encrypt_decrypt (
             let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
             let payload = $payload;
             // encode payload with shared secret
-            let dht_packet = $packet::new(&shared_secret, &alice_pk, payload.clone());
+            let dht_packet = $packet::new(&shared_secret, &alice_pk, &payload);
             // decode payload with bob's secret key
             let decoded_payload = dht_packet.get_payload(&bob_sk).unwrap();
             // payloads should be equal
@@ -42,7 +42,7 @@ macro_rules! dht_packet_encrypt_decrypt_invalid_key (
             let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
             let payload = $payload;
             // encode payload with shared secret
-            let dht_packet = $packet::new(&shared_secret, &alice_pk, payload);
+            let dht_packet = $packet::new(&shared_secret, &alice_pk, &payload);
             // try to decode payload with eve's secret key
             let decoded_payload = dht_packet.get_payload(&eve_sk);
             assert!(decoded_payload.is_err());

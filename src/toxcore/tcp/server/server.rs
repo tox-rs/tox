@@ -67,16 +67,16 @@ impl Server {
     */
     pub fn handle_packet(&self, pk: &PublicKey, packet: Packet) -> IoFuture<()> {
         match packet {
-            Packet::RouteRequest(packet) => self.handle_route_request(pk, packet),
-            Packet::RouteResponse(packet) => self.handle_route_response(pk, packet),
-            Packet::ConnectNotification(packet) => self.handle_connect_notification(pk, packet),
-            Packet::DisconnectNotification(packet) => self.handle_disconnect_notification(pk, packet),
-            Packet::PingRequest(packet) => self.handle_ping_request(pk, packet),
-            Packet::PongResponse(packet) => self.handle_pong_response(pk, packet),
+            Packet::RouteRequest(packet) => self.handle_route_request(pk, &packet),
+            Packet::RouteResponse(packet) => self.handle_route_response(pk, &packet),
+            Packet::ConnectNotification(packet) => self.handle_connect_notification(pk, &packet),
+            Packet::DisconnectNotification(packet) => self.handle_disconnect_notification(pk, &packet),
+            Packet::PingRequest(packet) => self.handle_ping_request(pk, &packet),
+            Packet::PongResponse(packet) => self.handle_pong_response(pk, &packet),
             Packet::OobSend(packet) => self.handle_oob_send(pk, packet),
-            Packet::OobReceive(packet) => self.handle_oob_receive(pk, packet),
+            Packet::OobReceive(packet) => self.handle_oob_receive(pk, &packet),
             Packet::OnionRequest(packet) => self.handle_onion_request(pk, packet),
-            Packet::OnionResponse(packet) => self.handle_onion_response(pk, packet),
+            Packet::OnionResponse(packet) => self.handle_onion_response(pk, &packet),
             Packet::Data(packet) => self.handle_data(pk, packet),
         }
     }
@@ -136,7 +136,7 @@ impl Server {
     }
     // Here start the impl of `handle_***` methods
 
-    fn handle_route_request(&self, pk: &PublicKey, packet: RouteRequest) -> IoFuture<()> {
+    fn handle_route_request(&self, pk: &PublicKey, packet: &RouteRequest) -> IoFuture<()> {
         let mut state = self.state.write();
         let b_id_in_client_a = {
             // check if client was already linked to pk
@@ -187,18 +187,18 @@ impl Server {
             client_a.send_route_response(&packet.pk, b_id_in_client_a)
         }
     }
-    fn handle_route_response(&self, _pk: &PublicKey, _packet: RouteResponse) -> IoFuture<()> {
+    fn handle_route_response(&self, _pk: &PublicKey, _packet: &RouteResponse) -> IoFuture<()> {
         Box::new(future::err(
             Error::new(ErrorKind::Other,
                 "Client must not send RouteResponse to server"
         )))
     }
-    fn handle_connect_notification(&self, _pk: &PublicKey, _packet: ConnectNotification) -> IoFuture<()> {
+    fn handle_connect_notification(&self, _pk: &PublicKey, _packet: &ConnectNotification) -> IoFuture<()> {
         // Although normally a client should not send ConnectNotification to server
         //  we ignore it for backward compatibility
         Box::new(future::ok(()))
     }
-    fn handle_disconnect_notification(&self, pk: &PublicKey, packet: DisconnectNotification) -> IoFuture<()> {
+    fn handle_disconnect_notification(&self, pk: &PublicKey, packet: &DisconnectNotification) -> IoFuture<()> {
         if packet.connection_id < 16 {
             return Box::new( future::err(
                 Error::new(ErrorKind::Other,
@@ -241,7 +241,7 @@ impl Server {
             Box::new( future::ok(()) )
         }
     }
-    fn handle_ping_request(&self, pk: &PublicKey, packet: PingRequest) -> IoFuture<()> {
+    fn handle_ping_request(&self, pk: &PublicKey, packet: &PingRequest) -> IoFuture<()> {
         if packet.ping_id == 0 {
             return Box::new( future::err(
                 Error::new(ErrorKind::Other,
@@ -258,7 +258,7 @@ impl Server {
             )) )
         }
     }
-    fn handle_pong_response(&self, pk: &PublicKey, packet: PongResponse) -> IoFuture<()> {
+    fn handle_pong_response(&self, pk: &PublicKey, packet: &PongResponse) -> IoFuture<()> {
         if packet.ping_id == 0 {
             return Box::new( future::err(
                 Error::new(ErrorKind::Other,
@@ -298,7 +298,7 @@ impl Server {
             Box::new( future::ok(()) )
         }
     }
-    fn handle_oob_receive(&self, _pk: &PublicKey, _packet: OobReceive) -> IoFuture<()> {
+    fn handle_oob_receive(&self, _pk: &PublicKey, _packet: &OobReceive) -> IoFuture<()> {
         Box::new( future::err(
             Error::new(ErrorKind::Other,
                 "Client must not send OobReceive to server"
@@ -329,7 +329,7 @@ impl Server {
             Box::new( future::ok(()) )
         }
     }
-    fn handle_onion_response(&self, _pk: &PublicKey, _packet: OnionResponse) -> IoFuture<()> {
+    fn handle_onion_response(&self, _pk: &PublicKey, _packet: &OnionResponse) -> IoFuture<()> {
         Box::new( future::err(
             Error::new(ErrorKind::Other,
                 "Client must not send OnionResponse to server"

@@ -174,24 +174,24 @@ impl NetCrypto {
     }
 
     /// Create `CookieResponse` packet with `Cookie` requested by `CookieRequest` packet
-    fn handle_cookie_request(&self, packet: CookieRequest) -> Result<CookieResponse, Error> {
+    fn handle_cookie_request(&self, packet: &CookieRequest) -> Result<CookieResponse, Error> {
         let payload = packet.get_payload(&self.dht_sk)?;
 
         let cookie = Cookie::new(payload.pk, packet.pk);
-        let encrypted_cookie = EncryptedCookie::new(&self.symmetric_key, cookie);
+        let encrypted_cookie = EncryptedCookie::new(&self.symmetric_key, &cookie);
 
         let response_payload = CookieResponsePayload {
             cookie: encrypted_cookie,
             id: payload.id,
         };
         let precomputed_key = precompute(&packet.pk, &self.dht_sk);
-        let response = CookieResponse::new(&precomputed_key, response_payload);
+        let response = CookieResponse::new(&precomputed_key, &response_payload);
 
         Ok(response)
     }
 
     /// Handle `CookieRequest` packet received from UDP socket
-    pub fn handle_udp_cookie_request(&self, packet: CookieRequest, addr: SocketAddr) -> IoFuture<()> {
+    pub fn handle_udp_cookie_request(&self, packet: &CookieRequest, addr: SocketAddr) -> IoFuture<()> {
         match self.handle_cookie_request(packet) {
             Ok(response) => self.send_to_udp(addr, Packet::CookieResponse(response)),
             Err(e) => Box::new(future::err(e))
@@ -199,7 +199,7 @@ impl NetCrypto {
     }
 
     /// Handle `CookieResponse` and if it's correct change connection status to `HandshakeSending`.
-    pub fn handle_cookie_response(&self, connection: &mut CryptoConnection, packet: CookieResponse) -> IoFuture<()> {
+    pub fn handle_cookie_response(&self, connection: &mut CryptoConnection, packet: &CookieResponse) -> IoFuture<()> {
         let cookie_request_id = if let ConnectionStatus::CookieRequesting { cookie_request_id, .. } = connection.status {
             cookie_request_id
         } else {
@@ -223,14 +223,14 @@ impl NetCrypto {
 
         let sent_nonce = gen_nonce();
         let our_cookie = Cookie::new(connection.peer_real_pk, connection.peer_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(&self.symmetric_key, our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&self.symmetric_key, &our_cookie);
         let handshake_payload = CryptoHandshakePayload {
             base_nonce: sent_nonce,
             session_pk: connection.session_pk,
             cookie_hash: payload.cookie.hash(),
             cookie: our_encrypted_cookie,
         };
-        let handshake = CryptoHandshake::new(&connection.dht_precomputed_key, handshake_payload, payload.cookie);
+        let handshake = CryptoHandshake::new(&connection.dht_precomputed_key, &handshake_payload, payload.cookie);
 
         connection.status = ConnectionStatus::HandshakeSending {
             sent_nonce,
@@ -241,7 +241,7 @@ impl NetCrypto {
     }
 
     /// Handle `CookieResponse` packet received from UDP socket
-    pub fn handle_udp_cookie_response(&self, packet: CookieResponse, addr: SocketAddr) -> IoFuture<()> {
+    pub fn handle_udp_cookie_response(&self, packet: &CookieResponse, addr: SocketAddr) -> IoFuture<()> {
         let connection = self.key_by_addr(addr).and_then(|pk| self.connection_by_key(pk));
         if let Some(connection) = connection {
             let mut connection = connection.write();
@@ -258,7 +258,7 @@ impl NetCrypto {
     }
 
     /// Handle `CryptoHandshake` and if it's correct change connection status to `NotConfirmed`.
-    pub fn handle_crypto_handshake(&self, connection: &mut CryptoConnection, packet: CryptoHandshake) -> IoFuture<()> {
+    pub fn handle_crypto_handshake(&self, connection: &mut CryptoConnection, packet: &CryptoHandshake) -> IoFuture<()> {
         if let ConnectionStatus::Established { .. } = connection.status {
             return Box::new(future::err(Error::new(
                 ErrorKind::Other,
@@ -309,14 +309,14 @@ impl NetCrypto {
             ConnectionStatus::CookieRequesting { .. } => {
                 let sent_nonce = gen_nonce();
                 let our_cookie = Cookie::new(connection.peer_real_pk, connection.peer_dht_pk);
-                let our_encrypted_cookie = EncryptedCookie::new(&self.symmetric_key, our_cookie);
+                let our_encrypted_cookie = EncryptedCookie::new(&self.symmetric_key, &our_cookie);
                 let handshake_payload = CryptoHandshakePayload {
                     base_nonce: sent_nonce,
                     session_pk: connection.session_pk,
                     cookie_hash: payload.cookie.hash(),
                     cookie: our_encrypted_cookie,
                 };
-                let handshake = CryptoHandshake::new(&connection.dht_precomputed_key, handshake_payload, payload.cookie);
+                let handshake = CryptoHandshake::new(&connection.dht_precomputed_key, &handshake_payload, payload.cookie);
                 ConnectionStatus::NotConfirmed {
                     sent_nonce,
                     received_nonce: payload.base_nonce,
@@ -340,7 +340,7 @@ impl NetCrypto {
     }
 
     /// Handle `CryptoHandshake` packet received from UDP socket
-    pub fn handle_udp_crypto_handshake(&self, packet: CryptoHandshake, addr: SocketAddr) -> IoFuture<()> {
+    pub fn handle_udp_crypto_handshake(&self, packet: &CryptoHandshake, addr: SocketAddr) -> IoFuture<()> {
         let connection = self.key_by_addr(addr).and_then(|pk| self.connection_by_key(pk));
         if let Some(connection) = connection {
             let mut connection = connection.write();
@@ -443,7 +443,7 @@ impl NetCrypto {
       packets from the beginning of this buffer
     - lossy type: just process the packet
     */
-    fn handle_crypto_data(&self, connection: &mut CryptoConnection, packet: CryptoData, udp: bool) -> IoFuture<()> {
+    fn handle_crypto_data(&self, connection: &mut CryptoConnection, packet: &CryptoData, udp: bool) -> IoFuture<()> {
         let (sent_nonce, mut received_nonce, peer_session_pk, session_precomputed_key) = match connection.status {
             ConnectionStatus::NotConfirmed { sent_nonce, received_nonce, peer_session_pk, ref session_precomputed_key, .. }
             | ConnectionStatus::Established { sent_nonce, received_nonce, peer_session_pk, ref session_precomputed_key } => {
@@ -545,7 +545,7 @@ impl NetCrypto {
     }
 
     /// Handle `CryptoData` packet received from UDP socket
-    pub fn handle_udp_crypto_data(&self, packet: CryptoData, addr: SocketAddr) -> IoFuture<()> {
+    pub fn handle_udp_crypto_data(&self, packet: &CryptoData, addr: SocketAddr) -> IoFuture<()> {
         let connection = self.key_by_addr(addr).and_then(|pk| self.connection_by_key(pk));
         if let Some(connection) = connection {
             let mut connection = connection.write();
@@ -688,9 +688,9 @@ mod tests {
             pk: peer_real_pk,
             id: cookie_request_id,
         };
-        let cookie_request = CookieRequest::new(&precomputed_key, &peer_dht_pk, cookie_request_payload);
+        let cookie_request = CookieRequest::new(&precomputed_key, &peer_dht_pk, &cookie_request_payload);
 
-        let cookie_response = net_crypto.handle_cookie_request(cookie_request).unwrap();
+        let cookie_response = net_crypto.handle_cookie_request(&cookie_request).unwrap();
         let cookie_response_payload = cookie_response.get_payload(&precomputed_key).unwrap();
 
         assert_eq!(cookie_response_payload.id, cookie_request_id);
@@ -724,7 +724,7 @@ mod tests {
             payload: vec![42; 88]
         };
 
-        assert!(net_crypto.handle_cookie_request(cookie_request).is_err());
+        assert!(net_crypto.handle_cookie_request(&cookie_request).is_err());
     }
 
     #[test]
@@ -754,11 +754,11 @@ mod tests {
             pk: peer_real_pk,
             id: cookie_request_id,
         };
-        let cookie_request = CookieRequest::new(&precomputed_key, &peer_dht_pk, cookie_request_payload);
+        let cookie_request = CookieRequest::new(&precomputed_key, &peer_dht_pk, &cookie_request_payload);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
 
-        assert!(net_crypto.handle_udp_cookie_request(cookie_request, addr).wait().is_ok());
+        assert!(net_crypto.handle_udp_cookie_request(&cookie_request, addr).wait().is_ok());
 
         let (received, _udp_rx) = udp_rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -801,7 +801,7 @@ mod tests {
 
         let addr = "127.0.0.1:12345".parse().unwrap();
 
-        assert!(net_crypto.handle_udp_cookie_request(cookie_request, addr).wait().is_err());
+        assert!(net_crypto.handle_udp_cookie_request(&cookie_request, addr).wait().is_err());
     }
 
     #[test]
@@ -824,7 +824,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let cookie_request_id = unpack!(connection.status, ConnectionStatus::CookieRequesting, cookie_request_id);
 
@@ -836,9 +836,9 @@ mod tests {
             cookie: cookie.clone(),
             id: cookie_request_id
         };
-        let cookie_response = CookieResponse::new(&connection.dht_precomputed_key, cookie_response_payload);
+        let cookie_response = CookieResponse::new(&connection.dht_precomputed_key, &cookie_response_payload);
 
-        assert!(net_crypto.handle_cookie_response(&mut connection, cookie_response).wait().is_ok());
+        assert!(net_crypto.handle_cookie_response(&mut connection, &cookie_response).wait().is_ok());
 
         let packet = unpack!(connection.status, ConnectionStatus::HandshakeSending, packet);
         let packet = unpack!(packet.dht_packet(), Packet::CryptoHandshake);
@@ -869,7 +869,7 @@ mod tests {
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
         let mut connection = CryptoConnection::new_not_confirmed(
-            dht_sk,
+            &dht_sk,
             peer_real_pk,
             peer_dht_pk,
             gen_nonce(),
@@ -889,9 +889,9 @@ mod tests {
             cookie,
             id: 12345
         };
-        let cookie_response = CookieResponse::new(&connection.dht_precomputed_key, cookie_response_payload);
+        let cookie_response = CookieResponse::new(&connection.dht_precomputed_key, &cookie_response_payload);
 
-        assert!(net_crypto.handle_cookie_response(&mut connection, cookie_response).wait().is_err());
+        assert!(net_crypto.handle_cookie_response(&mut connection, &cookie_response).wait().is_err());
     }
 
     #[test]
@@ -914,7 +914,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let cookie_request_id = unpack!(connection.status, ConnectionStatus::CookieRequesting, cookie_request_id);
 
@@ -926,9 +926,9 @@ mod tests {
             cookie,
             id: cookie_request_id.overflowing_add(1).0
         };
-        let cookie_response = CookieResponse::new(&connection.dht_precomputed_key, cookie_response_payload);
+        let cookie_response = CookieResponse::new(&connection.dht_precomputed_key, &cookie_response_payload);
 
-        assert!(net_crypto.handle_cookie_response(&mut connection, cookie_response).wait().is_err());
+        assert!(net_crypto.handle_cookie_response(&mut connection, &cookie_response).wait().is_err());
     }
 
 
@@ -952,7 +952,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let dht_precomputed_key = connection.dht_precomputed_key.clone();
         let cookie_request_id = unpack!(connection.status, ConnectionStatus::CookieRequesting, cookie_request_id);
@@ -971,9 +971,9 @@ mod tests {
             cookie: cookie.clone(),
             id: cookie_request_id
         };
-        let cookie_response = CookieResponse::new(&dht_precomputed_key, cookie_response_payload);
+        let cookie_response = CookieResponse::new(&dht_precomputed_key, &cookie_response_payload);
 
-        assert!(net_crypto.handle_udp_cookie_response(cookie_response, addr).wait().is_ok());
+        assert!(net_crypto.handle_udp_cookie_response(&cookie_response, addr).wait().is_ok());
 
         let connections = net_crypto.connections.read();
         let connection = connections.get(&peer_real_pk).unwrap().read().clone();
@@ -1017,9 +1017,9 @@ mod tests {
             cookie: cookie.clone(),
             id: 12345
         };
-        let cookie_response = CookieResponse::new(&dht_precomputed_key, cookie_response_payload);
+        let cookie_response = CookieResponse::new(&dht_precomputed_key, &cookie_response_payload);
 
-        assert!(net_crypto.handle_udp_cookie_response(cookie_response, addr).wait().is_err());
+        assert!(net_crypto.handle_udp_cookie_response(&cookie_response, addr).wait().is_err());
     }
 
     #[test]
@@ -1042,12 +1042,12 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let base_nonce = gen_nonce();
         let session_pk = gen_keypair().0;
         let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(&net_crypto.symmetric_key, our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: secretbox::gen_nonce(),
             payload: vec![43; 88]
@@ -1058,9 +1058,9 @@ mod tests {
             cookie_hash: our_encrypted_cookie.hash(),
             cookie: cookie.clone()
         };
-        let crypto_handshake = CryptoHandshake::new(&connection.dht_precomputed_key, crypto_handshake_payload, our_encrypted_cookie);
+        let crypto_handshake = CryptoHandshake::new(&connection.dht_precomputed_key, &crypto_handshake_payload, our_encrypted_cookie);
 
-        assert!(net_crypto.handle_crypto_handshake(&mut connection, crypto_handshake).wait().is_ok());
+        assert!(net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).wait().is_ok());
 
         let received_nonce = unpack!(connection.status, ConnectionStatus::NotConfirmed, received_nonce);
         let peer_session_pk = unpack!(connection.status, ConnectionStatus::NotConfirmed, peer_session_pk);
@@ -1101,7 +1101,7 @@ mod tests {
             payload: vec![42; 88]
         };
         let mut connection = CryptoConnection::new_not_confirmed(
-            dht_sk,
+            &dht_sk,
             peer_real_pk,
             peer_dht_pk,
             gen_nonce(),
@@ -1113,7 +1113,7 @@ mod tests {
         let base_nonce = gen_nonce();
         let session_pk = gen_keypair().0;
         let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(&net_crypto.symmetric_key, our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&net_crypto.symmetric_key, &our_cookie);
         let other_cookie = EncryptedCookie {
             nonce: secretbox::gen_nonce(),
             payload: vec![43; 88]
@@ -1124,9 +1124,9 @@ mod tests {
             cookie_hash: our_encrypted_cookie.hash(),
             cookie: other_cookie
         };
-        let crypto_handshake = CryptoHandshake::new(&connection.dht_precomputed_key, crypto_handshake_payload, our_encrypted_cookie);
+        let crypto_handshake = CryptoHandshake::new(&connection.dht_precomputed_key, &crypto_handshake_payload, our_encrypted_cookie);
 
-        assert!(net_crypto.handle_crypto_handshake(&mut connection, crypto_handshake).wait().is_ok());
+        assert!(net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).wait().is_ok());
 
         // Nonce and session pk should be taken from the packet
         let received_nonce = unpack!(connection.status, ConnectionStatus::NotConfirmed, received_nonce);
@@ -1164,7 +1164,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
@@ -1179,7 +1179,7 @@ mod tests {
         let base_nonce = gen_nonce();
         let session_pk = gen_keypair().0;
         let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(&net_crypto.symmetric_key, our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: secretbox::gen_nonce(),
             payload: vec![43; 88]
@@ -1190,9 +1190,9 @@ mod tests {
             cookie_hash: our_encrypted_cookie.hash(),
             cookie
         };
-        let crypto_handshake = CryptoHandshake::new(&connection.dht_precomputed_key, crypto_handshake_payload, our_encrypted_cookie);
+        let crypto_handshake = CryptoHandshake::new(&connection.dht_precomputed_key, &crypto_handshake_payload, our_encrypted_cookie);
 
-        assert!(net_crypto.handle_crypto_handshake(&mut connection, crypto_handshake).wait().is_err());
+        assert!(net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).wait().is_err());
     }
 
     #[test]
@@ -1215,12 +1215,12 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let base_nonce = gen_nonce();
         let session_pk = gen_keypair().0;
         let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(&net_crypto.symmetric_key, our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: secretbox::gen_nonce(),
             payload: vec![43; 88]
@@ -1231,9 +1231,9 @@ mod tests {
             cookie_hash: cookie.hash(),
             cookie
         };
-        let crypto_handshake = CryptoHandshake::new(&connection.dht_precomputed_key, crypto_handshake_payload, our_encrypted_cookie);
+        let crypto_handshake = CryptoHandshake::new(&connection.dht_precomputed_key, &crypto_handshake_payload, our_encrypted_cookie);
 
-        assert!(net_crypto.handle_crypto_handshake(&mut connection, crypto_handshake).wait().is_err());
+        assert!(net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).wait().is_err());
     }
 
     #[test]
@@ -1256,13 +1256,13 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let base_nonce = gen_nonce();
         let session_pk = gen_keypair().0;
         let mut our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
         our_cookie.time -= COOKIE_TIMEOUT + 1;
-        let our_encrypted_cookie = EncryptedCookie::new(&&net_crypto.symmetric_key, our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&&net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: secretbox::gen_nonce(),
             payload: vec![43; 88]
@@ -1273,9 +1273,9 @@ mod tests {
             cookie_hash: our_encrypted_cookie.hash(),
             cookie
         };
-        let crypto_handshake = CryptoHandshake::new(&connection.dht_precomputed_key, crypto_handshake_payload, our_encrypted_cookie);
+        let crypto_handshake = CryptoHandshake::new(&connection.dht_precomputed_key, &crypto_handshake_payload, our_encrypted_cookie);
 
-        assert!(net_crypto.handle_crypto_handshake(&mut connection, crypto_handshake).wait().is_err());
+        assert!(net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).wait().is_err());
     }
 
     #[test]
@@ -1298,12 +1298,12 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let base_nonce = gen_nonce();
         let session_pk = gen_keypair().0;
         let our_cookie = Cookie::new(peer_dht_pk, peer_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(&net_crypto.symmetric_key, our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: secretbox::gen_nonce(),
             payload: vec![43; 88]
@@ -1314,9 +1314,9 @@ mod tests {
             cookie_hash: our_encrypted_cookie.hash(),
             cookie
         };
-        let crypto_handshake = CryptoHandshake::new(&connection.dht_precomputed_key, crypto_handshake_payload, our_encrypted_cookie);
+        let crypto_handshake = CryptoHandshake::new(&connection.dht_precomputed_key, &crypto_handshake_payload, our_encrypted_cookie);
 
-        assert!(net_crypto.handle_crypto_handshake(&mut connection, crypto_handshake).wait().is_err());
+        assert!(net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).wait().is_err());
     }
 
     #[test]
@@ -1339,14 +1339,14 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let (new_dht_pk, _new_dht_sk) = gen_keypair();
 
         let base_nonce = gen_nonce();
         let session_pk = gen_keypair().0;
         let our_cookie = Cookie::new(peer_real_pk, new_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(&net_crypto.symmetric_key, our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: secretbox::gen_nonce(),
             payload: vec![43; 88]
@@ -1357,9 +1357,9 @@ mod tests {
             cookie_hash: our_encrypted_cookie.hash(),
             cookie
         };
-        let crypto_handshake = CryptoHandshake::new(&connection.dht_precomputed_key, crypto_handshake_payload, our_encrypted_cookie);
+        let crypto_handshake = CryptoHandshake::new(&connection.dht_precomputed_key, &crypto_handshake_payload, our_encrypted_cookie);
 
-        assert!(net_crypto.handle_crypto_handshake(&mut connection, crypto_handshake).wait().is_err());
+        assert!(net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).wait().is_err());
 
         let (keys, _dht_pk_rx) = dht_pk_rx.into_future().wait().unwrap();
         let (received_real_pk, received_dht_pk) = keys.unwrap();
@@ -1388,7 +1388,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let dht_precomputed_key = connection.dht_precomputed_key.clone();
 
@@ -1401,7 +1401,7 @@ mod tests {
         let base_nonce = gen_nonce();
         let session_pk = gen_keypair().0;
         let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(&net_crypto.symmetric_key, our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: secretbox::gen_nonce(),
             payload: vec![43; 88]
@@ -1412,9 +1412,9 @@ mod tests {
             cookie_hash: our_encrypted_cookie.hash(),
             cookie: cookie.clone()
         };
-        let crypto_handshake = CryptoHandshake::new(&dht_precomputed_key, crypto_handshake_payload, our_encrypted_cookie);
+        let crypto_handshake = CryptoHandshake::new(&dht_precomputed_key, &crypto_handshake_payload, our_encrypted_cookie);
 
-        assert!(net_crypto.handle_udp_crypto_handshake(crypto_handshake, addr).wait().is_ok());
+        assert!(net_crypto.handle_udp_crypto_handshake(&crypto_handshake, addr).wait().is_ok());
 
         let connections = net_crypto.connections.read();
         let connection = connections.get(&peer_real_pk).unwrap().read().clone();
@@ -1453,7 +1453,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let received_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
@@ -1471,9 +1471,9 @@ mod tests {
             packet_number: 0,
             data: vec![PACKET_ID_LOSSY_RANGE_START, 1, 2, 3]
         };
-        let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, crypto_data_payload);
+        let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, &crypto_data_payload);
 
-        assert!(net_crypto.handle_crypto_data(&mut connection, crypto_data, /* udp */ true).wait().is_ok());
+        assert!(net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait().is_ok());
 
         // The diff between nonces is not bigger than the threshold so received
         // nonce shouldn't be changed
@@ -1510,7 +1510,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let received_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
@@ -1532,9 +1532,9 @@ mod tests {
             packet_number: 0,
             data: vec![PACKET_ID_LOSSY_RANGE_START, 1, 2, 3]
         };
-        let crypto_data = CryptoData::new(&session_precomputed_key, packet_nonce, crypto_data_payload);
+        let crypto_data = CryptoData::new(&session_precomputed_key, packet_nonce, &crypto_data_payload);
 
-        assert!(net_crypto.handle_crypto_data(&mut connection, crypto_data, /* udp */ true).wait().is_ok());
+        assert!(net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait().is_ok());
 
         // The diff between nonces is bigger than the threshold so received
         // nonce should be changed increased
@@ -1573,7 +1573,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let now = Instant::now();
 
@@ -1602,13 +1602,13 @@ mod tests {
             packet_number: 0,
             data: vec![PACKET_ID_LOSSY_RANGE_START, 1, 2, 3]
         };
-        let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, crypto_data_payload);
+        let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, &crypto_data_payload);
 
         let mut enter = tokio_executor::enter().unwrap();
         let clock = Clock::new_with_now(ConstNow(now + Duration::from_millis(250)));
 
         with_default(&clock, &mut enter, |_| {
-            assert!(net_crypto.handle_crypto_data(&mut connection, crypto_data, /* udp */ true).wait().is_ok());
+            assert!(net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait().is_ok());
         });
 
         // The diff between nonces is not bigger than the threshold so received
@@ -1652,7 +1652,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let received_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
@@ -1670,9 +1670,9 @@ mod tests {
             packet_number: 0,
             data: vec![PACKET_ID_LOSSY_RANGE_START, 1, 2, 3]
         };
-        let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, crypto_data_payload);
+        let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, &crypto_data_payload);
 
-        assert!(net_crypto.handle_crypto_data(&mut connection, crypto_data, /* udp */ true).wait().is_err());
+        assert!(net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait().is_err());
 
         assert_eq!(unpack!(connection.status, ConnectionStatus::Established, received_nonce), received_nonce);
 
@@ -1702,7 +1702,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let received_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
@@ -1720,26 +1720,26 @@ mod tests {
             packet_number: 0,
             data: vec![PACKET_ID_LOSSY_RANGE_START - 1, 1, 2, 3]
         };
-        let crypto_data_1 = CryptoData::new(&session_precomputed_key, received_nonce, crypto_data_payload_1);
+        let crypto_data_1 = CryptoData::new(&session_precomputed_key, received_nonce, &crypto_data_payload_1);
 
         let crypto_data_payload_2 = CryptoDataPayload {
             buffer_start: 0,
             packet_number: 1,
             data: vec![PACKET_ID_LOSSY_RANGE_START - 1, 4, 5, 6]
         };
-        let crypto_data_2 = CryptoData::new(&session_precomputed_key, received_nonce, crypto_data_payload_2);
+        let crypto_data_2 = CryptoData::new(&session_precomputed_key, received_nonce, &crypto_data_payload_2);
 
         let crypto_data_payload_3 = CryptoDataPayload {
             buffer_start: 0,
             packet_number: 2,
             data: vec![PACKET_ID_LOSSY_RANGE_START - 1, 7, 8, 9]
         };
-        let crypto_data_3 = CryptoData::new(&session_precomputed_key, received_nonce, crypto_data_payload_3);
+        let crypto_data_3 = CryptoData::new(&session_precomputed_key, received_nonce, &crypto_data_payload_3);
 
         // Send packets in random order
-        assert!(net_crypto.handle_crypto_data(&mut connection, crypto_data_2, /* udp */ true).wait().is_ok());
-        assert!(net_crypto.handle_crypto_data(&mut connection, crypto_data_3, /* udp */ true).wait().is_ok());
-        assert!(net_crypto.handle_crypto_data(&mut connection, crypto_data_1, /* udp */ true).wait().is_ok());
+        assert!(net_crypto.handle_crypto_data(&mut connection, &crypto_data_2, /* udp */ true).wait().is_ok());
+        assert!(net_crypto.handle_crypto_data(&mut connection, &crypto_data_3, /* udp */ true).wait().is_ok());
+        assert!(net_crypto.handle_crypto_data(&mut connection, &crypto_data_1, /* udp */ true).wait().is_ok());
 
         // The diff between nonces is not bigger than the threshold so received
         // nonce shouldn't be changed
@@ -1788,7 +1788,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let received_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
@@ -1806,9 +1806,9 @@ mod tests {
             packet_number: CRYPTO_PACKET_BUFFER_SIZE,
             data: vec![PACKET_ID_LOSSY_RANGE_START - 1, 1, 2, 3]
         };
-        let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, crypto_data_payload);
+        let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, &crypto_data_payload);
 
-        assert!(net_crypto.handle_crypto_data(&mut connection, crypto_data, /* udp */ true).wait().is_err());
+        assert!(net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait().is_err());
 
         assert_eq!(unpack!(connection.status, ConnectionStatus::Established, received_nonce), received_nonce);
 
@@ -1838,7 +1838,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.udp_addr = Some(addr);
@@ -1863,9 +1863,9 @@ mod tests {
             packet_number: 0,
             data: vec![PACKET_ID_KILL]
         };
-        let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, crypto_data_payload);
+        let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, &crypto_data_payload);
 
-        assert!(net_crypto.handle_crypto_data(&mut connection.write(), crypto_data, /* udp */ true).wait().is_ok());
+        assert!(net_crypto.handle_crypto_data(&mut connection.write(), &crypto_data, /* udp */ true).wait().is_ok());
 
         assert!(net_crypto.connections.read().is_empty());
         assert!(net_crypto.keys_by_addr.read().is_empty());
@@ -1891,7 +1891,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let now = Instant::now();
 
@@ -1932,13 +1932,13 @@ mod tests {
             packet_number: 0,
             data: vec![PACKET_ID_REQUEST, 1, 5, 0, 0, 0, 254] // request 0, 5 and 1024 packets
         };
-        let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, crypto_data_payload);
+        let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, &crypto_data_payload);
 
         let mut enter = tokio_executor::enter().unwrap();
         let clock = Clock::new_with_now(ConstNow(now + Duration::from_secs(1)));
 
         with_default(&clock, &mut enter, |_| {
-            assert!(net_crypto.handle_crypto_data(&mut connection, crypto_data, /* udp */ true).wait().is_ok());
+            assert!(net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait().is_ok());
         });
 
         assert!(connection.send_array.get(0).unwrap().requested);
@@ -1974,7 +1974,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         assert!(connection.send_array.insert(0, SentPacket::new(vec![42; 123])).is_ok());
         assert!(connection.send_array.insert(1, SentPacket::new(vec![43; 123])).is_ok());
@@ -1998,9 +1998,9 @@ mod tests {
             packet_number: 0,
             data: vec![PACKET_ID_REQUEST]
         };
-        let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, crypto_data_payload);
+        let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, &crypto_data_payload);
 
-        assert!(net_crypto.handle_crypto_data(&mut connection, crypto_data, /* udp */ true).wait().is_ok());
+        assert!(net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait().is_ok());
 
         assert!(!connection.send_array.get(0).unwrap().requested);
         assert!(!connection.send_array.get(1).unwrap().requested);
@@ -2029,7 +2029,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let received_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
@@ -2047,9 +2047,9 @@ mod tests {
             packet_number: 0,
             data: vec![255, 1, 2, 3] // only 255 is invalid id
         };
-        let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, crypto_data_payload);
+        let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, &crypto_data_payload);
 
-        assert!(net_crypto.handle_crypto_data(&mut connection, crypto_data, /* udp */ true).wait().is_err());
+        assert!(net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait().is_err());
 
         assert_eq!(unpack!(connection.status, ConnectionStatus::Established, received_nonce), received_nonce);
 
@@ -2079,7 +2079,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let received_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
@@ -2097,9 +2097,9 @@ mod tests {
             packet_number: 0,
             data: Vec::new()
         };
-        let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, crypto_data_payload);
+        let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, &crypto_data_payload);
 
-        assert!(net_crypto.handle_crypto_data(&mut connection, crypto_data, /* udp */ true).wait().is_err());
+        assert!(net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait().is_err());
 
         assert_eq!(unpack!(connection.status, ConnectionStatus::Established, received_nonce), received_nonce);
 
@@ -2129,7 +2129,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let received_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
@@ -2140,9 +2140,9 @@ mod tests {
             packet_number: 0,
             data: vec![0, 0, PACKET_ID_LOSSY_RANGE_START, 1, 2, 3]
         };
-        let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, crypto_data_payload);
+        let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, &crypto_data_payload);
 
-        assert!(net_crypto.handle_crypto_data(&mut connection, crypto_data, /* udp */ true).wait().is_err());
+        assert!(net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait().is_err());
     }
 
     #[test]
@@ -2165,7 +2165,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let received_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
@@ -2189,9 +2189,9 @@ mod tests {
             packet_number: 0,
             data: vec![0, 0, PACKET_ID_LOSSY_RANGE_START, 1, 2, 3]
         };
-        let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, crypto_data_payload);
+        let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, &crypto_data_payload);
 
-        assert!(net_crypto.handle_udp_crypto_data(crypto_data, addr).wait().is_ok());
+        assert!(net_crypto.handle_udp_crypto_data(&crypto_data, addr).wait().is_ok());
 
         let connections = net_crypto.connections.read();
         let connection = connections.get(&peer_real_pk).unwrap().read().clone();
@@ -2231,7 +2231,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.udp_addr = Some(addr);
@@ -2276,7 +2276,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.udp_addr = Some(addr);
@@ -2316,7 +2316,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.udp_addr = Some(addr);
@@ -2357,7 +2357,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.udp_addr = Some(addr);
@@ -2392,7 +2392,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let packet = Packet::CryptoData(CryptoData {
             nonce_last_bytes: 123,
@@ -2424,7 +2424,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let packet = unpack!(connection.status.clone(), ConnectionStatus::CookieRequesting, packet).dht_packet();
 
@@ -2463,7 +2463,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.udp_addr = Some(addr);
@@ -2509,7 +2509,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let received_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();

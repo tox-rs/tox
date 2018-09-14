@@ -74,7 +74,7 @@ fn create_client(rx: mpsc::Receiver<Packet>, tx: mpsc::Sender<Packet>) -> IoFutu
 
     let client = TcpStream::connect(&addr)
         .and_then(move |socket| {
-            make_client_handshake(socket, client_pk, client_sk, server_pk)
+            make_client_handshake(socket, &client_pk, &client_sk, &server_pk)
         })
         .and_then(|(socket, channel)| {
             debug!("Handshake complited");

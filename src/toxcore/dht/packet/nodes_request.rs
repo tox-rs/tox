@@ -58,7 +58,7 @@ impl FromBytes for NodesRequest {
 
 impl NodesRequest {
     /// create new NodesRequest object
-    pub fn new(shared_secret: &PrecomputedKey, pk: &PublicKey, payload: NodesRequestPayload) -> NodesRequest {
+    pub fn new(shared_secret: &PrecomputedKey, pk: &PublicKey, payload: &NodesRequestPayload) -> NodesRequest {
         let nonce = gen_nonce();
         let mut buf = [0; MAX_DHT_PACKET_SIZE];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();

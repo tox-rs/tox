@@ -46,8 +46,8 @@ impl DaemonState {
     }
 
     /// Deserialize DHT close list and then re-setup close list, old means that the format of deserialization is old version
-    pub fn deserialize_old(server: &Server, serialized_data: Vec<u8>) -> IoFuture<()> {
-        let nodes = match DhtState::from_bytes(&serialized_data) {
+    pub fn deserialize_old(server: &Server, serialized_data: &[u8]) -> IoFuture<()> {
+        let nodes = match DhtState::from_bytes(serialized_data) {
             IResult::Done(_, DhtState(nodes)) => nodes,
             e => return Box::new(
                 future::err(
@@ -97,7 +97,7 @@ mod tests {
         alice.close_nodes.write().try_add(&pn);
 
         let serialized_vec = DaemonState::serialize_old(&alice);
-        DaemonState::deserialize_old(&alice, serialized_vec).wait().unwrap();
+        DaemonState::deserialize_old(&alice, &serialized_vec).wait().unwrap();
 
         let (received, _rx) = rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -111,11 +111,11 @@ mod tests {
         // test with incompleted serialized data
         let serialized_vec = DaemonState::serialize_old(&alice);
         let serialized_len = serialized_vec.len();
-        assert!(DaemonState::deserialize_old(&alice, serialized_vec[..serialized_len - 1].to_vec()).wait().is_err());
+        assert!(DaemonState::deserialize_old(&alice, &serialized_vec[..serialized_len - 1]).wait().is_err());
 
         // test with empty close list
         alice.close_nodes.write().remove(&pk_org);
         let serialized_vec = DaemonState::serialize_old(&alice);
-        assert!(DaemonState::deserialize_old(&alice, serialized_vec).wait().is_ok());
+        assert!(DaemonState::deserialize_old(&alice, &serialized_vec).wait().is_ok());
     }
 }

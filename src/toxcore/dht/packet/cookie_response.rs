@@ -53,7 +53,7 @@ impl ToBytes for CookieResponse {
 
 impl CookieResponse {
     /// Create `CookieResponse` from `CookieRequestPayload` encrypting it with `shared_key`
-    pub fn new(shared_secret: &PrecomputedKey, payload: CookieResponsePayload) -> CookieResponse {
+    pub fn new(shared_secret: &PrecomputedKey, payload: &CookieResponsePayload) -> CookieResponse {
         let nonce = gen_nonce();
         let mut buf = [0; 120];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
@@ -170,7 +170,7 @@ mod tests {
             id: 12345,
         };
         // encode payload with shared secret
-        let cookie_response = CookieResponse::new(&shared_secret, payload.clone());
+        let cookie_response = CookieResponse::new(&shared_secret, &payload);
         // decode payload with shared secret
         let decoded_payload = cookie_response.get_payload(&shared_secret).unwrap();
         // payloads should be equal
@@ -192,7 +192,7 @@ mod tests {
             id: 12345,
         };
         // encode payload with shared secret
-        let dht_packet = CookieResponse::new(&shared_secret, payload);
+        let dht_packet = CookieResponse::new(&shared_secret, &payload);
         // try to decode payload with eve's shared secret
         let decoded_payload = dht_packet.get_payload(&eve_shared_secret);
         assert!(decoded_payload.is_err());

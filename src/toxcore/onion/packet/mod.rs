@@ -258,6 +258,7 @@ impl ToBytes for OnionReturn {
 }
 
 impl OnionReturn {
+    #[cfg_attr(feature = "cargo-clippy", allow(needless_pass_by_value))]
     fn inner_to_bytes<'a>(ip_port: &IpPort, inner: Option<&OnionReturn>, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_call!(|buf, ip_port| IpPort::to_bytes(ip_port, buf), ip_port) >>

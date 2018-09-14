@@ -66,7 +66,7 @@ impl FromBytes for DhtRequest {
 
 impl DhtRequest {
     /// create new DhtRequest object
-    pub fn new(shared_secret: &PrecomputedKey, rpk: &PublicKey, spk: &PublicKey, dp: DhtRequestPayload) -> DhtRequest {
+    pub fn new(shared_secret: &PrecomputedKey, rpk: &PublicKey, spk: &PublicKey, dp: &DhtRequestPayload) -> DhtRequest {
         let nonce = gen_nonce();
 
         let mut buf = [0; MAX_DHT_PACKET_SIZE];
@@ -298,7 +298,7 @@ mod tests {
         ];
         for payload in test_payloads {
             // encode payload with shared secret
-            let dht_request = DhtRequest::new(&shared_secret, &bob_pk, &alice_pk, payload.clone());
+            let dht_request = DhtRequest::new(&shared_secret, &bob_pk, &alice_pk, &payload);
             // decode payload with bob's secret key
             let decoded_payload = dht_request.get_payload(&bob_sk).unwrap();
             // payloads should be equal
@@ -318,7 +318,7 @@ mod tests {
         ];
         for payload in test_payloads {
             // encode payload with shared secret
-            let dht_request = DhtRequest::new(&shared_secret, &bob_pk, &alice_pk, payload.clone());
+            let dht_request = DhtRequest::new(&shared_secret, &bob_pk, &alice_pk, &payload);
             // try to decode payload with eve's secret key
             let decoded_payload = dht_request.get_payload(&eve_sk);
             assert!(decoded_payload.is_err());

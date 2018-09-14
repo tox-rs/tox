@@ -120,8 +120,8 @@ mod tests {
         let bob_nonce = *bob_session.nonce();
 
         // Now both Alice and Bob may create secure Channels
-        let alice_channel = Channel::new(alice_session, &bob_pk, &bob_nonce);
-        let bob_channel = Channel::new(bob_session, &alice_pk, &alice_nonce);
+        let alice_channel = Channel::new(&alice_session, &bob_pk, &bob_nonce);
+        let bob_channel = Channel::new(&bob_session, &alice_pk, &alice_nonce);
 
         (alice_channel, bob_channel)
     }

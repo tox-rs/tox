@@ -65,7 +65,7 @@ impl ToBytes for CryptoHandshake {
 impl CryptoHandshake {
     /// Create `CryptoHandshake` from `CryptoHandshakePayload` encrypting it
     /// with `shared_key` and from `EncryptedCookie`.
-    pub fn new(shared_secret: &PrecomputedKey, payload: CryptoHandshakePayload, cookie: EncryptedCookie) -> CryptoHandshake {
+    pub fn new(shared_secret: &PrecomputedKey, payload: &CryptoHandshakePayload, cookie: EncryptedCookie) -> CryptoHandshake {
         let nonce = gen_nonce();
         let mut buf = [0; 232];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
@@ -215,7 +215,7 @@ mod tests {
             },
         };
         // encode payload with shared secret
-        let crypto_handshake = CryptoHandshake::new(&shared_secret, payload.clone(), cookie);
+        let crypto_handshake = CryptoHandshake::new(&shared_secret, &payload, cookie);
         // decode payload with shared secret
         let decoded_payload = crypto_handshake.get_payload(&shared_secret).unwrap();
         // payloads should be equal
@@ -243,7 +243,7 @@ mod tests {
             },
         };
         // encode payload with shared secret
-        let dht_packet = CryptoHandshake::new(&shared_secret, payload, cookie);
+        let dht_packet = CryptoHandshake::new(&shared_secret, &payload, cookie);
         // try to decode payload with eve's shared secret
         let decoded_payload = dht_packet.get_payload(&eve_shared_secret);
         assert!(decoded_payload.is_err());

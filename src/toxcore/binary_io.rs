@@ -87,6 +87,7 @@ pub fn gen_len_limit(buf: (&mut [u8], usize), limit: usize) -> Result<(&mut [u8]
 }
 
 /// Generator that returns specified error.
+#[cfg_attr(feature = "cargo-clippy", allow(needless_pass_by_value))]
 pub fn gen_error(_buf: (&mut [u8], usize), error: u32) -> Result<(&mut [u8], usize), GenError> {
     Err(GenError::CustomError(error))
 }

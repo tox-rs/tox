@@ -78,11 +78,11 @@ impl HolePunching {
     ///
     /// This function returns list of addresses to which we should send
     ///`PingRequest` packet.
-    pub fn next_punch_addrs(&mut self, addrs: Vec<SocketAddr>) -> Vec<SocketAddr> {
+    pub fn next_punch_addrs(&mut self, addrs: &[SocketAddr]) -> Vec<SocketAddr> {
         if !self.is_punching_done &&
             self.last_punching_time.map_or(true, |time| time.elapsed() >= Duration::from_secs(PUNCH_INTERVAL)) &&
             self.last_recv_ping_time.elapsed() <= Duration::from_secs(PUNCH_INTERVAL) * 2 {
-                let ip = match HolePunching::get_common_ip(&addrs, u32::from(FRIEND_CLOSE_NODES_COUNT) / 2) {
+                let ip = match HolePunching::get_common_ip(addrs, u32::from(FRIEND_CLOSE_NODES_COUNT) / 2) {
                     // A friend can have maximum 8 close node. If 4 or more close nodes returned
                     // the same friend's IP address but with different port we consider that friend
                     // is behind NAT. Otherwise we do nothing.
@@ -98,7 +98,7 @@ impl HolePunching {
 
                 let ports_to_try = HolePunching::get_nat_ports(&addrs, ip);
 
-                let res = self.punch_addrs(ports_to_try, ip);
+                let res = self.punch_addrs(&ports_to_try, ip);
 
                 self.last_punching_time = Some(clock_now());
                 self.is_punching_done = true;
@@ -142,7 +142,7 @@ impl HolePunching {
 
     /// Simple port guessing algorithm. It uses only ports (with some
     /// neighborhood) returned by close nodes of a friend.
-    fn first_hole_punching(&self, ports: Vec<u16>, ip: IpAddr) -> Vec<SocketAddr> {
+    fn first_hole_punching(&self, ports: &[u16], ip: IpAddr) -> Vec<SocketAddr> {
         let num_ports = ports.len();
         (0..MAX_PORTS_TO_PUNCH).map(|i| {
             // algorithm designed by irungentoo
@@ -177,7 +177,7 @@ impl HolePunching {
     ///
     /// This function returns list of addresses to which we should send
     ///`PingRequest` packet.
-    fn punch_addrs(&mut self, ports: Vec<u16>, ip: IpAddr) -> Vec<SocketAddr> {
+    fn punch_addrs(&mut self, ports: &[u16], ip: IpAddr) -> Vec<SocketAddr> {
         if ports.is_empty() {
             return Vec::new()
         }
@@ -218,7 +218,7 @@ mod tests {
         let mut hole_punch = HolePunching::new();
         hole_punch.is_punching_done = false;
 
-        assert!(hole_punch.next_punch_addrs(addrs).is_empty());
+        assert!(hole_punch.next_punch_addrs(&addrs).is_empty());
     }
 
     #[test]
@@ -232,7 +232,7 @@ mod tests {
         let mut hole_punch = HolePunching::new();
         hole_punch.is_punching_done = false;
 
-        assert!(hole_punch.next_punch_addrs(addrs).is_empty());
+        assert!(hole_punch.next_punch_addrs(&addrs).is_empty());
     }
 
     #[test]
@@ -252,7 +252,7 @@ mod tests {
         let mut hole_punch = HolePunching::new();
         hole_punch.is_punching_done = false;
 
-        assert!(!hole_punch.next_punch_addrs(addrs).is_empty());
+        assert!(!hole_punch.next_punch_addrs(&addrs).is_empty());
     }
 
     #[test]
@@ -273,6 +273,6 @@ mod tests {
         hole_punch.is_punching_done = false;
         hole_punch.num_punch_tries = MAX_NORMAL_PUNCHING_TRIES + 1;
 
-        assert!(!hole_punch.next_punch_addrs(addrs).is_empty());
+        assert!(!hole_punch.next_punch_addrs(&addrs).is_empty());
     }
 }

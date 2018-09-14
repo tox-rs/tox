@@ -240,8 +240,8 @@ pub struct CryptoConnection {
 impl CryptoConnection {
     /// Create new `CryptoConnection` with `CookieRequesting` status. This
     /// function is used when we initiate crypto connection with a friend.
-    pub fn new(dht_sk: SecretKey, dht_pk: PublicKey, real_pk: PublicKey, peer_real_pk: PublicKey, peer_dht_pk: PublicKey) -> CryptoConnection {
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+    pub fn new(dht_sk: &SecretKey, dht_pk: PublicKey, real_pk: PublicKey, peer_real_pk: PublicKey, peer_dht_pk: PublicKey) -> CryptoConnection {
+        let dht_precomputed_key = precompute(&peer_dht_pk, dht_sk);
         let (session_pk, session_sk) = gen_keypair();
 
         let cookie_request_id = random_u64();
@@ -249,7 +249,7 @@ impl CryptoConnection {
             pk: real_pk,
             id: cookie_request_id
         };
-        let cookie_request = CookieRequest::new(&dht_precomputed_key, &dht_pk, cookie_request_payload);
+        let cookie_request = CookieRequest::new(&dht_precomputed_key, &dht_pk, &cookie_request_payload);
         let status = ConnectionStatus::CookieRequesting {
             cookie_request_id,
             packet: StatusPacket::new_cookie_request(cookie_request)
@@ -275,7 +275,7 @@ impl CryptoConnection {
     /// is used when we got `CryptoHandshake` packet from a friend but didn't
     /// create `CryptoConnection` yet.
     pub fn new_not_confirmed(
-        dht_sk: SecretKey,
+        dht_sk: &SecretKey,
         peer_real_pk: PublicKey,
         peer_dht_pk: PublicKey,
         received_nonce: Nonce,
@@ -283,19 +283,19 @@ impl CryptoConnection {
         cookie: EncryptedCookie,
         symmetric_key: &secretbox::Key
     ) -> CryptoConnection {
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = precompute(&peer_dht_pk, dht_sk);
         let (session_pk, session_sk) = gen_keypair();
         let sent_nonce = gen_nonce();
 
         let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(symmetric_key, our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(symmetric_key, &our_cookie);
         let handshake_payload = CryptoHandshakePayload {
             base_nonce: sent_nonce,
             session_pk,
             cookie_hash: cookie.hash(),
             cookie: our_encrypted_cookie,
         };
-        let handshake = CryptoHandshake::new(&dht_precomputed_key, handshake_payload, cookie);
+        let handshake = CryptoHandshake::new(&dht_precomputed_key, &handshake_payload, cookie);
         let status = ConnectionStatus::NotConfirmed {
             sent_nonce,
             received_nonce,
@@ -459,7 +459,7 @@ mod tests {
         let (real_pk, _real_sk) = gen_keypair();
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new(dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let connection_c = connection.clone();
         assert_eq!(connection_c, connection);
