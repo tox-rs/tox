@@ -73,7 +73,7 @@ impl ToBytes for OnionRequest2 {
 
 impl OnionRequest2 {
     /// Create new `OnionRequest2` object.
-    pub fn new(shared_secret: &PrecomputedKey, temporary_pk: &PublicKey, payload: OnionRequest2Payload, onion_return: OnionReturn) -> OnionRequest2 {
+    pub fn new(shared_secret: &PrecomputedKey, temporary_pk: &PublicKey, payload: &OnionRequest2Payload, onion_return: OnionReturn) -> OnionRequest2 {
         let nonce = gen_nonce();
         let mut buf = [0; ONION_MAX_PACKET_SIZE];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
@@ -217,7 +217,7 @@ mod tests {
             payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
         };
         // encode payload with shared secret
-        let onion_packet = OnionRequest2::new(&shared_secret, &alice_pk, payload.clone(), onion_return);
+        let onion_packet = OnionRequest2::new(&shared_secret, &alice_pk, &payload, onion_return);
         // decode payload with bob's secret key
         let decoded_payload = onion_packet.get_payload(&shared_secret).unwrap();
         // payloads should be equal
@@ -248,7 +248,7 @@ mod tests {
             payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
         };
         // encode payload with shared secret
-        let onion_packet = OnionRequest2::new(&shared_secret, &alice_pk, payload.clone(), onion_return);
+        let onion_packet = OnionRequest2::new(&shared_secret, &alice_pk, &payload, onion_return);
         // try to decode payload with eve's secret key
         let eve_shared_secret = encrypt_precompute(&bob_pk, &eve_sk);
         let decoded_payload = onion_packet.get_payload(&eve_shared_secret);

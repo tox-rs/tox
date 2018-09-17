@@ -127,7 +127,7 @@ impl ToBytes for EncryptedCookie {
 
 impl EncryptedCookie {
     /// Create `EncryptedCookie` from `Cookie` encrypting it with `symmetric_key`
-    pub fn new(symmetric_key: &secretbox::Key, payload: Cookie) -> EncryptedCookie {
+    pub fn new(symmetric_key: &secretbox::Key, payload: &Cookie) -> EncryptedCookie {
         let nonce = secretbox::gen_nonce();
         let mut buf = [0; 72];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
@@ -201,7 +201,7 @@ mod tests {
         let symmetric_key = secretbox::gen_key();
         let payload = Cookie::new(gen_keypair().0, gen_keypair().0);
         // encode payload with symmetric key
-        let encrypted_cookie = EncryptedCookie::new(&symmetric_key, payload.clone());
+        let encrypted_cookie = EncryptedCookie::new(&symmetric_key, &payload);
         // decode payload with symmetric key
         let decoded_payload = encrypted_cookie.get_payload(&symmetric_key).unwrap();
         // payloads should be equal
@@ -214,7 +214,7 @@ mod tests {
         let eve_symmetric_key = secretbox::gen_key();
         let payload = Cookie::new(gen_keypair().0, gen_keypair().0);
         // encode payload with symmetric key
-        let encrypted_cookie = EncryptedCookie::new(&symmetric_key, payload.clone());
+        let encrypted_cookie = EncryptedCookie::new(&symmetric_key, &payload);
         // try to decode payload with eve's symmetric key
         let decoded_payload = encrypted_cookie.get_payload(&eve_symmetric_key);
         assert!(decoded_payload.is_err());

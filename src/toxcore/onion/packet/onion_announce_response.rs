@@ -66,7 +66,7 @@ impl ToBytes for OnionAnnounceResponse {
 
 impl OnionAnnounceResponse {
     /// Create new `OnionAnnounceResponse` object.
-    pub fn new(shared_secret: &PrecomputedKey, sendback_data: u64, payload: OnionAnnounceResponsePayload) -> OnionAnnounceResponse {
+    pub fn new(shared_secret: &PrecomputedKey, sendback_data: u64, payload: &OnionAnnounceResponsePayload) -> OnionAnnounceResponse {
         let nonce = gen_nonce();
         let mut buf = [0; ONION_MAX_PACKET_SIZE];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
@@ -205,7 +205,7 @@ mod tests {
             ]
         };
         // encode payload with shared secret
-        let onion_packet = OnionAnnounceResponse::new(&shared_secret, 12345, payload.clone());
+        let onion_packet = OnionAnnounceResponse::new(&shared_secret, 12345, &payload);
         // decode payload with bob's secret key
         let decoded_payload = onion_packet.get_payload(&shared_secret).unwrap();
         // payloads should be equal
@@ -226,7 +226,7 @@ mod tests {
             ]
         };
         // encode payload with shared secret
-        let onion_packet = OnionAnnounceResponse::new(&shared_secret, 12345, payload.clone());
+        let onion_packet = OnionAnnounceResponse::new(&shared_secret, 12345, &payload);
         // try to decode payload with eve's secret key
         let eve_shared_secret = encrypt_precompute(&bob_pk, &eve_sk);
         let decoded_payload = onion_packet.get_payload(&eve_shared_secret);

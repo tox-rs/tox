@@ -58,7 +58,7 @@ impl FromBytes for PingResponse {
 
 impl PingResponse {
     /// create new PingResponse object
-    pub fn new(shared_secret: &PrecomputedKey, pk: &PublicKey, payload: PingResponsePayload) -> PingResponse {
+    pub fn new(shared_secret: &PrecomputedKey, pk: &PublicKey, payload: &PingResponsePayload) -> PingResponse {
         let nonce = gen_nonce();
         let mut buf = [0; MAX_DHT_PACKET_SIZE];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
@@ -126,7 +126,7 @@ Serialized form should be put in the encrypted part of `PingResponse` packet.
 [`PingResponsePayload`](./struct.PingResponsePayload.html) can only be created as a response
 to [`PingRequestPayload`](./struct.PingRequestPayload.html).
 */
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PingResponsePayload {
     /// Ping id same as requested from PingRequest
     pub id: u64,

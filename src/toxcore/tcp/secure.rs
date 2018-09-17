@@ -20,8 +20,8 @@ let bob_pk = *bob_session.pk();
 let bob_nonce = *bob_session.nonce();
 
 // Now both Alice and Bob may create secure Channels
-let alice_channel = Channel::new(alice_session, &bob_pk, &bob_nonce);
-let bob_channel = Channel::new(bob_session, &alice_pk, &alice_nonce);
+let alice_channel = Channel::new(&alice_session, &bob_pk, &bob_nonce);
+let bob_channel = Channel::new(&bob_session, &alice_pk, &alice_nonce);
 
 // And now they may communicate sending encrypted data to each other
 
@@ -111,7 +111,7 @@ pub struct Channel {
 impl Channel {
     /** Create a secure channel with `our_session` and `their_pk` & `their_nonce`
     */
-    pub fn new(our_session: Session, their_pk: &PublicKey, their_nonce: &Nonce) -> Channel {
+    pub fn new(our_session: &Session, their_pk: &PublicKey, their_nonce: &Nonce) -> Channel {
         let precomputed = our_session.create_precomputed_key(their_pk);
         let sent_n = RefCell::new(*our_session.nonce());
         let recv_n = RefCell::new(*their_nonce);
@@ -151,8 +151,8 @@ mod tests {
         let bob_nonce = *bob_session.nonce();
 
         // Now both Alice and Bob may create secure Channels
-        let alice_channel = Channel::new(alice_session, &bob_pk, &bob_nonce);
-        let bob_channel = Channel::new(bob_session, &alice_pk, &alice_nonce);
+        let alice_channel = Channel::new(&alice_session, &bob_pk, &bob_nonce);
+        let bob_channel = Channel::new(&bob_session, &alice_pk, &alice_nonce);
 
         (alice_channel, bob_channel)
     }

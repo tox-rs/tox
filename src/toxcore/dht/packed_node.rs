@@ -92,12 +92,12 @@ impl PackedNode {
         trace!(target: "PackedNode", "With args: saddr: {:?}, PK: {:?}",
             &saddr, pk);
 
-        PackedNode { saddr: PackedNode::to_ipv4(saddr), pk: *pk }
+        PackedNode { saddr: PackedNode::ipv6_to_ipv4(saddr), pk: *pk }
     }
 
     /// Convert IPv6 address to IPv4 if it's IPv4-compatible or IPv4-mapped.
     /// Otherwise return original address.
-    fn to_ipv4(saddr: SocketAddr) -> SocketAddr {
+    fn ipv6_to_ipv4(saddr: SocketAddr) -> SocketAddr {
         match saddr {
             SocketAddr::V4(v4) => SocketAddr::V4(v4),
             SocketAddr::V6(v6) => {

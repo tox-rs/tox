@@ -20,9 +20,9 @@ use tokio_codec::Framed;
 use tokio::net::TcpStream;
 
 /// Create a handshake from client to server
-pub fn create_client_handshake(client_pk: PublicKey,
-                           client_sk: SecretKey,
-                           server_pk: PublicKey)
+pub fn create_client_handshake(client_pk: &PublicKey,
+                           client_sk: &SecretKey,
+                           server_pk: &PublicKey)
     -> Result<(secure::Session, PrecomputedKey, ClientHandshake), Error> {
     let session = secure::Session::new();
     let payload = HandshakePayload { session_pk: *session.pk(), session_nonce: *session.nonce() };
@@ -31,20 +31,20 @@ pub fn create_client_handshake(client_pk: PublicKey,
     // HandshakePayload::to_bytes may not fail because we created buffer with enough size
     let (serialized_payload, _) = payload.to_bytes((&mut serialized_payload, 0)).unwrap();
 
-    let common_key = encrypt_precompute(&server_pk, &client_sk);
+    let common_key = encrypt_precompute(server_pk, client_sk);
     let nonce = gen_nonce();
     let encrypted_payload = encrypt_data_symmetric(&common_key, &nonce, serialized_payload);
 
-    let handshake = ClientHandshake { pk: client_pk, nonce, payload: encrypted_payload };
+    let handshake = ClientHandshake { pk: *client_pk, nonce, payload: encrypted_payload };
     Ok((session, common_key, handshake))
 }
 
 /// Handle received client handshake on the server side.
 /// Return secure::Channel, Client PK, server handshake
-pub fn handle_client_handshake(server_sk: SecretKey,
-                           client_handshake: ClientHandshake)
+pub fn handle_client_handshake(server_sk: &SecretKey,
+                           client_handshake: &ClientHandshake)
     -> Result<(secure::Channel, PublicKey, ServerHandshake), Error> {
-    let common_key = encrypt_precompute(&client_handshake.pk, &server_sk);
+    let common_key = encrypt_precompute(&client_handshake.pk, server_sk);
     let payload_bytes = decrypt_data_symmetric(&common_key, &client_handshake.nonce, &client_handshake.payload)
         .map_err(
             |_| Error::new(ErrorKind::Other, "Failed to decrypt ClientHandshake payload")
@@ -69,16 +69,16 @@ pub fn handle_client_handshake(server_sk: SecretKey,
     let server_encrypted_payload = encrypt_data_symmetric(&common_key, &nonce, serialized_payload);
 
     let server_handshake = ServerHandshake { nonce, payload: server_encrypted_payload };
-    let channel = secure::Channel::new(session, &client_pk, &client_nonce);
+    let channel = secure::Channel::new(&session, &client_pk, &client_nonce);
     Ok((channel, client_handshake.pk, server_handshake))
 }
 
 /// Handle received server handshake on the client side.
-pub fn handle_server_handshake(common_key: PrecomputedKey,
-                           client_session: secure::Session,
-                           server_handshake: ServerHandshake)
+pub fn handle_server_handshake(common_key: &PrecomputedKey,
+                           client_session: &secure::Session,
+                           server_handshake: &ServerHandshake)
     -> Result<secure::Channel, Error> {
-    let payload_bytes = decrypt_data_symmetric(&common_key, &server_handshake.nonce, &server_handshake.payload)
+    let payload_bytes = decrypt_data_symmetric(common_key, &server_handshake.nonce, &server_handshake.payload)
         .map_err(
             |_| Error::new(ErrorKind::Other, "Failed to decrypt ServerHandshake payload")
         )?;
@@ -97,9 +97,9 @@ pub fn handle_server_handshake(common_key: PrecomputedKey,
 /// Sends handshake to the server, receives handshake from the server
 /// and processes it
 pub fn make_client_handshake(socket: TcpStream,
-                            client_pk: PublicKey,
-                            client_sk: SecretKey,
-                            server_pk: PublicKey)
+                            client_pk: &PublicKey,
+                            client_sk: &SecretKey,
+                            server_pk: &PublicKey)
     -> IoFuture<(TcpStream, secure::Channel)> {
     let res = futures::done(create_client_handshake(client_pk, client_sk, server_pk))
         .and_then(|(session, common_key, handshake)| {
@@ -136,7 +136,7 @@ pub fn make_client_handshake(socket: TcpStream,
         })
         .and_then(|(socket, common_key, session, handshake)| {
             // handle it
-            handle_server_handshake(common_key, session, handshake)
+            handle_server_handshake(&common_key, &session, &handshake)
                 .map(|channel| {
                     (socket, channel)
                 })
@@ -164,9 +164,9 @@ pub fn make_server_handshake(socket: TcpStream,
                 |handshake| Ok(( socket.into_inner(), handshake ))
             )
         })
-        .and_then(|(socket, handshake)| {
+        .and_then(move |(socket, handshake)| {
             // handle handshake
-            handle_client_handshake(server_sk, handshake)
+            handle_client_handshake(&server_sk, &handshake)
                 .map(|(channel, client_pk, server_handshake)| {
                     (socket, channel, client_pk, server_handshake)
                 })
@@ -199,7 +199,7 @@ mod tests {
         let (server_pk, server_sk) = gen_keypair();
 
         // client creates a handshake packet
-        let (client_session, common_key, client_handshake) = create_client_handshake(client_pk, client_sk, server_pk).unwrap();
+        let (client_session, common_key, client_handshake) = create_client_handshake(&client_pk, &client_sk, &server_pk).unwrap();
         assert_eq!(handshake::ENC_PAYLOAD_SIZE, client_handshake.payload.len());
         // sends client_handshake via network
         // ..
@@ -207,7 +207,7 @@ mod tests {
         // ..
         // server receives a handshake packet
         // handles it & creates a secure Channel
-        let (server_channel, received_client_pk, server_handshake) = handle_client_handshake(server_sk, client_handshake).unwrap();
+        let (server_channel, received_client_pk, server_handshake) = handle_client_handshake(&server_sk, &client_handshake).unwrap();
         assert_eq!(received_client_pk, client_pk);
         // sends server_handshake via network
         // ..
@@ -215,7 +215,7 @@ mod tests {
         // ..
         // client receives the reply
         // handles it & creates a secure Channel
-        let client_channel = handle_server_handshake(common_key, client_session, server_handshake).unwrap();
+        let client_channel = handle_server_handshake(&common_key, &client_session, &server_handshake).unwrap();
         // now they are ready to communicate via secure Channels
         (client_channel, server_channel)
     }
@@ -248,8 +248,8 @@ mod tests {
         let (server_pk, _) = gen_keypair();
         let (_, mallory_sk) = gen_keypair();
 
-        let (_client_session, _common_key, client_handshake) = create_client_handshake(client_pk, client_sk, server_pk).unwrap();
-        assert!(handle_client_handshake(mallory_sk, client_handshake).is_err());
+        let (_client_session, _common_key, client_handshake) = create_client_handshake(&client_pk, &client_sk, &server_pk).unwrap();
+        assert!(handle_client_handshake(&mallory_sk, &client_handshake).is_err());
     }
     #[test]
     fn server_handshake_with_different_keypair() {
@@ -257,10 +257,10 @@ mod tests {
         let (server_pk, server_sk) = gen_keypair();
         let (_, mallory_sk) = gen_keypair();
 
-        let (client_session, _common_key, client_handshake) = create_client_handshake(client_pk, client_sk, server_pk).unwrap();
-        let (_server_channel, _client_pk, server_handshake) = handle_client_handshake(server_sk, client_handshake).unwrap();
+        let (client_session, _common_key, client_handshake) = create_client_handshake(&client_pk, &client_sk, &server_pk).unwrap();
+        let (_server_channel, _client_pk, server_handshake) = handle_client_handshake(&server_sk, &client_handshake).unwrap();
         let common_key = encrypt_precompute(&client_pk, &mallory_sk);
-        assert!(handle_server_handshake(common_key, client_session, server_handshake).is_err());
+        assert!(handle_server_handshake(&common_key, &client_session, &server_handshake).is_err());
     }
     #[test]
     fn client_handshake_with_bad_payload() {
@@ -280,7 +280,7 @@ mod tests {
         }
 
         let client_handshake = create_bad_client_handshake(&client_pk, &client_sk, &server_pk);
-        assert!(handle_client_handshake(server_sk, client_handshake).is_err());
+        assert!(handle_client_handshake(&server_sk, &client_handshake).is_err());
     }
     #[test]
     fn server_handshake_with_bad_payload() {
@@ -301,7 +301,7 @@ mod tests {
         }
 
         let server_handshake = create_bad_server_handshake(&common_key);
-        assert!(handle_server_handshake(common_key, client_session, server_handshake).is_err());
+        assert!(handle_server_handshake(&common_key, &client_session, &server_handshake).is_err());
     }
     #[test]
     fn network_handshake() {
@@ -323,7 +323,7 @@ mod tests {
             });
         let client = TcpStream::connect(&addr)
             .and_then(move |socket| {
-                make_client_handshake(socket, client_pk, client_sk, server_pk)
+                make_client_handshake(socket, &client_pk, &client_sk, &server_pk)
             });
         let both = server.join(client)
             .then(|r| {

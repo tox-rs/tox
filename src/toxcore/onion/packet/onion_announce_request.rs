@@ -73,7 +73,7 @@ impl ToBytes for InnerOnionAnnounceRequest {
 
 impl InnerOnionAnnounceRequest {
     /// Create new `InnerOnionAnnounceRequest` object.
-    pub fn new(shared_secret: &PrecomputedKey, pk: &PublicKey, payload: OnionAnnounceRequestPayload) -> InnerOnionAnnounceRequest {
+    pub fn new(shared_secret: &PrecomputedKey, pk: &PublicKey, payload: &OnionAnnounceRequestPayload) -> InnerOnionAnnounceRequest {
         let nonce = gen_nonce();
         let mut buf = [0; ONION_MAX_PACKET_SIZE];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
@@ -259,7 +259,7 @@ mod tests {
             sendback_data: 12345
         };
         // encode payload with shared secret
-        let onion_packet = InnerOnionAnnounceRequest::new(&shared_secret, &alice_pk, payload.clone());
+        let onion_packet = InnerOnionAnnounceRequest::new(&shared_secret, &alice_pk, &payload);
         // decode payload with bob's secret key
         let decoded_payload = onion_packet.get_payload(&shared_secret).unwrap();
         // payloads should be equal
@@ -279,7 +279,7 @@ mod tests {
             sendback_data: 12345
         };
         // encode payload with shared secret
-        let onion_packet = InnerOnionAnnounceRequest::new(&shared_secret, &alice_pk, payload.clone());
+        let onion_packet = InnerOnionAnnounceRequest::new(&shared_secret, &alice_pk, &payload);
         // try to decode payload with eve's secret key
         let eve_shared_secret = encrypt_precompute(&bob_pk, &eve_sk);
         let decoded_payload = onion_packet.get_payload(&eve_shared_secret);
