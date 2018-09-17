@@ -165,79 +165,71 @@ impl PackedNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::{SocketAddrV4, SocketAddrV6};
 
-    use quickcheck::{Arbitrary, Gen, quickcheck};
+    #[test]
+    fn packed_node_new() {
+        let (pk, _sk) = gen_keypair();
+        let saddr = "1.2.3.4:12345".parse().unwrap();
 
-    // PackedNode::
-    /// Valid, random `PackedNode`.
-    impl Arbitrary for PackedNode {
-        fn arbitrary<G: Gen>(g: &mut G) -> Self {
-            let ipv4: bool = g.gen();
-
-            let mut pk_bytes = [0; PUBLICKEYBYTES];
-            g.fill_bytes(&mut pk_bytes);
-            let pk = PublicKey(pk_bytes);
-
-            if ipv4 {
-                let addr = Ipv4Addr::new(g.gen(), g.gen(), g.gen(), g.gen());
-                let saddr = SocketAddrV4::new(addr, g.gen());
-
-                PackedNode::new(SocketAddr::V4(saddr), &pk)
-            } else {
-                let addr = Ipv6Addr::new(g.gen(), g.gen(), g.gen(), g.gen(),
-                                        g.gen(), g.gen(), g.gen(), g.gen());
-                let saddr = SocketAddrV6::new(addr, g.gen(), 0, 0);
-
-                PackedNode::new(SocketAddr::V6(saddr), &pk)
-            }
-        }
+        let a = PackedNode::new(saddr, &pk);
+        let b = PackedNode {
+            saddr,
+            pk,
+        };
+        assert_eq!(a, b);
     }
 
     #[test]
-    fn packed_node_new_test() {
-        fn with_params(saddr: SocketAddr) {
-            let (pk, _sk) = gen_keypair();
+    fn packed_node_new_ipv4_mapped() {
+        let (pk, _sk) = gen_keypair();
+        let saddr_v6 = "[::ffff:1.2.3.4]:12345".parse().unwrap();
+        let saddr_v4 = "1.2.3.4:12345".parse().unwrap();
 
-            let a = PackedNode::new(saddr, &pk);
-            let b = PackedNode {
-                saddr,
-                pk,
-            };
-            assert_eq!(a, b);
-        }
-        quickcheck(with_params as fn(SocketAddr));
+        let a = PackedNode::new(saddr_v6, &pk);
+        let b = PackedNode {
+            saddr: saddr_v4,
+            pk,
+        };
+        assert_eq!(a, b);
     }
+
     #[test]
-    fn packed_node_ip_type_test() {
-        fn with_packed_node(pnode: PackedNode) {
-            let a = pnode.ip_type();
-            let b =
-                if pnode.saddr.is_ipv4() {
-                    2
-                } else {
-                    10
-                };
-            assert_eq!(a, b);
-        }
-        quickcheck(with_packed_node as fn(PackedNode));
+    fn packed_node_ip_type_2() {
+        let (pk, _sk) = gen_keypair();
+        let saddr = "1.2.3.4:12345".parse().unwrap();
+
+        let node = PackedNode::new(saddr, &pk);
+
+        assert_eq!(node.ip_type(), 2);
     }
+
     #[test]
-    fn packed_node_ip_test() {
-        fn with_packed_node(pnode: PackedNode) {
-            let a = pnode.ip();
-            let b = pnode.saddr.ip();
-            assert_eq!(a, b);
-        }
-        quickcheck(with_packed_node as fn(PackedNode));
+    fn packed_node_ip_type_10() {
+        let (pk, _sk) = gen_keypair();
+        let saddr = "[::1234:4321]:12345".parse().unwrap();
+
+        let node = PackedNode::new(saddr, &pk);
+
+        assert_eq!(node.ip_type(), 2);
     }
+
     #[test]
-    fn packed_node_socket_addr_test() {
-        fn with_packed_node(pnode: PackedNode) {
-            let a = pnode.socket_addr();
-            let b = pnode.saddr;
-            assert_eq!(a, b);
-        }
-        quickcheck(with_packed_node as fn(PackedNode));
+    fn packed_node_ip() {
+        let (pk, _sk) = gen_keypair();
+        let saddr = "1.2.3.4:12345".parse().unwrap();
+
+        let node = PackedNode::new(saddr, &pk);
+
+        assert_eq!(node.ip(), saddr.ip());
+    }
+
+    #[test]
+    fn packed_node_socket_addr() {
+        let (pk, _sk) = gen_keypair();
+        let saddr = "1.2.3.4:12345".parse().unwrap();
+
+        let node = PackedNode::new(saddr, &pk);
+
+        assert_eq!(node.socket_addr(), saddr);
     }
 }
