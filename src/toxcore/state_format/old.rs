@@ -43,7 +43,7 @@ pub const NOSPAMKEYSBYTES: usize = NOSPAMBYTES + PUBLICKEYBYTES + SECRETKEYBYTES
 /// The `Default` implementation generates random `NospamKeys`.
 impl Default for NospamKeys {
     fn default() -> Self {
-        let nospam = NoSpam::default();
+        let nospam = NoSpam::new();
         let (pk, sk) = gen_keypair();
         NospamKeys {
             nospam,

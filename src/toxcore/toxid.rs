@@ -6,7 +6,6 @@
 // TODO: ↓ add logging
 
 
-use std::default::Default;
 use std::fmt;
 
 use toxcore::binary_io::*;
@@ -54,15 +53,6 @@ impl NoSpam {
         let mut nospam = [0; NOSPAMBYTES];
         randombytes_into(&mut nospam);
         NoSpam(nospam)
-    }
-}
-
-/** Always returns a random `NoSpam`. Equivalent to the [`NoSpam::new()`]
-(#method.new).
-*/
-impl Default for NoSpam {
-    fn default() -> Self {
-        NoSpam::new()
     }
 }
 
@@ -311,10 +301,6 @@ impl fmt::Display for ToxId {
 
 #[cfg(test)]
 mod tests {
-    extern crate rand;
-
-    use quickcheck::quickcheck;
-
     use ::toxcore::crypto_core::*;
     use ::toxcore::toxid::*;
 
@@ -333,63 +319,32 @@ mod tests {
 
     // NoSpam::
 
-    #[cfg(test)]
-    fn no_spam_no_empty(ns: NoSpam) {
-        // shouldn't be empty, unless your PRNG is crappy
-        assert!(ns.0 != [0; NOSPAMBYTES])
-    }
-
     // NoSpam::new()
 
     #[test]
     fn no_spam_new_test() {
         let ns = NoSpam::new();
-        no_spam_no_empty(ns);
-    }
-
-    // NoSpam::default()
-
-    #[test]
-    fn no_spam_default_test() {
-        let ns = NoSpam::default();
-        no_spam_no_empty(ns);
+        // shouldn't be empty, unless your PRNG is crappy
+        assert!(ns.0 != [0; NOSPAMBYTES])
     }
 
     // NoSpam::fmt()
 
     #[test]
-    fn no_spam_fmt_test() {
+    fn no_spam_fmt() {
         // check if formatted NoSpam is always upper-case hexadecimal with matching
         // length
         let nospam = NoSpam::new();
-        assert_eq!(false, test_is_hexdump_uppercase("Not HexDump"));
-        assert_eq!(true, test_is_hexdump_uppercase(&format!("{:X}", nospam)));
-        assert_eq!(true, test_is_hexdump_uppercase(&format!("{}", nospam)));
-        assert_eq!(true, test_is_hexdump_uppercase(&format!("{:X}", NoSpam([0, 0, 0, 0]))));
-        assert_eq!(true, test_is_hexdump_uppercase(&format!("{}", NoSpam([0, 0, 0, 0]))));
-        assert_eq!(true, test_is_hexdump_uppercase(&format!("{:X}", NoSpam([15, 15, 15, 15]))));
-        assert_eq!(true, test_is_hexdump_uppercase(&format!("{}", NoSpam([15, 15, 15, 15]))));
+        assert!(!test_is_hexdump_uppercase("Not HexDump"));
+        assert!(test_is_hexdump_uppercase(&format!("{:X}", nospam)));
+        assert!(test_is_hexdump_uppercase(&format!("{}", nospam)));
+        assert!(test_is_hexdump_uppercase(&format!("{:X}", NoSpam([0, 0, 0, 0]))));
+        assert!(test_is_hexdump_uppercase(&format!("{}", NoSpam([0, 0, 0, 0]))));
+        assert!(test_is_hexdump_uppercase(&format!("{:X}", NoSpam([15, 15, 15, 15]))));
+        assert!(test_is_hexdump_uppercase(&format!("{}", NoSpam([15, 15, 15, 15]))));
     }
 
     // NoSpam::from_bytes()
-
-    #[test]
-    fn no_spam_from_bytes_test() {
-        fn with_bytes(bytes: Vec<u8>) {
-            if bytes.len() < NOSPAMBYTES {
-                assert!(NoSpam::from_bytes(&bytes).is_incomplete());
-            } else {
-                let nospam = NoSpam::from_bytes(&bytes)
-                                .to_result()
-                                .expect("Failed to get NoSpam!");
-                assert_eq!(bytes[0], nospam.0[0]);
-                assert_eq!(bytes[1], nospam.0[1]);
-                assert_eq!(bytes[2], nospam.0[2]);
-                assert_eq!(bytes[3], nospam.0[3]);
-            }
-        }
-        quickcheck(with_bytes as fn(Vec<u8>));
-    }
 
     encode_decode_test!(
         no_spam_encode_decode,
@@ -401,7 +356,7 @@ mod tests {
     // ToxId::new_nospam
 
     #[test]
-    fn tox_id_new_nospam_test() {
+    fn tox_id_new_nospam() {
         let (pk, _) = gen_keypair();
         let toxid = ToxId::new(pk);
         let mut toxid2 = toxid;
@@ -422,13 +377,13 @@ mod tests {
     // ToxId::fmt()
 
     #[test]
-    fn tox_id_fmt_test() {
+    fn tox_id_fmt() {
         // check if formatted ToxId is always upper-case hexadecimal with matching
         // length
         let (pk, _) = gen_keypair();
         let toxid = ToxId::new(pk);
-        assert_eq!(true, test_is_hexdump_uppercase(&format!("{:X}", toxid)));
-        assert_eq!(true, test_is_hexdump_uppercase(&format!("{}", toxid)));
+        assert!(test_is_hexdump_uppercase(&format!("{:X}", toxid)));
+        assert!(test_is_hexdump_uppercase(&format!("{}", toxid)));
     }
 
     encode_decode_test!(
