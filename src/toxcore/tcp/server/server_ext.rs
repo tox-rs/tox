@@ -5,6 +5,7 @@ use std::io::{Error, ErrorKind};
 use std::time::{Duration, Instant};
 
 use futures::{future, Future, Sink, Stream};
+use tokio;
 use tokio::net::{TcpStream, TcpListener};
 use tokio::util::FutureExt;
 use tokio_codec::Framed;
@@ -21,7 +22,9 @@ const TCP_PING_INTERVAL: u64 = 1;
 
 /// Extension trait for running TCP server on incoming `TcpStream` and ping sender
 pub trait ServerExt {
-    /// Running TCP ping sender and incoming `TcpStream`
+    /// Running TCP ping sender and incoming `TcpStream`. This function uses
+    /// `tokio::spawn` inside so it should be executed via tokio to be able to
+    /// get tokio default executor.
     fn run(self: Self, listner: TcpListener, dht_sk: SecretKey) -> IoFuture<()>;
     /// Running TCP server on incoming `TcpStream`
     fn run_connection(self: Self, stream: TcpStream, dht_sk: SecretKey) -> IoFuture<()>;
@@ -31,24 +34,32 @@ impl ServerExt for Server {
     fn run(self: Self, listner: TcpListener, dht_sk: SecretKey) -> IoFuture<()> {
         let self_c = self.clone();
 
-        let future = listner.incoming()
-            .for_each(move |stream|
-                self.clone().run_connection(stream, dht_sk.clone())
-            );
+        let connections_future = listner.incoming()
+            .for_each(move |stream| {
+                tokio::spawn(
+                    self_c.clone()
+                        .run_connection(stream, dht_sk.clone())
+                        .map_err(|e| {
+                            error!("Error while running tcp connection: {:?}", e);
+                            ()
+                        })
+                );
+                Ok(())
+            });
 
         let interval = Duration::from_secs(TCP_PING_INTERVAL);
         let wakeups = Interval::new(Instant::now(), interval);
-        let ping_sender = wakeups
+        let ping_future = wakeups
             .map_err(|e| {
                 Error::new(ErrorKind::Other, e)
             })
             .for_each(move |_instant| {
                 trace!("Tcp server ping sender wake up");
-                self_c.send_pings()
+                self.send_pings()
             });
 
-        let future = future
-            .select(ping_sender)
+        let future = connections_future
+            .select(ping_future)
             .map(|_| ()).map_err(|(e, _)| e);
 
         Box::new(future)
