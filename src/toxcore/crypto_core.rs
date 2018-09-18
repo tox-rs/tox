@@ -191,12 +191,22 @@ pub fn digest_as_pk(d: sha256::Digest) -> PublicKey {
     PublicKey::from_slice(d.as_ref()).unwrap()
 }
 
+
+impl FromBytes for PublicKey {
+    named!(from_bytes<PublicKey>, map_opt!(take!(PUBLICKEYBYTES), PublicKey::from_slice));
+}
+
+/* TODO
+Use the following implementation when https://github.com/TokTok/c-toxcore/issues/1169 is fixed.
+And when most of tox network will send valid PK for fake friends.
+
 impl FromBytes for PublicKey {
     named!(from_bytes<PublicKey>, verify!(
         map_opt!(take!(PUBLICKEYBYTES), PublicKey::from_slice),
         |pk| public_key_valid(&pk)
     ));
 }
+*/
 
 impl FromBytes for SecretKey {
     named!(from_bytes<SecretKey>, map_opt!(take!(SECRETKEYBYTES), SecretKey::from_slice));
