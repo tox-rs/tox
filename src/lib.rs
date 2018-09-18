@@ -46,18 +46,8 @@ extern crate tokio_executor;
 #[cfg(test)]
 #[macro_use]
 pub mod toxcore_tests {
-    extern crate rand;
-
-    // Helper macros for testing, no tests
-    // #[warn(missing_docs)]
-    // #[macro_use]
-    // FIXME: use new dht code instead of old
-    // pub mod test_macros;
-
     // tests
     mod crypto_core_tests;
-    // FIXME: use new dht code instead of old
-    // mod state_format_old_tests;
 }
 
 
