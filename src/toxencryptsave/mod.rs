@@ -44,9 +44,6 @@ pub use sodiumoxide::crypto::box_::PRECOMPUTEDKEYBYTES as KEY_LENGTH;
 
 use ::toxcore::crypto_core;
 
-#[cfg(test)]
-use quickcheck::{QuickCheck, TestResult};
-
 
 /// Length (in bytes) of [`MAGIC_NUMBER`](./constant.MAGIC_NUMBER.html).
 pub const MAGIC_LENGTH: usize = 8;
@@ -426,36 +423,24 @@ impl From<KeyDerivationError> for DecryptionError {
 
 #[test]
 fn pass_key_new_test() {
-    fn with_pw(passwd: Vec<u8>) -> TestResult {
-        // empty password is already tested in docs test
-        if passwd.is_empty() { return TestResult::discard() }
+    let passwd = [42; 123];
+    let pk = PassKey::new(&passwd).expect("Failed to unwrap PassKey!");
 
-        let pk = PassKey::new(&passwd).expect("Failed to unwrap PassKey!");
-
-        assert!(pk.salt.0.as_ref() != passwd.as_slice());
-        assert!(pk.salt.0.as_ref() != [0; SALT_LENGTH].as_ref());
-        assert!(pk.key.0.as_ref() != passwd.as_slice());
-        assert!(pk.key.0 != [0; KEY_LENGTH]);
-        TestResult::passed()
-    }
-    QuickCheck::new().max_tests(20).quickcheck(with_pw as fn(Vec<u8>) -> TestResult);
+    assert!(pk.salt.0.as_ref() != &passwd as &[u8]);
+    assert!(pk.salt.0.as_ref() != [0; SALT_LENGTH].as_ref());
+    assert!(pk.key.0.as_ref() != &passwd as &[u8]);
+    assert!(pk.key.0 != [0; KEY_LENGTH]);
 }
 
 // PassKey::with_salt()
 
 #[test]
 fn pass_key_with_salt_test() {
-    fn with_pw(passwd: Vec<u8>) -> TestResult {
-        // test for an empty passphrase is done in docs test
-        if passwd.is_empty() { return TestResult::discard() }
+    let passwd = [42; 123];
+    let salt = gen_salt();
+    let pk = PassKey::with_salt(&passwd, salt).unwrap();
 
-        let salt = gen_salt();
-        let pk = PassKey::with_salt(&passwd, salt).unwrap();
-
-        assert_eq!(&*pk.salt, &salt);
-        assert!(pk.key.0.as_ref() != passwd.as_slice());
-        assert!(pk.key.0 != [0; KEY_LENGTH]);
-        TestResult::passed()
-    }
-    QuickCheck::new().max_tests(20).quickcheck(with_pw as fn(Vec<u8>) -> TestResult);
+    assert_eq!(&*pk.salt, &salt);
+    assert!(pk.key.0.as_ref() != &passwd as &[u8]);
+    assert!(pk.key.0 != [0; KEY_LENGTH]);
 }
