@@ -39,15 +39,6 @@ extern crate tokio_timer;
 #[cfg(test)]
 extern crate tokio_executor;
 
-// TODO: refactor macros
-#[cfg(test)]
-#[macro_use]
-pub mod toxcore_tests {
-    // tests
-    mod crypto_core_tests;
-}
-
-
 /** Core Tox module. Provides an API on top of which other modules and
     applications may be build.
 */
