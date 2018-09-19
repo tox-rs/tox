@@ -27,9 +27,6 @@ extern crate nom;
 extern crate cookie_factory;
 extern crate sodiumoxide;
 
-#[cfg(test)]
-extern crate quickcheck;
-
 extern crate tokio;
 extern crate tokio_codec;
 extern crate get_if_addrs;
@@ -81,7 +78,5 @@ pub mod toxencryptsave;
 
 #[cfg(test)]
 mod toxencryptsave_tests {
-    extern crate rand;
-
     mod encryptsave_tests;
 }
