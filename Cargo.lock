@@ -787,7 +787,7 @@ dependencies = [
 [[package]]
 name = "tox"
 version = "0.0.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+source = "git+https://github.com/tox-rs/tox#2f0dfa29bac711319f02aa0dee1a739b91301bf7"
 dependencies = [
  "byteorder 1.2.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "bytes 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -805,7 +805,7 @@ dependencies = [
 
 [[package]]
 name = "tox-node"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "clap 2.32.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "env_logger 0.5.13 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -817,7 +817,7 @@ dependencies = [
  "syslog 4.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio 0.1.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio-codec 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "tox 0.0.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tox 0.0.6 (git+https://github.com/tox-rs/tox)",
 ]
 
 [[package]]
@@ -1010,7 +1010,7 @@ dependencies = [
 "checksum tokio-timer 0.2.6 (registry+https://github.com/rust-lang/crates.io-index)" = "d03fa701f9578a01b7014f106b47f0a363b4727a7f3f75d666e312ab7acbbf1c"
 "checksum tokio-udp 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)" = "da941144b816d0dcda4db3a1ba87596e4df5e860a72b70783fe435891f80601c"
 "checksum tokio-uds 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)" = "424c1ed15a0132251813ccea50640b224c809d6ceafb88154c1a8775873a0e89"
-"checksum tox 0.0.6 (registry+https://github.com/rust-lang/crates.io-index)" = "990b60e14e66fc56e05906e7453523afa470c49be4517cd9b82ef759396f71fc"
+"checksum tox 0.0.6 (git+https://github.com/tox-rs/tox)" = "<none>"
 "checksum ucd-util 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "fd2be2d6639d0f8fe6cdda291ad456e23629558d466e2789d2c3e9892bda285d"
 "checksum unicode-width 0.1.5 (registry+https://github.com/rust-lang/crates.io-index)" = "882386231c45df4700b275c7ff55b6f3698780a650026380e72dabe76fa46526"
 "checksum unicode-xid 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "fc72304796d0818e357ead4e000d19c9c174ab23dc11093ac919054d20a6a7fc"
