@@ -10,11 +10,6 @@ Repo: https://github.com/tox-rs/tox
 #![cfg_attr(feature = "cargo-clippy", allow(clippy::new_without_default, clippy::new_without_default_derive))]
 // Remove it when it will be fixed in nom parser
 #![cfg_attr(feature = "cargo-clippy", allow(clippy::redundant_closure))]
-// Too many false positives in tests
-#![cfg_attr(all(feature = "cargo-clippy", test), allow(clippy::needless_pass_by_value))]
-
-// FIXME update to nom 4 and remove this rule
-#![allow(unused_parens)]
 
 extern crate bytes;
 extern crate byteorder;
