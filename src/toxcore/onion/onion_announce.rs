@@ -336,11 +336,8 @@ impl OnionAnnounce {
 
 #[cfg(test)]
 mod tests {
-    extern crate rand;
-
     use super::*;
 
-    use quickcheck::{Arbitrary, StdGen};
     use tokio_executor;
     use tokio_timer::clock::*;
 
@@ -435,12 +432,11 @@ mod tests {
         assert!(ping_id != ping_id_5);
     }
 
-    fn create_random_entry() -> OnionAnnounceEntry {
-        let mut gen = StdGen::new(rand::thread_rng(), 1024);
+    fn create_random_entry(saddr: SocketAddr) -> OnionAnnounceEntry {
         OnionAnnounceEntry::new(
             gen_keypair().0,
-            IpAddr::arbitrary(&mut gen),
-            u16::arbitrary(&mut gen),
+            saddr.ip(),
+            saddr.port(),
             OnionReturn {
                 nonce: secretbox::gen_nonce(),
                 payload: vec![42; 42]
@@ -453,7 +449,7 @@ mod tests {
     fn onion_announce_is_clonable() {
         let dht_pk = gen_keypair().0;
         let mut onion_announce = OnionAnnounce::new(dht_pk);
-        let entry = create_random_entry();
+        let entry = create_random_entry("1.2.3.4:12345".parse().unwrap());
         onion_announce.add_to_entries(entry);
         let _cloned = onion_announce.clone();
         // that's all.
@@ -464,7 +460,7 @@ mod tests {
         let dht_pk = gen_keypair().0;
         let mut onion_announce = OnionAnnounce::new(dht_pk);
 
-        let entry = create_random_entry();
+        let entry = create_random_entry("1.2.3.4:12345".parse().unwrap());
         let entry_pk = entry.pk;
         let entry_time = entry.time;
 
@@ -490,8 +486,9 @@ mod tests {
 
         let mut pks = Vec::new();
 
-        for _ in 0..ONION_ANNOUNCE_MAX_ENTRIES {
-            let entry = create_random_entry();
+        for i in 0..ONION_ANNOUNCE_MAX_ENTRIES {
+            let saddr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + i as u16);
+            let entry = create_random_entry(saddr);
             pks.push(entry.pk);
             assert!(onion_announce.add_to_entries(entry).is_some());
         }
@@ -511,8 +508,9 @@ mod tests {
 
         let mut pks = Vec::new();
 
-        for _ in 0..ONION_ANNOUNCE_MAX_ENTRIES {
-            let entry = create_random_entry();
+        for i in 0..ONION_ANNOUNCE_MAX_ENTRIES {
+            let saddr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + i as u16);
+            let entry = create_random_entry(saddr);
             pks.push(entry.pk);
             assert!(onion_announce.add_to_entries(entry).is_some());
         }
@@ -563,8 +561,9 @@ mod tests {
         ));
 
         with_default(&clock_1, &mut enter, |_| {
-            for _ in 0..ONION_ANNOUNCE_MAX_ENTRIES {
-                let entry = create_random_entry();
+            for i in 0..ONION_ANNOUNCE_MAX_ENTRIES {
+                let saddr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + i as u16);
+                let entry = create_random_entry(saddr);
                 pks.push(entry.pk);
                 assert!(onion_announce.add_to_entries(entry).is_some());
             }
@@ -575,7 +574,7 @@ mod tests {
         onion_announce.entries[ONION_ANNOUNCE_MAX_ENTRIES / 2].time = now;
 
         with_default(&clock_2, &mut enter, |_| {
-            let entry = create_random_entry();
+            let entry = create_random_entry("1.2.3.5:12345".parse().unwrap());
             let entry_pk = entry.pk;
             assert!(onion_announce.add_to_entries(entry).is_some());
 
@@ -597,20 +596,21 @@ mod tests {
         let mut onion_announce = OnionAnnounce::new(dht_pk);
 
         // add one entry with farthest pk
-        let mut entry = create_random_entry();
+        let mut entry = create_random_entry("1.2.3.4:12345".parse().unwrap());
         entry.pk = PublicKey::from_slice(&[255; 32]).unwrap();
         assert!(onion_announce.add_to_entries(entry).is_some());
 
         let mut pks = Vec::new();
 
-        for _ in 0..ONION_ANNOUNCE_MAX_ENTRIES - 1 {
-            let entry = create_random_entry();
+        for i in 0..ONION_ANNOUNCE_MAX_ENTRIES - 1 {
+            let saddr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12346 + i as u16);
+            let entry = create_random_entry(saddr);
             pks.push(entry.pk);
             assert!(onion_announce.add_to_entries(entry).is_some());
         }
 
         // add new entry that should replace the farthest one
-        let entry = create_random_entry();
+        let entry = create_random_entry("1.2.3.5:12345".parse().unwrap());
         let entry_pk = entry.pk;
         assert!(onion_announce.add_to_entries(entry).is_some());
 
@@ -632,14 +632,15 @@ mod tests {
 
         let mut pks = Vec::new();
 
-        for _ in 0..ONION_ANNOUNCE_MAX_ENTRIES {
-            let entry = create_random_entry();
+        for i in 0..ONION_ANNOUNCE_MAX_ENTRIES {
+            let saddr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + i as u16);
+            let entry = create_random_entry(saddr);
             pks.push(entry.pk);
             assert!(onion_announce.add_to_entries(entry).is_some());
         }
 
         // try to add new farthest entry
-        let mut entry = create_random_entry();
+        let mut entry = create_random_entry("1.2.3.5:12345".parse().unwrap());
         let entry_pk = PublicKey::from_slice(&[255; 32]).unwrap();
         entry.pk = entry_pk;
         assert!(onion_announce.add_to_entries(entry).is_none());
@@ -667,7 +668,7 @@ mod tests {
         let mut onion_announce = OnionAnnounce::new(dht_pk);
 
         // insert random entry
-        let entry = create_random_entry();
+        let entry = create_random_entry("1.2.3.4:12345".parse().unwrap());
         assert!(onion_announce.add_to_entries(entry).is_some());
 
         // create request packet
@@ -703,7 +704,7 @@ mod tests {
         let mut onion_announce = OnionAnnounce::new(dht_pk);
 
         // insert random entry
-        let entry = create_random_entry();
+        let entry = create_random_entry("1.2.3.4:12345".parse().unwrap());
         let search_pk = entry.pk;
         let entry_data_pk = entry.data_pk;
         assert!(onion_announce.add_to_entries(entry).is_some());
@@ -743,7 +744,7 @@ mod tests {
         let mut onion_announce = OnionAnnounce::new(dht_pk);
 
         // insert random entry
-        let entry = create_random_entry();
+        let entry = create_random_entry("1.2.3.4:12345".parse().unwrap());
         assert!(onion_announce.add_to_entries(entry).is_some());
 
         let addr: SocketAddr = "127.0.0.1:12345".parse().unwrap();
@@ -782,7 +783,7 @@ mod tests {
         let mut onion_announce = OnionAnnounce::new(dht_pk);
 
         // insert ourselves
-        let mut entry = create_random_entry();
+        let mut entry = create_random_entry("1.2.3.4:12345".parse().unwrap());
         entry.pk = packet_pk;
         assert!(onion_announce.add_to_entries(entry).is_some());
 
@@ -820,7 +821,7 @@ mod tests {
         let mut onion_announce = OnionAnnounce::new(dht_pk);
 
         // insert random entry
-        let entry = create_random_entry();
+        let entry = create_random_entry("1.2.3.4:12345".parse().unwrap());
         let entry_pk = entry.pk;
         let entry_addr = entry.ip_addr;
         let entry_port = entry.port;

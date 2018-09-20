@@ -27,9 +27,6 @@ extern crate nom;
 extern crate cookie_factory;
 extern crate sodiumoxide;
 
-#[cfg(test)]
-extern crate quickcheck;
-
 extern crate tokio;
 extern crate tokio_codec;
 extern crate get_if_addrs;
@@ -41,25 +38,6 @@ extern crate failure;
 extern crate tokio_timer;
 #[cfg(test)]
 extern crate tokio_executor;
-
-// TODO: refactor macros
-#[cfg(test)]
-#[macro_use]
-pub mod toxcore_tests {
-    extern crate rand;
-
-    // Helper macros for testing, no tests
-    // #[warn(missing_docs)]
-    // #[macro_use]
-    // FIXME: use new dht code instead of old
-    // pub mod test_macros;
-
-    // tests
-    mod crypto_core_tests;
-    // FIXME: use new dht code instead of old
-    // mod state_format_old_tests;
-}
-
 
 /** Core Tox module. Provides an API on top of which other modules and
     applications may be build.
@@ -91,7 +69,5 @@ pub mod toxencryptsave;
 
 #[cfg(test)]
 mod toxencryptsave_tests {
-    extern crate rand;
-
     mod encryptsave_tests;
 }
