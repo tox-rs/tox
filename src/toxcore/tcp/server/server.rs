@@ -213,10 +213,12 @@ impl Server {
                 if let Some(client_b_pk) = client_a.take_link(packet.connection_id) {
                     client_b_pk
                 } else {
-                    return Box::new( future::err(
-                        Error::new(ErrorKind::Other,
-                            "DisconnectNotification.connection_id is not linked"
-                    )))
+                    trace!("DisconnectNotification.connection_id is not linked for the client {:?}", pk);
+                    // There is possibility that the first client disconnected but the second client
+                    // haven't received DisconnectNotification yet and have sent yet another packet.
+                    // In this case we don't want to throw an error and force disconnect the second client.
+                    // TODO: failure can be used to return an error and handle it inside ServerProcessor
+                    return Box::new(future::ok(()))
                 }
             } else {
                 return Box::new( future::err(
@@ -348,10 +350,12 @@ impl Server {
                 if let Some(client_b_pk) = client_a.get_link(packet.connection_id) {
                     client_b_pk
                 } else {
-                    return Box::new( future::err(
-                        Error::new(ErrorKind::Other,
-                            "Data.connection_id is not linked"
-                    )))
+                    trace!("Data.connection_id is not linked for the client {:?}", pk);
+                    // There is possibility that the first client disconnected but the second client
+                    // haven't received DisconnectNotification yet and have sent yet another packet.
+                    // In this case we don't want to throw an error and force disconnect the second client.
+                    // TODO: failure can be used to return an error and handle it inside ServerProcessor
+                    return Box::new(future::ok(()))
                 }
             } else {
                 return Box::new( future::err(
@@ -895,7 +899,7 @@ mod tests {
     fn handle_disconnect_notification_not_linked() {
         let server = Server::new();
 
-        let (client_1, _rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
+        let (client_1, rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         let client_pk_1 = client_1.pk();
         server.insert(client_1);
 
@@ -903,7 +907,12 @@ mod tests {
         let handle_res = server.handle_packet(&client_pk_1, Packet::DisconnectNotification(
             DisconnectNotification { connection_id: 16 }
         )).wait();
-        assert!(handle_res.is_err());
+        assert!(handle_res.is_ok());
+
+        // Necessary to drop tx so that rx.collect() can be finished
+        drop(server);
+
+        assert!(rx_1.collect().wait().unwrap().is_empty());
     }
     #[test]
     fn handle_ping_request_0() {
@@ -969,7 +978,7 @@ mod tests {
     fn handle_data_self_not_linked() {
         let server = Server::new();
 
-        let (client_1, _rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
+        let (client_1, rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         let client_pk_1 = client_1.pk();
         server.insert(client_1);
 
@@ -977,7 +986,12 @@ mod tests {
         let handle_res = server.handle_packet(&client_pk_1, Packet::Data(
             Data { connection_id: 16, data: vec![13, 42] }
         )).wait();
-        assert!(handle_res.is_err());
+        assert!(handle_res.is_ok());
+
+        // Necessary to drop tx so that rx.collect() can be finished
+        drop(server);
+
+        assert!(rx_1.collect().wait().unwrap().is_empty());
     }
     #[test]
     fn handle_oob_send_to_loooong_data() {
