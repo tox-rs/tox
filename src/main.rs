@@ -188,7 +188,10 @@ fn run_tcp(cli_config: &CliConfig, dht_sk: SecretKey, tcp_onion: TcpOnion) -> im
     let tcp_onion_future = tcp_onion.rx
         .map_err(|()| Error::from(ErrorKind::UnexpectedEof))
         .for_each(move |(onion_response, addr)|
-            tcp_server.handle_udp_onion_response(addr.ip(), addr.port(), onion_response)
+            tcp_server.handle_udp_onion_response(addr.ip(), addr.port(), onion_response).or_else(|err| {
+                warn!("Failed to handle UDP onion response: {:?}", err);
+                future::ok(())
+            })
         );
 
     info!("Running TCP relay on {}", cli_config.tcp_addrs.iter().format(","));
@@ -232,7 +235,10 @@ fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_on
     let udp_onion_future = udp_onion.rx
         .map_err(|()| Error::from(ErrorKind::UnexpectedEof))
         .for_each(move |(onion_request, addr)|
-            server_c.handle_tcp_onion_request(onion_request, addr)
+            server_c.handle_tcp_onion_request(onion_request, addr).or_else(|err| {
+                warn!("Failed to handle TCP onion request: {:?}", err);
+                future::ok(())
+            })
         );
 
     if cli_config.bootstrap_nodes.is_empty() {
