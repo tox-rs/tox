@@ -41,6 +41,20 @@ use syslog::Facility;
 
 use cli_config::*;
 
+/// Get version in format 3AAABBBCCC, where A B and C are major, minor and patch
+/// versions of node. `tox-bootstrapd` uses similar scheme but with leading 1.
+/// Before it used format YYYYMMDDVV so the leading numeral was 2. To make a
+/// difference with these schemes we use 3.
+fn version() -> u32 {
+    let major: u32 = env!("CARGO_PKG_VERSION_MAJOR").parse().expect("Invalid major version");
+    let minor: u32 = env!("CARGO_PKG_VERSION_MINOR").parse().expect("Invalid minor version");
+    let patch: u32 = env!("CARGO_PKG_VERSION_PATCH").parse().expect("Invalid patch version");
+    assert!(major < 1000, "Invalid major version");
+    assert!(minor < 1000, "Invalid minor version");
+    assert!(patch < 1000, "Invalid patch version");
+    3000000000 + major * 1000000 + minor * 1000 + patch
+}
+
 /// Bind a UDP listener to the socket address.
 fn bind_socket(addr: SocketAddr) -> UdpSocket {
     let socket = UdpSocket::bind(&addr).expect("Failed to bind UDP socket");
@@ -209,7 +223,7 @@ fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_on
     };
 
     let mut server = UdpServer::new(tx, dht_pk, dht_sk.clone());
-    server.set_bootstrap_info(07032018, cli_config.motd.as_bytes().to_owned());
+    server.set_bootstrap_info(version(), cli_config.motd.as_bytes().to_owned());
     server.enable_lan_discovery(cli_config.lan_discovery_enabled);
     server.set_tcp_onion_sink(udp_onion.tx);
     server.enable_ipv6_mode(udp_addr.is_ipv6());
