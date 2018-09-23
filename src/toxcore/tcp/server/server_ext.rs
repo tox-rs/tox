@@ -5,6 +5,7 @@ use std::io::{Error, ErrorKind};
 use std::time::{Duration, Instant};
 
 use futures::{future, Future, Sink, Stream};
+use futures::sync::mpsc;
 use tokio;
 use tokio::net::{TcpStream, TcpListener};
 use tokio::util::FutureExt;
@@ -15,7 +16,7 @@ use toxcore::crypto_core::*;
 use toxcore::io_tokio::IoFuture;
 use toxcore::tcp::codec::Codec;
 use toxcore::tcp::handshake::make_server_handshake;
-use toxcore::tcp::server::{Server, ServerProcessor};
+use toxcore::tcp::server::{Client, Server};
 
 /// Interval in seconds for Tcp Ping sender
 const TCP_PING_INTERVAL: u64 = 1;
@@ -89,13 +90,17 @@ impl ServerExt for Server {
         let process = register_client.and_then(move |(stream, channel, client_pk)| {
             let secure_socket = Framed::new(stream, Codec::new(channel));
             let (to_client, from_client) = secure_socket.split();
-            let ServerProcessor { from_client_tx, to_client_rx, processor } =
-                ServerProcessor::create(
-                    server_c,
-                    client_pk,
-                    addr.ip(),
-                    addr.port()
-                );
+            let (to_client_tx, to_client_rx) = mpsc::unbounded();
+
+            server_c.insert(Client::new(to_client_tx, &client_pk, addr.ip(), addr.port()));
+
+            let server_c_c = server_c.clone();
+            // processor = for each Packet from client process it
+            let processor = from_client
+                .for_each(move |packet| {
+                    debug!("Handle {:?} => {:?}", client_pk, packet);
+                    server_c_c.handle_packet(&client_pk, packet)
+                });
 
             // writer = for each Packet from to_client_rx send it to client
             let writer = to_client_rx
@@ -112,19 +117,13 @@ impl ServerExt for Server {
                 // drop to_client when to_client_rx stream is exhausted
                 .map(|_to_client| ());
 
-            // reader = for each Packet from client send it to server processor
-            let reader = from_client
-                .forward(from_client_tx
-                    .sink_map_err(|e|
-                        Error::new(ErrorKind::Other,
-                            format!("Could not forward message from TCP client to TCP server {}", e))
-                    )
-                )
-                .map(|(_from_client, _sink_err)| ());
-
             processor
-                .select(reader).map(|_| ()).map_err(|(e, _)| e)
                 .select(writer).map(|_| ()).map_err(|(e, _)| e)
+                .then(move |r_processing| {
+                    debug!("Shutdown a client with PK {:?}", &client_pk);
+                    server_c.shutdown_client(&client_pk)
+                        .then(move |r_shutdown| r_processing.and(r_shutdown))
+                })
         });
 
         Box::new(process)
