@@ -159,20 +159,15 @@ impl Client {
         self.links.iter()
     }
 
-    /** This is actually the sender method
-    */
-    fn send_impl(&self, packet: Packet) -> IoFuture<()> {
-        send_to(&self.tx, packet)
-    }
     /** Send a packet. This method does not ignore IO error
     */
     fn send(&self, packet: Packet) -> IoFuture<()> {
-        self.send_impl(packet)
+        send_to(&self.tx, packet)
     }
     /** Send a packet. This method ignores IO error
     */
     fn send_ignore_error(&self, packet: Packet) -> IoFuture<()> {
-        Box::new(self.send_impl(packet)
+        Box::new(self.send(packet)
             .then(|_| Ok(()) ) // ignore if somehow failed to send it
         )
     }
