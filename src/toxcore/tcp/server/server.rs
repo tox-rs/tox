@@ -118,10 +118,12 @@ impl Server {
             // foreach link that is Some(client_b_pk)
             .filter_map(|&client_b_pk| client_b_pk)
             .map(|client_b_pk| {
-                if let Some(client_b) = state.connected_clients.get(&client_b_pk) {
+                if let Some(client_b) = state.connected_clients.get_mut(&client_b_pk) {
                     // check if client_a is linked in client_b
                     if let Some(a_id_in_client_b) = client_b.get_connection_id(pk) {
-                        // it is linked, we should notify client_b
+                        // it is linked, we should notify client_b and
+                        // unlink pk from client_b.links
+                        client_b.take_link(a_id_in_client_b);
                         client_b.send_disconnect_notification(a_id_in_client_b)
                     } else {
                         // Current client is not linked in client_b
