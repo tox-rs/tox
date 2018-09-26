@@ -64,6 +64,16 @@ pub const BOOTSTRAP_INTERVAL: u64 = 1;
 /// Number of fake friends that server has.
 pub const FAKE_FRIENDS_NUMBER: usize = 2;
 
+/// Struct that contains necessary data for `BootstrapInfo` packet.
+#[derive(Clone)]
+struct ServerBootstrapInfo {
+    /// Version of tox core which will be sent with `BootstrapInfo` packet.
+    version: u32,
+    /// Callback to get the message of the day which will be sent with
+    /// `BootstrapInfo` packet.
+    motd_cb: Arc<Fn(&Server) -> Vec<u8> + Send + Sync>,
+}
+
 /**
 Own DHT node data.
 
@@ -131,10 +141,8 @@ pub struct Server {
     /// is processed every `TIME_TO_PING` seconds. The purpose of this is to
     /// prevent amplification attacks.
     nodes_to_ping: Arc<RwLock<NodesQueue>>,
-    /// Version of tox core which will be sent with `BootstrapInfo` packet.
-    tox_core_version: u32,
-    /// Message  of the day which will be sent with `BootstrapInfo` packet.
-    motd: Vec<u8>,
+    /// Info used to respond to `BootstrapInfo` packets.
+    bootstrap_info: Option<ServerBootstrapInfo>,
     /// `OnionResponse1` packets that have TCP protocol kind inside onion return
     /// should be redirected to TCP sender trough this sink
     /// None if there is no TCP relay
@@ -194,8 +202,7 @@ impl Server {
             random_requests_count: Arc::new(RwLock::new(0)),
             last_nodes_req_time: Arc::new(RwLock::new(clock_now())),
             nodes_to_ping: Arc::new(RwLock::new(NodesQueue::new(MAX_TO_PING))),
-            tox_core_version: 0,
-            motd: Vec::new(),
+            bootstrap_info: None,
             tcp_onion_sink: None,
             net_crypto: None,
             lan_discovery_enabled: true,
@@ -1279,17 +1286,33 @@ impl Server {
 
     /// Handle `BootstrapInfo` packet and response with `BootstrapInfo` packet.
     fn handle_bootstrap_info(&self, _packet: &BootstrapInfo, addr: SocketAddr) -> IoFuture<()> {
-        let packet = Packet::BootstrapInfo(BootstrapInfo {
-            version: self.tox_core_version,
-            motd: self.motd.clone(),
-        });
-        self.send_to_direct(addr, packet)
+        if let Some(ref bootstrap_info) = self.bootstrap_info {
+            let mut motd = (bootstrap_info.motd_cb)(&self);
+            if motd.len() > BOOSTRAP_SERVER_MAX_MOTD_LENGTH {
+                warn!(
+                    "Too long MOTD: {} bytes. Truncating to {} bytes",
+                    motd.len(),
+                    BOOSTRAP_SERVER_MAX_MOTD_LENGTH
+                );
+                motd.truncate(BOOSTRAP_SERVER_MAX_MOTD_LENGTH);
+            }
+            let packet = Packet::BootstrapInfo(BootstrapInfo {
+                version: bootstrap_info.version,
+                motd,
+            });
+            self.send_to_direct(addr, packet)
+        } else {
+            // Do not respond to BootstrapInfo packets if bootstrap_info not defined
+            Box::new(future::ok(()))
+        }
     }
 
-    /// Set toxcore version and message of the day.
-    pub fn set_bootstrap_info(&mut self, version: u32, motd: Vec<u8>) {
-        self.tox_core_version = version;
-        self.motd = motd;
+    /// Set toxcore version and message of the day callback.
+    pub fn set_bootstrap_info(&mut self, version: u32, motd_cb: Box<Fn(&Server) -> Vec<u8> + Send + Sync>) {
+        self.bootstrap_info = Some(ServerBootstrapInfo {
+            version,
+            motd_cb: motd_cb.into(),
+        });
     }
 
     /// Set TCP sink for onion packets.
@@ -1364,8 +1387,9 @@ mod tests {
 
         let version = 42;
         let motd = b"motd".to_vec();
+        let motd_c = motd.clone();
 
-        alice.set_bootstrap_info(version, motd.clone());
+        alice.set_bootstrap_info(version, Box::new(move |_| motd_c.clone()));
 
         let packet = Packet::BootstrapInfo(BootstrapInfo {
             version: 00,

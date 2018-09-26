@@ -76,7 +76,7 @@ fn main() {
     let lan_discovery_sender = LanDiscoverySender::new(tx.clone(), server_pk, local_addr.is_ipv6());
 
     let mut server = Server::new(tx, server_pk, server_sk);
-    server.set_bootstrap_info(07032018, "This is tox-rs".as_bytes().to_owned());
+    server.set_bootstrap_info(07032018, Box::new(|_| "This is tox-rs".as_bytes().to_owned()));
     server.enable_lan_discovery(true);
     server.enable_ipv6_mode(local_addr.is_ipv6());
 
