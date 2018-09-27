@@ -1,4 +1,4 @@
-/*! The implementaion of tcp relay client
+/*! The implementation of tcp relay client
 */
 
 mod connection;
