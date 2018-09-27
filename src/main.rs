@@ -226,7 +226,8 @@ fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_on
     };
 
     let mut server = UdpServer::new(tx, dht_pk, dht_sk.clone());
-    server.set_bootstrap_info(version(), cli_config.motd.as_bytes().to_owned());
+    let motd = cli_config.motd.clone();
+    server.set_bootstrap_info(version(), Box::new(move |_| motd.as_bytes().to_owned()));
     server.enable_lan_discovery(cli_config.lan_discovery_enabled);
     server.set_tcp_onion_sink(udp_onion.tx);
     server.enable_ipv6_mode(udp_addr.is_ipv6());
