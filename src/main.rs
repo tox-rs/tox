@@ -29,7 +29,6 @@ use futures::{future, Future, Sink, Stream};
 use futures::future::Either;
 use itertools::Itertools;
 use log::LevelFilter;
-use tokio::executor::thread_pool;
 use tokio::net::{TcpListener, UdpSocket, UdpFramed};
 use tokio::runtime;
 use tox::toxcore::crypto_core::*;
@@ -119,14 +118,13 @@ fn run<F>(future: F, threads_config: ThreadsConfig)
         let mut runtime = runtime::current_thread::Runtime::new().expect("Failed to create runtime");
         runtime.block_on(future).expect("Execution was terminated with error");
     } else {
-        let mut threadpool_builder = thread_pool::Builder::new();
-        threadpool_builder.name_prefix("tox-node-");
+        let mut builder = runtime::Builder::new();
+        builder.name_prefix("tox-node-");
         match threads_config {
-            ThreadsConfig::N(n) => { threadpool_builder.pool_size(n as usize); },
+            ThreadsConfig::N(n) => { builder.core_threads(n as usize); },
             ThreadsConfig::Auto => { }, // builder will detect number of cores automatically
         }
-        let mut runtime = runtime::Builder::new()
-            .threadpool_builder(threadpool_builder)
+        let mut runtime = builder
             .build()
             .expect("Failed to create runtime");
         runtime.block_on(future).expect("Execution was terminated with error");
