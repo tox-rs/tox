@@ -28,6 +28,16 @@ RUST_LOG=tox_node=trace cargo run --release
 
 Also it's possible to use syslog via `--log-type` parameter.
 
+## MOTD
+
+MOTD is an abbreviation for The Message of The Day. Tox bootstrap nodes have a
+special packet kind called `BootstrapInfo` to retrieve the MOTD alongside with
+version. Our node supports basic templates for the MOTD that can be specified
+via `--motd` key. It's possible to use the following variables surrounded by
+`{{ }}`:
+- `start_date`: time when the node was started
+- `uptime`: uptime in the format 'XX days XX hours XX minutes'
+
 ## Keys generation
 
 In order to run node you have to provide either secret key or path to a keys file.
