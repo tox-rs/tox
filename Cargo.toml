@@ -15,6 +15,7 @@ categories = ["multimedia"]
 license = "MIT"
 
 [dependencies]
+chrono = "0.4"
 clap = "2.32"
 env_logger = "0.5"
 failure = "0.1"
@@ -22,6 +23,7 @@ futures = "0.1"
 hex = "0.3"
 itertools = "0.7"
 log = "0.4"
+regex = "1"
 tokio = "0.1.7"
 tokio-codec = "0.1"
 tox = { git = "https://github.com/tox-rs/tox" }

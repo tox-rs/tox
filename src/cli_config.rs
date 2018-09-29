@@ -5,6 +5,7 @@ use std::str::FromStr;
 use clap::{App, AppSettings, Arg, ArgGroup};
 use hex::FromHex;
 use itertools::Itertools;
+use regex::Regex;
 use tox::toxcore::crypto_core::*;
 use tox::toxcore::dht::packed_node::PackedNode;
 use tox::toxcore::dht::packet::BOOSTRAP_SERVER_MAX_MOTD_LENGTH;
@@ -136,15 +137,20 @@ pub fn cli_parse() -> CliConfig {
         .arg(Arg::with_name("motd")
             .short("m")
             .long("motd")
-            .help("Message of the day")
+            .help("Message of the day. Must be no longer than 256 bytes. May \
+                   contain next variables placed in {{ }}:\n\
+                   - start_date: time when the node was started\n\
+                   - uptime: uptime in the format 'XX days XX hours XX minutes'\n")
             .takes_value(true)
-            .validator(|m|
-                if m.len() > BOOSTRAP_SERVER_MAX_MOTD_LENGTH {
+            .validator(|m| {
+                let template_regex = Regex::new(r"\{\{.*\}\}")
+                    .expect("Failed to compile template regex");
+                if !template_regex.is_match(&m) && m.len() > BOOSTRAP_SERVER_MAX_MOTD_LENGTH {
                     Err(format!("Message of the day must not be longer than {} bytes", BOOSTRAP_SERVER_MAX_MOTD_LENGTH))
                 } else {
                     Ok(())
                 }
-            )
+            })
             .default_value("This is tox-rs"))
         .arg(Arg::with_name("no-lan")
             .long("no-lan")

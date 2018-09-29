@@ -1,3 +1,4 @@
+extern crate chrono;
 #[macro_use]
 extern crate clap;
 extern crate env_logger;
@@ -7,6 +8,7 @@ extern crate hex;
 extern crate itertools;
 #[macro_use]
 extern crate log;
+extern crate regex;
 #[cfg(unix)]
 extern crate syslog;
 extern crate tokio;
@@ -14,6 +16,7 @@ extern crate tokio_codec;
 extern crate tox;
 
 mod cli_config;
+mod motd;
 
 use std::fs::{File, OpenOptions};
 use std::io::{Error, ErrorKind, Read, Write};
@@ -40,6 +43,7 @@ use tox::toxcore::tcp::server::{Server as TcpServer, ServerExt};
 use syslog::Facility;
 
 use cli_config::*;
+use motd::Motd;
 
 /// Get version in format 3AAABBBCCC, where A B and C are major, minor and patch
 /// versions of node. `tox-bootstrapd` uses similar scheme but with leading 1.
@@ -226,7 +230,8 @@ fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_on
     };
 
     let mut server = UdpServer::new(tx, dht_pk, dht_sk.clone());
-    server.set_bootstrap_info(version(), cli_config.motd.as_bytes().to_owned());
+    let motd = Motd::new(cli_config.motd.clone());
+    server.set_bootstrap_info(version(), Box::new(move |_| motd.format().as_bytes().to_owned()));
     server.enable_lan_discovery(cli_config.lan_discovery_enabled);
     server.set_tcp_onion_sink(udp_onion.tx);
     server.enable_ipv6_mode(udp_addr.is_ipv6());
