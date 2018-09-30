@@ -2,7 +2,7 @@ use std::net::{SocketAddr, ToSocketAddrs};
 use std::num::ParseIntError;
 use std::str::FromStr;
 
-use clap::{App, AppSettings, Arg, ArgGroup};
+use clap::{App, AppSettings, Arg};
 use hex::FromHex;
 use itertools::Itertools;
 use regex::Regex;
@@ -63,6 +63,10 @@ pub struct CliConfig {
     pub tcp_addrs: Vec<SocketAddr>,
     /// DHT SecretKey
     pub sk: Option<SecretKey>,
+    /// True if the SecretKey was passed as an argument instead of environment
+    /// variable. Necessary to print a warning since the logger backend is not
+    /// initialized when we parse arguments.
+    pub sk_passed_as_arg: bool,
     /// Path to the file where DHT keys are stored.
     pub keys_file: Option<String>,
     /// List of bootstrap nodes.
@@ -98,19 +102,24 @@ pub fn cli_parse() -> CliConfig {
             .takes_value(true)
             .use_delimiter(true)
             .required_unless("udp-address"))
-        .group(ArgGroup::with_name("credentials")
-            .args(&["secret-key", "keys-file"])
-            .required(true))
         .arg(Arg::with_name("secret-key")
             .short("s")
             .long("secret-key")
-            .help("DHT secret key")
-            .takes_value(true))
+            .help("DHT secret key. Note that you should not pass the key via \
+                   arguments due to security reasons. Use this argument for \
+                   test purposes only. In the real world use the environment \
+                   variable instead")
+            .takes_value(true)
+            .conflicts_with("keys-file")
+            .env("TOX_SECRET_KEY")
+            .hidden(true))
         .arg(Arg::with_name("keys-file")
             .short("k")
             .long("keys-file")
             .help("Path to the file where DHT keys are stored")
-            .takes_value(true))
+            .takes_value(true)
+            .required_unless("secret-key")
+            .conflicts_with("secret-key"))
         .arg(Arg::with_name("bootstrap-node")
             .short("b")
             .long("bootstrap-node")
@@ -174,6 +183,8 @@ pub fn cli_parse() -> CliConfig {
         SecretKey::from_slice(&sk_bytes).expect("Invalid DHT secret key")
     });
 
+    let sk_passed_as_arg = matches.occurrences_of("secret-key") > 0;
+
     let keys_file = matches.value_of("keys-file").map(|s| s.to_owned());
 
     let bootstrap_nodes = matches
@@ -208,6 +219,7 @@ pub fn cli_parse() -> CliConfig {
         udp_addr,
         tcp_addrs,
         sk,
+        sk_passed_as_arg,
         keys_file,
         bootstrap_nodes,
         threads_config,
