@@ -58,9 +58,9 @@ hexdump -s32 -e '32/1 "%02x" "\n"' ./key
 ### Secret key
 
 Secret key is a hexadecimal string of size 32 bytes. It can be specified via
-`--secret-key` argument. Any random string will fit but note that only strong
-random generators should be used to generate a secret key. Here are some
-examples how you can do it in the terminal:
+`TOX_SECRET_KEY` environment variable. Any random string will fit but note that
+only strong random generators should be used to generate a secret key. Here are
+some examples how you can do it in the terminal:
 
 ```sh
 openssl rand -hex 32

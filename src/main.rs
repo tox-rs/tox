@@ -333,6 +333,11 @@ fn main() {
     } else {
         panic!("Neither secret key nor keys file is specified")
     };
+    if cli_config.sk_passed_as_arg {
+        warn!("You should not pass the secret key via arguments due to \
+               security reasons. Use the environment variable instead");
+    }
+
     info!("DHT public key: {}", hex::encode(dht_pk.as_ref()).to_uppercase());
 
     let (tcp_onion, udp_onion) = create_onion_streams();
