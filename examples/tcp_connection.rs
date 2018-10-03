@@ -3,6 +3,7 @@ extern crate futures;
 extern crate tokio;
 extern crate tokio_codec;
 extern crate env_logger;
+extern crate failure;
 
 use tox::toxcore::crypto_core::{PublicKey, SecretKey};
 use tox::toxcore::tcp::packet::*;
@@ -50,15 +51,17 @@ fn main() {
 
     // Initialize network communication
     let network = TcpStream::connect(&addr)
+        .map_err(|e| e.into())
         .and_then(move |socket| {
             make_client_handshake(socket, &client_pk, &client_sk, &server_pk)
+                .map_err(|e| e.into())
         })
         .and_then(|(socket, channel)| {
             let secure_socket = Framed::new(socket, codec::Codec::new(channel));
             let (to_server, from_server) = secure_socket.split();
 
             let writer = to_server_rx
-                .map_err(|()| Error::from(ErrorKind::UnexpectedEof))
+                .map_err(|()| unreachable!("rx can't fail"))
                 .forward(to_server)
                 .map(|_| ());
 
@@ -75,13 +78,15 @@ fn main() {
 
             let network = reader.select(writer).map(|_| ()).map_err(|(err, _select_next)| err);
 
-            processor.select(network).map_err(|(err, _select_next)| err)
+            processor
+                .map_err(|e| e.into())
+                .select(network).map_err(|(err, _select_next)| err)
         })
         .map(|_| ());
 
     // Read incoming messages
     let incomings = to_client_rx
-        .map_err(|()| Error::from(ErrorKind::UnexpectedEof))
+        .map_err(|()| unreachable!("rx can't fail"))
         .for_each(|packet| {
             println!("Got packet: {:?}", packet);
             // We may send something to server using `from_client_tx`
