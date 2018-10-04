@@ -135,6 +135,7 @@ mod tests {
     use super::*;
 
     use tokio;
+    use tokio::runtime::Runtime;
 
     use toxcore::tcp::codec::Codec;
     use toxcore::tcp::handshake::make_client_handshake;
@@ -250,8 +251,10 @@ mod tests {
 
         let mut enter = tokio_executor::enter().unwrap();
         let clock = Clock::new_with_now(mut_now);
-        with_default(&clock, &mut enter, |_| {
-            tokio::run(both);
+        with_default(&clock, &mut enter, |enter| {
+            let mut runtime = Runtime::new().unwrap();
+            runtime.spawn(both);
+            enter.block_on(runtime.shutdown_on_idle()).unwrap();
         });
     }
 }
