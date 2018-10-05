@@ -16,24 +16,10 @@ fn is_encrypted_test() {
 #[test]
 fn pass_encrypt_error_test() {
     // empty data
-    assert_eq!(
-        pass_encrypt(&[], &[0])
-            .err()
-            .unwrap()
-            .downcast::<EncryptionError>()
-            .unwrap(),
-        EncryptionError::Null
-    );
+    assert_eq!(pass_encrypt(&[], &[0]), Err(EncryptionError::Null));
 
     // empty passphrase
-    assert_eq!(
-        pass_encrypt(&[0], &[])
-            .err()
-            .unwrap()
-            .downcast::<KeyDerivationError>()
-            .unwrap(),
-        KeyDerivationError::Null
-    );
+    assert_eq!(pass_encrypt(&[0], &[]), Err(KeyDerivationError::Null.into()));
 }
 
 #[test]
@@ -57,41 +43,20 @@ fn pass_encrypt_test() {
 #[test]
 fn pass_decrypt_error_null_test() {
     // empty data
-    assert_eq!(
-        pass_decrypt(&[], &[0])
-            .err()
-            .unwrap()
-            .downcast::<DecryptionError>()
-            .unwrap(),
-        DecryptionError::Null
-    );
+    assert_eq!(pass_decrypt(&[], &[0]), Err(DecryptionError::Null));
 }
 
 #[test]
 fn pass_decrypt_error_invalid_length_test() {
     // not enough data
-    assert_eq!(
-        pass_decrypt(&[0], &[])
-            .err()
-            .unwrap()
-            .downcast::<DecryptionError>()
-            .unwrap(),
-        DecryptionError::InvalidLength
-    );
+    assert_eq!(pass_decrypt(&[0], &[]), Err(DecryptionError::InvalidLength));
 }
 
 #[test]
 fn pass_decrypt_error_key_derivation_test() {
     // empty passphrase
     let ciphertext = include_bytes!("ciphertext");
-    assert_eq!(
-        pass_decrypt(ciphertext, &[])
-            .err()
-            .unwrap()
-            .downcast::<KeyDerivationError>()
-            .unwrap(),
-        KeyDerivationError::Null
-    );
+    assert_eq!(pass_decrypt(ciphertext, &[]), Err(KeyDerivationError::Null.into()));
 }
 
 #[test]
@@ -101,14 +66,7 @@ fn pass_decrypt_error_bad_format_test() {
     let mut bad_ciphertext = Vec::with_capacity(MAGIC_LENGTH + SALT_LENGTH);
     bad_ciphertext.extend_from_slice(&[0; MAGIC_LENGTH]);
     bad_ciphertext.extend_from_slice(&ciphertext[MAGIC_LENGTH..]);
-    assert_eq!(
-        pass_decrypt(&bad_ciphertext, &[])
-            .err()
-            .unwrap()
-            .downcast::<DecryptionError>()
-            .unwrap(),
-        DecryptionError::BadFormat
-    );
+    assert_eq!(pass_decrypt(&bad_ciphertext, &[]), Err(DecryptionError::BadFormat));
 }
 
 #[test]
@@ -118,14 +76,7 @@ fn pass_decrypt_error_failed_test() {
     let mut bad_ciphertext = Vec::with_capacity(EXTRA_LENGTH + 123);
     bad_ciphertext.extend_from_slice(&ciphertext[..EXTRA_LENGTH]);
     bad_ciphertext.extend_from_slice(&[42; 123]);
-    assert_eq!(
-        pass_decrypt(&bad_ciphertext, b"encryptsave")
-            .err()
-            .unwrap()
-            .downcast::<DecryptionError>()
-            .unwrap(),
-        DecryptionError::Failed
-    );
+    assert_eq!(pass_decrypt(&bad_ciphertext, b"encryptsave"), Err(DecryptionError::Failed));
 }
 
 #[test]
