@@ -13,7 +13,7 @@ let encrypted = pass_encrypt(plaintext, password)
 
 // confirm that the data is encrypted
 assert!(plaintext != encrypted.as_slice());
-assert_eq!(true, is_encrypted(&encrypted));
+assert!(is_encrypted(&encrypted));
 
 // decrypted is same as plaintext
 assert_eq!(plaintext,
@@ -21,6 +21,7 @@ assert_eq!(plaintext,
 ```
 */
 
+use failure::Error;
 
 use sodiumoxide::crypto::pwhash::{
     MEMLIMIT_INTERACTIVE, OPSLIMIT_INTERACTIVE,
@@ -90,10 +91,17 @@ impl PassKey {
     use self::tox::toxencryptsave::*;
 
     // fails with an empty passphrase
-    assert_eq!(Err(KeyDerivationError::Null), PassKey::new(&[]));
+    assert_eq!(
+        PassKey::new(&[])
+            .err()
+            .unwrap()
+            .downcast::<KeyDerivationError>()
+            .unwrap(),
+        KeyDerivationError::Null
+    );
     ```
     */
-    pub fn new(passphrase: &[u8]) -> Result<PassKey, KeyDerivationError> {
+    pub fn new(passphrase: &[u8]) -> Result<PassKey, Error> {
         PassKey::with_salt(passphrase, gen_salt())
     }
 
@@ -119,32 +127,38 @@ impl PassKey {
     use sodiumoxide::crypto::pwhash::gen_salt;
     use tox::toxencryptsave::*;
 
-    assert_eq!(Err(KeyDerivationError::Null),
-                PassKey::with_salt(&[], gen_salt()));
+    assert_eq!(
+        PassKey::with_salt(&[], gen_salt())
+            .err()
+            .unwrap()
+            .downcast::<KeyDerivationError>()
+            .unwrap(),
+        KeyDerivationError::Null
+    );
     # }
     ```
     */
-    pub fn with_salt(passphrase: &[u8], salt: Salt) -> Result<PassKey, KeyDerivationError> {
-        if passphrase.is_empty() { return Err(KeyDerivationError::Null) };
+    pub fn with_salt(passphrase: &[u8], salt: Salt) -> Result<PassKey, Error> {
+        if passphrase.is_empty() { Err(KeyDerivationError::Null)? };
 
         let sha256::Digest(passhash) = sha256::hash(passphrase);
         let OpsLimit(ops) = OPSLIMIT_INTERACTIVE;
         let mut key = [0; KEY_LENGTH];
 
-        let maybe_key = PrecomputedKey::from_slice(try!(
+        let maybe_key = PrecomputedKey::from_slice(
             derive_key(
                 &mut key,
                 &passhash,
                 &salt,
                 OpsLimit(ops * 2),
                 MEMLIMIT_INTERACTIVE
-            ).or(Err(KeyDerivationError::Failed))
-        ));
+            ).or(Err(KeyDerivationError::Failed))?
+        );
 
         memzero(&mut key);
 
         let salt = Box::new(salt);
-        let key = Box::new(try!(maybe_key.ok_or(KeyDerivationError::Failed)));
+        let key = Box::new(maybe_key.ok_or(KeyDerivationError::Failed)?);
 
         Ok(PassKey { salt, key })
     }
@@ -167,11 +181,18 @@ impl PassKey {
                               // ↓ don't
     let passkey = PassKey::new(&[0]).expect("Failed to unwrap PassKey!");
 
-    assert_eq!(Err(EncryptionError::Null), passkey.encrypt(&[]));
+    assert_eq!(
+        passkey.encrypt(&[])
+            .err()
+            .unwrap()
+            .downcast::<EncryptionError>()
+            .unwrap(),
+        EncryptionError::Null
+    );
     ```
     */
-    pub fn encrypt(&self, data: &[u8]) -> Result<Vec<u8>, EncryptionError> {
-        if data.is_empty() { return Err(EncryptionError::Null) };
+    pub fn encrypt(&self, data: &[u8]) -> Result<Vec<u8>, Error> {
+        if data.is_empty() { Err(EncryptionError::Null)? };
 
         let mut output = Vec::with_capacity(EXTRA_LENGTH + data.len());
         let nonce = gen_nonce();
@@ -212,23 +233,30 @@ impl PassKey {
     let passkey = PassKey::new(&[0]).expect("Failed to unwrap PassKey!");
 
     // empty data
-    assert_eq!(Err(DecryptionError::Null), passkey.decrypt(&[]));
+    assert_eq!(
+        passkey.decrypt(&[])
+            .err()
+            .unwrap()
+            .downcast::<DecryptionError>()
+            .unwrap(),
+        DecryptionError::Null
+    );
     ```
     */
-    pub fn decrypt(&self, data: &[u8]) -> Result<Vec<u8>, DecryptionError> {
-        if data.is_empty() { return Err(DecryptionError::Null) };
-        if data.len() <= EXTRA_LENGTH { return Err(DecryptionError::InvalidLength) };
-        if !is_encrypted(data) { return Err(DecryptionError::BadFormat) };
+    pub fn decrypt(&self, data: &[u8]) -> Result<Vec<u8>, Error> {
+        if data.is_empty() { Err(DecryptionError::Null)? };
+        if data.len() <= EXTRA_LENGTH { Err(DecryptionError::InvalidLength)? };
+        if !is_encrypted(data) { Err(DecryptionError::BadFormat)? };
 
-        let nonce = try!(Nonce::from_slice(&data[
+        let nonce = Nonce::from_slice(&data[
             MAGIC_LENGTH+SALT_LENGTH..MAGIC_LENGTH+SALT_LENGTH+NONCEBYTES
-        ]).ok_or(DecryptionError::BadFormat));
+        ]).ok_or(DecryptionError::BadFormat)?;
 
-        let output = try!(crypto_core::decrypt_data_symmetric(
+        let output = crypto_core::decrypt_data_symmetric(
             &self.key,
             &nonce,
             &data[MAGIC_LENGTH+SALT_LENGTH+NONCEBYTES..]
-        ).or(Err(DecryptionError::Failed)));
+        ).or(Err(DecryptionError::Failed))?;
 
         Ok(output)
     }
@@ -259,15 +287,28 @@ E.g.
 use self::tox::toxencryptsave::*;
 
 // empty data
-assert_eq!(Err(EncryptionError::Null), pass_encrypt(&[], &[0]));
+assert_eq!(
+    pass_encrypt(&[], &[0])
+        .err()
+        .unwrap()
+        .downcast::<EncryptionError>()
+        .unwrap(),
+    EncryptionError::Null
+);
 
 // empty passphrase
-assert_eq!(Err(EncryptionError::KeyDerivation(KeyDerivationError::Null)),
-           pass_encrypt(&[0], &[]));
+assert_eq!(
+    pass_encrypt(&[0], &[])
+        .err()
+        .unwrap()
+        .downcast::<KeyDerivationError>()
+        .unwrap(),
+    KeyDerivationError::Null
+);
 ```
 */
-pub fn pass_encrypt(data: &[u8], passphrase: &[u8]) -> Result<Vec<u8>, EncryptionError> {
-    try!(PassKey::new(passphrase)).encrypt(data)
+pub fn pass_encrypt(data: &[u8], passphrase: &[u8]) -> Result<Vec<u8>, Error> {
+    PassKey::new(passphrase)?.encrypt(data)
 }
 
 /**
@@ -294,43 +335,84 @@ than encrypted data.
 use self::tox::toxencryptsave::*;
 
 // with an empty data
-assert_eq!(Err(DecryptionError::Null), pass_decrypt(&[], &[0]));
+assert_eq!(
+    pass_decrypt(&[], &[0])
+        .err()
+        .unwrap()
+        .downcast::<DecryptionError>()
+        .unwrap(),
+    DecryptionError::Null
+);
 
 // when there's not enough data to decrypt
-assert_eq!(Err(DecryptionError::InvalidLength), pass_decrypt(MAGIC_NUMBER, &[0]));
+assert_eq!(
+    pass_decrypt(MAGIC_NUMBER, &[0])
+        .err()
+        .unwrap()
+        .downcast::<DecryptionError>()
+        .unwrap(),
+    DecryptionError::InvalidLength
+);
 
 let encrypted = pass_encrypt(&[0, 0], &[0]).expect("Failed to pass_encrypt!");
 
 // when passphrase is empty
-assert_eq!(Err(DecryptionError::KeyDerivation(KeyDerivationError::Null)),
-           pass_decrypt(&encrypted, &[]));
+assert_eq!(
+    pass_decrypt(&encrypted, &[])
+        .err()
+        .unwrap()
+        .downcast::<KeyDerivationError>()
+        .unwrap(),
+    KeyDerivationError::Null
+);
 
 // when data format is wrong
 for pos in 0..MAGIC_LENGTH {
     let mut enc = encrypted.clone();
     if enc[pos] == 0 { enc[pos] = 1; } else { enc[pos] = 0; }
-    assert_eq!(Err(DecryptionError::BadFormat), pass_decrypt(&enc, &[0]));
+    assert_eq!(
+        pass_decrypt(&enc, &[0])
+            .err()
+            .unwrap()
+            .downcast::<DecryptionError>()
+            .unwrap(),
+        DecryptionError::BadFormat
+    );
 }
 
 { // there are more or less bytes than the encrypted ones
     let mut enc = encrypted.clone();
     enc.push(0);
-    assert_eq!(Err(DecryptionError::Failed), pass_decrypt(&enc, &[0]));
+    assert_eq!(
+        pass_decrypt(&enc, &[0])
+            .err()
+            .unwrap()
+            .downcast::<DecryptionError>()
+            .unwrap(),
+        DecryptionError::Failed
+    );
 
     // less
     enc.pop();
     enc.pop();
-    assert_eq!(Err(DecryptionError::Failed), pass_decrypt(&enc, &[0]));
+    assert_eq!(
+        pass_decrypt(&enc, &[0])
+            .err()
+            .unwrap()
+            .downcast::<DecryptionError>()
+            .unwrap(),
+        DecryptionError::Failed
+    );
 }
 ```
 */
-pub fn pass_decrypt(data: &[u8], passphrase: &[u8]) -> Result<Vec<u8>, DecryptionError> {
-    if data.is_empty() { return Err(DecryptionError::Null) }
-    if data.len() <= EXTRA_LENGTH { return Err(DecryptionError::InvalidLength) }
-    if !is_encrypted(data) { return Err(DecryptionError::BadFormat) }
+pub fn pass_decrypt(data: &[u8], passphrase: &[u8]) -> Result<Vec<u8>, Error> {
+    if data.is_empty() { Err(DecryptionError::Null)? }
+    if data.len() <= EXTRA_LENGTH { Err(DecryptionError::InvalidLength)? }
+    if !is_encrypted(data) { Err(DecryptionError::BadFormat)? }
 
-    let salt = try!(get_salt(data).ok_or(KeyDerivationError::Failed));
-    try!(PassKey::with_salt(passphrase, salt)).decrypt(data)
+    let salt = get_salt(data).ok_or(KeyDerivationError::Failed)?;
+    PassKey::with_salt(passphrase, salt)?.decrypt(data)
 }
 
 /** Get `Salt` from data encrypted with **TES**.
@@ -345,7 +427,7 @@ E.g.
 ```
 use self::tox::toxencryptsave::*;
 
-assert_eq!(None, get_salt(&[]));
+assert_eq!(get_salt(&[]), None);
 ```
 */
 pub fn get_salt(data: &[u8]) -> Option<Salt> {
@@ -359,42 +441,37 @@ pub fn get_salt(data: &[u8]) -> Option<Salt> {
 }
 
 /// Deriving secret key for [`PassKey`](./struct.PassKey.html).
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Fail)]
 pub enum KeyDerivationError {
     /// Provided passphrase is empty.
+    #[fail(display = "Provided passphrase is empty")]
     Null,
     /// Failed to derive key, most likely due to OOM.
     // TODO: ↑ link to the used sodium memory constant * 2
+    #[fail(display = "Failed to derive key, most likely due to OOM")]
     Failed
 }
 
 /// Error encrypting data.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Fail)]
 pub enum EncryptionError {
     /// Data provided for encryption is empty.
+    #[fail(display = "Data provided for encryption is empty")]
     Null,
-    /// Failed to derive key – [`KeyDerivationError`]
-    /// (./enum.KeyDerivationError.html)
-    KeyDerivation(KeyDerivationError),
-}
-
-impl From<KeyDerivationError> for EncryptionError {
-    fn from(err: KeyDerivationError) -> EncryptionError {
-        EncryptionError::KeyDerivation(err)
-    }
 }
 
 /// Error when trying to decrypt data.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Fail)]
 pub enum DecryptionError {
     /// Data to be decrypted is empty.
+    #[fail(display = "Data to be decrypted is empty")]
     Null,
     /// There's not enough data to decrypt.
+    #[fail(display = "There's not enough data to decrypt")]
     InvalidLength,
     /// Provided data has invalid format, incompatible with **TES**.
+    #[fail(display = "Provided data has invalid format, incompatible with TES")]
     BadFormat,
-    /// Deriving key failed.
-    KeyDerivation(KeyDerivationError),
     /**
     Failure due to encrypted data being invalid.
 
@@ -406,16 +483,9 @@ pub enum DecryptionError {
      * not all encrypted bytes were provided
      * some bytes that aren't encrypted were provided after encrypted bytes
     */
+    #[fail(display = "Failure due to encrypted data being invalid")]
     Failed
 }
-
-impl From<KeyDerivationError> for DecryptionError {
-    fn from(err: KeyDerivationError) -> DecryptionError {
-        DecryptionError::KeyDerivation(err)
-    }
-}
-
-
 
 // PassKey::
 
