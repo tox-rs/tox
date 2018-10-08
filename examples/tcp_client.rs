@@ -15,7 +15,7 @@ use tox::toxcore::tcp::handshake::make_client_handshake;
 use tox::toxcore::tcp::codec;
 use tox::toxcore::io_tokio::IoFuture;
 
-use failure::err_msg;
+use failure::{Error, err_msg};
 
 use hex::FromHex;
 
@@ -76,10 +76,10 @@ fn create_client(rx: mpsc::Receiver<Packet>, tx: mpsc::Sender<Packet>) -> IoFutu
     };
 
     let client = TcpStream::connect(&addr)
-        .map_err(|e| e.into())
+        .map_err(Error::from)
         .and_then(move |socket| {
             make_client_handshake(socket, &client_pk, &client_sk, &server_pk)
-                .map_err(|e| e.into())
+                .map_err(Error::from)
         })
         .and_then(|(socket, channel)| {
             debug!("Handshake complited");
@@ -87,7 +87,7 @@ fn create_client(rx: mpsc::Receiver<Packet>, tx: mpsc::Sender<Packet>) -> IoFutu
             let secure_socket = Framed::new(socket, codec::Codec::new(channel));
             let (to_server, from_server) = secure_socket.split();
 
-            let reader = from_server.for_each(move |packet| {
+            let reader = from_server.map_err(Error::from).for_each(move |packet| {
                 debug!("Got packet {:?}", packet);
                 // Simple pong responser
                 if let Packet::PingRequest(ping) = packet {

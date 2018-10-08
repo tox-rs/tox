@@ -11,12 +11,11 @@ use tox::toxcore::tcp::handshake::make_client_handshake;
 use tox::toxcore::tcp::codec;
 use tox::toxcore::tcp::client::*;
 
+use failure::{Error, err_msg};
 use futures::{Future, Sink, Stream};
 
 use tokio_codec::Framed;
 use tokio::net::TcpStream;
-
-use std::io::{Error, ErrorKind};
 
 fn main() {
     env_logger::init();
@@ -51,10 +50,10 @@ fn main() {
 
     // Initialize network communication
     let network = TcpStream::connect(&addr)
-        .map_err(|e| e.into())
+        .map_err(Error::from)
         .and_then(move |socket| {
             make_client_handshake(socket, &client_pk, &client_sk, &server_pk)
-                .map_err(|e| e.into())
+                .map_err(Error::from)
         })
         .and_then(|(socket, channel)| {
             let secure_socket = Framed::new(socket, codec::Codec::new(channel));
@@ -66,10 +65,10 @@ fn main() {
                 .map(|_| ());
 
             let reader = from_server
+                .map_err(Error::from)
                 .forward(from_server_tx
                     .sink_map_err(|e| {
-                        Error::new(ErrorKind::Other,
-                            format!("Could not forward message from server to connection {:?}", e))
+                        err_msg(format!("Could not forward message from server to connection {:?}", e))
                     })
                 )
                 .map(|_| {
@@ -79,7 +78,7 @@ fn main() {
             let network = reader.select(writer).map(|_| ()).map_err(|(err, _select_next)| err);
 
             processor
-                .map_err(|e| e.into())
+                .map_err(Error::from)
                 .select(network).map_err(|(err, _select_next)| err)
         })
         .map(|_| ());

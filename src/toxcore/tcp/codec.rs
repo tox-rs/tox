@@ -1,13 +1,14 @@
 /*! Codec implementation for encoding/decoding TCP Packets in terms of tokio-io
 */
 
+use std::io::{Error as IoError};
+
 use toxcore::binary_io::*;
 use toxcore::tcp::packet::*;
 use toxcore::tcp::secure::*;
 
 use nom::{ErrorKind, Needed, Offset};
 use bytes::BytesMut;
-use failure::Error;
 use tokio_codec::{Decoder, Encoder};
 
 /// Error that can happen when decoding `Packet` from bytes
@@ -35,6 +36,21 @@ pub enum DecodeError {
     DeserializeDecryptedError {
         /// Parsing error
         error: ErrorKind
+    },
+    /// General IO error
+    #[fail(display = "IO error: {:?}", error)]
+    IoError {
+        /// IO error
+        #[fail(cause)]
+        error: IoError
+    },
+}
+
+impl From<IoError> for DecodeError {
+    fn from(error: IoError) -> DecodeError {
+        DecodeError::IoError {
+            error
+        }
     }
 }
 
@@ -46,6 +62,21 @@ pub enum EncodeError {
     SerializeError {
         /// Serialization error
         error: GenError
+    },
+    /// General IO error
+    #[fail(display = "IO error: {:?}", error)]
+    IoError {
+        /// IO error
+        #[fail(cause)]
+        error: IoError
+    },
+}
+
+impl From<IoError> for EncodeError {
+    fn from(error: IoError) -> EncodeError {
+        EncodeError::IoError {
+            error
+        }
     }
 }
 
@@ -63,7 +94,7 @@ impl Codec {
 
 impl Decoder for Codec {
     type Item = Packet;
-    type Error = Error;
+    type Error = DecodeError;
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         // deserialize EncryptedPacket
@@ -72,7 +103,7 @@ impl Decoder for Codec {
                 return Ok(None)
             },
             IResult::Error(error) => {
-                return Err(DecodeError::DeserializeEncryptedError { error }.into())
+                return Err(DecodeError::DeserializeEncryptedError { error })
             },
             IResult::Done(i, encrypted_packet) => {
                 (buf.offset(i), encrypted_packet)
@@ -89,10 +120,10 @@ impl Decoder for Codec {
                 Err(DecodeError::IncompleteDecryptedPacket {
                     len: decrypted_data.len(),
                     needed
-                }.into())
+                })
             },
             IResult::Error(error) => {
-                Err(DecodeError::DeserializeDecryptedError { error }.into())
+                Err(DecodeError::DeserializeDecryptedError { error })
             },
             IResult::Done(_, packet) => {
                 buf.split_to(consumed);
@@ -104,7 +135,7 @@ impl Decoder for Codec {
 
 impl Encoder for Codec {
     type Item = Packet;
-    type Error = Error;
+    type Error = EncodeError;
 
     fn encode(&mut self, packet: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
         // serialize Packet
@@ -135,11 +166,54 @@ mod tests {
     use ::toxcore::onion::packet::*;
     use ::toxcore::tcp::codec::*;
 
+    use std::io::{ErrorKind as IoErrorKind};
     use std::net::{
       IpAddr,
       Ipv4Addr,
       Ipv6Addr,
     };
+
+    #[test]
+    fn decode_error_from_io() {
+        let error = IoError::new(IoErrorKind::Other, "io error");
+        let decode_error = DecodeError::from(error);
+        assert_eq!(unpack!(decode_error, DecodeError::IoError, error).kind(), IoErrorKind::Other);
+    }
+
+    #[test]
+    fn encode_error_from_io() {
+        let error = IoError::new(IoErrorKind::Other, "io error");
+        let encode_error = EncodeError::from(error);
+        assert_eq!(unpack!(encode_error, EncodeError::IoError, error).kind(), IoErrorKind::Other);
+    }
+
+    #[test]
+    fn decode_error_display() {
+        format!("{}", DecodeError::DeserializeEncryptedError {
+            error: ErrorKind::Alt,
+        });
+        format!("{}", DecodeError::DecryptError);
+        format!("{}", DecodeError::IncompleteDecryptedPacket {
+            len: 12,
+            needed: Needed::Unknown,
+        });
+        format!("{}", DecodeError::DeserializeDecryptedError {
+            error: ErrorKind::Alt,
+        });
+        format!("{}", DecodeError::IoError {
+            error: IoError::new(IoErrorKind::Other, "io error"),
+        });
+    }
+
+    #[test]
+    fn encode_error_display() {
+        format!("{}", EncodeError::SerializeError {
+            error: GenError::CustomError(0),
+        });
+        format!("{}", EncodeError::IoError {
+            error: IoError::new(IoErrorKind::Other, "io error"),
+        });
+    }
 
     fn create_channels() -> (Channel, Channel) {
         let alice_session = Session::new();
