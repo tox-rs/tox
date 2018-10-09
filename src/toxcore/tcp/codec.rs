@@ -15,27 +15,31 @@ use tokio_codec::{Decoder, Encoder};
 #[derive(Debug, Fail)]
 pub enum DecodeError {
     /// Error indicates that received encrypted packet can't be parsed
-    #[fail(display = "Deserialize EncryptedPacket error: {:?}", error)]
+    #[fail(display = "Deserialize EncryptedPacket error: {:?}, buffer: {:?}", error, buf)]
     DeserializeEncryptedError {
         /// Parsing error
-        error: ErrorKind
+        error: ErrorKind,
+        /// TCP buffer
+        buf: Vec<u8>,
     },
     /// Error indicates that received encrypted packet can't be decrypted
     #[fail(display = "Decrypt EncryptedPacket error")]
     DecryptError,
     /// Error indicates that more data is needed to parse decrypted packet
-    #[fail(display = "Decrypted packet should not be incomplete: length {}, needed {:?}", len, needed)]
+    #[fail(display = "Decrypted packet should not be incomplete: {:?}, packet: {:?}", needed, packet)]
     IncompleteDecryptedPacket {
-        /// Length of received packet
-        len: usize,
         /// Required data size to be parsed
-        needed: Needed
+        needed: Needed,
+        /// Received packet
+        packet: Vec<u8>,
     },
     /// Error indicates that decrypted packet can't be parsed
-    #[fail(display = "Deserialize decrypted packet error: {:?}", error)]
+    #[fail(display = "Deserialize decrypted packet error: {:?}, packet: {:?}", error, packet)]
     DeserializeDecryptedError {
         /// Parsing error
-        error: ErrorKind
+        error: ErrorKind,
+        /// Received packet
+        packet: Vec<u8>,
     },
     /// General IO error
     #[fail(display = "IO error: {:?}", error)]
@@ -103,7 +107,7 @@ impl Decoder for Codec {
                 return Ok(None)
             },
             IResult::Error(error) => {
-                return Err(DecodeError::DeserializeEncryptedError { error })
+                return Err(DecodeError::DeserializeEncryptedError { error, buf: buf.to_vec() })
             },
             IResult::Done(i, encrypted_packet) => {
                 (buf.offset(i), encrypted_packet)
@@ -117,13 +121,10 @@ impl Decoder for Codec {
         // deserialize Packet
         match Packet::from_bytes(&decrypted_data) {
             IResult::Incomplete(needed) => {
-                Err(DecodeError::IncompleteDecryptedPacket {
-                    len: decrypted_data.len(),
-                    needed
-                })
+                Err(DecodeError::IncompleteDecryptedPacket { needed, packet: decrypted_data })
             },
             IResult::Error(error) => {
-                Err(DecodeError::DeserializeDecryptedError { error })
+                Err(DecodeError::DeserializeDecryptedError { error, packet: decrypted_data })
             },
             IResult::Done(_, packet) => {
                 buf.split_to(consumed);
@@ -191,14 +192,16 @@ mod tests {
     fn decode_error_display() {
         format!("{}", DecodeError::DeserializeEncryptedError {
             error: ErrorKind::Alt,
+            buf: vec![42; 123],
         });
         format!("{}", DecodeError::DecryptError);
         format!("{}", DecodeError::IncompleteDecryptedPacket {
-            len: 12,
             needed: Needed::Unknown,
+            packet: vec![42; 123],
         });
         format!("{}", DecodeError::DeserializeDecryptedError {
             error: ErrorKind::Alt,
+            packet: vec![42; 123],
         });
         format!("{}", DecodeError::IoError {
             error: IoError::new(IoErrorKind::Other, "io error"),

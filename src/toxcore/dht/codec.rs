@@ -23,18 +23,20 @@ pub enum DecodeError {
         len: usize
     },
     /// Error indicates that more data is needed to parse received packet
-    #[fail(display = "Packet should not be incomplete: length {}, needed {:?}", len, needed)]
+    #[fail(display = "Packet should not be incomplete: {:?}, packet: {:?}", needed, packet)]
     IncompletePacket {
-        /// Length of received packet
-        len: usize,
         /// Required data size to be parsed
-        needed: Needed
+        needed: Needed,
+        /// Received packet
+        packet: Vec<u8>,
     },
     /// Error indicates that received packet can't be parsed
-    #[fail(display = "Deserialize Packet error: {:?}", error)]
+    #[fail(display = "Deserialize Packet error: {:?}, packet: {:?}", error, packet)]
     DeserializeError {
         /// Parsing error
-        error: ErrorKind
+        error: ErrorKind,
+        /// Received packet
+        packet: Vec<u8>,
     }
 }
 
@@ -64,8 +66,8 @@ impl Decoder for DhtCodec {
         }
 
         match Packet::from_bytes(buf) {
-            IResult::Incomplete(needed) => Err(DecodeError::IncompletePacket { len, needed }.into()),
-            IResult::Error(error) => Err(DecodeError::DeserializeError { error }.into()),
+            IResult::Incomplete(needed) => Err(DecodeError::IncompletePacket { needed, packet: buf.to_vec() }.into()),
+            IResult::Error(error) => Err(DecodeError::DeserializeError { error, packet: buf.to_vec() }.into()),
             IResult::Done(_, packet) => Ok(Some(packet))
         }
     }
