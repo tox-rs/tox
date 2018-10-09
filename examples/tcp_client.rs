@@ -7,6 +7,7 @@ extern crate tokio_codec;
 extern crate log;
 extern crate env_logger;
 extern crate hex;
+extern crate failure;
 
 use tox::toxcore::crypto_core::*;
 use tox::toxcore::tcp::packet::*;
@@ -14,17 +15,19 @@ use tox::toxcore::tcp::handshake::make_client_handshake;
 use tox::toxcore::tcp::codec;
 use tox::toxcore::io_tokio::IoFuture;
 
+use failure::{Error, err_msg};
+
 use hex::FromHex;
 
 use futures::prelude::*;
 use futures::future;
+use futures::future::Either;
 use futures::sync::mpsc;
 
 use tokio_codec::Framed;
 use tokio::net::TcpStream;
 
 use std::{thread, time};
-use std::io::{Error, ErrorKind};
 
 // Notice that create_client create a future of client processing.
 //  The future will live untill all copies of tx is dropped or there is a IO error
@@ -73,8 +76,10 @@ fn create_client(rx: mpsc::Receiver<Packet>, tx: mpsc::Sender<Packet>) -> IoFutu
     };
 
     let client = TcpStream::connect(&addr)
+        .map_err(Error::from)
         .and_then(move |socket| {
             make_client_handshake(socket, &client_pk, &client_sk, &server_pk)
+                .map_err(Error::from)
         })
         .and_then(|(socket, channel)| {
             debug!("Handshake complited");
@@ -82,19 +87,19 @@ fn create_client(rx: mpsc::Receiver<Packet>, tx: mpsc::Sender<Packet>) -> IoFutu
             let secure_socket = Framed::new(socket, codec::Codec::new(channel));
             let (to_server, from_server) = secure_socket.split();
 
-            let reader = from_server.for_each(move |packet| -> IoFuture<()> {
+            let reader = from_server.map_err(Error::from).for_each(move |packet| {
                 debug!("Got packet {:?}", packet);
                 // Simple pong responser
                 if let Packet::PingRequest(ping) = packet {
-                    Box::new(
+                    Either::A(
                         tx.clone().send(Packet::PongResponse(
                             PongResponse { ping_id: ping.ping_id }
                         ))
                         .map(|_| () )
-                        .map_err(|_| Error::new(ErrorKind::Other, "Could not send pong") )
+                        .map_err(|_| err_msg("Could not send pong") )
                     )
                 } else {
-                    Box::new( future::ok(()) )
+                    Either::B( future::ok(()) )
                 }
             })
             .then(|res| {
