@@ -74,3 +74,55 @@ impl ConnectionsProcessor {
         ConnectionsProcessor { from_net_crypto_tx, to_net_crypto_rx, from_server_tx, to_server_rx, processor }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use futures::Future;
+    use tokio;
+
+    #[test]
+    fn connections_processor_shutdown_client() {
+        // Create ClientProcessor
+        let ConnectionsProcessor {
+            from_net_crypto_tx,
+            to_net_crypto_rx,
+            from_server_tx,
+            to_server_rx,
+            processor
+        } = ConnectionsProcessor::new();
+        let connections_processor = processor.map_err(|_| ());
+
+        // shutdown client channel = shutdown client
+        drop(from_net_crypto_tx);
+        drop(to_net_crypto_rx);
+
+        let _from_server_tx = from_server_tx;
+        let _to_server_rx = to_server_rx;
+
+        tokio::run(connections_processor);
+    }
+
+    #[test]
+    fn connections_processor_shutdown_server() {
+        // Create ClientProcessor
+        let ConnectionsProcessor {
+            from_net_crypto_tx,
+            to_net_crypto_rx,
+            from_server_tx,
+            to_server_rx,
+            processor
+        } = ConnectionsProcessor::new();
+        let connections_processor = processor.map_err(|_| ());
+
+        // shutdown server channel = shutdown server
+        drop(from_server_tx);
+        drop(to_server_rx);
+
+        let _from_net_crypto_tx = from_net_crypto_tx;
+        let _to_net_crypto_rx = to_net_crypto_rx;
+
+        tokio::run(connections_processor);
+    }
+}
