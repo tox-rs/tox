@@ -14,15 +14,15 @@ Defintion of struct names.
 
 
 >   Connections has
-         set of ConnOfClient(HashMap)
+         set of ClientConnection(HashMap)
          set of Connection(HashMap)
-     ConnOfClient has
+     ClientConnection has
          object of TcpClient processor
          IP, port, PK : to save for sleeping status
      Connection has
          object of 3 to 6 ConnToRelay connections for redundancy
      ConnToRelay has
-         id_of_client as a key to ConnOfClient hashmap
+         id_of_client as a key to ClientConnection hashmap
          connection_id of Routing Response packet
 
 */
@@ -33,16 +33,14 @@ use std::sync::Arc;
 use std::time::Instant;
 use std::collections::HashMap;
 use std::net::{SocketAddr, IpAddr, Ipv4Addr};
-use std::io::{Error, ErrorKind};
 
 use futures::sync::mpsc;
 use futures::{future, Future, Sink, Stream};
-
+use failure::{Error, err_msg};
 use tokio_codec::Framed;
 use tokio::net::TcpStream;
 
 use toxcore::time::*;
-use toxcore::io_tokio::*;
 use toxcore::crypto_core::*;
 use toxcore::tcp::codec::*;
 use toxcore::tcp::handshake::make_client_handshake;
@@ -68,7 +66,7 @@ pub enum ConnectionStatus {
 
 /// Status of connection to a friend.
 #[derive(PartialEq, Clone)]
-pub enum ConnOfClientStatus {
+pub enum ClientConnectionStatus {
     /// Uninitialized state.
     None,
     /// Connection is valid but not connected.
@@ -87,14 +85,14 @@ pub enum ConnOfClientStatus {
 pub struct Connections {
     pk: PublicKey,
     sk: SecretKey,
-    conns_of_client: Arc<RwLock<HashMap<PublicKey, ConnOfClient>>>,
+    conns_of_client: Arc<RwLock<HashMap<PublicKey, ClientConnection>>>,
     connections: Arc<RwLock<HashMap<PublicKey, Connection>>>,
 }
 
 /// Connection of a TcpClient processor object.
 #[derive(Clone)]
-pub struct ConnOfClient {
-    status: ConnOfClientStatus,
+pub struct ClientConnection {
+    status: ClientConnectionStatus,
     to_local_tx: Option<mpsc::UnboundedSender<Packet>>,
     connected_time: Instant,
     lock_count: u32,
@@ -113,7 +111,7 @@ pub struct ConnOfClient {
 /// It has 3 to 6 redundant connection to TcpRelays.
 #[derive(Clone, PartialEq)]
 pub struct Connection {
-    status: ConnOfClientStatus,
+    status: ClientConnectionStatus,
     friend_dht_pk: PublicKey,
     conn_to_relay: Vec<ConnToRelay>,
 }
@@ -139,7 +137,7 @@ impl Connections {
     }
 
     fn add_entry(&self, socket: Framed<TcpStream, Codec>, server_pk: &PublicKey,
-                 from_server_tx: mpsc::UnboundedSender<(Packet, PublicKey)>) -> IoFuture<()> {
+                 from_server_tx: mpsc::UnboundedSender<(Packet, PublicKey)>) -> Box<Future<Item = (), Error = Error> + Send> {
         let (to_server, from_server) = socket.split();
         let (to_local_tx, to_local_rx) = mpsc::unbounded();
         let mut connections = self.connections.write();
@@ -153,7 +151,7 @@ impl Connections {
 
         let connection = connections.entry(*server_pk).or_insert(
             Connection {
-                status: ConnOfClientStatus::None,
+                status: ClientConnectionStatus::None,
                 friend_dht_pk: server_pk.clone(),
                 conn_to_relay: vec![relay.clone()],
             }
@@ -166,46 +164,46 @@ impl Connections {
             connection.conn_to_relay.push(relay.clone());
         }
 
-        let mut conn_of_client = ConnOfClient::new();
+        let mut conn_of_client = ClientConnection::new();
         conn_of_client.to_local_tx = Some(to_local_tx);
 
         conns_of_client.insert(relay.id_of_client, conn_of_client);
 
         let reader = from_server
+            .map_err(Error::from)
             .map(move |packet| (packet, relay.clone().id_of_client))
             .forward(from_server_tx
                 .sink_map_err(|e| {
-                    Error::new(ErrorKind::Other,
-                               format!("Could not forward message from server to connection {:?}", e))
+                    err_msg(format!("Could not forward message from server to connection {:?}", e))
                 })
             )
-            .map(|_| {
-                println!("Connection closed");
-            });
+            .map(|_| ());
 
         let writer = to_local_rx
-            .map_err(|()| Error::from(ErrorKind::UnexpectedEof))
+            .map_err(|()|  unreachable!("rx can't fail"))
             .forward(to_server)
             .map(|_| ());
 
         let network = reader.select(writer)
             .map(|_| ())
-            .map_err(|(err, _select_next)| Error::new(ErrorKind::Other, err));
+            .map_err(|(err, _select_next)| err);
 
         Box::new(network)
     }
 
     /// Add a new connection of client to tcp server.
     pub fn add_relay(&self, addr: &SocketAddr, server_pk: &PublicKey,
-                     from_server_tx: mpsc::UnboundedSender<(Packet, PublicKey)>) -> IoFuture<()> {
+                     from_server_tx: mpsc::UnboundedSender<(Packet, PublicKey)>) -> Box<Future<Item = (), Error = Error> + Send> {
         let (pk, sk, server_pk, from_server_tx) =
             (self.pk.clone(), self.sk.clone(), server_pk.clone(), from_server_tx.clone());
 
         let self_c = self.clone();
 
         let conn = TcpStream::connect(addr)
+            .map_err(Error::from)
             .and_then(move |socket| {
                 make_client_handshake(socket, &pk, &sk, &server_pk)
+                    .map_err(Error::from)
             })
             .and_then(move |(socket, channel)| {
                 let secure_socket = Framed::new(socket, Codec::new(channel));
@@ -216,7 +214,7 @@ impl Connections {
     }
 
     /// Send a packet to the tcp server
-    pub fn send_packet(&self, connection_id: &PublicKey, packet: Packet) -> IoFuture<()> {
+    pub fn send_packet(&self, connection_id: &PublicKey, packet: Packet) -> Box<Future<Item = (), Error = Error> + Send> {
         let connections = self.connections.read();
         let conns_of_connection = self.conns_of_client.read();
 
@@ -226,21 +224,21 @@ impl Connections {
                     if let Some(ref to_local_tx) = client.to_local_tx {
                         return Box::new(to_local_tx.clone().send(packet)
                             .map(|_| ())
-                            .map_err(|e| Error::new(ErrorKind::Other, e))
-                        )
+                            .map_err(Error::from))
                     }
                 }
             }
         }
+
         Box::new(future::ok(()))
     }
 }
 
-impl ConnOfClient {
-    /// Create new ConnOfClient object.
+impl ClientConnection {
+    /// Create new ClientConnection object.
     pub fn new() -> Self {
-        ConnOfClient {
-            status: ConnOfClientStatus::None,
+        ClientConnection {
+            status: ClientConnectionStatus::None,
             to_local_tx: None,
             connected_time: clock_now(),
             lock_count: 0,
@@ -251,5 +249,69 @@ impl ConnOfClient {
             relay_pk: gen_keypair().0,
             wakeup: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use toxcore::tcp::connections::*;
+    use tokio::net::TcpListener;
+    use tokio::runtime::Runtime;
+    use tokio_executor;
+    use tokio_timer::clock::*;
+    use toxcore::tcp::server::*;
+
+    #[test]
+    fn connections_send_packet() {
+        let (client_pk, client_sk) = gen_keypair();
+        let addr = "0.0.0.0:12347".parse().unwrap();
+        let (server_pk, server_sk) = gen_keypair();
+        let listener = TcpListener::bind(&addr).unwrap();
+
+        let server = Server::new();
+        let server_future = server.run(listener, server_sk);
+
+        let connections = Connections::new(client_pk.clone(), client_sk.clone());
+
+        // Create ConnectionsProcessor
+        let ConnectionsProcessor {
+            from_net_crypto_tx: _,
+            to_net_crypto_rx: _,
+            from_server_tx,
+            to_server_rx: _,
+            processor: _
+        } = ConnectionsProcessor::new();
+
+        let add_relay_future1 = connections.add_relay(&addr, &server_pk, from_server_tx.clone());
+
+        let add_relay_future2 = connections.add_relay(&addr, &server_pk, from_server_tx.clone());
+
+        let connection_id = gen_keypair().0;
+
+        let packet = Packet::DisconnectNotification(
+            DisconnectNotification { connection_id: 42 }
+        );
+
+        let send_packet_future = connections.send_packet(&connection_id, packet);
+
+        let send_future = send_packet_future.join3(add_relay_future1, add_relay_future2)
+            .map(|_| ());
+
+        let both = server_future
+            .map_err(Error::from)
+            .select(send_future)
+            .map(|_| ())
+            .map_err(|_| ());
+
+        let now = Instant::now();
+        let mut_now = MutNow::new(now);
+        let mut enter = tokio_executor::enter().unwrap();
+        let clock = Clock::new_with_now(mut_now);
+        with_default(&clock, &mut enter, |enter| {
+            let mut runtime = Runtime::new().unwrap();
+            runtime.spawn(both);
+            enter.block_on(runtime.shutdown_on_idle()).unwrap();
+        });
     }
 }

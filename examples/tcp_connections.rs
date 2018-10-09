@@ -3,6 +3,7 @@ extern crate futures;
 extern crate tokio;
 extern crate tokio_codec;
 extern crate env_logger;
+extern crate failure;
 
 use tox::toxcore::crypto_core::{PublicKey, SecretKey};
 use tox::toxcore::tcp::packet::*;
@@ -10,7 +11,7 @@ use tox::toxcore::tcp::connections::*;
 
 use futures::{Future, Sink, Stream};
 
-use std::io::{Error, ErrorKind};
+use failure::{Error};
 
 fn main() {
     env_logger::init();
@@ -45,33 +46,41 @@ fn main() {
         processor
     } = ConnectionsProcessor::new();
 
-    let add_relay = connections.add_relay(&addr, &server_pk, from_server_tx);
+    let add_relay = connections.add_relay(&addr, &server_pk, from_server_tx)
+        .map_err(Error::from);
 
     let network_writer = to_server_rx
-        .map_err(|()| Error::new(ErrorKind::Other, "rx error"))
+        .map_err(|()| unreachable!("rx can't fail"))
         .for_each(move |(packet, _connection_id)| {
             connections.send_packet(&server_pk, packet)
-        });
+        })
+        .map(|_| ());
 
     // Read incoming messages
     let incomings = to_net_crypto_rx
-        .map_err(|()| Error::from(ErrorKind::UnexpectedEof))
-        .for_each(|(packet, connection_id)| {
-            println!("Got packet: {:?}{:?}", packet, connection_id);
-            // We may send something to server using `from_net_crypto_tx`
+        .map_err(|()| unreachable!("rx can't fail"))
+        .for_each(|packet| {
+            println!("Got packet: {:?}", packet);
+            // We may send something to server using `from_client_tx`
             //  but for now we do nothing
             Ok(())
         })
         .map(|_| ());
 
-    let processor = processor.join(add_relay)
-        .map(|_| ())
-        .map_err(|e| Error::new(ErrorKind::Other, e));
+    let processor = processor
+        .map_err(Error::from)
+        .join(add_relay)
+        .map(|_| ());
 
     // Combine network with incomings
     let net_crypto = processor
-        .select(network_writer).map(|_| ()).map_err(|(e, _)| Error::new(ErrorKind::Other, e))
-        .select(incomings).map(|_| ()).map_err(|_| ());
+        .map_err(Error::from)
+        .select(network_writer)
+        .map(|_| ())
+        .map_err(|(e,_)| e)
+        .select(incomings)
+        .map(|_| ())
+        .map_err(|(_e,_)| ());
 
     {
         // Send RouteRequest to server
