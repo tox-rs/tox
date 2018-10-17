@@ -97,18 +97,18 @@ impl DhtRequest {
             .map_err(|()| {
                 debug!("Decrypting DhtRequest failed!");
                 Error::new(ErrorKind::Other, "DhtRequest decrypt error.")
-            });
+            })?;
 
-        match DhtRequestPayload::from_bytes(&decrypted?) {
+        match DhtRequestPayload::from_bytes(&decrypted) {
             IResult::Incomplete(e) => {
                 debug!(target: "DhtRequest", "DhtRequest deserialize error: {:?}", e);
                 Err(Error::new(ErrorKind::Other,
-                    format!("DhtRequest deserialize error: {:?}", e)))
+                    format!("DhtRequest deserialize error: {:?}, packet: {:?}", e, decrypted)))
             },
             IResult::Error(e) => {
                 debug!(target: "DhtRequest", "DhtRequest deserialize error: {:?}", e);
                 Err(Error::new(ErrorKind::Other,
-                    format!("DhtRequest deserialize error: {:?}", e)))
+                    format!("DhtRequest deserialize error: {:?}, packet: {:?}", e, decrypted)))
             },
             IResult::Done(_, packet) => {
                 Ok(packet)
