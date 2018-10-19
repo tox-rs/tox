@@ -936,6 +936,16 @@ impl Server {
                     // TODO: handle this packet in onion client
                     Box::new( future::ok(()) )
                 },
+                DhtRequestPayload::HardeningRequest(_dht_pk_payload) => {
+                    debug!("Received Hardening request");
+                    // TODO: implement handler
+                    Box::new( future::ok(()) )
+                },
+                DhtRequestPayload::HardeningResponse(_dht_pk_payload) => {
+                    debug!("Received Hardening response");
+                    // TODO: implement handler
+                    Box::new( future::ok(()) )
+                },
             }
         } else {
             let close_nodes = self.close_nodes.read();
