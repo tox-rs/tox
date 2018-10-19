@@ -1285,7 +1285,14 @@ impl Server {
     }
 
     /// Handle `BootstrapInfo` packet and response with `BootstrapInfo` packet.
-    fn handle_bootstrap_info(&self, _packet: &BootstrapInfo, addr: SocketAddr) -> IoFuture<()> {
+    fn handle_bootstrap_info(&self, packet: &BootstrapInfo, addr: SocketAddr) -> IoFuture<()> {
+        if packet.motd.len() != BOOSTRAP_CLIENT_MAX_MOTD_LENGTH {
+            return Box::new( future::err(
+                Error::new(ErrorKind::Other,
+                    "Wrong BootstrapInfo packet length".to_string()
+            )))
+        }
+
         if let Some(ref bootstrap_info) = self.bootstrap_info {
             let mut motd = (bootstrap_info.motd_cb)(&self);
             if motd.len() > BOOSTRAP_SERVER_MAX_MOTD_LENGTH {
@@ -1393,7 +1400,7 @@ mod tests {
 
         let packet = Packet::BootstrapInfo(BootstrapInfo {
             version: 00,
-            motd: b"Hello".to_vec(),
+            motd: vec![0; BOOSTRAP_CLIENT_MAX_MOTD_LENGTH],
         });
 
         alice.handle_packet(packet, addr).wait().unwrap();
@@ -1407,6 +1414,28 @@ mod tests {
 
         assert_eq!(bootstrap_info.version, version);
         assert_eq!(bootstrap_info.motd, motd);
+    }
+
+    #[test]
+    fn handle_bootstrap_info_wrong_length() {
+        let (mut alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
+
+        let version = 42;
+        let motd = b"motd".to_vec();
+
+        alice.set_bootstrap_info(version, Box::new(move |_| motd.clone()));
+
+        let packet = Packet::BootstrapInfo(BootstrapInfo {
+            version: 00,
+            motd: Vec::new(),
+        });
+
+        assert!(alice.handle_packet(packet, addr).wait().is_err());
+
+        // Necessary to drop tx so that rx.collect() can be finished
+        drop(alice);
+
+        assert!(rx.collect().wait().unwrap().is_empty());
     }
 
     // handle_ping_req
