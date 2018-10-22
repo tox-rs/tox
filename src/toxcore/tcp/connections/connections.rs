@@ -263,6 +263,7 @@ mod tests {
     use toxcore::tcp::server::*;
 
     #[test]
+    #[ignore]
     fn connections_send_packet() {
         let (client_pk, client_sk) = gen_keypair();
         let addr = "0.0.0.0:12347".parse().unwrap();
