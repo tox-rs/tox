@@ -19,11 +19,12 @@ mod cli_config;
 mod motd;
 
 use std::fs::{File, OpenOptions};
-use std::io::{Error, ErrorKind, Read, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::net::{IpAddr, SocketAddr};
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 
+use failure::Error;
 use futures::sync::mpsc;
 use futures::{future, Future, Sink, Stream};
 use futures::future::Either;
@@ -167,7 +168,7 @@ fn run_tcp(cli_config: &CliConfig, dht_sk: SecretKey, tcp_onion: TcpOnion) -> im
         // If TCP address is not specified don't start TCP server and only drop
         // all onion packets from DHT server
         let tcp_onion_future = tcp_onion.rx
-            .map_err(|()| Error::from(ErrorKind::UnexpectedEof))
+            .map_err(|()| unreachable!("rx can't fail"))
             .for_each(|_| future::ok(()));
         return Either::A(tcp_onion_future)
     }
@@ -181,6 +182,7 @@ fn run_tcp(cli_config: &CliConfig, dht_sk: SecretKey, tcp_onion: TcpOnion) -> im
         let dht_sk = dht_sk.clone();
         let listener = TcpListener::bind(&addr).expect("Failed to bind TCP listener");
         tcp_server_c.run(listener, dht_sk)
+            .map_err(Error::from)
     });
 
     let tcp_server_future = future::select_all(tcp_server_futures)
@@ -188,7 +190,7 @@ fn run_tcp(cli_config: &CliConfig, dht_sk: SecretKey, tcp_onion: TcpOnion) -> im
         .map_err(|(e, _, _)| e);
 
     let tcp_onion_future = tcp_onion.rx
-        .map_err(|()| Error::from(ErrorKind::UnexpectedEof))
+        .map_err(|()| unreachable!("rx can't fail"))
         .for_each(move |(onion_response, addr)|
             tcp_server.handle_udp_onion_response(addr.ip(), addr.port(), onion_response).or_else(|err| {
                 warn!("Failed to handle UDP onion response: {:?}", err);
@@ -210,7 +212,7 @@ fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_on
         // If UDP address is not specified don't start DHT server and only drop
         // all onion packets from TCP server
         let udp_onion_future = udp_onion.rx
-            .map_err(|()| Error::from(ErrorKind::UnexpectedEof))
+            .map_err(|()| unreachable!("rx can't fail"))
             .for_each(|_| future::ok(()));
         return Either::A(udp_onion_future)
     };
@@ -222,9 +224,11 @@ fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_on
     let (tx, rx) = mpsc::unbounded();
 
     let lan_discovery_future = if cli_config.lan_discovery_enabled {
-        LanDiscoverySender::new(tx.clone(), dht_pk, udp_addr.is_ipv6()).run()
+        Either::A(LanDiscoverySender::new(tx.clone(), dht_pk, udp_addr.is_ipv6())
+            .run()
+            .map_err(Error::from))
     } else {
-        Box::new(future::empty())
+        Either::B(future::empty())
     };
 
     let mut server = UdpServer::new(tx, dht_pk, dht_sk.clone());
@@ -236,7 +240,7 @@ fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_on
 
     let server_c = server.clone();
     let udp_onion_future = udp_onion.rx
-        .map_err(|()| Error::from(ErrorKind::UnexpectedEof))
+        .map_err(|()| unreachable!("rx can't fail"))
         .for_each(move |(onion_request, addr)|
             server_c.handle_tcp_onion_request(onion_request, addr).or_else(|err| {
                 warn!("Failed to handle TCP onion request: {:?}", err);
@@ -255,7 +259,7 @@ fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_on
     // The server task asynchronously iterates over and processes each
     // incoming packet.
     let server_c = server.clone();
-    let network_reader = stream.then(future::ok).filter(|event| // TODO: use filter_map from futures 0.2 to avoid next `expect`
+    let network_reader = stream.then(future::ok).filter(|event|
         match event {
             Ok(_) => true,
             Err(ref e) => {
@@ -264,18 +268,16 @@ fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_on
                 e.as_fail().downcast_ref::<DecodeError>().is_none()
             }
         }
-    ).then(|event: Result<_, ()>|
-        event.expect("always ok")
-    ).for_each(move |(packet, addr)| {
+    ).and_then(|event| event).for_each(move |(packet, addr)| {
         trace!("Received packet {:?}", packet);
         server_c.handle_packet(packet, addr).or_else(|err| {
             error!("Failed to handle packet: {:?}", err);
             future::ok(())
         })
-    }).map_err(|e| Error::new(ErrorKind::Other, e.compat()));
+    });
 
     let network_writer = rx
-        .map_err(|()| Error::new(ErrorKind::Other, "rx error"))
+        .map_err(|()| unreachable!("rx can't fail"))
         // filter out IPv6 packets if node is running in IPv4 mode
         .filter(move |&(ref _packet, addr)| !(udp_addr.is_ipv4() && addr.is_ipv6()))
         .fold(sink, move |sink, (packet, mut addr)| {
@@ -285,7 +287,7 @@ fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_on
                 }
             }
             trace!("Sending packet {:?} to {:?}", packet, addr);
-            sink.send((packet, addr)).map_err(|e| Error::new(ErrorKind::Other, e.compat()))
+            sink.send((packet, addr))
         })
         // drop sink when rx stream is exhausted
         .map(|_sink| ());
@@ -294,7 +296,7 @@ fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_on
 
     Either::B(network_reader
         .select(network_writer).map(|_| ()).map_err(|(e, _)| e)
-        .select(server.run()).map(|_| ()).map_err(|(e, _)| e)
+        .select(server.run().map_err(Error::from)).map(|_| ()).map_err(|(e, _)| e)
         .select(lan_discovery_future).map(|_| ()).map_err(|(e, _)| e)
         .join(udp_onion_future).map(|_| ()))
 }
