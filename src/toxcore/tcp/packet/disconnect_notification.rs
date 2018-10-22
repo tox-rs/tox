@@ -35,7 +35,7 @@ pub struct DisconnectNotification {
 impl FromBytes for DisconnectNotification {
     named!(from_bytes<DisconnectNotification>, do_parse!(
         tag!("\x03") >>
-        connection_id: be_u8 >>
+        connection_id: verify!(be_u8, |id| id >= 0x10 && id < 0xF0) >>
         (DisconnectNotification { connection_id })
     ));
 }

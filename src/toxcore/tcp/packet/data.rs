@@ -27,8 +27,7 @@ pub struct Data {
 
 impl FromBytes for Data {
     named!(from_bytes<Data>, do_parse!(
-        connection_id: be_u8 >>
-        verify!(value!(connection_id), |id| id >= 0x10 && id < 0xF0) >>
+        connection_id: verify!(be_u8, |id| id >= 0x10 && id < 0xF0) >>
         data: rest >>
         (Data { connection_id, data: data.to_vec() })
     ));
