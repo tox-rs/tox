@@ -87,13 +87,6 @@ pub enum ConnectionError {
         #[fail(cause)]
         error: IoError
     },
-    /// Shutdown client error
-    #[fail(display = "Shutdown client error error: {:?}", error)]
-    ShutdownClientError {
-        /// Shutdown client error
-        #[fail(cause)]
-        error: IoError
-    },
 }
 
 /// Extension trait for running TCP server on incoming `TcpStream` and ping sender
@@ -194,9 +187,10 @@ impl ServerExt for Server {
                 .select(writer).map(|_| ()).map_err(|(e, _)| e)
                 .then(move |r_processing| {
                     debug!("Shutdown a client with PK {:?}", &client_pk);
+                    // ignore shutdown error since the client can be already
+                    // shutdown at this moment
                     server_c.shutdown_client(&client_pk)
-                        .map_err(|error| ConnectionError::ShutdownClientError { error })
-                        .then(move |r_shutdown| r_processing.and(r_shutdown))
+                        .then(move |_| r_processing)
                 })
         });
 
@@ -258,9 +252,6 @@ mod tests {
             error: IoError::new(IoErrorKind::Other, "io error"),
         });
         format!("{}", ConnectionError::PacketHandlingError {
-            error: IoError::new(IoErrorKind::Other, "io error"),
-        });
-        format!("{}", ConnectionError::ShutdownClientError {
             error: IoError::new(IoErrorKind::Other, "io error"),
         });
     }
