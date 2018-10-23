@@ -201,12 +201,6 @@ impl Server {
         Box::new(future::ok(()))
     }
     fn handle_disconnect_notification(&self, pk: &PublicKey, packet: &DisconnectNotification) -> IoFuture<()> {
-        if packet.connection_id < 16 {
-            return Box::new( future::err(
-                Error::new(ErrorKind::Other,
-                    "DisconnectNotification.connection_id < 16"
-            )))
-        }
         let mut state = self.state.write();
         let client_b_pk = {
             if let Some(client_a) = state.connected_clients.get_mut(pk) {
@@ -340,12 +334,6 @@ impl Server {
         )))
     }
     fn handle_data(&self, pk: &PublicKey, packet: Data) -> IoFuture<()> {
-        if packet.connection_id < 16 {
-            return Box::new( future::err(
-                Error::new(ErrorKind::Other,
-                    "Data.connection_id < 16"
-            )))
-        }
         let state = self.state.read();
         let client_b_pk = {
             if let Some(client_a) = state.connected_clients.get(pk) {
@@ -884,20 +872,6 @@ mod tests {
         assert!(handle_res.is_err());
     }
     #[test]
-    fn handle_disconnect_notification_0() {
-        let server = Server::new();
-
-        let (client_1, _rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
-        let client_pk_1 = client_1.pk();
-        server.insert(client_1);
-
-        // emulate send DisconnectNotification from client_1
-        let handle_res = server.handle_packet(&client_pk_1, Packet::DisconnectNotification(
-            DisconnectNotification { connection_id: 0 }
-        )).wait();
-        assert!(handle_res.is_err());
-    }
-    #[test]
     fn handle_disconnect_notification_not_linked() {
         let server = Server::new();
 
@@ -959,20 +933,6 @@ mod tests {
         // emulate send OobSend from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::OobSend(
             OobSend { destination_pk: client_pk_2, data: vec![] }
-        )).wait();
-        assert!(handle_res.is_err());
-    }
-    #[test]
-    fn handle_data_0() {
-        let server = Server::new();
-
-        let (client_1, _rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
-        let client_pk_1 = client_1.pk();
-        server.insert(client_1);
-
-        // emulate send Data from client_1
-        let handle_res = server.handle_packet(&client_pk_1, Packet::Data(
-            Data { connection_id: 0, data: vec![13, 42] }
         )).wait();
         assert!(handle_res.is_err());
     }
