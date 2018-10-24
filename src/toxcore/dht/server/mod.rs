@@ -1192,7 +1192,13 @@ impl Server {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let payload = packet.onion_return.get_payload(&onion_symmetric_key);
         let payload = match payload {
-            Err(e) => return Box::new(future::err(e)),
+            Err(e) => {
+                // Onion symmetric key is changed every 2 hours to enforce onion
+                // paths expiration. It means that we can get packets with old
+                // onion key. So we do not consider this as error.
+                trace!("Failed to decrypt onion_return from OnionResponse3: {}", e);
+                return Box::new(future::ok(()));
+            },
             Ok(payload) => payload,
         };
 
@@ -1216,7 +1222,13 @@ impl Server {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let payload = packet.onion_return.get_payload(&onion_symmetric_key);
         let payload = match payload {
-            Err(e) => return Box::new(future::err(e)),
+            Err(e) => {
+                // Onion symmetric key is changed every 2 hours to enforce onion
+                // paths expiration. It means that we can get packets with old
+                // onion key. So we do not consider this as error.
+                trace!("Failed to decrypt onion_return from OnionResponse2: {}", e);
+                return Box::new(future::ok(()));
+            },
             Ok(payload) => payload,
         };
 
@@ -1241,7 +1253,13 @@ impl Server {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let payload = packet.onion_return.get_payload(&onion_symmetric_key);
         let payload = match payload {
-            Err(e) => return Box::new(future::err(e)),
+            Err(e) => {
+                // Onion symmetric key is changed every 2 hours to enforce onion
+                // paths expiration. It means that we can get packets with old
+                // onion key. So we do not consider this as error.
+                trace!("Failed to decrypt onion_return from OnionResponse1: {}", e);
+                return Box::new(future::ok(()));
+            },
             Ok(payload) => payload,
         };
 
@@ -2463,7 +2481,7 @@ mod tests {
 
     #[test]
     fn handle_onion_response_3_invalid_onion_return() {
-        let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
+        let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
 
         let onion_return = OnionReturn {
             nonce: secretbox::gen_nonce(),
@@ -2479,7 +2497,12 @@ mod tests {
             payload
         });
 
-        assert!(alice.handle_packet(packet, addr).wait().is_err());
+        alice.handle_packet(packet, addr).wait().unwrap();
+
+        // Necessary to drop tx so that rx.collect() can be finished
+        drop(alice);
+
+        assert!(rx.collect().wait().unwrap().is_empty());
     }
 
     #[test]
@@ -2549,7 +2572,7 @@ mod tests {
 
     #[test]
     fn handle_onion_response_2_invalid_onion_return() {
-        let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
+        let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
 
         let onion_return = OnionReturn {
             nonce: secretbox::gen_nonce(),
@@ -2565,7 +2588,12 @@ mod tests {
             payload
         });
 
-        assert!(alice.handle_packet(packet, addr).wait().is_err());
+        alice.handle_packet(packet, addr).wait().unwrap();
+
+        // Necessary to drop tx so that rx.collect() can be finished
+        drop(alice);
+
+        assert!(rx.collect().wait().unwrap().is_empty());
     }
 
     #[test]
@@ -2724,7 +2752,7 @@ mod tests {
 
     #[test]
     fn handle_onion_response_1_invalid_onion_return() {
-        let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
+        let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
 
         let onion_return = OnionReturn {
             nonce: secretbox::gen_nonce(),
@@ -2740,7 +2768,12 @@ mod tests {
             payload
         });
 
-        assert!(alice.handle_packet(packet, addr).wait().is_err());
+        alice.handle_packet(packet, addr).wait().unwrap();
+
+        // Necessary to drop tx so that rx.collect() can be finished
+        drop(alice);
+
+        assert!(rx.collect().wait().unwrap().is_empty());
     }
 
     #[test]
