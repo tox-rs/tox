@@ -130,6 +130,10 @@ pub enum DhtRequestPayload {
     NatPingResponse(NatPingResponse),
     /// [`DhtPkAnnounce`](./struct.DhtPkAnnounce.html) structure.
     DhtPkAnnounce(DhtPkAnnounce),
+    /// [`HardeningRequest`](./struct.HardeningRequest.html) structure.
+    HardeningRequest(HardeningRequest),
+    /// [`HardeningResponse`](./struct.HardeningResponse.html) structure.
+    HardeningResponse(HardeningResponse),
 }
 
 impl ToBytes for DhtRequestPayload {
@@ -138,6 +142,8 @@ impl ToBytes for DhtRequestPayload {
             DhtRequestPayload::NatPingRequest(ref p) => p.to_bytes(buf),
             DhtRequestPayload::NatPingResponse(ref p) => p.to_bytes(buf),
             DhtRequestPayload::DhtPkAnnounce(ref p) => p.to_bytes(buf),
+            DhtRequestPayload::HardeningRequest(ref p) => p.to_bytes(buf),
+            DhtRequestPayload::HardeningResponse(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -146,7 +152,9 @@ impl FromBytes for DhtRequestPayload {
     named!(from_bytes<DhtRequestPayload>, alt!(
         map!(NatPingRequest::from_bytes, DhtRequestPayload::NatPingRequest) |
         map!(NatPingResponse::from_bytes, DhtRequestPayload::NatPingResponse) |
-        map!(DhtPkAnnounce::from_bytes, DhtRequestPayload::DhtPkAnnounce)
+        map!(DhtPkAnnounce::from_bytes, DhtRequestPayload::DhtPkAnnounce) |
+        map!(HardeningRequest::from_bytes, DhtRequestPayload::HardeningRequest) |
+        map!(HardeningResponse::from_bytes, DhtRequestPayload::HardeningResponse)
     ));
 }
 
@@ -264,9 +272,74 @@ impl ToBytes for DhtPkAnnounce {
     }
 }
 
+/** Hardening nodes request of DHT Request packet.
+
+Length    | Content
+--------- | -------------------------
+`1`       | `0x30`
+`1`       | `0x02`
+`rest`    | ignored
+
+Hardening will be deprecated later.
+So we just ignore rest except packet ids.
+*/
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct HardeningRequest;
+
+impl FromBytes for HardeningRequest {
+    named!(from_bytes<HardeningRequest>, do_parse!(
+        tag!("\x30") >>
+        tag!("\x02") >>
+        rest >> // Hardening will be deprecated, so no need to parse body of packet.
+        (HardeningRequest)
+    ));
+}
+
+impl ToBytes for HardeningRequest {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_be_u8!(0x30) >>
+            gen_be_u8!(0x02)
+        )
+    }
+}
+
+/** Hardening nodes response of DHT Request packet.
+
+Length    | Content
+--------- | -------------------------
+`1`       | `0x30`
+`1`       | `0x03`
+`rest`    | ignored
+
+Hardening will be deprecated later.
+So we just ignore rest except packet ids.
+*/
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HardeningResponse;
+
+impl FromBytes for HardeningResponse {
+    named!(from_bytes<HardeningResponse>, do_parse!(
+        tag!("\x30") >>
+        tag!("\x03") >>
+        rest >> // Hardening will be deprecated, so no need to parse body of packet.
+        (HardeningResponse)
+    ));
+}
+
+impl ToBytes for HardeningResponse {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_be_u8!(0x30) >>
+            gen_be_u8!(0x03)
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use toxcore::dht::packet::dht_request::*;
+    use super::*;
 
     encode_decode_test!(
         nat_ping_request_payload_encode_decode,
@@ -287,6 +360,16 @@ mod tests {
         })
     );
 
+    encode_decode_test!(
+        hardening_request_payload_encode_decode,
+        DhtRequestPayload::HardeningRequest(HardeningRequest)
+    );
+
+    encode_decode_test!(
+        hardening_response_payload_encode_decode,
+        DhtRequestPayload::HardeningResponse(HardeningResponse)
+    );
+
     #[test]
     fn dht_request_payload_encrypt_decrypt() {
         let (alice_pk, alice_sk) = gen_keypair();
@@ -294,8 +377,11 @@ mod tests {
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
         let test_payloads = vec![
             DhtRequestPayload::NatPingRequest(NatPingRequest { id: 42 }),
-            DhtRequestPayload::NatPingResponse(NatPingResponse { id: 42 })
+            DhtRequestPayload::NatPingResponse(NatPingResponse { id: 42 }),
+            DhtRequestPayload::HardeningRequest(HardeningRequest),
+            DhtRequestPayload::HardeningResponse(HardeningResponse)
         ];
+
         for payload in test_payloads {
             // encode payload with shared secret
             let dht_request = DhtRequest::new(&shared_secret, &bob_pk, &alice_pk, &payload);
@@ -314,7 +400,9 @@ mod tests {
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
         let test_payloads = vec![
             DhtRequestPayload::NatPingRequest(NatPingRequest { id: 42 }),
-            DhtRequestPayload::NatPingResponse(NatPingResponse { id: 42 })
+            DhtRequestPayload::NatPingResponse(NatPingResponse { id: 42 }),
+            DhtRequestPayload::HardeningRequest(HardeningRequest),
+            DhtRequestPayload::HardeningResponse(HardeningResponse)
         ];
         for payload in test_payloads {
             // encode payload with shared secret
