@@ -696,12 +696,30 @@ impl Server {
                 debug!("Received BootstrapInfo");
                 self.handle_bootstrap_info(&packet, addr)
             },
-            ref p => {
-                Box::new( future::err(
+            // This packet should be handled in client only
+            Packet::CryptoData(packet) => {
+                debug!("This packet should be handled in client only, {:?}", packet);
+                Box::new(future::err(
                     Error::new(ErrorKind::Other,
-                        format!("Packet is not handled {:?}", p)
-                )))
-            }
+                               format!("Packet is not handled {:?}", packet)
+                    )))
+            },
+            // This packet should be handled in client only
+            Packet::OnionDataResponse(packet) => {
+                debug!("This packet should be handled in client only, {:?}", packet);
+                Box::new(future::err(
+                    Error::new(ErrorKind::Other,
+                               format!("Packet is not handled {:?}", packet)
+                    )))
+            },
+            // This packet should be handled in client only
+            Packet::OnionAnnounceResponse(packet) => {
+                debug!("This packet should be handled in client only, {:?}", packet);
+                Box::new(future::err(
+                    Error::new(ErrorKind::Other,
+                               format!("Packet is not handled {:?}", packet)
+                    )))
+            },
         }
     }
 
@@ -3275,5 +3293,50 @@ mod tests {
                 }
             }).collect().wait().unwrap();
         });
+    }
+
+    #[test]
+    fn handle_crypto_data() {
+        let (alice, precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
+
+        let data_payload = CryptoDataPayload {
+            buffer_start: 1,
+            packet_number: 0,
+            data: vec![1, 2, 3, 4]
+        };
+
+        let data = Packet::CryptoData(CryptoData::new(&precomp, gen_nonce(), &data_payload));
+
+        assert!(alice.handle_packet(data, addr).wait().is_err());
+    }
+
+    #[test]
+    fn handle_onion_data_response() {
+        let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
+
+        let data = Packet::OnionDataResponse(OnionDataResponse {
+            nonce: gen_nonce(),
+            temporary_pk: gen_keypair().0,
+            payload: vec![42; 123]
+        });
+
+        assert!(alice.handle_packet(data, addr).wait().is_err());
+    }
+
+    #[test]
+    fn handle_onion_announce_response() {
+        let (alice, precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
+
+        let payload = OnionAnnounceResponsePayload {
+            announce_status: AnnounceStatus::Found,
+            ping_id_or_pk: sha256::hash(&[1, 2, 3]),
+            nodes: vec![
+                PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
+            ]
+        };
+
+        let data = Packet::OnionAnnounceResponse(OnionAnnounceResponse::new(&precomp, 12345, &payload));
+
+        assert!(alice.handle_packet(data, addr).wait().is_err());
     }
 }
