@@ -23,7 +23,7 @@ Serialized form:
 Length | Content
 ------ | ------
 `1`    | `0x03`
-`1`    | connection_id
+`1`    | connection_id [ `0x10` .. `0xFF` ]
 
 */
 #[derive(Debug, PartialEq, Clone)]
@@ -35,7 +35,7 @@ pub struct DisconnectNotification {
 impl FromBytes for DisconnectNotification {
     named!(from_bytes<DisconnectNotification>, do_parse!(
         tag!("\x03") >>
-        connection_id: verify!(be_u8, |id| id >= 0x10 && id < 0xF0) >>
+        connection_id: verify!(be_u8, |id| id >= 0x10) >>
         (DisconnectNotification { connection_id })
     ));
 }

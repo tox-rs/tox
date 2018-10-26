@@ -13,7 +13,7 @@ Serialized form:
 
 Length   | Content
 -------- | ------
-`1`      | connection_id [ `0x10` .. `0xF0` )
+`1`      | connection_id [ `0x10` .. `0xFF` ]
 variable | Data
 
 */
@@ -27,7 +27,7 @@ pub struct Data {
 
 impl FromBytes for Data {
     named!(from_bytes<Data>, do_parse!(
-        connection_id: verify!(be_u8, |id| id >= 0x10 && id < 0xF0) >>
+        connection_id: verify!(be_u8, |id| id >= 0x10) >>
         data: rest >>
         (Data { connection_id, data: data.to_vec() })
     ));
