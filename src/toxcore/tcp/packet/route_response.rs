@@ -19,7 +19,7 @@ Serialized form:
 Length | Content
 ------ | ------
 `1`    | `0x01`
-`1`    | connection_id
+`1`    | connection_id [ `0x10` .. `0xFF` ]
 `32`   | Public Key
 
 */
@@ -34,7 +34,7 @@ pub struct RouteResponse {
 impl FromBytes for RouteResponse {
     named!(from_bytes<RouteResponse>, do_parse!(
         tag!("\x01") >>
-        connection_id: be_u8 >>
+        connection_id: verify!(be_u8, |id| id >= 0x10) >>
         pk: call!(PublicKey::from_bytes) >>
         (RouteResponse { connection_id, pk })
     ));
