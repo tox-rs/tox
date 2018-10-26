@@ -873,9 +873,10 @@ impl Server {
             }
             Box::new( future::ok(()) )
         } else {
-            Box::new( future::err(
-                Error::new(ErrorKind::Other, "NodesResponse.ping_id does not match")
-            ))
+            // Some old version toxcore responds with wrong ping_id.
+            // So we do not treat this as our own error.
+            trace!("NodesResponse.ping_id does not match");
+            Box::new(future::ok(()))
         }
     }
 
@@ -1820,28 +1821,41 @@ mod tests {
 
     #[test]
     fn handle_nodes_resp_ping_id_is_0() {
-        let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
+        let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
 
         let resp_payload = NodesResponsePayload { nodes: vec![
             PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0)
         ], id: 0 };
         let nodes_resp = Packet::NodesResponse(NodesResponse::new(&precomp, &bob_pk, &resp_payload));
 
-        assert!(alice.handle_packet(nodes_resp, addr).wait().is_err());
+        alice.handle_packet(nodes_resp, addr).wait().unwrap();
+
+        // Necessary to drop tx so that rx.collect() can be finished
+        drop(alice);
+
+        assert!(rx.collect().wait().unwrap().is_empty());
     }
 
     #[test]
     fn handle_nodes_resp_invalid_ping_id() {
-        let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
+        let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
 
         let ping_id = alice.request_queue.write().new_ping_id(bob_pk);
 
-        let resp_payload = NodesResponsePayload { nodes: vec![
-            PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0)
-        ], id: ping_id + 1 };
+        let resp_payload = NodesResponsePayload {
+            nodes: vec![
+                PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0)
+            ],
+            id: ping_id + 1
+        };
         let nodes_resp = Packet::NodesResponse(NodesResponse::new(&precomp, &bob_pk, &resp_payload));
 
-        assert!(alice.handle_packet(nodes_resp, addr).wait().is_err());
+        alice.handle_packet(nodes_resp, addr).wait().unwrap();
+
+        // Necessary to drop tx so that rx.collect() can be finished
+        drop(alice);
+
+        assert!(rx.collect().wait().unwrap().is_empty());
     }
 
     // handle_cookie_request
