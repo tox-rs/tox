@@ -120,15 +120,21 @@ macro_rules! encode_decode_test (
 #[cfg(test)]
 macro_rules! unpack {
     ($variable:expr, $variant:path, $name:ident) => (
+        unpack!($variable, $variant { $name })
+    );
+    ($variable:expr, $variant:path) => {
+        unpack!($variable, $variant[inner])
+    };
+    ($variable:expr, $variant:path [ $($inner:ident),* ]) => (
         match $variable {
-            $variant { $name, .. } => $name,
+            $variant( $($inner),* ) => ( $($inner),* ),
             other => panic!("Expected {} but got {:?}", stringify!($variant), other),
         }
     );
-    ($variable:expr, $variant:path) => (
+    ($variable:expr, $variant:path { $($inner:ident),* }) => (
         match $variable {
-            $variant(inner) => inner,
+            $variant { $($inner,)* .. } => ( $($inner),* ),
             other => panic!("Expected {} but got {:?}", stringify!($variant), other),
         }
-    )
+    );
 }

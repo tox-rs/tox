@@ -1,321 +1,859 @@
 /*! TCP connections handling
 
-TCP connectins resides between net_crypto and tcp_client.
-It serves to net_crypto using tcp_client.
-It provides reliable connection to net_crypto via multiple tcp relays to a friend.
-When a Tox client connects to a friend via tcp relay, normally 3 redundant connections are established.
-One connection is used for data send/recv, 2 others are backup.
-In toxcore maximum number of redundant connections is 6.
-TCP connection can get into sleep mode.
-Getting into sleep mode can occur when UDP connecion is established, because Tox prefer UDP than TCP.
-When established UDP connection is disabled, TCP connecions are awaken.
-
-Defintion of struct names.
-
-
->   Connections has
-         set of ClientConnection(HashMap)
-         set of Connection(HashMap)
-     ClientConnection has
-         object of TcpClient processor
-         IP, port, PK : to save for sleeping status
-     Connection has
-         object of 3 to 6 ConnToRelay connections for redundancy
-     ConnToRelay has
-         id_of_client as a key to ClientConnection hashmap
-         connection_id of Routing Response packet
+TCP connections provides reliable connection to net_crypto via multiple TCP
+relays to a friend. When a Tox client connects to a friend via TCP relay,
+normally 3 redundant connections are established. One connection is used for
+sending/receiving data, 2 others are backup. In toxcore maximum number of
+redundant connections is 6. TCP connection can get into sleep mode. Getting
+into sleep mode can occur when UDP connection is established, because Tox
+prefers UDP over TCP. When established UDP connection is lost, TCP connections
+are awaken.
 
 */
 
 use parking_lot::RwLock;
 
+use std::collections::{hash_map, HashMap, HashSet};
+use std::net::SocketAddr;
+use std::io::{Error, ErrorKind};
 use std::sync::Arc;
-use std::time::Instant;
-use std::collections::HashMap;
-use std::net::{SocketAddr, IpAddr, Ipv4Addr};
+use std::time::{Duration, Instant};
 
+use futures::{future, stream, Future, Stream};
+use futures::future::Either;
 use futures::sync::mpsc;
-use futures::{future, Future, Sink, Stream};
-use failure::{Error, err_msg};
-use tokio_codec::Framed;
-use tokio::net::TcpStream;
+use tokio::timer::Interval;
 
-use toxcore::time::*;
 use toxcore::crypto_core::*;
-use toxcore::tcp::codec::*;
-use toxcore::tcp::handshake::make_client_handshake;
+use toxcore::io_tokio::*;
+use toxcore::tcp::connections::relay::*;
 use toxcore::tcp::packet::*;
-use toxcore::stats::*;
+use toxcore::time::*;
 
 /// The amount of maximum connections for each friend.
-pub const MAX_FRIEND_TCP_CONNECTIONS: usize =  6;
+const MAX_FRIEND_TCP_CONNECTIONS: usize =  6;
 
 /// The amount of recommended connections for each friend.
 ///   NOTE: Must be at most (MAX_FRIEND_TCP_CONNECTIONS / 2).
-pub const RECOMMENDED_FRIEND_TCP_CONNECTIONS: usize =  MAX_FRIEND_TCP_CONNECTIONS / 2;
+const RECOMMENDED_FRIEND_TCP_CONNECTIONS: usize =  MAX_FRIEND_TCP_CONNECTIONS / 2;
 
-/// Status of connection to TcpRelay.
-#[derive(PartialEq, Clone)]
-pub enum ConnectionStatus {
-    /// Uninitialized state.
-    None,
-    /// Connection is registered internally.
-    Registered,
-    /// Connection is online.
-    Online,
+/// How many attempts to reconnect to the relay we should make before we
+/// consider this relay unreachable and drop it.
+const MAX_RECONNECTION_ATTEMPTS: u32 = 1;
+
+const TCP_CONNECTION_ANNOUNCE_TIMEOUT: u64 = 10;
+
+/// How often `main_loop` should be run.
+const CONNECTIONS_INTERVAL: u64 = 1;
+
+/// Connection status shows whether a connection used or not.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum NodeConnectionStatus {
+    /// We are not connected to the node directly and need active relays to send
+    /// packets to this node.
+    TCP,
+    /// We are connected to the node directly via UDP so all relays used only
+    /// for this node connection can go to sleep.
+    UDP,
 }
 
-/// Status of connection to a friend.
-#[derive(PartialEq, Clone)]
-pub enum ClientConnectionStatus {
-    /// Uninitialized state.
-    None,
-    /// Connection is valid but not connected.
-    Valid,
-    /// Connection is valid and connected.
-    Connected,
-    /// Connection is sleeping because UDP is enabled.
-    Sleeping,
+/// Contains info about connection to a node via TCP relays.
+#[derive(Debug, PartialEq, Clone)]
+struct NodeConnection {
+    /// Connection status shows whether a connection used or not.
+    status: NodeConnectionStatus,
+    /// List of relays we are connected to the node through.
+    connections: HashSet<PublicKey>,
 }
 
-/// Main struct for TCP connections.
-/// Holds key_pair for TCP connections, set of TCP connections to relay,
-/// set of connections of TcpClient.
-/// PublicKey is used as a key of HashMap to avoid ABA problem.
+impl NodeConnection {
+    /// Create new `NodeConnection` struct.
+    fn new() -> NodeConnection {
+        NodeConnection {
+            status: NodeConnectionStatus::TCP,
+            connections: HashSet::new(),
+        }
+    }
+
+    /// Get an iterator over connected relays.
+    fn relays<'c, 'a: 'c, 'b: 'c>(&'a self, relays: &'b HashMap<PublicKey, Relay>) -> impl Iterator<Item = &'b Relay> + 'c {
+        self.connections
+            .iter()
+            .flat_map(move |relay_pk| relays.get(relay_pk).into_iter())
+    }
+}
+
+/// TCP connections provides reliable connection to a friend via multiple TCP
+/// relays.
 #[derive(Clone)]
 pub struct Connections {
-    pk: PublicKey,
-    sk: SecretKey,
-    conns_of_client: Arc<RwLock<HashMap<PublicKey, ClientConnection>>>,
-    connections: Arc<RwLock<HashMap<PublicKey, Connection>>>,
-}
-
-/// Connection of a TcpClient processor object.
-#[derive(Clone)]
-pub struct ClientConnection {
-    status: ClientConnectionStatus,
-    to_local_tx: Option<mpsc::UnboundedSender<Packet>>,
-    connected_time: Instant,
-    lock_count: u32,
-    sleep_count: u32,
-    onion: bool,
-    /// used when sleep.
-    ip: IpAddr,
-    /// used when sleep.
-    port: u16,
-    /// used when sleep.
-    relay_pk: PublicKey,
-    wakeup: bool,
-}
-
-/// Connection to a friend.
-/// It has 3 to 6 redundant connection to TcpRelays.
-#[derive(Clone, PartialEq)]
-pub struct Connection {
-    status: ClientConnectionStatus,
-    friend_dht_pk: PublicKey,
-    conn_to_relay: Vec<ConnToRelay>,
-}
-
-/// Connection to a relay.
-#[derive(Clone, PartialEq)]
-pub struct ConnToRelay {
-    status: ConnectionStatus,
-    /// Public key is used for id to avoid ABA problem.
-    id_of_client: PublicKey,
-    connection_id: u8,
+    /// DHT `PublicKey`
+    dht_pk: PublicKey,
+    /// DHT `SecretKey`
+    dht_sk: SecretKey,
+    /// Sink for packets that should be handled somewhere else. `PublicKey` here
+    /// belongs to TCP relay we received packet from.
+    incoming_tx: mpsc::UnboundedSender<(PublicKey, IncomingPacket)>,
+    /// List of TCP relays we are connected to. Key is a `PublicKey` of TCP
+    /// relay.
+    relays: Arc<RwLock<HashMap<PublicKey, Relay>>>,
+    /// List of DHT nodes we are connected to via TCP relays. Key is a
+    /// `PublicKey` of DHT node.
+    connections: Arc<RwLock<HashMap<PublicKey, NodeConnection>>>,
 }
 
 impl Connections {
     /// Create new TCP connections object.
-    pub fn new(pk: PublicKey, sk: SecretKey) -> Self {
+    pub fn new(dht_pk: PublicKey, dht_sk: SecretKey, incoming_tx: mpsc::UnboundedSender<(PublicKey, IncomingPacket)>) -> Self {
         Connections {
-            pk,
-            sk,
-            conns_of_client: Arc::new(RwLock::new(HashMap::new())),
+            dht_pk,
+            dht_sk,
+            incoming_tx,
+            relays: Arc::new(RwLock::new(HashMap::new())),
             connections: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
-    fn add_entry(&self, socket: Framed<TcpStream, Codec>, server_pk: &PublicKey,
-                 from_server_tx: mpsc::UnboundedSender<(Packet, PublicKey)>) -> Box<Future<Item = (), Error = Error> + Send> {
-        let (to_server, from_server) = socket.split();
-        let (to_local_tx, to_local_rx) = mpsc::unbounded();
+    /// Add relay we are supposed to be connected to. These relays are necessary
+    /// for initial connection so that we are able to find friends and to send
+    /// them our relays. Later when more relays are received from our friends
+    /// they should be added via `add_relay_connection` method.
+    pub fn add_relay_global(&self, relay_addr: SocketAddr, relay_pk: PublicKey) -> IoFuture<()> {
+        if let hash_map::Entry::Vacant(vacant) = self.relays.write().entry(relay_pk) {
+            let relay = Relay::new(relay_pk, relay_addr, self.incoming_tx.clone());
+            vacant.insert(relay.clone());
+            relay.spawn(self.dht_sk.clone(), self.dht_pk)
+        } else {
+            trace!("Attempt to add relay that already exists: {}", relay_addr);
+            Box::new(future::ok(()))
+        }
+    }
+
+    /// Add relay that we received from our friend. This relay can be ignored if
+    /// we already connected to this friend via at least
+    /// `RECOMMENDED_FRIEND_TCP_CONNECTIONS` relays. Connection to our friend
+    /// via this relay will be added as well.
+    pub fn add_relay_connection(&self, relay_addr: SocketAddr, relay_pk: PublicKey, node_pk: PublicKey) -> IoFuture<()> {
+        let mut relays = self.relays.write();
+        // TODO: NLL
+        if relays.contains_key(&relay_pk) {
+            let relay = relays.get(&relay_pk).unwrap();
+            self.add_connection_inner(relay, node_pk)
+        } else {
+            let mut connections = self.connections.write();
+            let connection = connections.entry(node_pk).or_insert(NodeConnection::new());
+
+            let connections_count = connection.connections.len();
+            let online_connections_count = connection.connections.iter().filter(|relay_pk|
+                relays.get(relay_pk).map_or(false, |relay| relay.is_connection_online(node_pk))
+            ).count();
+
+            if online_connections_count < RECOMMENDED_FRIEND_TCP_CONNECTIONS && connections_count < MAX_FRIEND_TCP_CONNECTIONS {
+                let relay = Relay::new(relay_pk, relay_addr, self.incoming_tx.clone());
+                relays.insert(relay_pk, relay.clone());
+                connection.connections.insert(relay_pk);
+                let future = relay.add_connection(node_pk)
+                    .join(relay.spawn(self.dht_sk.clone(), self.dht_pk))
+                    .map(|_| ());
+                Box::new(future)
+            } else {
+                Box::new(future::ok(()))
+            }
+        }
+    }
+
+    /// Add a connection to our friend via relay. It means that we will send
+    /// `RouteRequest` packet to this relay and wait for the friend to become
+    /// connected.
+    pub fn add_connection(&self, relay_pk: PublicKey, node_pk: PublicKey) -> IoFuture<()> {
+        if let Some(relay) = self.relays.read().get(&relay_pk) {
+            self.add_connection_inner(relay, node_pk)
+        } else {
+            Box::new( future::err(
+                Error::new(ErrorKind::Other,
+                    "add_connection: no such relay"
+            )))
+        }
+    }
+
+    /// Remove connection to a friend via relays.
+    pub fn remove_connection(&self, node_pk: PublicKey) -> IoFuture<()> {
+        if let Some(connection) = self.connections.write().remove(&node_pk) {
+            let relays = self.relays.read();
+            let futures = connection.relays(&relays)
+                .map(|relay| relay.remove_connection(node_pk).then(Ok))
+                .collect::<Vec<_>>();
+            Box::new(future::join_all(futures).map(|_| ()))
+        } else {
+            // TODO: what if we didn't receive relays from friend and delete him?
+            Box::new( future::err(
+                Error::new(ErrorKind::Other,
+                    "remove_connection: no connection to the node"
+            )))
+        }
+    }
+
+    /// Inner function to add a connection to our friend via relay.
+    fn add_connection_inner(&self, relay: &Relay, node_pk: PublicKey) -> IoFuture<()> {
+        // TODO: check MAX_FRIEND_TCP_CONNECTIONS?
         let mut connections = self.connections.write();
-        let mut conns_of_client = self.conns_of_client.write();
-
-        let relay = ConnToRelay {
-            status: ConnectionStatus::None,
-            id_of_client: gen_keypair().0,
-            connection_id: 0,
+        let connection = connections.entry(node_pk).or_insert(NodeConnection::new());
+        connection.connections.insert(relay.pk);
+        let future = if connection.status == NodeConnectionStatus::TCP && relay.is_sleeping() {
+            // unsleep relay
+            Either::A(relay.clone().spawn(self.dht_sk.clone(), self.dht_pk))
+        } else {
+            Either::B(future::ok(()))
         };
+        let future = future.join(relay.add_connection(node_pk)).map(|_| ());
+        Box::new(future)
+    }
 
-        let connection = connections.entry(*server_pk).or_insert(
-            Connection {
-                status: ClientConnectionStatus::None,
-                friend_dht_pk: server_pk.clone(),
-                conn_to_relay: vec![relay.clone()],
+    /// Send `Data` packet to a node via one of the relays.
+    pub fn send_data(&self, node_pk: PublicKey, data: Vec<u8>) -> IoFuture<()> {
+        let connections = self.connections.read();
+        if let Some(connection) = connections.get(&node_pk) {
+            let relays = self.relays.read();
+            // TODO: shuffle?
+            let futures = connection.relays(&relays)
+                .map(move |relay| relay.send_data(node_pk, data.clone()));
+            // send packet to the first relay only that can accept it
+            // errors are ignored
+            // TODO: return error if stream is exhausted?
+            Box::new(stream::futures_unordered(futures)
+                .then(Ok)
+                .skip_while(|res| future::ok(res.is_err()))
+                .into_future()
+                .map(|_| ())
+                .map_err(|(e, _)| e))
+        } else {
+            Box::new(future::ok(()))
+        }
+
+        // TODO: send as OOB?
+    }
+
+    /// Send `OobSend` packet to a node via relay with specified `PublicKey`.
+    pub fn send_oob(&self, relay_pk: PublicKey, node_pk: PublicKey, data: Vec<u8>) -> IoFuture<()> {
+        let relays = self.relays.read();
+        if let Some(relay) = relays.get(&relay_pk) {
+            relay.send_oob(node_pk, data)
+        } else {
+            Box::new( future::err(
+                Error::new(ErrorKind::Other,
+                    "send_oob: relay is not connected"
+            )))
+        }
+    }
+
+    /// Send `OnionRequest` packet to relay with specified `PublicKey`.
+    pub fn send_onion(&self, relay_pk: PublicKey, onion_request: OnionRequest) -> IoFuture<()> {
+        let relays = self.relays.read();
+        if let Some(relay) = relays.get(&relay_pk) {
+            relay.send_onion(onion_request)
+        } else {
+            Box::new( future::err(
+                Error::new(ErrorKind::Other,
+                    "send_onion: relay is not connected"
+            )))
+        }
+    }
+
+    /// Change status of connection to the node. Connections module need to know
+    /// whether connection is used to be able to put to sleep relay connections.
+    pub fn set_connection_status(&self, node_pk: PublicKey, status: NodeConnectionStatus) -> IoFuture<()> {
+        if let Some(connection) = self.connections.write().get_mut(&node_pk) {
+            let future = if status == NodeConnectionStatus::TCP && connection.status == NodeConnectionStatus::UDP {
+                // unsleep relays
+                let relays = self.relays.read();
+                let futures = connection.relays(&relays)
+                    .map(|relay| relay.clone().spawn(self.dht_sk.clone(), self.dht_pk))
+                    .collect::<Vec<_>>();
+                Box::new(future::join_all(futures).map(|_| ())) as IoFuture<()>
+            } else {
+                Box::new(future::ok(()))
+            };
+            connection.status = status;
+            future
+        } else {
+            Box::new( future::err(
+                Error::new(ErrorKind::Other,
+                    "set_connection_status: no such connection"
+            )))
+        }
+    }
+
+    /// Main loop that should be run periodically. It removes unreachable and
+    /// redundant relays, reconnects to relays if a connection was lost, puts
+    /// relays to sleep if they are not used right now.
+    fn main_loop(&self) -> IoFuture<()> {
+        let mut relays = self.relays.write();
+        let mut connections = self.connections.write();
+
+        let mut futures = Vec::new();
+
+        // If we have at least one connected relay that means that our network
+        // connection is fine. So if we can't connect to some relays we can
+        // drop them.
+        let connected = relays.values().any(Relay::is_connected);
+
+        // remove relays we can't connect to (or retry to connect)
+        relays.retain(|_, relay|
+            if relay.is_disconnected() {
+                if connected && relay.connection_attempts() > MAX_RECONNECTION_ATTEMPTS {
+                    false
+                } else {
+                    let future = relay.clone().spawn(self.dht_sk.clone(), self.dht_pk);
+                    futures.push(future);
+                    true
+                }
+            } else {
+                true
             }
         );
 
-        if connection.conn_to_relay.contains(&relay) {
-            // TODO: return with proper value
-            return Box::new(future::ok(()))
-        } else {
-            connection.conn_to_relay.push(relay.clone());
-        }
+        // find out which relays are used right now
+        let used_relays = connections.values()
+            .filter(|connection| connection.status == NodeConnectionStatus::TCP)
+            .flat_map(|connection| connection.connections.iter().cloned())
+            .collect::<HashSet<_>>();
 
-        let mut conn_of_client = ClientConnection::new();
-        conn_of_client.to_local_tx = Some(to_local_tx);
-
-        conns_of_client.insert(relay.id_of_client, conn_of_client);
-
-        let reader = from_server
-            .map_err(Error::from)
-            .map(move |packet| (packet, relay.clone().id_of_client))
-            .forward(from_server_tx
-                .sink_map_err(|e| {
-                    err_msg(format!("Could not forward message from server to connection {:?}", e))
-                })
+        // send to sleep not used right now relays
+        relays.values()
+            .filter(move |relay|
+                // only connected relays have connected_time
+                relay.connected_time().map_or(
+                    false,
+                    |connected_time| clock_elapsed(connected_time) > Duration::from_secs(TCP_CONNECTION_ANNOUNCE_TIMEOUT)
+                ) && !used_relays.contains(&relay.pk)
             )
-            .map(|_| ());
+            .for_each(|relay| relay.sleep());
 
-        let writer = to_local_rx
-            .map_err(|()|  unreachable!("rx can't fail"))
-            .forward(to_server)
-            .map(|_| ());
-
-        let network = reader.select(writer)
-            .map(|_| ())
-            .map_err(|(err, _select_next)| err);
-
-        Box::new(network)
-    }
-
-    /// Add a new connection of client to tcp server.
-    pub fn add_relay(&self, addr: &SocketAddr, server_pk: &PublicKey,
-                     from_server_tx: mpsc::UnboundedSender<(Packet, PublicKey)>) -> Box<Future<Item = (), Error = Error> + Send> {
-        let (pk, sk, server_pk, from_server_tx) =
-            (self.pk.clone(), self.sk.clone(), server_pk.clone(), from_server_tx.clone());
-
-        let self_c = self.clone();
-
-        let conn = TcpStream::connect(addr)
-            .map_err(Error::from)
-            .and_then(move |socket| {
-                make_client_handshake(socket, &pk, &sk, &server_pk)
-                    .map_err(Error::from)
-            })
-            .and_then(move |(socket, channel)| {
-                let stats = Stats::new();
-                let secure_socket = Framed::new(socket, Codec::new(channel, stats));
-                self_c.add_entry(secure_socket, &server_pk, from_server_tx)
-            });
-
-        Box::new(conn)
-    }
-
-    /// Send a packet to the tcp server
-    pub fn send_packet(&self, connection_id: &PublicKey, packet: Packet) -> Box<Future<Item = (), Error = Error> + Send> {
-        let connections = self.connections.read();
-        let conns_of_connection = self.conns_of_client.read();
-
-        if let Some(conn) = connections.get(connection_id) {
-            for relay in &conn.conn_to_relay {
-                if let Some(client) = conns_of_connection.get(&relay.id_of_client) {
-                    if let Some(ref to_local_tx) = client.to_local_tx {
-                        return Box::new(to_local_tx.clone().send(packet)
-                            .map(|_| ())
-                            .map_err(Error::from))
-                    }
-                }
+        // remove not used relays
+        let mut relays_len = relays.len();
+        relays.retain(|_, relay|
+            if relays_len > RECOMMENDED_FRIEND_TCP_CONNECTIONS && relay.connections_count() == 0 {
+                relays_len -= 1;
+                relay.disconnect();
+                false
+            } else {
+                true
             }
+        );
+
+        // remove deleted relays from connections
+        for connection in connections.values_mut() {
+            connection.connections.retain(|relay_pk| relays.contains_key(relay_pk));
+
+            // TODO: remove connections if there are too many?
         }
 
-        Box::new(future::ok(()))
+        Box::new(future::join_all(futures).map(|_| ()))
     }
-}
 
-impl ClientConnection {
-    /// Create new ClientConnection object.
-    pub fn new() -> Self {
-        ClientConnection {
-            status: ClientConnectionStatus::None,
-            to_local_tx: None,
-            connected_time: clock_now(),
-            lock_count: 0,
-            sleep_count: 0,
-            onion: false,
-            ip: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-            port: 33445,
-            relay_pk: gen_keypair().0,
-            wakeup: false,
-        }
+    /// Run TCP periodical tasks. Result future will never be completed
+    /// successfully.
+    pub fn run(self) -> IoFuture<()> {
+        let interval = Duration::from_secs(CONNECTIONS_INTERVAL);
+        let wakeups = Interval::new(Instant::now(), interval);
+
+        let future = wakeups
+            .map_err(|e| Error::new(ErrorKind::Other, format!("TCP connections timer error: {:?}", e)))
+            .for_each(move |_instant| self.main_loop());
+
+        Box::new(future)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use toxcore::tcp::connections::*;
-    use tokio::net::TcpListener;
-    use tokio::runtime::Runtime;
+
     use tokio_executor;
     use tokio_timer::clock::*;
-    use toxcore::tcp::server::*;
+
+    use toxcore::tcp::connections::relay::tests::*;
+    use toxcore::time::ConstNow;
+    use toxcore::onion::packet::*;
 
     #[test]
-    #[ignore]
-    fn connections_send_packet() {
-        let (client_pk, client_sk) = gen_keypair();
+    fn add_relay_global() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (incoming_tx, _incoming_rx) = mpsc::unbounded();
+        let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
+
         let addr = "0.0.0.0:12347".parse().unwrap();
-        let (server_pk, server_sk) = gen_keypair();
-        let listener = TcpListener::bind(&addr).unwrap();
+        let (relay_pk, _relay_sk) = gen_keypair();
 
-        let server = Server::new();
-        let stats = Stats::new();
-        let server_future = server.run(listener, server_sk, stats);
+        // ignore result future since it spawns the connection which should be
+        // executed inside tokio context
+        let _ = connections.add_relay_global(addr, relay_pk);
 
-        let connections = Connections::new(client_pk.clone(), client_sk.clone());
+        assert!(connections.relays.read().contains_key(&relay_pk));
+    }
 
-        // Create ConnectionsProcessor
-        let ConnectionsProcessor {
-            from_net_crypto_tx: _,
-            to_net_crypto_rx: _,
-            from_server_tx,
-            to_server_rx: _,
-            processor: _
-        } = ConnectionsProcessor::new();
+    #[test]
+    fn add_relay_global_exists() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (incoming_tx, _incoming_rx) = mpsc::unbounded();
+        let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
 
-        let add_relay_future1 = connections.add_relay(&addr, &server_pk, from_server_tx.clone());
+        let (_incoming_rx, _outgoing_rx, relay) = create_relay();
+        let addr = relay.addr;
+        let relay_pk = relay.pk;
 
-        let add_relay_future2 = connections.add_relay(&addr, &server_pk, from_server_tx.clone());
+        connections.relays.write().insert(relay_pk, relay);
 
-        let connection_id = gen_keypair().0;
+        // new connection shouldn't be spawned
+        connections.add_relay_global(addr, relay_pk).wait().unwrap();
+    }
 
-        let packet = Packet::DisconnectNotification(
-            DisconnectNotification { connection_id: 42 }
-        );
+    #[test]
+    fn add_relay_connection() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (incoming_tx, _incoming_rx) = mpsc::unbounded();
+        let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
 
-        let send_packet_future = connections.send_packet(&connection_id, packet);
+        let addr = "0.0.0.0:12347".parse().unwrap();
+        let (relay_pk, _relay_sk) = gen_keypair();
+        let (node_pk, _node_sk) = gen_keypair();
 
-        let send_future = send_packet_future.join3(add_relay_future1, add_relay_future2)
-            .map(|_| ());
+        // ignore result future since it spawns the connection which should be
+        // executed inside tokio context
+        let _ = connections.add_relay_connection(addr, relay_pk, node_pk);
 
-        let both = server_future
-            .map_err(Error::from)
-            .select(send_future)
-            .map(|_| ())
-            .map_err(|_| ());
+        let relays = connections.relays.read();
+        let connections = connections.connections.read();
 
-        let now = Instant::now();
-        let mut_now = MutNow::new(now);
-        let mut enter = tokio_executor::enter().unwrap();
-        let clock = Clock::new_with_now(mut_now);
-        with_default(&clock, &mut enter, |enter| {
-            let mut runtime = Runtime::new().unwrap();
-            runtime.spawn(both);
-            enter.block_on(runtime.shutdown_on_idle()).unwrap();
+        assert!(relays.contains_key(&relay_pk));
+        assert!(relays.get(&relay_pk).unwrap().has_connection(node_pk));
+
+        assert!(connections.contains_key(&node_pk));
+        assert_eq!(connections.get(&node_pk).unwrap().status, NodeConnectionStatus::TCP);
+        assert!(connections.get(&node_pk).unwrap().connections.contains(&relay_pk));
+    }
+
+    #[test]
+    fn add_relay_connection_relay_exists() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (incoming_tx, _incoming_rx) = mpsc::unbounded();
+        let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
+
+        let (_incoming_rx, _outgoing_rx, relay) = create_relay();
+        let addr = relay.addr;
+        let relay_pk = relay.pk;
+
+        connections.relays.write().insert(relay_pk, relay);
+
+        let (node_pk, _node_sk) = gen_keypair();
+
+        // new connection shouldn't be spawned
+        connections.add_relay_connection(addr, relay_pk, node_pk).wait().unwrap();
+
+        let relays = connections.relays.read();
+        let connections = connections.connections.read();
+
+        assert!(relays.contains_key(&relay_pk));
+        assert!(relays.get(&relay_pk).unwrap().has_connection(node_pk));
+
+        assert!(connections.contains_key(&node_pk));
+        assert_eq!(connections.get(&node_pk).unwrap().status, NodeConnectionStatus::TCP);
+        assert!(connections.get(&node_pk).unwrap().connections.contains(&relay_pk));
+    }
+
+    #[test]
+    fn add_connection() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (incoming_tx, _incoming_rx) = mpsc::unbounded();
+        let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
+
+        let (_incoming_rx, _outgoing_rx, relay) = create_relay();
+        let relay_pk = relay.pk;
+
+        connections.relays.write().insert(relay_pk, relay);
+
+        let (node_pk, _node_sk) = gen_keypair();
+
+        // new connection shouldn't be spawned
+        connections.add_connection(relay_pk, node_pk).wait().unwrap();
+
+        let relays = connections.relays.read();
+        let connections = connections.connections.read();
+
+        assert!(relays.contains_key(&relay_pk));
+        assert!(relays.get(&relay_pk).unwrap().has_connection(node_pk));
+
+        assert!(connections.contains_key(&node_pk));
+        assert_eq!(connections.get(&node_pk).unwrap().status, NodeConnectionStatus::TCP);
+        assert!(connections.get(&node_pk).unwrap().connections.contains(&relay_pk));
+    }
+
+    #[test]
+    fn add_connection_no_relay() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (incoming_tx, _incoming_rx) = mpsc::unbounded();
+        let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
+
+        let (relay_pk, _relay_sk) = gen_keypair();
+        let (node_pk, _node_sk) = gen_keypair();
+
+        assert!(connections.add_connection(relay_pk, node_pk).wait().is_err());
+    }
+
+    #[test]
+    fn remove_connection() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (incoming_tx, _incoming_rx) = mpsc::unbounded();
+        let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
+
+        let (node_pk, _node_sk) = gen_keypair();
+
+        let (_incoming_rx, _outgoing_rx, relay) = create_relay();
+        let relay_pk = relay.pk;
+
+        relay.add_connection(node_pk).wait().unwrap();
+
+        let mut node_connection = NodeConnection::new();
+        node_connection.connections.insert(relay_pk);
+
+        connections.relays.write().insert(relay_pk, relay);
+        connections.connections.write().insert(node_pk, node_connection);
+
+        connections.remove_connection(node_pk).wait().unwrap();
+
+        let relays = connections.relays.read();
+        let connections = connections.connections.read();
+
+        assert!(!relays.get(&relay_pk).unwrap().has_connection(node_pk));
+
+        assert!(!connections.contains_key(&node_pk));
+    }
+
+    #[test]
+    fn remove_connection_no_connection() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (incoming_tx, _incoming_rx) = mpsc::unbounded();
+        let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
+
+        let (node_pk, _node_sk) = gen_keypair();
+
+        assert!(connections.remove_connection(node_pk).wait().is_err());
+    }
+
+    #[test]
+    fn send_data() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (incoming_tx, _incoming_rx) = mpsc::unbounded();
+        let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
+
+        let (_incoming_rx_0, _outgoing_rx_0, relay_0) = create_relay();
+        let (_incoming_rx_1, outgoing_rx_1, relay_1) = create_relay();
+        let (_incoming_rx_2, outgoing_rx_2, relay_2) = create_relay();
+
+        let (destination_pk, _destination_sk) = gen_keypair();
+
+        // add connection to destination_pk to be able to send data packets
+        relay_1.add_connection(destination_pk).wait().unwrap();
+        relay_2.add_connection(destination_pk).wait().unwrap();
+
+        // receive route request
+        let outgoing_rx_1 = outgoing_rx_1.into_future().wait().unwrap().1;
+        let outgoing_rx_2 = outgoing_rx_2.into_future().wait().unwrap().1;
+
+        // make connections online
+        relay_1.handle_packet(Packet::RouteResponse(RouteResponse {
+            connection_id: 42,
+            pk: destination_pk,
+        })).wait().unwrap();
+        relay_2.handle_packet(Packet::RouteResponse(RouteResponse {
+            connection_id: 42,
+            pk: destination_pk,
+        })).wait().unwrap();
+        relay_1.handle_packet(Packet::ConnectNotification(ConnectNotification {
+            connection_id: 42,
+        })).wait().unwrap();
+        relay_2.handle_packet(Packet::ConnectNotification(ConnectNotification {
+            connection_id: 42,
+        })).wait().unwrap();
+
+        connections.connections.write().insert(destination_pk, NodeConnection {
+            status: NodeConnectionStatus::TCP,
+            connections: [relay_0.pk, relay_1.pk, relay_2.pk].iter().cloned().collect(),
         });
+        connections.relays.write().insert(relay_0.pk, relay_0);
+        connections.relays.write().insert(relay_1.pk, relay_1);
+        connections.relays.write().insert(relay_2.pk, relay_2);
+
+        let data = vec![42; 123];
+
+        connections.send_data(destination_pk, data.clone()).wait().unwrap();
+
+        // Necessary to drop tx so that rx.collect() can be finished
+        drop(connections);
+
+        // data packet should be sent only once
+        let packets = outgoing_rx_1.select(outgoing_rx_2).collect().wait().unwrap();
+        assert_eq!(packets.len(), 1);
+        let packet = unpack!(packets[0].clone(), Packet::Data);
+
+        assert_eq!(packet.data, data);
+    }
+
+    #[test]
+    fn send_data_no_connection() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (incoming_tx, _incoming_rx) = mpsc::unbounded();
+        let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
+
+        let (destination_pk, _destination_sk) = gen_keypair();
+
+        connections.send_data(destination_pk, vec![42; 123]).wait().unwrap();
+    }
+
+    #[test]
+    fn send_oob() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (incoming_tx, _incoming_rx) = mpsc::unbounded();
+        let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
+
+        let (destination_pk, _destination_sk) = gen_keypair();
+
+        let (_incoming_rx, outgoing_rx, relay) = create_relay();
+        let relay_pk = relay.pk;
+
+        connections.relays.write().insert(relay.pk, relay);
+
+        let data = vec![42; 123];
+
+        connections.send_oob(relay_pk, destination_pk, data.clone()).wait().unwrap();
+
+        let packet = unpack!(outgoing_rx.into_future().wait().unwrap().0.unwrap(), Packet::OobSend);
+
+        assert_eq!(packet.data, data);
+    }
+
+    #[test]
+    fn send_oob_no_relay() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (incoming_tx, _incoming_rx) = mpsc::unbounded();
+        let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
+
+        let (destination_pk, _destination_sk) = gen_keypair();
+        let (relay_pk, _relay_sk) = gen_keypair();
+
+        assert!(connections.send_oob(relay_pk, destination_pk, vec![42; 123]).wait().is_err());
+    }
+
+    #[test]
+    fn send_onion() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (incoming_tx, _incoming_rx) = mpsc::unbounded();
+        let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
+
+        let (_incoming_rx, outgoing_rx, relay) = create_relay();
+        let relay_pk = relay.pk;
+
+        connections.relays.write().insert(relay.pk, relay);
+
+        let onion_request = OnionRequest {
+            nonce: gen_nonce(),
+            ip_port: IpPort {
+                protocol: ProtocolType::TCP,
+                ip_addr: "5.6.7.8".parse().unwrap(),
+                port: 12345,
+            },
+            temporary_pk: gen_keypair().0,
+            payload: vec![42; 123],
+        };
+
+        connections.send_onion(relay_pk, onion_request.clone()).wait().unwrap();
+
+        let packet = unpack!(outgoing_rx.into_future().wait().unwrap().0.unwrap(), Packet::OnionRequest);
+
+        assert_eq!(packet, onion_request);
+    }
+
+    #[test]
+    fn send_onion_no_relay() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (incoming_tx, _incoming_rx) = mpsc::unbounded();
+        let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
+
+        let (relay_pk, _relay_sk) = gen_keypair();
+
+        let onion_request = OnionRequest {
+            nonce: gen_nonce(),
+            ip_port: IpPort {
+                protocol: ProtocolType::TCP,
+                ip_addr: "5.6.7.8".parse().unwrap(),
+                port: 12345,
+            },
+            temporary_pk: gen_keypair().0,
+            payload: vec![42; 123],
+        };
+
+        assert!(connections.send_onion(relay_pk, onion_request.clone()).wait().is_err());
+    }
+
+    #[test]
+    fn set_connection_status() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (incoming_tx, _incoming_rx) = mpsc::unbounded();
+        let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
+
+        let (node_pk, _node_sk) = gen_keypair();
+
+        connections.connections.write().insert(node_pk, NodeConnection {
+            status: NodeConnectionStatus::TCP,
+            connections: HashSet::new(),
+        });
+
+        connections.set_connection_status(node_pk, NodeConnectionStatus::UDP).wait().unwrap();
+
+        assert_eq!(connections.connections.read().get(&node_pk).unwrap().status, NodeConnectionStatus::UDP);
+    }
+
+    #[test]
+    fn set_connection_status_no_connection() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (incoming_tx, _incoming_rx) = mpsc::unbounded();
+        let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
+
+        let (node_pk, _node_sk) = gen_keypair();
+
+        assert!(connections.set_connection_status(node_pk, NodeConnectionStatus::UDP).wait().is_err());
+    }
+
+    #[test]
+    fn main_loop_put_to_sleep() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (incoming_tx, _incoming_rx) = mpsc::unbounded();
+        let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
+
+        let (_incoming_rx_1, _outgoing_rx_1, relay_1) = create_relay();
+        let (_incoming_rx_2, _outgoing_rx_2, relay_2) = create_relay();
+        let relay_pk_1 = relay_1.pk;
+        let relay_pk_2 = relay_2.pk;
+
+        let (node_pk_1, _node_sk_1) = gen_keypair();
+        let (node_pk_2, _node_sk_2) = gen_keypair();
+
+        connections.connections.write().insert(node_pk_1, NodeConnection {
+            status: NodeConnectionStatus::TCP,
+            connections: [relay_pk_1].iter().cloned().collect(),
+        });
+        connections.connections.write().insert(node_pk_2, NodeConnection {
+            status: NodeConnectionStatus::UDP,
+            connections: [relay_pk_2].iter().cloned().collect(),
+        });
+
+        connections.relays.write().insert(relay_pk_1, relay_1);
+        connections.relays.write().insert(relay_pk_2, relay_2);
+
+        let mut enter = tokio_executor::enter().unwrap();
+        // time when we don't wait for connections to appear
+        let clock = Clock::new_with_now(ConstNow(
+            Instant::now() + Duration::from_secs(TCP_CONNECTION_ANNOUNCE_TIMEOUT + 1)
+        ));
+
+        with_default(&clock, &mut enter, |_| {
+            connections.main_loop().wait().unwrap();
+        });
+
+        let relays = connections.relays.read();
+
+        assert!(relays.get(&relay_pk_1).unwrap().is_connected());
+        assert!(relays.get(&relay_pk_2).unwrap().is_sleeping());
+    }
+
+    #[test]
+    fn main_loop_remove_unsuccessful() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (incoming_tx, _incoming_rx) = mpsc::unbounded();
+        let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
+
+        let (_incoming_rx_0, _outgoing_rx_0, relay_0) = create_relay();
+        let (_incoming_rx_1, _outgoing_rx_1, relay_1) = create_relay();
+        let (_incoming_rx_2, _outgoing_rx_2, relay_2) = create_relay();
+        let relay_pk_0 = relay_0.pk;
+        let relay_pk_1 = relay_1.pk;
+        let relay_pk_2 = relay_2.pk;
+
+        relay_1.disconnect();
+        relay_2.disconnect();
+
+        set_connection_attempts(&relay_1, MAX_RECONNECTION_ATTEMPTS + 1);
+
+        let (node_pk, _node_sk) = gen_keypair();
+
+        connections.connections.write().insert(node_pk, NodeConnection {
+            status: NodeConnectionStatus::TCP,
+            connections: [relay_pk_0, relay_pk_1, relay_pk_2].iter().cloned().collect(),
+        });
+
+        connections.relays.write().insert(relay_pk_0, relay_0);
+        connections.relays.write().insert(relay_pk_1, relay_1);
+        connections.relays.write().insert(relay_pk_2, relay_2);
+
+        // ignore result future since it spawns the connection which should be
+        // executed inside tokio context
+        let _ = connections.main_loop();
+
+        let relays = connections.relays.read();
+
+        assert!(relays.contains_key(&relay_pk_0));
+        assert!(!relays.contains_key(&relay_pk_1));
+        assert!(relays.contains_key(&relay_pk_2));
+
+        let connections = connections.connections.read();
+        let connection = connections.get(&node_pk).unwrap();
+
+        assert!(connection.connections.contains(&relay_pk_0));
+        assert!(!connection.connections.contains(&relay_pk_1));
+        assert!(connection.connections.contains(&relay_pk_2));
+    }
+
+    #[test]
+    fn main_loop_remove_not_used() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (incoming_tx, _incoming_rx) = mpsc::unbounded();
+        let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
+
+        let (_incoming_rx_0, _outgoing_rx_0, relay_0) = create_relay();
+        let (_incoming_rx_1, _outgoing_rx_1, relay_1) = create_relay();
+        let (_incoming_rx_2, _outgoing_rx_2, relay_2) = create_relay();
+        let (_incoming_rx_3, _outgoing_rx_3, relay_3) = create_relay();
+        let relay_0_c = relay_0.clone();
+        let relay_pk_0 = relay_0.pk;
+        let relay_pk_1 = relay_1.pk;
+        let relay_pk_2 = relay_2.pk;
+        let relay_pk_3 = relay_3.pk;
+
+        let (node_pk, _node_sk) = gen_keypair();
+
+        relay_1.add_connection(node_pk);
+        relay_2.add_connection(node_pk);
+        relay_3.add_connection(node_pk);
+
+        connections.connections.write().insert(node_pk, NodeConnection {
+            status: NodeConnectionStatus::TCP,
+            connections: [relay_pk_1, relay_pk_2, relay_pk_3].iter().cloned().collect(),
+        });
+
+        connections.relays.write().insert(relay_pk_0, relay_0);
+        connections.relays.write().insert(relay_pk_1, relay_1);
+        connections.relays.write().insert(relay_pk_2, relay_2);
+        connections.relays.write().insert(relay_pk_3, relay_3);
+
+        connections.main_loop().wait().unwrap();
+
+        let relays = connections.relays.read();
+
+        assert!(!relays.contains_key(&relay_pk_0));
+        assert!(relays.contains_key(&relay_pk_1));
+        assert!(relays.contains_key(&relay_pk_2));
+        assert!(relays.contains_key(&relay_pk_3));
+
+        assert!(relay_0_c.is_disconnected());
     }
 }
