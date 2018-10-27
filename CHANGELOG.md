@@ -1,3 +1,13 @@
+# 0.0.5 (October 27, 2018)
+
+* Update tox core version (#30)
+* Add possibility to specify the secret key via environment variable (#29)
+* Add feature for MOTD templates (#28)
+* Fix deprecated item 'tokio::executor::thread_pool' (#27)
+* Handle onion errors (#26)
+* Use tox from github (#24)
+* Validate loaded public key (#23)
+
 # 0.0.4 (September 11, 2018)
 
 * Use tox from crates.io (#22)
