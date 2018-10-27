@@ -1,6 +1,6 @@
 [package]
 name = "tox"
-version = "0.0.6"
+version = "0.0.7"
 authors = [
   "Zetok Zalbavar <zetok@openmailbox.org>",
   "Roman Proskuryakov <humbug@deeptown.org>",
