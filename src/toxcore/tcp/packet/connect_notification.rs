@@ -13,7 +13,7 @@ Serialized form:
 Length | Content
 ------ | ------
 `1`    | `0x02`
-`1`    | connection_id
+`1`    | connection_id [ `0x10` .. `0xFF` ]
 
 */
 #[derive(Debug, PartialEq, Clone)]
@@ -25,7 +25,7 @@ pub struct ConnectNotification {
 impl FromBytes for ConnectNotification {
     named!(from_bytes<ConnectNotification>, do_parse!(
         tag!("\x02") >>
-        connection_id: be_u8 >>
+        connection_id: verify!(be_u8, |id| id >= 0x10) >>
         (ConnectNotification { connection_id })
     ));
 }

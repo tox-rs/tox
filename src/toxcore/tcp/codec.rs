@@ -335,50 +335,29 @@ mod tests {
         // Mallory cannot decode the payload of EncryptedPacket
         assert!(mallory_codec.decode(&mut buf).err().is_some());
     }
-    fn encode_bytes_to_packet(channel: &Channel, bytes: &[u8]) -> Vec<u8> {
-        // encrypt it
-        let encrypted = channel.encrypt(bytes);
-
-        // create EncryptedPacket
-        let encrypted_packet = EncryptedPacket { payload: encrypted };
-
-        // serialize EncryptedPacket to binary form
-        let mut stack_buf = [0; MAX_TCP_ENC_PACKET_SIZE];
-        let (_, encrypted_packet_size) = encrypted_packet.to_bytes((&mut stack_buf, 0)).unwrap();
-        stack_buf[..encrypted_packet_size].to_vec()
-    }
     #[test]
     fn decode_packet_imcomplete() {
-        let (alice_channel, bob_channel) = create_channels();
+        let (alice_channel, _) = create_channels();
 
-        let mut buf = BytesMut::from(encode_bytes_to_packet(&alice_channel,b"\x00"));
-        let mut bob_codec = Codec::new(bob_channel);
+        let mut buf = BytesMut::new();
+        let mut bob_codec = Codec::new(alice_channel);
 
-        // not enought bytes to decode Packet
-        assert!(bob_codec.decode(&mut buf).err().is_some());
+        // not enough bytes to decode Packet
+        assert!(bob_codec.decode(&mut buf).unwrap().is_none());
     }
     #[test]
     fn decode_packet_error() {
-        let (alice_channel, bob_channel) = create_channels();
+        let (alice_channel, _) = create_channels();
 
         let mut alice_codec = Codec::new(alice_channel);
-        let mut bob_codec = Codec::new(bob_channel);
 
         let mut buf = BytesMut::new();
 
-        // bad Data with connection id = 0x0F
-        let packet = Packet::Data( Data { connection_id: 0x0F, data: vec![13; 42] } );
+        // bad Data with connection id = 0
+        let packet = Packet::Data( Data { connection_id: 0, data: vec![13; 42] } );
 
         alice_codec.encode(packet.clone(), &mut buf).expect("Alice should encode");
-        assert!(bob_codec.decode(&mut buf).is_err());
-
-        buf.clear();
-
-        // bad Data with connection id = 0xF0
-        let packet = Packet::Data( Data { connection_id: 0xF0, data: vec![13; 42] } );
-
-        alice_codec.encode(packet.clone(), &mut buf).expect("Alice should encode");
-        assert!(bob_codec.decode(&mut buf).is_err());
+        assert!(alice_codec.decode(&mut buf).is_err());
     }
 
     #[test]
