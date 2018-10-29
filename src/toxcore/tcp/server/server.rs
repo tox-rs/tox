@@ -304,7 +304,7 @@ impl Server {
     }
     fn handle_onion_request(&self, pk: &PublicKey, packet: OnionRequest) -> IoFuture<()> {
         if let Some(ref onion_sink) = self.onion_sink {
-            let mut state = self.state.read();
+            let state = self.state.read();
             if let Some(client) = state.connected_clients.get(&pk) {
                 let saddr = SocketAddr::new(client.ip_addr(), client.port());
                 Box::new(onion_sink.clone() // clone sink for 1 send only
