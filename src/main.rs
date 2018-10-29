@@ -310,14 +310,16 @@ fn main() {
 
     match cli_config.log_type {
         LogType::Stderr => {
-            env_logger::Builder::from_default_env()
-                .filter_level(LevelFilter::Info)
+            let env = env_logger::Env::default()
+                .filter_or("RUST_LOG", "info");
+            env_logger::Builder::from_env(env)
                 .init();
         },
         LogType::Stdout => {
-            env_logger::Builder::from_default_env()
+            let env = env_logger::Env::default()
+                .filter_or("RUST_LOG", "info");
+            env_logger::Builder::from_env(env)
                 .target(env_logger::fmt::Target::Stdout)
-                .filter_level(LevelFilter::Info)
                 .init();
         },
         #[cfg(unix)]
