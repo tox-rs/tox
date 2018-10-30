@@ -121,9 +121,8 @@ impl Server {
                 if let Some(client_b) = state.connected_clients.get_mut(&client_b_pk) {
                     // check if client_a is linked in client_b
                     if let Some(a_id_in_client_b) = client_b.get_connection_id(pk) {
-                        // it is linked, we should notify client_b and
-                        // unlink pk from client_b.links
-                        client_b.take_link(a_id_in_client_b);
+                        // it is linked, we should notify client_b
+                        // link from client_b.links should not be removed
                         client_b.send_disconnect_notification(a_id_in_client_b)
                     } else {
                         // Current client is not linked in client_b
@@ -226,8 +225,8 @@ impl Server {
 
         if let Some(client_b) = state.connected_clients.get_mut(&client_b_pk) {
             if let Some(a_id_in_client_b) = client_b.get_connection_id(pk) {
-                // unlink pk from client_b it and send notification
-                client_b.take_link(a_id_in_client_b);
+                // it is linked, we should notify client_b
+                // link from client_b.links should not be removed
                 client_b.send_disconnect_notification(a_id_in_client_b)
             } else {
                 // Do nothing because
