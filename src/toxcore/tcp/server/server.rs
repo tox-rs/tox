@@ -121,9 +121,8 @@ impl Server {
                 if let Some(client_b) = state.connected_clients.get_mut(&client_b_pk) {
                     // check if client_a is linked in client_b
                     if let Some(a_id_in_client_b) = client_b.get_connection_id(pk) {
-                        // it is linked, we should notify client_b and
-                        // unlink pk from client_b.links
-                        client_b.take_link(a_id_in_client_b);
+                        // it is linked, we should notify client_b
+                        // link from client_b.links should not be removed
                         client_b.send_disconnect_notification(a_id_in_client_b)
                     } else {
                         // Current client is not linked in client_b
@@ -226,8 +225,8 @@ impl Server {
 
         if let Some(client_b) = state.connected_clients.get_mut(&client_b_pk) {
             if let Some(a_id_in_client_b) = client_b.get_connection_id(pk) {
-                // unlink pk from client_b it and send notification
-                client_b.take_link(a_id_in_client_b);
+                // it is linked, we should notify client_b
+                // link from client_b.links should not be removed
                 client_b.send_disconnect_notification(a_id_in_client_b)
             } else {
                 // Do nothing because
@@ -519,6 +518,11 @@ mod tests {
         assert_eq!(packet.unwrap(), Packet::DisconnectNotification(
             DisconnectNotification { connection_id: 16 }
         ));
+
+        // check we did not unlink client_1 from client_2
+        let state = server.state.read();
+        let client_b = state.connected_clients.get(&client_pk_2).unwrap();
+        assert!(client_b.get_connection_id(&client_pk_1).is_some());
     }
     #[test]
     fn handle_route_request() {
@@ -542,6 +546,19 @@ mod tests {
         assert_eq!(packet.unwrap(), Packet::RouteResponse(
             RouteResponse { pk: client_pk_2, connection_id: 16 }
         ));
+
+        {
+            // check links
+            let state = server.state.read();
+
+            // check we linked client_2 in client_1
+            let client_a = state.connected_clients.get(&client_pk_1).unwrap();
+            assert!(client_a.get_connection_id(&client_pk_2).is_some());
+
+            // check we did not link client_1 in client_2
+            let client_b = state.connected_clients.get(&client_pk_2).unwrap();
+            assert!(client_b.get_connection_id(&client_pk_1).is_none());
+        }
     }
     #[test]
     fn handle_route_request_to_itself() {
@@ -653,7 +670,7 @@ mod tests {
         ));
         // AND
         // the server should put ConnectNotification into rx_1
-        let (packet, _rx_1) = rx_1.into_future().wait().unwrap();
+        let (packet, rx_1) = rx_1.into_future().wait().unwrap();
         assert_eq!(packet.unwrap(), Packet::ConnectNotification(
             ConnectNotification { connection_id: 16 }
         ));
@@ -674,6 +691,42 @@ mod tests {
         assert_eq!(packet.unwrap(), Packet::DisconnectNotification(
             DisconnectNotification { connection_id: 16 }
         ));
+
+        {
+            // check links
+            let state = server.state.read();
+
+            // check we unlinked client_2 from client_1
+            let client_a = state.connected_clients.get(&client_pk_1).unwrap();
+            assert!(client_a.get_connection_id(&client_pk_2).is_none());
+
+            // check we did not unlink client_1 from client_2
+            let client_b = state.connected_clients.get(&client_pk_2).unwrap();
+            assert!(client_b.get_connection_id(&client_pk_1).is_some());
+        }
+
+        // emulate send DisconnectNotification from client_2
+        server.handle_packet(&client_pk_2, Packet::DisconnectNotification(
+            DisconnectNotification { connection_id: 16 }
+        )).wait().unwrap();
+
+        {
+            // check links
+            let state = server.state.read();
+
+            // check we unlinked client_1 from client_2
+            let client_b = state.connected_clients.get(&client_pk_2).unwrap();
+            assert!(client_b.get_connection_id(&client_pk_1).is_none());
+
+            // check we unlinked client_2 from client_1
+            let client_a = state.connected_clients.get(&client_pk_1).unwrap();
+            assert!(client_a.get_connection_id(&client_pk_2).is_none());
+        }
+
+        // check that DisconnectNotification from client_2 did not put anything in client1.rx
+        // necessary to drop server so that rx.collect() can be finished
+        drop(server);
+        assert!(rx_1.collect().wait().unwrap().is_empty());
     }
     #[test]
     fn handle_disconnect_notification_other_not_linked() {
@@ -683,7 +736,7 @@ mod tests {
         let client_pk_1 = client_1.pk();
         server.insert(client_1);
 
-        let (client_2, _rx_2) = create_random_client("1.2.3.5:12345".parse().unwrap());
+        let (client_2, rx_2) = create_random_client("1.2.3.5:12345".parse().unwrap());
         let client_pk_2 = client_2.pk();
         server.insert(client_2);
 
@@ -697,6 +750,11 @@ mod tests {
             DisconnectNotification { connection_id: 16 }
         )).wait();
         assert!(handle_res.is_ok());
+
+        // check that packets from client_1 did not put anything in client2.rx
+        // necessary to drop server so that rx.collect() can be finished
+        drop(server);
+        assert!(rx_2.collect().wait().unwrap().is_empty());
     }
     #[test]
     fn handle_ping_request() {
