@@ -221,7 +221,7 @@ impl Server {
     }
 
     /// Get PrecomputedKey of a peer or newly make and save it.
-    fn get_precomputed_key(&self, pk: PublicKey) -> PrecomputedKey {
+    pub fn get_precomputed_key(&self, pk: PublicKey) -> PrecomputedKey {
         let mut precomputed_cache = self.precomputed_keys.write();
         if let Some(precomputed_key) = precomputed_cache.get(&pk) {
             return precomputed_key.clone();
@@ -916,15 +916,33 @@ impl Server {
         }
     }
 
-    /// Handle received `CookieRequest` packet and pass it to `net_crypto`
-    /// module.
-    fn handle_cookie_request(&self, packet: &CookieRequest, addr: SocketAddr) -> IoFuture<()> {
+    /// Create `CookieResponse` packet with `Cookie` requested by `CookieRequest` packet
+    fn handle_cookie_request_inner(&self, packet: &CookieRequest) -> Result<CookieResponse, Error> {
+        let precomputed_key = self.get_precomputed_key(packet.pk);
+        let payload = packet.get_payload(&precomputed_key)?;
+
+        let cookie = Cookie::new(payload.pk, packet.pk);
         if let Some(ref net_crypto) = self.net_crypto {
-            net_crypto.handle_udp_cookie_request(packet, addr)
+            let encrypted_cookie = EncryptedCookie::new(&net_crypto.symmetric_key, &cookie);
+
+            let response_payload = CookieResponsePayload {
+                cookie: encrypted_cookie,
+                id: payload.id,
+            };
+            let response = CookieResponse::new(&precomputed_key, &response_payload);
+
+            Ok(response)
         } else {
-            Box::new( future::err(
-                Error::new(ErrorKind::Other, "Net crypto is not initialised")
-            ))
+            Err(Error::new(ErrorKind::Other,
+            "There is no NetCrypto object."))
+        }
+    }
+
+    /// Handle `CookieRequest` packet received from UDP socket
+    fn handle_cookie_request(&self, packet: &CookieRequest, addr: SocketAddr) -> IoFuture<()> {
+        match self.handle_cookie_request_inner(packet) {
+            Ok(response) => self.send_to_direct(addr, Packet::CookieResponse(response)),
+            Err(e) => Box::new(future::err(e))
         }
     }
 
