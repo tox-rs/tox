@@ -854,7 +854,8 @@ impl Server {
     /// added to bootstrap nodes list to send `NodesRequest` packet to them
     /// later.
     fn handle_nodes_resp(&self, packet: &NodesResponse, addr: SocketAddr) -> IoFuture<()> {
-        let payload = match packet.get_payload(&self.sk) {
+        let precomputed_key = self.get_precomputed_key(packet.pk);
+        let payload = match packet.get_payload(&precomputed_key) {
             Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
@@ -1694,7 +1695,8 @@ mod tests {
         assert_eq!(addr_to_send, addr);
 
         let nodes_resp = unpack!(packet, Packet::NodesResponse);
-        let nodes_resp_payload = nodes_resp.get_payload(&bob_sk).unwrap();
+        let precomputed_key = precompute(&nodes_resp.pk, &bob_sk);
+        let nodes_resp_payload = nodes_resp.get_payload(&precomputed_key).unwrap();
 
         assert_eq!(nodes_resp_payload.id, req_payload.id);
         assert_eq!(nodes_resp_payload.nodes, vec!(packed_node));
@@ -1722,7 +1724,8 @@ mod tests {
         assert_eq!(addr_to_send, addr);
 
         let nodes_resp = unpack!(packet, Packet::NodesResponse);
-        let nodes_resp_payload = nodes_resp.get_payload(&bob_sk).unwrap();
+        let precomputed_key = precompute(&nodes_resp.pk, &bob_sk);
+        let nodes_resp_payload = nodes_resp.get_payload(&precomputed_key).unwrap();
 
         assert_eq!(nodes_resp_payload.id, req_payload.id);
         assert_eq!(nodes_resp_payload.nodes, vec!(packed_node));
@@ -1756,7 +1759,8 @@ mod tests {
         assert_eq!(addr_to_send, addr);
 
         let nodes_resp = unpack!(packet, Packet::NodesResponse);
-        let nodes_resp_payload = nodes_resp.get_payload(&bob_sk).unwrap();
+        let precomputed_key = precompute(&nodes_resp.pk, &bob_sk);
+        let nodes_resp_payload = nodes_resp.get_payload(&precomputed_key).unwrap();
 
         assert_eq!(nodes_resp_payload.id, req_payload.id);
         assert!(nodes_resp_payload.nodes.is_empty());
@@ -1784,7 +1788,8 @@ mod tests {
         assert_eq!(addr_to_send, addr);
 
         let nodes_resp = unpack!(packet, Packet::NodesResponse);
-        let nodes_resp_payload = nodes_resp.get_payload(&bob_sk).unwrap();
+        let precomputed_key = precompute(&nodes_resp.pk, &bob_sk);
+        let nodes_resp_payload = nodes_resp.get_payload(&precomputed_key).unwrap();
 
         assert_eq!(nodes_resp_payload.id, req_payload.id);
         assert!(nodes_resp_payload.nodes.is_empty());
