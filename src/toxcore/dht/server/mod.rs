@@ -974,7 +974,8 @@ impl Server {
     /// someone else or parse it and handle the payload if it's sent for us.
     fn handle_dht_req(&self, packet: DhtRequest, addr: SocketAddr) -> IoFuture<()> {
         if packet.rpk == self.pk { // the target peer is me
-            let payload = packet.get_payload(&self.sk);
+            let precomputed_key = self.get_precomputed_key(packet.spk);
+            let payload = packet.get_payload(&precomputed_key);
             let payload = match payload {
                 Err(e) => return Box::new(future::err(e)),
                 Ok(payload) => payload,
@@ -2083,7 +2084,8 @@ mod tests {
         assert_eq!(addr_to_send, addr);
 
         let dht_req = unpack!(packet, Packet::DhtRequest);
-        let dht_payload = dht_req.get_payload(&bob_sk).unwrap();
+        let precomputed_key = precompute(&dht_req.spk, &bob_sk);
+        let dht_payload = dht_req.get_payload(&precomputed_key).unwrap();
         let nat_ping_resp_payload = unpack!(dht_payload, DhtRequestPayload::NatPingResponse);
 
         assert_eq!(nat_ping_resp_payload.id, nat_req.id);
@@ -2888,7 +2890,8 @@ mod tests {
             let (packet, _addr_to_send) = received.unwrap();
 
             if let Packet::DhtRequest(nat_ping_req) = packet {
-                let nat_ping_req_payload = nat_ping_req.get_payload(&friend_sk).unwrap();
+                let precomputed_key = precompute(&nat_ping_req.spk, &friend_sk);
+                let nat_ping_req_payload = nat_ping_req.get_payload(&precomputed_key).unwrap();
                 let nat_ping_req_payload = unpack!(nat_ping_req_payload, DhtRequestPayload::NatPingRequest);
 
                 assert_eq!(alice.friends.read()[FAKE_FRIENDS_NUMBER].hole_punch.ping_id, nat_ping_req_payload.id);
