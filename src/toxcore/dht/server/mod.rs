@@ -825,7 +825,8 @@ impl Server {
     /// packet. If node that sent this packet is not present in close nodes list
     /// and can be added there then it will be added to ping list.
     fn handle_nodes_req(&self, packet: &NodesRequest, addr: SocketAddr) -> IoFuture<()> {
-        let payload = match packet.get_payload(&self.sk) {
+        let precomputed_key = self.get_precomputed_key(packet.pk);
+        let payload = match packet.get_payload(&precomputed_key) {
             Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
@@ -837,7 +838,7 @@ impl Server {
             id: payload.id,
         };
         let nodes_resp = Packet::NodesResponse(NodesResponse::new(
-            &self.get_precomputed_key(packet.pk),
+            &precomputed_key,
             &self.pk,
             &resp_payload
         ));
@@ -2916,7 +2917,8 @@ mod tests {
         assert_eq!(addr_to_send, addr);
 
         let nodes_req = unpack!(packet, Packet::NodesRequest);
-        let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
+        let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
+        let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
 
         assert_eq!(nodes_req_payload.pk, alice.pk);
     }
@@ -3017,11 +3019,13 @@ mod tests {
         rx.take(2).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, Packet::NodesRequest);
             if addr == "127.0.0.1:33445".parse().unwrap() {
-                let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
+                let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
+                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
                 assert_eq!(nodes_req_payload.pk, alice.pk);
             } else {
-                let nodes_req_payload = nodes_req.get_payload(&node_sk).unwrap();
+                let precomputed_key = precompute(&nodes_req.pk, &node_sk);
+                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(node_pk, nodes_req_payload.id));
                 assert_eq!(nodes_req_payload.pk, alice.pk);
             }
@@ -3086,11 +3090,13 @@ mod tests {
         rx.take(3).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, Packet::NodesRequest);
             if addr == "127.0.0.1:33445".parse().unwrap() {
-                let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
+                let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
+                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
                 assert_eq!(nodes_req_payload.pk, alice.pk);
             } else {
-                let nodes_req_payload = nodes_req.get_payload(&node_sk).unwrap();
+                let precomputed_key = precompute(&nodes_req.pk, &node_sk);
+                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(node_pk, nodes_req_payload.id));
                 assert_eq!(nodes_req_payload.pk, alice.pk);
             }
@@ -3167,11 +3173,13 @@ mod tests {
         rx.take(2).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, Packet::NodesRequest);
             if addr == "127.0.0.1:33445".parse().unwrap() {
-                let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
+                let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
+                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
                 assert_eq!(nodes_req_payload.pk, friend_pk);
             } else {
-                let nodes_req_payload = nodes_req.get_payload(&node_sk).unwrap();
+                let precomputed_key = precompute(&nodes_req.pk, &node_sk);
+                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(node_pk, nodes_req_payload.id));
                 assert_eq!(nodes_req_payload.pk, friend_pk);
             }
@@ -3201,11 +3209,13 @@ mod tests {
         rx.take(3).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, Packet::NodesRequest);
             if addr == "127.0.0.1:33445".parse().unwrap() {
-                let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
+                let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
+                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
                 assert_eq!(nodes_req_payload.pk, friend_pk);
             } else {
-                let nodes_req_payload = nodes_req.get_payload(&node_sk).unwrap();
+                let precomputed_key = precompute(&nodes_req.pk, &node_sk);
+                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(node_pk, nodes_req_payload.id));
                 assert_eq!(nodes_req_payload.pk, friend_pk);
             }
@@ -3288,10 +3298,12 @@ mod tests {
         rx.take(2).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, Packet::NodesRequest);
             if addr == "[FF::01]:33445".parse().unwrap() {
-                let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
+                let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
+                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
             } else {
-                let nodes_req_payload = nodes_req.get_payload(&node_sk).unwrap();
+                let precomputed_key = precompute(&nodes_req.pk, &node_sk);
+                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(node_pk, nodes_req_payload.id));
             }
         }).collect().wait().unwrap();
@@ -3317,10 +3329,12 @@ mod tests {
         rx.take(2).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, Packet::NodesRequest);
             if addr == "[FF::01]:33445".parse().unwrap() {
-                let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
+                let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
+                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
             } else {
-                let nodes_req_payload = nodes_req.get_payload(&node_sk).unwrap();
+                let precomputed_key = precompute(&nodes_req.pk, &node_sk);
+                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(node_pk, nodes_req_payload.id));
             }
         }).collect().wait().unwrap();
@@ -3374,10 +3388,12 @@ mod tests {
             rx.take(2).map(|(packet, addr)| {
                 let nodes_req = unpack!(packet, Packet::NodesRequest);
                 if addr == "[FF::01]:33445".parse().unwrap() {
-                    let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
+                    let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
+                    let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                     assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
                 } else {
-                    let nodes_req_payload = nodes_req.get_payload(&node_sk).unwrap();
+                    let precomputed_key = precompute(&nodes_req.pk, &node_sk);
+                    let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                     assert!(request_queue.check_ping_id(node_pk, nodes_req_payload.id));
                 }
             }).collect().wait().unwrap();
