@@ -790,7 +790,8 @@ impl Server {
     /// Handle received `PingResponse` packet and if it's correct add the node
     /// that sent this packet to close nodes lists.
     fn handle_ping_resp(&self, packet: &PingResponse, addr: SocketAddr) -> IoFuture<()> {
-        let payload = match packet.get_payload(&self.sk) {
+        let precomputed_key = self.get_precomputed_key(packet.pk);
+        let payload = match packet.get_payload(&precomputed_key) {
             Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
@@ -1544,7 +1545,8 @@ mod tests {
         assert_eq!(addr_to_send, addr);
 
         let ping_resp = unpack!(packet, Packet::PingResponse);
-        let ping_resp_payload = ping_resp.get_payload(&bob_sk).unwrap();
+        let precomputed_key = precompute(&ping_resp.pk, &bob_sk);
+        let ping_resp_payload = ping_resp.get_payload(&precomputed_key).unwrap();
 
         assert_eq!(ping_resp_payload.id, req_payload.id);
 
@@ -1568,7 +1570,8 @@ mod tests {
             assert_eq!(addr_to_send, addr);
 
             if let Packet::PingResponse(ping_resp) = packet {
-                let ping_resp_payload = ping_resp.get_payload(&bob_sk).unwrap();
+                let precomputed_key = precompute(&ping_resp.pk, &bob_sk);
+                let ping_resp_payload = ping_resp.get_payload(&precomputed_key).unwrap();
                 assert_eq!(ping_resp_payload.id, req_payload.id);
             } else {
                 let ping_req = unpack!(packet, Packet::PingRequest);
