@@ -766,7 +766,8 @@ impl Server {
     /// packet. If node that sent this packet is not present in close nodes list
     /// and can be added there then it will be added to ping list.
     fn handle_ping_req(&self, packet: &PingRequest, addr: SocketAddr) -> IoFuture<()> {
-        let payload = match packet.get_payload(&self.sk) {
+        let precomputed_key = self.get_precomputed_key(packet.pk);
+        let payload = match packet.get_payload(&precomputed_key) {
             Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
@@ -775,7 +776,7 @@ impl Server {
             id: payload.id,
         };
         let ping_resp = Packet::PingResponse(PingResponse::new(
-            &self.get_precomputed_key(packet.pk),
+            &precomputed_key,
             &self.pk,
             &resp_payload
         ));
@@ -1571,7 +1572,8 @@ mod tests {
                 assert_eq!(ping_resp_payload.id, req_payload.id);
             } else {
                 let ping_req = unpack!(packet, Packet::PingRequest);
-                let ping_req_payload = ping_req.get_payload(&bob_sk).unwrap();
+                let precomputed_key = precompute(&ping_req.pk, &bob_sk);
+                let ping_req_payload = ping_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(bob_pk, ping_req_payload.id));
             }
         }).collect().wait().unwrap();
@@ -3055,10 +3057,12 @@ mod tests {
         rx.take(2).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, Packet::PingRequest);
             if addr == "127.0.0.1:33445".parse().unwrap() {
-                let ping_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
+                let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
+                let ping_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(bob_pk, ping_req_payload.id));
             } else {
-                let ping_req_payload = nodes_req.get_payload(&node_sk).unwrap();
+                let precomputed_key = precompute(&nodes_req.pk, &node_sk);
+                let ping_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(node_pk, ping_req_payload.id));
             }
         }).collect().wait().unwrap();
