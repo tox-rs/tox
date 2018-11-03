@@ -165,17 +165,17 @@ mod tests {
 
     dht_packet_encode_decode!(ping_request_encode_decode, PingRequest);
 
-//    dht_packet_encrypt_decrypt!(
-//        ping_request_payload_encrypt_decrypt,
-//        PingRequest,
-//        PingRequestPayload { id: 42 }
-//    );
-//
-//    dht_packet_encrypt_decrypt_invalid_key!(
-//        ping_request_payload_encrypt_decrypt_invalid_key,
-//        PingRequest,
-//        PingRequestPayload { id: 42 }
-//    );
-//
-//    dht_packet_decode_invalid!(ping_request_decode_invalid, PingRequest);
+    dht_packet_encrypt_decrypt!(
+        ping_request_payload_encrypt_decrypt,
+        PingRequest,
+        PingRequestPayload { id: 42 }
+    );
+
+    dht_packet_encrypt_decrypt_invalid_key!(
+        ping_request_payload_encrypt_decrypt_invalid_key,
+        PingRequest,
+        PingRequestPayload { id: 42 }
+    );
+
+    dht_packet_decode_invalid!(ping_request_decode_invalid, PingRequest);
 }

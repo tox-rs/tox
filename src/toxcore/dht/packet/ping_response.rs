@@ -162,17 +162,17 @@ mod tests {
 
     dht_packet_encode_decode!(ping_response_encode_decode, PingResponse);
 
-//    dht_packet_encrypt_decrypt!(
-//        ping_response_payload_encrypt_decrypt,
-//        PingResponse,
-//        PingResponsePayload { id: 42 }
-//    );
-//
-//    dht_packet_encrypt_decrypt_invalid_key!(
-//        ping_response_payload_encrypt_decrypt_invalid_key,
-//        PingResponse,
-//        PingResponsePayload { id: 42 }
-//    );
-//
-//    dht_packet_decode_invalid!(ping_response_decode_invalid, PingResponse);
+    dht_packet_encrypt_decrypt!(
+        ping_response_payload_encrypt_decrypt,
+        PingResponse,
+        PingResponsePayload { id: 42 }
+    );
+
+    dht_packet_encrypt_decrypt_invalid_key!(
+        ping_response_payload_encrypt_decrypt_invalid_key,
+        PingResponse,
+        PingResponsePayload { id: 42 }
+    );
+
+    dht_packet_decode_invalid!(ping_response_decode_invalid, PingResponse);
 }

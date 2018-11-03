@@ -169,7 +169,7 @@ pub struct Server {
     /// Lru cache for precomputed keys.
     /// Storing precomputed keys for avoiding redundant calculation.
     /// When DHT needs precomputed key, search this cache before calc new precomputed key.
-    precomputed_keys: Arc<RwLock<LruCache<PublicKey, PrecomputedKey>>>,
+    precomputed_keys: Arc<RwLock<LruCache<PublicKey, PrecomputedKey>>>
 }
 
 impl Server {

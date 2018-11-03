@@ -171,17 +171,17 @@ mod tests {
         }
     );
 
-//    dht_packet_encrypt_decrypt!(
-//        cookie_request_payload_encrypt_decrypt,
-//        CookieRequest,
-//        CookieRequestPayload { pk: gen_keypair().0, id: 42 }
-//    );
+    dht_packet_encrypt_decrypt!(
+        cookie_request_payload_encrypt_decrypt,
+        CookieRequest,
+        CookieRequestPayload { pk: gen_keypair().0, id: 42 }
+    );
 
-//    dht_packet_encrypt_decrypt_invalid_key!(
-//        cookie_request_payload_encrypt_decrypt_invalid_key,
-//        CookieRequest,
-//        CookieRequestPayload { pk: gen_keypair().0, id: 42 }
-//    );
+    dht_packet_encrypt_decrypt_invalid_key!(
+        cookie_request_payload_encrypt_decrypt_invalid_key,
+        CookieRequest,
+        CookieRequestPayload { pk: gen_keypair().0, id: 42 }
+    );
 
-//    dht_packet_decode_invalid!(cookie_request_decode_invalid, CookieRequest);
+    dht_packet_decode_invalid!(cookie_request_decode_invalid, CookieRequest);
 }

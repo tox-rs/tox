@@ -173,21 +173,21 @@ mod tests {
 
     dht_packet_encode_decode!(nodes_response_encode_decode, NodesResponse);
 
-//    dht_packet_encrypt_decrypt!(
-//        nodes_response_payload_encrypt_decrypt,
-//        NodesResponse,
-//        NodesResponsePayload { nodes: vec![
-//            PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
-//        ], id: 42 }
-//    );
-//
-//    dht_packet_encrypt_decrypt_invalid_key!(
-//        nodes_response_payload_encrypt_decrypt_invalid_key,
-//        NodesResponse,
-//        NodesResponsePayload { nodes: vec![
-//            PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
-//        ], id: 42 }
-//    );
-//
-//    dht_packet_decode_invalid!(nodes_response_decode_invalid, NodesResponse);
+    dht_packet_encrypt_decrypt!(
+        nodes_response_payload_encrypt_decrypt,
+        NodesResponse,
+        NodesResponsePayload { nodes: vec![
+            PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
+        ], id: 42 }
+    );
+
+    dht_packet_encrypt_decrypt_invalid_key!(
+        nodes_response_payload_encrypt_decrypt_invalid_key,
+        NodesResponse,
+        NodesResponsePayload { nodes: vec![
+            PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
+        ], id: 42 }
+    );
+
+    dht_packet_decode_invalid!(nodes_response_decode_invalid, NodesResponse);
 }

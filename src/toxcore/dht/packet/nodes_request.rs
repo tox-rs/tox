@@ -154,17 +154,17 @@ mod tests {
 
     dht_packet_encode_decode!(nodes_request_encode_decode, NodesRequest);
 
-//    dht_packet_encrypt_decrypt!(
-//        nodes_request_payload_encrypt_decrypt,
-//        NodesRequest,
-//        NodesRequestPayload { pk: gen_keypair().0, id: 42 }
-//    );
-//
-//    dht_packet_encrypt_decrypt_invalid_key!(
-//        nodes_request_payload_encrypt_decrypt_invalid_key,
-//        NodesRequest,
-//        NodesRequestPayload { pk: gen_keypair().0, id: 42 }
-//    );
-//
-//    dht_packet_decode_invalid!(nodes_request_decode_invalid, NodesRequest);
+    dht_packet_encrypt_decrypt!(
+        nodes_request_payload_encrypt_decrypt,
+        NodesRequest,
+        NodesRequestPayload { pk: gen_keypair().0, id: 42 }
+    );
+
+    dht_packet_encrypt_decrypt_invalid_key!(
+        nodes_request_payload_encrypt_decrypt_invalid_key,
+        NodesRequest,
+        NodesRequestPayload { pk: gen_keypair().0, id: 42 }
+    );
+
+    dht_packet_decode_invalid!(nodes_request_decode_invalid, NodesRequest);
 }
