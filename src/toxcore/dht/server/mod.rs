@@ -10,7 +10,6 @@ use futures::future::join_all;
 use futures::sync::mpsc;
 use parking_lot::RwLock;
 use tokio::timer::Interval;
-use lru::LruCache;
 
 use std::io::{ErrorKind, Error};
 use std::net::SocketAddr;
@@ -24,6 +23,7 @@ use toxcore::dht::packet::*;
 use toxcore::dht::packed_node::*;
 use toxcore::dht::kbucket::*;
 use toxcore::dht::nodes_queue::*;
+use toxcore::dht::precomputed_cache::*;
 use toxcore::onion::packet::*;
 use toxcore::onion::onion_announce::*;
 use toxcore::dht::request_queue::*;
@@ -166,10 +166,9 @@ pub struct Server {
     /// from this list if Ktree doesn't have good (or bad but not discarded)
     /// nodes.
     initial_bootstrap: Vec<PackedNode>,
-    /// Lru cache for precomputed keys.
-    /// Storing precomputed keys for avoiding redundant calculation.
-    /// When DHT needs precomputed key, search this cache before calc new precomputed key.
-    precomputed_keys: Arc<RwLock<LruCache<PublicKey, PrecomputedKey>>>
+    /// Lru cache for precomputed keys. It stores precomputed keys to avoid
+    /// redundant calculations.
+    precomputed_keys: PrecomputedCache,
 }
 
 impl Server {
@@ -196,6 +195,8 @@ impl Server {
         //     .take(FAKE_FRIENDS_NUMBER)
         //     .collect();
 
+        let precomputed_keys = PrecomputedCache::new(sk.clone(), PRECOMPUTED_LRU_CACHE_SIZE);
+
         Server {
             sk,
             pk,
@@ -216,19 +217,8 @@ impl Server {
             lan_discovery_enabled: true,
             is_ipv6_enabled: false,
             initial_bootstrap: Vec::new(),
-            precomputed_keys: Arc::new(RwLock::new(LruCache::new(PRECOMPUTED_LRU_CACHE_SIZE))),
+            precomputed_keys,
         }
-    }
-
-    /// Get PrecomputedKey of a peer or newly make and save it.
-    fn get_precomputed_key(&self, pk: PublicKey) -> PrecomputedKey {
-        let mut precomputed_cache = self.precomputed_keys.write();
-        if let Some(precomputed_key) = precomputed_cache.get(&pk) {
-            return precomputed_key.clone();
-        }
-        let precomputed_key = precompute(&pk, &self.sk);
-        precomputed_cache.put(pk,precomputed_key.clone());
-        precomputed_key
     }
 
     /// Enable/disable IPv6 mode of DHT server.
@@ -544,7 +534,7 @@ impl Server {
             id: request_queue.new_ping_id(node.pk),
         };
         let ping_req = Packet::PingRequest(PingRequest::new(
-            &self.get_precomputed_key(node.pk),
+            &self.precomputed_keys.get(node.pk),
             &self.pk,
             &payload
         ));
@@ -564,7 +554,7 @@ impl Server {
             id: request_queue.new_ping_id(node.pk),
         };
         let nodes_req = Packet::NodesRequest(NodesRequest::new(
-            &self.get_precomputed_key(node.pk),
+            &self.precomputed_keys.get(node.pk),
             &self.pk,
             &payload
         ));
@@ -593,7 +583,7 @@ impl Server {
                         id: friend.hole_punch.ping_id,
                     });
                     let nat_ping_req_packet = DhtRequest::new(
-                        &self.get_precomputed_key(friend.pk),
+                        &self.precomputed_keys.get(friend.pk),
                         &friend.pk,
                         &self.pk,
                         &payload
@@ -619,7 +609,7 @@ impl Server {
                 id: request_queue.new_ping_id(friend.pk),
             };
             let packet = Packet::PingRequest(PingRequest::new(
-                &self.get_precomputed_key(friend.pk),
+                &self.precomputed_keys.get(friend.pk),
                 &self.pk,
                 &payload
             ));
@@ -766,7 +756,7 @@ impl Server {
     /// packet. If node that sent this packet is not present in close nodes list
     /// and can be added there then it will be added to ping list.
     fn handle_ping_req(&self, packet: &PingRequest, addr: SocketAddr) -> IoFuture<()> {
-        let precomputed_key = self.get_precomputed_key(packet.pk);
+        let precomputed_key = self.precomputed_keys.get(packet.pk);
         let payload = match packet.get_payload(&precomputed_key) {
             Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
@@ -790,7 +780,7 @@ impl Server {
     /// Handle received `PingResponse` packet and if it's correct add the node
     /// that sent this packet to close nodes lists.
     fn handle_ping_resp(&self, packet: &PingResponse, addr: SocketAddr) -> IoFuture<()> {
-        let precomputed_key = self.get_precomputed_key(packet.pk);
+        let precomputed_key = self.precomputed_keys.get(packet.pk);
         let payload = match packet.get_payload(&precomputed_key) {
             Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
@@ -827,7 +817,7 @@ impl Server {
     /// packet. If node that sent this packet is not present in close nodes list
     /// and can be added there then it will be added to ping list.
     fn handle_nodes_req(&self, packet: &NodesRequest, addr: SocketAddr) -> IoFuture<()> {
-        let precomputed_key = self.get_precomputed_key(packet.pk);
+        let precomputed_key = self.precomputed_keys.get(packet.pk);
         let payload = match packet.get_payload(&precomputed_key) {
             Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
@@ -856,7 +846,7 @@ impl Server {
     /// added to bootstrap nodes list to send `NodesRequest` packet to them
     /// later.
     fn handle_nodes_resp(&self, packet: &NodesResponse, addr: SocketAddr) -> IoFuture<()> {
-        let precomputed_key = self.get_precomputed_key(packet.pk);
+        let precomputed_key = self.precomputed_keys.get(packet.pk);
         let payload = match packet.get_payload(&precomputed_key) {
             Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
@@ -960,7 +950,7 @@ impl Server {
     /// someone else or parse it and handle the payload if it's sent for us.
     fn handle_dht_req(&self, packet: DhtRequest, addr: SocketAddr) -> IoFuture<()> {
         if packet.rpk == self.pk { // the target peer is me
-            let precomputed_key = self.get_precomputed_key(packet.spk);
+            let precomputed_key = self.precomputed_keys.get(packet.spk);
             let payload = packet.get_payload(&precomputed_key);
             let payload = match payload {
                 Err(e) => return Box::new(future::err(e)),
@@ -1024,7 +1014,7 @@ impl Server {
             id: payload.id,
         });
         let nat_ping_resp = Packet::DhtRequest(DhtRequest::new(
-            &self.get_precomputed_key(*spk),
+            &self.precomputed_keys.get(*spk),
             spk,
             &self.pk,
             &resp_payload
@@ -1090,7 +1080,7 @@ impl Server {
     /// to the next peer.
     fn handle_onion_request_0(&self, packet: &OnionRequest0, addr: SocketAddr) -> IoFuture<()> {
         let onion_symmetric_key = self.onion_symmetric_key.read();
-        let shared_secret = self.get_precomputed_key(packet.temporary_pk);
+        let shared_secret = self.precomputed_keys.get(packet.temporary_pk);
         let payload = packet.get_payload(&shared_secret);
         let payload = match payload {
             Err(e) => return Box::new(future::err(e)),
@@ -1115,7 +1105,7 @@ impl Server {
     /// to the next peer.
     fn handle_onion_request_1(&self, packet: &OnionRequest1, addr: SocketAddr) -> IoFuture<()> {
         let onion_symmetric_key = self.onion_symmetric_key.read();
-        let shared_secret = self.get_precomputed_key(packet.temporary_pk);
+        let shared_secret = self.precomputed_keys.get(packet.temporary_pk);
         let payload = packet.get_payload(&shared_secret);
         let payload = match payload {
             Err(e) => return Box::new(future::err(e)),
@@ -1140,7 +1130,7 @@ impl Server {
     /// or `OnionDataRequest` packet to the next peer.
     fn handle_onion_request_2(&self, packet: &OnionRequest2, addr: SocketAddr) -> IoFuture<()> {
         let onion_symmetric_key = self.onion_symmetric_key.read();
-        let shared_secret = self.get_precomputed_key(packet.temporary_pk);
+        let shared_secret = self.precomputed_keys.get(packet.temporary_pk);
         let payload = packet.get_payload(&shared_secret);
         let payload = match payload {
             Err(e) => return Box::new(future::err(e)),
@@ -1174,7 +1164,7 @@ impl Server {
     fn handle_onion_announce_request(&self, packet: OnionAnnounceRequest, addr: SocketAddr) -> IoFuture<()> {
         let mut onion_announce = self.onion_announce.write();
 
-        let shared_secret = self.get_precomputed_key(packet.inner.pk);
+        let shared_secret = self.precomputed_keys.get(packet.inner.pk);
         let payload = match packet.inner.get_payload(&shared_secret) {
             Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
