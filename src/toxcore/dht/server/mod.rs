@@ -1394,6 +1394,11 @@ impl Server {
     pub fn set_net_crypto(&mut self, net_crypto: NetCrypto) {
         self.net_crypto = Some(net_crypto);
     }
+
+    /// Get `PrecomputedKey`s cache.
+    pub fn get_precomputed_keys(&self) -> PrecomputedCache {
+        self.precomputed_keys.clone()
+    }
 }
 
 #[cfg(test)]
@@ -1902,7 +1907,8 @@ mod tests {
             lossy_tx,
             dht_pk,
             dht_sk,
-            real_pk
+            real_pk,
+            precomputed_keys: alice.get_precomputed_keys(),
         });
 
         alice.set_net_crypto(net_crypto);
