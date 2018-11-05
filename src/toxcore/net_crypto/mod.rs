@@ -133,7 +133,7 @@ pub struct NetCrypto {
     /// Our real `PublicKey`
     real_pk: PublicKey,
     /// Symmetric key used for cookies encryption
-    pub symmetric_key: secretbox::Key,
+    symmetric_key: secretbox::Key,
     /// Connection by long term public key of DHT node map
     connections: Arc<RwLock<HashMap<PublicKey, Arc<RwLock<CryptoConnection>>>>>,
     /// Long term keys by IP address of DHT node map. `SocketAddr` can't be used
@@ -171,6 +171,31 @@ impl NetCrypto {
     /// Get crypto connection by long term `PublicKey`
     fn connection_by_key(&self, pk: PublicKey) -> Option<Arc<RwLock<CryptoConnection>>> {
         self.connections.read().get(&pk).cloned()
+    }
+
+    /// Create `CookieResponse` packet with `Cookie` requested by `CookieRequest` packet
+    fn handle_cookie_request(&self, packet: &CookieRequest) -> Result<CookieResponse, Error> {
+        let payload = packet.get_payload(&self.dht_sk)?;
+
+        let cookie = Cookie::new(payload.pk, packet.pk);
+        let encrypted_cookie = EncryptedCookie::new(&self.symmetric_key, &cookie);
+
+        let response_payload = CookieResponsePayload {
+            cookie: encrypted_cookie,
+            id: payload.id,
+        };
+        let precomputed_key = precompute(&packet.pk, &self.dht_sk);
+        let response = CookieResponse::new(&precomputed_key, &response_payload);
+
+        Ok(response)
+    }
+
+    /// Handle `CookieRequest` packet received from UDP socket
+    pub fn handle_udp_cookie_request(&self, packet: &CookieRequest, addr: SocketAddr) -> IoFuture<()> {
+        match self.handle_cookie_request(packet) {
+            Ok(response) => self.send_to_udp(addr, Packet::CookieResponse(response)),
+            Err(e) => Box::new(future::err(e))
+        }
     }
 
     /// Handle `CookieResponse` and if it's correct change connection status to `HandshakeSending`.
@@ -634,6 +659,149 @@ mod tests {
         });
 
         let _net_crypto_c = net_crypto.clone();
+    }
+
+    #[test]
+    fn handle_cookie_request() {
+        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
+        let (lossless_tx, _lossless_rx) = mpsc::unbounded();
+        let (lossy_tx, _lossy_rx) = mpsc::unbounded();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, _real_sk) = gen_keypair();
+        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let net_crypto = NetCrypto::new(NetCryptoNewArgs {
+            udp_tx,
+            dht_pk_tx,
+            lossless_tx,
+            lossy_tx,
+            dht_pk,
+            dht_sk,
+            real_pk
+        });
+
+        let cookie_request_id = 12345;
+
+        let cookie_request_payload = CookieRequestPayload {
+            pk: peer_real_pk,
+            id: cookie_request_id,
+        };
+        let cookie_request = CookieRequest::new(&precomputed_key, &peer_dht_pk, &cookie_request_payload);
+
+        let cookie_response = net_crypto.handle_cookie_request(&cookie_request).unwrap();
+        let cookie_response_payload = cookie_response.get_payload(&precomputed_key).unwrap();
+
+        assert_eq!(cookie_response_payload.id, cookie_request_id);
+
+        let cookie = cookie_response_payload.cookie.get_payload(&net_crypto.symmetric_key).unwrap();
+        assert_eq!(cookie.dht_pk, peer_dht_pk);
+        assert_eq!(cookie.real_pk, peer_real_pk);
+    }
+
+    #[test]
+    fn handle_cookie_request_invalid() {
+        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
+        let (lossless_tx, _lossless_rx) = mpsc::unbounded();
+        let (lossy_tx, _lossy_rx) = mpsc::unbounded();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, _real_sk) = gen_keypair();
+        let net_crypto = NetCrypto::new(NetCryptoNewArgs {
+            udp_tx,
+            dht_pk_tx,
+            lossless_tx,
+            lossy_tx,
+            dht_pk,
+            dht_sk,
+            real_pk
+        });
+
+        let cookie_request = CookieRequest {
+            pk: gen_keypair().0,
+            nonce: gen_nonce(),
+            payload: vec![42; 88]
+        };
+
+        assert!(net_crypto.handle_cookie_request(&cookie_request).is_err());
+    }
+
+    #[test]
+    fn handle_udp_cookie_request() {
+        let (udp_tx, udp_rx) = mpsc::unbounded();
+        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
+        let (lossless_tx, _lossless_rx) = mpsc::unbounded();
+        let (lossy_tx, _lossy_rx) = mpsc::unbounded();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, _real_sk) = gen_keypair();
+        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let net_crypto = NetCrypto::new(NetCryptoNewArgs {
+            udp_tx,
+            dht_pk_tx,
+            lossless_tx,
+            lossy_tx,
+            dht_pk,
+            dht_sk,
+            real_pk
+        });
+
+        let cookie_request_id = 12345;
+
+        let cookie_request_payload = CookieRequestPayload {
+            pk: peer_real_pk,
+            id: cookie_request_id,
+        };
+        let cookie_request = CookieRequest::new(&precomputed_key, &peer_dht_pk, &cookie_request_payload);
+
+        let addr = "127.0.0.1:12345".parse().unwrap();
+
+        assert!(net_crypto.handle_udp_cookie_request(&cookie_request, addr).wait().is_ok());
+
+        let (received, _udp_rx) = udp_rx.into_future().wait().unwrap();
+        let (packet, addr_to_send) = received.unwrap();
+        let cookie_response = unpack!(packet, Packet::CookieResponse);
+
+        assert_eq!(addr_to_send, addr);
+
+        let cookie_response_payload = cookie_response.get_payload(&precomputed_key).unwrap();
+
+        assert_eq!(cookie_response_payload.id, cookie_request_id);
+
+        let cookie = cookie_response_payload.cookie.get_payload(&net_crypto.symmetric_key).unwrap();
+        assert_eq!(cookie.dht_pk, peer_dht_pk);
+        assert_eq!(cookie.real_pk, peer_real_pk);
+    }
+
+    #[test]
+    fn handle_udp_cookie_request_invalid() {
+        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
+        let (lossless_tx, _lossless_rx) = mpsc::unbounded();
+        let (lossy_tx, _lossy_rx) = mpsc::unbounded();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, _real_sk) = gen_keypair();
+        let net_crypto = NetCrypto::new(NetCryptoNewArgs {
+            udp_tx,
+            dht_pk_tx,
+            lossless_tx,
+            lossy_tx,
+            dht_pk,
+            dht_sk,
+            real_pk
+        });
+
+        let cookie_request = CookieRequest {
+            pk: gen_keypair().0,
+            nonce: gen_nonce(),
+            payload: vec![42; 88]
+        };
+
+        let addr = "127.0.0.1:12345".parse().unwrap();
+
+        assert!(net_crypto.handle_udp_cookie_request(&cookie_request, addr).wait().is_err());
     }
 
     #[test]
