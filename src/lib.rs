@@ -20,7 +20,7 @@ extern crate log;
 extern crate nom;
 #[macro_use]
 extern crate cookie_factory;
-extern crate sodiumoxide;
+extern crate rust_sodium;
 
 extern crate tokio;
 extern crate tokio_codec;

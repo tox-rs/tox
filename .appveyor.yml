@@ -1,6 +1,6 @@
 # Thanks to https://github.com/starkat99/appveyor-rust
 
-os: Visual Studio 2015
+os: Visual Studio 2017
 platform: Any CPU
 
 clone_depth: 1
@@ -13,17 +13,11 @@ branches:
 environment:
   matrix:
     - channel: stable
-      target: x86_64-pc-windows-gnu
+      target: x86_64-pc-windows-msvc
   # env variables for debugging
   RUST_BACKTRACE: "1"
 
 install:
-  # install libsodium
-  - mkdir deps && cd deps
-  - appveyor-retry appveyor DownloadFile https://download.libsodium.org/libsodium/releases/libsodium-1.0.16-mingw.tar.gz -FileName libsodium.tar.gz
-  - 7z x libsodium.tar.gz -so | 7z x -si -ttar > nul
-  - set SODIUM_STATIC=1
-  - set SODIUM_LIB_DIR=C:\projects\tox\deps\libsodium-win64\lib
   - cd C:\projects\tox
   # install rustc & cargo
   - appveyor-retry appveyor DownloadFile https://win.rustup.rs/ -FileName rustup-init.exe

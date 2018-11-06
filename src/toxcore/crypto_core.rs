@@ -1,24 +1,19 @@
 //! Functions for the core crypto.
 
-pub use sodiumoxide::randombytes::randombytes_into;
-pub use sodiumoxide::crypto::box_::*;
-pub use sodiumoxide::crypto::hash::{sha256, sha512};
-pub use sodiumoxide::crypto::secretbox;
+pub use rust_sodium::randombytes::randombytes_into;
+pub use rust_sodium::crypto::box_::*;
+pub use rust_sodium::crypto::hash::{sha256, sha512};
+pub use rust_sodium::crypto::secretbox;
 
-use std::sync::{Once, ONCE_INIT};
 use byteorder::{ByteOrder, NativeEndian};
 
 use toxcore::binary_io::*;
 
 // TODO: check if `#[inline]` is actually useful
 
-
-static CRYPTO_INIT_ONCE: Once = ONCE_INIT;
-static mut CRYPTO_INIT: bool = false;
-
 /** Run before using crypto.
 
-Runs [`sodiumoxide::init()`](../../../sodiumoxide/fn.init.html).
+Runs [`rust_sodium::init()`](../../../rust_sodium/fn.init.html).
 
 Returns `true` on success, `false` otherwise.
 
@@ -33,14 +28,7 @@ assert_eq!(true, crypto_init());
 ```
 */
 pub fn crypto_init() -> bool {
-    // NOTE: `init()` could be run more than once, but not in parallel, and
-    //       `CRYPTO_INIT` *can't* be modified while it may be read by
-    //       something else.
-    CRYPTO_INIT_ONCE.call_once(|| {
-        let initialized = ::sodiumoxide::init();
-        unsafe { CRYPTO_INIT = initialized; }
-    });
-    unsafe { CRYPTO_INIT }
+    ::rust_sodium::init().is_ok()
 }
 
 
@@ -95,8 +83,8 @@ pub fn public_key_valid(&PublicKey(ref pk): &PublicKey) -> bool {
     not have to be performed on every encrypt/decrypt.
 
     This a wrapper for the
-    [`precompute()`](../../../sodiumoxide/crypto/box_/curve25519xsalsa20poly1305/fn.precompute.html)
-    function from `sodiumoxide` crate.
+    [`precompute()`](../../../rust_sodium/crypto/box_/curve25519xsalsa20poly1305/fn.precompute.html)
+    function from `rust_sodium` crate.
 */
 #[inline]
 pub fn encrypt_precompute(their_public_key: &PublicKey,
@@ -104,7 +92,7 @@ pub fn encrypt_precompute(their_public_key: &PublicKey,
     precompute(their_public_key, our_secret_key)
 }
 // ↓ can't use, since there's no way to add additional docs
-//pub use sodiumoxide::crypto::box_::precompute as encrypt_precompute;
+//pub use rust_sodium::crypto::box_::precompute as encrypt_precompute;
 
 
 /** Returns encrypted data from `plain`, with length of `plain + 16` due to
@@ -113,12 +101,12 @@ pub fn encrypt_precompute(their_public_key: &PublicKey,
     Encryption is done using precomputed key (from the public key (32 bytes)
     of receiver and the secret key of sender) and a 24 byte nonce.
 
-    `sodiumoxide` takes care of padding the data, so the resulting encrypted
+    `rust_sodium` takes care of padding the data, so the resulting encrypted
     data has length of `plain + 16`.
 
     A wrapper for the
-    [`seal_precomputed()`](../../../sodiumoxide/crypto/box_/curve25519xsalsa20poly1305/fn.seal_precomputed.html)
-    function from `sodiumoxide`.
+    [`seal_precomputed()`](../../../rust_sodium/crypto/box_/curve25519xsalsa20poly1305/fn.seal_precomputed.html)
+    function from `rust_sodium`.
 */
 #[inline]
 pub fn encrypt_data_symmetric(precomputed_key: &PrecomputedKey,
@@ -127,7 +115,7 @@ pub fn encrypt_data_symmetric(precomputed_key: &PrecomputedKey,
     seal_precomputed(plain, nonce, precomputed_key)
 }
 // not using ↓ since it doesn't allow to add additional documentation
-//pub use sodiumoxide::crypto::box_::seal_precomputed as encrypt_data_symmetric;
+//pub use rust_sodium::crypto::box_::seal_precomputed as encrypt_data_symmetric;
 
 
 /** Returns plain data from `encrypted`, with length of `encrypted - 16` due to
@@ -136,12 +124,12 @@ pub fn encrypt_data_symmetric(precomputed_key: &PrecomputedKey,
     Decryption is done using precomputed key (from the secret key of receiver
     and the public key of sender) and a 24 byte nonce.
 
-    `sodiumoxide` takes care of removing padding from the data, so the
+    `rust_sodium` takes care of removing padding from the data, so the
     resulting plain data has length of `encrypted - 16`.
 
     This function is a wrapper for the
-    [`open_precomputed()`](../../../sodiumoxide/crypto/box_/curve25519xsalsa20poly1305/fn.open_precomputed.html)
-    function from `sodiumoxide`.
+    [`open_precomputed()`](../../../rust_sodium/crypto/box_/curve25519xsalsa20poly1305/fn.open_precomputed.html)
+    function from `rust_sodium`.
 */
 #[inline]
 pub fn decrypt_data_symmetric(precomputed_key: &PrecomputedKey,
@@ -168,7 +156,7 @@ pub fn increment_nonce(nonce: &mut Nonce) {
     trace!(target: "Nonce", "Incrementing Nonce: {:?}", &nonce);
     let Nonce(ref mut bytes) = *nonce;
     bytes.reverse(); // treat nonce as LE number
-    ::sodiumoxide::utils::increment_le(bytes);
+    ::rust_sodium::utils::increment_le(bytes);
     bytes.reverse(); // treat nonce as BE number again
 }
 
@@ -260,7 +248,7 @@ pub mod tests {
 
     #[test]
     // test comparing empty keys
-    // testing since it would appear that sodiumoxide doesn't do testing for it
+    // testing since it would appear that rust_sodium doesn't do testing for it
     fn public_key_cmp_test_empty() {
         let alice_publickey = PublicKey([0; PUBLICKEYBYTES]);
         let bob_publickey = PublicKey([0; PUBLICKEYBYTES]);
@@ -271,7 +259,7 @@ pub mod tests {
 
     #[test]
     // test comparing random public keys
-    // testing since it would appear that sodiumoxide doesn't do testing for it
+    // testing since it would appear that rust_sodium doesn't do testing for it
     fn public_key_cmp_test_random() {
         let (alice_publickey, _alice_secretkey) = gen_keypair();
         let (bob_publickey, _bob_secretkey) = gen_keypair();
@@ -328,7 +316,7 @@ pub mod tests {
 
 
     #[test]
-    // test uses "bare" functions provided by `sodiumoxide`, with an exception
+    // test uses "bare" functions provided by `rust_sodium`, with an exception
     // of the tested function
     fn encrypt_precompute_test() {
         let (alice_pk, alice_sk) = gen_keypair();
@@ -349,7 +337,7 @@ pub mod tests {
 
 
     #[test]
-    // test uses "bare" functions provided by `sodiumoxide`, with an "exception"
+    // test uses "bare" functions provided by `rust_sodium`, with an "exception"
     // of the tested function
     fn encrypt_data_symmetric_test() {
         let (alice_pk, alice_sk) = gen_keypair();
@@ -379,7 +367,7 @@ pub mod tests {
 
 
     #[test]
-    // test uses "bare" functions provided by `sodiumoxide`, with an exception
+    // test uses "bare" functions provided by `rust_sodium`, with an exception
     // of the tested function
     fn decrypt_data_symmetric_test() {
         let (alice_pk, alice_sk) = gen_keypair();

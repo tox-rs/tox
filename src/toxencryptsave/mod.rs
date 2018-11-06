@@ -21,25 +21,25 @@ assert_eq!(plaintext,
 ```
 */
 
-use sodiumoxide::crypto::pwhash::{
+use rust_sodium::crypto::pwhash::{
     MEMLIMIT_INTERACTIVE, OPSLIMIT_INTERACTIVE,
     Salt, OpsLimit,
     gen_salt, derive_key
 };
 
-use sodiumoxide::crypto::box_::{
+use rust_sodium::crypto::box_::{
     NONCEBYTES, MACBYTES,
     Nonce, PrecomputedKey,
     gen_nonce
 };
 
-use sodiumoxide::crypto::hash::sha256;
-use sodiumoxide::utils::memzero;
+use rust_sodium::crypto::hash::sha256;
+use rust_sodium::utils::memzero;
 
 /// Length in bytes of the salt used to encrypt/decrypt data.
-pub use sodiumoxide::crypto::pwhash::SALTBYTES as SALT_LENGTH;
+pub use rust_sodium::crypto::pwhash::SALTBYTES as SALT_LENGTH;
 /// Length in bytes of the key used to encrypt/decrypt data.
-pub use sodiumoxide::crypto::box_::PRECOMPUTEDKEYBYTES as KEY_LENGTH;
+pub use rust_sodium::crypto::box_::PRECOMPUTEDKEYBYTES as KEY_LENGTH;
 
 use ::toxcore::crypto_core;
 
@@ -111,11 +111,11 @@ impl PassKey {
     E.g.
 
     ```
-    extern crate sodiumoxide;
+    extern crate rust_sodium;
     extern crate tox;
 
     # fn main() {
-    use sodiumoxide::crypto::pwhash::gen_salt;
+    use rust_sodium::crypto::pwhash::gen_salt;
     use tox::toxencryptsave::*;
 
     assert_eq!(PassKey::with_salt(&[], gen_salt()), Err(KeyDerivationError::Null));
