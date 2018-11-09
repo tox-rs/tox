@@ -4,10 +4,9 @@
 use byteorder::{ByteOrder, BigEndian};
 use nom::{be_u16, be_u32, rest};
 
-use std::io::{Error, ErrorKind};
-
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
+use toxcore::dht::packet::errors::*;
 
 /// The maximum size of `CryptoData` packet including two bytes of nonce and
 /// packet kind byte.
@@ -85,22 +84,20 @@ impl CryptoData {
     - fails to decrypt
     - fails to parse `CryptoDataPayload`
     */
-    pub fn get_payload(&self, shared_secret: &PrecomputedKey, nonce: &Nonce) -> Result<CryptoDataPayload, Error> {
+    pub fn get_payload(&self, shared_secret: &PrecomputedKey, nonce: &Nonce) -> Result<CryptoDataPayload, GetPayloadError> {
         let decrypted = open_precomputed(&self.payload, nonce, shared_secret)
             .map_err(|()| {
                 debug!("Decrypting CryptoData failed!");
-                Error::new(ErrorKind::Other, "CryptoData decrypt error.")
+                GetPayloadError::decrypt()
             })?;
         match CryptoDataPayload::from_bytes(&decrypted) {
-            IResult::Incomplete(e) => {
-                debug!(target: "Dht", "CryptoDataPayload return deserialize error: {:?}", e);
-                Err(Error::new(ErrorKind::Other,
-                    format!("CryptoDataPayload return deserialize error: {:?}", e)))
+            IResult::Incomplete(needed) => {
+                debug!(target: "Dht", "CryptoDataPayload return deserialize error: {:?}", needed);
+                Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
             },
-            IResult::Error(e) => {
-                debug!(target: "Dht", "CryptoDataPayload return deserialize error: {:?}", e);
-                Err(Error::new(ErrorKind::Other,
-                    format!("CryptoDataPayload return deserialize error: {:?}", e)))
+            IResult::Error(error) => {
+                debug!(target: "Dht", "CryptoDataPayload return deserialize error: {:?}", error);
+                Err(GetPayloadError::deserialize(error, self.payload.to_vec()))
             },
             IResult::Done(_, payload) => {
                 Ok(payload)
@@ -154,6 +151,7 @@ impl ToBytes for CryptoDataPayload {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nom::Needed;
 
     encode_decode_test!(
         crypto_data_encode_decode,
@@ -219,6 +217,7 @@ mod tests {
         // try to decode payload with eve's shared secret
         let decoded_payload = crypto_data.get_payload(&eve_shared_secret, &nonce);
         assert!(decoded_payload.is_err());
+        assert_eq!(*decoded_payload.err().unwrap().kind(), GetPayloadErrorKind::Decrypt);
     }
 
     #[test]
@@ -237,5 +236,6 @@ mod tests {
         };
         let decoded_payload = invalid_packet.get_payload(&shared_secret, &nonce);
         assert!(decoded_payload.is_err());
+        assert_eq!(*decoded_payload.err().unwrap().kind(), GetPayloadErrorKind::IncompletePayload { needed: Needed::Size(4), payload: invalid_packet.payload });
     }
 }

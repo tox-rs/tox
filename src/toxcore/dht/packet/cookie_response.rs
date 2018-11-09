@@ -3,11 +3,10 @@
 
 use nom::be_u64;
 
-use std::io::{Error, ErrorKind};
-
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 use toxcore::dht::packet::cookie::EncryptedCookie;
+use toxcore::dht::packet::errors::*;
 
 /** Response to a `CookieRequest` packet.
 
@@ -71,22 +70,20 @@ impl CookieResponse {
     - fails to decrypt
     - fails to parse `CookieResponsePayload`
     */
-    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<CookieResponsePayload, Error> {
+    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<CookieResponsePayload, GetPayloadError> {
         let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
             .map_err(|()| {
                 debug!("Decrypting CookieResponse failed!");
-                Error::new(ErrorKind::Other, "CookieResponse decrypt error.")
+                GetPayloadError::decrypt()
             })?;
         match CookieResponsePayload::from_bytes(&decrypted) {
-            IResult::Incomplete(e) => {
-                debug!(target: "Dht", "CookieResponsePayload return deserialize error: {:?}", e);
-                Err(Error::new(ErrorKind::Other,
-                    format!("CookieResponsePayload return deserialize error: {:?}", e)))
+            IResult::Incomplete(needed) => {
+                debug!(target: "Dht", "CookieResponsePayload return deserialize error: {:?}", needed);
+                Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
             },
-            IResult::Error(e) => {
-                debug!(target: "Dht", "CookieResponsePayload return deserialize error: {:?}", e);
-                Err(Error::new(ErrorKind::Other,
-                    format!("CookieResponsePayload return deserialize error: {:?}", e)))
+            IResult::Error(error) => {
+                debug!(target: "Dht", "CookieResponsePayload return deserialize error: {:?}", error);
+                Err(GetPayloadError::deserialize(error, self.payload.to_vec()))
             },
             IResult::Done(_, payload) => {
                 Ok(payload)
@@ -137,6 +134,7 @@ impl ToBytes for CookieResponsePayload {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nom::{Needed, ErrorKind};
 
     encode_decode_test!(
         cookie_response_encode_decode,
@@ -196,6 +194,7 @@ mod tests {
         // try to decode payload with eve's shared secret
         let decoded_payload = dht_packet.get_payload(&eve_shared_secret);
         assert!(decoded_payload.is_err());
+        assert_eq!(*decoded_payload.err().unwrap().kind(), GetPayloadErrorKind::Decrypt);
     }
 
     #[test]
@@ -213,6 +212,7 @@ mod tests {
         };
         let decoded_payload = invalid_packet.get_payload(&shared_secret);
         assert!(decoded_payload.is_err());
+        assert_eq!(*decoded_payload.err().unwrap().kind(), GetPayloadErrorKind::Deserialize { error: ErrorKind::Eof, payload: invalid_packet.payload });
         // Try short incomplete array
         let invalid_payload = [];
         let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
@@ -222,5 +222,6 @@ mod tests {
         };
         let decoded_payload = invalid_packet.get_payload(&shared_secret);
         assert!(decoded_payload.is_err());
+        assert_eq!(*decoded_payload.err().unwrap().kind(), GetPayloadErrorKind::IncompletePayload { needed: Needed::Size(24), payload: invalid_packet.payload });
     }
 }

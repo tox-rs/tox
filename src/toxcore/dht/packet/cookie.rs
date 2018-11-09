@@ -3,12 +3,12 @@
 
 use nom::be_u64;
 
-use std::io::{Error, ErrorKind};
 use std::time::SystemTime;
 
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 use toxcore::time::*;
+use toxcore::dht::packet::errors::*;
 
 /// Number of seconds that generated cookie is valid
 pub const COOKIE_TIMEOUT: u64 = 15;
@@ -145,22 +145,20 @@ impl EncryptedCookie {
     - fails to decrypt
     - fails to parse `Cookie`
     */
-    pub fn get_payload(&self, symmetric_key: &secretbox::Key) -> Result<Cookie, Error> {
+    pub fn get_payload(&self, symmetric_key: &secretbox::Key) -> Result<Cookie, GetPayloadError> {
         let decrypted = secretbox::open(&self.payload, &self.nonce, symmetric_key)
             .map_err(|()| {
                 debug!("Decrypting Cookie failed!");
-                Error::new(ErrorKind::Other, "Cookie decrypt error.")
+                GetPayloadError::decrypt()
             })?;
         match Cookie::from_bytes(&decrypted) {
-            IResult::Incomplete(e) => {
-                debug!(target: "Dht", "Cookie return deserialize error: {:?}", e);
-                Err(Error::new(ErrorKind::Other,
-                    format!("Cookie return deserialize error: {:?}", e)))
+            IResult::Incomplete(needed) => {
+                debug!(target: "Dht", "Cookie return deserialize error: {:?}", needed);
+                Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
             },
-            IResult::Error(e) => {
-                debug!(target: "Dht", "Cookie return deserialize error: {:?}", e);
-                Err(Error::new(ErrorKind::Other,
-                    format!("Cookie return deserialize error: {:?}", e)))
+            IResult::Error(error) => {
+                debug!(target: "Dht", "Cookie return deserialize error: {:?}", error);
+                Err(GetPayloadError::deserialize(error, self.payload.to_vec()))
             },
             IResult::Done(_, payload) => {
                 Ok(payload)
@@ -178,6 +176,7 @@ impl EncryptedCookie {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nom::{Needed, ErrorKind};
 
     encode_decode_test!(
         cookie_encode_decode,
@@ -218,6 +217,7 @@ mod tests {
         // try to decode payload with eve's symmetric key
         let decoded_payload = encrypted_cookie.get_payload(&eve_symmetric_key);
         assert!(decoded_payload.is_err());
+        assert_eq!(*decoded_payload.err().unwrap().kind(), GetPayloadErrorKind::Decrypt);
     }
 
     #[test]
@@ -233,6 +233,7 @@ mod tests {
         };
         let decoded_payload = invalid_encrypted_cookie.get_payload(&symmetric_key);
         assert!(decoded_payload.is_err());
+        assert_eq!(*decoded_payload.err().unwrap().kind(), GetPayloadErrorKind::Deserialize { error: ErrorKind::Eof, payload: invalid_encrypted_cookie.payload });
         // Try short incomplete array
         let invalid_payload = [];
         let invalid_payload_encoded = secretbox::seal(&invalid_payload, &nonce, &symmetric_key);
@@ -242,6 +243,7 @@ mod tests {
         };
         let decoded_payload = invalid_encrypted_cookie.get_payload(&symmetric_key);
         assert!(decoded_payload.is_err());
+        assert_eq!(*decoded_payload.err().unwrap().kind(), GetPayloadErrorKind::IncompletePayload { needed: Needed::Size(8), payload: invalid_encrypted_cookie.payload });
     }
 
     #[test]
