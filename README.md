@@ -4,8 +4,8 @@
 
 [travis-badge]: https://travis-ci.org/tox-rs/tox.svg?branch=master
 [travis-url]: https://travis-ci.org/tox-rs/tox
-[appveyor-badge]: https://ci.appveyor.com/api/projects/status/y3y2hi6552qgmfr0/branch/master?svg=true
-[appveyor-url]: https://ci.appveyor.com/project/kpp/tox/branch/master
+[appveyor-badge]: https://ci.appveyor.com/api/projects/status/m47ke5odayd6enbn/branch/master?svg=true
+[appveyor-url]: https://ci.appveyor.com/project/tox-rs/tox/branch/master
 [cov-badge]: https://coveralls.io/repos/github/tox-rs/tox/badge.svg?branch=master
 [cov-url]: https://coveralls.io/github/tox-rs/tox?branch=master
 [doc-badge]: https://docs.rs/tox/badge.svg
