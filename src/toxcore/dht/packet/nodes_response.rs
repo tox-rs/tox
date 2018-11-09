@@ -3,12 +3,11 @@
 
 use nom::{le_u8, be_u64, rest};
 
-use std::io::{Error, ErrorKind};
-
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 use toxcore::dht::packed_node::PackedNode;
 use toxcore::dht::codec::*;
+use toxcore::dht::packet::errors::*;
 
 /** Nodes response packet struct. When DHT node receives `NodesRequest` it
 should respond with `NodesResponse` that contains up to to 4 closest nodes to
@@ -79,25 +78,23 @@ impl NodesResponse {
     - fails to decrypt
     - fails to parse as given packet type
     */
-    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<NodesResponsePayload, Error> {
+    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<NodesResponsePayload, GetPayloadError> {
         debug!(target: "NodesResponse", "Getting packet data from NodesResponse.");
         trace!(target: "NodesResponse", "With NodesResponse: {:?}", self);
         let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
             .map_err(|()| {
                 debug!("Decrypting NodesResponse failed!");
-                Error::new(ErrorKind::Other, "NodesResponse decrypt error.")
+                GetPayloadError::DecryptError { packet: stringify!(Self).to_string() }
             })?;
 
         match NodesResponsePayload::from_bytes(&decrypted) {
-            IResult::Incomplete(e) => {
-                debug!(target: "NodesResponse", "NodesResponsePayload deserialize error: {:?}", e);
-                Err(Error::new(ErrorKind::Other,
-                    format!("NodesResponsePayload deserialize error: {:?}", e)))
+            IResult::Incomplete(needed) => {
+                debug!(target: "NodesResponse", "NodesResponsePayload deserialize error: {:?}", needed);
+                Err(GetPayloadError::IncompletePayload { packet: stringify!(Self).to_string(), needed, payload: self.payload.to_vec() })
             },
-            IResult::Error(e) => {
-                debug!(target: "NodesResponse", "PingRequestPayload deserialize error: {:?}", e);
-                Err(Error::new(ErrorKind::Other,
-                    format!("NodesResponsePayload deserialize error: {:?}", e)))
+            IResult::Error(error) => {
+                debug!(target: "NodesResponse", "PingRequestPayload deserialize error: {:?}", error);
+                Err(GetPayloadError::DeserializeError { packet: stringify!(Self).to_string(), error, payload: self.payload.to_vec() })
             },
             IResult::Done(_, payload) => {
                 Ok(payload)

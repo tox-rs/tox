@@ -3,11 +3,10 @@
 
 use nom::{be_u64, rest};
 
-use std::io::{Error, ErrorKind};
-
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 use toxcore::dht::codec::*;
+use toxcore::dht::packet::errors::*;
 
 /** DHT Request packet struct.
 DHT Request packet consists of NatPingRequest and NatPingResponse.
@@ -88,26 +87,24 @@ impl DhtRequest {
     - fails to decrypt
     - fails to parse as given packet type
     */
-    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<DhtRequestPayload, Error>
+    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<DhtRequestPayload, GetPayloadError>
     {
         debug!(target: "DhtRequest", "Getting packet data from DhtRequest.");
         trace!(target: "DhtRequest", "With DhtRequest: {:?}", self);
         let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
             .map_err(|()| {
                 debug!("Decrypting DhtRequest failed!");
-                Error::new(ErrorKind::Other, "DhtRequest decrypt error.")
+                GetPayloadError::DecryptError { packet: stringify!(Self).to_string() }
             })?;
 
         match DhtRequestPayload::from_bytes(&decrypted) {
-            IResult::Incomplete(e) => {
-                debug!(target: "DhtRequest", "DhtRequest deserialize error: {:?}", e);
-                Err(Error::new(ErrorKind::Other,
-                    format!("DhtRequest deserialize error: {:?}, packet: {:?}", e, decrypted)))
+            IResult::Incomplete(needed) => {
+                debug!(target: "DhtRequest", "DhtRequest deserialize error: {:?}", needed);
+                Err(GetPayloadError::IncompletePayload { packet: stringify!(Self).to_string(), needed, payload: self.payload.to_vec() })
             },
-            IResult::Error(e) => {
-                debug!(target: "DhtRequest", "DhtRequest deserialize error: {:?}", e);
-                Err(Error::new(ErrorKind::Other,
-                    format!("DhtRequest deserialize error: {:?}, packet: {:?}", e, decrypted)))
+            IResult::Error(error) => {
+                debug!(target: "DhtRequest", "DhtRequest deserialize error: {:?}", error);
+                Err(GetPayloadError::DeserializeError { packet: stringify!(Self).to_string(), error, payload: self.payload.to_vec() })
             },
             IResult::Done(_, packet) => {
                 Ok(packet)

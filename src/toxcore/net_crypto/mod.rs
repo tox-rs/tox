@@ -219,7 +219,7 @@ impl NetCrypto {
 
         let payload = match packet.get_payload(&connection.dht_precomputed_key) {
             Ok(payload) => payload,
-            Err(e) => return Box::new(future::err(e)),
+            Err(e) => return Box::new(future::err(Error::from(e))),
         };
 
         if payload.id != cookie_request_id {
@@ -276,7 +276,7 @@ impl NetCrypto {
 
         let payload = match packet.get_payload(&connection.dht_precomputed_key) {
             Ok(payload) => payload,
-            Err(e) => return Box::new(future::err(e)),
+            Err(e) => return Box::new(future::err(Error::from(e))),
         };
 
         if packet.cookie.hash() != payload.cookie_hash {
@@ -288,7 +288,7 @@ impl NetCrypto {
 
         let cookie = match packet.cookie.get_payload(&self.symmetric_key) {
             Ok(cookie) => cookie,
-            Err(e) => return Box::new(future::err(e)),
+            Err(e) => return Box::new(future::err(Error::from(e))),
         };
 
         if cookie.is_timed_out() {
@@ -472,7 +472,7 @@ impl NetCrypto {
 
         let payload = match packet.get_payload(&session_precomputed_key, &packet_nonce) {
             Ok(payload) => payload,
-            Err(e) => return Box::new(future::err(e))
+            Err(e) => return Box::new(future::err(Error::from(e)))
         };
 
         // Find the time when the last acknowledged packet was sent

@@ -1,11 +1,10 @@
 /*! CryptoHandshake packet
 */
 
-use std::io::{Error, ErrorKind};
-
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 use toxcore::dht::packet::cookie::EncryptedCookie;
+use toxcore::dht::packet::errors::*;
 
 /** Packet used to establish `net_crypto` connection between two peers.
 
@@ -84,22 +83,20 @@ impl CryptoHandshake {
     - fails to decrypt
     - fails to parse `CryptoHandshakePayload`
     */
-    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<CryptoHandshakePayload, Error> {
+    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<CryptoHandshakePayload, GetPayloadError> {
         let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
             .map_err(|()| {
                 debug!("Decrypting CryptoHandshake failed!");
-                Error::new(ErrorKind::Other, "CryptoHandshake decrypt error.")
+                GetPayloadError::DecryptError { packet: stringify!(Self).to_string() }
             })?;
         match CryptoHandshakePayload::from_bytes(&decrypted) {
-            IResult::Incomplete(e) => {
-                debug!(target: "Dht", "CryptoHandshakePayload return deserialize error: {:?}", e);
-                Err(Error::new(ErrorKind::Other,
-                    format!("CryptoHandshakePayload return deserialize error: {:?}", e)))
+            IResult::Incomplete(needed) => {
+                debug!(target: "Dht", "CryptoHandshakePayload return deserialize error: {:?}", needed);
+                Err(GetPayloadError::IncompletePayload { packet: stringify!(Self).to_string(), needed, payload: self.payload.to_vec() })
             },
-            IResult::Error(e) => {
-                debug!(target: "Dht", "CryptoHandshakePayload return deserialize error: {:?}", e);
-                Err(Error::new(ErrorKind::Other,
-                    format!("CryptoHandshakePayload return deserialize error: {:?}", e)))
+            IResult::Error(error) => {
+                debug!(target: "Dht", "CryptoHandshakePayload return deserialize error: {:?}", error);
+                Err(GetPayloadError::DeserializeError { packet: stringify!(Self).to_string(), error, payload: self.payload.to_vec() })
             },
             IResult::Done(_, payload) => {
                 Ok(payload)

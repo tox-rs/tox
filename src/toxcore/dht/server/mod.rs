@@ -758,7 +758,7 @@ impl Server {
     fn handle_ping_req(&self, packet: &PingRequest, addr: SocketAddr) -> IoFuture<()> {
         let precomputed_key = self.precomputed_keys.get(packet.pk);
         let payload = match packet.get_payload(&precomputed_key) {
-            Err(e) => return Box::new(future::err(e)),
+            Err(e) => return Box::new(future::err(Error::from(e))),
             Ok(payload) => payload,
         };
 
@@ -782,7 +782,7 @@ impl Server {
     fn handle_ping_resp(&self, packet: &PingResponse, addr: SocketAddr) -> IoFuture<()> {
         let precomputed_key = self.precomputed_keys.get(packet.pk);
         let payload = match packet.get_payload(&precomputed_key) {
-            Err(e) => return Box::new(future::err(e)),
+            Err(e) => return Box::new(future::err(Error::from(e))),
             Ok(payload) => payload,
         };
 
@@ -819,7 +819,7 @@ impl Server {
     fn handle_nodes_req(&self, packet: &NodesRequest, addr: SocketAddr) -> IoFuture<()> {
         let precomputed_key = self.precomputed_keys.get(packet.pk);
         let payload = match packet.get_payload(&precomputed_key) {
-            Err(e) => return Box::new(future::err(e)),
+            Err(e) => return Box::new(future::err(Error::from(e))),
             Ok(payload) => payload,
         };
 
@@ -848,7 +848,7 @@ impl Server {
     fn handle_nodes_resp(&self, packet: &NodesResponse, addr: SocketAddr) -> IoFuture<()> {
         let precomputed_key = self.precomputed_keys.get(packet.pk);
         let payload = match packet.get_payload(&precomputed_key) {
-            Err(e) => return Box::new(future::err(e)),
+            Err(e) => return Box::new(future::err(Error::from(e))),
             Ok(payload) => payload,
         };
 
@@ -953,7 +953,7 @@ impl Server {
             let precomputed_key = self.precomputed_keys.get(packet.spk);
             let payload = packet.get_payload(&precomputed_key);
             let payload = match payload {
-                Err(e) => return Box::new(future::err(e)),
+                Err(e) => return Box::new(future::err(Error::from(e))),
                 Ok(payload) => payload,
             };
 

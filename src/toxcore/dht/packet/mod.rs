@@ -17,6 +17,7 @@ mod lan_discovery;
 mod crypto_handshake;
 mod crypto_data;
 mod cookie;
+mod errors;
 
 pub use self::ping_request::*;
 pub use self::ping_response::*;
@@ -30,6 +31,7 @@ pub use self::lan_discovery::*;
 pub use self::crypto_handshake::*;
 pub use self::crypto_data::*;
 pub use self::cookie::*;
+pub use self::errors::*;
 
 use toxcore::binary_io::*;
 use toxcore::onion::packet::*;

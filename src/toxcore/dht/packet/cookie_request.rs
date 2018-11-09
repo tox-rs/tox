@@ -3,10 +3,9 @@
 
 use nom::be_u64;
 
-use std::io::{Error, ErrorKind};
-
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
+use toxcore::dht::packet::errors::*;
 
 /** CookieRequest packet struct.
 According to https://zetok.github.io/tox-spec/#net-crypto
@@ -86,22 +85,20 @@ impl CookieRequest {
     - fails to decrypt
     - fails to parse `CookieRequestPayload`
     */
-    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<CookieRequestPayload, Error> {
+    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<CookieRequestPayload, GetPayloadError> {
         let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
             .map_err(|()| {
                 debug!("Decrypting CookieRequest failed!");
-                Error::new(ErrorKind::Other, "CookieRequest decrypt error.")
+                GetPayloadError::DecryptError { packet: stringify!(Self).to_string() }
             })?;
         match CookieRequestPayload::from_bytes(&decrypted) {
-            IResult::Incomplete(e) => {
-                debug!(target: "Dht", "CookieRequestPayload return deserialize error: {:?}", e);
-                Err(Error::new(ErrorKind::Other,
-                    format!("CookieRequestPayload return deserialize error: {:?}", e)))
+            IResult::Incomplete(needed) => {
+                debug!(target: "Dht", "CookieRequestPayload return deserialize error: {:?}", needed);
+                Err(GetPayloadError::IncompletePayload { packet: stringify!(Self).to_string(), needed, payload: self.payload.to_vec() })
             },
-            IResult::Error(e) => {
-                debug!(target: "Dht", "CookieRequestPayload return deserialize error: {:?}", e);
-                Err(Error::new(ErrorKind::Other,
-                    format!("CookieRequestPayload return deserialize error: {:?}", e)))
+            IResult::Error(error) => {
+                debug!(target: "Dht", "CookieRequestPayload return deserialize error: {:?}", error);
+                Err(GetPayloadError::DeserializeError { packet: stringify!(Self).to_string(), error, payload: self.payload.to_vec() })
             },
             IResult::Done(_, payload) => {
                 Ok(payload)

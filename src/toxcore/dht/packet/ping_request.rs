@@ -3,11 +3,10 @@
 
 use nom::{be_u64, rest};
 
-use std::io::{Error, ErrorKind};
-
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 use toxcore::dht::codec::*;
+use toxcore::dht::packet::errors::*;
 
 /** Ping request packet struct. Every 60 seconds DHT node sends `PingRequest`
 packet to peers to check whether it is alive. When `PingRequest` is received
@@ -80,25 +79,23 @@ impl PingRequest {
     - fails to decrypt
     - fails to parse as given packet type
     */
-    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<PingRequestPayload, Error> {
+    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<PingRequestPayload, GetPayloadError> {
         debug!(target: "PingRequest", "Getting packet data from PingRequest.");
         trace!(target: "PingRequest", "With PingRequest: {:?}", self);
         let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
             .map_err(|()| {
                 debug!("Decrypting PingRequest failed!");
-                Error::new(ErrorKind::Other, "PingRequest decrypt error.")
+                GetPayloadError::DecryptError { packet: stringify!(Self).to_string() }
             })?;
 
         match PingRequestPayload::from_bytes(&decrypted) {
-            IResult::Incomplete(e) => {
-                debug!(target: "PingRequest", "PingRequestPayload deserialize error: {:?}", e);
-                Err(Error::new(ErrorKind::Other,
-                    format!("PingRequestPayload deserialize error: {:?}", e)))
+            IResult::Incomplete(needed) => {
+                debug!(target: "PingRequest", "PingRequestPayload deserialize error: {:?}", needed);
+                Err(GetPayloadError::IncompletePayload { packet: stringify!(Self).to_string(), needed, payload: self.payload.to_vec() })
             },
-            IResult::Error(e) => {
-                debug!(target: "PingRequest", "PingRequestPayload deserialize error: {:?}", e);
-                Err(Error::new(ErrorKind::Other,
-                    format!("PingRequestPayload deserialize error: {:?}", e)))
+            IResult::Error(error) => {
+                debug!(target: "PingRequest", "PingRequestPayload deserialize error: {:?}", error);
+                Err(GetPayloadError::DeserializeError { packet: stringify!(Self).to_string(), error, payload: self.payload.to_vec() })
             },
             IResult::Done(_, payload) => {
                 Ok(payload)
