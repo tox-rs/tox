@@ -86,8 +86,8 @@ impl CookieRequest {
     - fails to decrypt
     - fails to parse `CookieRequestPayload`
     */
-    pub fn get_payload(&self, own_secret_key: &SecretKey) -> Result<CookieRequestPayload, Error> {
-        let decrypted = open(&self.payload, &self.nonce, &self.pk, own_secret_key)
+    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<CookieRequestPayload, Error> {
+        let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
             .map_err(|()| {
                 debug!("Decrypting CookieRequest failed!");
                 Error::new(ErrorKind::Other, "CookieRequest decrypt error.")

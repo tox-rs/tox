@@ -40,6 +40,7 @@ cookie-factory = "0.2.3"
 get_if_addrs = "0.5.3"
 parking_lot = "0.6"
 failure = "0.1"
+lru = "0.1.9"
 
 [dev-dependencies]
 env_logger = "0.5"

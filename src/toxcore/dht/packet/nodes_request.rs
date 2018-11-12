@@ -77,10 +77,10 @@ impl NodesRequest {
     - fails to decrypt
     - fails to parse as given packet type
     */
-    pub fn get_payload(&self, own_secret_key: &SecretKey) -> Result<NodesRequestPayload, Error> {
+    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<NodesRequestPayload, Error> {
         debug!(target: "NodesRequest", "Getting packet data from NodesRequest.");
         trace!(target: "NodesRequest", "With NodesRequest: {:?}", self);
-        let decrypted = open(&self.payload, &self.nonce, &self.pk, own_secret_key)
+        let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
             .map_err(|()| {
                 debug!("Decrypting NodesRequest failed!");
                 Error::new(ErrorKind::Other, "NodesRequest decrypt error.")

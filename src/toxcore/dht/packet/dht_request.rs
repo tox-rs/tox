@@ -88,12 +88,11 @@ impl DhtRequest {
     - fails to decrypt
     - fails to parse as given packet type
     */
-    pub fn get_payload(&self, own_secret_key: &SecretKey) -> Result<DhtRequestPayload, Error>
+    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<DhtRequestPayload, Error>
     {
         debug!(target: "DhtRequest", "Getting packet data from DhtRequest.");
         trace!(target: "DhtRequest", "With DhtRequest: {:?}", self);
-        let decrypted = open(&self.payload, &self.nonce, &self.spk,
-                            own_secret_key)
+        let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
             .map_err(|()| {
                 debug!("Decrypting DhtRequest failed!");
                 Error::new(ErrorKind::Other, "DhtRequest decrypt error.")
@@ -385,8 +384,9 @@ mod tests {
         for payload in test_payloads {
             // encode payload with shared secret
             let dht_request = DhtRequest::new(&shared_secret, &bob_pk, &alice_pk, &payload);
-            // decode payload with bob's secret key
-            let decoded_payload = dht_request.get_payload(&bob_sk).unwrap();
+            // decode payload with bob's secret key & sender's public key
+            let precomputed_key = precompute(&dht_request.spk, &bob_sk);
+            let decoded_payload = dht_request.get_payload(&precomputed_key).unwrap();
             // payloads should be equal
             assert_eq!(decoded_payload, payload);
         }
@@ -407,8 +407,9 @@ mod tests {
         for payload in test_payloads {
             // encode payload with shared secret
             let dht_request = DhtRequest::new(&shared_secret, &bob_pk, &alice_pk, &payload);
-            // try to decode payload with eve's secret key
-            let decoded_payload = dht_request.get_payload(&eve_sk);
+            // try to decode payload with eve's secret key & sender's public key
+            let precomputed_key = precompute(&dht_request.spk, &eve_sk);
+            let decoded_payload = dht_request.get_payload(&precomputed_key);
             assert!(decoded_payload.is_err());
         }
     }
@@ -428,7 +429,10 @@ mod tests {
             nonce,
             payload: invalid_payload_encoded
         };
-        let decoded_payload = invalid_packet.get_payload(&bob_sk);
+
+        let precomputed_key = precompute(&alice_pk, &bob_sk);
+
+        let decoded_payload = invalid_packet.get_payload(&precomputed_key);
         assert!(decoded_payload.is_err());
         // Try short incomplete
         let invalid_payload = [0xfe];
@@ -439,7 +443,7 @@ mod tests {
             nonce,
             payload: invalid_payload_encoded
         };
-        let decoded_payload = invalid_packet.get_payload(&bob_sk);
+        let decoded_payload = invalid_packet.get_payload(&precomputed_key);
         assert!(decoded_payload.is_err());
     }
 }

@@ -77,10 +77,10 @@ impl PingResponse {
     - fails to decrypt
     - fails to parse as given packet type
     */
-    pub fn get_payload(&self, own_secret_key: &SecretKey) -> Result<PingResponsePayload, Error> {
+    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<PingResponsePayload, Error> {
         debug!(target: "PingResponse", "Getting packet data from PingResponse.");
         trace!(target: "PingResponse", "With PingResponse: {:?}", self);
-        let decrypted = open(&self.payload, &self.nonce, &self.pk, own_secret_key)
+        let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
             .map_err(|()| {
                 debug!("Decrypting PingResponse failed!");
                 Error::new(ErrorKind::Other, "PingResponse decrypt error.")

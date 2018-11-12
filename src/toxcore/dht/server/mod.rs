@@ -23,6 +23,7 @@ use toxcore::dht::packet::*;
 use toxcore::dht::packed_node::*;
 use toxcore::dht::kbucket::*;
 use toxcore::dht::nodes_queue::*;
+use toxcore::dht::precomputed_cache::*;
 use toxcore::onion::packet::*;
 use toxcore::onion::onion_announce::*;
 use toxcore::dht::request_queue::*;
@@ -63,6 +64,9 @@ pub const TIME_TO_PING: u64 = 2;
 pub const BOOTSTRAP_INTERVAL: u64 = 1;
 /// Number of fake friends that server has.
 pub const FAKE_FRIENDS_NUMBER: usize = 2;
+/// Maximum number of entry in Lru cache for precomputed keys.
+pub const PRECOMPUTED_LRU_CACHE_SIZE: usize = KBUCKET_DEFAULT_SIZE as usize * KBUCKET_MAX_ENTRIES as usize + // For KTree.
+    KBUCKET_DEFAULT_SIZE as usize * (2 + 10); // For friend's close_nodes of 2 fake friends + 10 friends reserved
 
 /// Struct that contains necessary data for `BootstrapInfo` packet.
 #[derive(Clone)]
@@ -162,6 +166,9 @@ pub struct Server {
     /// from this list if Ktree doesn't have good (or bad but not discarded)
     /// nodes.
     initial_bootstrap: Vec<PackedNode>,
+    /// Lru cache for precomputed keys. It stores precomputed keys to avoid
+    /// redundant calculations.
+    precomputed_keys: PrecomputedCache,
 }
 
 impl Server {
@@ -188,6 +195,8 @@ impl Server {
         //     .take(FAKE_FRIENDS_NUMBER)
         //     .collect();
 
+        let precomputed_keys = PrecomputedCache::new(sk.clone(), PRECOMPUTED_LRU_CACHE_SIZE);
+
         Server {
             sk,
             pk,
@@ -208,6 +217,7 @@ impl Server {
             lan_discovery_enabled: true,
             is_ipv6_enabled: false,
             initial_bootstrap: Vec::new(),
+            precomputed_keys,
         }
     }
 
@@ -524,7 +534,7 @@ impl Server {
             id: request_queue.new_ping_id(node.pk),
         };
         let ping_req = Packet::PingRequest(PingRequest::new(
-            &precompute(&node.pk, &self.sk),
+            &self.precomputed_keys.get(node.pk),
             &self.pk,
             &payload
         ));
@@ -544,7 +554,7 @@ impl Server {
             id: request_queue.new_ping_id(node.pk),
         };
         let nodes_req = Packet::NodesRequest(NodesRequest::new(
-            &precompute(&node.pk, &self.sk),
+            &self.precomputed_keys.get(node.pk),
             &self.pk,
             &payload
         ));
@@ -573,7 +583,7 @@ impl Server {
                         id: friend.hole_punch.ping_id,
                     });
                     let nat_ping_req_packet = DhtRequest::new(
-                        &precompute(&friend.pk, &self.sk),
+                        &self.precomputed_keys.get(friend.pk),
                         &friend.pk,
                         &self.pk,
                         &payload
@@ -599,7 +609,7 @@ impl Server {
                 id: request_queue.new_ping_id(friend.pk),
             };
             let packet = Packet::PingRequest(PingRequest::new(
-                &precompute(&friend.pk, &self.sk),
+                &self.precomputed_keys.get(friend.pk),
                 &self.pk,
                 &payload
             ));
@@ -746,7 +756,8 @@ impl Server {
     /// packet. If node that sent this packet is not present in close nodes list
     /// and can be added there then it will be added to ping list.
     fn handle_ping_req(&self, packet: &PingRequest, addr: SocketAddr) -> IoFuture<()> {
-        let payload = match packet.get_payload(&self.sk) {
+        let precomputed_key = self.precomputed_keys.get(packet.pk);
+        let payload = match packet.get_payload(&precomputed_key) {
             Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
@@ -755,7 +766,7 @@ impl Server {
             id: payload.id,
         };
         let ping_resp = Packet::PingResponse(PingResponse::new(
-            &precompute(&packet.pk, &self.sk),
+            &precomputed_key,
             &self.pk,
             &resp_payload
         ));
@@ -763,12 +774,14 @@ impl Server {
         Box::new(self.ping_add(&PackedNode::new(addr, &packet.pk))
             .join(self.send_to_direct(addr, ping_resp))
             .map(|_| ())
-        )    }
+        )
+    }
 
     /// Handle received `PingResponse` packet and if it's correct add the node
     /// that sent this packet to close nodes lists.
     fn handle_ping_resp(&self, packet: &PingResponse, addr: SocketAddr) -> IoFuture<()> {
-        let payload = match packet.get_payload(&self.sk) {
+        let precomputed_key = self.precomputed_keys.get(packet.pk);
+        let payload = match packet.get_payload(&precomputed_key) {
             Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
@@ -804,7 +817,8 @@ impl Server {
     /// packet. If node that sent this packet is not present in close nodes list
     /// and can be added there then it will be added to ping list.
     fn handle_nodes_req(&self, packet: &NodesRequest, addr: SocketAddr) -> IoFuture<()> {
-        let payload = match packet.get_payload(&self.sk) {
+        let precomputed_key = self.precomputed_keys.get(packet.pk);
+        let payload = match packet.get_payload(&precomputed_key) {
             Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
@@ -816,7 +830,7 @@ impl Server {
             id: payload.id,
         };
         let nodes_resp = Packet::NodesResponse(NodesResponse::new(
-            &precompute(&packet.pk, &self.sk),
+            &precomputed_key,
             &self.pk,
             &resp_payload
         ));
@@ -832,7 +846,8 @@ impl Server {
     /// added to bootstrap nodes list to send `NodesRequest` packet to them
     /// later.
     fn handle_nodes_resp(&self, packet: &NodesResponse, addr: SocketAddr) -> IoFuture<()> {
-        let payload = match packet.get_payload(&self.sk) {
+        let precomputed_key = self.precomputed_keys.get(packet.pk);
+        let payload = match packet.get_payload(&precomputed_key) {
             Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
         };
@@ -935,7 +950,8 @@ impl Server {
     /// someone else or parse it and handle the payload if it's sent for us.
     fn handle_dht_req(&self, packet: DhtRequest, addr: SocketAddr) -> IoFuture<()> {
         if packet.rpk == self.pk { // the target peer is me
-            let payload = packet.get_payload(&self.sk);
+            let precomputed_key = self.precomputed_keys.get(packet.spk);
+            let payload = packet.get_payload(&precomputed_key);
             let payload = match payload {
                 Err(e) => return Box::new(future::err(e)),
                 Ok(payload) => payload,
@@ -998,7 +1014,7 @@ impl Server {
             id: payload.id,
         });
         let nat_ping_resp = Packet::DhtRequest(DhtRequest::new(
-            &precompute(spk, &self.sk),
+            &self.precomputed_keys.get(*spk),
             spk,
             &self.pk,
             &resp_payload
@@ -1064,7 +1080,7 @@ impl Server {
     /// to the next peer.
     fn handle_onion_request_0(&self, packet: &OnionRequest0, addr: SocketAddr) -> IoFuture<()> {
         let onion_symmetric_key = self.onion_symmetric_key.read();
-        let shared_secret = precompute(&packet.temporary_pk, &self.sk);
+        let shared_secret = self.precomputed_keys.get(packet.temporary_pk);
         let payload = packet.get_payload(&shared_secret);
         let payload = match payload {
             Err(e) => return Box::new(future::err(e)),
@@ -1089,7 +1105,7 @@ impl Server {
     /// to the next peer.
     fn handle_onion_request_1(&self, packet: &OnionRequest1, addr: SocketAddr) -> IoFuture<()> {
         let onion_symmetric_key = self.onion_symmetric_key.read();
-        let shared_secret = precompute(&packet.temporary_pk, &self.sk);
+        let shared_secret = self.precomputed_keys.get(packet.temporary_pk);
         let payload = packet.get_payload(&shared_secret);
         let payload = match payload {
             Err(e) => return Box::new(future::err(e)),
@@ -1114,7 +1130,7 @@ impl Server {
     /// or `OnionDataRequest` packet to the next peer.
     fn handle_onion_request_2(&self, packet: &OnionRequest2, addr: SocketAddr) -> IoFuture<()> {
         let onion_symmetric_key = self.onion_symmetric_key.read();
-        let shared_secret = precompute(&packet.temporary_pk, &self.sk);
+        let shared_secret = self.precomputed_keys.get(packet.temporary_pk);
         let payload = packet.get_payload(&shared_secret);
         let payload = match payload {
             Err(e) => return Box::new(future::err(e)),
@@ -1148,7 +1164,7 @@ impl Server {
     fn handle_onion_announce_request(&self, packet: OnionAnnounceRequest, addr: SocketAddr) -> IoFuture<()> {
         let mut onion_announce = self.onion_announce.write();
 
-        let shared_secret = precompute(&packet.inner.pk, &self.sk);
+        let shared_secret = self.precomputed_keys.get(packet.inner.pk);
         let payload = match packet.inner.get_payload(&shared_secret) {
             Err(e) => return Box::new(future::err(e)),
             Ok(payload) => payload,
@@ -1378,6 +1394,11 @@ impl Server {
     pub fn set_net_crypto(&mut self, net_crypto: NetCrypto) {
         self.net_crypto = Some(net_crypto);
     }
+
+    /// Get `PrecomputedKey`s cache.
+    pub fn get_precomputed_keys(&self) -> PrecomputedCache {
+        self.precomputed_keys.clone()
+    }
 }
 
 #[cfg(test)]
@@ -1501,7 +1522,8 @@ mod tests {
         assert_eq!(addr_to_send, addr);
 
         let ping_resp = unpack!(packet, Packet::PingResponse);
-        let ping_resp_payload = ping_resp.get_payload(&bob_sk).unwrap();
+        let precomputed_key = precompute(&ping_resp.pk, &bob_sk);
+        let ping_resp_payload = ping_resp.get_payload(&precomputed_key).unwrap();
 
         assert_eq!(ping_resp_payload.id, req_payload.id);
 
@@ -1525,11 +1547,13 @@ mod tests {
             assert_eq!(addr_to_send, addr);
 
             if let Packet::PingResponse(ping_resp) = packet {
-                let ping_resp_payload = ping_resp.get_payload(&bob_sk).unwrap();
+                let precomputed_key = precompute(&ping_resp.pk, &bob_sk);
+                let ping_resp_payload = ping_resp.get_payload(&precomputed_key).unwrap();
                 assert_eq!(ping_resp_payload.id, req_payload.id);
             } else {
                 let ping_req = unpack!(packet, Packet::PingRequest);
-                let ping_req_payload = ping_req.get_payload(&bob_sk).unwrap();
+                let precomputed_key = precompute(&ping_req.pk, &bob_sk);
+                let ping_req_payload = ping_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(bob_pk, ping_req_payload.id));
             }
         }).collect().wait().unwrap();
@@ -1653,7 +1677,8 @@ mod tests {
         assert_eq!(addr_to_send, addr);
 
         let nodes_resp = unpack!(packet, Packet::NodesResponse);
-        let nodes_resp_payload = nodes_resp.get_payload(&bob_sk).unwrap();
+        let precomputed_key = precompute(&nodes_resp.pk, &bob_sk);
+        let nodes_resp_payload = nodes_resp.get_payload(&precomputed_key).unwrap();
 
         assert_eq!(nodes_resp_payload.id, req_payload.id);
         assert_eq!(nodes_resp_payload.nodes, vec!(packed_node));
@@ -1681,7 +1706,8 @@ mod tests {
         assert_eq!(addr_to_send, addr);
 
         let nodes_resp = unpack!(packet, Packet::NodesResponse);
-        let nodes_resp_payload = nodes_resp.get_payload(&bob_sk).unwrap();
+        let precomputed_key = precompute(&nodes_resp.pk, &bob_sk);
+        let nodes_resp_payload = nodes_resp.get_payload(&precomputed_key).unwrap();
 
         assert_eq!(nodes_resp_payload.id, req_payload.id);
         assert_eq!(nodes_resp_payload.nodes, vec!(packed_node));
@@ -1715,7 +1741,8 @@ mod tests {
         assert_eq!(addr_to_send, addr);
 
         let nodes_resp = unpack!(packet, Packet::NodesResponse);
-        let nodes_resp_payload = nodes_resp.get_payload(&bob_sk).unwrap();
+        let precomputed_key = precompute(&nodes_resp.pk, &bob_sk);
+        let nodes_resp_payload = nodes_resp.get_payload(&precomputed_key).unwrap();
 
         assert_eq!(nodes_resp_payload.id, req_payload.id);
         assert!(nodes_resp_payload.nodes.is_empty());
@@ -1743,7 +1770,8 @@ mod tests {
         assert_eq!(addr_to_send, addr);
 
         let nodes_resp = unpack!(packet, Packet::NodesResponse);
-        let nodes_resp_payload = nodes_resp.get_payload(&bob_sk).unwrap();
+        let precomputed_key = precompute(&nodes_resp.pk, &bob_sk);
+        let nodes_resp_payload = nodes_resp.get_payload(&precomputed_key).unwrap();
 
         assert_eq!(nodes_resp_payload.id, req_payload.id);
         assert!(nodes_resp_payload.nodes.is_empty());
@@ -1879,7 +1907,8 @@ mod tests {
             lossy_tx,
             dht_pk,
             dht_sk,
-            real_pk
+            real_pk,
+            precomputed_keys: alice.get_precomputed_keys(),
         });
 
         alice.set_net_crypto(net_crypto);
@@ -2044,7 +2073,8 @@ mod tests {
         assert_eq!(addr_to_send, addr);
 
         let dht_req = unpack!(packet, Packet::DhtRequest);
-        let dht_payload = dht_req.get_payload(&bob_sk).unwrap();
+        let precomputed_key = precompute(&dht_req.spk, &bob_sk);
+        let dht_payload = dht_req.get_payload(&precomputed_key).unwrap();
         let nat_ping_resp_payload = unpack!(dht_payload, DhtRequestPayload::NatPingResponse);
 
         assert_eq!(nat_ping_resp_payload.id, nat_req.id);
@@ -2849,7 +2879,8 @@ mod tests {
             let (packet, _addr_to_send) = received.unwrap();
 
             if let Packet::DhtRequest(nat_ping_req) = packet {
-                let nat_ping_req_payload = nat_ping_req.get_payload(&friend_sk).unwrap();
+                let precomputed_key = precompute(&nat_ping_req.spk, &friend_sk);
+                let nat_ping_req_payload = nat_ping_req.get_payload(&precomputed_key).unwrap();
                 let nat_ping_req_payload = unpack!(nat_ping_req_payload, DhtRequestPayload::NatPingRequest);
 
                 assert_eq!(alice.friends.read()[FAKE_FRIENDS_NUMBER].hole_punch.ping_id, nat_ping_req_payload.id);
@@ -2874,7 +2905,8 @@ mod tests {
         assert_eq!(addr_to_send, addr);
 
         let nodes_req = unpack!(packet, Packet::NodesRequest);
-        let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
+        let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
+        let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
 
         assert_eq!(nodes_req_payload.pk, alice.pk);
     }
@@ -2975,11 +3007,13 @@ mod tests {
         rx.take(2).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, Packet::NodesRequest);
             if addr == "127.0.0.1:33445".parse().unwrap() {
-                let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
+                let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
+                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
                 assert_eq!(nodes_req_payload.pk, alice.pk);
             } else {
-                let nodes_req_payload = nodes_req.get_payload(&node_sk).unwrap();
+                let precomputed_key = precompute(&nodes_req.pk, &node_sk);
+                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(node_pk, nodes_req_payload.id));
                 assert_eq!(nodes_req_payload.pk, alice.pk);
             }
@@ -3004,10 +3038,12 @@ mod tests {
         rx.take(2).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, Packet::PingRequest);
             if addr == "127.0.0.1:33445".parse().unwrap() {
-                let ping_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
+                let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
+                let ping_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(bob_pk, ping_req_payload.id));
             } else {
-                let ping_req_payload = nodes_req.get_payload(&node_sk).unwrap();
+                let precomputed_key = precompute(&nodes_req.pk, &node_sk);
+                let ping_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(node_pk, ping_req_payload.id));
             }
         }).collect().wait().unwrap();
@@ -3044,11 +3080,13 @@ mod tests {
         rx.take(3).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, Packet::NodesRequest);
             if addr == "127.0.0.1:33445".parse().unwrap() {
-                let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
+                let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
+                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
                 assert_eq!(nodes_req_payload.pk, alice.pk);
             } else {
-                let nodes_req_payload = nodes_req.get_payload(&node_sk).unwrap();
+                let precomputed_key = precompute(&nodes_req.pk, &node_sk);
+                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(node_pk, nodes_req_payload.id));
                 assert_eq!(nodes_req_payload.pk, alice.pk);
             }
@@ -3125,11 +3163,13 @@ mod tests {
         rx.take(2).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, Packet::NodesRequest);
             if addr == "127.0.0.1:33445".parse().unwrap() {
-                let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
+                let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
+                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
                 assert_eq!(nodes_req_payload.pk, friend_pk);
             } else {
-                let nodes_req_payload = nodes_req.get_payload(&node_sk).unwrap();
+                let precomputed_key = precompute(&nodes_req.pk, &node_sk);
+                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(node_pk, nodes_req_payload.id));
                 assert_eq!(nodes_req_payload.pk, friend_pk);
             }
@@ -3159,11 +3199,13 @@ mod tests {
         rx.take(3).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, Packet::NodesRequest);
             if addr == "127.0.0.1:33445".parse().unwrap() {
-                let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
+                let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
+                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
                 assert_eq!(nodes_req_payload.pk, friend_pk);
             } else {
-                let nodes_req_payload = nodes_req.get_payload(&node_sk).unwrap();
+                let precomputed_key = precompute(&nodes_req.pk, &node_sk);
+                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(node_pk, nodes_req_payload.id));
                 assert_eq!(nodes_req_payload.pk, friend_pk);
             }
@@ -3246,10 +3288,12 @@ mod tests {
         rx.take(2).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, Packet::NodesRequest);
             if addr == "[FF::01]:33445".parse().unwrap() {
-                let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
+                let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
+                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
             } else {
-                let nodes_req_payload = nodes_req.get_payload(&node_sk).unwrap();
+                let precomputed_key = precompute(&nodes_req.pk, &node_sk);
+                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(node_pk, nodes_req_payload.id));
             }
         }).collect().wait().unwrap();
@@ -3275,10 +3319,12 @@ mod tests {
         rx.take(2).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, Packet::NodesRequest);
             if addr == "[FF::01]:33445".parse().unwrap() {
-                let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
+                let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
+                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
             } else {
-                let nodes_req_payload = nodes_req.get_payload(&node_sk).unwrap();
+                let precomputed_key = precompute(&nodes_req.pk, &node_sk);
+                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(node_pk, nodes_req_payload.id));
             }
         }).collect().wait().unwrap();
@@ -3332,10 +3378,12 @@ mod tests {
             rx.take(2).map(|(packet, addr)| {
                 let nodes_req = unpack!(packet, Packet::NodesRequest);
                 if addr == "[FF::01]:33445".parse().unwrap() {
-                    let nodes_req_payload = nodes_req.get_payload(&bob_sk).unwrap();
+                    let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
+                    let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                     assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
                 } else {
-                    let nodes_req_payload = nodes_req.get_payload(&node_sk).unwrap();
+                    let precomputed_key = precompute(&nodes_req.pk, &node_sk);
+                    let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                     assert!(request_queue.check_ping_id(node_pk, nodes_req_payload.id));
                 }
             }).collect().wait().unwrap();

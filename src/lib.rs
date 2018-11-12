@@ -28,6 +28,7 @@ extern crate get_if_addrs;
 extern crate parking_lot;
 #[macro_use]
 extern crate failure;
+extern crate lru;
 
 #[cfg(test)]
 extern crate tokio_timer;
