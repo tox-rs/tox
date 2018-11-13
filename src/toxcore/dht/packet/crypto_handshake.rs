@@ -4,7 +4,7 @@
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 use toxcore::dht::packet::cookie::EncryptedCookie;
-use toxcore::dht::packet::errors::*;
+use toxcore::dht::errors::*;
 
 /** Packet used to establish `net_crypto` connection between two peers.
 

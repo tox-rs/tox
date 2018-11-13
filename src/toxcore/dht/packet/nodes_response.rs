@@ -7,7 +7,7 @@ use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 use toxcore::dht::packed_node::PackedNode;
 use toxcore::dht::codec::*;
-use toxcore::dht::packet::errors::*;
+use toxcore::dht::errors::*;
 
 /** Nodes response packet struct. When DHT node receives `NodesRequest` it
 should respond with `NodesResponse` that contains up to to 4 closest nodes to

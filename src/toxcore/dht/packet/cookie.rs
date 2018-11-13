@@ -8,7 +8,7 @@ use std::time::SystemTime;
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 use toxcore::time::*;
-use toxcore::dht::packet::errors::*;
+use toxcore::dht::errors::*;
 
 /// Number of seconds that generated cookie is valid
 pub const COOKIE_TIMEOUT: u64 = 15;

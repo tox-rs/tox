@@ -5,7 +5,7 @@ use nom::be_u64;
 
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
-use toxcore::dht::packet::errors::*;
+use toxcore::dht::errors::*;
 
 /** CookieRequest packet struct.
 According to https://zetok.github.io/tox-spec/#net-crypto

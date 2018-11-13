@@ -4,16 +4,37 @@ When toxcore starts, it deserializes states from serialized file.
 Toxcore daemon may serialize its states to file with some interval.
 */
 
-use std::io::{Error, ErrorKind};
+use nom::{Needed, ErrorKind};
 
-use futures::{future, Stream, stream};
+use futures::{future, Future, Stream, stream};
+use futures::future::Either;
 
 use toxcore::dht::server::*;
 use toxcore::dht::packed_node::*;
 use toxcore::state_format::old::*;
 use toxcore::binary_io::*;
-use toxcore::io_tokio::*;
 use toxcore::dht::kbucket::*;
+
+/// Error that can happen when calling `deserialize_old` of DhtState.
+#[derive(Debug, Fail)]
+pub enum DeserializeOldError {
+    /// Error indicates that DhtState object can't be parsed.
+    #[fail(display = "Deserialize DhtState error: {:?}, packet: {:?}", error, data)]
+    DeserializeError {
+        /// Parsing error
+        error: ErrorKind,
+        /// DhtState object serialized data
+        data: Vec<u8>,
+    },
+    /// Error indicates that more data is needed to parse serialized DhtState object.
+    #[fail(display = "Bytes of DhtState object should not be incomplete: {:?}, data: {:?}", needed, data)]
+    IncompleteData {
+        /// Required data size to be parsed
+        needed: Needed,
+        /// DhtState object serialized data
+        data: Vec<u8>,
+    },
+}
 
 /// Serialize or deserialize states of DHT close lists
 #[derive(Clone, Debug)]
@@ -46,14 +67,13 @@ impl DaemonState {
     }
 
     /// Deserialize DHT close list and then re-setup close list, old means that the format of deserialization is old version
-    pub fn deserialize_old(server: &Server, serialized_data: &[u8]) -> IoFuture<()> {
+    pub fn deserialize_old(server: &Server, serialized_data: &[u8]) -> impl Future<Item=(), Error=DeserializeOldError> {
         let nodes = match DhtState::from_bytes(serialized_data) {
             IResult::Done(_, DhtState(nodes)) => nodes,
-            e => return Box::new(
-                future::err(
-                    Error::new(ErrorKind::Other, format!("Can't deserialize DHT states from serialized bytes {:?}", e))
-                )
-            ),
+            IResult::Incomplete(needed) =>
+                return Either::A(future::err(DeserializeOldError::IncompleteData { needed, data: serialized_data.to_vec() })),
+            IResult::Error(error) =>
+                return Either::A(future::err(DeserializeOldError::DeserializeError { error, data: serialized_data.to_vec() })),
         };
 
         let mut request_queue = server.request_queue.write();
@@ -61,7 +81,7 @@ impl DaemonState {
             .map(|node| server.send_nodes_req(node, &mut request_queue, server.pk));
 
         let nodes_stream = stream::futures_unordered(nodes_sender).then(|_| Ok(()));
-        Box::new(nodes_stream.for_each(|()| Ok(())))
+        Either::B(nodes_stream.for_each(|()| Ok(())))
     }
 }
 

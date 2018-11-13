@@ -6,7 +6,7 @@ use nom::{be_u64, rest};
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 use toxcore::dht::codec::*;
-use toxcore::dht::packet::errors::*;
+use toxcore::dht::errors::*;
 
 /** Ping response packet struct. When `PingRequest` is received DHT node should
 respond with `PingResponse` that contains the same ping id inside it's encrypted

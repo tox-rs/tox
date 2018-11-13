@@ -6,7 +6,7 @@ use nom::{be_u64, rest};
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 use toxcore::dht::codec::*;
-use toxcore::dht::packet::errors::*;
+use toxcore::dht::errors::*;
 
 /** Nodes request packet struct. It's used to get up to 4 closest nodes to
 requested public key. Every 20 seconds DHT node sends `NodesRequest` packet to

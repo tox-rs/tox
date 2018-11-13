@@ -6,7 +6,7 @@ use nom::{be_u64, rest};
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 use toxcore::dht::codec::*;
-use toxcore::dht::packet::errors::*;
+use toxcore::dht::errors::*;
 
 /** Ping request packet struct. Every 60 seconds DHT node sends `PingRequest`
 packet to peers to check whether it is alive. When `PingRequest` is received
