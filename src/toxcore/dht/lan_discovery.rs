@@ -1,19 +1,99 @@
 //! Module for LAN discovery.
 
 use std::iter;
-use std::io::{Error, ErrorKind};
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
 
+use std::fmt;
+use std::io::Error as IoError;
+use std::io::ErrorKind as IoErrorKind;
+
+use failure::{Backtrace, Context, Fail};
 use futures::{future, stream, Future, Stream};
 use futures::sync::mpsc;
 use get_if_addrs;
 use get_if_addrs::IfAddr;
 use tokio::timer::Interval;
+use tokio::timer::Error as TimerError;
+use tokio::timer::timeout::Error as TimeoutError;
 
 use toxcore::crypto_core::*;
 use toxcore::io_tokio::*;
 use toxcore::dht::packet::*;
+
+/// Error that can happen during lan discovery
+#[derive(Debug)]
+pub struct LanDiscoveryError {
+    ctx: Context<LanDiscoveryErrorKind>,
+}
+
+impl LanDiscoveryError {
+    /// Return the kind of this error.
+    pub fn kind(&self) -> &LanDiscoveryErrorKind {
+        self.ctx.get_context()
+    }
+
+    pub(crate) fn send_to(error: IoError) -> LanDiscoveryError {
+        LanDiscoveryError::from(LanDiscoveryErrorKind::SendTo { error })
+    }
+}
+
+impl Fail for LanDiscoveryError {
+    fn cause(&self) -> Option<&Fail> {
+        self.ctx.cause()
+    }
+
+    fn backtrace(&self) -> Option<&Backtrace> {
+        self.ctx.backtrace()
+    }
+}
+
+impl fmt::Display for LanDiscoveryError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.ctx.fmt(f)
+    }
+}
+
+/// The specific kind of error that can occur.
+#[derive(Debug, Fail)]
+pub enum LanDiscoveryErrorKind {
+    /// Ping wakeup timer error
+    #[fail(display = "Lan discovery wakeup timer error")]
+    Wakeup,
+    /// Send packet(s) error
+    #[fail(display = "Send packet(s) error: {:?}", error)]
+    SendTo {
+        /// IO error during sending packet(s).
+        error: IoError,
+    },
+}
+
+impl From<LanDiscoveryErrorKind> for LanDiscoveryError {
+    fn from(kind: LanDiscoveryErrorKind) -> LanDiscoveryError {
+        LanDiscoveryError::from(Context::new(kind))
+    }
+}
+
+impl From<Context<LanDiscoveryErrorKind>> for LanDiscoveryError {
+    fn from(ctx: Context<LanDiscoveryErrorKind>) -> LanDiscoveryError {
+        LanDiscoveryError { ctx }
+    }
+}
+
+impl From<TimerError> for LanDiscoveryError {
+    fn from(error: TimerError) -> LanDiscoveryError {
+        LanDiscoveryError {
+            ctx: error.context(LanDiscoveryErrorKind::Wakeup)
+        }
+    }
+}
+
+/// From trait for temporary use during transition from io:Error to custom enum error of failure crate
+impl From<LanDiscoveryError> for IoError {
+    fn from(item: LanDiscoveryError) -> Self {
+        IoError::new(IoErrorKind::Other, format!("LanDiscoveryError occurred. error: {:?}", item))
+    }
+}
 
 /// How many ports should be used on every iteration.
 pub const PORTS_PER_DISCOVERY: u16 = 10;
@@ -113,7 +193,7 @@ impl LanDiscoverySender {
     }
 
     /// Send `LanDiscovery` packets.
-    fn send(&mut self) -> IoFuture<()> {
+    fn send(&mut self) -> impl Future<Item=(), Error=TimeoutError<IoError>> + Send {
         let addrs = self.get_broadcast_socket_addrs();
         let lan_packet = Packet::LanDiscovery(LanDiscovery {
             pk: self.dht_pk,
@@ -128,21 +208,24 @@ impl LanDiscoverySender {
 
     /// Run LAN discovery periodically. Result future will never be completed
     /// successfully.
-    pub fn run(mut self) -> IoFuture<()> {
+    pub fn run(mut self) -> impl Future<Item=(), Error=LanDiscoveryError> + Send {
         let interval = Duration::from_secs(LAN_DISCOVERY_INTERVAL);
         let wakeups = Interval::new(Instant::now(), interval);
-        let future = wakeups
-            .map_err(|e| Error::new(ErrorKind::Other, format!("LanDiscovery timer error: {:?}", e)))
+        wakeups
+            .map_err(|e| LanDiscoveryError::from(e))
             .for_each(move |_instant| {
                 trace!("LAN discovery sender wake up");
-                self.send().then(|res| {
-                    if let Err(e) = res {
+                self.send().then(|r| {
+                    if let Err(e) = r {
                         warn!("Failed to send LAN discovery packets: {}", e);
+                        if e.is_inner() {
+                            let io_error = e.into_inner().expect("Missing inner error.");
+                            return future::err(LanDiscoveryError::send_to(io_error));
+                        }
                     }
                     future::ok(())
                 })
-            });
-        Box::new(future)
+            })
     }
 }
 
