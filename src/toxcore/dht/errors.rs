@@ -41,6 +41,6 @@ pub enum GetPayloadError {
 /// From trait for temporary use during transition from io:Error to custom enum error of failure crate
 impl From<GetPayloadError> for IoError {
     fn from(_item: GetPayloadError) -> Self {
-        IoError::new(IoErrorKind::Other, "GetPayloadError occured.")
+        IoError::new(IoErrorKind::Other, "GetPayloadError occurred.")
     }
 }

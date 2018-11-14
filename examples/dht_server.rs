@@ -6,10 +6,10 @@ extern crate futures;
 extern crate tokio;
 extern crate hex;
 
-#[macro_use]
+//#[macro_use]
 extern crate log;
 extern crate env_logger;
-
+/*
 use futures::*;
 use futures::sync::mpsc;
 use hex::FromHex;
@@ -54,8 +54,9 @@ fn bind_socket(addr: SocketAddr) -> UdpSocket {
     }
     socket
 }
-
+*/
 fn main() {
+    /*
     env_logger::init();
 
     if !crypto_init() {
@@ -142,4 +143,5 @@ fn main() {
     info!("Running DHT server on {}", local_addr);
 
     tokio::run(future);
+    */
 }

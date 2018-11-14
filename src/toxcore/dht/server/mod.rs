@@ -617,7 +617,8 @@ impl Server {
             (packet, addr)
         }).collect::<Vec<_>>();
 
-        send_all_to(&self.tx, stream::iter_ok(packets))
+        Box::new(send_all_to(&self.tx, stream::iter_ok(packets))
+            .map_err(|_| Error::new(ErrorKind::Other, "send_all_to error.")))
     }
 
     /// Send `NatPingRequest` packet to all close nodes of friend in the hope
