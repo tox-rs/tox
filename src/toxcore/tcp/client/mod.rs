@@ -1,10 +1,8 @@
-/*! The implementation of tcp relay client
+/*! The implementation of tcp relay client.
 */
 
-mod connection;
-mod processor;
+mod connections;
+mod relay;
 
-pub use self::connection::Connection;
-pub use self::connection::IncomingPacket;
-pub use self::connection::OutgoingPacket;
-pub use self::processor::ClientProcessor;
+pub use self::connections::*;
+pub use self::relay::*;

@@ -26,7 +26,7 @@ use tokio::timer::Interval;
 
 use toxcore::crypto_core::*;
 use toxcore::io_tokio::*;
-use toxcore::tcp::connections::relay::*;
+use toxcore::tcp::client::relay::*;
 use toxcore::tcp::packet::*;
 use toxcore::time::*;
 
@@ -372,7 +372,7 @@ mod tests {
     use tokio_executor;
     use tokio_timer::clock::*;
 
-    use toxcore::tcp::connections::relay::tests::*;
+    use toxcore::tcp::client::relay::tests::*;
     use toxcore::time::ConstNow;
     use toxcore::onion::packet::*;
 
