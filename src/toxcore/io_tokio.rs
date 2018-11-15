@@ -11,6 +11,18 @@ pub type IoFuture<T> = Box<Future<Item = T, Error = IoError> + Send>;
 /// A convenience typedef around a `Stream` whose error component is `io::Error`
 pub type IoStream<T> = Box<Stream<Item = T, Error = IoError> + Send>;
 
+/// Error that can happen during sending packet to peer.
+#[derive(Debug, Fail)]
+pub enum SendToError {
+    /// Send error
+    #[fail(display = "Send packet error: {:?}", error)]
+    Eof {
+        /// Send packet error
+        #[fail(cause)]
+        error: IoError
+    },
+}
+
 /// Error that can happen during sending all packet to peer.
 #[derive(Debug, Fail)]
 pub enum SendAllToError {
@@ -21,6 +33,24 @@ pub enum SendAllToError {
         #[fail(cause)]
         error: IoError
     },
+}
+
+/// Used temporary and will be removed after using failure crate in tcp part is done.
+/// Because `send_to` is also called from tcp parts.
+pub fn send_to_dht<T: Send + 'static, Tx, E: Debug>(tx: &Tx, v: T) -> impl Future<Item=(), Error=SendToError>
+    where Tx: Sink<SinkItem = T, SinkError = E> + Send + Clone + 'static
+{
+    Box::new(tx
+        .clone() // clone tx sender for 1 send only
+        .send(v)
+        .map(|_tx| ()) // ignore tx because it was cloned
+        .map_err(|e| {
+            // This may only happen if rx is gone
+            // So cast SendError<T> to a corresponding std::io::Error
+            debug!("Send to a sink error {:?}", e);
+            SendToError::Eof { error: IoError::from(ErrorKind::UnexpectedEof) }
+        })
+    )
 }
 
 /// Send item to a sink using reference

@@ -6,7 +6,7 @@ This module works on top of other modules.
 pub mod hole_punching;
 
 use futures::{Future, Sink, Stream, future, stream};
-use futures::future::join_all;
+use futures::future::{join_all, Either};
 use futures::sync::mpsc;
 use parking_lot::RwLock;
 use tokio::timer::Interval;
@@ -35,6 +35,7 @@ use toxcore::tcp::packet::OnionRequest;
 use toxcore::net_crypto::*;
 use toxcore::dht::ip_port::IsGlobal;
 use toxcore::utils::*;
+use toxcore::dht::errors::*;
 
 /// Shorthand for the transmit half of the message channel.
 type Tx = mpsc::UnboundedSender<(Packet, SocketAddr)>;
@@ -271,7 +272,7 @@ impl Server {
     /// method iterates over all nodes from close nodes list, close nodes of
     /// friends and bootstrap nodes and sends `NodesRequest` packets if
     /// necessary.
-    fn dht_main_loop(&self) -> IoFuture<()> {
+    fn dht_main_loop(&self) -> impl Future<Item=(), Error=DhtMainLoopError> {
         // Check if we should send `NodesRequest` packet to a random node. This
         // request is sent every second 5 times and then every 20 seconds.
         fn send_random_request(last_nodes_req_time: &mut Instant, random_requests_count: &mut u32) -> bool {
@@ -292,47 +293,55 @@ impl Server {
         request_queue.clear_timed_out();
 
         // Send NodesRequest packets to nodes from the Server
-        let ping_nodes_to_bootstrap = self.ping_nodes_to_bootstrap(&mut request_queue, &mut nodes_to_bootstrap, self.pk);
-        let ping_close_nodes = self.ping_close_nodes(&mut request_queue, close_nodes.iter_mut(), self.pk);
+        let ping_nodes_to_bootstrap = self.ping_nodes_to_bootstrap(&mut request_queue, &mut nodes_to_bootstrap, self.pk)
+            .map_err(|error| DhtMainLoopError::PingNodesToBootstrap { error });
+        let ping_close_nodes = self.ping_close_nodes(&mut request_queue, close_nodes.iter_mut(), self.pk)
+            .map_err(|error| DhtMainLoopError::PingCloseNodes { error });
         let send_nodes_req_random = if send_random_request(&mut self.last_nodes_req_time.write(), &mut self.random_requests_count.write()) {
-            self.send_nodes_req_random(&mut request_queue, close_nodes.iter(), self.pk)
+            Either::A(self.send_nodes_req_random(&mut request_queue, close_nodes.iter(), self.pk))
         } else {
-            Box::new(future::ok(()))
-        };
+            Either::B(future::ok(()))
+        }.map_err(|error| DhtMainLoopError::SendNodesReqRandom { error });
 
         // Send NodesRequest packets to nodes from every DhtFriend
         let send_nodes_req_to_friends = friends.iter_mut().map(|friend| {
-            let ping_nodes_to_bootstrap = self.ping_nodes_to_bootstrap(&mut request_queue, &mut friend.nodes_to_bootstrap, friend.pk);
-            let ping_close_nodes = self.ping_close_nodes(&mut request_queue, friend.close_nodes.nodes.iter_mut(), friend.pk);
+            let ping_nodes_to_bootstrap = self.ping_nodes_to_bootstrap(&mut request_queue, &mut friend.nodes_to_bootstrap, friend.pk)
+                .map_err(|error| SendNodesReqToFriendsError::PingNodesToBootstrap { error });
+            let ping_close_nodes = self.ping_close_nodes(&mut request_queue, friend.close_nodes.nodes.iter_mut(), friend.pk)
+                .map_err(|error| SendNodesReqToFriendsError::PingCloseNodes { error });
             let send_nodes_req_random = if send_random_request(&mut friend.last_nodes_req_time, &mut friend.random_requests_count) {
-                self.send_nodes_req_random(&mut request_queue, friend.close_nodes.nodes.iter(), friend.pk)
+                Either::A(self.send_nodes_req_random(&mut request_queue, friend.close_nodes.nodes.iter(), friend.pk))
             } else {
-                Box::new(future::ok(()))
-            };
+                Either::B(future::ok(()))
+            }.map_err(|error| SendNodesReqToFriendsError::SendNodesReqRandom { error });
             ping_nodes_to_bootstrap.join3(ping_close_nodes, send_nodes_req_random)
+                .map_err(|error| DhtMainLoopError::SendNodesReqToFriends { error })
         }).collect::<Vec<_>>();
 
-        let send_nat_ping_req = self.send_nat_ping_req(&mut request_queue, &mut friends);
+        let send_nat_ping_req = self.send_nat_ping_req(&mut request_queue, &mut friends)
+            .map_err(|error| DhtMainLoopError::SendNatPingReq { error });
 
-        let future = ping_nodes_to_bootstrap.join5(
+        ping_nodes_to_bootstrap.join5(
             ping_close_nodes,
             send_nodes_req_random,
             future::join_all(send_nodes_req_to_friends),
             send_nat_ping_req
-        ).map(|_| ());
-
-        Box::new(future)
+        ).map(|_| ())
     }
 
     /// Run DHT periodical tasks. Result future will never be completed
     /// successfully.
-    pub fn run(self) -> IoFuture<()> {
-        let future = self.clone().run_pings_sending().join4(
-            self.clone().run_onion_key_refresing(),
-            self.clone().run_main_loop(),
+    pub fn run(self) -> impl Future<Item=(), Error=ServerRunError> {
+        self.clone().run_pings_sending()
+            .map_err(|error| ServerRunError::RunPingsSending { error })
+            .join4(
+            self.clone().run_onion_key_refresing()
+                .map_err(|error| ServerRunError::Other { error }),
+            self.clone().run_main_loop()
+                .map_err(|error| ServerRunError::RunMainLoop { error }),
             self.run_bootstrap_requests_sending()
-        ).map(|_| ());
-        Box::new(future)
+                .map_err(|error| ServerRunError::RunBootstrapReqSending { error })
+        ).map(|_| ())
     }
 
     /// Store bootstap nodes
@@ -344,29 +353,28 @@ impl Server {
     /// nodes periodically if all nodes in Ktree are discarded (including the
     /// case when it's empty). It has to be an endless loop because we might
     /// loose the network connection and thereby loose all nodes in Ktree.
-    fn run_bootstrap_requests_sending(self) -> IoFuture<()> {
+    fn run_bootstrap_requests_sending(self) -> impl Future<Item=(), Error=RunBootstrapReqSendingError> {
         let interval = Duration::from_secs(BOOTSTRAP_INTERVAL);
         let wakeups = Interval::new(Instant::now(), interval);
 
-        let future = wakeups
-            .map_err(|e| Error::new(ErrorKind::Other, format!("Bootstrap timer error: {:?}", e)))
+        wakeups
+            .map_err(|error| RunBootstrapReqSendingError::WakeupsError { error })
             .for_each(move |_instant| {
                 trace!("Bootstrap wake up");
                 self.send_bootstrap_requests()
-            });
-
-        Box::new(future)
+                    .map_err(|error| RunBootstrapReqSendingError::SendBootstrapReqs { error })
+            })
     }
 
     /// Check if all nodes in Ktree are discarded (including the case when
     /// it's empty) and if so then send `NodesRequest` packet to nodes from
     /// initial bootstrap list and from Ktree.
-    fn send_bootstrap_requests(&self) -> IoFuture<()> {
+    fn send_bootstrap_requests(&self) -> impl Future<Item=(), Error=SendBootstrapReqsError> {
         let mut request_queue = self.request_queue.write();
         let close_nodes = self.close_nodes.read();
 
         if !close_nodes.is_all_discarded() {
-            return Box::new(future::ok(()));
+            return Either::A(future::ok(()));
         }
 
         let futures = close_nodes
@@ -376,21 +384,20 @@ impl Server {
             .map(|node| self.send_nodes_req(&node, &mut request_queue, self.pk))
             .collect::<Vec<_>>();
 
-        Box::new(join_all(futures).map(|_| ()))
+        Either::B(join_all(futures).map(|_| ()).map_err(|error| SendBootstrapReqsError::SendNodesReq { error }))
     }
 
     /// Run DHT main loop periodically. Result future will never be completed
     /// successfully.
-    fn run_main_loop(self) -> IoFuture<()> {
+    fn run_main_loop(self) -> impl Future<Item=(), Error=RunMainLoopError> {
         let interval = Duration::from_secs(1);
         let wakeups = Interval::new(Instant::now(), interval);
-        let future = wakeups
-            .map_err(|e| Error::new(ErrorKind::Other, format!("DHT server timer error: {:?}", e)))
+        wakeups
+            .map_err(|error| RunMainLoopError::WakeupsError { error })
             .for_each(move |_instant| {
                 trace!("DHT server wake up");
-                self.dht_main_loop()
-            });
-        Box::new(future)
+                self.clone().dht_main_loop().map_err(|error| RunMainLoopError::DhtMainLoop { error })
+            })
     }
 
     /// Refresh onion symmetric key periodically. Result future will never be
@@ -410,47 +417,48 @@ impl Server {
 
     /// Run ping sending periodically. Result future will never be completed
     /// successfully.
-    fn run_pings_sending(self) -> IoFuture<()> {
+    fn run_pings_sending(self) -> impl Future<Item=(), Error=RunPingsSendingError> {
         let interval = Duration::from_secs(TIME_TO_PING);
         let wakeups = Interval::new(Instant::now() + interval, interval);
-        let future = wakeups
-            .map_err(|e| Error::new(ErrorKind::Other, format!("Ping timer error: {:?}", e)))
+        wakeups
+            .map_err(|error| RunPingsSendingError::WakeupsError { error })
             .for_each(move |_instant| {
                 trace!("Pings sending wake up");
                 self.send_pings()
-            });
-        Box::new(future)
+                    .map_err(|error| RunPingsSendingError::PingsSending { error })
+            })
     }
 
     /// Send `PingRequest` packets to nodes from `nodes_to_ping` list.
-    fn send_pings(&self) -> IoFuture<()> {
+    fn send_pings(&self) -> impl Future<Item=(), Error=SendPingsError> {
         let nodes_to_ping = mem::replace(
             &mut *self.nodes_to_ping.write(),
             NodesQueue::new(MAX_TO_PING)
         );
 
         if nodes_to_ping.is_empty() {
-            return Box::new(future::ok(()))
+            return Either::A(future::ok(()))
         }
 
         let mut request_queue = self.request_queue.write();
 
         let futures = nodes_to_ping.iter().map(|node|
             self.send_ping_req(node, &mut request_queue)
+                .map_err(|error| SendPingsError::SendPingReq { error })
         ).collect::<Vec<_>>();
 
-        Box::new(future::join_all(futures).map(|_| ()))
+        Either::B(future::join_all(futures).map(|_| ()))
     }
 
     /// Add node to a `nodes_to_ping` list to send ping later. If node is
     /// a friend and we don't know it's address then this method will send
     /// `PingRequest` immediately instead of adding to a `nodes_to_ping`
     /// list.
-    fn ping_add(&self, node: &PackedNode) -> IoFuture<()> {
+    fn ping_add(&self, node: &PackedNode) -> impl Future<Item=(), Error=PingAddError> {
         let close_nodes = self.close_nodes.read();
 
         if !close_nodes.can_add(node) {
-            return Box::new(future::ok(()))
+            return Either::A(future::ok(()))
         }
 
         let friends = self.friends.read();
@@ -458,18 +466,20 @@ impl Server {
         // If node is friend and we don't know friend's IP address yet then send
         // PingRequest immediately and unconditionally
         if friends.iter().any(|friend| friend.pk == node.pk && !friend.is_addr_known()) {
-            return Box::new(self.send_ping_req(node, &mut self.request_queue.write()))
+            return Either::B(self.send_ping_req(node, &mut self.request_queue.write())
+                .map_err(|error| PingAddError::SendPingReq { error }))
         }
 
         self.nodes_to_ping.write().try_add(&self.pk, node);
 
-        Box::new(future::ok(()))
+        Either::A(future::ok(()))
     }
 
     /// Send `NodesRequest` packets to nodes from bootstrap list. This is
     /// necessary to check whether node is alive before adding it to close
     /// nodes lists.
-    fn ping_nodes_to_bootstrap(&self, request_queue: &mut RequestQueue, nodes_to_bootstrap: &mut NodesQueue, pk: PublicKey) -> IoFuture<()> {
+    fn ping_nodes_to_bootstrap(&self, request_queue: &mut RequestQueue, nodes_to_bootstrap: &mut NodesQueue, pk: PublicKey)
+        -> impl Future<Item=(), Error=PingNodesToBootstrapError> {
         let capacity = nodes_to_bootstrap.capacity() as u8;
         let nodes_to_bootstrap = mem::replace(nodes_to_bootstrap, NodesQueue::new(capacity));
 
@@ -477,12 +487,14 @@ impl Server {
             .map(|node| self.send_nodes_req(&node, request_queue, pk))
             .collect::<Vec<_>>();
 
-        Box::new(future::join_all(futures).map(|_| ()))
+        future::join_all(futures).map(|_| ())
+            .map_err(|error| PingNodesToBootstrapError::SendNodesReq { error })
     }
 
     /// Iterate over nodes from close nodes list and send `NodesRequest` packets
     /// to them if necessary.
-    fn ping_close_nodes<'a, T>(&self, request_queue: &mut RequestQueue, nodes: T, pk: PublicKey) -> IoFuture<()>
+    fn ping_close_nodes<'a, T>(&self, request_queue: &mut RequestQueue, nodes: T, pk: PublicKey)
+        -> impl Future<Item=(), Error=PingCloseNodesError>
         where T: Iterator<Item = &'a mut DhtNode>
     {
         let futures = nodes
@@ -498,13 +510,15 @@ impl Server {
             .map(|node| self.send_nodes_req(&node, request_queue, pk))
             .collect::<Vec<_>>();
 
-        Box::new(future::join_all(futures).map(|_| ()))
+        future::join_all(futures).map(|_| ())
+            .map_err(|error| PingCloseNodesError::SendNodesReq { error })
     }
 
     /// Send `NodesRequest` packet to a random good node every 20 seconds or if
     /// it was sent less than `NODES_REQ_INTERVAL`. This function should be
     /// called every second.
-    fn send_nodes_req_random<'a, T>(&self, request_queue: &mut RequestQueue, nodes: T, pk: PublicKey) -> IoFuture<()>
+    fn send_nodes_req_random<'a, T>(&self, request_queue: &mut RequestQueue, nodes: T, pk: PublicKey)
+        -> impl Future<Item=(), Error=SendNodesReqRandomError>
         where T: Iterator<Item = &'a DhtNode>
     {
         let good_nodes = nodes
@@ -514,7 +528,7 @@ impl Server {
 
         if good_nodes.is_empty() {
             // Random request should be sent only to good nodes
-            return Box::new(future::ok(()))
+            return Either::A(future::ok(()))
         }
 
         let mut random_node_idx = random_usize() % good_nodes.len();
@@ -525,11 +539,12 @@ impl Server {
 
         let random_node = &good_nodes[random_node_idx];
 
-        self.send_nodes_req(&random_node, request_queue, pk)
+        Either::B(self.send_nodes_req(&random_node, request_queue, pk)
+            .map_err(|error| SendNodesReqRandomError::SendNodesReq { error }))
     }
 
     /// Send `PingRequest` packet to the node.
-    pub fn send_ping_req(&self, node: &PackedNode, request_queue: &mut RequestQueue) -> IoFuture<()> {
+    pub fn send_ping_req(&self, node: &PackedNode, request_queue: &mut RequestQueue) -> impl Future<Item=(), Error=SendToError> {
         let payload = PingRequestPayload {
             id: request_queue.new_ping_id(node.pk),
         };
@@ -538,15 +553,16 @@ impl Server {
             &self.pk,
             &payload
         ));
-        self.send_to_direct(node.saddr, ping_req)
+        self.send_to_direct_dht(node.saddr, ping_req)
     }
 
     /// Send `NodesRequest` packet to the node.
-    pub fn send_nodes_req(&self, node: &PackedNode, request_queue: &mut RequestQueue, search_pk: PublicKey) -> IoFuture<()> {
+    pub fn send_nodes_req(&self, node: &PackedNode, request_queue: &mut RequestQueue, search_pk: PublicKey)
+        -> impl Future<Item=(), Error=SendToError> {
         // Check if packet is going to be sent to ourselves.
         if self.pk == node.pk {
             trace!("Attempt to send NodesRequest to ourselves.");
-            return Box::new(future::ok(()))
+            return Either::A(future::ok(()))
         }
 
         let payload = NodesRequestPayload {
@@ -558,11 +574,11 @@ impl Server {
             &self.pk,
             &payload
         ));
-        self.send_to_direct(node.saddr, nodes_req)
+        Either::B(self.send_to_direct_dht(node.saddr, nodes_req))
     }
 
     /// Send `NatPingRequest` packet to all friends and try to punch holes.
-    fn send_nat_ping_req(&self, request_queue: &mut RequestQueue, friends: &mut Vec<DhtFriend>) -> IoFuture<()> {
+    fn send_nat_ping_req(&self, request_queue: &mut RequestQueue, friends: &mut Vec<DhtFriend>) -> impl Future<Item=(), Error=SendNatPingReqError> {
         let futures = friends.iter_mut()
             // we don't want to punch holes to fake friends under any circumstances
             .skip(FAKE_FRIENDS_NUMBER)
@@ -590,18 +606,19 @@ impl Server {
                     );
                     let nat_ping_future = self.send_nat_ping_req_inner(friend, nat_ping_req_packet);
 
-                    Box::new(punch_future.join(nat_ping_future).map(|_| ()))
+                    Either::A(punch_future.join(nat_ping_future).map(|_| ()))
                 } else {
-                    punch_future
+                    Either::B(punch_future)
                 }
             })
             .collect::<Vec<_>>();
 
-        Box::new(join_all(futures).map(|_| ()))
+        join_all(futures).map(|_| ())
     }
 
     /// Try to punch holes to specified friend.
-    fn punch_holes(&self, request_queue: &mut RequestQueue, friend: &mut DhtFriend, returned_addrs: &[SocketAddr]) -> IoFuture<()> {
+    fn punch_holes(&self, request_queue: &mut RequestQueue, friend: &mut DhtFriend, returned_addrs: &[SocketAddr])
+        -> impl Future<Item=(), Error=SendNatPingReqError> {
         let punch_addrs = friend.hole_punch.next_punch_addrs(returned_addrs);
 
         let packets = punch_addrs.into_iter().map(|addr| {
@@ -617,135 +634,151 @@ impl Server {
             (packet, addr)
         }).collect::<Vec<_>>();
 
-        Box::new(send_all_to(&self.tx, stream::iter_ok(packets))
-            .map_err(|_| Error::new(ErrorKind::Other, "send_all_to error.")))
+        send_all_to(&self.tx, stream::iter_ok(packets))
+            .map_err(|error| SendNatPingReqError::PunchHoles { error })
     }
 
     /// Send `NatPingRequest` packet to all close nodes of friend in the hope
     /// that they will redirect it to this friend.
-    fn send_nat_ping_req_inner(&self, friend: &DhtFriend, nat_ping_req_packet: DhtRequest) -> IoFuture<()> {
+    fn send_nat_ping_req_inner(&self, friend: &DhtFriend, nat_ping_req_packet: DhtRequest) -> impl Future<Item=(), Error=SendNatPingReqError> {
         let packet = Packet::DhtRequest(nat_ping_req_packet);
         let futures = friend.close_nodes.nodes.iter().map(|node| {
             self.send_to_node(node, &packet)
         }).collect::<Vec<_>>();
 
-        Box::new(join_all(futures).map(|_| ()))
+        join_all(futures)
+            .map(|_| ())
+            .map_err(|error| SendNatPingReqError::Inner { error })
     }
 
     /// Function to handle incoming packets and send responses if necessary.
-    pub fn handle_packet(&self, packet: Packet, addr: SocketAddr) -> IoFuture<()> {
+    pub fn handle_packet(&self, packet: Packet, addr: SocketAddr) -> impl Future<Item=(), Error=HandlePacketError> {
         match packet {
             Packet::PingRequest(packet) => {
                 debug!("Received ping request");
-                self.handle_ping_req(&packet, addr)
+                Box::new(self.handle_ping_req(&packet, addr)
+                    .map_err(|error| HandlePacketError::PingReq { error })) as Box<Future<Item=(), Error=HandlePacketError>>
             },
             Packet::PingResponse(packet) => {
                 debug!("Received ping response");
-                self.handle_ping_resp(&packet, addr)
+                Box::new(self.handle_ping_resp(&packet, addr)
+                    .map_err(|error| HandlePacketError::PingResp { error })) as Box<Future<Item=(), Error=HandlePacketError>>
             },
             Packet::NodesRequest(packet) => {
                 debug!("Received NodesRequest");
-                self.handle_nodes_req(&packet, addr)
+                Box::new(self.handle_nodes_req(&packet, addr)
+                    .map_err(|error| HandlePacketError::NodesReq { error })) as Box<Future<Item=(), Error=HandlePacketError>>
             },
             Packet::NodesResponse(packet) => {
                 debug!("Received NodesResponse");
-                self.handle_nodes_resp(&packet, addr)
+                Box::new(self.handle_nodes_resp(&packet, addr)
+                    .map_err(|error| HandlePacketError::NodesResp { error })) as Box<Future<Item=(), Error=HandlePacketError>>
             },
             Packet::CookieRequest(packet) => {
                 debug!("Received CookieRequest");
-                self.handle_cookie_request(&packet, addr)
+                Box::new(self.handle_cookie_request(&packet, addr)
+                    .map_err(|error| HandlePacketError::Other { error })) as Box<Future<Item=(), Error=HandlePacketError>>
             },
             Packet::CookieResponse(packet) => {
                 debug!("Received CookieResponse");
-                self.handle_cookie_response(&packet, addr)
+                Box::new(self.handle_cookie_response(&packet, addr)
+                    .map_err(|error| HandlePacketError::Other { error })) as Box<Future<Item=(), Error=HandlePacketError>>
             },
             Packet::CryptoHandshake(packet) => {
                 debug!("Received CryptoHandshake");
-                self.handle_crypto_handshake(&packet, addr)
+                Box::new(self.handle_crypto_handshake(&packet, addr)
+                    .map_err(|error| HandlePacketError::Other { error })) as Box<Future<Item=(), Error=HandlePacketError>>
             },
             Packet::DhtRequest(packet) => {
                 debug!("Received DhtRequest");
-                self.handle_dht_req(packet, addr)
+                Box::new(self.handle_dht_req(packet, addr)
+                    .map_err(|error| HandlePacketError::DhtReq { error })) as Box<Future<Item=(), Error=HandlePacketError>>
             },
             Packet::LanDiscovery(packet) => {
                 debug!("Received LanDiscovery");
-                self.handle_lan_discovery(&packet, addr)
+                Box::new(self.handle_lan_discovery(&packet, addr)
+                    .map_err(|error| HandlePacketError::LanDiscovery { error })) as Box<Future<Item=(), Error=HandlePacketError>>
             },
             Packet::OnionRequest0(packet) => {
                 debug!("Received OnionRequest0");
-                self.handle_onion_request_0(&packet, addr)
+                Box::new(self.handle_onion_request_0(&packet, addr)
+                    .map_err(|error| HandlePacketError::Other { error })) as Box<Future<Item=(), Error=HandlePacketError>>
             },
             Packet::OnionRequest1(packet) => {
                 debug!("Received OnionRequest1");
-                self.handle_onion_request_1(&packet, addr)
+                Box::new(self.handle_onion_request_1(&packet, addr)
+                    .map_err(|error| HandlePacketError::Other { error })) as Box<Future<Item=(), Error=HandlePacketError>>
             },
             Packet::OnionRequest2(packet) => {
                 debug!("Received OnionRequest2");
-                self.handle_onion_request_2(&packet, addr)
+                Box::new(self.handle_onion_request_2(&packet, addr)
+                    .map_err(|error| HandlePacketError::Other { error })) as Box<Future<Item=(), Error=HandlePacketError>>
             },
             Packet::OnionAnnounceRequest(packet) => {
                 debug!("Received OnionAnnounceRequest");
-                self.handle_onion_announce_request(packet, addr)
+                Box::new(self.handle_onion_announce_request(packet, addr)
+                    .map_err(|error| HandlePacketError::Other { error })) as Box<Future<Item=(), Error=HandlePacketError>>
             },
             Packet::OnionDataRequest(packet) => {
                 debug!("Received OnionDataRequest");
-                self.handle_onion_data_request(packet)
+                Box::new(self.handle_onion_data_request(packet)
+                    .map_err(|error| HandlePacketError::Other { error })) as Box<Future<Item=(), Error=HandlePacketError>>
             },
             Packet::OnionResponse3(packet) => {
                 debug!("Received OnionResponse3");
-                self.handle_onion_response_3(packet)
+                Box::new(self.handle_onion_response_3(packet)
+                    .map_err(|error| HandlePacketError::Other { error })) as Box<Future<Item=(), Error=HandlePacketError>>
             },
             Packet::OnionResponse2(packet) => {
                 debug!("Received OnionResponse2");
-                self.handle_onion_response_2(packet)
+                Box::new(self.handle_onion_response_2(packet)
+                    .map_err(|error| HandlePacketError::Other { error })) as Box<Future<Item=(), Error=HandlePacketError>>
             },
             Packet::OnionResponse1(packet) => {
                 debug!("Received OnionResponse1");
-                self.handle_onion_response_1(packet)
+                Box::new(self.handle_onion_response_1(packet)
+                    .map_err(|error| HandlePacketError::Other { error })) as Box<Future<Item=(), Error=HandlePacketError>>
             },
             Packet::BootstrapInfo(packet) => {
                 debug!("Received BootstrapInfo");
-                self.handle_bootstrap_info(&packet, addr)
+                Box::new(self.handle_bootstrap_info(&packet, addr)
+                    .map_err(|error| HandlePacketError::Other { error })) as Box<Future<Item=(), Error=HandlePacketError>>
             },
             // This packet should be handled in client only
             Packet::CryptoData(packet) => {
                 debug!("This packet should be handled in client only, {:?}", packet);
-                Box::new(future::err(
-                    Error::new(ErrorKind::Other,
-                               format!("Packet is not handled {:?}", packet)
-                    )))
+                Box::new(future::err(HandlePacketError::ClientOnly)) as Box<Future<Item=(), Error=HandlePacketError>>
             },
             // This packet should be handled in client only
             Packet::OnionDataResponse(packet) => {
                 debug!("This packet should be handled in client only, {:?}", packet);
-                Box::new(future::err(
-                    Error::new(ErrorKind::Other,
-                               format!("Packet is not handled {:?}", packet)
-                    )))
+                Box::new(future::err(HandlePacketError::ClientOnly)) as Box<Future<Item=(), Error=HandlePacketError>>
             },
             // This packet should be handled in client only
             Packet::OnionAnnounceResponse(packet) => {
                 debug!("This packet should be handled in client only, {:?}", packet);
-                Box::new(future::err(
-                    Error::new(ErrorKind::Other,
-                               format!("Packet is not handled {:?}", packet)
-                    )))
+                Box::new(future::err(HandlePacketError::ClientOnly)) as Box<Future<Item=(), Error=HandlePacketError>>
             },
         }
     }
 
     /// Send UDP packet node. If the node has both IPv4 and IPv6 addresses,
     /// then it sends packet to both addresses.
-    fn send_to_node(&self, node: &DhtNode, packet: &Packet) -> IoFuture<()> {
+    fn send_to_node(&self, node: &DhtNode, packet: &Packet) -> impl Future<Item=(), Error=SendToError> {
         let addrs = node.get_all_addrs();
 
         let futures = addrs.into_iter()
             .map(|addr| {
-                send_to(&self.tx, (packet.clone(), addr))
+                send_to_dht(&self.tx, (packet.clone(), addr))
             })
             .collect::<Vec<_>>();
 
-        Box::new(join_all(futures).map(|_| ()))
+        join_all(futures).map(|_| ())
+    }
+
+    /// Send UDP packet to specified address.
+    fn send_to_direct_dht(&self, addr: SocketAddr, packet: Packet) -> impl Future<Item=(), Error=SendToError> {
+        send_to_dht(&self.tx, (packet, addr))
     }
 
     /// Send UDP packet to specified address.
@@ -756,10 +789,10 @@ impl Server {
     /// Handle received `PingRequest` packet and response with `PingResponse`
     /// packet. If node that sent this packet is not present in close nodes list
     /// and can be added there then it will be added to ping list.
-    fn handle_ping_req(&self, packet: &PingRequest, addr: SocketAddr) -> IoFuture<()> {
+    fn handle_ping_req(&self, packet: &PingRequest, addr: SocketAddr) -> impl Future<Item=(), Error=HandlePingReqError> {
         let precomputed_key = self.precomputed_keys.get(packet.pk);
         let payload = match packet.get_payload(&precomputed_key) {
-            Err(e) => return Box::new(future::err(Error::from(e))),
+            Err(error) => return Either::A(future::err(HandlePingReqError::GetPayload { error } )),
             Ok(payload) => payload,
         };
 
@@ -772,26 +805,25 @@ impl Server {
             &resp_payload
         ));
 
-        Box::new(self.ping_add(&PackedNode::new(addr, &packet.pk))
-            .join(self.send_to_direct(addr, ping_resp))
+        Either::B(self.ping_add(&PackedNode::new(addr, &packet.pk))
+            .map_err(|error| HandlePingReqError::PingAdd { error })
+            .join(self.send_to_direct_dht(addr, ping_resp)
+                .map_err(|error| HandlePingReqError::PingResp { error }))
             .map(|_| ())
         )
     }
 
     /// Handle received `PingResponse` packet and if it's correct add the node
     /// that sent this packet to close nodes lists.
-    fn handle_ping_resp(&self, packet: &PingResponse, addr: SocketAddr) -> IoFuture<()> {
+    fn handle_ping_resp(&self, packet: &PingResponse, addr: SocketAddr) -> impl Future<Item=(), Error=HandlePingRespError> {
         let precomputed_key = self.precomputed_keys.get(packet.pk);
         let payload = match packet.get_payload(&precomputed_key) {
-            Err(e) => return Box::new(future::err(Error::from(e))),
+            Err(error) => return Either::A(future::err(HandlePingRespError::GetPayload { error })),
             Ok(payload) => payload,
         };
 
         if payload.id == 0u64 {
-            return Box::new( future::err(
-                Error::new(ErrorKind::Other,
-                    "PingResponse.ping_id == 0"
-            )))
+            return Either::A( future::err(HandlePingRespError::PingIdIsZero))
         }
 
         let mut request_queue = self.request_queue.write();
@@ -806,21 +838,19 @@ impl Server {
                 friend.try_add_to_close(&pn);
             }
 
-            Box::new( future::ok(()) )
+            Either::B( future::ok(()) )
         } else {
-            Box::new( future::err(
-                Error::new(ErrorKind::Other, "PingResponse.ping_id does not match")
-            ))
+            Either::A( future::err(HandlePingRespError::PingIdMismatch))
         }
     }
 
     /// Handle received `NodesRequest` packet and respond with `NodesResponse`
     /// packet. If node that sent this packet is not present in close nodes list
     /// and can be added there then it will be added to ping list.
-    fn handle_nodes_req(&self, packet: &NodesRequest, addr: SocketAddr) -> IoFuture<()> {
+    fn handle_nodes_req(&self, packet: &NodesRequest, addr: SocketAddr) -> impl Future<Item=(), Error=HandleNodesReqError> {
         let precomputed_key = self.precomputed_keys.get(packet.pk);
         let payload = match packet.get_payload(&precomputed_key) {
-            Err(e) => return Box::new(future::err(Error::from(e))),
+            Err(error) => return Either::A(future::err(HandleNodesReqError::GetPayload { error })),
             Ok(payload) => payload,
         };
 
@@ -836,8 +866,10 @@ impl Server {
             &resp_payload
         ));
 
-        Box::new(self.ping_add(&PackedNode::new(addr, &packet.pk))
-            .join(self.send_to_direct(addr, nodes_resp))
+        Either::B(self.ping_add(&PackedNode::new(addr, &packet.pk))
+            .map_err(|error| HandleNodesReqError::PingAdd { error })
+            .join(self.send_to_direct_dht(addr, nodes_resp)
+                .map_err(|error| HandleNodesReqError::NodesResp { error }))
             .map(|_| ())
         )
     }
@@ -846,10 +878,10 @@ impl Server {
     /// that sent this packet to close nodes lists. Nodes from response will be
     /// added to bootstrap nodes list to send `NodesRequest` packet to them
     /// later.
-    fn handle_nodes_resp(&self, packet: &NodesResponse, addr: SocketAddr) -> IoFuture<()> {
+    fn handle_nodes_resp(&self, packet: &NodesResponse, addr: SocketAddr) -> impl Future<Item=(), Error=HandleNodesRespError> {
         let precomputed_key = self.precomputed_keys.get(packet.pk);
         let payload = match packet.get_payload(&precomputed_key) {
-            Err(e) => return Box::new(future::err(Error::from(e))),
+            Err(error) => return Either::A(future::err(HandleNodesRespError::GetPayload { error })),
             Ok(payload) => payload,
         };
 
@@ -887,12 +919,12 @@ impl Server {
 
                 self.update_returned_addr(node, &packet.pk, &mut close_nodes, &mut friends);
             }
-            Box::new( future::ok(()) )
+            Either::B( future::ok(()) )
         } else {
             // Some old version toxcore responds with wrong ping_id.
             // So we do not treat this as our own error.
             trace!("NodesResponse.ping_id does not match");
-            Box::new(future::ok(()))
+            Either::B(future::ok(()))
         }
     }
 
@@ -949,63 +981,63 @@ impl Server {
 
     /// Handle received `DhtRequest` packet, redirect it if it's sent for
     /// someone else or parse it and handle the payload if it's sent for us.
-    fn handle_dht_req(&self, packet: DhtRequest, addr: SocketAddr) -> IoFuture<()> {
+    fn handle_dht_req(&self, packet: DhtRequest, addr: SocketAddr) -> impl Future<Item=(), Error=HandleDhtReqError> {
         if packet.rpk == self.pk { // the target peer is me
             let precomputed_key = self.precomputed_keys.get(packet.spk);
             let payload = packet.get_payload(&precomputed_key);
             let payload = match payload {
-                Err(e) => return Box::new(future::err(Error::from(e))),
+                Err(error) => return Box::new(future::err(HandleDhtReqError::GetPayload { error })) as Box<Future<Item=(), Error=HandleDhtReqError>>,
                 Ok(payload) => payload,
             };
 
             match payload {
                 DhtRequestPayload::NatPingRequest(nat_payload) => {
                     debug!("Received nat ping request");
-                    self.handle_nat_ping_req(nat_payload, &packet.spk, addr)
+                    Box::new(self.handle_nat_ping_req(nat_payload, &packet.spk, addr)
+                                  .map_err(|error| HandleDhtReqError::NatPingReq { error })) as Box<Future<Item=(), Error=HandleDhtReqError>>
                 },
                 DhtRequestPayload::NatPingResponse(nat_payload) => {
                     debug!("Received nat ping response");
-                    self.handle_nat_ping_resp(nat_payload, &packet.spk)
+                    Box::new(self.handle_nat_ping_resp(nat_payload, &packet.spk)
+                                  .map_err(|error| HandleDhtReqError::NatPingResp { error })) as Box<Future<Item=(), Error=HandleDhtReqError>>
                 },
                 DhtRequestPayload::DhtPkAnnounce(_dht_pk_payload) => {
                     debug!("Received DHT PublicKey Announce");
                     // TODO: handle this packet in onion client
-                    Box::new( future::ok(()) )
+                    Box::new( future::ok(()) ) as Box<Future<Item=(), Error=HandleDhtReqError>>
                 },
                 DhtRequestPayload::HardeningRequest(_dht_pk_payload) => {
                     debug!("Received Hardening request");
                     // TODO: implement handler
-                    Box::new( future::ok(()) )
+                    Box::new( future::ok(()) ) as Box<Future<Item=(), Error=HandleDhtReqError>>
                 },
                 DhtRequestPayload::HardeningResponse(_dht_pk_payload) => {
                     debug!("Received Hardening response");
                     // TODO: implement handler
-                    Box::new( future::ok(()) )
+                    Box::new( future::ok(()) ) as Box<Future<Item=(), Error=HandleDhtReqError>>
                 },
             }
         } else {
             let close_nodes = self.close_nodes.read();
             if let Some(node) = close_nodes.get_node(&packet.rpk) { // search close_nodes to find target peer
                 let packet = Packet::DhtRequest(packet);
-                self.send_to_node(node, &packet)
+                Box::new(self.send_to_node(node, &packet)
+                              .map_err(|error| HandleDhtReqError::SendToNode { error })) as Box<Future<Item=(), Error=HandleDhtReqError>>
             } else {
-                Box::new( future::ok(()) )
+                Box::new( future::ok(()) ) as Box<Future<Item=(), Error=HandleDhtReqError>>
             }
         }
     }
 
     /// Handle received `NatPingRequest` packet and respond with
     /// `NatPingResponse` packet.
-    fn handle_nat_ping_req(&self, payload: NatPingRequest, spk: &PublicKey, addr: SocketAddr) -> IoFuture<()> {
+    fn handle_nat_ping_req(&self, payload: NatPingRequest, spk: &PublicKey, addr: SocketAddr) -> impl Future<Item=(), Error=HandleNatPingReqError> {
         let mut friends = self.friends.write();
 
         let friend = friends.iter_mut()
             .find(|friend| friend.pk == *spk);
         let friend = match friend {
-            None => return Box::new( future::err(
-                Error::new(ErrorKind::Other,
-                           "Can't find friend"
-                ))),
+            None => return Either::A( future::err(HandleNatPingReqError::CannotFindFriend)),
             Some(friend) => friend,
         };
 
@@ -1020,17 +1052,15 @@ impl Server {
             &self.pk,
             &resp_payload
         ));
-        self.send_to_direct(addr, nat_ping_resp)
+        Either::B(self.send_to_direct_dht(addr, nat_ping_resp)
+            .map_err(|error| HandleNatPingReqError::SendNatPingResp { error }))
     }
 
     /// Handle received `NatPingResponse` packet and enable hole punching if
     /// it's correct.
-    fn handle_nat_ping_resp(&self, payload: NatPingResponse, spk: &PublicKey) -> IoFuture<()> {
+    fn handle_nat_ping_resp(&self, payload: NatPingResponse, spk: &PublicKey) -> impl Future<Item=(), Error=HandleNatPingRespError> {
         if payload.id == 0 {
-            return Box::new( future::err(
-                Error::new(ErrorKind::Other,
-                    "NodesResponse.ping_id == 0"
-            )))
+            return Either::A( future::err(HandleNatPingRespError::PingIdIsZero))
         }
 
         let mut friends = self.friends.write();
@@ -1038,10 +1068,7 @@ impl Server {
         let friend = friends.iter_mut()
             .find(|friend| friend.pk == *spk);
         let friend = match friend {
-            None => return Box::new( future::err(
-                Error::new(ErrorKind::Other,
-                           "Can't find friend"
-                ))),
+            None => return Either::A( future::err(HandleNatPingRespError::CannotFindFriend)),
             Some(friend) => friend,
         };
 
@@ -1053,28 +1080,27 @@ impl Server {
             // to him. If we received NatPingResponse that means that this
             // friend is likely behind NAT so we should try to punch holes.
             friend.hole_punch.is_punching_done = false;
-            Box::new( future::ok(()) )
+            Either::B( future::ok(()) )
         } else {
-            Box::new( future::err(
-                Error::new(ErrorKind::Other, "NatPingResponse.ping_id does not match or timed out")
-            ))
+            Either::A( future::err(HandleNatPingRespError::PingIdMismatch))
         }
     }
 
     /// Handle received `LanDiscovery` packet and response with `NodesRequest`
     /// packet.
-    fn handle_lan_discovery(&self, packet: &LanDiscovery, addr: SocketAddr) -> IoFuture<()> {
+    fn handle_lan_discovery(&self, packet: &LanDiscovery, addr: SocketAddr) -> impl Future<Item=(), Error=HandleLanDiscoveryError> {
         // LanDiscovery is optional
         if !self.lan_discovery_enabled {
-            return Box::new(future::ok(()));
+            return Either::A(future::ok(()));
         }
 
         // if Lan Discovery packet has my PK, then it is sent by myself.
         if packet.pk == self.pk {
-            return Box::new(future::ok(()));
+            return Either::A(future::ok(()));
         }
 
-        self.send_nodes_req(&PackedNode::new(addr, &packet.pk), &mut self.request_queue.write(), self.pk)
+        Either::B(self.send_nodes_req(&PackedNode::new(addr, &packet.pk), &mut self.request_queue.write(), self.pk)
+            .map_err(|error| HandleLanDiscoveryError::SendNodesReq { error }))
     }
 
     /// Handle received `OnionRequest0` packet and send `OnionRequest1` packet
@@ -1153,7 +1179,7 @@ impl Server {
                 onion_return
             }),
         };
-        self.send_to_direct(payload.ip_port.to_saddr(), next_packet)
+        Box::new(self.send_to_direct(payload.ip_port.to_saddr(), next_packet))
     }
 
     /// Handle received `OnionAnnounceRequest` packet and response with
