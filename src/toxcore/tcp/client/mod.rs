@@ -2,7 +2,7 @@
 */
 
 mod connections;
-mod relay;
+mod client;
 
 pub use self::connections::*;
-pub use self::relay::*;
+pub use self::client::*;

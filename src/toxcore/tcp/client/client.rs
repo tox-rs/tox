@@ -26,7 +26,7 @@ use toxcore::time::*;
 /// to minimize latency. If some relay can't take more packets we can use
 /// another relay. So it doesn't make much sense to buffer packets and wait for
 /// the relay to send them.
-const RELAY_CHANNEL_SIZE: usize = 2;
+const CLIENT_CHANNEL_SIZE: usize = 2;
 
 /// Packet that can be received from a TCP relay and should be handled outside
 /// of connections module.
@@ -42,7 +42,7 @@ pub enum IncomingPacket {
 
 /// TCP relay connection status.
 #[derive(Debug, Clone)]
-enum RelayStatus {
+enum ClientStatus {
     /// In this status we are not connected to the relay. This is initial
     /// status. Also we can end up in this status if connection was lost due to
     /// errors.
@@ -89,7 +89,7 @@ impl Link {
 
 /// Client connection to a TCP relay.
 #[derive(Clone)]
-pub struct Relay {
+pub struct Client {
     /// `PublicKey` of the TCP relay.
     pub pk: PublicKey,
     /// IP address of the TCP relay.
@@ -98,7 +98,7 @@ pub struct Relay {
     /// belongs to TCP relay.
     incoming_tx: mpsc::UnboundedSender<(PublicKey, IncomingPacket)>,
     /// Status of the relay.
-    status: Arc<RwLock<RelayStatus>>,
+    status: Arc<RwLock<ClientStatus>>,
     /// Time when a connection to the relay was established.
     connected_time: Arc<RwLock<Option<Instant>>>,
     /// Number of unsuccessful attempts to establish connection to the relay.
@@ -111,14 +111,14 @@ pub struct Relay {
     connections: Arc<RwLock<HashSet<PublicKey>>>,
 }
 
-impl Relay {
-    /// Create new `Relay` object.
-    pub fn new(pk: PublicKey, addr: SocketAddr, incoming_tx: mpsc::UnboundedSender<(PublicKey, IncomingPacket)>) -> Relay {
-        Relay {
+impl Client {
+    /// Create new `Client` object.
+    pub fn new(pk: PublicKey, addr: SocketAddr, incoming_tx: mpsc::UnboundedSender<(PublicKey, IncomingPacket)>) -> Client {
+        Client {
             pk,
             addr,
             incoming_tx,
-            status: Arc::new(RwLock::new(RelayStatus::Disconnected)),
+            status: Arc::new(RwLock::new(ClientStatus::Disconnected)),
             connected_time: Arc::new(RwLock::new(None)),
             connection_attempts: Arc::new(RwLock::new(0)),
             links: Arc::new(RwLock::new([None; 240])),
@@ -147,7 +147,7 @@ impl Relay {
     /// Send packet to this relay. If we are not connected to the relay an error
     /// will be returned.
     fn send_packet(&self, packet: Packet) -> IoFuture<()> {
-        if let RelayStatus::Connected(ref tx) = *self.status.read() {
+        if let ClientStatus::Connected(ref tx) = *self.status.read() {
             send_to(tx, packet)
         } else {
             // Attempt to send packet to TCP relay with wrong status. For
@@ -273,8 +273,8 @@ impl Relay {
             let self_c = self.clone();
 
             match *self.status.write() {
-                ref mut status @ RelayStatus::Disconnected
-                | ref mut status @ RelayStatus::Sleeping => *status = RelayStatus::Connecting,
+                ref mut status @ ClientStatus::Disconnected
+                | ref mut status @ ClientStatus::Sleeping => *status = ClientStatus::Connecting,
                 _ => return future::ok(()),
             }
 
@@ -284,10 +284,10 @@ impl Relay {
                     let stats = Stats::new();
                     let secure_socket = Framed::new(socket, Codec::new(channel, stats));
                     let (to_server, from_server) = secure_socket.split();
-                    let (to_server_tx, to_server_rx) = mpsc::channel(RELAY_CHANNEL_SIZE);
+                    let (to_server_tx, to_server_rx) = mpsc::channel(CLIENT_CHANNEL_SIZE);
 
                     match *self.status.write() {
-                        ref mut status @ RelayStatus::Connecting => *status = RelayStatus::Connected(to_server_tx),
+                        ref mut status @ ClientStatus::Connecting => *status = ClientStatus::Connected(to_server_tx),
                         _ => return Either::A(future::ok(())),
                     }
 
@@ -315,8 +315,8 @@ impl Relay {
                 })
                 .then(move |res| {
                     match *self_c.status.write() {
-                        RelayStatus::Sleeping => { },
-                        ref mut status => *status = RelayStatus::Disconnected,
+                        ClientStatus::Sleeping => { },
+                        ref mut status => *status = ClientStatus::Disconnected,
                     }
                     if res.is_err() {
                         self_c.connection_attempts.write().saturating_add(1);
@@ -441,20 +441,20 @@ impl Relay {
     /// Drop connection to the TCP relay if it's connected.
     pub fn disconnect(&self) {
         // just drop the sink to stop the connection
-        *self.status.write() = RelayStatus::Disconnected;
+        *self.status.write() = ClientStatus::Disconnected;
     }
 
     /// Drop connection to the TCP relay if it's connected changing status to
     /// `Sleeping`.
     pub fn sleep(&self) {
         // just drop the sink to stop the connection
-        *self.status.write() = RelayStatus::Sleeping;
+        *self.status.write() = ClientStatus::Sleeping;
     }
 
     /// Check if TCP connection to the relay is established.
     pub fn is_connected(&self) -> bool {
         match *self.status.read() {
-            RelayStatus::Connected(_) => true,
+            ClientStatus::Connected(_) => true,
             _ => false,
         }
     }
@@ -462,7 +462,7 @@ impl Relay {
     /// Check if TCP connection to the relay is not established.
     pub fn is_disconnected(&self) -> bool {
         match *self.status.read() {
-            RelayStatus::Disconnected => true,
+            ClientStatus::Disconnected => true,
             _ => false,
         }
     }
@@ -470,7 +470,7 @@ impl Relay {
     /// Check if TCP connection to the relay is sleeping.
     pub fn is_sleeping(&self) -> bool {
         match *self.status.read() {
-            RelayStatus::Sleeping => true,
+            ClientStatus::Sleeping => true,
             _ => false,
         }
     }
@@ -521,51 +521,51 @@ pub mod tests {
     use tokio::timer::Interval;
 
     use toxcore::onion::packet::*;
-    use toxcore::tcp::server::*;
+    use toxcore::tcp::server::{Server, ServerExt};
 
-    pub fn create_relay() -> (mpsc::UnboundedReceiver<(PublicKey, IncomingPacket)>, mpsc::Receiver<Packet>, Relay) {
+    pub fn create_client() -> (mpsc::UnboundedReceiver<(PublicKey, IncomingPacket)>, mpsc::Receiver<Packet>, Client) {
         let relay_addr = "127.0.0.1:12345".parse().unwrap();
         let (relay_pk, _relay_sk) = gen_keypair();
         let (incoming_tx, incoming_rx) = mpsc::unbounded();
-        let (outgoing_tx, outgoing_rx) = mpsc::channel(RELAY_CHANNEL_SIZE);
-        let relay = Relay::new(relay_pk, relay_addr, incoming_tx);
-        *relay.status.write() = RelayStatus::Connected(outgoing_tx);
-        *relay.connected_time.write() = Some(Instant::now());
-        (incoming_rx, outgoing_rx, relay)
+        let (outgoing_tx, outgoing_rx) = mpsc::channel(CLIENT_CHANNEL_SIZE);
+        let client = Client::new(relay_pk, relay_addr, incoming_tx);
+        *client.status.write() = ClientStatus::Connected(outgoing_tx);
+        *client.connected_time.write() = Some(Instant::now());
+        (incoming_rx, outgoing_rx, client)
     }
 
-    pub fn set_connection_attempts(relay: &Relay, attempts: u32) {
-        *relay.connection_attempts.write() = attempts;
+    pub fn set_connection_attempts(client: &Client, attempts: u32) {
+        *client.connection_attempts.write() = attempts;
     }
 
     #[test]
     fn handle_route_request() {
-        let (_incoming_rx, _outgoing_rx, relay) = create_relay();
+        let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let route_request = Packet::RouteRequest(RouteRequest {
             pk: gen_keypair().0,
         });
 
-        assert!(relay.handle_packet(route_request).wait().is_err());
+        assert!(client.handle_packet(route_request).wait().is_err());
     }
 
     #[test]
     fn handle_route_response() {
-        let (_incoming_rx, _outgoing_rx, relay) = create_relay();
+        let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let (new_pk, _new_sk) = gen_keypair();
         let connection_id = 42;
 
-        relay.connections.write().insert(new_pk);
+        client.connections.write().insert(new_pk);
 
         let route_response = Packet::RouteResponse(RouteResponse {
             connection_id,
             pk: new_pk,
         });
 
-        relay.handle_packet(route_response).wait().unwrap();
+        client.handle_packet(route_response).wait().unwrap();
 
-        let link = relay.links.read()[connection_id as usize - 16].unwrap();
+        let link = client.links.read()[connection_id as usize - 16].unwrap();
 
         assert_eq!(link.pk, new_pk);
         assert_eq!(link.status, LinkStatus::Registered);
@@ -573,23 +573,23 @@ pub mod tests {
 
     #[test]
     fn handle_route_response_occupied() {
-        let (_incoming_rx, _outgoing_rx, relay) = create_relay();
+        let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let (existing_pk, _existing_sk) = gen_keypair();
         let (new_pk, _new_sk) = gen_keypair();
         let connection_id = 42;
 
-        relay.connections.write().insert(new_pk);
-        relay.links.write()[connection_id as usize - 16] = Some(Link::new(existing_pk));
+        client.connections.write().insert(new_pk);
+        client.links.write()[connection_id as usize - 16] = Some(Link::new(existing_pk));
 
         let route_response = Packet::RouteResponse(RouteResponse {
             connection_id,
             pk: new_pk,
         });
 
-        assert!(relay.handle_packet(route_response).wait().is_err());
+        assert!(client.handle_packet(route_response).wait().is_err());
 
-        let link = relay.links.read()[connection_id as usize - 16].unwrap();
+        let link = client.links.read()[connection_id as usize - 16].unwrap();
 
         assert_eq!(link.pk, existing_pk);
         assert_eq!(link.status, LinkStatus::Registered);
@@ -597,7 +597,7 @@ pub mod tests {
 
     #[test]
     fn handle_route_response_unexpected() {
-        let (_incoming_rx, _outgoing_rx, relay) = create_relay();
+        let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let connection_id = 42;
         let route_response = Packet::RouteResponse(RouteResponse {
@@ -605,27 +605,27 @@ pub mod tests {
             pk: gen_keypair().0,
         });
 
-        assert!(relay.handle_packet(route_response).wait().is_err());
+        assert!(client.handle_packet(route_response).wait().is_err());
 
-        assert!(relay.links.read()[connection_id as usize - 16].is_none());
+        assert!(client.links.read()[connection_id as usize - 16].is_none());
     }
 
     #[test]
     fn handle_connect_notification() {
-        let (_incoming_rx, _outgoing_rx, relay) = create_relay();
+        let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let (existing_pk, _existing_sk) = gen_keypair();
         let connection_id = 42;
 
-        relay.links.write()[connection_id as usize - 16] = Some(Link::new(existing_pk));
+        client.links.write()[connection_id as usize - 16] = Some(Link::new(existing_pk));
 
         let connect_notification = Packet::ConnectNotification(ConnectNotification {
             connection_id,
         });
 
-        relay.handle_packet(connect_notification).wait().unwrap();
+        client.handle_packet(connect_notification).wait().unwrap();
 
-        let link = relay.links.read()[connection_id as usize - 16].unwrap();
+        let link = client.links.read()[connection_id as usize - 16].unwrap();
 
         assert_eq!(link.pk, existing_pk);
         assert_eq!(link.status, LinkStatus::Online);
@@ -633,26 +633,26 @@ pub mod tests {
 
     #[test]
     fn handle_connect_notification_unexpected() {
-        let (_incoming_rx, _outgoing_rx, relay) = create_relay();
+        let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let connection_id = 42;
         let connect_notification = Packet::ConnectNotification(ConnectNotification {
             connection_id,
         });
 
-        assert!(relay.handle_packet(connect_notification).wait().is_err());
+        assert!(client.handle_packet(connect_notification).wait().is_err());
 
-        assert!(relay.links.read()[connection_id as usize - 16].is_none());
+        assert!(client.links.read()[connection_id as usize - 16].is_none());
     }
 
     #[test]
     fn handle_disconnect_notification() {
-        let (_incoming_rx, _outgoing_rx, relay) = create_relay();
+        let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let (existing_pk, _existing_sk) = gen_keypair();
         let connection_id = 42;
 
-        relay.links.write()[connection_id as usize - 16] = Some(Link {
+        client.links.write()[connection_id as usize - 16] = Some(Link {
             pk: existing_pk,
             status: LinkStatus::Online,
         });
@@ -661,9 +661,9 @@ pub mod tests {
             connection_id,
         });
 
-        relay.handle_packet(disconnect_notification).wait().unwrap();
+        client.handle_packet(disconnect_notification).wait().unwrap();
 
-        let link = relay.links.read()[connection_id as usize - 16].unwrap();
+        let link = client.links.read()[connection_id as usize - 16].unwrap();
 
         assert_eq!(link.pk, existing_pk);
         assert_eq!(link.status, LinkStatus::Registered);
@@ -671,28 +671,28 @@ pub mod tests {
 
     #[test]
     fn handle_disconnect_notification_unexpected() {
-        let (_incoming_rx, _outgoing_rx, relay) = create_relay();
+        let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let connection_id = 42;
         let disconnect_notification = Packet::DisconnectNotification(DisconnectNotification {
             connection_id,
         });
 
-        assert!(relay.handle_packet(disconnect_notification).wait().is_err());
+        assert!(client.handle_packet(disconnect_notification).wait().is_err());
 
-        assert!(relay.links.read()[connection_id as usize - 16].is_none());
+        assert!(client.links.read()[connection_id as usize - 16].is_none());
     }
 
     #[test]
     fn handle_ping_request() {
-        let (_incoming_rx, outgoing_rx, relay) = create_relay();
+        let (_incoming_rx, outgoing_rx, client) = create_client();
 
         let ping_id = 42;
         let ping_request = Packet::PingRequest(PingRequest {
             ping_id
         });
 
-        relay.handle_packet(ping_request).wait().unwrap();
+        client.handle_packet(ping_request).wait().unwrap();
 
         let packet = unpack!(outgoing_rx.into_future().wait().unwrap().0.unwrap(), Packet::PongResponse);
 
@@ -701,31 +701,31 @@ pub mod tests {
 
     #[test]
     fn handle_pong_response() {
-        let (_incoming_rx, _outgoing_rx, relay) = create_relay();
+        let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let ping_id = 42;
         let pong_response = Packet::PongResponse(PongResponse {
             ping_id
         });
 
-        relay.handle_packet(pong_response).wait().unwrap();
+        client.handle_packet(pong_response).wait().unwrap();
     }
 
     #[test]
     fn handle_oob_send() {
-        let (_incoming_rx, _outgoing_rx, relay) = create_relay();
+        let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let oob_send = Packet::OobSend(OobSend {
             destination_pk: gen_keypair().0,
             data: vec![42; 123],
         });
 
-        assert!(relay.handle_packet(oob_send).wait().is_err());
+        assert!(client.handle_packet(oob_send).wait().is_err());
     }
 
     #[test]
     fn handle_oob_receive() {
-        let (incoming_rx, _outgoing_rx, relay) = create_relay();
+        let (incoming_rx, _outgoing_rx, client) = create_client();
 
         let sender_pk = gen_keypair().0;
         let data = vec![42; 123];
@@ -734,24 +734,24 @@ pub mod tests {
             data: data.clone(),
         });
 
-        relay.handle_packet(oob_receive).wait().unwrap();
+        client.handle_packet(oob_receive).wait().unwrap();
 
         let (relay_pk, packet) = incoming_rx.into_future().wait().unwrap().0.unwrap();
         let (received_pk, received_data) = unpack!(packet, IncomingPacket::Oob[pk, data]);
 
-        assert_eq!(relay_pk, relay.pk);
+        assert_eq!(relay_pk, client.pk);
         assert_eq!(received_pk, sender_pk);
         assert_eq!(received_data, data);
     }
 
     #[test]
     fn handle_data() {
-        let (incoming_rx, _outgoing_rx, relay) = create_relay();
+        let (incoming_rx, _outgoing_rx, client) = create_client();
 
         let (sender_pk, _sender_sk) = gen_keypair();
         let connection_id = 42;
 
-        relay.links.write()[connection_id as usize - 16] = Some(Link {
+        client.links.write()[connection_id as usize - 16] = Some(Link {
             pk: sender_pk,
             status: LinkStatus::Online,
         });
@@ -762,36 +762,36 @@ pub mod tests {
             data: data.clone(),
         });
 
-        relay.handle_packet(data_packet).wait().unwrap();
+        client.handle_packet(data_packet).wait().unwrap();
 
         let (relay_pk, packet) = incoming_rx.into_future().wait().unwrap().0.unwrap();
         let (received_pk, received_data) = unpack!(packet, IncomingPacket::Data[pk, data]);
 
-        assert_eq!(relay_pk, relay.pk);
+        assert_eq!(relay_pk, client.pk);
         assert_eq!(received_pk, sender_pk);
         assert_eq!(received_data, data);
     }
 
     #[test]
     fn handle_data_unexpected() {
-        let (incoming_rx, _outgoing_rx, relay) = create_relay();
+        let (incoming_rx, _outgoing_rx, client) = create_client();
 
         let data_packet = Packet::Data(Data {
             connection_id: 42,
             data: vec![42; 123],
         });
 
-        assert!(relay.handle_packet(data_packet).wait().is_err());
+        assert!(client.handle_packet(data_packet).wait().is_err());
 
         // Necessary to drop tx so that rx.collect() can be finished
-        drop(relay);
+        drop(client);
 
         assert!(incoming_rx.collect().wait().unwrap().is_empty());
     }
 
     #[test]
     fn handle_onion_request() {
-        let (_incoming_rx, _outgoing_rx, relay) = create_relay();
+        let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let onion_request = Packet::OnionRequest(OnionRequest {
             nonce: gen_nonce(),
@@ -804,12 +804,12 @@ pub mod tests {
             payload: vec![42; 123],
         });
 
-        assert!(relay.handle_packet(onion_request).wait().is_err());
+        assert!(client.handle_packet(onion_request).wait().is_err());
     }
 
     #[test]
     fn handle_onion_response() {
-        let (incoming_rx, _outgoing_rx, relay) = create_relay();
+        let (incoming_rx, _outgoing_rx, client) = create_client();
 
         let payload = InnerOnionResponse::OnionDataResponse(OnionDataResponse {
             nonce: gen_nonce(),
@@ -820,30 +820,30 @@ pub mod tests {
             payload: payload.clone(),
         });
 
-        relay.handle_packet(onion_response).wait().unwrap();
+        client.handle_packet(onion_response).wait().unwrap();
 
         let (relay_pk, packet) = incoming_rx.into_future().wait().unwrap().0.unwrap();
         let received_payload = unpack!(packet, IncomingPacket::Onion);
 
-        assert_eq!(relay_pk, relay.pk);
+        assert_eq!(relay_pk, client.pk);
         assert_eq!(received_payload, payload);
     }
 
     #[test]
     fn send_data() {
-        let (_incoming_rx, outgoing_rx, relay) = create_relay();
+        let (_incoming_rx, outgoing_rx, client) = create_client();
 
         let (destination_pk, _destination_sk) = gen_keypair();
         let data = vec![42; 123];
 
         let connection_id = 42;
-        relay.pk_to_id.write().insert(destination_pk, connection_id);
-        relay.links.write()[connection_id as usize - 16] = Some(Link {
+        client.pk_to_id.write().insert(destination_pk, connection_id);
+        client.links.write()[connection_id as usize - 16] = Some(Link {
             pk: destination_pk,
             status: LinkStatus::Online,
         });
 
-        relay.send_data(destination_pk, data.clone()).wait().unwrap();
+        client.send_data(destination_pk, data.clone()).wait().unwrap();
 
         let packet = unpack!(outgoing_rx.into_future().wait().unwrap().0.unwrap(), Packet::Data);
 
@@ -853,46 +853,46 @@ pub mod tests {
 
     #[test]
     fn send_data_not_linked() {
-        let (_incoming_rx, outgoing_rx, relay) = create_relay();
+        let (_incoming_rx, outgoing_rx, client) = create_client();
 
         let (destination_pk, _destination_sk) = gen_keypair();
         let data = vec![42; 123];
 
-        assert!(relay.send_data(destination_pk, data.clone()).wait().is_err());
+        assert!(client.send_data(destination_pk, data.clone()).wait().is_err());
 
         // Necessary to drop tx so that rx.collect() can be finished
-        drop(relay);
+        drop(client);
 
         assert!(outgoing_rx.collect().wait().unwrap().is_empty());
     }
 
     #[test]
     fn send_data_not_online() {
-        let (_incoming_rx, outgoing_rx, relay) = create_relay();
+        let (_incoming_rx, outgoing_rx, client) = create_client();
 
         let (destination_pk, _destination_sk) = gen_keypair();
         let data = vec![42; 123];
 
         let connection_id = 42;
-        relay.pk_to_id.write().insert(destination_pk, connection_id);
-        relay.links.write()[connection_id as usize - 16] = Some(Link::new(destination_pk));
+        client.pk_to_id.write().insert(destination_pk, connection_id);
+        client.links.write()[connection_id as usize - 16] = Some(Link::new(destination_pk));
 
-        assert!(relay.send_data(destination_pk, data.clone()).wait().is_err());
+        assert!(client.send_data(destination_pk, data.clone()).wait().is_err());
 
         // Necessary to drop tx so that rx.collect() can be finished
-        drop(relay);
+        drop(client);
 
         assert!(outgoing_rx.collect().wait().unwrap().is_empty());
     }
 
     #[test]
     fn send_oob() {
-        let (_incoming_rx, outgoing_rx, relay) = create_relay();
+        let (_incoming_rx, outgoing_rx, client) = create_client();
 
         let (destination_pk, _destination_sk) = gen_keypair();
         let data = vec![42; 123];
 
-        relay.send_oob(destination_pk, data.clone()).wait().unwrap();
+        client.send_oob(destination_pk, data.clone()).wait().unwrap();
 
         let packet = unpack!(outgoing_rx.into_future().wait().unwrap().0.unwrap(), Packet::OobSend);
 
@@ -902,7 +902,7 @@ pub mod tests {
 
     #[test]
     fn send_onion() {
-        let (_incoming_rx, outgoing_rx, relay) = create_relay();
+        let (_incoming_rx, outgoing_rx, client) = create_client();
 
         let onion_request = OnionRequest {
             nonce: gen_nonce(),
@@ -915,7 +915,7 @@ pub mod tests {
             payload: vec![42; 123],
         };
 
-        relay.send_onion(onion_request.clone()).wait().unwrap();
+        client.send_onion(onion_request.clone()).wait().unwrap();
 
         let packet = unpack!(outgoing_rx.into_future().wait().unwrap().0.unwrap(), Packet::OnionRequest);
 
@@ -924,11 +924,11 @@ pub mod tests {
 
     #[test]
     fn add_connection() {
-        let (_incoming_rx, outgoing_rx, relay) = create_relay();
+        let (_incoming_rx, outgoing_rx, client) = create_client();
 
         let (connection_pk, _connection_sk) = gen_keypair();
 
-        relay.add_connection(connection_pk).wait().unwrap();
+        client.add_connection(connection_pk).wait().unwrap();
 
         let (packet, outgoing_rx) = outgoing_rx.into_future().wait().unwrap();
         let packet = unpack!(packet.unwrap(), Packet::RouteRequest);
@@ -936,26 +936,26 @@ pub mod tests {
         assert_eq!(packet.pk, connection_pk);
 
         // RouteRequest shouldn't be sent again after we add the same connection
-        relay.add_connection(connection_pk).wait().unwrap();
+        client.add_connection(connection_pk).wait().unwrap();
 
         // Necessary to drop tx so that rx.collect() can be finished
-        drop(relay);
+        drop(client);
 
         assert!(outgoing_rx.collect().wait().unwrap().is_empty());
     }
 
     #[test]
     fn remove_connection() {
-        let (_incoming_rx, outgoing_rx, relay) = create_relay();
+        let (_incoming_rx, outgoing_rx, client) = create_client();
 
         let (connection_pk, _connection_sk) = gen_keypair();
         let connection_id = 42;
 
-        relay.connections.write().insert(connection_pk);
-        relay.links.write()[connection_id as usize - 16] = Some(Link::new(connection_pk));
-        relay.pk_to_id.write().insert(connection_pk, connection_id);
+        client.connections.write().insert(connection_pk);
+        client.links.write()[connection_id as usize - 16] = Some(Link::new(connection_pk));
+        client.pk_to_id.write().insert(connection_pk, connection_id);
 
-        relay.remove_connection(connection_pk).wait().unwrap();
+        client.remove_connection(connection_pk).wait().unwrap();
 
         let packet = unpack!(outgoing_rx.into_future().wait().unwrap().0.unwrap(), Packet::DisconnectNotification);
 
@@ -964,110 +964,110 @@ pub mod tests {
 
     #[test]
     fn remove_connection_no_connection() {
-        let (_incoming_rx, _outgoing_rx, relay) = create_relay();
+        let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let (connection_pk, _connection_sk) = gen_keypair();
 
-        assert!(relay.remove_connection(connection_pk).wait().is_err());
+        assert!(client.remove_connection(connection_pk).wait().is_err());
     }
 
     #[test]
     fn remove_connection_no_link() {
-        let (_incoming_rx, outgoing_rx, relay) = create_relay();
+        let (_incoming_rx, outgoing_rx, client) = create_client();
 
         let (connection_pk, _connection_sk) = gen_keypair();
 
-        relay.connections.write().insert(connection_pk);
+        client.connections.write().insert(connection_pk);
 
-        relay.remove_connection(connection_pk).wait().unwrap();
+        client.remove_connection(connection_pk).wait().unwrap();
 
         // Necessary to drop tx so that rx.collect() can be finished
-        drop(relay);
+        drop(client);
 
         assert!(outgoing_rx.collect().wait().unwrap().is_empty());
     }
 
     #[test]
     fn disconnect() {
-        let (_incoming_rx, _outgoing_rx, relay) = create_relay();
+        let (_incoming_rx, _outgoing_rx, client) = create_client();
 
-        assert!(relay.is_connected());
-        assert!(!relay.is_disconnected());
-        assert!(!relay.is_sleeping());
+        assert!(client.is_connected());
+        assert!(!client.is_disconnected());
+        assert!(!client.is_sleeping());
 
-        relay.disconnect();
+        client.disconnect();
 
-        assert!(!relay.is_connected());
-        assert!(relay.is_disconnected());
-        assert!(!relay.is_sleeping());
+        assert!(!client.is_connected());
+        assert!(client.is_disconnected());
+        assert!(!client.is_sleeping());
     }
 
     #[test]
     fn sleep() {
-        let (_incoming_rx, _outgoing_rx, relay) = create_relay();
+        let (_incoming_rx, _outgoing_rx, client) = create_client();
 
-        assert!(relay.is_connected());
-        assert!(!relay.is_disconnected());
-        assert!(!relay.is_sleeping());
+        assert!(client.is_connected());
+        assert!(!client.is_disconnected());
+        assert!(!client.is_sleeping());
 
-        relay.sleep();
+        client.sleep();
 
-        assert!(!relay.is_connected());
-        assert!(!relay.is_disconnected());
-        assert!(relay.is_sleeping());
+        assert!(!client.is_connected());
+        assert!(!client.is_disconnected());
+        assert!(client.is_sleeping());
     }
 
     #[test]
     fn is_connection_online() {
-        let (_incoming_rx, _outgoing_rx, relay) = create_relay();
+        let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let (connection_pk, _connection_sk) = gen_keypair();
         let connection_id = 42;
 
-        relay.links.write()[connection_id as usize - 16] = Some(Link::new(connection_pk));
-        relay.pk_to_id.write().insert(connection_pk, connection_id);
+        client.links.write()[connection_id as usize - 16] = Some(Link::new(connection_pk));
+        client.pk_to_id.write().insert(connection_pk, connection_id);
 
-        assert!(!relay.is_connection_online(connection_pk));
+        assert!(!client.is_connection_online(connection_pk));
 
-        relay.links.write()[connection_id as usize - 16] = Some(Link {
+        client.links.write()[connection_id as usize - 16] = Some(Link {
             pk: connection_pk,
             status: LinkStatus::Online,
         });
 
-        assert!(relay.is_connection_online(connection_pk));
+        assert!(client.is_connection_online(connection_pk));
     }
 
     #[test]
     fn connections_count() {
-        let (_incoming_rx, _outgoing_rx, relay) = create_relay();
+        let (_incoming_rx, _outgoing_rx, client) = create_client();
 
-        assert_eq!(relay.connections_count(), 0);
+        assert_eq!(client.connections_count(), 0);
 
         let (connection_pk, _connection_sk) = gen_keypair();
 
-        relay.connections.write().insert(connection_pk);
+        client.connections.write().insert(connection_pk);
 
-        assert_eq!(relay.connections_count(), 1);
+        assert_eq!(client.connections_count(), 1);
     }
 
     #[test]
     fn is_connection_online_no_connection() {
-        let (_incoming_rx, _outgoing_rx, relay) = create_relay();
+        let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let (connection_pk, _connection_sk) = gen_keypair();
 
-        assert!(!relay.is_connection_online(connection_pk));
+        assert!(!client.is_connection_online(connection_pk));
     }
 
     #[test]
     fn spawn() {
         // waits until the relay becomes connected
-        fn on_connected(relay: Relay) -> IoFuture<()> {
+        fn on_connected(client: Client) -> IoFuture<()> {
             let future = Interval::new(Instant::now(), Duration::from_millis(10))
                 .map_err(|e| Error::new(ErrorKind::Other, e))
-                .skip_while(move |_| match *relay.status.read() {
-                    RelayStatus::Connecting => future::ok(true),
-                    RelayStatus::Connected(_) => future::ok(false),
+                .skip_while(move |_| match *client.status.read() {
+                    ClientStatus::Connecting => future::ok(true),
+                    ClientStatus::Connected(_) => future::ok(false),
                     ref other => future::err(Error::new(ErrorKind::Other, format!("Invalid status: {:?}", other))),
                 })
                 .into_future()
@@ -1077,12 +1077,12 @@ pub mod tests {
         }
 
         // waits until link with PublicKey becomes online
-        fn on_online(relay: Relay, pk: PublicKey) -> IoFuture<()> {
+        fn on_online(client: Client, pk: PublicKey) -> IoFuture<()> {
             let future = Interval::new(Instant::now(), Duration::from_millis(10))
                 .map_err(|e| Error::new(ErrorKind::Other, e))
                 .skip_while(move |_|
-                    if let Some(&connection_id) = relay.pk_to_id.read().get(&pk) {
-                        let link = relay.links.read()[connection_id as usize - 16];
+                    if let Some(&connection_id) = client.pk_to_id.read().get(&pk) {
+                        let link = client.links.read()[connection_id as usize - 16];
                         future::ok(link.map(|link| link.status) != Some(LinkStatus::Online))
                     } else {
                         future::ok(true)
@@ -1106,46 +1106,46 @@ pub mod tests {
         // run first client
         let (client_pk_1, client_sk_1) = gen_keypair();
         let (incoming_tx_1, incoming_rx_1) = mpsc::unbounded();
-        let relay_1 = Relay::new(server_pk, addr, incoming_tx_1);
+        let client_1 = Client::new(server_pk, addr, incoming_tx_1);
         // connection attempts should be set to 0 after successful connection
-        set_connection_attempts(&relay_1, 3);
-        let relay_future_1 = relay_1.clone().spawn(client_sk_1, client_pk_1);
+        set_connection_attempts(&client_1, 3);
+        let client_future_1 = client_1.clone().spawn(client_sk_1, client_pk_1);
 
         // run second client
         let (client_pk_2, client_sk_2) = gen_keypair();
         let (incoming_tx_2, incoming_rx_2) = mpsc::unbounded();
-        let relay_2 = Relay::new(server_pk, addr, incoming_tx_2);
+        let client_2 = Client::new(server_pk, addr, incoming_tx_2);
         // connection attempts should be set to 0 after successful connection
-        set_connection_attempts(&relay_2, 3);
-        let relay_future_2 = relay_2.clone().spawn(client_sk_2, client_pk_2);
+        set_connection_attempts(&client_2, 3);
+        let client_future_2 = client_2.clone().spawn(client_sk_2, client_pk_2);
 
         // add connection immediately
-        let connection_future = relay_2.add_connection(client_pk_1);
+        let connection_future = client_2.add_connection(client_pk_1);
 
         // wait until connections are established
-        let relay_1_c = relay_1.clone();
-        let relay_2_c = relay_2.clone();
-        let on_connected_future = on_connected(relay_1.clone()).join(on_connected(relay_2.clone())).and_then(move |_| {
-            assert!(relay_1_c.connected_time().is_some());
-            assert!(relay_2_c.connected_time().is_some());
-            assert_eq!(relay_1_c.connection_attempts(), 0);
-            assert_eq!(relay_2_c.connection_attempts(), 0);
+        let client_1_c = client_1.clone();
+        let client_2_c = client_2.clone();
+        let on_connected_future = on_connected(client_1.clone()).join(on_connected(client_2.clone())).and_then(move |_| {
+            assert!(client_1_c.connected_time().is_some());
+            assert!(client_2_c.connected_time().is_some());
+            assert_eq!(client_1_c.connection_attempts(), 0);
+            assert_eq!(client_2_c.connection_attempts(), 0);
             // add connection when relay is connected
-            relay_1_c.add_connection(client_pk_2)
+            client_1_c.add_connection(client_pk_2)
         });
 
         let data_1 = vec![42; 123];
         let data_2 = vec![43; 123];
 
         // wait until links become online
-        let relay_1_c = relay_1.clone();
-        let relay_2_c = relay_2.clone();
+        let client_1_c = client_1.clone();
+        let client_2_c = client_2.clone();
         let data_1_c = data_1.clone();
         let data_2_c = data_2.clone();
-        let on_online_future = on_online(relay_1.clone(), client_pk_2).join(on_online(relay_2.clone(), client_pk_1))
+        let on_online_future = on_online(client_1.clone(), client_pk_2).join(on_online(client_2.clone(), client_pk_1))
             // and then send data packets to each other
-            .and_then(move |_| relay_1_c.send_data(client_pk_2, data_1_c))
-            .and_then(move |_| relay_2_c.send_data(client_pk_1, data_2_c))
+            .and_then(move |_| client_1_c.send_data(client_pk_2, data_1_c))
+            .and_then(move |_| client_2_c.send_data(client_pk_1, data_2_c))
             // and then get them
             .and_then(move |_| incoming_rx_1.map_err(|()| unreachable!("rx can't fail")).into_future().map(move |(packet, _)| {
                 let (relay_pk, packet) = packet.unwrap();
@@ -1165,13 +1165,13 @@ pub mod tests {
             }).map_err(|(e, _)| e))
             .map(move |_| {
                 // tokio runtime won't become idle until we drop the connections
-                relay_1.disconnect();
-                relay_2.disconnect();
+                client_1.disconnect();
+                client_2.disconnect();
                 ()
             });
 
-        let future = relay_future_1
-            .join5(relay_future_2, connection_future, on_connected_future, on_online_future)
+        let future = client_future_1
+            .join5(client_future_2, connection_future, on_connected_future, on_online_future)
             .map(|_| ());
         let future = server_future
             .select(future)
