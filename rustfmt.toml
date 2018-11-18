@@ -1,0 +1,6 @@
+format_doc_comments = false
+trailing_semicolon = false
+binop_separator = "Back"
+reorder_imports = false
+reorder_modules = false
+overflow_delimited_expr = true
