@@ -1,6 +1,9 @@
 /*! Codec for encoding/decoding DHT Packets & DHT Request packets using tokio-io
 */
 
+use std::sync::Arc;
+use parking_lot::RwLock;
+
 use toxcore::dht::packet::*;
 use toxcore::binary_io::*;
 
@@ -51,15 +54,53 @@ pub enum EncodeError {
     }
 }
 
-/// Struct to use for {de-,}serializing DHT UDP packets.
+/// Statistics of incoming/outgoing packets
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DhtCodec;
+pub struct Stats {
+    /// Incoming packets count for Udp
+    incoming: u64,
+    /// Outgoing packets count for Udp
+    outgoing: u64,
+}
+
+impl Stats {
+    /// New Stats object
+    pub fn new() -> Self {
+        Stats {
+            incoming: 0,
+            outgoing: 0,
+        }
+    }
+}
+
+/// Struct to use for {de-,}serializing DHT UDP packets.
+#[derive(Clone, Debug)]
+pub struct DhtCodec {
+    stats: Arc<RwLock<Stats>>,
+}
+
+impl DhtCodec {
+    /// Make object
+    pub fn new(stats: Stats) -> Self {
+        DhtCodec {
+            stats: Arc::new(RwLock::new(stats))
+        }
+    }
+
+    /// Get Stats object
+    pub fn get_current_stats(&self) -> Stats {
+        self.stats.read().clone()
+    }
+}
 
 impl Decoder for DhtCodec {
     type Item = Packet;
     type Error = Error;
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        // Add 1 to incoming counter
+        self.stats.write().incoming +=  1;
+
         let len = buf.len();
         if len > MAX_DHT_PACKET_SIZE {
             return Err(DecodeError::TooBigPacket { len }.into())
@@ -78,6 +119,9 @@ impl Encoder for DhtCodec {
     type Error = Error;
 
     fn encode(&mut self, packet: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
+        // Add 1 to outgoing counter
+        self.stats.write().outgoing +=  1;
+
         let mut packet_buf = [0; MAX_DHT_PACKET_SIZE];
         packet.to_bytes((&mut packet_buf, 0))
             .map(|(packet_buf, size)| {
@@ -91,7 +135,7 @@ impl Encoder for DhtCodec {
 
 #[cfg(test)]
 mod tests {
-    use toxcore::dht::codec::*;
+    use super::*;
     use toxcore::onion::packet::*;
     use toxcore::crypto_core::*;
 
@@ -231,7 +275,8 @@ mod tests {
             }),
         ];
 
-        let mut codec = DhtCodec;
+        let stats = Stats::new();
+        let mut codec = DhtCodec::new(stats);
         let mut buf = BytesMut::new();
         for packet in test_packets {
             buf.clear();
@@ -243,7 +288,8 @@ mod tests {
 
     #[test]
     fn decode_encrypted_packet_incomplete() {
-        let mut codec = DhtCodec;
+        let stats = Stats::new();
+        let mut codec = DhtCodec::new(stats);
         let mut buf = BytesMut::new();
         let packet = Packet::PingRequest(PingRequest {
                 pk: gen_keypair().0,
@@ -260,7 +306,8 @@ mod tests {
 
     #[test]
     fn decode_encrypted_packet_error() {
-        let mut codec = DhtCodec;
+        let stats = Stats::new();
+        let mut codec = DhtCodec::new(stats);
         let mut buf = BytesMut::new();
 
         buf.extend_from_slice(b"\xFF");
@@ -269,7 +316,8 @@ mod tests {
     }
     #[test]
     fn decode_encrypted_packet_zero_length() {
-        let mut codec = DhtCodec;
+        let stats = Stats::new();
+        let mut codec = DhtCodec::new(stats);
         let mut buf = BytesMut::new();
 
         // not enought bytes to decode EncryptedPacket
@@ -277,7 +325,8 @@ mod tests {
     }
     #[test]
     fn encode_packet_too_big() {
-        let mut codec = DhtCodec;
+        let stats = Stats::new();
+        let mut codec = DhtCodec::new(stats);
         let mut buf = BytesMut::new();
         let (pk, _) = gen_keypair();
         let nonce = gen_nonce();
@@ -289,7 +338,14 @@ mod tests {
     }
     #[test]
     fn codec_is_clonable() {
-        let codec = DhtCodec;
+        let stats = Stats::new();
+        let codec = DhtCodec::new(stats);
         let _codec_c = codec.clone();
+    }
+    #[test]
+    fn get_current_stats() {
+        let stats = Stats::new();
+        let codec = DhtCodec::new(stats.clone());
+        assert_eq!(stats, codec.get_current_stats());
     }
 }

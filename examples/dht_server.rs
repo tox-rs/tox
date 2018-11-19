@@ -71,7 +71,9 @@ fn main() {
     // let local_addr: SocketAddr = "[::]:33445".parse().unwrap(); // [::] for IPv6
 
     let socket = bind_socket(local_addr);
-    let (sink, stream) = UdpFramed::new(socket, DhtCodec).split();
+    let stats = Stats::new();
+    let dht_codec = DhtCodec::new(stats);
+    let (sink, stream) = UdpFramed::new(socket, dht_codec).split();
 
     let lan_discovery_sender = LanDiscoverySender::new(tx.clone(), server_pk, local_addr.is_ipv6());
 
