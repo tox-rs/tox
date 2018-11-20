@@ -23,6 +23,7 @@ use tox::toxcore::dht::server::*;
 use tox::toxcore::dht::packed_node::*;
 use tox::toxcore::dht::lan_discovery::*;
 use tox::toxcore::crypto_core::*;
+use tox::toxcore::utils::Stats;
 
 const BOOTSTRAP_NODES: [(&str, &str); 9] = [
     // Impyy

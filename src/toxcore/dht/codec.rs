@@ -6,6 +6,7 @@ use parking_lot::RwLock;
 
 use toxcore::dht::packet::*;
 use toxcore::binary_io::*;
+use toxcore::utils::*;
 
 use bytes::BytesMut;
 use cookie_factory::GenError;
@@ -51,25 +52,6 @@ pub enum EncodeError {
     SerializeError {
         /// Serialization error
         error: GenError
-    }
-}
-
-/// Statistics of incoming/outgoing packets
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Stats {
-    /// Incoming packets count for Udp
-    incoming: u64,
-    /// Outgoing packets count for Udp
-    outgoing: u64,
-}
-
-impl Stats {
-    /// New Stats object
-    pub fn new() -> Self {
-        Stats {
-            incoming: 0,
-            outgoing: 0,
-        }
     }
 }
 

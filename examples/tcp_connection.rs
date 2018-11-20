@@ -10,6 +10,7 @@ use tox::toxcore::tcp::packet::*;
 use tox::toxcore::tcp::handshake::make_client_handshake;
 use tox::toxcore::tcp::codec;
 use tox::toxcore::tcp::client::*;
+use tox::toxcore::utils::Stats;
 
 use failure::{Error, err_msg};
 use futures::{Future, Sink, Stream};
@@ -48,6 +49,7 @@ fn main() {
         processor
     } = ClientProcessor::new();
 
+    let stats = Stats::new();
     // Initialize network communication
     let network = TcpStream::connect(&addr)
         .map_err(Error::from)
@@ -55,8 +57,8 @@ fn main() {
             make_client_handshake(socket, &client_pk, &client_sk, &server_pk)
                 .map_err(Error::from)
         })
-        .and_then(|(socket, channel)| {
-            let secure_socket = Framed::new(socket, codec::Codec::new(channel));
+        .and_then(move |(socket, channel)| {
+            let secure_socket = Framed::new(socket, codec::Codec::new(channel, stats.clone()));
             let (to_server, from_server) = secure_socket.split();
 
             let writer = to_server_rx

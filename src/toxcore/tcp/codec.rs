@@ -6,10 +6,13 @@ use std::io::{Error as IoError};
 use toxcore::binary_io::*;
 use toxcore::tcp::packet::*;
 use toxcore::tcp::secure::*;
+use toxcore::utils::*;
 
 use nom::{ErrorKind, Needed, Offset};
 use bytes::BytesMut;
 use tokio_codec::{Decoder, Encoder};
+use std::sync::Arc;
+use parking_lot::RwLock;
 
 /// Error that can happen when decoding `Packet` from bytes
 #[derive(Debug, Fail)]
@@ -86,13 +89,22 @@ impl From<IoError> for EncodeError {
 
 /// implements tokio-io's Decoder and Encoder to deal with Packet
 pub struct Codec {
-    channel: Channel
+    channel: Channel,
+    stats: Arc<RwLock<Stats>>
 }
 
 impl Codec {
     /// create a new Codec with the given Channel
-    pub fn new(channel: Channel) -> Codec {
-        Codec { channel }
+    pub fn new(channel: Channel, stats: Stats) -> Codec {
+        Codec {
+            channel,
+            stats: Arc::new(RwLock::new(stats))
+        }
+    }
+
+    /// Get Stats object
+    pub fn get_current_stats(&self) -> Stats {
+        self.stats.read().clone()
     }
 }
 
@@ -101,6 +113,9 @@ impl Decoder for Codec {
     type Error = DecodeError;
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        // Add 1 to incoming counter
+        self.stats.write().incoming +=  1;
+
         // deserialize EncryptedPacket
         let (consumed, encrypted_packet) = match EncryptedPacket::from_bytes(buf) {
             IResult::Incomplete(_) => {
@@ -139,6 +154,9 @@ impl Encoder for Codec {
     type Error = EncodeError;
 
     fn encode(&mut self, packet: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
+        // Add 1 to outgoing counter
+        self.stats.write().outgoing +=  1;
+
         // serialize Packet
         let mut packet_buf = [0; MAX_TCP_PACKET_SIZE];
         let (_, packet_size) = packet.to_bytes((&mut packet_buf, 0))
@@ -242,8 +260,9 @@ mod tests {
         let (pk, _) = gen_keypair();
         let (alice_channel, bob_channel) = create_channels();
         let mut buf = BytesMut::new();
-        let mut alice_codec = Codec::new(alice_channel);
-        let mut bob_codec = Codec::new(bob_channel);
+        let stats = Stats::new();
+        let mut alice_codec = Codec::new(alice_channel, stats.clone());
+        let mut bob_codec = Codec::new(bob_channel, stats.clone());
 
         let test_packets = vec![
             Packet::RouteRequest( RouteRequest { pk } ),
@@ -305,7 +324,8 @@ mod tests {
         let (alice_channel, _) = create_channels();
         let mut buf = BytesMut::new();
         buf.extend_from_slice(b"\x00");
-        let mut alice_codec = Codec::new(alice_channel);
+        let stats = Stats::new();
+        let mut alice_codec = Codec::new(alice_channel, stats);
 
         // not enought bytes to decode EncryptedPacket
         assert_eq!(alice_codec.decode(&mut buf).unwrap(), None);
@@ -315,7 +335,8 @@ mod tests {
         let (alice_channel, _) = create_channels();
         let mut buf = BytesMut::new();
         buf.extend_from_slice(b"\x00\x00");
-        let mut alice_codec = Codec::new(alice_channel);
+        let stats = Stats::new();
+        let mut alice_codec = Codec::new(alice_channel, stats);
 
         // not enought bytes to decode EncryptedPacket
         assert!(alice_codec.decode(&mut buf).is_err());
@@ -325,8 +346,9 @@ mod tests {
         let (alice_channel, _) = create_channels();
         let (mallory_channel, _) = create_channels();
 
-        let mut alice_codec = Codec::new(alice_channel);
-        let mut mallory_codec = Codec::new(mallory_channel);
+        let stats = Stats::new();
+        let mut alice_codec = Codec::new(alice_channel, stats.clone());
+        let mut mallory_codec = Codec::new(mallory_channel, stats.clone());
 
         let mut buf = BytesMut::new();
         let packet = Packet::PingRequest( PingRequest { ping_id: 4242 } );
@@ -340,7 +362,8 @@ mod tests {
         let (alice_channel, _) = create_channels();
 
         let mut buf = BytesMut::new();
-        let mut bob_codec = Codec::new(alice_channel);
+        let stats = Stats::new();
+        let mut bob_codec = Codec::new(alice_channel, stats);
 
         // not enough bytes to decode Packet
         assert!(bob_codec.decode(&mut buf).unwrap().is_none());
@@ -349,7 +372,8 @@ mod tests {
     fn decode_packet_error() {
         let (alice_channel, _) = create_channels();
 
-        let mut alice_codec = Codec::new(alice_channel);
+        let stats = Stats::new();
+        let mut alice_codec = Codec::new(alice_channel,stats);
 
         let mut buf = BytesMut::new();
 
@@ -364,10 +388,19 @@ mod tests {
     fn encode_packet_too_big() {
         let (alice_channel, _) = create_channels();
         let mut buf = BytesMut::new();
-        let mut alice_codec = Codec::new(alice_channel);
+        let stats = Stats::new();
+        let mut alice_codec = Codec::new(alice_channel, stats);
         let packet = Packet::Data( Data { connection_id: 42, data: vec![13; 2032] } );
 
         // Alice cannot serialize Packet because it is too long
         assert!(alice_codec.encode(packet, &mut buf).is_err());
+    }
+
+    #[test]
+    fn get_current_stats() {
+        let (alice_channel, _) = create_channels();
+        let stats = Stats::new();
+        let codec = Codec::new(alice_channel, stats.clone());
+        assert_eq!(stats, codec.get_current_stats());
     }
 }

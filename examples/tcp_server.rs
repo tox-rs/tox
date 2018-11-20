@@ -9,6 +9,7 @@ extern crate env_logger;
 
 use tox::toxcore::crypto_core::*;
 use tox::toxcore::tcp::server::{Server, ServerExt};
+use tox::toxcore::utils::Stats;
 
 use tokio::net::TcpListener;
 use futures::Future;
@@ -32,7 +33,8 @@ fn main() {
 
     let server = Server::new();
 
-    let future = server.run(listener, server_sk)
+    let stats = Stats::new();
+    let future = server.run(listener, server_sk, stats)
         .map_err(|_| ());
 
     tokio::run(future);
