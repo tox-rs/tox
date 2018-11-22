@@ -6,6 +6,7 @@ use std::io::{Error as IoError};
 use toxcore::binary_io::*;
 use toxcore::tcp::packet::*;
 use toxcore::tcp::secure::*;
+use toxcore::stats::*;
 
 use nom::{ErrorKind, Needed, Offset};
 use bytes::BytesMut;
@@ -86,13 +87,17 @@ impl From<IoError> for EncodeError {
 
 /// implements tokio-io's Decoder and Encoder to deal with Packet
 pub struct Codec {
-    channel: Channel
+    channel: Channel,
+    stats: Stats
 }
 
 impl Codec {
     /// create a new Codec with the given Channel
-    pub fn new(channel: Channel) -> Codec {
-        Codec { channel }
+    pub fn new(channel: Channel, stats: Stats) -> Codec {
+        Codec {
+            channel,
+            stats
+        }
     }
 }
 
@@ -127,6 +132,9 @@ impl Decoder for Codec {
                 Err(DecodeError::DeserializeDecryptedError { error, packet: decrypted_data })
             },
             IResult::Done(_, packet) => {
+                // Add 1 to incoming counter
+                self.stats.counters.increase_incoming();
+
                 buf.split_to(consumed);
                 Ok(Some(packet))
             }
@@ -139,6 +147,9 @@ impl Encoder for Codec {
     type Error = EncodeError;
 
     fn encode(&mut self, packet: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
+        // Add 1 to outgoing counter
+        self.stats.counters.increase_outgoing();
+
         // serialize Packet
         let mut packet_buf = [0; MAX_TCP_PACKET_SIZE];
         let (_, packet_size) = packet.to_bytes((&mut packet_buf, 0))
@@ -153,9 +164,9 @@ impl Encoder for Codec {
         // serialize EncryptedPacket to binary form
         let mut encrypted_packet_buf = [0; MAX_TCP_ENC_PACKET_SIZE];
         let (_, encrypted_packet_size) = encrypted_packet.to_bytes((&mut encrypted_packet_buf, 0))
-            .expect("EncryptedPacket serialize failed"); // there is nothing to fail since
-                    // serialized Packet is not longer than 2032 bytes
-                    // and we provided 2050 bytes for EncryptedPacket
+            .expect("EncryptedPacket serialize failed");  // there is nothing to fail since
+                                                                // serialized Packet is not longer than 2032 bytes
+                                                                // and we provided 2050 bytes for EncryptedPacket
         buf.extend_from_slice(&encrypted_packet_buf[..encrypted_packet_size]);
         Ok(())
     }
@@ -242,8 +253,9 @@ mod tests {
         let (pk, _) = gen_keypair();
         let (alice_channel, bob_channel) = create_channels();
         let mut buf = BytesMut::new();
-        let mut alice_codec = Codec::new(alice_channel);
-        let mut bob_codec = Codec::new(bob_channel);
+        let stats = Stats::new();
+        let mut alice_codec = Codec::new(alice_channel, stats.clone());
+        let mut bob_codec = Codec::new(bob_channel, stats.clone());
 
         let test_packets = vec![
             Packet::RouteRequest( RouteRequest { pk } ),
@@ -305,7 +317,8 @@ mod tests {
         let (alice_channel, _) = create_channels();
         let mut buf = BytesMut::new();
         buf.extend_from_slice(b"\x00");
-        let mut alice_codec = Codec::new(alice_channel);
+        let stats = Stats::new();
+        let mut alice_codec = Codec::new(alice_channel, stats);
 
         // not enought bytes to decode EncryptedPacket
         assert_eq!(alice_codec.decode(&mut buf).unwrap(), None);
@@ -315,7 +328,8 @@ mod tests {
         let (alice_channel, _) = create_channels();
         let mut buf = BytesMut::new();
         buf.extend_from_slice(b"\x00\x00");
-        let mut alice_codec = Codec::new(alice_channel);
+        let stats = Stats::new();
+        let mut alice_codec = Codec::new(alice_channel, stats);
 
         // not enought bytes to decode EncryptedPacket
         assert!(alice_codec.decode(&mut buf).is_err());
@@ -325,8 +339,9 @@ mod tests {
         let (alice_channel, _) = create_channels();
         let (mallory_channel, _) = create_channels();
 
-        let mut alice_codec = Codec::new(alice_channel);
-        let mut mallory_codec = Codec::new(mallory_channel);
+        let stats = Stats::new();
+        let mut alice_codec = Codec::new(alice_channel, stats.clone());
+        let mut mallory_codec = Codec::new(mallory_channel, stats.clone());
 
         let mut buf = BytesMut::new();
         let packet = Packet::PingRequest( PingRequest { ping_id: 4242 } );
@@ -340,7 +355,8 @@ mod tests {
         let (alice_channel, _) = create_channels();
 
         let mut buf = BytesMut::new();
-        let mut bob_codec = Codec::new(alice_channel);
+        let stats = Stats::new();
+        let mut bob_codec = Codec::new(alice_channel, stats);
 
         // not enough bytes to decode Packet
         assert!(bob_codec.decode(&mut buf).unwrap().is_none());
@@ -349,7 +365,8 @@ mod tests {
     fn decode_packet_error() {
         let (alice_channel, _) = create_channels();
 
-        let mut alice_codec = Codec::new(alice_channel);
+        let stats = Stats::new();
+        let mut alice_codec = Codec::new(alice_channel,stats);
 
         let mut buf = BytesMut::new();
 
@@ -364,7 +381,8 @@ mod tests {
     fn encode_packet_too_big() {
         let (alice_channel, _) = create_channels();
         let mut buf = BytesMut::new();
-        let mut alice_codec = Codec::new(alice_channel);
+        let stats = Stats::new();
+        let mut alice_codec = Codec::new(alice_channel, stats);
         let packet = Packet::Data( Data { connection_id: 42, data: vec![13; 2032] } );
 
         // Alice cannot serialize Packet because it is too long

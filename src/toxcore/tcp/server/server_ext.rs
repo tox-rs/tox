@@ -17,6 +17,7 @@ use toxcore::crypto_core::*;
 use toxcore::tcp::codec::{DecodeError, EncodeError, Codec};
 use toxcore::tcp::handshake::make_server_handshake;
 use toxcore::tcp::server::{Client, Server};
+use toxcore::stats::*;
 
 /// Interval in seconds for Tcp Ping sender
 const TCP_PING_INTERVAL: u64 = 1;
@@ -94,13 +95,13 @@ pub trait ServerExt {
     /// Running TCP ping sender and incoming `TcpStream`. This function uses
     /// `tokio::spawn` inside so it should be executed via tokio to be able to
     /// get tokio default executor.
-    fn run(self: Self, listner: TcpListener, dht_sk: SecretKey) -> Box<Future<Item = (), Error = ServerRunError> + Send>;
+    fn run(self: Self, listner: TcpListener, dht_sk: SecretKey, stats: Stats) -> Box<Future<Item = (), Error = ServerRunError> + Send>;
     /// Running TCP server on incoming `TcpStream`
-    fn run_connection(self: Self, stream: TcpStream, dht_sk: SecretKey) -> Box<Future<Item = (), Error = ConnectionError> + Send>;
+    fn run_connection(self: Self, stream: TcpStream, dht_sk: SecretKey, stats: Stats) -> Box<Future<Item = (), Error = ConnectionError> + Send>;
 }
 
 impl ServerExt for Server {
-    fn run(self: Self, listner: TcpListener, dht_sk: SecretKey) -> Box<Future<Item = (), Error = ServerRunError> + Send> {
+    fn run(self: Self, listner: TcpListener, dht_sk: SecretKey, stats: Stats) -> Box<Future<Item = (), Error = ServerRunError> + Send> {
         let self_c = self.clone();
 
         let connections_future = listner.incoming()
@@ -108,7 +109,7 @@ impl ServerExt for Server {
             .for_each(move |stream| {
                 tokio::spawn(
                     self_c.clone()
-                        .run_connection(stream, dht_sk.clone())
+                        .run_connection(stream, dht_sk.clone(), stats.clone())
                         .map_err(|e| {
                             error!("Error while running tcp connection: {:?}", e);
                             ()
@@ -134,7 +135,7 @@ impl ServerExt for Server {
         Box::new(future)
     }
 
-    fn run_connection(self: Self, stream: TcpStream, dht_sk: SecretKey) -> Box<Future<Item = (), Error = ConnectionError> + Send> {
+    fn run_connection(self: Self, stream: TcpStream, dht_sk: SecretKey, stats: Stats) -> Box<Future<Item = (), Error = ConnectionError> + Send> {
         let addr = match stream.peer_addr() {
             Ok(addr) => addr,
             Err(error) => return Box::new(future::err(ConnectionError::PeerAddrError {
@@ -153,7 +154,7 @@ impl ServerExt for Server {
 
         let server_c = self.clone();
         let process = register_client.and_then(move |(stream, channel, client_pk)| {
-            let secure_socket = Framed::new(stream, Codec::new(channel));
+            let secure_socket = Framed::new(stream, Codec::new(channel, stats));
             let (to_client, from_client) = secure_socket.split();
             let (to_client_tx, to_client_rx) = mpsc::unbounded();
 
@@ -263,12 +264,14 @@ mod tests {
 
         let addr = "127.0.0.1:12345".parse().unwrap();
 
+        let stats = Stats::new();
+        let stats_c = stats.clone();
         let server = TcpListener::bind(&addr).unwrap().incoming()
             .into_future() // take the first connection
             .map_err(|(e, _other_incomings)| Error::from(e))
             .map(|(connection, _other_incomings)| connection.unwrap())
             .and_then(move |stream|
-                Server::new().run_connection(stream, server_sk)
+                Server::new().run_connection(stream, server_sk, stats.clone())
                     .map_err(Error::from)
             );
 
@@ -278,8 +281,8 @@ mod tests {
                 make_client_handshake(socket, &client_pk, &client_sk, &server_pk)
                     .map_err(Error::from)
             })
-            .and_then(|(stream, channel)| {
-                let secure_socket = Framed::new(stream, Codec::new(channel));
+            .and_then(move |(stream, channel)| {
+                let secure_socket = Framed::new(stream, Codec::new(channel, stats_c));
                 let (to_server, from_server) = secure_socket.split();
                 let packet = Packet::PingRequest(PingRequest {
                     ping_id: 42
@@ -318,7 +321,8 @@ mod tests {
         let addr = "127.0.0.1:12346".parse().unwrap();
 
         let listener = TcpListener::bind(&addr).unwrap();
-        let server = Server::new().run(listener, server_sk)
+        let stats = Stats::new();
+        let server = Server::new().run(listener, server_sk, stats.clone())
             .map_err(Error::from);
 
         let now = Instant::now();
@@ -331,8 +335,8 @@ mod tests {
                 make_client_handshake(socket, &client_pk, &client_sk, &server_pk)
                     .map_err(Error::from)
             })
-            .and_then(|(stream, channel)| {
-                let secure_socket = Framed::new(stream, Codec::new(channel));
+            .and_then(move |(stream, channel)| {
+                let secure_socket = Framed::new(stream, Codec::new(channel, stats.clone()));
                 let (to_server, from_server) = secure_socket.split();
                 let packet = Packet::PingRequest(PingRequest {
                     ping_id: 42

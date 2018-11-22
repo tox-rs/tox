@@ -14,6 +14,7 @@ use tox::toxcore::tcp::packet::*;
 use tox::toxcore::tcp::handshake::make_client_handshake;
 use tox::toxcore::tcp::codec;
 use tox::toxcore::io_tokio::IoFuture;
+use tox::toxcore::stats::Stats;
 
 use failure::{Error, err_msg};
 
@@ -75,16 +76,18 @@ fn create_client(rx: mpsc::Receiver<Packet>, tx: mpsc::Sender<Packet>) -> IoFutu
         }
     };
 
+    let stats = Stats::new();
+
     let client = TcpStream::connect(&addr)
         .map_err(Error::from)
         .and_then(move |socket| {
             make_client_handshake(socket, &client_pk, &client_sk, &server_pk)
                 .map_err(Error::from)
         })
-        .and_then(|(socket, channel)| {
+        .and_then(move |(socket, channel)| {
             debug!("Handshake complited");
 
-            let secure_socket = Framed::new(socket, codec::Codec::new(channel));
+            let secure_socket = Framed::new(socket, codec::Codec::new(channel, stats));
             let (to_server, from_server) = secure_socket.split();
 
             let reader = from_server.map_err(Error::from).for_each(move |packet| {

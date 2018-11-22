@@ -45,6 +45,7 @@ use toxcore::crypto_core::*;
 use toxcore::tcp::codec::*;
 use toxcore::tcp::handshake::make_client_handshake;
 use toxcore::tcp::packet::*;
+use toxcore::stats::*;
 
 /// The amount of maximum connections for each friend.
 pub const MAX_FRIEND_TCP_CONNECTIONS: usize =  6;
@@ -206,7 +207,8 @@ impl Connections {
                     .map_err(Error::from)
             })
             .and_then(move |(socket, channel)| {
-                let secure_socket = Framed::new(socket, Codec::new(channel));
+                let stats = Stats::new();
+                let secure_socket = Framed::new(socket, Codec::new(channel, stats));
                 self_c.add_entry(secure_socket, &server_pk, from_server_tx)
             });
 
@@ -271,7 +273,8 @@ mod tests {
         let listener = TcpListener::bind(&addr).unwrap();
 
         let server = Server::new();
-        let server_future = server.run(listener, server_sk);
+        let stats = Stats::new();
+        let server_future = server.run(listener, server_sk, stats);
 
         let connections = Connections::new(client_pk.clone(), client_sk.clone());
 

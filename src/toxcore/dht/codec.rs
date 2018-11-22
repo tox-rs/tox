@@ -3,6 +3,7 @@
 
 use toxcore::dht::packet::*;
 use toxcore::binary_io::*;
+use toxcore::stats::*;
 
 use bytes::BytesMut;
 use cookie_factory::GenError;
@@ -52,8 +53,19 @@ pub enum EncodeError {
 }
 
 /// Struct to use for {de-,}serializing DHT UDP packets.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DhtCodec;
+#[derive(Clone)]
+pub struct DhtCodec {
+    stats: Stats,
+}
+
+impl DhtCodec {
+    /// Make object
+    pub fn new(stats: Stats) -> Self {
+        DhtCodec {
+            stats
+        }
+    }
+}
 
 impl Decoder for DhtCodec {
     type Item = Packet;
@@ -68,7 +80,12 @@ impl Decoder for DhtCodec {
         match Packet::from_bytes(buf) {
             IResult::Incomplete(needed) => Err(DecodeError::IncompletePacket { needed, packet: buf.to_vec() }.into()),
             IResult::Error(error) => Err(DecodeError::DeserializeError { error, packet: buf.to_vec() }.into()),
-            IResult::Done(_, packet) => Ok(Some(packet))
+            IResult::Done(_, packet) => {
+                // Add 1 to incoming counter
+                self.stats.counters.increase_incoming();
+
+                Ok(Some(packet))
+            }
         }
     }
 }
@@ -81,6 +98,9 @@ impl Encoder for DhtCodec {
         let mut packet_buf = [0; MAX_DHT_PACKET_SIZE];
         packet.to_bytes((&mut packet_buf, 0))
             .map(|(packet_buf, size)| {
+                // Add 1 to outgoing counter
+                self.stats.counters.increase_outgoing();
+
                 buf.extend(&packet_buf[..size]);
             })
             .map_err(|error|
@@ -91,7 +111,7 @@ impl Encoder for DhtCodec {
 
 #[cfg(test)]
 mod tests {
-    use toxcore::dht::codec::*;
+    use super::*;
     use toxcore::onion::packet::*;
     use toxcore::crypto_core::*;
 
@@ -231,7 +251,8 @@ mod tests {
             }),
         ];
 
-        let mut codec = DhtCodec;
+        let stats = Stats::new();
+        let mut codec = DhtCodec::new(stats);
         let mut buf = BytesMut::new();
         for packet in test_packets {
             buf.clear();
@@ -243,7 +264,8 @@ mod tests {
 
     #[test]
     fn decode_encrypted_packet_incomplete() {
-        let mut codec = DhtCodec;
+        let stats = Stats::new();
+        let mut codec = DhtCodec::new(stats);
         let mut buf = BytesMut::new();
         let packet = Packet::PingRequest(PingRequest {
                 pk: gen_keypair().0,
@@ -260,7 +282,8 @@ mod tests {
 
     #[test]
     fn decode_encrypted_packet_error() {
-        let mut codec = DhtCodec;
+        let stats = Stats::new();
+        let mut codec = DhtCodec::new(stats);
         let mut buf = BytesMut::new();
 
         buf.extend_from_slice(b"\xFF");
@@ -269,7 +292,8 @@ mod tests {
     }
     #[test]
     fn decode_encrypted_packet_zero_length() {
-        let mut codec = DhtCodec;
+        let stats = Stats::new();
+        let mut codec = DhtCodec::new(stats);
         let mut buf = BytesMut::new();
 
         // not enought bytes to decode EncryptedPacket
@@ -277,7 +301,8 @@ mod tests {
     }
     #[test]
     fn encode_packet_too_big() {
-        let mut codec = DhtCodec;
+        let stats = Stats::new();
+        let mut codec = DhtCodec::new(stats);
         let mut buf = BytesMut::new();
         let (pk, _) = gen_keypair();
         let nonce = gen_nonce();
@@ -289,7 +314,8 @@ mod tests {
     }
     #[test]
     fn codec_is_clonable() {
-        let codec = DhtCodec;
+        let stats = Stats::new();
+        let codec = DhtCodec::new(stats);
         let _codec_c = codec.clone();
     }
 }
