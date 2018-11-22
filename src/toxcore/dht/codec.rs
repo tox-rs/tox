@@ -1,12 +1,9 @@
 /*! Codec for encoding/decoding DHT Packets & DHT Request packets using tokio-io
 */
 
-use std::sync::Arc;
-use parking_lot::RwLock;
-
 use toxcore::dht::packet::*;
 use toxcore::binary_io::*;
-use toxcore::utils::*;
+use toxcore::stats::*;
 
 use bytes::BytesMut;
 use cookie_factory::GenError;
@@ -56,22 +53,17 @@ pub enum EncodeError {
 }
 
 /// Struct to use for {de-,}serializing DHT UDP packets.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct DhtCodec {
-    stats: Arc<RwLock<Stats>>,
+    stats: Stats,
 }
 
 impl DhtCodec {
     /// Make object
     pub fn new(stats: Stats) -> Self {
         DhtCodec {
-            stats: Arc::new(RwLock::new(stats))
+            stats
         }
-    }
-
-    /// Get Stats object
-    pub fn get_current_stats(&self) -> Stats {
-        self.stats.read().clone()
     }
 }
 
@@ -80,9 +72,6 @@ impl Decoder for DhtCodec {
     type Error = Error;
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        // Add 1 to incoming counter
-        self.stats.write().incoming +=  1;
-
         let len = buf.len();
         if len > MAX_DHT_PACKET_SIZE {
             return Err(DecodeError::TooBigPacket { len }.into())
@@ -91,7 +80,12 @@ impl Decoder for DhtCodec {
         match Packet::from_bytes(buf) {
             IResult::Incomplete(needed) => Err(DecodeError::IncompletePacket { needed, packet: buf.to_vec() }.into()),
             IResult::Error(error) => Err(DecodeError::DeserializeError { error, packet: buf.to_vec() }.into()),
-            IResult::Done(_, packet) => Ok(Some(packet))
+            IResult::Done(_, packet) => {
+                // Add 1 to incoming counter
+                self.stats.counters.increase_incoming();
+
+                Ok(Some(packet))
+            }
         }
     }
 }
@@ -101,12 +95,12 @@ impl Encoder for DhtCodec {
     type Error = Error;
 
     fn encode(&mut self, packet: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
-        // Add 1 to outgoing counter
-        self.stats.write().outgoing +=  1;
-
         let mut packet_buf = [0; MAX_DHT_PACKET_SIZE];
         packet.to_bytes((&mut packet_buf, 0))
             .map(|(packet_buf, size)| {
+                // Add 1 to outgoing counter
+                self.stats.counters.increase_outgoing();
+
                 buf.extend(&packet_buf[..size]);
             })
             .map_err(|error|
@@ -323,11 +317,5 @@ mod tests {
         let stats = Stats::new();
         let codec = DhtCodec::new(stats);
         let _codec_c = codec.clone();
-    }
-    #[test]
-    fn get_current_stats() {
-        let stats = Stats::new();
-        let codec = DhtCodec::new(stats.clone());
-        assert_eq!(stats, codec.get_current_stats());
     }
 }

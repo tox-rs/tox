@@ -9,7 +9,7 @@ extern crate env_logger;
 
 use tox::toxcore::crypto_core::*;
 use tox::toxcore::tcp::server::{Server, ServerExt};
-use tox::toxcore::utils::Stats;
+use tox::toxcore::stats::Stats;
 
 use tokio::net::TcpListener;
 use futures::Future;

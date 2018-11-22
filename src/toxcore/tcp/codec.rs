@@ -6,13 +6,11 @@ use std::io::{Error as IoError};
 use toxcore::binary_io::*;
 use toxcore::tcp::packet::*;
 use toxcore::tcp::secure::*;
-use toxcore::utils::*;
+use toxcore::stats::*;
 
 use nom::{ErrorKind, Needed, Offset};
 use bytes::BytesMut;
 use tokio_codec::{Decoder, Encoder};
-use std::sync::Arc;
-use parking_lot::RwLock;
 
 /// Error that can happen when decoding `Packet` from bytes
 #[derive(Debug, Fail)]
@@ -90,7 +88,7 @@ impl From<IoError> for EncodeError {
 /// implements tokio-io's Decoder and Encoder to deal with Packet
 pub struct Codec {
     channel: Channel,
-    stats: Arc<RwLock<Stats>>
+    stats: Stats
 }
 
 impl Codec {
@@ -98,13 +96,8 @@ impl Codec {
     pub fn new(channel: Channel, stats: Stats) -> Codec {
         Codec {
             channel,
-            stats: Arc::new(RwLock::new(stats))
+            stats
         }
-    }
-
-    /// Get Stats object
-    pub fn get_current_stats(&self) -> Stats {
-        self.stats.read().clone()
     }
 }
 
@@ -113,9 +106,6 @@ impl Decoder for Codec {
     type Error = DecodeError;
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        // Add 1 to incoming counter
-        self.stats.write().incoming +=  1;
-
         // deserialize EncryptedPacket
         let (consumed, encrypted_packet) = match EncryptedPacket::from_bytes(buf) {
             IResult::Incomplete(_) => {
@@ -142,6 +132,9 @@ impl Decoder for Codec {
                 Err(DecodeError::DeserializeDecryptedError { error, packet: decrypted_data })
             },
             IResult::Done(_, packet) => {
+                // Add 1 to incoming counter
+                self.stats.counters.increase_incoming();
+
                 buf.split_to(consumed);
                 Ok(Some(packet))
             }
@@ -155,7 +148,7 @@ impl Encoder for Codec {
 
     fn encode(&mut self, packet: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
         // Add 1 to outgoing counter
-        self.stats.write().outgoing +=  1;
+        self.stats.counters.increase_outgoing();
 
         // serialize Packet
         let mut packet_buf = [0; MAX_TCP_PACKET_SIZE];
@@ -171,9 +164,9 @@ impl Encoder for Codec {
         // serialize EncryptedPacket to binary form
         let mut encrypted_packet_buf = [0; MAX_TCP_ENC_PACKET_SIZE];
         let (_, encrypted_packet_size) = encrypted_packet.to_bytes((&mut encrypted_packet_buf, 0))
-            .expect("EncryptedPacket serialize failed"); // there is nothing to fail since
-                    // serialized Packet is not longer than 2032 bytes
-                    // and we provided 2050 bytes for EncryptedPacket
+            .expect("EncryptedPacket serialize failed");  // there is nothing to fail since
+                                                                // serialized Packet is not longer than 2032 bytes
+                                                                // and we provided 2050 bytes for EncryptedPacket
         buf.extend_from_slice(&encrypted_packet_buf[..encrypted_packet_size]);
         Ok(())
     }
@@ -394,13 +387,5 @@ mod tests {
 
         // Alice cannot serialize Packet because it is too long
         assert!(alice_codec.encode(packet, &mut buf).is_err());
-    }
-
-    #[test]
-    fn get_current_stats() {
-        let (alice_channel, _) = create_channels();
-        let stats = Stats::new();
-        let codec = Codec::new(alice_channel, stats.clone());
-        assert_eq!(stats, codec.get_current_stats());
     }
 }

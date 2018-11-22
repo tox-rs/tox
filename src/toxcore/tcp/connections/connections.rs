@@ -45,7 +45,7 @@ use toxcore::crypto_core::*;
 use toxcore::tcp::codec::*;
 use toxcore::tcp::handshake::make_client_handshake;
 use toxcore::tcp::packet::*;
-use toxcore::utils::*;
+use toxcore::stats::*;
 
 /// The amount of maximum connections for each friend.
 pub const MAX_FRIEND_TCP_CONNECTIONS: usize =  6;

@@ -17,7 +17,7 @@ use toxcore::crypto_core::*;
 use toxcore::tcp::codec::{DecodeError, EncodeError, Codec};
 use toxcore::tcp::handshake::make_server_handshake;
 use toxcore::tcp::server::{Client, Server};
-use toxcore::utils::*;
+use toxcore::stats::*;
 
 /// Interval in seconds for Tcp Ping sender
 const TCP_PING_INTERVAL: u64 = 1;

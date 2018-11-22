@@ -10,7 +10,7 @@ use tox::toxcore::tcp::packet::*;
 use tox::toxcore::tcp::handshake::make_client_handshake;
 use tox::toxcore::tcp::codec;
 use tox::toxcore::tcp::client::*;
-use tox::toxcore::utils::Stats;
+use tox::toxcore::stats::Stats;
 
 use failure::{Error, err_msg};
 use futures::{Future, Sink, Stream};
@@ -58,7 +58,7 @@ fn main() {
                 .map_err(Error::from)
         })
         .and_then(move |(socket, channel)| {
-            let secure_socket = Framed::new(socket, codec::Codec::new(channel, stats.clone()));
+            let secure_socket = Framed::new(socket, codec::Codec::new(channel, stats));
             let (to_server, from_server) = secure_socket.split();
 
             let writer = to_server_rx
