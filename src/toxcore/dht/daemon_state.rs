@@ -4,8 +4,6 @@ When toxcore starts, it deserializes states from serialized file.
 Toxcore daemon may serialize its states to file with some interval.
 */
 
-use nom::{Needed, ErrorKind};
-
 use futures::{future, Future, Stream, stream};
 use futures::future::Either;
 
@@ -14,27 +12,7 @@ use toxcore::dht::packed_node::*;
 use toxcore::state_format::old::*;
 use toxcore::binary_io::*;
 use toxcore::dht::kbucket::*;
-
-/// Error that can happen when calling `deserialize_old` of DhtState.
-#[derive(Debug, Fail, PartialEq)]
-pub enum DeserializeError {
-    /// Error indicates that DhtState object can't be parsed.
-    #[fail(display = "Deserialize DhtState error: {:?}, packet: {:?}", error, data)]
-    Deserialize {
-        /// Parsing error
-        error: ErrorKind,
-        /// DhtState object serialized data
-        data: Vec<u8>,
-    },
-    /// Error indicates that more data is needed to parse serialized DhtState object.
-    #[fail(display = "Bytes of DhtState object should not be incomplete: {:?}, data: {:?}", needed, data)]
-    IncompleteData {
-        /// Required data size to be parsed
-        needed: Needed,
-        /// DhtState object serialized data
-        data: Vec<u8>,
-    },
-}
+use toxcore::error::*;
 
 /// Serialize or deserialize states of DHT close lists
 #[derive(Clone, Debug)]
@@ -67,13 +45,13 @@ impl DaemonState {
     }
 
     /// Deserialize DHT close list and then re-setup close list, old means that the format of deserialization is old version
-    pub fn deserialize_old(server: &Server, serialized_data: &[u8]) -> impl Future<Item=(), Error=DeserializeError> + Send {
+    pub fn deserialize_old(server: &Server, serialized_data: &[u8]) -> impl Future<Item=(), Error=Error> + Send {
         let nodes = match DhtState::from_bytes(serialized_data) {
             IResult::Done(_, DhtState(nodes)) => nodes,
             IResult::Incomplete(needed) =>
-                return Either::A(future::err(DeserializeError::IncompleteData { needed, data: serialized_data.to_vec() })),
+                return Either::A(future::err(Error::incomplete(needed, serialized_data.to_vec()))),
             IResult::Error(error) =>
-                return Either::A(future::err(DeserializeError::Deserialize { error, data: serialized_data.to_vec() })),
+                return Either::A(future::err(Error::deserialize(error, serialized_data.to_vec()))),
         };
 
         let mut request_queue = server.request_queue.write();
@@ -94,7 +72,7 @@ mod tests {
 
     use futures::sync::mpsc;
     use std::net::SocketAddr;
-    use futures::Future;
+    use nom::{Needed, ErrorKind as nomErrorKind};
 
     macro_rules! unpack {
         ($variable:expr, $variant:path) => (
@@ -103,18 +81,6 @@ mod tests {
                 other => panic!("Expected {} but got {:?}", stringify!($variant), other),
             }
         )
-    }
-
-    #[test]
-    fn daemon_state_error_display() {
-        format!("{}", DeserializeError::Deserialize {
-            error: ErrorKind::Eof,
-            data: vec![1,2,3,4],
-        });
-        format!("{}", DeserializeError::IncompleteData {
-            needed: Needed::Size(10),
-            data: vec![1,2,3,4],
-        });
     }
 
     #[test]
@@ -143,13 +109,21 @@ mod tests {
         // test with incompleted serialized data
         let serialized_vec = DaemonState::serialize_old(&alice);
         let serialized_len = serialized_vec.len();
-        let deserial_result = DaemonState::deserialize_old(&alice, &serialized_vec[..serialized_len - 1]).wait();
-        assert_eq!(deserial_result, Err(DeserializeError::IncompleteData { needed: Needed::Size(55), data: serialized_vec[..serialized_len - 1].to_vec()}));
+        match DaemonState::deserialize_old(&alice, &serialized_vec[..serialized_len - 1]).wait() {
+            Ok(_) => assert!(false),
+            Err(error) => {
+                assert_eq!(*error.kind(), ErrorKind::IncompleteData { needed: Needed::Size(55), data: serialized_vec[..serialized_len - 1].to_vec() });
+            }
+        }
 
         // test with serialized data corrupted
         let serialized_vec = [42; 10];
-        let deserial_result = DaemonState::deserialize_old(&alice, &serialized_vec).wait();
-        assert_eq!(deserial_result, Err(DeserializeError::Deserialize { error: ErrorKind::Tag, data: serialized_vec.to_vec()}));
+        match DaemonState::deserialize_old(&alice, &serialized_vec).wait() {
+            Ok(_) => assert!(false),
+            Err(error) => {
+                assert_eq!(*error.kind(), ErrorKind::Deserialize { error: nomErrorKind::Tag, data: serialized_vec.to_vec() });
+            }
+        }
 
         // test with empty close list
         alice.close_nodes.write().remove(&pk_org);

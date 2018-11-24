@@ -56,6 +56,7 @@ pub mod toxcore {
     pub mod friend_connection;
     pub mod messenger;
     pub mod stats;
+    pub mod error;
 }
 
 /// Tox Encrypt Save (a.k.a. **TES**) module. Can be used to ecrypt / decrypt
