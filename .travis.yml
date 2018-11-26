@@ -1,34 +1,12 @@
 language: rust
+os:
+  - linux
+  - osx
 rust:
   - 1.26.0
   - stable
   - beta
   - nightly
-cache:
-  - apt
-  - cargo
-# needed for `cargo install cargo-travis`
-addons:
-  apt:
-    packages:
-      - libcurl4-openssl-dev
-      - libelf-dev
-      - libdw-dev
-      - binutils-dev
-      - cmake
-    sources:
-      - kalakris-cmake
-
-os:
-  - linux
-  - osx
-
-matrix:
-  allow_failures:
-  - rust: beta
-  - rust: nightly
-
-sudo: required
 
 env:
   global:
@@ -42,38 +20,57 @@ before_install:
   - |
     if [[ "$TRAVIS_OS_NAME" == "linux" ]]
     then
-        ./scripts/verify-commit-messages.sh "$TRAVIS_COMMIT_RANGE" \
-        && ./scripts/bootstrap-ubuntu-14-04.sh
+        ./scripts/verify-commit-messages.sh "$TRAVIS_COMMIT_RANGE" || exit 1;
+        ./scripts/bootstrap-ubuntu-14-04.sh;
     fi
   - |
     if [[ "$TRAVIS_OS_NAME" == "osx" ]]
     then
-        ./scripts/bootstrap-osx.sh
-    fi
-
-install:
-  - |
-    if [[ "$TRAVIS_RUST_VERSION" == nightly ]]
-    then
-        rustup component add clippy-preview
+        ./scripts/bootstrap-osx.sh;
     fi
 
 script:
   - cargo build --verbose
   - cargo test --verbose
-  - |
-    if [[ "$TRAVIS_RUST_VERSION" == nightly ]]
-    then
-        cargo clippy --verbose --all --tests
-    fi
   - cargo doc
 
-after_success:
-  # measure code coverage and upload to coveralls.io
-  - |
-    if [[ "$TRAVIS_OS_NAME" == "linux" ]] && [[ "$TRAVIS_RUST_VERSION" == stable ]]
-    then
-      cargo install cargo-travis || echo "cargo-travis has been already installed"
-      export PATH=$HOME/.cargo/bin:$PATH
-      cargo coveralls
-    fi
+matrix:
+  allow_failures:
+    - rust: beta
+    - rust: nightly
+  include:
+    - os: linux
+      rust: nightly
+      env:
+        NAME: clippy
+      install:
+        - rustup component add clippy-preview
+      script:
+        - cargo clippy --verbose --all --tests
+
+    - os: linux
+      rust: stable
+      sudo: required
+      env:
+        NAME: coverage
+      addons: # needed for `cargo install cargo-travis`
+        apt:
+          packages:
+            - libcurl4-openssl-dev
+            - libelf-dev
+            - libdw-dev
+            - binutils-dev
+            - cmake
+          sources:
+            - kalakris-cmake
+      cache:
+        directories:
+          - /home/travis/.cargo
+          - /home/travis/build/tox-rs/tox/target/kcov-master
+      before_cache:
+        - rm -rf /home/travis/.cargo/registry
+      install:
+        - cargo install cargo-travis --debug || echo "cargo-travis has been already installed"
+      script:
+        - mkdir -p target # fix for cargo-coveralls
+        - cargo coveralls
