@@ -9,9 +9,8 @@ use toxcore::crypto_core::*;
 use toxcore::dht::packet::*;
 use toxcore::time::*;
 
-/// How often in seconds `CookieRequest` or `CryptoHandshake` packets should be
-/// sent
-pub const CRYPTO_SEND_PACKET_INTERVAL: u64 = 1;
+/// Interval in ms between sending cookie request/handshake packets.
+pub const CRYPTO_SEND_PACKET_INTERVAL: u64 = 1000;
 
 /// The maximum number of times we try to send the cookie request and handshake
 /// before giving up
@@ -26,6 +25,34 @@ pub const DEFAULT_RTT: u64 = 1000;
 
 /// rtt in milliseconds for TCP connections
 pub const TCP_RTT: u64 = 500;
+
+/// The dT for the average packet receiving rate calculations.
+pub const PACKET_COUNTER_AVERAGE_INTERVAL: u64 = 50;
+
+/// How many last sizes of `send_array` should be recorded for congestion
+/// control.
+pub const CONGESTION_QUEUE_ARRAY_SIZE: usize = 12;
+
+/// How many numbers of sent lossless packets should be recorded for congestion
+/// control. It should be bigger than `CONGESTION_QUEUE_ARRAY_SIZE` due to rtt.
+pub const CONGESTION_LAST_SENT_ARRAY_SIZE: usize = CONGESTION_QUEUE_ARRAY_SIZE * 2;
+
+/// Minimum packets rate per second.
+pub const CRYPTO_PACKET_MIN_RATE: f64 = 4.0;
+
+/// Timeout for increasing speed after congestion event (in ms).
+pub const CONGESTION_EVENT_TIMEOUT: u64 = 1000;
+
+/// If the send queue grows so that it will take more than 2 seconds to send all
+/// its packet we will reduce send rate.
+pub const SEND_QUEUE_CLEARANCE_TIME: f64 = 2.0;
+
+/// Minimum packets in the send queue to reduce send rate.
+pub const CRYPTO_MIN_QUEUE_LENGTH: u32 = 64;
+
+/// Ratio of recv queue size / recv packet rate (in seconds) times
+/// the number of ms between request packets to send at that ratio.
+pub const REQUEST_PACKETS_COMPARE_CONSTANT: f64 = 0.125 * 100.0;
 
 /// Packet that should be sent every second. Depending on `ConnectionStatus` it
 /// can be `CookieRequest` or `CryptoHandshake`
@@ -79,7 +106,7 @@ impl StatusPacket {
 
     /// Check if one second is elapsed since last time when the packet was sent
     fn is_time_elapsed(&self) -> bool {
-        clock_elapsed(self.sent_time) > Duration::from_secs(CRYPTO_SEND_PACKET_INTERVAL)
+        clock_elapsed(self.sent_time) > Duration::from_millis(CRYPTO_SEND_PACKET_INTERVAL)
     }
 
     /// Check if packet should be sent to the peer
@@ -208,7 +235,7 @@ It can use both UDP and TCP (over relays) transport protocols to send data and
 can switch between them without the peers needing to disconnect and reconnect.
 
 */
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CryptoConnection {
     /// Precomputed key of our DHT `SecretKey` and peer's DHT `PublicKey`
     pub dht_precomputed_key: PrecomputedKey,
@@ -235,6 +262,36 @@ pub struct CryptoConnection {
     /// Round trip time - the lowest (for all packets) difference between time
     /// when a packet was sent and time when we received the confirmation
     pub rtt: Duration,
+    /// Time when the last request packet was sent.
+    pub request_packet_sent_time: Option<Instant>,
+
+    // Stats for congestion control
+
+    /// Time since the last stats calculation.
+    pub stats_calculation_time: Instant,
+    /// Number of received lossless packets since the last rate calculation.
+    pub packets_received: u32,
+    /// Number of sent lossless packets. It does not include resent packets.
+    pub packets_sent: u32,
+    /// Number of resent lossless packets.
+    pub packets_resent: u32,
+    /// Current position in `last_send_array_sizes` and `last_num_packets` arrays.
+    pub last_sendqueue_counter: u32,
+    /// Last sizes of `send_array`.
+    pub last_send_array_sizes: [u32; CONGESTION_QUEUE_ARRAY_SIZE],
+    /// Last sent packets counts.
+    pub last_num_packets_sent: [u32; CONGESTION_LAST_SENT_ARRAY_SIZE],
+    /// Last resent packets counts.
+    pub last_num_packets_resent: [u32; CONGESTION_LAST_SENT_ARRAY_SIZE],
+    /// Congestion event is a time when we couldn't send all packets due to
+    /// slow connection.
+    pub last_congestion_event: Option<Instant>,
+    /// Rate of receiving lossless packets.
+    pub packet_recv_rate: f64,
+    /// Estimated packets send rate.
+    pub packet_send_rate: f64,
+    /// Estimated requested packets send rate.
+    pub packet_send_rate_requested: f64,
 }
 
 impl CryptoConnection {
@@ -268,6 +325,19 @@ impl CryptoConnection {
             send_array: PacketsArray::new(),
             recv_array: PacketsArray::new(),
             rtt: Duration::from_millis(DEFAULT_RTT),
+            request_packet_sent_time: None,
+            stats_calculation_time: clock_now(),
+            packets_received: 0,
+            packets_sent: 0,
+            packets_resent: 0,
+            last_sendqueue_counter: 0,
+            last_send_array_sizes: [0; CONGESTION_QUEUE_ARRAY_SIZE],
+            last_num_packets_sent: [0; CONGESTION_LAST_SENT_ARRAY_SIZE],
+            last_num_packets_resent: [0; CONGESTION_LAST_SENT_ARRAY_SIZE],
+            last_congestion_event: None,
+            packet_recv_rate: 0.0,
+            packet_send_rate: CRYPTO_PACKET_MIN_RATE,
+            packet_send_rate_requested: CRYPTO_PACKET_MIN_RATE,
         }
     }
 
@@ -317,6 +387,19 @@ impl CryptoConnection {
             send_array: PacketsArray::new(),
             recv_array: PacketsArray::new(),
             rtt: Duration::from_millis(DEFAULT_RTT),
+            request_packet_sent_time: None,
+            stats_calculation_time: clock_now(),
+            packets_received: 0,
+            packets_sent: 0,
+            packets_resent: 0,
+            last_sendqueue_counter: 0,
+            last_send_array_sizes: [0; CONGESTION_QUEUE_ARRAY_SIZE],
+            last_num_packets_sent: [0; CONGESTION_LAST_SENT_ARRAY_SIZE],
+            last_num_packets_resent: [0; CONGESTION_LAST_SENT_ARRAY_SIZE],
+            last_congestion_event: None,
+            packet_recv_rate: 0.0,
+            packet_send_rate: CRYPTO_PACKET_MIN_RATE,
+            packet_send_rate_requested: CRYPTO_PACKET_MIN_RATE,
         }
     }
 
@@ -375,6 +458,133 @@ impl CryptoConnection {
             .map(|time| clock_elapsed(time) >= Duration::from_secs(UDP_DIRECT_TIMEOUT / 2))
             .unwrap_or(true)
     }
+
+    /// Calculate packets receive rate.
+    fn calculate_recv_rate(&mut self, now: Instant) {
+        let dt = now - self.stats_calculation_time;
+        self.packet_recv_rate = self.packets_received as f64 / (dt.as_secs() as f64 + dt.subsec_millis() as f64 / 1000.0);
+    }
+
+    /// Calculate packets send rate.
+    fn calculate_send_rate(&mut self, now: Instant) {
+        let pos = self.last_sendqueue_counter as usize % CONGESTION_QUEUE_ARRAY_SIZE;
+        let n_p_pos = self.last_sendqueue_counter as usize % CONGESTION_LAST_SENT_ARRAY_SIZE;
+        self.last_sendqueue_counter = (self.last_sendqueue_counter + 1) %
+            // divide by the common multiple to prevent overflow
+            (CONGESTION_QUEUE_ARRAY_SIZE * CONGESTION_LAST_SENT_ARRAY_SIZE) as u32;
+
+        let send_array_len = self.send_array.len();
+
+        self.last_send_array_sizes[pos] = send_array_len;
+        self.last_num_packets_sent[n_p_pos] = self.packets_sent;
+        self.last_num_packets_resent[n_p_pos] = self.packets_resent;
+
+        // How changed the size of send_array per CONGESTION_QUEUE_ARRAY_SIZE * PACKET_COUNTER_AVERAGE_INTERVAL interval
+        let sum = send_array_len as i32 - self.last_send_array_sizes[(pos + 1) % CONGESTION_QUEUE_ARRAY_SIZE] as i32;
+
+        // The maximum allowed delay
+        const CONGESTION_MAX_DELAY: usize = CONGESTION_LAST_SENT_ARRAY_SIZE - CONGESTION_QUEUE_ARRAY_SIZE;
+
+        // Based on rtt offset in number of positions for last_num_packets arrays (one position equals 50 ms)
+        let delay = ((
+            self.rtt.as_secs() * 1000 +
+                self.rtt.subsec_millis() as u64 +
+                PACKET_COUNTER_AVERAGE_INTERVAL / 2 // add half of the interval to make delay rounded
+        ) / PACKET_COUNTER_AVERAGE_INTERVAL) as usize;
+        let delay = delay.min(CONGESTION_MAX_DELAY);
+
+        // Total number of sent packets per CONGESTION_QUEUE_ARRAY_SIZE * PACKET_COUNTER_AVERAGE_INTERVAL interval
+        // For instance if the delay is 3 elements marked with '+' will be taken ('x' is the current pos):
+        // ...++++++++++++..x......
+        let mut total_sent = 0;
+        let mut total_resent = 0;
+        for i in 0 .. CONGESTION_QUEUE_ARRAY_SIZE {
+            let i = (n_p_pos + (CONGESTION_MAX_DELAY - delay) + i) % CONGESTION_LAST_SENT_ARRAY_SIZE;
+            total_sent += self.last_num_packets_sent[i];
+            total_resent += self.last_num_packets_resent[i];
+        }
+
+        if sum > 0 {
+            // send_array increased i.e. we sent more packets that was delivered
+            // decrease total_sent packets by this number so that it includes only delivered packets
+            total_sent -= sum as u32;
+        } else if total_resent > -sum as u32 {
+            // send_array decreased and not all resent packets were delivered
+            // use this number to count only delivered packets
+            total_resent = -sum as u32;
+        }
+
+        // Average number of successfully delivered packets per second
+        let coeff = 1000.0 / (CONGESTION_QUEUE_ARRAY_SIZE as f64 * PACKET_COUNTER_AVERAGE_INTERVAL as f64);
+        let min_speed = total_sent as f64 * coeff;
+        let min_speed_request = (total_sent + total_resent) as f64 * coeff;
+
+        // Time necessary to send all packets from send queue
+        let send_array_time = send_array_len as f64 / min_speed;
+
+        // And, finally, estimated packets send rate
+        let packet_send_rate = if send_array_time > SEND_QUEUE_CLEARANCE_TIME && send_array_len > CRYPTO_MIN_QUEUE_LENGTH {
+            // It will take more than SEND_QUEUE_CLEARANCE_TIME seconds to send
+            // all packets from send queue. Reduce packets send rate in this case
+            min_speed / (send_array_time / SEND_QUEUE_CLEARANCE_TIME)
+        } else if self.last_congestion_event.map_or(true, |time| (now - time) > Duration::from_millis(CONGESTION_EVENT_TIMEOUT)) {
+            // Congestion event happened long ago so increase packets send rate
+            min_speed * 1.2
+        } else {
+            // Congestion event happened recently so decrease packets send rate
+            min_speed * 0.9
+        };
+        let packet_send_rate = packet_send_rate.max(CRYPTO_PACKET_MIN_RATE);
+        let packet_send_rate_requested = min_speed_request * 1.2;
+        let packet_send_rate_requested = packet_send_rate_requested.max(packet_send_rate);
+
+        self.packet_send_rate = packet_send_rate;
+        self.packet_send_rate_requested = packet_send_rate_requested;
+    }
+
+    /// Reset congestion counters after they were used for stats calculation.
+    fn reset_congestion_counters(&mut self, now: Instant) {
+        self.packets_received = 0;
+        self.packets_sent = 0;
+        self.packets_resent = 0;
+        self.stats_calculation_time = now;
+    }
+
+    /// Update stats necessary for congestion control. Should be called every 50 ms.
+    pub fn update_congestion_stats(&mut self) {
+        let now = clock_now();
+        self.calculate_recv_rate(now);
+        self.calculate_send_rate(now);
+        self.reset_congestion_counters(now);
+    }
+
+    /// Calculate the interval in ms for request packet.
+    pub fn request_packet_interval(&self) -> Duration {
+        let request_packet_interval = REQUEST_PACKETS_COMPARE_CONSTANT / ((self.recv_array.len() as f64 + 1.0) / (self.packet_recv_rate + 1.0));
+        let request_packet_interval = request_packet_interval.min(
+            CRYPTO_PACKET_MIN_RATE / self.packet_recv_rate * CRYPTO_SEND_PACKET_INTERVAL as f64 + PACKET_COUNTER_AVERAGE_INTERVAL as f64
+        );
+        let request_packet_interval = (request_packet_interval.round() as u64)
+            .max(PACKET_COUNTER_AVERAGE_INTERVAL) // lower bound
+            .min(CRYPTO_SEND_PACKET_INTERVAL); // upper bound
+        Duration::from_millis(request_packet_interval)
+    }
+
+    /// Check if the connection is established.
+    pub fn is_established(&self) -> bool {
+        match self.status {
+            ConnectionStatus::Established { .. } => true,
+            _ => false,
+        }
+    }
+
+    /// Check if the connection is not confirmed.
+    pub fn is_not_confirmed(&self) -> bool {
+        match self.status {
+            ConnectionStatus::NotConfirmed { .. } => true,
+            _ => false,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -403,7 +613,7 @@ mod tests {
 
         let mut enter = tokio_executor::enter().unwrap();
         let clock = Clock::new_with_now(ConstNow(
-            packet.sent_time + Duration::from_secs(CRYPTO_SEND_PACKET_INTERVAL + 1)
+            packet.sent_time + Duration::from_millis(CRYPTO_SEND_PACKET_INTERVAL + 1000)
         ));
 
         with_default(&clock, &mut enter, |_| {
@@ -431,7 +641,7 @@ mod tests {
 
         let mut enter = tokio_executor::enter().unwrap();
         let clock = Clock::new_with_now(ConstNow(
-            packet.sent_time + Duration::from_secs(CRYPTO_SEND_PACKET_INTERVAL + 1)
+            packet.sent_time + Duration::from_millis(CRYPTO_SEND_PACKET_INTERVAL + 1000)
         ));
 
         with_default(&clock, &mut enter, |_| {
@@ -507,5 +717,109 @@ mod tests {
 
         let connection_c = connection.clone();
         assert_eq!(connection_c, connection);
+    }
+
+    #[test]
+    fn update_congestion_stats() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, _real_sk) = gen_keypair();
+        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+
+        let now = Instant::now();
+
+        connection.stats_calculation_time = now;
+        connection.packets_received = 300;
+        connection.packets_sent = 200;
+        connection.packets_resent = 100;
+
+        let next_now = now + Duration::from_millis(PACKET_COUNTER_AVERAGE_INTERVAL);
+        let mut enter = tokio_executor::enter().unwrap();
+        let clock = Clock::new_with_now(ConstNow(next_now));
+
+        with_default(&clock, &mut enter, |_| {
+            connection.update_congestion_stats();
+        });
+
+        assert_eq!(connection.packets_received, 0);
+        assert_eq!(connection.packets_sent, 0);
+        assert_eq!(connection.packets_resent, 0);
+        assert_eq!(connection.stats_calculation_time, next_now);
+        assert_eq!(connection.packet_recv_rate, 6000.0);
+    }
+
+    #[test]
+    fn request_packet_interval() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, _real_sk) = gen_keypair();
+        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+
+        connection.packet_recv_rate = 500.0;
+
+        // increasing packets queue length should cause the interval decreasing
+        for &(len, interval) in &[
+            (80, 58),
+            (90, 58),
+            (100, 58),
+            (110, 56),
+            (120, 52),
+            (130, 50),
+            (140, 50),
+            (150, 50),
+        ] {
+            connection.recv_array.buffer_end = len;
+            assert_eq!(connection.request_packet_interval().subsec_millis(), interval);
+        }
+    }
+
+    #[test]
+    fn is_established() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, _real_sk) = gen_keypair();
+        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+
+        connection.status = ConnectionStatus::Established {
+            sent_nonce: gen_nonce(),
+            received_nonce: gen_nonce(),
+            peer_session_pk: gen_keypair().0,
+            session_precomputed_key: precompute(&gen_keypair().0, &gen_keypair().1),
+        };
+
+        assert!(!connection.is_not_confirmed());
+        assert!(connection.is_established());
+    }
+
+    #[test]
+    fn is_not_confirmed() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, _real_sk) = gen_keypair();
+        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+
+        let crypto_handshake = CryptoHandshake {
+            cookie: EncryptedCookie {
+                nonce: secretbox::gen_nonce(),
+                payload: vec![42; 88]
+            },
+            nonce: gen_nonce(),
+            payload: vec![42; 248]
+        };
+
+        connection.status = ConnectionStatus::NotConfirmed {
+            sent_nonce: gen_nonce(),
+            received_nonce: gen_nonce(),
+            peer_session_pk: gen_keypair().0,
+            session_precomputed_key: precompute(&gen_keypair().0, &gen_keypair().1),
+            packet: StatusPacket::new_crypto_handshake(crypto_handshake),
+        };
+
+        assert!(connection.is_not_confirmed());
+        assert!(!connection.is_established());
     }
 }

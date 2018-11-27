@@ -23,10 +23,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::u16;
 
-use futures::Future;
+use futures::{Future, Stream};
 use futures::future;
 use futures::sync::mpsc;
 use parking_lot::RwLock;
+use tokio::timer::Interval;
 
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
@@ -62,6 +63,9 @@ const PACKET_ID_LOSSY_RANGE_START: u8 = 192;
 /// Packets with ID from `PACKET_ID_LOSSY_RANGE_START` to
 /// `PACKET_ID_LOSSY_RANGE_END` are considered lossy packets.
 const PACKET_ID_LOSSY_RANGE_END: u8 = 254;
+
+/// Timeout in seconds for packet sending
+const NET_CRYPTO_SEND_TIMEOUT: u64 = 50;
 
 /// Shorthand for the transmit half of the message channel for sending DHT
 /// packets.
@@ -168,7 +172,7 @@ impl NetCrypto {
 
     /// Send `Packet` packet to UDP socket
     fn send_to_udp(&self, addr: SocketAddr, packet: Packet) -> IoFuture<()> {
-        send_to(&self.udp_tx, (packet, addr))
+        send_to_bounded(&self.udp_tx, (packet, addr), Duration::from_millis(NET_CRYPTO_SEND_TIMEOUT))
     }
 
     /// Get long term `PublicKey` of the peer by its UDP address
@@ -412,6 +416,35 @@ impl NetCrypto {
         }
     }
 
+    /// Build request packet that will contain numbers of missing packets that
+    /// we should receive.
+    fn generate_request_packet(recv_array: &PacketsArray<RecvPacket>) -> Vec<u8> {
+        let mut data = Vec::with_capacity(MAX_CRYPTO_DATA_SIZE);
+        data.push(PACKET_ID_REQUEST);
+
+        // n is a packet number relative to the last missing packet
+        let mut n = 1;
+
+        // go through all received packets and put numbers of missing packets to the request
+        for i in recv_array.buffer_start .. recv_array.buffer_end {
+            if !recv_array.contains(i) {
+                data.push(n);
+                n = 0;
+            } else if n == 255 {
+                data.push(0);
+                n = 0;
+            }
+
+            if data.len() == MAX_CRYPTO_DATA_SIZE {
+                return data;
+            }
+
+            n += 1;
+        }
+
+        data
+    }
+
     /// Send received lossless packets from the beginning of the receiving
     /// buffer to lossless sink and delete them
     fn process_ready_lossless_packets(&self, recv_array: &mut PacketsArray<RecvPacket>, pk: PublicKey) -> IoFuture<()> {
@@ -527,6 +560,7 @@ impl NetCrypto {
             if let Err(e) = connection.recv_array.insert(payload.packet_number, RecvPacket::new(payload.data)) {
                 return Box::new(future::err(e))
             }
+            connection.packets_received += 1;
             self.process_ready_lossless_packets(&mut connection.recv_array, connection.peer_real_pk)
         } else if packet_id >= PACKET_ID_LOSSY_RANGE_START && packet_id <= PACKET_ID_LOSSY_RANGE_END {
             // Update end index of received buffer ignoring the error - we still
@@ -571,6 +605,9 @@ impl NetCrypto {
 
     /// Send packet to crypto connection choosing TCP or UDP protocol
     fn send_packet(&self, packet: Packet, connection: &mut CryptoConnection) -> IoFuture<()> {
+        // TODO: can backpressure be used instead of congestion control? It
+        // seems it's possible to implement wrapper for bounded sender with
+        // priority queue and just send packets there
         if let Some(addr) = connection.udp_addr {
             if connection.is_udp_alive() {
                 return self.send_to_udp(addr, packet)
@@ -604,12 +641,56 @@ impl NetCrypto {
         }
     }
 
+    /// Send `CryptoData` packet if the connection is established.
+    fn send_data_packet(&self, connection: &mut CryptoConnection, data: Vec<u8>, packet_number: u32) -> IoFuture<()> {
+        let packet = match connection.status {
+            ConnectionStatus::NotConfirmed { ref mut sent_nonce, ref session_precomputed_key, .. }
+            | ConnectionStatus::Established { ref mut sent_nonce, ref session_precomputed_key, .. } => {
+                let payload = CryptoDataPayload {
+                    buffer_start: connection.recv_array.buffer_start,
+                    packet_number,
+                    data,
+                };
+                let packet = CryptoData::new(session_precomputed_key, *sent_nonce, &payload);
+                increment_nonce(sent_nonce);
+                packet
+            },
+            _ => return Box::new(future::err(Error::new(ErrorKind::Other, "Connection is not established"))),
+        };
+        self.send_packet(Packet::CryptoData(packet), connection)
+    }
+
+    /// Send request packet with indices of not received packets.
+    fn send_request_packet(&self, connection: &mut CryptoConnection) -> IoFuture<()> {
+        let data = NetCrypto::generate_request_packet(&connection.recv_array);
+        let packet_number = connection.send_array.buffer_end;
+        // TODO: set only if packet was sent successfully?
+        connection.request_packet_sent_time = Some(clock_now());
+        self.send_data_packet(connection, data, packet_number)
+    }
+
+    /// Send packets that were requested.
+    fn send_requested_packets(&self, connection: &mut CryptoConnection) -> IoFuture<()> {
+        let now = clock_now();
+        let packets = connection.send_array.iter_mut()
+            .filter(|(_, packet)| packet.requested)
+            .map(|(i, packet)| {
+                packet.requested = false;
+                packet.sent_time = now;
+                (i, packet.data.clone())
+            }).collect::<Vec<_>>();
+        let futures = packets.into_iter().map(|(i, data)|
+            self.send_data_packet(connection, data, i)
+        ).collect::<Vec<_>>();
+        Box::new(future::join_all(futures).map(|_| ()))
+    }
+
     /// The main loop that should be run at least 20 times per second
-    pub fn main_loop(&self) -> IoFuture<()> {
+    fn main_loop(&self) -> IoFuture<()> {
         let connections = self.connections.read();
-        let len = connections.len();
-        let mut send_futures = Vec::with_capacity(len);
-        let mut timed_out = Vec::with_capacity(len);
+        let mut futures = Vec::new();
+        let mut timed_out = Vec::new();
+
         // Only one cycle over all connections to prevent many lock acquirements
         for (&pk, connection) in connections.iter() {
             let mut connection = connection.write();
@@ -620,10 +701,38 @@ impl NetCrypto {
             }
 
             let send_future = self.send_status_packet(&mut connection);
-            send_futures.push(send_future);
+            futures.push(send_future);
+
+            if connection.is_not_confirmed() || connection.is_established() {
+                let should_send = connection.request_packet_sent_time.map_or(true, |time|
+                    clock_elapsed(time) > Duration::from_millis(CRYPTO_SEND_PACKET_INTERVAL)
+                );
+                if should_send {
+                    futures.push(self.send_request_packet(&mut connection));
+                }
+            }
+
+            if connection.is_established() {
+                if connection.packet_recv_rate > CRYPTO_PACKET_MIN_RATE {
+                    let request_packet_interval = connection.request_packet_interval();
+                    let should_send = connection.request_packet_sent_time.map_or(true, |time|
+                        clock_elapsed(time) > request_packet_interval
+                    );
+                    if should_send {
+                        futures.push(self.send_request_packet(&mut connection));
+                    }
+                }
+
+                // TODO: either use send_rate or remove it
+                connection.update_congestion_stats();
+
+                futures.push(self.send_requested_packets(&mut connection));
+            }
         }
+
         // release read lock and acquire write lock if we have to delete some connections
         drop(connections);
+
         if !timed_out.is_empty() {
             let mut connections = self.connections.write();
             let mut keys_by_addr = self.keys_by_addr.write();
@@ -634,7 +743,21 @@ impl NetCrypto {
                 }
             }
         }
-        Box::new(future::join_all(send_futures).map(|_| ()))
+
+        Box::new(future::join_all(futures).map(|_| ()))
+    }
+
+    /// Run `net_crypto` periodical tasks. Result future will never be completed
+    /// successfully.
+    pub fn run(self) -> IoFuture<()> {
+        let interval = Duration::from_secs(PACKET_COUNTER_AVERAGE_INTERVAL);
+        let wakeups = Interval::new(Instant::now(), interval);
+
+        let future = wakeups
+            .map_err(|e| Error::new(ErrorKind::Other, format!("Net crypto timer error: {:?}", e)))
+            .for_each(move |_instant| self.main_loop());
+
+        Box::new(future)
     }
 }
 
@@ -774,7 +897,7 @@ mod tests {
 
         let addr = "127.0.0.1:12345".parse().unwrap();
 
-        assert!(net_crypto.handle_udp_cookie_request(&cookie_request, addr).wait().is_ok());
+        net_crypto.handle_udp_cookie_request(&cookie_request, addr).wait().unwrap();
 
         let (received, _udp_rx) = udp_rx.into_future().wait().unwrap();
         let (packet, addr_to_send) = received.unwrap();
@@ -858,7 +981,7 @@ mod tests {
         };
         let cookie_response = CookieResponse::new(&connection.dht_precomputed_key, &cookie_response_payload);
 
-        assert!(net_crypto.handle_cookie_response(&mut connection, &cookie_response).wait().is_ok());
+        net_crypto.handle_cookie_response(&mut connection, &cookie_response).wait().unwrap();
 
         let packet = unpack!(connection.status, ConnectionStatus::HandshakeSending, packet);
         let packet = unpack!(packet.dht_packet(), Packet::CryptoHandshake);
@@ -999,7 +1122,7 @@ mod tests {
         };
         let cookie_response = CookieResponse::new(&dht_precomputed_key, &cookie_response_payload);
 
-        assert!(net_crypto.handle_udp_cookie_response(&cookie_response, addr).wait().is_ok());
+        net_crypto.handle_udp_cookie_response(&cookie_response, addr).wait().unwrap();
 
         let connections = net_crypto.connections.read();
         let connection = connections.get(&peer_real_pk).unwrap().read().clone();
@@ -1090,7 +1213,7 @@ mod tests {
         };
         let crypto_handshake = CryptoHandshake::new(&connection.dht_precomputed_key, &crypto_handshake_payload, our_encrypted_cookie);
 
-        assert!(net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).wait().is_ok());
+        net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).wait().unwrap();
 
         let received_nonce = unpack!(connection.status, ConnectionStatus::NotConfirmed, received_nonce);
         let peer_session_pk = unpack!(connection.status, ConnectionStatus::NotConfirmed, peer_session_pk);
@@ -1158,7 +1281,7 @@ mod tests {
         };
         let crypto_handshake = CryptoHandshake::new(&connection.dht_precomputed_key, &crypto_handshake_payload, our_encrypted_cookie);
 
-        assert!(net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).wait().is_ok());
+        net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).wait().unwrap();
 
         // Nonce and session pk should be taken from the packet
         let received_nonce = unpack!(connection.status, ConnectionStatus::NotConfirmed, received_nonce);
@@ -1458,7 +1581,7 @@ mod tests {
         };
         let crypto_handshake = CryptoHandshake::new(&dht_precomputed_key, &crypto_handshake_payload, our_encrypted_cookie);
 
-        assert!(net_crypto.handle_udp_crypto_handshake(&crypto_handshake, addr).wait().is_ok());
+        net_crypto.handle_udp_crypto_handshake(&crypto_handshake, addr).wait().unwrap();
 
         let connections = net_crypto.connections.read();
         let connection = connections.get(&peer_real_pk).unwrap().read().clone();
@@ -1519,7 +1642,7 @@ mod tests {
         };
         let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, &crypto_data_payload);
 
-        assert!(net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait().is_ok());
+        net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait().unwrap();
 
         // The diff between nonces is not bigger than the threshold so received
         // nonce shouldn't be changed
@@ -1582,7 +1705,7 @@ mod tests {
         };
         let crypto_data = CryptoData::new(&session_precomputed_key, packet_nonce, &crypto_data_payload);
 
-        assert!(net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait().is_ok());
+        net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait().unwrap();
 
         // The diff between nonces is bigger than the threshold so received
         // nonce should be changed increased
@@ -1658,7 +1781,7 @@ mod tests {
         let clock = Clock::new_with_now(ConstNow(now + Duration::from_millis(250)));
 
         with_default(&clock, &mut enter, |_| {
-            assert!(net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait().is_ok());
+            net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait().unwrap();
         });
 
         // The diff between nonces is not bigger than the threshold so received
@@ -1791,9 +1914,9 @@ mod tests {
         let crypto_data_3 = CryptoData::new(&session_precomputed_key, received_nonce, &crypto_data_payload_3);
 
         // Send packets in random order
-        assert!(net_crypto.handle_crypto_data(&mut connection, &crypto_data_2, /* udp */ true).wait().is_ok());
-        assert!(net_crypto.handle_crypto_data(&mut connection, &crypto_data_3, /* udp */ true).wait().is_ok());
-        assert!(net_crypto.handle_crypto_data(&mut connection, &crypto_data_1, /* udp */ true).wait().is_ok());
+        net_crypto.handle_crypto_data(&mut connection, &crypto_data_2, /* udp */ true).wait().unwrap();
+        net_crypto.handle_crypto_data(&mut connection, &crypto_data_3, /* udp */ true).wait().unwrap();
+        net_crypto.handle_crypto_data(&mut connection, &crypto_data_1, /* udp */ true).wait().unwrap();
 
         // The diff between nonces is not bigger than the threshold so received
         // nonce shouldn't be changed
@@ -1923,7 +2046,7 @@ mod tests {
         };
         let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, &crypto_data_payload);
 
-        assert!(net_crypto.handle_crypto_data(&mut connection.write(), &crypto_data, /* udp */ true).wait().is_ok());
+        net_crypto.handle_crypto_data(&mut connection.write(), &crypto_data, /* udp */ true).wait().unwrap();
 
         assert!(net_crypto.connections.read().is_empty());
         assert!(net_crypto.keys_by_addr.read().is_empty());
@@ -1998,7 +2121,7 @@ mod tests {
         let clock = Clock::new_with_now(ConstNow(now + Duration::from_secs(1)));
 
         with_default(&clock, &mut enter, |_| {
-            assert!(net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait().is_ok());
+            net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait().unwrap();
         });
 
         assert!(connection.send_array.get(0).unwrap().requested);
@@ -2062,7 +2185,7 @@ mod tests {
         };
         let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, &crypto_data_payload);
 
-        assert!(net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait().is_ok());
+        net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait().unwrap();
 
         assert!(!connection.send_array.get(0).unwrap().requested);
         assert!(!connection.send_array.get(1).unwrap().requested);
@@ -2261,7 +2384,7 @@ mod tests {
         };
         let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, &crypto_data_payload);
 
-        assert!(net_crypto.handle_udp_crypto_data(&crypto_data, addr).wait().is_ok());
+        net_crypto.handle_udp_crypto_data(&crypto_data, addr).wait().unwrap();
 
         let connections = net_crypto.connections.read();
         let connection = connections.get(&peer_real_pk).unwrap().read().clone();
@@ -2310,7 +2433,7 @@ mod tests {
         connection.update_udp_received_time();
 
         // send status packet first time - it should be sent
-        assert!(net_crypto.send_status_packet(&mut connection).wait().is_ok());
+        net_crypto.send_status_packet(&mut connection).wait().unwrap();
 
         let packet = unpack!(connection.status.clone(), ConnectionStatus::CookieRequesting, packet);
         assert_eq!(packet.num_sent, 1);
@@ -2322,7 +2445,7 @@ mod tests {
         assert_eq!(addr_to_send, addr);
 
         // send status packet again - it shouldn't be sent
-        assert!(net_crypto.send_status_packet(&mut connection).wait().is_ok());
+        net_crypto.send_status_packet(&mut connection).wait().unwrap();
 
         let packet = unpack!(connection.status, ConnectionStatus::CookieRequesting, packet);
         assert_eq!(packet.num_sent, 1);
@@ -2361,7 +2484,7 @@ mod tests {
             payload: vec![42; DHT_ATTEMPT_MAX_PACKET_LENGTH]
         });
 
-        assert!(net_crypto.send_packet(packet.clone(), &mut connection).wait().is_ok());
+        net_crypto.send_packet(packet.clone(), &mut connection).wait().unwrap();
 
         let (received, _udp_rx) = udp_rx.into_future().wait().unwrap();
         let (received, addr_to_send) = received.unwrap();
@@ -2402,7 +2525,7 @@ mod tests {
             payload: vec![42; DHT_ATTEMPT_MAX_PACKET_LENGTH - 3] // 1 byte of packet kind and 2 bytes of nonce
         });
 
-        assert!(net_crypto.send_packet(packet.clone(), &mut connection).wait().is_ok());
+        net_crypto.send_packet(packet.clone(), &mut connection).wait().unwrap();
 
         let (received, _udp_rx) = udp_rx.into_future().wait().unwrap();
         let (received, addr_to_send) = received.unwrap();
@@ -2445,7 +2568,7 @@ mod tests {
             payload: vec![42; DHT_ATTEMPT_MAX_PACKET_LENGTH]
         });
 
-        assert!(net_crypto.send_packet(packet.clone(), &mut connection).wait().is_ok());
+        net_crypto.send_packet(packet.clone(), &mut connection).wait().unwrap();
 
         // TODO: check that TCP received the packet
     }
@@ -2479,7 +2602,7 @@ mod tests {
             payload: vec![42; DHT_ATTEMPT_MAX_PACKET_LENGTH]
         });
 
-        assert!(net_crypto.send_packet(packet.clone(), &mut connection).wait().is_ok());
+        net_crypto.send_packet(packet.clone(), &mut connection).wait().unwrap();
 
         // TODO: check that TCP received the packet
     }
@@ -2516,7 +2639,7 @@ mod tests {
 
         net_crypto.connections.write().insert(peer_real_pk, Arc::new(RwLock::new(connection)));
 
-        assert!(net_crypto.main_loop().wait().is_ok());
+        net_crypto.main_loop().wait().unwrap();
 
         let (received, _udp_rx) = udp_rx.into_future().wait().unwrap();
         let (received, addr_to_send) = received.unwrap();
@@ -2556,7 +2679,7 @@ mod tests {
         let cookie_request_id = unpack!(connection.status.clone(), ConnectionStatus::CookieRequesting, cookie_request_id);
         let mut packet = unpack!(connection.status.clone(), ConnectionStatus::CookieRequesting, packet);
         packet.num_sent = MAX_NUM_SENDPACKET_TRIES;
-        packet.sent_time -= Duration::from_secs(CRYPTO_SEND_PACKET_INTERVAL + 1);
+        packet.sent_time -= Duration::from_millis(CRYPTO_SEND_PACKET_INTERVAL + 1000);
         connection.status = ConnectionStatus::CookieRequesting {
             cookie_request_id,
             packet
@@ -2567,10 +2690,137 @@ mod tests {
         net_crypto.connections.write().insert(peer_real_pk, Arc::new(RwLock::new(connection)));
         net_crypto.keys_by_addr.write().insert((addr.ip(), addr.port()), peer_real_pk);
 
-        assert!(net_crypto.main_loop().wait().is_ok());
+        net_crypto.main_loop().wait().unwrap();
 
         assert!(net_crypto.connections.read().is_empty());
         assert!(net_crypto.keys_by_addr.read().is_empty());
+    }
+
+    #[test]
+    fn main_loop_sends_request_packets() {
+        let (udp_tx, udp_rx) = mpsc::channel(1);
+        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
+        let (lossless_tx, _lossless_rx) = mpsc::unbounded();
+        let (lossy_tx, _lossy_rx) = mpsc::unbounded();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, _real_sk) = gen_keypair();
+        let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
+        let net_crypto = NetCrypto::new(NetCryptoNewArgs {
+            udp_tx,
+            dht_pk_tx,
+            lossless_tx,
+            lossy_tx,
+            dht_pk,
+            dht_sk: dht_sk.clone(),
+            real_pk,
+            precomputed_keys,
+        });
+
+        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+
+        let addr = "127.0.0.1:12345".parse().unwrap();
+        connection.udp_addr = Some(addr);
+        connection.update_udp_received_time();
+
+        let received_nonce = gen_nonce();
+        let sent_nonce = gen_nonce();
+        let (peer_session_pk, _peer_session_sk) = gen_keypair();
+        let (_session_pk, session_sk) = gen_keypair();
+        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        connection.status = ConnectionStatus::Established {
+            sent_nonce,
+            received_nonce,
+            peer_session_pk,
+            session_precomputed_key: session_precomputed_key.clone(),
+        };
+
+        net_crypto.connections.write().insert(peer_real_pk, Arc::new(RwLock::new(connection)));
+        net_crypto.keys_by_addr.write().insert((addr.ip(), addr.port()), peer_real_pk);
+
+        net_crypto.main_loop().wait().unwrap();
+
+        let (received, _udp_rx) = udp_rx.into_future().wait().unwrap();
+        let (received, addr_to_send) = received.unwrap();
+
+        assert_eq!(addr_to_send, addr);
+
+        let packet = unpack!(received, Packet::CryptoData);
+        let payload = packet.get_payload(&session_precomputed_key, &sent_nonce).unwrap();
+        assert_eq!(payload.buffer_start, 0);
+        assert_eq!(payload.packet_number, 0);
+        assert_eq!(payload.data, vec![PACKET_ID_REQUEST]);
+    }
+
+    #[test]
+    fn main_loop_sends_requested_packets() {
+        let (udp_tx, udp_rx) = mpsc::channel(1);
+        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
+        let (lossless_tx, _lossless_rx) = mpsc::unbounded();
+        let (lossy_tx, _lossy_rx) = mpsc::unbounded();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, _real_sk) = gen_keypair();
+        let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
+        let net_crypto = NetCrypto::new(NetCryptoNewArgs {
+            udp_tx,
+            dht_pk_tx,
+            lossless_tx,
+            lossy_tx,
+            dht_pk,
+            dht_sk: dht_sk.clone(),
+            real_pk,
+            precomputed_keys,
+        });
+
+        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+
+        let addr = "127.0.0.1:12345".parse().unwrap();
+        connection.udp_addr = Some(addr);
+        connection.update_udp_received_time();
+
+        let received_nonce = gen_nonce();
+        let sent_nonce = gen_nonce();
+        let (peer_session_pk, _peer_session_sk) = gen_keypair();
+        let (_session_pk, session_sk) = gen_keypair();
+        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        connection.status = ConnectionStatus::Established {
+            sent_nonce,
+            received_nonce,
+            peer_session_pk,
+            session_precomputed_key: session_precomputed_key.clone(),
+        };
+
+        let now = Instant::now();
+
+        connection.request_packet_sent_time = Some(now);
+
+        let data = vec![42; 123];
+        connection.packets_sent = 1;
+        connection.send_array.buffer_end = 1;
+        assert!(connection.send_array.insert(0, SentPacket {
+            data: data.clone(),
+            sent_time: now,
+            requested: true,
+        }).is_ok());
+
+        net_crypto.connections.write().insert(peer_real_pk, Arc::new(RwLock::new(connection)));
+        net_crypto.keys_by_addr.write().insert((addr.ip(), addr.port()), peer_real_pk);
+
+        net_crypto.main_loop().wait().unwrap();
+
+        let (received, _udp_rx) = udp_rx.into_future().wait().unwrap();
+        let (received, addr_to_send) = received.unwrap();
+
+        assert_eq!(addr_to_send, addr);
+
+        let packet = unpack!(received, Packet::CryptoData);
+        let payload = packet.get_payload(&session_precomputed_key, &sent_nonce).unwrap();
+        assert_eq!(payload.buffer_start, 0);
+        assert_eq!(payload.packet_number, 0);
+        assert_eq!(payload.data, data);
     }
 
     #[test]
@@ -2609,11 +2859,280 @@ mod tests {
         };
 
         // send status packet with connection.status is Established
-        assert!(net_crypto.send_status_packet(&mut connection).wait().is_ok());
+        net_crypto.send_status_packet(&mut connection).wait().unwrap();
 
         // Necessary to drop udp_tx so that udp_rx.collect() can be finished
         drop(net_crypto.udp_tx);
 
         assert!(udp_rx.collect().wait().unwrap().is_empty());
+    }
+
+    #[test]
+    fn send_data_packet() {
+        let (udp_tx, udp_rx) = mpsc::channel(1);
+        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
+        let (lossless_tx, _lossless_rx) = mpsc::unbounded();
+        let (lossy_tx, _lossy_rx) = mpsc::unbounded();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, _real_sk) = gen_keypair();
+        let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
+        let net_crypto = NetCrypto::new(NetCryptoNewArgs {
+            udp_tx,
+            dht_pk_tx,
+            lossless_tx,
+            lossy_tx,
+            dht_pk,
+            dht_sk: dht_sk.clone(),
+            real_pk,
+            precomputed_keys,
+        });
+
+        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+
+        let addr = "127.0.0.1:12345".parse().unwrap();
+        connection.udp_addr = Some(addr);
+        connection.update_udp_received_time();
+
+        let received_nonce = gen_nonce();
+        let mut sent_nonce = gen_nonce();
+        let (peer_session_pk, _peer_session_sk) = gen_keypair();
+        let (_session_pk, session_sk) = gen_keypair();
+        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        connection.status = ConnectionStatus::Established {
+            sent_nonce,
+            received_nonce,
+            peer_session_pk,
+            session_precomputed_key: session_precomputed_key.clone(),
+        };
+
+        connection.recv_array.buffer_start = 23;
+        connection.recv_array.buffer_end = 25;
+
+        let data = vec![42; 123];
+        net_crypto.send_data_packet(&mut connection, data.clone(), 7).wait().unwrap();
+
+        let (received, _udp_rx) = udp_rx.into_future().wait().unwrap();
+        let (received, addr_to_send) = received.unwrap();
+
+        assert_eq!(addr_to_send, addr);
+
+        let packet = unpack!(received, Packet::CryptoData);
+        let payload = packet.get_payload(&session_precomputed_key, &sent_nonce).unwrap();
+        assert_eq!(payload.buffer_start, 23);
+        assert_eq!(payload.packet_number, 7);
+        assert_eq!(payload.data, data);
+
+        increment_nonce(&mut sent_nonce);
+        assert_eq!(unpack!(connection.status, ConnectionStatus::Established, sent_nonce), sent_nonce);
+        assert_eq!(unpack!(connection.status, ConnectionStatus::Established, received_nonce), received_nonce);
+    }
+
+    #[test]
+    fn send_request_packet() {
+        let (udp_tx, udp_rx) = mpsc::channel(1);
+        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
+        let (lossless_tx, _lossless_rx) = mpsc::unbounded();
+        let (lossy_tx, _lossy_rx) = mpsc::unbounded();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, _real_sk) = gen_keypair();
+        let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
+        let net_crypto = NetCrypto::new(NetCryptoNewArgs {
+            udp_tx,
+            dht_pk_tx,
+            lossless_tx,
+            lossy_tx,
+            dht_pk,
+            dht_sk: dht_sk.clone(),
+            real_pk,
+            precomputed_keys,
+        });
+
+        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+
+        let addr = "127.0.0.1:12345".parse().unwrap();
+        connection.udp_addr = Some(addr);
+        connection.update_udp_received_time();
+
+        let received_nonce = gen_nonce();
+        let sent_nonce = gen_nonce();
+        let (peer_session_pk, _peer_session_sk) = gen_keypair();
+        let (_session_pk, session_sk) = gen_keypair();
+        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        connection.status = ConnectionStatus::Established {
+            sent_nonce,
+            received_nonce,
+            peer_session_pk,
+            session_precomputed_key: session_precomputed_key.clone(),
+        };
+
+        connection.recv_array.buffer_end = 270;
+        assert!(connection.recv_array.insert(2, RecvPacket {
+            data: vec![42; 123],
+        }).is_ok());
+        for i in 5 .. 269 {
+            assert!(connection.recv_array.insert(i, RecvPacket {
+                data: vec![42; 123],
+            }).is_ok());
+        }
+
+        let now = Instant::now() + Duration::from_secs(1);
+        let mut enter = tokio_executor::enter().unwrap();
+        let clock = Clock::new_with_now(ConstNow(now));
+
+        with_default(&clock, &mut enter, |_| {
+            net_crypto.send_request_packet(&mut connection).wait().unwrap();
+        });
+
+        assert_eq!(connection.request_packet_sent_time, Some(now));
+
+        let (received, _udp_rx) = udp_rx.into_future().wait().unwrap();
+        let (received, addr_to_send) = received.unwrap();
+
+        assert_eq!(addr_to_send, addr);
+
+        let packet = unpack!(received, Packet::CryptoData);
+        let payload = packet.get_payload(&session_precomputed_key, &sent_nonce).unwrap();
+        assert_eq!(payload.buffer_start, 0);
+        assert_eq!(payload.packet_number, 0);
+        assert_eq!(payload.data, vec![PACKET_ID_REQUEST, 1, 1, 2, 1, 0, 10]);
+    }
+
+    #[test]
+    fn send_request_packet_too_many_missing_packets() {
+        let (udp_tx, udp_rx) = mpsc::channel(1);
+        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
+        let (lossless_tx, _lossless_rx) = mpsc::unbounded();
+        let (lossy_tx, _lossy_rx) = mpsc::unbounded();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, _real_sk) = gen_keypair();
+        let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
+        let net_crypto = NetCrypto::new(NetCryptoNewArgs {
+            udp_tx,
+            dht_pk_tx,
+            lossless_tx,
+            lossy_tx,
+            dht_pk,
+            dht_sk: dht_sk.clone(),
+            real_pk,
+            precomputed_keys,
+        });
+
+        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+
+        let addr = "127.0.0.1:12345".parse().unwrap();
+        connection.udp_addr = Some(addr);
+        connection.update_udp_received_time();
+
+        let received_nonce = gen_nonce();
+        let sent_nonce = gen_nonce();
+        let (peer_session_pk, _peer_session_sk) = gen_keypair();
+        let (_session_pk, session_sk) = gen_keypair();
+        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        connection.status = ConnectionStatus::Established {
+            sent_nonce,
+            received_nonce,
+            peer_session_pk,
+            session_precomputed_key: session_precomputed_key.clone(),
+        };
+
+        connection.recv_array.buffer_end = MAX_CRYPTO_DATA_SIZE as u32 + 42;
+
+        net_crypto.send_request_packet(&mut connection).wait().unwrap();
+
+        let (received, _udp_rx) = udp_rx.into_future().wait().unwrap();
+        let (received, addr_to_send) = received.unwrap();
+
+        assert_eq!(addr_to_send, addr);
+
+        let packet = unpack!(received, Packet::CryptoData);
+        let payload = packet.get_payload(&session_precomputed_key, &sent_nonce).unwrap();
+        assert_eq!(payload.buffer_start, 0);
+        assert_eq!(payload.packet_number, 0);
+        assert_eq!(payload.data.len(), MAX_CRYPTO_DATA_SIZE);
+    }
+
+    #[test]
+    fn send_requested_packets() {
+        let (udp_tx, udp_rx) = mpsc::channel(2);
+        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
+        let (lossless_tx, _lossless_rx) = mpsc::unbounded();
+        let (lossy_tx, _lossy_rx) = mpsc::unbounded();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, _real_sk) = gen_keypair();
+        let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
+        let net_crypto = NetCrypto::new(NetCryptoNewArgs {
+            udp_tx,
+            dht_pk_tx,
+            lossless_tx,
+            lossy_tx,
+            dht_pk,
+            dht_sk: dht_sk.clone(),
+            real_pk,
+            precomputed_keys,
+        });
+
+        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let mut connection = CryptoConnection::new(&dht_sk, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+
+        let addr = "127.0.0.1:12345".parse().unwrap();
+        connection.udp_addr = Some(addr);
+        connection.update_udp_received_time();
+
+        let received_nonce = gen_nonce();
+        let sent_nonce = gen_nonce();
+        let (peer_session_pk, _peer_session_sk) = gen_keypair();
+        let (_session_pk, session_sk) = gen_keypair();
+        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        connection.status = ConnectionStatus::Established {
+            sent_nonce,
+            received_nonce,
+            peer_session_pk,
+            session_precomputed_key,
+        };
+
+        let now = Instant::now();
+        connection.send_array.buffer_end = 7;
+        assert!(connection.send_array.insert(2, SentPacket {
+            data: vec![42; 123],
+            sent_time: now,
+            requested: true,
+        }).is_ok());
+        assert!(connection.send_array.insert(4, SentPacket {
+            data: vec![42; 123],
+            sent_time: now,
+            requested: false,
+        }).is_ok());
+        assert!(connection.send_array.insert(5, SentPacket {
+            data: vec![42; 123],
+            sent_time: now,
+            requested: true,
+        }).is_ok());
+
+        let next_now = now + Duration::from_secs(1);
+        let mut enter = tokio_executor::enter().unwrap();
+        let clock = Clock::new_with_now(ConstNow(next_now));
+
+        with_default(&clock, &mut enter, |_| {
+            net_crypto.send_requested_packets(&mut connection).wait().unwrap();
+        });
+
+        assert!(!connection.send_array.get(2).unwrap().requested);
+        assert!(!connection.send_array.get(4).unwrap().requested);
+        assert!(!connection.send_array.get(5).unwrap().requested);
+        assert_eq!(connection.send_array.get(2).unwrap().sent_time, next_now);
+        assert_eq!(connection.send_array.get(4).unwrap().sent_time, now);
+        assert_eq!(connection.send_array.get(5).unwrap().sent_time, next_now);
+
+        // Necessary to drop udp_tx so that udp_rx.collect() can be finished
+        drop(net_crypto.udp_tx);
+
+        assert_eq!(udp_rx.collect().wait().unwrap().len(), 2);
     }
 }
