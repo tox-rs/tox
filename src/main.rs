@@ -252,7 +252,7 @@ fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_on
         warn!("No bootstrap nodes!");
     }
 
-    for &node in &cli_config.bootstrap_nodes {
+    for node in cli_config.bootstrap_nodes.iter().flat_map(|node| node.resolve()) {
         server.add_initial_bootstrap(node);
     }
 

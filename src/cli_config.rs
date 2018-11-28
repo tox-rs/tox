@@ -54,6 +54,31 @@ arg_enum! {
     }
 }
 
+/// Bootstrap node with generic string address which might be either IP address
+/// or DNS name.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct BootstrapNode {
+    /// `PublicKey` of the node.
+    pk: PublicKey,
+    /// Generic string address which might be either IP address or DNS name.
+    addr: String,
+}
+
+impl BootstrapNode {
+    /// Resolve string address of the node to possible multiple `SocketAddr`s.
+    pub fn resolve(&self) -> impl Iterator<Item = PackedNode> {
+        let pk = self.pk;
+        let addrs = match self.addr.to_socket_addrs() {
+            Ok(addrs) => addrs,
+            Err(e) => {
+                warn!("Failed to resolve bootstrap node address '{}': {}", self.addr, e);
+                Vec::new().into_iter()
+            },
+        };
+        addrs.map(move |addr| PackedNode::new(addr, &pk))
+    }
+}
+
 /// Config parsed from command line arguments.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct CliConfig {
@@ -70,7 +95,7 @@ pub struct CliConfig {
     /// Path to the file where DHT keys are stored.
     pub keys_file: Option<String>,
     /// List of bootstrap nodes.
-    pub bootstrap_nodes: Vec<PackedNode>,
+    pub bootstrap_nodes: Vec<BootstrapNode>,
     /// Number of threads for execution.
     pub threads_config: ThreadsConfig,
     /// Specifies where to write logs.
@@ -192,18 +217,16 @@ pub fn cli_parse() -> CliConfig {
         .into_iter()
         .flat_map(|values| values)
         .tuples()
-        .map(|(pk, saddr)| {
+        .map(|(pk, addr)| {
             // get PK bytes of the bootstrap node
             let bootstrap_pk_bytes: [u8; 32] = FromHex::from_hex(pk).expect("Invalid node key");
             // create PK from bytes
             let bootstrap_pk = PublicKey::from_slice(&bootstrap_pk_bytes).expect("Invalid node key");
 
-            let saddr = saddr
-                .to_socket_addrs()
-                .expect("Invalid node address")
-                .next()
-                .expect("Invalid node address");
-            PackedNode::new(saddr, &bootstrap_pk)
+            BootstrapNode {
+                pk: bootstrap_pk,
+                addr: addr.to_owned(),
+            }
         })
         .collect();
 
