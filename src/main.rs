@@ -39,11 +39,12 @@ use tox::toxcore::dht::lan_discovery::LanDiscoverySender;
 use tox::toxcore::onion::packet::InnerOnionResponse;
 use tox::toxcore::tcp::packet::OnionRequest;
 use tox::toxcore::tcp::server::{Server as TcpServer, ServerExt};
+use tox::toxcore::stats::Stats;
 #[cfg(unix)]
 use syslog::Facility;
 
 use cli_config::*;
-use motd::Motd;
+use motd::{Motd, Counters};
 
 /// Get version in format 3AAABBBCCC, where A B and C are major, minor and patch
 /// versions of node. `tox-bootstrapd` uses similar scheme but with leading 1.
@@ -163,7 +164,7 @@ fn create_onion_streams() -> (TcpOnion, UdpOnion) {
     (tcp_onion, udp_onion)
 }
 
-fn run_tcp(cli_config: &CliConfig, dht_sk: SecretKey, tcp_onion: TcpOnion) -> impl Future<Item = (), Error = Error> {
+fn run_tcp(cli_config: &CliConfig, dht_sk: SecretKey, tcp_onion: TcpOnion, stats: Stats) -> impl Future<Item = (), Error = Error> {
     if cli_config.tcp_addrs.is_empty() {
         // If TCP address is not specified don't start TCP server and only drop
         // all onion packets from DHT server
@@ -181,7 +182,7 @@ fn run_tcp(cli_config: &CliConfig, dht_sk: SecretKey, tcp_onion: TcpOnion) -> im
         let tcp_server_c = tcp_server_c.clone();
         let dht_sk = dht_sk.clone();
         let listener = TcpListener::bind(&addr).expect("Failed to bind TCP listener");
-        tcp_server_c.run(listener, dht_sk)
+        tcp_server_c.run(listener, dht_sk, stats.clone())
             .map_err(Error::from)
     });
 
@@ -205,7 +206,7 @@ fn run_tcp(cli_config: &CliConfig, dht_sk: SecretKey, tcp_onion: TcpOnion) -> im
         .map(|_| ()))
 }
 
-fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_onion: UdpOnion) -> impl Future<Item = (), Error = Error> {
+fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_onion: UdpOnion, tcp_stats: Stats) -> impl Future<Item = (), Error = Error> {
     let udp_addr = if let Some(udp_addr) = cli_config.udp_addr {
         udp_addr
     } else {
@@ -218,7 +219,9 @@ fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_on
     };
 
     let socket = bind_socket(udp_addr);
-    let (sink, stream) = UdpFramed::new(socket, DhtCodec).split();
+    let udp_stats = Stats::new();
+    let codec = DhtCodec::new(udp_stats.clone());
+    let (sink, stream) = UdpFramed::new(socket, codec).split();
 
     // Create a channel for server to communicate with network
     let (tx, rx) = mpsc::unbounded();
@@ -232,7 +235,8 @@ fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_on
     };
 
     let mut server = UdpServer::new(tx, dht_pk, dht_sk.clone());
-    let motd = Motd::new(cli_config.motd.clone());
+    let counters = Counters::new(tcp_stats, udp_stats);
+    let motd = Motd::new(cli_config.motd.clone(), counters);
     server.set_bootstrap_info(version(), Box::new(move |_| motd.format().as_bytes().to_owned()));
     server.enable_lan_discovery(cli_config.lan_discovery_enabled);
     server.set_tcp_onion_sink(udp_onion.tx);
@@ -346,8 +350,9 @@ fn main() {
 
     let (tcp_onion, udp_onion) = create_onion_streams();
 
-    let udp_server_future = run_udp(&cli_config, dht_pk, &dht_sk, udp_onion);
-    let tcp_server_future = run_tcp(&cli_config, dht_sk, tcp_onion);
+    let tcp_stats = Stats::new();
+    let udp_server_future = run_udp(&cli_config, dht_pk, &dht_sk, udp_onion, tcp_stats.clone());
+    let tcp_server_future = run_tcp(&cli_config, dht_sk, tcp_onion, tcp_stats);
 
     let future = udp_server_future.select(tcp_server_future).map(|_| ()).map_err(|(e, _)| e);
 

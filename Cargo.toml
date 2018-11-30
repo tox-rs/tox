@@ -26,7 +26,7 @@ log = "0.4"
 regex = "1"
 tokio = "0.1.7"
 tokio-codec = "0.1"
-tox = "0.0.7"
+tox = { git = "https://github.com/tox-rs/tox/" }
 
 [target.'cfg(unix)'.dependencies]
 syslog = "4.0"

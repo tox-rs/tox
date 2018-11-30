@@ -37,6 +37,10 @@ via `--motd` key. It's possible to use the following variables surrounded by
 `{{ }}`:
 - `start_date`: time when the node was started
 - `uptime`: uptime in the format 'XX days XX hours XX minutes'
+- `tcp_packets_in`: counter of tcp incoming packets
+- `tcp_packets_out`: counter of tcp outgoing packets
+- `udp_packets_in`: counter of udp incoming packets
+- `udp_packets_out`: counter of udp outgoing packets
 
 ## Keys generation
 
