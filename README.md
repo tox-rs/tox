@@ -28,42 +28,43 @@ issue / pull request should be filled on the reference repository.
 
 ## Contributions
 
-... are welcome :smile:. For details, look at
+...are welcome. :smile: For details, look at
 [CONTRIBUTING.md](/CONTRIBUTING.md).
 
-## Dependencies
-| **Name** | **Version** |
-|----------|-------------|
-| libsodium | >=1.0.13 |
-
 ## Building
-Fairly simple. You'll need [Rust] >= 1.26.0 and [libsodium].
+Fairly simple. First, install [Rust] >= 1.30.1 and a C compiler ([Build Tools
+for Visual Studio][VSBuild] on Windows, GCC or Clang on other platforms).
 
-When you'll have deps, build debug version with
+Then you can build the debug version with
+
 ```bash
 cargo build
 ```
 
-To run tests:
+To run tests, use:
+
 ```bash
 cargo test
 ```
-To build docs:
+
+To build docs and open them in your browser:
+
 ```bash
-cargo doc
+cargo doc --open
 ```
-They will be located under `target/doc/`
 
 ### With clippy
 To check for [clippy](https://github.com/rust-lang-nursery/rust-clippy) warnings
 (linting), you need nightly Rust with `clippy-preview` component.
 
 To check:
+
 ```bash
 cargo clippy --all
 ```
 
 To check with tests:
+
 ```bash
 cargo clippy --all --tests
 ```
@@ -126,7 +127,7 @@ terms of either the MIT License or the GNU General Public License (GPL) Version 
 
 For details, see [LICENSE-MIT](/LICENSE) and [LICENSE-GPL](/LICENSE-GPL).
 
-[libsodium]: https://github.com/jedisct1/libsodium
 [Reference source repository]: https://github.com/zetok/tox-spec
 [Rust]: https://www.rust-lang.org/
+[VSBuild]: https://visualstudio.microsoft.com/downloads/
 [toxcore]: https://github.com/TokTok/c-toxcore
