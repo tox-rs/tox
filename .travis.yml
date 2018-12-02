@@ -3,11 +3,12 @@ os:
   - linux
   - osx
 rust:
-  - 1.26.0
+  - 1.30.1
   - stable
   - beta
   - nightly
 
+sudo: false
 env:
   global:
     - RUST_BACKTRACE=1
@@ -21,12 +22,6 @@ before_install:
     if [[ "$TRAVIS_OS_NAME" == "linux" ]]
     then
         ./scripts/verify-commit-messages.sh "$TRAVIS_COMMIT_RANGE" || exit 1;
-        ./scripts/bootstrap-ubuntu-14-04.sh;
-    fi
-  - |
-    if [[ "$TRAVIS_OS_NAME" == "osx" ]]
-    then
-        ./scripts/bootstrap-osx.sh;
     fi
 
 script:

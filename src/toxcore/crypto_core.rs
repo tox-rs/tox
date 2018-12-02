@@ -5,16 +5,11 @@ pub use sodiumoxide::crypto::box_::*;
 pub use sodiumoxide::crypto::hash::{sha256, sha512};
 pub use sodiumoxide::crypto::secretbox;
 
-use std::sync::{Once, ONCE_INIT};
 use byteorder::{ByteOrder, NativeEndian};
 
 use toxcore::binary_io::*;
 
 // TODO: check if `#[inline]` is actually useful
-
-
-static CRYPTO_INIT_ONCE: Once = ONCE_INIT;
-static mut CRYPTO_INIT: bool = false;
 
 /** Run before using crypto.
 
@@ -33,14 +28,7 @@ assert_eq!(true, crypto_init());
 ```
 */
 pub fn crypto_init() -> bool {
-    // NOTE: `init()` could be run more than once, but not in parallel, and
-    //       `CRYPTO_INIT` *can't* be modified while it may be read by
-    //       something else.
-    CRYPTO_INIT_ONCE.call_once(|| {
-        let initialized = ::sodiumoxide::init();
-        unsafe { CRYPTO_INIT = initialized; }
-    });
-    unsafe { CRYPTO_INIT }
+    ::sodiumoxide::init().is_ok()
 }
 
 
