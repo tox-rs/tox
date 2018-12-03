@@ -313,8 +313,11 @@ mod tests {
         let (client_pk, client_sk) = gen_keypair();
         let (server_pk, server_sk) = gen_keypair();
 
-        let addr = "127.0.0.1:12344".parse().unwrap();
-        let server = TcpListener::bind(&addr).unwrap().incoming()
+        let addr = "127.0.0.1:0".parse().unwrap();
+        let listener = TcpListener::bind(&addr).unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = listener.incoming()
             .into_future() // take the first connection
             .map_err(|(e, _other_incomings)| e)
             .map(|(connection, _other_incomings)| connection.unwrap())
