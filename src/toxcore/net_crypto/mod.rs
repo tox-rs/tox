@@ -468,7 +468,7 @@ impl NetCrypto {
         let cur_last_bytes = CryptoData::nonce_last_bytes(received_nonce);
         let (diff, _) = packet.nonce_last_bytes.overflowing_sub(cur_last_bytes);
         let mut packet_nonce = received_nonce;
-        increment_nonce_number(&mut packet_nonce, diff as usize);
+        increment_nonce_number(&mut packet_nonce, diff as u64);
 
         let payload = match packet.get_payload(&session_precomputed_key, &packet_nonce) {
             Ok(payload) => payload,
@@ -503,7 +503,7 @@ impl NetCrypto {
 
         // Update nonce if diff is big enough
         if diff > NONCE_DIFF_THRESHOLD * 2 {
-            increment_nonce_number(&mut received_nonce, NONCE_DIFF_THRESHOLD as usize);
+            increment_nonce_number(&mut received_nonce, NONCE_DIFF_THRESHOLD as u64);
         }
 
         // TODO: connection status notification
@@ -1573,7 +1573,7 @@ mod tests {
 
         // Make the diff between nonces is bigger than the threshold
         let mut packet_nonce = received_nonce;
-        increment_nonce_number(&mut packet_nonce, (2 * NONCE_DIFF_THRESHOLD + 1) as usize);
+        increment_nonce_number(&mut packet_nonce, (2 * NONCE_DIFF_THRESHOLD + 1) as u64);
 
         let crypto_data_payload = CryptoDataPayload {
             buffer_start: 0,
@@ -1587,7 +1587,7 @@ mod tests {
         // The diff between nonces is bigger than the threshold so received
         // nonce should be changed increased
         let mut expected_nonce = received_nonce;
-        increment_nonce_number(&mut expected_nonce, NONCE_DIFF_THRESHOLD as usize);
+        increment_nonce_number(&mut expected_nonce, NONCE_DIFF_THRESHOLD as u64);
         assert_eq!(unpack!(connection.status, ConnectionStatus::Established, received_nonce), expected_nonce);
 
         assert_eq!(connection.recv_array.buffer_start, 0);
