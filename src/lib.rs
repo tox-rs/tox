@@ -5,6 +5,7 @@ Repo: https://github.com/tox-rs/tox
 
 */
 
+#![forbid(unsafe_code)]
 #![doc(html_logo_url = "https://raw.githubusercontent.com/tox-rs/logo/master/logo.png")]
 #![cfg_attr(feature = "cargo-clippy", feature(tool_lints))]
 // Turn off clippy warnings that gives false positives

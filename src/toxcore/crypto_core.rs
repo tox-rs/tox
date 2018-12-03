@@ -5,7 +5,7 @@ pub use sodiumoxide::crypto::box_::*;
 pub use sodiumoxide::crypto::hash::{sha256, sha512};
 pub use sodiumoxide::crypto::secretbox;
 
-use byteorder::{ByteOrder, NativeEndian};
+use byteorder::{ByteOrder, LittleEndian, NativeEndian};
 
 use toxcore::binary_io::*;
 
@@ -161,10 +161,13 @@ pub fn increment_nonce(nonce: &mut Nonce) {
 }
 
 /// Inrement given nonce by number `num`.
-pub fn increment_nonce_number(mut nonce: &mut Nonce, num: usize) {
-    for _ in 0..num {
-        increment_nonce(&mut nonce);
-    }
+pub fn increment_nonce_number(nonce: &mut Nonce, num: u64) {
+    let Nonce(ref mut bytes) = *nonce;
+    bytes.reverse(); // treat nonce as LE number
+    let mut num_bytes = [0; NONCEBYTES];
+    LittleEndian::write_u64(&mut num_bytes, num);
+    ::sodiumoxide::utils::add_le(bytes, &num_bytes).unwrap(); // sizes are equal
+    bytes.reverse(); // treat nonce as BE number again
 }
 
 /// Convert `PublicKey` to sha256 `Digest` type.
