@@ -262,11 +262,13 @@ mod tests {
         let (client_pk, client_sk) = gen_keypair();
         let (server_pk, server_sk) = gen_keypair();
 
-        let addr = "127.0.0.1:12345".parse().unwrap();
+        let addr = "127.0.0.1:0".parse().unwrap();
+        let listener = TcpListener::bind(&addr).unwrap();
+        let addr = listener.local_addr().unwrap();
 
         let stats = Stats::new();
         let stats_c = stats.clone();
-        let server = TcpListener::bind(&addr).unwrap().incoming()
+        let server = listener.incoming()
             .into_future() // take the first connection
             .map_err(|(e, _other_incomings)| Error::from(e))
             .map(|(connection, _other_incomings)| connection.unwrap())
@@ -318,9 +320,10 @@ mod tests {
         let (client_pk, client_sk) = gen_keypair();
         let (server_pk, server_sk) = gen_keypair();
 
-        let addr = "127.0.0.1:12346".parse().unwrap();
-
+        let addr = "127.0.0.1:0".parse().unwrap();
         let listener = TcpListener::bind(&addr).unwrap();
+        let addr = listener.local_addr().unwrap();
+
         let stats = Stats::new();
         let server = Server::new().run(listener, server_sk, stats.clone())
             .map_err(Error::from);

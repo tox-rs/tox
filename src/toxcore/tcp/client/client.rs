@@ -1096,8 +1096,11 @@ pub mod tests {
 
         // run server
         let (server_pk, server_sk) = gen_keypair();
-        let addr = "0.0.0.0:12347".parse().unwrap();
+
+        let addr = "127.0.0.1:0".parse().unwrap();
         let listener = TcpListener::bind(&addr).unwrap();
+        let addr = listener.local_addr().unwrap();
+
         let server = Server::new();
         let stats = Stats::new();
         let server_future = server.run(listener, server_sk, stats)
