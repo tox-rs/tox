@@ -40,7 +40,7 @@ use toxcore::utils::*;
 type Tx = mpsc::UnboundedSender<(Packet, SocketAddr)>;
 
 /// Shorthand for the transmit half of the TCP onion channel.
-type TcpOnionTx = mpsc::UnboundedSender<(InnerOnionResponse, SocketAddr)>;
+type TcpOnionTx = mpsc::Sender<(InnerOnionResponse, SocketAddr)>;
 
 /// Number of random `NodesRequest` packet to send every second one per second.
 /// After random requests count exceeds this number `NODES_REQ_INTERVAL` will be
@@ -2737,7 +2737,7 @@ mod tests {
     #[test]
     fn handle_onion_response_1_redirect_to_tcp() {
         let (mut alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
-        let (tcp_onion_tx, tcp_onion_rx) = mpsc::unbounded::<(InnerOnionResponse, SocketAddr)>();
+        let (tcp_onion_tx, tcp_onion_rx) = mpsc::channel(1);
         alice.set_tcp_onion_sink(tcp_onion_tx);
 
         let addr: SocketAddr = "127.0.0.1:12346".parse().unwrap();

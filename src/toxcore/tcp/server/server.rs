@@ -32,7 +32,7 @@ to clients via network.
 pub struct Server {
     state: Arc<RwLock<ServerState>>,
     // None if the server is not responsible to handle OnionRequests
-    onion_sink: Option<mpsc::UnboundedSender<(OnionRequest, SocketAddr)>>,
+    onion_sink: Option<mpsc::Sender<(OnionRequest, SocketAddr)>>,
 }
 
 #[derive(Default)]
@@ -50,7 +50,7 @@ impl Server {
     }
     /** Create a new `Server` with onion
     */
-    pub fn set_udp_onion_sink(&mut self, onion_sink: mpsc::UnboundedSender<(OnionRequest, SocketAddr)>) {
+    pub fn set_udp_onion_sink(&mut self, onion_sink: mpsc::Sender<(OnionRequest, SocketAddr)>) {
         self.onion_sink = Some(onion_sink)
     }
     /** Insert the client into connected_clients. Do nothing else.
@@ -800,7 +800,7 @@ mod tests {
     }
     #[test]
     fn handle_onion_request() {
-        let (udp_onion_sink, udp_onion_stream) = mpsc::unbounded();
+        let (udp_onion_sink, udp_onion_stream) = mpsc::channel(1);
         let mut server = Server::new();
         server.set_udp_onion_sink(udp_onion_sink);
 
@@ -1092,7 +1092,7 @@ mod tests {
     }
     #[test]
     fn handle_udp_onion_response_for_unknown_client() {
-        let (udp_onion_sink, _) = mpsc::unbounded();
+        let (udp_onion_sink, _) = mpsc::channel(1);
         let mut server = Server::new();
         server.set_udp_onion_sink(udp_onion_sink);
 
@@ -1291,7 +1291,7 @@ mod tests {
     }
     #[test]
     fn send_onion_request_to_dropped_stream() {
-        let (udp_onion_sink, udp_onion_stream) = mpsc::unbounded();
+        let (udp_onion_sink, udp_onion_stream) = mpsc::channel(1);
         let mut server = Server::new();
         server.set_udp_onion_sink(udp_onion_sink);
 
