@@ -58,3 +58,15 @@ pub fn send_all_to<T: Send + 'static, S, Tx, E: Debug>(tx: &Tx, s: S) -> IoFutur
         })
     )
 }
+
+/// Send item to a sink using reference with timeout
+pub fn send_all_to_bounded<T: Send + 'static, S, Tx, E: Debug>(tx: &Tx, s: S, timeout: Duration) -> IoFuture<()>
+    where S: Stream<Item = T, Error = E> + Send + 'static,
+          Tx: Sink<SinkItem = T, SinkError = E> + Send + Clone + 'static
+{
+    Box::new(send_all_to(tx, s)
+        .timeout(timeout)
+        .map_err(|e| Error::new(ErrorKind::Other,
+            format!("Failed to send message: {}", e)
+        )))
+}

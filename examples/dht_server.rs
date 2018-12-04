@@ -66,7 +66,7 @@ fn main() {
     let (server_pk, server_sk) = gen_keypair();
 
     // Create a channel for server to communicate with network
-    let (tx, rx) = mpsc::unbounded();
+    let (tx, rx) = mpsc::channel(32);
 
     let local_addr: SocketAddr = "0.0.0.0:33445".parse().unwrap(); // 0.0.0.0 for IPv4
     // let local_addr: SocketAddr = "[::]:33445".parse().unwrap(); // [::] for IPv6

@@ -31,8 +31,11 @@ pub const END_PORT: u16 = 33546;
 /// Interval in seconds between `LanDiscovery` packet sending.
 pub const LAN_DISCOVERY_INTERVAL: u64 = 10;
 
+/// Timeout in seconds for packet sending
+pub const LAN_DISCOVERY_SEND_TIMEOUT: u64 = 1;
+
 /// Shorthand for the transmit half of the message channel.
-type Tx = mpsc::UnboundedSender<(Packet, SocketAddr)>;
+type Tx = mpsc::Sender<(Packet, SocketAddr)>;
 
 /// LAN discovery struct
 pub struct LanDiscoverySender {
@@ -120,7 +123,7 @@ impl LanDiscoverySender {
             addrs.into_iter().map(move |addr| (lan_packet.clone(), addr))
         );
 
-        send_all_to(&self.tx, stream)
+        send_all_to_bounded(&self.tx, stream, Duration::from_secs(LAN_DISCOVERY_SEND_TIMEOUT))
     }
 
     /// Run LAN discovery periodically. Result future will never be completed
@@ -157,7 +160,10 @@ mod tests {
 
     #[test]
     fn send_ipv4() {
-        let (tx, mut rx) = mpsc::unbounded();
+        // `+1` for 255.255.255.255
+        let packets_count = (broadcast_addrs_count() + 1) * (PORTS_PER_DISCOVERY + 1) as usize;
+
+        let (tx, mut rx) = mpsc::channel(packets_count);
         let (dht_pk, _dht_sk) = gen_keypair();
         let mut lan_discovery = LanDiscoverySender::new(tx, dht_pk, /* ipv6 */ false);
 
@@ -165,8 +171,7 @@ mod tests {
 
         assert_eq!(lan_discovery.next_port, START_PORT + PORTS_PER_DISCOVERY);
 
-        // `+1` for 255.255.255.255
-        for _i in 0 .. (broadcast_addrs_count() + 1) * (PORTS_PER_DISCOVERY + 1) as usize {
+        for _i in 0 .. packets_count {
             let (received, rx1) = rx.into_future().wait().unwrap();
             let (packet, _addr) = received.unwrap();
 
@@ -180,7 +185,10 @@ mod tests {
 
     #[test]
     fn send_ipv6() {
-        let (tx, mut rx) = mpsc::unbounded();
+        // `+2` for ::1 and ::ffff:255.255.255.255
+        let packets_count = (broadcast_addrs_count() + 2) * (PORTS_PER_DISCOVERY + 1) as usize;
+
+        let (tx, mut rx) = mpsc::channel(packets_count);
         let (dht_pk, _dht_sk) = gen_keypair();
         let mut lan_discovery = LanDiscoverySender::new(tx, dht_pk, /* ipv6 */ true);
 
@@ -188,8 +196,7 @@ mod tests {
 
         assert_eq!(lan_discovery.next_port, START_PORT + PORTS_PER_DISCOVERY);
 
-        // `+2` for ::1 and ::ffff:255.255.255.255
-        for _i in 0 .. (broadcast_addrs_count() + 2) * (PORTS_PER_DISCOVERY + 1) as usize {
+        for _i in 0 .. packets_count {
             let (received, rx1) = rx.into_future().wait().unwrap();
             let (packet, _addr) = received.unwrap();
 
@@ -203,7 +210,10 @@ mod tests {
 
     #[test]
     fn cycle_around_ports() {
-        let (tx, mut rx) = mpsc::unbounded();
+        // `+1` for 255.255.255.255
+        let packets_count = (broadcast_addrs_count() + 1) * (PORTS_PER_DISCOVERY + 1) as usize;
+
+        let (tx, mut rx) = mpsc::channel(packets_count);
         let (dht_pk, _dht_sk) = gen_keypair();
         let mut lan_discovery = LanDiscoverySender::new(tx, dht_pk, /* ipv6 */ false);
 
@@ -213,8 +223,7 @@ mod tests {
 
         assert_eq!(lan_discovery.next_port, START_PORT + PORTS_PER_DISCOVERY - 1);
 
-        // `+1` for 255.255.255.255
-        for _i in 0 .. (broadcast_addrs_count() + 1) * (PORTS_PER_DISCOVERY + 1) as usize {
+        for _i in 0 .. packets_count {
             let (received, rx1) = rx.into_future().wait().unwrap();
             let (packet, _addr) = received.unwrap();
 

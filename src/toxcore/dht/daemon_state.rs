@@ -156,7 +156,6 @@ mod tests {
     use toxcore::dht::packet::*;
 
     use futures::sync::mpsc;
-    use std::net::SocketAddr;
 
     macro_rules! unpack {
         ($variable:expr, $variant:path) => (
@@ -170,7 +169,7 @@ mod tests {
     #[test]
     fn daemon_state_serialize_deserialize() {
         let (pk, sk) = gen_keypair();
-        let (tx, rx) = mpsc::unbounded::<(Packet, SocketAddr)>();
+        let (tx, rx) = mpsc::channel(1);
         let alice = Server::new(tx, pk, sk);
 
         let addr_org = "1.2.3.4:1234".parse().unwrap();

@@ -65,7 +65,7 @@ const PACKET_ID_LOSSY_RANGE_END: u8 = 254;
 
 /// Shorthand for the transmit half of the message channel for sending DHT
 /// packets.
-type UdpTx = mpsc::UnboundedSender<(Packet, SocketAddr)>;
+type UdpTx = mpsc::Sender<(Packet, SocketAddr)>;
 
 /// Shorthand for the transmit half of the message channel for sending DHT
 /// `PublicKey` when it gets known. The first key is a long term key, the second
@@ -650,7 +650,7 @@ mod tests {
 
     #[test]
     fn net_crypto_clone() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -673,7 +673,7 @@ mod tests {
 
     #[test]
     fn handle_cookie_request() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -714,7 +714,7 @@ mod tests {
 
     #[test]
     fn handle_cookie_request_invalid() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -743,7 +743,7 @@ mod tests {
 
     #[test]
     fn handle_udp_cookie_request() {
-        let (udp_tx, udp_rx) = mpsc::unbounded();
+        let (udp_tx, udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -793,7 +793,7 @@ mod tests {
 
     #[test]
     fn handle_udp_cookie_request_invalid() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -824,7 +824,7 @@ mod tests {
 
     #[test]
     fn handle_cookie_response() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -870,7 +870,7 @@ mod tests {
 
     #[test]
     fn handle_cookie_response_invalid_status() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -918,7 +918,7 @@ mod tests {
 
     #[test]
     fn handle_cookie_response_invalid_request_id() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -958,7 +958,7 @@ mod tests {
 
     #[test]
     fn handle_udp_cookie_response() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -1014,7 +1014,7 @@ mod tests {
 
     #[test]
     fn handle_udp_cookie_response_no_connection() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -1052,7 +1052,7 @@ mod tests {
 
     #[test]
     fn handle_crypto_handshake_in_cookie_requesting_status() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -1108,7 +1108,7 @@ mod tests {
 
     #[test]
     fn handle_crypto_handshake_in_not_confirmed_status() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -1178,7 +1178,7 @@ mod tests {
 
     #[test]
     fn handle_crypto_handshake_invalid_status() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -1231,7 +1231,7 @@ mod tests {
 
     #[test]
     fn handle_crypto_handshake_invalid_hash() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -1274,7 +1274,7 @@ mod tests {
 
     #[test]
     fn handle_crypto_handshake_timed_out_cookie() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -1318,7 +1318,7 @@ mod tests {
 
     #[test]
     fn handle_crypto_handshake_invalid_peer_real_pk() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -1361,7 +1361,7 @@ mod tests {
 
     #[test]
     fn handle_crypto_handshake_invalid_peer_dht_pk() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -1412,7 +1412,7 @@ mod tests {
 
     #[test]
     fn handle_udp_crypto_handshake() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -1479,7 +1479,7 @@ mod tests {
 
     #[test]
     fn handle_crypto_data_lossy() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, lossy_rx) = mpsc::unbounded();
@@ -1538,7 +1538,7 @@ mod tests {
 
     #[test]
     fn handle_crypto_data_lossy_increment_nonce() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, lossy_rx) = mpsc::unbounded();
@@ -1603,7 +1603,7 @@ mod tests {
 
     #[test]
     fn handle_crypto_data_lossy_update_rtt() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, lossy_rx) = mpsc::unbounded();
@@ -1684,7 +1684,7 @@ mod tests {
 
     #[test]
     fn handle_crypto_data_lossy_invalid_buffer_start() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -1736,7 +1736,7 @@ mod tests {
 
     #[test]
     fn handle_crypto_data_lossless() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -1824,7 +1824,7 @@ mod tests {
 
     #[test]
     fn handle_crypto_data_lossless_too_big_index() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -1876,7 +1876,7 @@ mod tests {
 
     #[test]
     fn handle_crypto_data_kill() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -1931,7 +1931,7 @@ mod tests {
 
     #[test]
     fn handle_crypto_data_request() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -2016,7 +2016,7 @@ mod tests {
 
     #[test]
     fn handle_crypto_data_empty_request() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -2073,7 +2073,7 @@ mod tests {
 
     #[test]
     fn handle_crypto_data_invalid_packet_id() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -2125,7 +2125,7 @@ mod tests {
 
     #[test]
     fn handle_crypto_data_empty_data() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -2177,7 +2177,7 @@ mod tests {
 
     #[test]
     fn handle_crypto_data_invalid_status() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -2215,7 +2215,7 @@ mod tests {
 
     #[test]
     fn handle_udp_crypto_data_lossy() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, lossy_rx) = mpsc::unbounded();
@@ -2283,7 +2283,7 @@ mod tests {
 
     #[test]
     fn send_status_packet() {
-        let (udp_tx, udp_rx) = mpsc::unbounded();
+        let (udp_tx, udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -2330,7 +2330,7 @@ mod tests {
 
     #[test]
     fn send_packet_udp() {
-        let (udp_tx, udp_rx) = mpsc::unbounded();
+        let (udp_tx, udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -2372,7 +2372,7 @@ mod tests {
 
     #[test]
     fn send_packet_udp_attempt() {
-        let (udp_tx, udp_rx) = mpsc::unbounded();
+        let (udp_tx, udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -2415,7 +2415,7 @@ mod tests {
 
     #[test]
     fn send_packet_no_udp_attempt() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -2452,7 +2452,7 @@ mod tests {
 
     #[test]
     fn send_packet_tcp() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -2486,7 +2486,7 @@ mod tests {
 
     #[test]
     fn main_loop_sends_status_packets() {
-        let (udp_tx, udp_rx) = mpsc::unbounded();
+        let (udp_tx, udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -2527,7 +2527,7 @@ mod tests {
 
     #[test]
     fn main_loop_removes_timed_out_connections() {
-        let (udp_tx, _udp_rx) = mpsc::unbounded();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
@@ -2575,7 +2575,7 @@ mod tests {
 
     #[test]
     fn send_status_packet_established() {
-        let (udp_tx, udp_rx) = mpsc::unbounded();
+        let (udp_tx, udp_rx) = mpsc::channel(1);
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
