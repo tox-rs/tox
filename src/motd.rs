@@ -28,6 +28,7 @@ impl RegexMatches {
     }
 }
 
+/// Packet counters for both tcp and udp.
 pub struct Counters {
     tcp: Stats,
     udp: Stats,
@@ -88,7 +89,7 @@ impl Motd {
             1000000..=999999999 => format!("{0:.1}M", source as f32 / 1000000.0),
             1000000000..=999999999999 => format!("{0:.1}G", source as f32 / 1000000000.0),
             1000000000000..=u64::MAX => format!("{0:.1}T", source as f32 / 1000000000000.0),
-            _ => unreachable!("Packet counters have values impossible")
+            _ => unreachable!("Packets counter has an impossible value")
         }
     }
 
