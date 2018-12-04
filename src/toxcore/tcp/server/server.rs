@@ -432,9 +432,9 @@ mod tests {
 
     /// A function that generates random keypair, random `std::net::IpAddr`,
     /// random port, creates mpsc channel and returns created with them Client
-    fn create_random_client(saddr: SocketAddr) -> (Client, mpsc::UnboundedReceiver<Packet>) {
+    fn create_random_client(saddr: SocketAddr) -> (Client, mpsc::Receiver<Packet>) {
         let (client_pk, _) = gen_keypair();
-        let (tx, rx) = mpsc::unbounded();
+        let (tx, rx) = mpsc::channel(32);
         let client = Client::new(tx, &client_pk, saddr.ip(), saddr.port());
         (client, rx)
     }
@@ -1099,7 +1099,7 @@ mod tests {
         let client_addr_1 = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
         let client_port_1 = 12345u16;
         let (client_pk_1, _) = gen_keypair();
-        let (tx_1, _rx_1) = mpsc::unbounded();
+        let (tx_1, _rx_1) = mpsc::channel(1);
         let client_1 = Client::new(tx_1, &client_pk_1, client_addr_1, client_port_1);
         server.insert(client_1);
 
