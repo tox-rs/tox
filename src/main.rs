@@ -46,6 +46,11 @@ use syslog::Facility;
 use cli_config::*;
 use motd::{Motd, Counters};
 
+/// Channel size for onion messages between UDP and TCP relay.
+const ONION_CHANNEL_SIZE: usize = 32;
+/// Channel size for DHT packets.
+const DHT_CHANNEL_SIZE: usize = 32;
+
 /// Get version in format 3AAABBBCCC, where A B and C are major, minor and patch
 /// versions of node. `tox-bootstrapd` uses similar scheme but with leading 1.
 /// Before it used format YYYYMMDDVV so the leading numeral was 2. To make a
@@ -136,23 +141,23 @@ fn run<F>(future: F, threads_config: ThreadsConfig)
 /// Onion sink and stream for TCP.
 struct TcpOnion {
     /// Sink for onion packets from TCP to UDP.
-    tx: mpsc::UnboundedSender<(OnionRequest, SocketAddr)>,
+    tx: mpsc::Sender<(OnionRequest, SocketAddr)>,
     /// Stream of onion packets from TCP to UDP.
-    rx: mpsc::UnboundedReceiver<(InnerOnionResponse, SocketAddr)>,
+    rx: mpsc::Receiver<(InnerOnionResponse, SocketAddr)>,
 }
 
 /// Onion sink and stream for UDP.
 struct UdpOnion {
     /// Sink for onion packets from UDP to TCP.
-    tx: mpsc::UnboundedSender<(InnerOnionResponse, SocketAddr)>,
+    tx: mpsc::Sender<(InnerOnionResponse, SocketAddr)>,
     /// Stream of onion packets from TCP to UDP.
-    rx: mpsc::UnboundedReceiver<(OnionRequest, SocketAddr)>,
+    rx: mpsc::Receiver<(OnionRequest, SocketAddr)>,
 }
 
 /// Create onion streams for TCP and UDP servers communication.
 fn create_onion_streams() -> (TcpOnion, UdpOnion) {
-    let (udp_onion_tx, udp_onion_rx) = mpsc::unbounded();
-    let (tcp_onion_tx, tcp_onion_rx) = mpsc::unbounded();
+    let (udp_onion_tx, udp_onion_rx) = mpsc::channel(ONION_CHANNEL_SIZE);
+    let (tcp_onion_tx, tcp_onion_rx) = mpsc::channel(ONION_CHANNEL_SIZE);
     let tcp_onion = TcpOnion {
         tx: tcp_onion_tx,
         rx: udp_onion_rx,
@@ -224,7 +229,7 @@ fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_on
     let (sink, stream) = UdpFramed::new(socket, codec).split();
 
     // Create a channel for server to communicate with network
-    let (tx, rx) = mpsc::unbounded();
+    let (tx, rx) = mpsc::channel(DHT_CHANNEL_SIZE);
 
     let lan_discovery_future = if cli_config.lan_discovery_enabled {
         Either::A(LanDiscoverySender::new(tx.clone(), dht_pk, udp_addr.is_ipv6())
