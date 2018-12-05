@@ -390,7 +390,12 @@ impl Server {
             .map_err(|e| Error::new(ErrorKind::Other, format!("DHT server timer error: {:?}", e)))
             .for_each(move |_instant| {
                 trace!("DHT server wake up");
-                self.dht_main_loop()
+                self.dht_main_loop().then(|res| {
+                    if let Err(e) = res {
+                        warn!("Failed to send DHT periodical packets: {}", e);
+                    }
+                    future::ok(())
+                })
             });
         Box::new(future)
     }

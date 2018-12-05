@@ -5,7 +5,7 @@ use std::io::{Error, ErrorKind};
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
 
-use futures::{stream, Stream};
+use futures::{future, stream, Future, Stream};
 use futures::sync::mpsc;
 use get_if_addrs;
 use get_if_addrs::IfAddr;
@@ -135,7 +135,12 @@ impl LanDiscoverySender {
             .map_err(|e| Error::new(ErrorKind::Other, format!("LanDiscovery timer error: {:?}", e)))
             .for_each(move |_instant| {
                 trace!("LAN discovery sender wake up");
-                self.send()
+                self.send().then(|res| {
+                    if let Err(e) = res {
+                        warn!("Failed to send LAN discovery packets: {}", e);
+                    }
+                    future::ok(())
+                })
             });
         Box::new(future)
     }
