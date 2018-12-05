@@ -366,7 +366,7 @@ impl Server {
             Box::new( future::ok(()) )
         }
     }
-    /* Remove timedout connected clients
+    /** Remove timedout connected clients
     */
     fn remove_timedout_clients(&self, state: &mut ServerState) -> IoFuture<()> {
         let keys = state.connected_clients.iter()
@@ -375,11 +375,10 @@ impl Server {
             .collect::<Vec<PublicKey>>();
 
         let remove_timedouts = keys.iter()
-            .map(|key| {
-                self.shutdown_client_inner(key, state)
-            });
+            // failure in removing one client should not affect other clients
+            .map(|key| self.shutdown_client_inner(key, state).then(|_| Ok(())));
 
-        let remove_stream = stream::futures_unordered(remove_timedouts).then(|_| Ok(()));
+        let remove_stream = stream::futures_unordered(remove_timedouts);
 
         Box::new(remove_stream.for_each(Ok))
     }
@@ -392,12 +391,14 @@ impl Server {
 
         let ping_sender = state.connected_clients.iter_mut()
             .filter(|(_key, client)| client.is_ping_interval_passed())
-            .map(|(_key, client)| client.send_ping_request());
+            // failure in ping sending for one client should not affect other clients
+            .map(|(_key, client)| client.send_ping_request().then(|_| Ok(())));
 
-        let ping_stream = stream::futures_unordered(ping_sender).then(|_| Ok(()));
+        let ping_stream = stream::futures_unordered(ping_sender);
 
         let res = remove_timedouts
-            .and_then(|_| ping_stream.for_each(Ok));
+            .join(ping_stream.for_each(Ok))
+            .map(|_| ());
 
         Box::new(res)
     }
