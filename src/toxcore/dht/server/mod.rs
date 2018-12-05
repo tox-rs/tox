@@ -37,10 +37,10 @@ use toxcore::dht::ip_port::IsGlobal;
 use toxcore::utils::*;
 
 /// Shorthand for the transmit half of the message channel.
-type Tx = mpsc::UnboundedSender<(Packet, SocketAddr)>;
+type Tx = mpsc::Sender<(Packet, SocketAddr)>;
 
 /// Shorthand for the transmit half of the TCP onion channel.
-type TcpOnionTx = mpsc::UnboundedSender<(InnerOnionResponse, SocketAddr)>;
+type TcpOnionTx = mpsc::Sender<(InnerOnionResponse, SocketAddr)>;
 
 /// Number of random `NodesRequest` packet to send every second one per second.
 /// After random requests count exceeds this number `NODES_REQ_INTERVAL` will be
@@ -67,6 +67,8 @@ pub const FAKE_FRIENDS_NUMBER: usize = 2;
 /// Maximum number of entry in Lru cache for precomputed keys.
 pub const PRECOMPUTED_LRU_CACHE_SIZE: usize = KBUCKET_DEFAULT_SIZE as usize * KBUCKET_MAX_ENTRIES as usize + // For KTree.
     KBUCKET_DEFAULT_SIZE as usize * (2 + 10); // For friend's close_nodes of 2 fake friends + 10 friends reserved
+/// Timeout in seconds for packet sending
+pub const DHT_SEND_TIMEOUT: u64 = 1;
 
 /// Struct that contains necessary data for `BootstrapInfo` packet.
 #[derive(Clone)]
@@ -388,7 +390,12 @@ impl Server {
             .map_err(|e| Error::new(ErrorKind::Other, format!("DHT server timer error: {:?}", e)))
             .for_each(move |_instant| {
                 trace!("DHT server wake up");
-                self.dht_main_loop()
+                self.dht_main_loop().then(|res| {
+                    if let Err(e) = res {
+                        warn!("Failed to send DHT periodical packets: {}", e);
+                    }
+                    future::ok(())
+                })
             });
         Box::new(future)
     }
@@ -617,7 +624,7 @@ impl Server {
             (packet, addr)
         }).collect::<Vec<_>>();
 
-        send_all_to(&self.tx, stream::iter_ok(packets))
+        send_all_to_bounded(&self.tx, stream::iter_ok(packets), Duration::from_secs(DHT_SEND_TIMEOUT))
     }
 
     /// Send `NatPingRequest` packet to all close nodes of friend in the hope
@@ -739,9 +746,7 @@ impl Server {
         let addrs = node.get_all_addrs();
 
         let futures = addrs.into_iter()
-            .map(|addr| {
-                send_to(&self.tx, (packet.clone(), addr))
-            })
+            .map(|addr| self.send_to_direct(addr, packet.clone()))
             .collect::<Vec<_>>();
 
         Box::new(join_all(futures).map(|_| ()))
@@ -749,7 +754,7 @@ impl Server {
 
     /// Send UDP packet to specified address.
     fn send_to_direct(&self, addr: SocketAddr, packet: Packet) -> IoFuture<()> {
-        send_to(&self.tx, (packet, addr))
+        send_to_bounded(&self.tx, (packet, addr), Duration::from_secs(DHT_SEND_TIMEOUT))
     }
 
     /// Handle received `PingRequest` packet and response with `PingResponse`
@@ -1418,11 +1423,11 @@ mod tests {
     const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - secretbox::NONCEBYTES;
 
     fn create_node() -> (Server, PrecomputedKey, PublicKey, SecretKey,
-            mpsc::UnboundedReceiver<(Packet, SocketAddr)>, SocketAddr) {
+            mpsc::Receiver<(Packet, SocketAddr)>, SocketAddr) {
         crypto_init();
 
         let (pk, sk) = gen_keypair();
-        let (tx, rx) = mpsc::unbounded::<(Packet, SocketAddr)>();
+        let (tx, rx) = mpsc::channel(32);
         let alice = Server::new(tx, pk, sk);
         let (bob_pk, bob_sk) = gen_keypair();
         let precomp = precompute(&alice.pk, &bob_sk);
@@ -1435,7 +1440,7 @@ mod tests {
     fn server_is_clonable() {
         crypto_init();
         let (pk, sk) = gen_keypair();
-        let (tx, _rx) = mpsc::unbounded();
+        let (tx, _rx) = mpsc::channel(1);
         let server = Server::new(tx, pk, sk);
 
         let _ = server.clone();
@@ -1889,7 +1894,7 @@ mod tests {
     // handle_cookie_request
     #[test]
     fn handle_cookie_request() {
-        let (udp_tx, udp_rx) = mpsc::unbounded();
+        let (udp_tx, udp_rx) = mpsc::channel(1);
         let (dht_pk, dht_sk) = gen_keypair();
         let mut alice = Server::new(udp_tx.clone(), dht_pk, dht_sk.clone());
 
@@ -2737,7 +2742,7 @@ mod tests {
     #[test]
     fn handle_onion_response_1_redirect_to_tcp() {
         let (mut alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
-        let (tcp_onion_tx, tcp_onion_rx) = mpsc::unbounded::<(InnerOnionResponse, SocketAddr)>();
+        let (tcp_onion_tx, tcp_onion_rx) = mpsc::channel(1);
         alice.set_tcp_onion_sink(tcp_onion_tx);
 
         let addr: SocketAddr = "127.0.0.1:12346".parse().unwrap();

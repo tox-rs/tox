@@ -19,6 +19,8 @@ use futures::sync::mpsc;
 pub const TCP_PING_FREQUENCY: u64 = 30;
 /// Timeout in seconds for waiting response of PingRequest sent
 pub const TCP_PING_TIMEOUT: u64 = 10;
+/// Timeout in seconds for packet sending
+pub const TCP_SEND_TIMEOUT: u64 = 1;
 
 /** Structure that represents how Server keeps connected clients. A write-only socket with
 human interface. A client cannot send a message directly to another client, whereas server can.
@@ -31,7 +33,7 @@ pub struct Client {
     /// Port of the client.
     port: u16,
     /// The transmission end of a channel which is used to send values.
-    tx: mpsc::UnboundedSender<Packet>,
+    tx: mpsc::Sender<Packet>,
     /** links - a table of indexing links from this client to another
 
     A client requests to link him with another client by PK with RouteRequest.
@@ -54,7 +56,7 @@ pub struct Client {
 impl Client {
     /** Create new Client
     */
-    pub fn new(tx: mpsc::UnboundedSender<Packet>, pk: &PublicKey, ip_addr: IpAddr, port: u16) -> Client {
+    pub fn new(tx: mpsc::Sender<Packet>, pk: &PublicKey, ip_addr: IpAddr, port: u16) -> Client {
         Client {
             pk: *pk,
             ip_addr,
@@ -162,7 +164,7 @@ impl Client {
     /** Send a packet. This method does not ignore IO error
     */
     fn send(&self, packet: Packet) -> IoFuture<()> {
-        send_to(&self.tx, packet)
+        send_to_bounded(&self.tx, packet, Duration::from_secs(TCP_SEND_TIMEOUT))
     }
     /** Send a packet. This method ignores IO error
     */

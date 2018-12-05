@@ -32,7 +32,7 @@ to clients via network.
 pub struct Server {
     state: Arc<RwLock<ServerState>>,
     // None if the server is not responsible to handle OnionRequests
-    onion_sink: Option<mpsc::UnboundedSender<(OnionRequest, SocketAddr)>>,
+    onion_sink: Option<mpsc::Sender<(OnionRequest, SocketAddr)>>,
 }
 
 #[derive(Default)]
@@ -50,7 +50,7 @@ impl Server {
     }
     /** Create a new `Server` with onion
     */
-    pub fn set_udp_onion_sink(&mut self, onion_sink: mpsc::UnboundedSender<(OnionRequest, SocketAddr)>) {
+    pub fn set_udp_onion_sink(&mut self, onion_sink: mpsc::Sender<(OnionRequest, SocketAddr)>) {
         self.onion_sink = Some(onion_sink)
     }
     /** Insert the client into connected_clients. Do nothing else.
@@ -366,7 +366,7 @@ impl Server {
             Box::new( future::ok(()) )
         }
     }
-    /* Remove timedout connected clients
+    /** Remove timedout connected clients
     */
     fn remove_timedout_clients(&self, state: &mut ServerState) -> IoFuture<()> {
         let keys = state.connected_clients.iter()
@@ -375,11 +375,10 @@ impl Server {
             .collect::<Vec<PublicKey>>();
 
         let remove_timedouts = keys.iter()
-            .map(|key| {
-                self.shutdown_client_inner(key, state)
-            });
+            // failure in removing one client should not affect other clients
+            .map(|key| self.shutdown_client_inner(key, state).then(|_| Ok(())));
 
-        let remove_stream = stream::futures_unordered(remove_timedouts).then(|_| Ok(()));
+        let remove_stream = stream::futures_unordered(remove_timedouts);
 
         Box::new(remove_stream.for_each(Ok))
     }
@@ -392,12 +391,14 @@ impl Server {
 
         let ping_sender = state.connected_clients.iter_mut()
             .filter(|(_key, client)| client.is_ping_interval_passed())
-            .map(|(_key, client)| client.send_ping_request());
+            // failure in ping sending for one client should not affect other clients
+            .map(|(_key, client)| client.send_ping_request().then(|_| Ok(())));
 
-        let ping_stream = stream::futures_unordered(ping_sender).then(|_| Ok(()));
+        let ping_stream = stream::futures_unordered(ping_sender);
 
         let res = remove_timedouts
-            .and_then(|_| ping_stream.for_each(Ok));
+            .join(ping_stream.for_each(Ok))
+            .map(|_| ());
 
         Box::new(res)
     }
@@ -432,9 +433,9 @@ mod tests {
 
     /// A function that generates random keypair, random `std::net::IpAddr`,
     /// random port, creates mpsc channel and returns created with them Client
-    fn create_random_client(saddr: SocketAddr) -> (Client, mpsc::UnboundedReceiver<Packet>) {
+    fn create_random_client(saddr: SocketAddr) -> (Client, mpsc::Receiver<Packet>) {
         let (client_pk, _) = gen_keypair();
-        let (tx, rx) = mpsc::unbounded();
+        let (tx, rx) = mpsc::channel(32);
         let client = Client::new(tx, &client_pk, saddr.ip(), saddr.port());
         (client, rx)
     }
@@ -800,7 +801,7 @@ mod tests {
     }
     #[test]
     fn handle_onion_request() {
-        let (udp_onion_sink, udp_onion_stream) = mpsc::unbounded();
+        let (udp_onion_sink, udp_onion_stream) = mpsc::channel(1);
         let mut server = Server::new();
         server.set_udp_onion_sink(udp_onion_sink);
 
@@ -1092,14 +1093,14 @@ mod tests {
     }
     #[test]
     fn handle_udp_onion_response_for_unknown_client() {
-        let (udp_onion_sink, _) = mpsc::unbounded();
+        let (udp_onion_sink, _) = mpsc::channel(1);
         let mut server = Server::new();
         server.set_udp_onion_sink(udp_onion_sink);
 
         let client_addr_1 = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
         let client_port_1 = 12345u16;
         let (client_pk_1, _) = gen_keypair();
-        let (tx_1, _rx_1) = mpsc::unbounded();
+        let (tx_1, _rx_1) = mpsc::channel(1);
         let client_1 = Client::new(tx_1, &client_pk_1, client_addr_1, client_port_1);
         server.insert(client_1);
 
@@ -1291,7 +1292,7 @@ mod tests {
     }
     #[test]
     fn send_onion_request_to_dropped_stream() {
-        let (udp_onion_sink, udp_onion_stream) = mpsc::unbounded();
+        let (udp_onion_sink, udp_onion_stream) = mpsc::channel(1);
         let mut server = Server::new();
         server.set_udp_onion_sink(udp_onion_sink);
 

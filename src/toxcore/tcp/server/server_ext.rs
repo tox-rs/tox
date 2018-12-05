@@ -8,10 +8,8 @@ use futures::{future, Future, Sink, Stream};
 use futures::sync::mpsc;
 use tokio;
 use tokio::net::{TcpStream, TcpListener};
-use tokio::util::FutureExt;
 use tokio_codec::Framed;
 use tokio::timer::{Error as TimerError, Interval};
-use tokio::timer::timeout::{Error as TimeoutError};
 
 use toxcore::crypto_core::*;
 use toxcore::tcp::codec::{DecodeError, EncodeError, Codec};
@@ -21,6 +19,8 @@ use toxcore::stats::*;
 
 /// Interval in seconds for Tcp Ping sender
 const TCP_PING_INTERVAL: u64 = 1;
+
+const SERVER_CHANNEL_SIZE: usize = 64;
 
 /// Error that can happen during server execution
 #[derive(Debug, Fail)]
@@ -57,10 +57,10 @@ pub enum ConnectionError {
         #[fail(cause)]
         error: IoError,
     },
-    /// Sending packet error. Can be either timeout or underlying sending error
+    /// Sending packet error
     #[fail(display = "Failed to send TCP packet: {}", error)]
     SendPacketError {
-        error: TimeoutError<EncodeError>
+        error: EncodeError
     },
     /// Decode incoming packet error
     #[fail(display = "Failed to decode incoming packet: {}", error)]
@@ -156,7 +156,7 @@ impl ServerExt for Server {
         let process = register_client.and_then(move |(stream, channel, client_pk)| {
             let secure_socket = Framed::new(stream, Codec::new(channel, stats));
             let (to_client, from_client) = secure_socket.split();
-            let (to_client_tx, to_client_rx) = mpsc::unbounded();
+            let (to_client_tx, to_client_rx) = mpsc::channel(SERVER_CHANNEL_SIZE);
 
             server_c.insert(Client::new(to_client_tx, &client_pk, addr.ip(), addr.port()));
 
@@ -176,7 +176,6 @@ impl ServerExt for Server {
                 .fold(to_client, move |to_client, packet| {
                     trace!("Sending TCP packet {:?} to {:?}", packet, client_pk);
                     to_client.send(packet)
-                        .timeout(Duration::from_secs(30))
                         .map_err(|error| ConnectionError::SendPacketError {
                             error
                         })
@@ -239,9 +238,9 @@ mod tests {
             error: IoError::new(IoErrorKind::Other, "io error"),
         });
         format!("{}", ConnectionError::SendPacketError {
-            error: TimeoutError::inner(EncodeError::IoError {
+            error: EncodeError::IoError {
                 error: IoError::new(IoErrorKind::Other, "io error"),
-            }),
+            },
         });
         format!("{}", ConnectionError::DecodePacketError {
             error: DecodeError::DecryptError,
