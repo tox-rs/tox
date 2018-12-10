@@ -3,13 +3,13 @@
 
 use toxcore::crypto_core::*;
 use toxcore::tcp::packet::*;
+use toxcore::tcp::links::Links;
 use toxcore::io_tokio::*;
 use toxcore::onion::packet::InnerOnionResponse;
 use toxcore::time::*;
 use toxcore::utils::*;
 
 use std::net::IpAddr;
-use std::slice::Iter;
 use std::time::{Instant, Duration};
 
 use futures::Future;
@@ -44,7 +44,7 @@ pub struct Client {
     `::get_link` and `::take_link` accept ids in `[0; 240) + 16`. All conversions are done only
     inside this module.
     */
-    links: [Option<PublicKey>; 240],
+    links: Links,
     /// Used to check whether PongResponse is correct
     ping_id: u64,
     /// Last time sent PingRequest packet
@@ -62,7 +62,7 @@ impl Client {
             ip_addr,
             port,
             tx,
-            links: [None; 240],
+            links: Links::new(),
             ping_id: 0,
             last_pinged: clock_now(),
             last_pong_resp: clock_now()
@@ -111,54 +111,16 @@ impl Client {
         clock_elapsed(self.last_pinged) >= Duration::from_secs(TCP_PING_FREQUENCY)
     }
 
-    /** Return index of of the link by PK
-
-    Some(index + 16) if link exists
-
-    None if there is no such PK linked to this client
+    /** Get the Links of the Client
     */
-    pub fn get_connection_id(&self, to: &PublicKey) -> Option<u8> {
-        self.links.iter().position(|&link| link == Some(*to)).map(|x| x as u8).map(|x| x + 16)
+    pub fn links(&self) -> &Links {
+        &self.links
     }
 
-    /** Try to link PK.
-
-    Some(index + 16) if has been inserted or link existed
-
-    None if no free space to insert
+    /** Get the Links of the Client
     */
-    pub fn insert_connection_id(&mut self, to: &PublicKey) -> Option<u8> {
-        match self.get_connection_id(to) {
-            Some(index) => Some(index), // already inserted
-            None => {
-                if let Some(index) = self.links.iter().position(|link| link.is_none()) {
-                    self.links[index] = Some(*to);
-                    Some(index as u8).map(|x| x + 16)
-                } else {
-                    None
-                }
-            }
-        }
-    }
-
-    /** Get link by connection_id.
-    Ensure connection_id [0; 240) + 16
-    */
-    pub fn get_link(&self, connection_id: u8) -> Option<PublicKey> {
-        self.links[connection_id as usize - 16]
-    }
-
-    /** Get link by connection_id and remove it from container.
-    Ensure connection_id [0; 240) + 16
-    */
-    pub fn take_link(&mut self, connection_id: u8) -> Option<PublicKey> {
-        self.links[connection_id as usize - 16].take()
-    }
-
-    /** Iter over each link in links of the Client
-    */
-    pub fn iter_links(&self) -> Iter<Option<PublicKey>> {
-        self.links.iter()
+    pub fn links_mut(&mut self) -> &mut Links {
+        &mut self.links
     }
 
     /** Send a packet. This method does not ignore IO error
