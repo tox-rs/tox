@@ -14,7 +14,7 @@ use toxcore::crypto_core::*;
 const MAX_CRYPTO_PACKET_SIZE: usize = 1400;
 
 /// The maximum size of data in packets.
-const MAX_CRYPTO_DATA_SIZE: usize = MAX_CRYPTO_PACKET_SIZE - MACBYTES - 11;
+pub const MAX_CRYPTO_DATA_SIZE: usize = MAX_CRYPTO_PACKET_SIZE - MACBYTES - 11;
 
 /// All packets will be padded a number of bytes based on this number.
 const CRYPTO_MAX_PADDING: usize = 8;

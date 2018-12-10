@@ -119,6 +119,17 @@ impl<T> PacketsArray<T> {
         result.map(|packet| *packet)
     }
 
+    /// Check if packet the index exists
+    pub fn contains(&self, index: u32) -> bool {
+        let len = self.len();
+
+        if self.buffer_end.overflowing_sub(index).0 > len || index.overflowing_sub(self.buffer_start).0 >= len {
+            return false
+        }
+
+        self.buffer[real_index(index)].is_some()
+    }
+
     /// Get reference to the packet by its index
     pub fn get(&self, index: u32) -> Option<&T> {
         let len = self.len();
@@ -197,6 +208,24 @@ impl<T> PacketsArray<T> {
         self.buffer_start = index;
 
         Ok(())
+    }
+
+    /// Get mutable iterator over all stored packets with their index.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (u32, &mut T)> {
+        let buffer_start = self.buffer_start;
+        let start = real_index(buffer_start);
+        let end = real_index(self.buffer_end);
+        let iter = if start > end {
+            let (first, second) = self.buffer.split_at_mut(start);
+            second.iter_mut().chain(first.iter_mut().take(end))
+        } else {
+            [].iter_mut().chain(self.buffer[start ..].iter_mut().take(end - start))
+        };
+        iter.enumerate().flat_map(move |(i, packet)|
+            packet.iter_mut().map(move |packet|
+                (buffer_start.overflowing_add(i as u32).0, &mut **packet)
+            )
+        )
     }
 }
 
@@ -308,6 +337,15 @@ mod tests {
     }
 
     #[test]
+    fn contains() {
+        let mut array = PacketsArray::<()>::new();
+        assert!(array.push_back(()).is_ok());
+        assert!(array.contains(0));
+        assert!(!array.contains(1));
+        assert!(!array.contains(2));
+    }
+
+    #[test]
     fn get() {
         let mut array = PacketsArray::<()>::new();
         assert!(array.push_back(()).is_ok());
@@ -401,5 +439,41 @@ mod tests {
         assert!(array.set_buffer_start(1).is_err());
         assert_eq!(array.buffer_start, 7);
         assert_eq!(array.buffer_end, 7);
+    }
+
+    #[test]
+    fn iter_mut_empty() {
+        let mut array = PacketsArray::<()>::new();
+        assert!(array.iter_mut().next().is_none());
+    }
+
+    #[test]
+    fn iter_mut_single_part() {
+        let mut array = PacketsArray::<()>::new();
+        assert!(array.insert(0, ()).is_ok());
+        assert!(array.insert(2, ()).is_ok());
+        assert!(array.insert(5, ()).is_ok());
+        assert_eq!(
+            array.iter_mut().map(|(i, _)| i).collect::<Vec<_>>(),
+            vec![0, 2, 5]
+        );
+    }
+
+    #[test]
+    fn iter_mut_two_parts() {
+        let mut array = PacketsArray::<()>::new();
+        array.buffer_start = CRYPTO_PACKET_BUFFER_SIZE - 1;
+        array.buffer_end = CRYPTO_PACKET_BUFFER_SIZE + 3;
+        assert!(array.insert(CRYPTO_PACKET_BUFFER_SIZE - 1, ()).is_ok());
+        assert!(array.insert(CRYPTO_PACKET_BUFFER_SIZE, ()).is_ok());
+        assert!(array.insert(CRYPTO_PACKET_BUFFER_SIZE + 2, ()).is_ok());
+        assert_eq!(
+            array.iter_mut().map(|(i, _)| i).collect::<Vec<_>>(),
+            vec![
+                CRYPTO_PACKET_BUFFER_SIZE - 1,
+                CRYPTO_PACKET_BUFFER_SIZE,
+                CRYPTO_PACKET_BUFFER_SIZE + 2,
+            ]
+        );
     }
 }
