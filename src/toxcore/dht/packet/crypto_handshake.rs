@@ -1,11 +1,10 @@
 /*! CryptoHandshake packet
 */
 
-use std::io::{Error, ErrorKind};
-
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 use toxcore::dht::packet::cookie::EncryptedCookie;
+use toxcore::dht::packet::errors::*;
 
 /** Packet used to establish `net_crypto` connection between two peers.
 
@@ -84,22 +83,20 @@ impl CryptoHandshake {
     - fails to decrypt
     - fails to parse `CryptoHandshakePayload`
     */
-    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<CryptoHandshakePayload, Error> {
+    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<CryptoHandshakePayload, GetPayloadError> {
         let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
             .map_err(|()| {
                 debug!("Decrypting CryptoHandshake failed!");
-                Error::new(ErrorKind::Other, "CryptoHandshake decrypt error.")
+                GetPayloadError::decrypt()
             })?;
         match CryptoHandshakePayload::from_bytes(&decrypted) {
-            IResult::Incomplete(e) => {
-                debug!(target: "Dht", "CryptoHandshakePayload return deserialize error: {:?}", e);
-                Err(Error::new(ErrorKind::Other,
-                    format!("CryptoHandshakePayload return deserialize error: {:?}", e)))
+            IResult::Incomplete(needed) => {
+                debug!(target: "Dht", "CryptoHandshakePayload return deserialize error: {:?}", needed);
+                Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
             },
-            IResult::Error(e) => {
-                debug!(target: "Dht", "CryptoHandshakePayload return deserialize error: {:?}", e);
-                Err(Error::new(ErrorKind::Other,
-                    format!("CryptoHandshakePayload return deserialize error: {:?}", e)))
+            IResult::Error(error) => {
+                debug!(target: "Dht", "CryptoHandshakePayload return deserialize error: {:?}", error);
+                Err(GetPayloadError::deserialize(error, self.payload.to_vec()))
             },
             IResult::Done(_, payload) => {
                 Ok(payload)
@@ -170,6 +167,7 @@ impl ToBytes for CryptoHandshakePayload {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nom::Needed;
 
     encode_decode_test!(
         crypto_handshake_encode_decode,
@@ -247,6 +245,7 @@ mod tests {
         // try to decode payload with eve's shared secret
         let decoded_payload = dht_packet.get_payload(&eve_shared_secret);
         assert!(decoded_payload.is_err());
+        assert_eq!(*decoded_payload.err().unwrap().kind(), GetPayloadErrorKind::Decrypt);
     }
 
     #[test]
@@ -269,6 +268,7 @@ mod tests {
         };
         let decoded_payload = invalid_packet.get_payload(&shared_secret);
         assert!(decoded_payload.is_err());
+        assert_eq!(*decoded_payload.err().unwrap().kind(), GetPayloadErrorKind::IncompletePayload { needed: Needed::Size(144), payload: invalid_packet.payload });
         // Try short incomplete array
         let invalid_payload = [];
         let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
@@ -279,5 +279,6 @@ mod tests {
         };
         let decoded_payload = invalid_packet.get_payload(&shared_secret);
         assert!(decoded_payload.is_err());
+        assert_eq!(*decoded_payload.err().unwrap().kind(), GetPayloadErrorKind::IncompletePayload { needed: Needed::Size(24), payload: invalid_packet.payload });
     }
 }
