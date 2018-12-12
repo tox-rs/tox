@@ -20,25 +20,25 @@ mod motd;
 
 use std::fs::{File, OpenOptions};
 use std::io::{ErrorKind, Read, Write};
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 
 use failure::Error;
 use futures::sync::mpsc;
-use futures::{future, Future, Sink, Stream};
+use futures::{future, Future, Stream};
 use futures::future::Either;
 use itertools::Itertools;
 use log::LevelFilter;
-use tokio::net::{TcpListener, UdpSocket, UdpFramed};
+use tokio::net::{TcpListener, UdpSocket};
 use tokio::runtime;
 use tox::toxcore::crypto_core::*;
-use tox::toxcore::dht::codec::{DecodeError, DhtCodec};
 use tox::toxcore::dht::server::{Server as UdpServer};
+use tox::toxcore::dht::server_ext::{ServerExt as UdpServerExt};
 use tox::toxcore::dht::lan_discovery::LanDiscoverySender;
 use tox::toxcore::onion::packet::InnerOnionResponse;
 use tox::toxcore::tcp::packet::OnionRequest;
-use tox::toxcore::tcp::server::{Server as TcpServer, ServerExt};
+use tox::toxcore::tcp::server::{Server as TcpServer, ServerExt as TcpServerExt};
 use tox::toxcore::stats::Stats;
 #[cfg(unix)]
 use syslog::Facility;
@@ -225,8 +225,6 @@ fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_on
 
     let socket = bind_socket(udp_addr);
     let udp_stats = Stats::new();
-    let codec = DhtCodec::new(udp_stats.clone());
-    let (sink, stream) = UdpFramed::new(socket, codec).split();
 
     // Create a channel for server to communicate with network
     let (tx, rx) = mpsc::channel(DHT_CHANNEL_SIZE);
@@ -240,7 +238,7 @@ fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_on
     };
 
     let mut server = UdpServer::new(tx, dht_pk, dht_sk.clone());
-    let counters = Counters::new(tcp_stats, udp_stats);
+    let counters = Counters::new(tcp_stats, udp_stats.clone());
     let motd = Motd::new(cli_config.motd.clone(), counters);
     server.set_bootstrap_info(version(), Box::new(move |_| motd.format().as_bytes().to_owned()));
     server.enable_lan_discovery(cli_config.lan_discovery_enabled);
@@ -265,47 +263,9 @@ fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_on
         server.add_initial_bootstrap(node);
     }
 
-    // The server task asynchronously iterates over and processes each
-    // incoming packet.
-    let server_c = server.clone();
-    let network_reader = stream.then(future::ok).filter(|event|
-        match event {
-            Ok(_) => true,
-            Err(ref e) => {
-                error!("packet receive error = {:?}", e);
-                // ignore packet decode errors
-                e.as_fail().downcast_ref::<DecodeError>().is_none()
-            }
-        }
-    ).and_then(|event| event).for_each(move |(packet, addr)| {
-        trace!("Received packet {:?}", packet);
-        server_c.handle_packet(packet, addr).or_else(|err| {
-            error!("Failed to handle packet: {:?}", err);
-            future::ok(())
-        })
-    });
-
-    let network_writer = rx
-        .map_err(|()| unreachable!("rx can't fail"))
-        // filter out IPv6 packets if node is running in IPv4 mode
-        .filter(move |&(ref _packet, addr)| !(udp_addr.is_ipv4() && addr.is_ipv6()))
-        .fold(sink, move |sink, (packet, mut addr)| {
-            if udp_addr.is_ipv6() {
-                if let IpAddr::V4(ip) = addr.ip() {
-                    addr = SocketAddr::new(IpAddr::V6(ip.to_ipv6_mapped()), addr.port());
-                }
-            }
-            trace!("Sending packet {:?} to {:?}", packet, addr);
-            sink.send((packet, addr))
-        })
-        // drop sink when rx stream is exhausted
-        .map(|_sink| ());
-
     info!("Running DHT server on {}", udp_addr);
 
-    Either::B(network_reader
-        .select(network_writer).map(|_| ()).map_err(|(e, _)| e)
-        .select(server.run().map_err(Error::from)).map(|_| ()).map_err(|(e, _)| e)
+    Either::B(server.run_socket(socket, rx, udp_stats).map_err(Error::from)
         .select(lan_discovery_future).map(|_| ()).map_err(|(e, _)| e)
         .join(udp_onion_future).map(|_| ()))
 }

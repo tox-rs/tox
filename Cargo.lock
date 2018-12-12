@@ -1231,7 +1231,7 @@ dependencies = [
 [[package]]
 name = "tox"
 version = "0.0.7"
-source = "git+https://github.com/tox-rs/tox/#9e94de823dab476f3aefe044e79ce791f3c458ca"
+source = "git+https://github.com/tox-rs/tox/#a523b8086ba13721e85ab129e150ea9dca206435"
 dependencies = [
  "byteorder 1.2.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "bytes 0.4.11 (registry+https://github.com/rust-lang/crates.io-index)",
