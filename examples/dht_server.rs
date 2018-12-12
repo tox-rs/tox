@@ -13,13 +13,12 @@ extern crate env_logger;
 use futures::*;
 use futures::sync::mpsc;
 use hex::FromHex;
-use tokio::net::{UdpSocket, UdpFramed};
+use tokio::net::UdpSocket;
 
-use std::net::{SocketAddr, IpAddr};
-use std::io::{ErrorKind, Error};
+use std::net::SocketAddr;
 
-use tox::toxcore::dht::codec::*;
 use tox::toxcore::dht::server::*;
+use tox::toxcore::dht::server_ext::ServerExt;
 use tox::toxcore::dht::packed_node::*;
 use tox::toxcore::dht::lan_discovery::*;
 use tox::toxcore::crypto_core::*;
@@ -73,8 +72,6 @@ fn main() {
 
     let socket = bind_socket(local_addr);
     let stats = Stats::new();
-    let dht_codec = DhtCodec::new(stats);
-    let (sink, stream) = UdpFramed::new(socket, dht_codec).split();
 
     let lan_discovery_sender = LanDiscoverySender::new(tx.clone(), server_pk, local_addr.is_ipv6());
 
@@ -95,47 +92,7 @@ fn main() {
         server.add_initial_bootstrap(bootstrap_pn);
     }
 
-    // The server task asynchronously iterates over and processes each
-    // incoming packet.
-    let server_c = server.clone();
-    let network_reader = stream.then(future::ok).filter(|event| // TODO: use filter_map from futures 0.2 to avoid next `expect`
-        match event {
-            Ok(_) => true,
-            Err(ref e) => {
-                error!("packet receive error = {:?}", e);
-                // ignore packet decode errors
-                e.as_fail().downcast_ref::<DecodeError>().is_none()
-            }
-        }
-    ).then(|event: Result<_, ()>|
-        event.expect("always ok")
-    ).for_each(move |(packet, addr)| {
-        trace!("Received packet {:?}", packet);
-        server_c.handle_packet(packet, addr).or_else(|err| {
-            error!("Failed to handle packet: {:?}", err);
-            future::ok(())
-        })
-    }).map_err(|e| Error::new(ErrorKind::Other, e.compat()));
-
-    let network_writer = rx
-        .map_err(|()| Error::new(ErrorKind::Other, "rx error"))
-        // filter out IPv6 packets if node is running in IPv4 mode
-        .filter(move |&(ref _packet, addr)| !(local_addr.is_ipv4() && addr.is_ipv6()))
-        .fold(sink, move |sink, (packet, mut addr)| {
-            if local_addr.is_ipv6() {
-                if let IpAddr::V4(ip) = addr.ip() {
-                    addr = SocketAddr::new(IpAddr::V6(ip.to_ipv6_mapped()), addr.port());
-                }
-            }
-            trace!("Sending packet {:?} to {:?}", packet, addr);
-            sink.send((packet, addr)).map_err(|e| Error::new(ErrorKind::Other, e.compat()))
-        })
-        // drop sink when rx stream is exhausted
-        .map(|_sink| ());
-
-    let future = network_reader
-        .select(network_writer).map(|_| ()).map_err(|(e, _)| e)
-        .select(server.run()).map(|_| ()).map_err(|(e, _)| e)
+    let future = server.run_socket(socket, rx, stats)
         .select(lan_discovery_sender.run()).map(|_| ()).map_err(|(e, _)| e)
         .map_err(|err| {
             error!("Processing ended with error: {:?}", err);
