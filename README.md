@@ -20,10 +20,10 @@ cargo run --release
 
 If you want to change default log level you can do it via setting `RUST_LOG`
 environment variable. For example, if you want to see all received and sent
-packets you can change log level to `trace` for `tox_node`:
+packets you can change log level to `trace` for `tox` crate:
 
 ```sh
-RUST_LOG=tox_node=trace cargo run --release
+RUST_LOG=tox=trace cargo run --release
 ```
 
 Also it's possible to use syslog via `--log-type` parameter.
