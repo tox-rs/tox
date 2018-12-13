@@ -284,6 +284,7 @@ mod tests {
 
     #[test]
     fn get_saddr() {
+        crypto_init();
         let (pk, _) = gen_keypair();
         let mut queue = NodesQueue::new(8);
 

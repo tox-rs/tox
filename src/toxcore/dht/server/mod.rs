@@ -1891,6 +1891,7 @@ mod tests {
     // handle_cookie_request
     #[test]
     fn handle_cookie_request() {
+        crypto_init();
         let (udp_tx, udp_rx) = mpsc::channel(1);
         let (dht_pk, dht_sk) = gen_keypair();
         let mut alice = Server::new(udp_tx.clone(), dht_pk, dht_sk.clone());

@@ -168,6 +168,7 @@ mod tests {
 
     #[test]
     fn daemon_state_serialize_deserialize() {
+        crypto_init();
         let (pk, sk) = gen_keypair();
         let (tx, rx) = mpsc::channel(1);
         let alice = Server::new(tx, pk, sk);

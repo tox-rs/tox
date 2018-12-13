@@ -267,6 +267,7 @@ mod tests {
 
     #[test]
     fn run_connection() {
+        crypto_init();
         let (client_pk, client_sk) = gen_keypair();
         let (server_pk, server_sk) = gen_keypair();
 
@@ -325,6 +326,7 @@ mod tests {
 
     #[test]
     fn run() {
+        crypto_init();
         let (client_pk, client_sk) = gen_keypair();
         let (server_pk, server_sk) = gen_keypair();
 

@@ -251,6 +251,7 @@ mod tests {
 
     #[test]
     fn encode_decode() {
+        crypto_init();
         let (pk, _) = gen_keypair();
         let (alice_channel, bob_channel) = create_channels();
         let mut buf = BytesMut::new();
@@ -315,6 +316,7 @@ mod tests {
     }
     #[test]
     fn decode_encrypted_packet_incomplete() {
+        crypto_init();
         let (alice_channel, _) = create_channels();
         let mut buf = BytesMut::new();
         buf.extend_from_slice(b"\x00");
@@ -326,6 +328,7 @@ mod tests {
     }
     #[test]
     fn decode_encrypted_packet_zero_length() {
+        crypto_init();
         let (alice_channel, _) = create_channels();
         let mut buf = BytesMut::new();
         buf.extend_from_slice(b"\x00\x00");
@@ -337,6 +340,7 @@ mod tests {
     }
     #[test]
     fn decode_encrypted_packet_wrong_key() {
+        crypto_init();
         let (alice_channel, _) = create_channels();
         let (mallory_channel, _) = create_channels();
 
@@ -353,6 +357,7 @@ mod tests {
     }
     #[test]
     fn decode_packet_imcomplete() {
+        crypto_init();
         let (alice_channel, _) = create_channels();
 
         let mut buf = BytesMut::new();
@@ -364,6 +369,7 @@ mod tests {
     }
     #[test]
     fn decode_packet_error() {
+        crypto_init();
         let alice_session = Session::new();
 
         // assume we got Alice's PK via handshake
@@ -395,6 +401,7 @@ mod tests {
 
     #[test]
     fn encode_packet_too_big() {
+        crypto_init();
         let (alice_channel, _) = create_channels();
         let mut buf = BytesMut::new();
         let stats = Stats::new();

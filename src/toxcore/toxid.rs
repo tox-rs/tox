@@ -323,6 +323,7 @@ mod tests {
 
     #[test]
     fn no_spam_new_test() {
+        crypto_init();
         let ns = NoSpam::new();
         // shouldn't be empty, unless your PRNG is crappy
         assert!(ns.0 != [0; NOSPAMBYTES])
@@ -332,6 +333,7 @@ mod tests {
 
     #[test]
     fn no_spam_fmt() {
+        crypto_init();
         // check if formatted NoSpam is always upper-case hexadecimal with matching
         // length
         let nospam = NoSpam::new();
@@ -357,6 +359,7 @@ mod tests {
 
     #[test]
     fn tox_id_new_nospam() {
+        crypto_init();
         let (pk, _) = gen_keypair();
         let toxid = ToxId::new(pk);
         let mut toxid2 = toxid;
@@ -378,6 +381,7 @@ mod tests {
 
     #[test]
     fn tox_id_fmt() {
+        crypto_init();
         // check if formatted ToxId is always upper-case hexadecimal with matching
         // length
         let (pk, _) = gen_keypair();
