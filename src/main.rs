@@ -237,19 +237,19 @@ fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_on
         Either::B(future::empty())
     };
 
-    let mut server = UdpServer::new(tx, dht_pk, dht_sk.clone());
+    let mut udp_server = UdpServer::new(tx, dht_pk, dht_sk.clone());
     let counters = Counters::new(tcp_stats, udp_stats.clone());
     let motd = Motd::new(cli_config.motd.clone(), counters);
-    server.set_bootstrap_info(version(), Box::new(move |_| motd.format().as_bytes().to_owned()));
-    server.enable_lan_discovery(cli_config.lan_discovery_enabled);
-    server.set_tcp_onion_sink(udp_onion.tx);
-    server.enable_ipv6_mode(udp_addr.is_ipv6());
+    udp_server.set_bootstrap_info(version(), Box::new(move |_| motd.format().as_bytes().to_owned()));
+    udp_server.enable_lan_discovery(cli_config.lan_discovery_enabled);
+    udp_server.set_tcp_onion_sink(udp_onion.tx);
+    udp_server.enable_ipv6_mode(udp_addr.is_ipv6());
 
-    let server_c = server.clone();
+    let udp_server_c = udp_server.clone();
     let udp_onion_future = udp_onion.rx
         .map_err(|()| unreachable!("rx can't fail"))
         .for_each(move |(onion_request, addr)|
-            server_c.handle_tcp_onion_request(onion_request, addr).or_else(|err| {
+            udp_server_c.handle_tcp_onion_request(onion_request, addr).or_else(|err| {
                 warn!("Failed to handle TCP onion request: {:?}", err);
                 future::ok(())
             })
@@ -260,12 +260,12 @@ fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_on
     }
 
     for node in cli_config.bootstrap_nodes.iter().flat_map(|node| node.resolve()) {
-        server.add_initial_bootstrap(node);
+        udp_server.add_initial_bootstrap(node);
     }
 
     info!("Running DHT server on {}", udp_addr);
 
-    Either::B(server.run_socket(socket, rx, udp_stats).map_err(Error::from)
+    Either::B(udp_server.run_socket(socket, rx, udp_stats).map_err(Error::from)
         .select(lan_discovery_future).map(|_| ()).map_err(|(e, _)| e)
         .join(udp_onion_future).map(|_| ()))
 }
