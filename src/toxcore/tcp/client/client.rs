@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::io::{Error, ErrorKind};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -19,6 +19,7 @@ use toxcore::onion::packet::InnerOnionResponse;
 use toxcore::stats::Stats;
 use toxcore::tcp::codec::{Codec, EncodeError};
 use toxcore::tcp::handshake::make_client_handshake;
+use toxcore::tcp::links::*;
 use toxcore::tcp::packet::*;
 use toxcore::time::*;
 
@@ -61,32 +62,6 @@ enum ClientStatus {
     Sleeping,
 }
 
-/// Link status.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-enum LinkStatus {
-    /// We received `RouteResponse` packet with connection id but can't use it
-    /// until we get `ConnectNotification` packet.
-    Registered,
-    /// We received `ConnectNotification` packet so connection can be used to
-    /// send packets.
-    Online,
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-struct Link {
-    status: LinkStatus,
-    pk: PublicKey,
-}
-
-impl Link {
-    fn new(pk: PublicKey) -> Link {
-        Link {
-            status: LinkStatus::Registered,
-            pk,
-        }
-    }
-}
-
 /// Client connection to a TCP relay.
 #[derive(Clone)]
 pub struct Client {
@@ -104,8 +79,7 @@ pub struct Client {
     /// Number of unsuccessful attempts to establish connection to the relay.
     /// This is used to decide what to do after the connection terminates.
     connection_attempts: Arc<RwLock<u32>>,
-    links: Arc<RwLock<[Option<Link>; 240]>>,
-    pk_to_id: Arc<RwLock<HashMap<PublicKey, u8>>>,
+    links: Arc<RwLock<Links>>,
     /// List of nodes we want to be connected to. When the connection to the
     /// relay establishes we send `RouteRequest` packets with these `PublicKey`s.
     connections: Arc<RwLock<HashSet<PublicKey>>>,
@@ -121,8 +95,7 @@ impl Client {
             status: Arc::new(RwLock::new(ClientStatus::Disconnected)),
             connected_time: Arc::new(RwLock::new(None)),
             connection_attempts: Arc::new(RwLock::new(0)),
-            links: Arc::new(RwLock::new([None; 240])),
-            pk_to_id: Arc::new(RwLock::new(HashMap::new())),
+            links: Arc::new(RwLock::new(Links::new())),
             connections: Arc::new(RwLock::new(HashSet::new())),
         }
     }
@@ -169,34 +142,28 @@ impl Client {
     }
 
     fn handle_route_response(&self, packet: RouteResponse) -> IoFuture<()> {
-        let mut links = self.links.write();
-        let link = &mut links[packet.connection_id as usize - 16];
-        if link.is_none() {
-            if self.connections.read().contains(&packet.pk) {
-                *link = Some(Link::new(packet.pk));
-                self.pk_to_id.write().insert(packet.pk, packet.connection_id);
+        if self.connections.read().contains(&packet.pk) {
+            if self.links.write().insert_by_id(&packet.pk, packet.connection_id - 16) {
                 Box::new(future::ok(()))
             } else {
-                // in theory this can happen if we added connection and right
-                // after that removed it
-                // TODO: should it be handled better?
                 Box::new( future::err(
                     Error::new(ErrorKind::Other,
-                        "handle_route_response: unexpected route response"
+                        "handle_route_response: connection_id is already linked"
                 )))
             }
         } else {
+            // in theory this can happen if we added connection and right
+            // after that removed it
+            // TODO: should it be handled better?
             Box::new( future::err(
                 Error::new(ErrorKind::Other,
-                    "handle_route_response: connection_id is already linked"
+                    "handle_route_response: unexpected route response"
             )))
         }
     }
 
     fn handle_connect_notification(&self, packet: ConnectNotification) -> IoFuture<()> {
-        let mut links = self.links.write();
-        if let Some(ref mut link) = links[packet.connection_id as usize - 16] {
-            link.status = LinkStatus::Online;
+        if self.links.write().upgrade(packet.connection_id - 16) {
             Box::new(future::ok(()))
         } else {
             Box::new( future::err(
@@ -207,9 +174,7 @@ impl Client {
     }
 
     fn handle_disconnect_notification(&self, packet: DisconnectNotification) -> IoFuture<()> {
-        let mut links = self.links.write();
-        if let Some(ref mut link) = links[packet.connection_id as usize - 16] {
-            link.status = LinkStatus::Registered;
+        if self.links.write().downgrade(packet.connection_id - 16) {
             Box::new(future::ok(()))
         } else {
             Box::new( future::err(
@@ -243,7 +208,7 @@ impl Client {
 
     fn handle_data(&self, packet: Data) -> IoFuture<()> {
         let links = self.links.read();
-        if let Some(link) = links[packet.connection_id as usize - 16] {
+        if let Some(link) = links.by_id(packet.connection_id - 16) {
             send_to(&self.incoming_tx, (self.pk, IncomingPacket::Data(link.pk, packet.data)))
         } else {
             Box::new( future::err(
@@ -322,7 +287,7 @@ impl Client {
                         self_c.connection_attempts.write().saturating_add(1);
                     }
                     *self_c.connected_time.write() = None;
-                    self_c.clear_links();
+                    self_c.links.write().clear();
                     future::result(res)
                 })
                 .map_err(|e| {
@@ -353,24 +318,16 @@ impl Client {
         Box::new(future::join_all(futures).map(|_| ()))
     }
 
-    /// When the connection to a TCP relay closed links are no longer valid.
-    /// After new connection establishes new links will be created.
-    fn clear_links(&self) {
-        *self.links.write() = [None; 240];
-        self.pk_to_id.write().clear();
-    }
-
     /// Send `Data` packet to a node via relay.
     pub fn send_data(&self, destination_pk: PublicKey, data: Vec<u8>) -> IoFuture<()> {
         // it is important that the result future succeeds only if packet is
         // sent since we take only one successful future from several relays
         // when send data packet
-        let pk_to_id = self.pk_to_id.read();
-        if let Some(&connection_id) = pk_to_id.get(&destination_pk) {
-            let links = self.links.read();
-            if links[connection_id as usize - 16].map(|link| link.status) == Some(LinkStatus::Online) {
+        let links = self.links.read();
+        if let Some(index) = links.id_by_pk(&destination_pk) {
+            if links.by_id(index).map(|link| link.status) == Some(LinkStatus::Online) {
                 self.send_packet(Packet::Data(Data {
-                    connection_id,
+                    connection_id: index + 16,
                     data,
                 }))
             } else {
@@ -418,11 +375,11 @@ impl Client {
     /// sent.
     pub fn remove_connection(&self, pk: PublicKey) -> IoFuture<()> {
         if self.connections.write().remove(&pk) {
-            let mut pk_to_id = self.pk_to_id.write();
-            if let Some(connection_id) = pk_to_id.remove(&pk) {
-                self.links.write()[connection_id as usize - 16] = None;
+            let mut links = self.links.write();
+            if let Some(index) = links.id_by_pk(&pk) {
+                links.take(index);
                 Box::new(self.send_packet(Packet::DisconnectNotification(DisconnectNotification {
-                    connection_id
+                    connection_id: index + 16,
                 })).then(|_| Ok(())))
             } else {
                 // the link may not exist if we delete the connection before we
@@ -499,8 +456,9 @@ impl Client {
 
     /// Check if connection to the node with specified `PublicKey` is online.
     pub fn is_connection_online(&self, pk: PublicKey) -> bool {
-        if let Some(&connection_id) = self.pk_to_id.read().get(&pk) {
-            if let Some(link) = self.links.read()[connection_id as usize - 16] {
+        let links = self.links.read();
+        if let Some(index) = links.id_by_pk(&pk) {
+            if let Some(link) = links.by_id(index) {
                 link.status == LinkStatus::Online
             } else {
                 false
@@ -565,7 +523,7 @@ pub mod tests {
 
         client.handle_packet(route_response).wait().unwrap();
 
-        let link = client.links.read()[connection_id as usize - 16].unwrap();
+        let link = client.links.read().by_id(connection_id - 16).cloned().unwrap();
 
         assert_eq!(link.pk, new_pk);
         assert_eq!(link.status, LinkStatus::Registered);
@@ -580,7 +538,7 @@ pub mod tests {
         let connection_id = 42;
 
         client.connections.write().insert(new_pk);
-        client.links.write()[connection_id as usize - 16] = Some(Link::new(existing_pk));
+        client.links.write().insert_by_id(&existing_pk, connection_id - 16);
 
         let route_response = Packet::RouteResponse(RouteResponse {
             connection_id,
@@ -589,7 +547,7 @@ pub mod tests {
 
         assert!(client.handle_packet(route_response).wait().is_err());
 
-        let link = client.links.read()[connection_id as usize - 16].unwrap();
+        let link = client.links.read().by_id(connection_id - 16).cloned().unwrap();
 
         assert_eq!(link.pk, existing_pk);
         assert_eq!(link.status, LinkStatus::Registered);
@@ -607,7 +565,7 @@ pub mod tests {
 
         assert!(client.handle_packet(route_response).wait().is_err());
 
-        assert!(client.links.read()[connection_id as usize - 16].is_none());
+        assert!(client.links.read().by_id(connection_id - 16).is_none());
     }
 
     #[test]
@@ -617,7 +575,7 @@ pub mod tests {
         let (existing_pk, _existing_sk) = gen_keypair();
         let connection_id = 42;
 
-        client.links.write()[connection_id as usize - 16] = Some(Link::new(existing_pk));
+        client.links.write().insert_by_id(&existing_pk, connection_id - 16);
 
         let connect_notification = Packet::ConnectNotification(ConnectNotification {
             connection_id,
@@ -625,7 +583,7 @@ pub mod tests {
 
         client.handle_packet(connect_notification).wait().unwrap();
 
-        let link = client.links.read()[connection_id as usize - 16].unwrap();
+        let link = client.links.read().by_id(connection_id - 16).cloned().unwrap();
 
         assert_eq!(link.pk, existing_pk);
         assert_eq!(link.status, LinkStatus::Online);
@@ -642,7 +600,7 @@ pub mod tests {
 
         assert!(client.handle_packet(connect_notification).wait().is_err());
 
-        assert!(client.links.read()[connection_id as usize - 16].is_none());
+        assert!(client.links.read().by_id(connection_id - 16).is_none());
     }
 
     #[test]
@@ -652,10 +610,8 @@ pub mod tests {
         let (existing_pk, _existing_sk) = gen_keypair();
         let connection_id = 42;
 
-        client.links.write()[connection_id as usize - 16] = Some(Link {
-            pk: existing_pk,
-            status: LinkStatus::Online,
-        });
+        client.links.write().insert_by_id(&existing_pk, connection_id - 16);
+        client.links.write().upgrade(connection_id - 16);
 
         let disconnect_notification = Packet::DisconnectNotification(DisconnectNotification {
             connection_id,
@@ -663,7 +619,7 @@ pub mod tests {
 
         client.handle_packet(disconnect_notification).wait().unwrap();
 
-        let link = client.links.read()[connection_id as usize - 16].unwrap();
+        let link = client.links.read().by_id(connection_id - 16).cloned().unwrap();
 
         assert_eq!(link.pk, existing_pk);
         assert_eq!(link.status, LinkStatus::Registered);
@@ -680,7 +636,7 @@ pub mod tests {
 
         assert!(client.handle_packet(disconnect_notification).wait().is_err());
 
-        assert!(client.links.read()[connection_id as usize - 16].is_none());
+        assert!(client.links.read().by_id(connection_id - 16).is_none());
     }
 
     #[test]
@@ -751,10 +707,8 @@ pub mod tests {
         let (sender_pk, _sender_sk) = gen_keypair();
         let connection_id = 42;
 
-        client.links.write()[connection_id as usize - 16] = Some(Link {
-            pk: sender_pk,
-            status: LinkStatus::Online,
-        });
+        client.links.write().insert_by_id(&sender_pk, connection_id - 16);
+        client.links.write().upgrade(connection_id - 16);
 
         let data = vec![42; 123];
         let data_packet = Packet::Data(Data {
@@ -837,11 +791,8 @@ pub mod tests {
         let data = vec![42; 123];
 
         let connection_id = 42;
-        client.pk_to_id.write().insert(destination_pk, connection_id);
-        client.links.write()[connection_id as usize - 16] = Some(Link {
-            pk: destination_pk,
-            status: LinkStatus::Online,
-        });
+        client.links.write().insert_by_id(&destination_pk, connection_id - 16);
+        client.links.write().upgrade(connection_id - 16);
 
         client.send_data(destination_pk, data.clone()).wait().unwrap();
 
@@ -874,8 +825,7 @@ pub mod tests {
         let data = vec![42; 123];
 
         let connection_id = 42;
-        client.pk_to_id.write().insert(destination_pk, connection_id);
-        client.links.write()[connection_id as usize - 16] = Some(Link::new(destination_pk));
+        client.links.write().insert_by_id(&destination_pk, connection_id - 16);
 
         assert!(client.send_data(destination_pk, data.clone()).wait().is_err());
 
@@ -952,8 +902,7 @@ pub mod tests {
         let connection_id = 42;
 
         client.connections.write().insert(connection_pk);
-        client.links.write()[connection_id as usize - 16] = Some(Link::new(connection_pk));
-        client.pk_to_id.write().insert(connection_pk, connection_id);
+        client.links.write().insert_by_id(&connection_pk, connection_id - 16);
 
         client.remove_connection(connection_pk).wait().unwrap();
 
@@ -1024,15 +973,11 @@ pub mod tests {
         let (connection_pk, _connection_sk) = gen_keypair();
         let connection_id = 42;
 
-        client.links.write()[connection_id as usize - 16] = Some(Link::new(connection_pk));
-        client.pk_to_id.write().insert(connection_pk, connection_id);
+        client.links.write().insert_by_id(&connection_pk, connection_id - 16);
 
         assert!(!client.is_connection_online(connection_pk));
 
-        client.links.write()[connection_id as usize - 16] = Some(Link {
-            pk: connection_pk,
-            status: LinkStatus::Online,
-        });
+        client.links.write().upgrade(connection_id - 16);
 
         assert!(client.is_connection_online(connection_pk));
     }
@@ -1080,14 +1025,14 @@ pub mod tests {
         fn on_online(client: Client, pk: PublicKey) -> IoFuture<()> {
             let future = Interval::new(Instant::now(), Duration::from_millis(10))
                 .map_err(|e| Error::new(ErrorKind::Other, e))
-                .skip_while(move |_|
-                    if let Some(&connection_id) = client.pk_to_id.read().get(&pk) {
-                        let link = client.links.read()[connection_id as usize - 16];
-                        future::ok(link.map(|link| link.status) != Some(LinkStatus::Online))
+                .skip_while(move |_| {
+                    let links = client.links.read();
+                    if let Some(index) = links.id_by_pk(&pk) {
+                        future::ok(links.by_id(index).map(|link| link.status) != Some(LinkStatus::Online))
                     } else {
                         future::ok(true)
                     }
-                )
+                })
                 .into_future()
                 .map(|_| ())
                 .map_err(|(e, _)| e);
