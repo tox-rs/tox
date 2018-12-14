@@ -113,8 +113,6 @@ pub struct Server {
     pub pk: PublicKey,
     /// Tx split of a channel to send packets to this peer via UDP socket.
     pub tx: Tx,
-    /// Whether hole punching to friends is enabled.
-    pub is_hole_punching_enabled: bool,
     /// Struct that stores and manages requests IDs and timeouts.
     pub request_queue: Arc<RwLock<RequestQueue>>,
     /// Close nodes list which contains nodes close to own DHT `PublicKey`.
@@ -203,7 +201,6 @@ impl Server {
             sk,
             pk,
             tx,
-            is_hole_punching_enabled: true,
             request_queue: Arc::new(RwLock::new(RequestQueue::new(Duration::from_secs(PING_TIMEOUT)))),
             close_nodes: Arc::new(RwLock::new(Ktree::new(&pk))),
             onion_symmetric_key: Arc::new(RwLock::new(secretbox::gen_key())),
