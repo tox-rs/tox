@@ -120,12 +120,21 @@ consider helping :wink:
     - [x] tests cover almost all functionality
 
 
+## Authors
+
+[zetox](https://github.com/zetok/tox) was created by [Zetok Zalbavar](https://github.com/zetok/)
+(zetok/openmailbox/org) and assimilated by the tox-rs team.
+
+tox-rs has contributions from many users. See [AUTHORS.md](/AUTHORS.md). Thanks everyone!
+
+tox-rs is sponsored by [Zerho LLC](https://zerho.info/).
+
 ## License
 
 Dual licensed under the MIT or GPLv3+ licenses. You may use this project under the
 terms of either the MIT License or the GNU General Public License (GPL) Version 3+.
 
-For details, see [LICENSE-MIT](/LICENSE) and [LICENSE-GPL](/LICENSE-GPL).
+For details, see [LICENSE-MIT](/LICENSE-MIT) and [LICENSE-GPL](/LICENSE-GPL).
 
 [Reference source repository]: https://github.com/zetok/tox-spec
 [Rust]: https://www.rust-lang.org/
