@@ -85,7 +85,7 @@ mod tests {
 
     #[test]
     fn insert_new_ping_id() {
-        crypto_init();
+        crypto_init().unwrap();
         let mut queue = RequestQueue::new(Duration::from_secs(42));
         let (pk, _sk) = gen_keypair();
 
@@ -96,7 +96,7 @@ mod tests {
 
     #[test]
     fn check_ping_id() {
-        crypto_init();
+        crypto_init().unwrap();
         let mut queue = RequestQueue::new(Duration::from_secs(42));
         let (pk, _sk) = gen_keypair();
 
@@ -107,7 +107,7 @@ mod tests {
 
     #[test]
     fn check_ping_id_zero() {
-        crypto_init();
+        crypto_init().unwrap();
         let mut queue = RequestQueue::new(Duration::from_secs(42));
         let (pk, _sk) = gen_keypair();
 
@@ -116,7 +116,7 @@ mod tests {
 
     #[test]
     fn check_ping_id_nonexistent() {
-        crypto_init();
+        crypto_init().unwrap();
         let mut queue = RequestQueue::new(Duration::from_secs(42));
         let (pk, _sk) = gen_keypair();
 
@@ -127,7 +127,7 @@ mod tests {
 
     #[test]
     fn check_ping_id_timed_out() {
-        crypto_init();
+        crypto_init().unwrap();
         let mut queue = RequestQueue::new(Duration::from_secs(42));
         let (pk, _sk) = gen_keypair();
 
@@ -146,7 +146,7 @@ mod tests {
 
     #[test]
     fn clear_timed_out_pings() {
-        crypto_init();
+        crypto_init().unwrap();
         let mut queue = RequestQueue::new(Duration::from_secs(42));
         let (pk, _sk) = gen_keypair();
 

@@ -408,7 +408,7 @@ mod tests {
 
     #[test]
     fn onion_return_encrypt_decrypt() {
-        crypto_init();
+        crypto_init().unwrap();
         let alice_symmetric_key = secretbox::gen_key();
         let bob_symmetric_key = secretbox::gen_key();
         // alice encrypt
@@ -437,7 +437,7 @@ mod tests {
 
     #[test]
     fn onion_return_encrypt_decrypt_invalid_key() {
-        crypto_init();
+        crypto_init().unwrap();
         let alice_symmetric_key = secretbox::gen_key();
         let bob_symmetric_key = secretbox::gen_key();
         let eve_symmetric_key = secretbox::gen_key();
@@ -462,7 +462,7 @@ mod tests {
 
     #[test]
     fn onion_return_decrypt_invalid() {
-        crypto_init();
+        crypto_init().unwrap();
         let symmetric_key = secretbox::gen_key();
         let nonce = secretbox::gen_nonce();
         // Try long invalid array

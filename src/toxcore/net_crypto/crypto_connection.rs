@@ -598,7 +598,7 @@ mod tests {
 
     #[test]
     fn status_packet_should_be_sent() {
-        crypto_init();
+        crypto_init().unwrap();
         // just created packet should be sent
         let mut packet = StatusPacket::new_cookie_request(CookieRequest {
             pk: gen_keypair().0,
@@ -628,7 +628,7 @@ mod tests {
 
     #[test]
     fn status_packet_is_timed_out() {
-        crypto_init();
+        crypto_init().unwrap();
         // just created packet isn't timed out
         let mut packet = StatusPacket::new_cookie_request(CookieRequest {
             pk: gen_keypair().0,
@@ -653,7 +653,7 @@ mod tests {
 
     #[test]
     fn sent_packet_clone() {
-        crypto_init();
+        crypto_init().unwrap();
         let sent_packet = SentPacket::new(vec![42; 123]);
         let sent_packet_c = sent_packet.clone();
         assert_eq!(sent_packet_c, sent_packet);
@@ -661,7 +661,7 @@ mod tests {
 
     #[test]
     fn recv_packet_clone() {
-        crypto_init();
+        crypto_init().unwrap();
         let recv_packet = RecvPacket::new(vec![42; 123]);
         let recv_packet_c = recv_packet.clone();
         assert_eq!(recv_packet_c, recv_packet);
@@ -669,7 +669,7 @@ mod tests {
 
     #[test]
     fn crypto_connection_clone() {
-        crypto_init();
+        crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (real_pk, _real_sk) = gen_keypair();
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
@@ -726,7 +726,7 @@ mod tests {
 
     #[test]
     fn update_congestion_stats() {
-        crypto_init();
+        crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (real_pk, _real_sk) = gen_keypair();
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
@@ -757,7 +757,7 @@ mod tests {
 
     #[test]
     fn request_packet_interval() {
-        crypto_init();
+        crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (real_pk, _real_sk) = gen_keypair();
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
@@ -784,7 +784,7 @@ mod tests {
 
     #[test]
     fn is_established() {
-        crypto_init();
+        crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (real_pk, _real_sk) = gen_keypair();
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
@@ -804,7 +804,7 @@ mod tests {
 
     #[test]
     fn is_not_confirmed() {
-        crypto_init();
+        crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (real_pk, _real_sk) = gen_keypair();
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();

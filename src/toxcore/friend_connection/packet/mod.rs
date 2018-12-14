@@ -45,7 +45,6 @@ impl FromBytes for Packet {
 mod tests {
     use super::*;
     use toxcore::toxid::NoSpam;
-    use toxcore::crypto_core::*;
     use toxcore::dht::packed_node::*;
 
     encode_decode_test!(

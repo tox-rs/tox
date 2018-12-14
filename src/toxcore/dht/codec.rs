@@ -121,7 +121,7 @@ mod tests {
 
     #[test]
     fn encode_decode() {
-        crypto_init();
+        crypto_init().unwrap();
         let test_packets = vec![
             Packet::PingRequest(PingRequest {
                 pk: gen_keypair().0,
@@ -265,7 +265,7 @@ mod tests {
 
     #[test]
     fn decode_encrypted_packet_incomplete() {
-        crypto_init();
+        crypto_init().unwrap();
         let stats = Stats::new();
         let mut codec = DhtCodec::new(stats);
         let mut buf = BytesMut::new();
@@ -284,7 +284,7 @@ mod tests {
 
     #[test]
     fn decode_encrypted_packet_error() {
-        crypto_init();
+        crypto_init().unwrap();
         let stats = Stats::new();
         let mut codec = DhtCodec::new(stats);
         let mut buf = BytesMut::new();
@@ -295,7 +295,7 @@ mod tests {
     }
     #[test]
     fn decode_encrypted_packet_zero_length() {
-        crypto_init();
+        crypto_init().unwrap();
         let stats = Stats::new();
         let mut codec = DhtCodec::new(stats);
         let mut buf = BytesMut::new();
@@ -305,7 +305,7 @@ mod tests {
     }
     #[test]
     fn encode_packet_too_big() {
-        crypto_init();
+        crypto_init().unwrap();
         let stats = Stats::new();
         let mut codec = DhtCodec::new(stats);
         let mut buf = BytesMut::new();
@@ -319,7 +319,7 @@ mod tests {
     }
     #[test]
     fn codec_is_clonable() {
-        crypto_init();
+        crypto_init().unwrap();
         let stats = Stats::new();
         let codec = DhtCodec::new(stats);
         let _codec_c = codec.clone();

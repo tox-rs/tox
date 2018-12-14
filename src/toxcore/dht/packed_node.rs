@@ -168,7 +168,7 @@ mod tests {
 
     #[test]
     fn packed_node_new() {
-        crypto_init();
+        crypto_init().unwrap();
         let (pk, _sk) = gen_keypair();
         let saddr = "1.2.3.4:12345".parse().unwrap();
 
@@ -182,7 +182,7 @@ mod tests {
 
     #[test]
     fn packed_node_new_ipv4_mapped() {
-        crypto_init();
+        crypto_init().unwrap();
         let (pk, _sk) = gen_keypair();
         let saddr_v6 = "[::ffff:1.2.3.4]:12345".parse().unwrap();
         let saddr_v4 = "1.2.3.4:12345".parse().unwrap();
@@ -197,7 +197,7 @@ mod tests {
 
     #[test]
     fn packed_node_ip_type_2() {
-        crypto_init();
+        crypto_init().unwrap();
         let (pk, _sk) = gen_keypair();
         let saddr = "1.2.3.4:12345".parse().unwrap();
 
@@ -208,7 +208,7 @@ mod tests {
 
     #[test]
     fn packed_node_ip_type_10() {
-        crypto_init();
+        crypto_init().unwrap();
         let (pk, _sk) = gen_keypair();
         let saddr = "[::1234:4321]:12345".parse().unwrap();
 
@@ -219,7 +219,7 @@ mod tests {
 
     #[test]
     fn packed_node_ip() {
-        crypto_init();
+        crypto_init().unwrap();
         let (pk, _sk) = gen_keypair();
         let saddr = "1.2.3.4:12345".parse().unwrap();
 
@@ -230,7 +230,7 @@ mod tests {
 
     #[test]
     fn packed_node_socket_addr() {
-        crypto_init();
+        crypto_init().unwrap();
         let (pk, _sk) = gen_keypair();
         let saddr = "1.2.3.4:12345".parse().unwrap();
 

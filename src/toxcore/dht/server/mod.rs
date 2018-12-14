@@ -1421,7 +1421,7 @@ mod tests {
 
     fn create_node() -> (Server, PrecomputedKey, PublicKey, SecretKey,
             mpsc::Receiver<(Packet, SocketAddr)>, SocketAddr) {
-        crypto_init();
+        crypto_init().unwrap();
 
         let (pk, sk) = gen_keypair();
         let (tx, rx) = mpsc::channel(32);
@@ -1435,7 +1435,7 @@ mod tests {
 
     #[test]
     fn server_is_clonable() {
-        crypto_init();
+        crypto_init().unwrap();
         let (pk, sk) = gen_keypair();
         let (tx, _rx) = mpsc::channel(1);
         let server = Server::new(tx, pk, sk);
@@ -1891,7 +1891,7 @@ mod tests {
     // handle_cookie_request
     #[test]
     fn handle_cookie_request() {
-        crypto_init();
+        crypto_init().unwrap();
         let (udp_tx, udp_rx) = mpsc::channel(1);
         let (dht_pk, dht_sk) = gen_keypair();
         let mut alice = Server::new(udp_tx.clone(), dht_pk, dht_sk.clone());

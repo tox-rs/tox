@@ -52,7 +52,6 @@ impl ToBytes for ShareRelays {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use toxcore::crypto_core::*;
 
     encode_decode_test!(
         share_relays_encode_decode,

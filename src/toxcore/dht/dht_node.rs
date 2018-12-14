@@ -193,7 +193,7 @@ mod tests {
 
     #[test]
     fn dht_node_clonable() {
-        crypto_init();
+        crypto_init().unwrap();
         let pn = PackedNode {
             pk: gen_keypair().0,
             saddr: "127.0.0.1:33445".parse().unwrap(),

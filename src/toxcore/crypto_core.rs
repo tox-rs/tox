@@ -15,20 +15,20 @@ use toxcore::binary_io::*;
 
 Runs [`sodiumoxide::init()`](../../../sodiumoxide/fn.init.html).
 
-Returns `true` on success, `false` otherwise.
+Returns `Ok` on success, `Err` otherwise.
 
 E.g.
 
 ```
 use ::tox::toxcore::crypto_core::crypto_init;
 
-assert_eq!(true, crypto_init());
+crypto_init().unwrap();
 // second call should yield same result
-assert_eq!(true, crypto_init());
+crypto_init().unwrap();
 ```
 */
-pub fn crypto_init() -> bool {
-    ::sodiumoxide::init().is_ok()
+pub fn crypto_init() -> Result<(), ()> {
+    ::sodiumoxide::init()
 }
 
 
@@ -240,9 +240,9 @@ pub mod tests {
         thread::spawn(move || {
             for _ in 0..num {
                 thread::spawn(move || {
-                    assert_eq!(true, crypto_init());
+                    crypto_init().unwrap();
                     // second run, value should be the same
-                    assert_eq!(true, crypto_init());
+                    crypto_init().unwrap();
                 });
             }
         });
@@ -264,7 +264,7 @@ pub mod tests {
     // test comparing random public keys
     // testing since it would appear that sodiumoxide doesn't do testing for it
     fn public_key_cmp_test_random() {
-        crypto_init();
+        crypto_init().unwrap();
         let (alice_publickey, _alice_secretkey) = gen_keypair();
         let (bob_publickey, _bob_secretkey) = gen_keypair();
 
@@ -278,7 +278,7 @@ pub mod tests {
 
     #[test]
     fn random_u32_test() {
-        crypto_init();
+        crypto_init().unwrap();
         let a = random_u32();
         let b = random_u32();
         assert!(a != 0);
@@ -290,7 +290,7 @@ pub mod tests {
 
     #[test]
     fn random_u64_test() {
-        crypto_init();
+        crypto_init().unwrap();
         let a = random_u64();
         let b = random_u64();
         assert!(a != 0);
@@ -301,7 +301,7 @@ pub mod tests {
 
     #[test]
     fn random_usize_test() {
-        crypto_init();
+        crypto_init().unwrap();
         let a = random_usize();
         let b = random_usize();
         assert!(a != 0);
@@ -312,7 +312,7 @@ pub mod tests {
 
     #[test]
     fn public_key_valid_test() {
-        crypto_init();
+        crypto_init().unwrap();
         let (pk, _) = gen_keypair();
         assert!(public_key_valid(&pk));
 
@@ -327,7 +327,7 @@ pub mod tests {
     // test uses "bare" functions provided by `sodiumoxide`, with an exception
     // of the tested function
     fn encrypt_precompute_test() {
-        crypto_init();
+        crypto_init().unwrap();
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, bob_sk) = gen_keypair();
 
@@ -349,7 +349,7 @@ pub mod tests {
     // test uses "bare" functions provided by `sodiumoxide`, with an "exception"
     // of the tested function
     fn encrypt_data_symmetric_test() {
-        crypto_init();
+        crypto_init().unwrap();
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, bob_sk) = gen_keypair();
 
@@ -380,7 +380,7 @@ pub mod tests {
     // test uses "bare" functions provided by `sodiumoxide`, with an exception
     // of the tested function
     fn decrypt_data_symmetric_test() {
-        crypto_init();
+        crypto_init().unwrap();
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, bob_sk) = gen_keypair();
 
@@ -401,7 +401,7 @@ pub mod tests {
 
     #[test]
     fn increment_nonce_test_zero_plus_one() {
-        crypto_init();
+        crypto_init().unwrap();
         let cmp_nonce = Nonce([0, 0, 0, 0, 0, 0, 0, 0,
                                0, 0, 0, 0, 0, 0, 0, 0,
                                0, 0, 0, 0, 0, 0, 0, 1]);
@@ -413,7 +413,7 @@ pub mod tests {
 
     #[test]
     fn increment_nonce_test_0xf_plus_one() {
-        crypto_init();
+        crypto_init().unwrap();
         let cmp_nonce = Nonce([0, 0, 0, 0, 0, 0, 0, 0,
                                0, 0, 0, 0, 0, 0, 0, 0,
                                0, 0, 0, 0, 0, 0, 0, 0x10]);
@@ -427,7 +427,7 @@ pub mod tests {
 
     #[test]
     fn increment_nonce_test_0xff_plus_one() {
-        crypto_init();
+        crypto_init().unwrap();
         let cmp_nonce = Nonce([0, 0, 0, 0, 0, 0, 0, 0,
                                0, 0, 0, 0, 0, 0, 0, 0,
                                0, 0, 0, 0, 0, 0, 1, 0]);
@@ -441,7 +441,7 @@ pub mod tests {
 
     #[test]
     fn increment_nonce_test_0xff_max() {
-        crypto_init();
+        crypto_init().unwrap();
         let cmp_nonce = Nonce([0; NONCEBYTES]);
         let mut nonce = Nonce([0xff; NONCEBYTES]);
         increment_nonce(&mut nonce);
@@ -450,7 +450,7 @@ pub mod tests {
 
     #[test]
     fn increment_nonce_test_random() {
-        crypto_init();
+        crypto_init().unwrap();
         let mut nonce = gen_nonce();
         let cmp_nonce = nonce;
         increment_nonce(&mut nonce);
@@ -461,7 +461,7 @@ pub mod tests {
 
     #[test]
     fn increment_nonce_number_test_zero_plus_0xff00() {
-        crypto_init();
+        crypto_init().unwrap();
         let cmp_nonce = Nonce([0, 0, 0, 0, 0, 0, 0, 0,
                                0, 0, 0, 0, 0, 0, 0, 0,
                                0, 0, 0, 0, 0, 0, 0xff, 0]);
@@ -473,7 +473,7 @@ pub mod tests {
 
     #[test]
     fn increment_nonce_number_test_0xff0000_plus_0x011000() {
-        crypto_init();
+        crypto_init().unwrap();
         let cmp_nonce = Nonce([0, 0, 0, 0, 0, 0, 0, 0,
                                0, 0, 0, 0, 0, 0, 0, 0,
                                0, 0, 0, 0, 1, 0, 0x10, 0]);

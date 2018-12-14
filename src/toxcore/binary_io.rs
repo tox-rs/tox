@@ -101,6 +101,11 @@ macro_rules! encode_decode_test (
     ($test:ident, $value:expr) => (
         #[test]
         fn $test() {
+            #[cfg(test)]
+            use toxcore::crypto_core::*;
+
+            crypto_init().unwrap();
+
             let value = $value;
             let mut buf = [0; 1024 * 1024];
             let (_, size) = value.to_bytes((&mut buf, 0)).unwrap();
