@@ -2,30 +2,10 @@ variables:
   CARGO_HOME: $CI_PROJECT_DIR/cargo
   RUST_BACKTRACE: "1"
 
-cache:
-  key: $CI_BUILD_STAGE-$CI_BUILD_REF_NAME
-  paths:
-    - $HOME/.cargo
-    - cargo/
-    - target/
-    - apt-cache/
-    - kcov/
-
 windows:stable:
   script:
-    ### init variables
-    - |
-      set SODIUM_STATIC=1
-      set SODIUM_LIB_DIR=C:\GitLab-Runner\libsodium
-
-    ### set rustup version
-    - rustup default stable
-
-    ### run build, test and doc
-    - |
-      cargo build --verbose
-      cargo test --verbose
-      cargo doc
+    - cargo build --verbose
+    - cargo test --verbose
   stage: build
   tags:
     - tox
@@ -33,35 +13,12 @@ windows:stable:
 
 macos:stable:
   script:
-    ### init valiables
-    - |
-      export SODIUM_STATIC=1
-      export SODIUM_LIB_DIR=/usr/local/Cellar/libsodium/1.0.16/lib/
-
-    ### set rustup version
-    - rustup default stable
-
-    ### run build, test and doc
-    - |
-      cargo build --verbose
-      cargo test --verbose
-      cargo doc
+    - cargo build --verbose
+    - cargo test --verbose
   stage: build
   tags:
     - tox
     - macos
-
-.linux_before_template: &linux_before_script
-  ### init variables
-  - |
-    export PKG_CONFIG_ALLOW_CROSS=1
-    export TRAVIS_JOB_ID=$CI_BUILD_ID
-
-  ### install libsodium
-  - |
-    curl --location --output libsodium18_1.0.13-1_amd64.deb http://archive.ubuntu.com/ubuntu/pool/universe/libs/libsodium/libsodium18_1.0.13-1_amd64.deb
-    curl --location --output libsodium-dev_1.0.13-1_amd64.deb http://archive.ubuntu.com/ubuntu/pool/universe/libs/libsodium/libsodium-dev_1.0.13-1_amd64.deb
-    sudo dpkg -i libsodium-dev_1.0.13-1_amd64.deb libsodium18_1.0.13-1_amd64.deb
 
 .linux_template: &linux_script
   ### run build, test and doc
@@ -70,15 +27,15 @@ macos:stable:
     cargo test --verbose
     cargo doc
 
-linux:v1-26-0:
-  image: rustdocker/rust:1.26.0
-  before_script: *linux_before_script
+linux:v1-30-1:
+  image: rustdocker/rust:1.30.1
   script: *linux_script
   after_script:
     ### measure code coverage and upload to coveralls.io
     - |
       CARGO_TARGET_DIR=target/ cargo install --force cargo-travis || echo "cargo-travis has been already installed"
       export PATH=$HOME/.cargo/bin:$PATH
+      export TRAVIS_JOB_ID=$CI_BUILD_ID
       cargo coveralls
   stage: build
   tags:
@@ -87,7 +44,6 @@ linux:v1-26-0:
 
 linux:stable:
   image: rustdocker/rust:stable
-  before_script: *linux_before_script
   script: *linux_script
   stage: build
   tags:
@@ -97,7 +53,6 @@ linux:stable:
 linux:beta:
   allow_failure: true
   image: rustdocker/rust:beta
-  before_script: *linux_before_script
   script: *linux_script
   stage: build
   tags:
@@ -107,7 +62,6 @@ linux:beta:
 linux:nightly:
   allow_failure: true
   image: rustdocker/rust:nightly
-  before_script: *linux_before_script
   script:
     ### run build, test and doc
     - |
@@ -120,8 +74,7 @@ linux:nightly:
     - docker
 
 other:kcov-and-check-commit-message:
-  image: rustdocker/rust:1.26.0
-  before_script: *linux_before_script
+  image: rustdocker/rust:1.30.1
   script:
     ### export sha
     - |
@@ -143,7 +96,7 @@ other:kcov-and-check-commit-message:
       export ROOT_DIR=`pwd`
       rm -rf target/kcov || echo 'target/kcov not exist'
 
-    ### build kcov for 1.26.0
+    ### build kcov for 1.30.1
     - |
       sudo apt-get remove kcov -y || echo 'ok'
       sudo apt-get -o dir::cache::archives="$APT_CACHE_DIR" update -yq
