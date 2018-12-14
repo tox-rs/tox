@@ -2,15 +2,6 @@ variables:
   CARGO_HOME: $CI_PROJECT_DIR/cargo
   RUST_BACKTRACE: "1"
 
-cache:
-  key: $CI_BUILD_STAGE-$CI_BUILD_REF_NAME
-  paths:
-    - $HOME/.cargo
-    - cargo/
-    - target/
-    - apt-cache/
-    - kcov/
-
 windows:stable:
   script:
     ### init variables
