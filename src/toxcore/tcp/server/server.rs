@@ -54,14 +54,24 @@ impl Server {
     pub fn set_udp_onion_sink(&mut self, onion_sink: mpsc::Sender<(OnionRequest, SocketAddr)>) {
         self.onion_sink = Some(onion_sink)
     }
-    /** Insert the client into connected_clients. Do nothing else.
+    /** Insert the client into `connected_clients`. If `connected_clients`
+    contains a client with the same pk it will be terminated.
     */
-    pub fn insert(&self, client: Client) {
+    pub fn insert(&self, client: Client) -> IoFuture<()> {
         let mut state = self.state.write();
+
+        let shutdown_future = if state.connected_clients.contains_key(&client.pk()) {
+            self.shutdown_client_inner(&client.pk(), &mut state)
+        } else {
+            Box::new(future::ok(()))
+        };
+
         state.keys_by_addr
             .insert((client.ip_addr(), client.port()), client.pk());
         state.connected_clients
             .insert(client.pk(), client);
+
+        shutdown_future
     }
     /**The main processing function. Call in on each incoming packet from connected and
     handshaked client.
@@ -94,12 +104,32 @@ impl Server {
             )))
         }
     }
-    /** Gracefully shutdown client by pk. Remove it from the list of connected clients.
-    If there are any clients mutually linked to current client, we send them corresponding
-    DisconnectNotification.
+    /** Gracefully shutdown client by pk, IP address and port. IP address and
+    port are used to ensure that the right client will be removed. If the client
+    with passed pk has different IP address or port it means that it was
+    recently reconnected and it shouldn't be removed by the old connection
+    finalization step. If IP address with port are correct remove it from the
+    list of connected clients. If there are any clients mutually linked to
+    current client, we send them corresponding `DisconnectNotification`.
     */
-    pub fn shutdown_client(&self, pk: &PublicKey) -> IoFuture<()> {
+    pub fn shutdown_client(&self, pk: &PublicKey, ip_addr: IpAddr, port: u16) -> IoFuture<()> {
         let mut state = self.state.write();
+
+        // check that the client's address isn't changed
+        if let Some(client) = state.connected_clients.get(pk) {
+            if client.ip_addr() != ip_addr || client.port() != port {
+                return Box::new(future::err(
+                    Error::new(ErrorKind::Other,
+                               "Client with pk has different address"
+                    )))
+            }
+        } else {
+            return Box::new(future::err(
+                Error::new(ErrorKind::Other,
+                           "Cannot find client by pk to shutdown it"
+                )))
+        }
+
         self.shutdown_client_inner(pk, &mut state)
     }
 
@@ -495,7 +525,7 @@ mod tests {
     fn server_is_clonable() {
         let server = Server::new();
         let (client_1, _rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
-        server.insert(client_1);
+        server.insert(client_1).wait().unwrap();
         let _cloned = server.clone();
         // that's all.
     }
@@ -515,9 +545,11 @@ mod tests {
 
         let (client_1, rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         let client_pk_1 = client_1.pk();
+        let client_ip_addr_1 = client_1.ip_addr();
+        let client_port_1 = client_1.port();
 
         // client 1 connects to the server
-        server.insert(client_1);
+        server.insert(client_1).wait().unwrap();
 
         let (client_2, rx_2) = create_random_client("1.2.3.5:12345".parse().unwrap());
         let client_pk_2 = client_2.pk();
@@ -544,7 +576,7 @@ mod tests {
         }
 
         // client 2 connects to the server
-        server.insert(client_2);
+        server.insert(client_2).wait().unwrap();
 
         // emulate send RouteRequest from client_1 again
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
@@ -616,7 +648,7 @@ mod tests {
         ));
 
         // emulate client_1 disconnected
-        server.shutdown_client(&client_pk_1).wait().unwrap();
+        server.shutdown_client(&client_pk_1, client_ip_addr_1, client_port_1).wait().unwrap();
         // the server should put DisconnectNotification into rx_2
         let (packet, _rx_2) = rx_2.into_future().wait().unwrap();
         assert_eq!(packet.unwrap(), Packet::DisconnectNotification(
@@ -634,11 +666,11 @@ mod tests {
 
         let (client_1, rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         let client_pk_1 = client_1.pk();
-        server.insert(client_1);
+        server.insert(client_1).wait().unwrap();
 
         let (client_2, _rx_2) = create_random_client("1.2.3.5:12345".parse().unwrap());
         let client_pk_2 = client_2.pk();
-        server.insert(client_2);
+        server.insert(client_2).wait().unwrap();
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
@@ -671,7 +703,7 @@ mod tests {
 
         let (client_1, rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         let client_pk_1 = client_1.pk();
-        server.insert(client_1);
+        server.insert(client_1).wait().unwrap();
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
@@ -690,14 +722,14 @@ mod tests {
 
         let (client_1, mut rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         let client_pk_1 = client_1.pk();
-        server.insert(client_1);
+        server.insert(client_1).wait().unwrap();
 
         // send 240 RouteRequest
         for i in 0..240 {
             let saddr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12346 + u16::from(i));
             let (other_client, _other_rx) = create_random_client(saddr);
             let other_client_pk = other_client.pk();
-            server.insert(other_client);
+            server.insert(other_client).wait().unwrap();
 
             // emulate send RouteRequest from client_1
             server.handle_packet(&client_pk_1, Packet::RouteRequest(
@@ -714,7 +746,7 @@ mod tests {
         // and send one more again
         let (other_client, _other_rx) = create_random_client("1.2.3.5:12345".parse().unwrap());
         let other_client_pk = other_client.pk();
-        server.insert(other_client);
+        server.insert(other_client).wait().unwrap();
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
             RouteRequest { pk: other_client_pk }
@@ -732,7 +764,7 @@ mod tests {
 
         let (client_1, _rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         let client_pk_1 = client_1.pk();
-        server.insert(client_1);
+        server.insert(client_1).wait().unwrap();
 
         // emulate send ConnectNotification from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::ConnectNotification(
@@ -746,11 +778,11 @@ mod tests {
 
         let (client_1, rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         let client_pk_1 = client_1.pk();
-        server.insert(client_1);
+        server.insert(client_1).wait().unwrap();
 
         let (client_2, rx_2) = create_random_client("1.2.3.5:12345".parse().unwrap());
         let client_pk_2 = client_2.pk();
-        server.insert(client_2);
+        server.insert(client_2).wait().unwrap();
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
@@ -851,11 +883,11 @@ mod tests {
 
         let (client_1, _rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         let client_pk_1 = client_1.pk();
-        server.insert(client_1);
+        server.insert(client_1).wait().unwrap();
 
         let (client_2, rx_2) = create_random_client("1.2.3.5:12345".parse().unwrap());
         let client_pk_2 = client_2.pk();
-        server.insert(client_2);
+        server.insert(client_2).wait().unwrap();
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
@@ -879,7 +911,7 @@ mod tests {
 
         let (client_1, rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         let client_pk_1 = client_1.pk();
-        server.insert(client_1);
+        server.insert(client_1).wait().unwrap();
 
         // emulate send PingRequest from client_1
         server.handle_packet(&client_pk_1, Packet::PingRequest(
@@ -898,11 +930,11 @@ mod tests {
 
         let (client_1, _rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         let client_pk_1 = client_1.pk();
-        server.insert(client_1);
+        server.insert(client_1).wait().unwrap();
 
         let (client_2, rx_2) = create_random_client("1.2.3.5:12345".parse().unwrap());
         let client_pk_2 = client_2.pk();
-        server.insert(client_2);
+        server.insert(client_2).wait().unwrap();
 
         // emulate send OobSend from client_1
         server.handle_packet(&client_pk_1, Packet::OobSend(
@@ -925,7 +957,7 @@ mod tests {
         let client_pk_1 = client_1.pk();
         let client_addr_1 = client_1.ip_addr();
         let client_port_1 = client_1.port();
-        server.insert(client_1);
+        server.insert(client_1).wait().unwrap();
 
         let request = OnionRequest {
             nonce: gen_nonce(),
@@ -956,7 +988,7 @@ mod tests {
         let (client_1, rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         let client_addr_1 = client_1.ip_addr();
         let client_port_1 = client_1.port();
-        server.insert(client_1);
+        server.insert(client_1).wait().unwrap();
 
         let payload = InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
             sendback_data: 12345,
@@ -974,16 +1006,54 @@ mod tests {
         ));
     }
     #[test]
+    fn insert_with_same_pk() {
+        let server = Server::new();
+
+        let (mut client_1, _rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
+        let (mut client_2, rx_2) = create_random_client("1.2.3.4:12346".parse().unwrap());
+
+        // link client_1 with client_2
+        let index_1 = client_1.links_mut().insert(&client_2.pk()).unwrap();
+        assert!(client_1.links_mut().upgrade(index_1));
+        let index_2 = client_2.links_mut().insert(&client_1.pk()).unwrap();
+        assert!(client_2.links_mut().upgrade(index_2));
+
+        let client_pk_1 = client_1.pk();
+        let client_addr_3 = "1.2.3.4".parse().unwrap();
+        let client_port_3 = 12347;
+        let (tx_3, _rx_3) = mpsc::channel(32);
+        let client_3 = Client::new(tx_3, &client_pk_1, client_addr_3, client_port_3);
+
+        server.insert(client_1).wait().unwrap();
+        server.insert(client_2).wait().unwrap();
+
+        // replace client_1 with client_3
+        server.insert(client_3).wait().unwrap();
+
+        let (packet, _) = rx_2.into_future().wait().unwrap();
+        assert_eq!(packet.unwrap(), Packet::DisconnectNotification(
+            DisconnectNotification { connection_id: index_2 + 16 }
+        ));
+
+        let state = server.state.read();
+        let client = state.connected_clients.get(&client_pk_1).unwrap();
+
+        assert_eq!(client.ip_addr(), client_addr_3);
+        assert_eq!(client.port(), client_port_3);
+    }
+    #[test]
     fn shutdown_other_not_linked() {
         let server = Server::new();
 
         let (client_1, rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         let client_pk_1 = client_1.pk();
-        server.insert(client_1);
+        let client_ip_addr_1 = client_1.ip_addr();
+        let client_port_1 = client_1.port();
+        server.insert(client_1).wait().unwrap();
 
         let (client_2, _rx_2) = create_random_client("1.2.3.5:12345".parse().unwrap());
         let client_pk_2 = client_2.pk();
-        server.insert(client_2);
+        server.insert(client_2).wait().unwrap();
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
@@ -997,7 +1067,7 @@ mod tests {
         ));
 
         // emulate shutdown
-        let handle_res = server.shutdown_client(&client_pk_1).wait();
+        let handle_res = server.shutdown_client(&client_pk_1, client_ip_addr_1, client_port_1).wait();
         assert!(handle_res.is_ok());
     }
     #[test]
@@ -1006,11 +1076,11 @@ mod tests {
 
         let (client_1, rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         let client_pk_1 = client_1.pk();
-        server.insert(client_1);
+        server.insert(client_1).wait().unwrap();
 
         let (client_2, _rx_2) = create_random_client("1.2.3.5:12345".parse().unwrap());
         let client_pk_2 = client_2.pk();
-        server.insert(client_2);
+        server.insert(client_2).wait().unwrap();
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
@@ -1038,7 +1108,7 @@ mod tests {
 
         let (client_1, _rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         let client_pk_1 = client_1.pk();
-        server.insert(client_1);
+        server.insert(client_1).wait().unwrap();
 
         // emulate send RouteResponse from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::RouteResponse(
@@ -1052,7 +1122,7 @@ mod tests {
 
         let (client_1, rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         let client_pk_1 = client_1.pk();
-        server.insert(client_1);
+        server.insert(client_1).wait().unwrap();
 
         // emulate send DisconnectNotification from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::DisconnectNotification(
@@ -1071,7 +1141,7 @@ mod tests {
 
         let (client_1, _rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         let client_pk_1 = client_1.pk();
-        server.insert(client_1);
+        server.insert(client_1).wait().unwrap();
 
         // emulate send PingRequest from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::PingRequest(
@@ -1085,7 +1155,7 @@ mod tests {
 
         let (client_1, _rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         let client_pk_1 = client_1.pk();
-        server.insert(client_1);
+        server.insert(client_1).wait().unwrap();
 
         // emulate send PongResponse from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::PongResponse(
@@ -1099,11 +1169,11 @@ mod tests {
 
         let (client_1, _rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         let client_pk_1 = client_1.pk();
-        server.insert(client_1);
+        server.insert(client_1).wait().unwrap();
 
         let (client_2, _rx_2) = create_random_client("1.2.3.5:12345".parse().unwrap());
         let client_pk_2 = client_2.pk();
-        server.insert(client_2);
+        server.insert(client_2).wait().unwrap();
 
         // emulate send OobSend from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::OobSend(
@@ -1117,7 +1187,7 @@ mod tests {
 
         let (client_1, rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         let client_pk_1 = client_1.pk();
-        server.insert(client_1);
+        server.insert(client_1).wait().unwrap();
 
         // emulate send Data from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::Data(
@@ -1136,11 +1206,11 @@ mod tests {
 
         let (client_1, _rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         let client_pk_1 = client_1.pk();
-        server.insert(client_1);
+        server.insert(client_1).wait().unwrap();
 
         let (client_2, _rx_2) = create_random_client("1.2.3.5:12345".parse().unwrap());
         let client_pk_2 = client_2.pk();
-        server.insert(client_2);
+        server.insert(client_2).wait().unwrap();
 
         // emulate send OobSend from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::OobSend(
@@ -1154,11 +1224,11 @@ mod tests {
 
         let (client_1, _rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         let client_pk_1 = client_1.pk();
-        server.insert(client_1);
+        server.insert(client_1).wait().unwrap();
 
         let (client_2, _rx_2) = create_random_client("1.2.3.5:12345".parse().unwrap());
         let client_pk_2 = client_2.pk();
-        server.insert(client_2);
+        server.insert(client_2).wait().unwrap();
 
         // emulate send OobReceive from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::OobReceive(
@@ -1172,7 +1242,7 @@ mod tests {
 
         let (client_1, _rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         let client_pk_1 = client_1.pk();
-        server.insert(client_1);
+        server.insert(client_1).wait().unwrap();
 
         let request = OnionRequest {
             nonce: gen_nonce(),
@@ -1195,7 +1265,7 @@ mod tests {
 
         let (client_1, _rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         let client_pk_1 = client_1.pk();
-        server.insert(client_1);
+        server.insert(client_1).wait().unwrap();
 
         let payload = InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
             sendback_data: 12345,
@@ -1218,7 +1288,7 @@ mod tests {
         let (client_pk_1, _) = gen_keypair();
         let (tx_1, _rx_1) = mpsc::channel(1);
         let client_1 = Client::new(tx_1, &client_pk_1, client_addr_1, client_port_1);
-        server.insert(client_1);
+        server.insert(client_1).wait().unwrap();
 
         let client_addr_2 = IpAddr::V4(Ipv4Addr::new(5, 6, 7, 8));
         let client_port_2 = 54321u16;
@@ -1265,7 +1335,7 @@ mod tests {
 
         let (client_1, _rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         let client_pk_1 = client_1.pk();
-        server.insert(client_1);
+        server.insert(client_1).wait().unwrap();
 
         let (client_pk_2, _) = gen_keypair();
 
@@ -1331,7 +1401,7 @@ mod tests {
 
         let (client_1, rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         let client_pk_1 = client_1.pk();
-        server.insert(client_1);
+        server.insert(client_1).wait().unwrap();
 
         let (client_pk_2, _) = gen_keypair();
 
@@ -1353,12 +1423,41 @@ mod tests {
         assert!(handle_res.is_ok());
     }
     #[test]
+    fn shutdown_different_addr() {
+        let server = Server::new();
+
+        let (client, _rx) = create_random_client("1.2.3.4:12345".parse().unwrap());
+        let client_pk = client.pk();
+        server.insert(client).wait().unwrap();
+
+        // emulate shutdown
+        let handle_res = server.shutdown_client(&client_pk, "1.2.3.4".parse().unwrap(), 12346).wait();
+        assert!(handle_res.is_err());
+
+        let state = server.state.read();
+
+        assert!(state.connected_clients.contains_key(&client_pk));
+    }
+    #[test]
     fn shutdown_not_connected() {
         let server = Server::new();
         let (client_pk, _) = gen_keypair();
+        let client_ip_addr = "1.2.3.4".parse().unwrap();
+        let client_port = 12345;
 
         // emulate shutdown
-        let handle_res = server.shutdown_client(&client_pk).wait();
+        let handle_res = server.shutdown_client(&client_pk, client_ip_addr, client_port).wait();
+        assert!(handle_res.is_err());
+    }
+    #[test]
+    fn shutdown_inner_not_connected() {
+        let server = Server::new();
+        let (client_pk, _) = gen_keypair();
+
+        let mut state = server.state.write();
+
+        // emulate shutdown
+        let handle_res = server.shutdown_client_inner(&client_pk, &mut state).wait();
         assert!(handle_res.is_err());
     }
     #[test]
@@ -1367,7 +1466,9 @@ mod tests {
 
         let (client_1, rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         let client_pk_1 = client_1.pk();
-        server.insert(client_1);
+        let client_ip_addr_1 = client_1.ip_addr();
+        let client_port_1 = client_1.port();
+        server.insert(client_1).wait().unwrap();
 
         let (client_pk_2, _) = gen_keypair();
 
@@ -1383,7 +1484,7 @@ mod tests {
         ));
 
         // emulate shutdown
-        let handle_res = server.shutdown_client(&client_pk_1).wait();
+        let handle_res = server.shutdown_client(&client_pk_1, client_ip_addr_1, client_port_1).wait();
         assert!(handle_res.is_ok());
     }
     #[test]
@@ -1392,11 +1493,11 @@ mod tests {
 
         let (client_1, rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         let client_pk_1 = client_1.pk();
-        server.insert(client_1);
+        server.insert(client_1).wait().unwrap();
 
         let (client_2, _rx_2) = create_random_client("1.2.3.5:12345".parse().unwrap());
         let client_pk_2 = client_2.pk();
-        server.insert(client_2);
+        server.insert(client_2).wait().unwrap();
 
         drop(rx_1);
 
@@ -1414,7 +1515,7 @@ mod tests {
 
         let (client_1, _rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         let client_pk_1 = client_1.pk();
-        server.insert(client_1);
+        server.insert(client_1).wait().unwrap();
 
         drop(udp_onion_stream);
 
@@ -1441,17 +1542,17 @@ mod tests {
         // client #1
         let (client_1, rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         let pk_1 = client_1.pk();
-        server.insert(client_1);
+        server.insert(client_1).wait().unwrap();
 
         // client #2
         let (client_2, rx_2) = create_random_client("1.2.3.5:12345".parse().unwrap());
         let pk_2 = client_2.pk();
-        server.insert(client_2);
+        server.insert(client_2).wait().unwrap();
 
         // client #3
         let (client_3, rx_3) = create_random_client("1.2.3.6:12345".parse().unwrap());
         let pk_3 = client_3.pk();
-        server.insert(client_3);
+        server.insert(client_3).wait().unwrap();
 
         let now = Instant::now();
 
@@ -1486,12 +1587,12 @@ mod tests {
         // client #1
         let (client_1, _rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         let pk_1 = client_1.pk();
-        server.insert(client_1);
+        server.insert(client_1).wait().unwrap();
 
         // client #2
         let (client_2, _rx_2) = create_random_client("1.2.3.5:12345".parse().unwrap());
         let pk_2 = client_2.pk();
-        server.insert(client_2);
+        server.insert(client_2).wait().unwrap();
 
         // client #3
         let (mut client_3, _rx_3) = create_random_client("1.2.3.6:12345".parse().unwrap());
@@ -1507,7 +1608,7 @@ mod tests {
 
         with_default(&clock_1, &mut enter, |_| {
             client_3.set_last_pong_resp(clock_now());
-            server.insert(client_3);
+            server.insert(client_3).wait().unwrap();
             let sender_res = server.send_pings().wait();
             assert!(sender_res.is_ok());
         });

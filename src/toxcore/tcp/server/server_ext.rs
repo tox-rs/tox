@@ -88,6 +88,13 @@ pub enum ConnectionError {
         #[fail(cause)]
         error: IoError
     },
+    /// Insert client error
+    #[fail(display = "Packet handling error: {:?}", error)]
+    InsertClientError {
+        /// Insert client error
+        #[fail(cause)]
+        error: IoError
+    },
 }
 
 /// Extension trait for running TCP server on incoming `TcpStream` and ping sender
@@ -158,7 +165,7 @@ impl ServerExt for Server {
             let (to_client, from_client) = secure_socket.split();
             let (to_client_tx, to_client_rx) = mpsc::channel(SERVER_CHANNEL_SIZE);
 
-            server_c.insert(Client::new(to_client_tx, &client_pk, addr.ip(), addr.port()));
+            let insert_future = server_c.insert(Client::new(to_client_tx, &client_pk, addr.ip(), addr.port()));
 
             let server_c_c = server_c.clone();
             // processor = for each Packet from client process it
@@ -183,15 +190,17 @@ impl ServerExt for Server {
                 // drop to_client when to_client_rx stream is exhausted
                 .map(|_to_client| ());
 
-            processor
-                .select(writer).map(|_| ()).map_err(|(e, _)| e)
-                .then(move |r_processing| {
-                    debug!("Shutdown a client with PK {:?}", &client_pk);
-                    // ignore shutdown error since the client can be already
-                    // shutdown at this moment
-                    server_c.shutdown_client(&client_pk)
-                        .then(move |_| r_processing)
-                })
+            insert_future.map_err(|error| ConnectionError::InsertClientError { error }).and_then(move |()|
+                processor
+                    .select(writer).map(|_| ()).map_err(|(e, _)| e)
+                    .then(move |r_processing| {
+                        debug!("Shutdown a client with PK {:?}", &client_pk);
+                        // ignore shutdown error since the client can be already
+                        // shutdown at this moment
+                        server_c.shutdown_client(&client_pk, addr.ip(), addr.port())
+                            .then(move |_| r_processing)
+                    })
+            )
         });
 
         Box::new(process)
