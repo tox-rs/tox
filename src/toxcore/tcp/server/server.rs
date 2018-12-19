@@ -1006,6 +1006,42 @@ mod tests {
         ));
     }
     #[test]
+    fn insert_with_same_pk() {
+        let server = Server::new();
+
+        let (mut client_1, _rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
+        let (mut client_2, rx_2) = create_random_client("1.2.3.4:12346".parse().unwrap());
+
+        // link client_1 with client_2
+        let index_1 = client_1.links_mut().insert(&client_2.pk()).unwrap();
+        assert!(client_1.links_mut().upgrade(index_1));
+        let index_2 = client_2.links_mut().insert(&client_1.pk()).unwrap();
+        assert!(client_2.links_mut().upgrade(index_2));
+
+        let client_pk_1 = client_1.pk();
+        let client_addr_3 = "1.2.3.4".parse().unwrap();
+        let client_port_3 = 12347;
+        let (tx_3, _rx_3) = mpsc::channel(32);
+        let client_3 = Client::new(tx_3, &client_pk_1, client_addr_3, client_port_3);
+
+        server.insert(client_1).wait().unwrap();
+        server.insert(client_2).wait().unwrap();
+
+        // replace client_1 with client_3
+        server.insert(client_3).wait().unwrap();
+
+        let (packet, _) = rx_2.into_future().wait().unwrap();
+        assert_eq!(packet.unwrap(), Packet::DisconnectNotification(
+            DisconnectNotification { connection_id: index_2 + 16 }
+        ));
+
+        let state = server.state.read();
+        let client = state.connected_clients.get(&client_pk_1).unwrap();
+
+        assert_eq!(client.ip_addr(), client_addr_3);
+        assert_eq!(client.port(), client_port_3);
+    }
+    #[test]
     fn shutdown_other_not_linked() {
         let server = Server::new();
 
@@ -1387,6 +1423,22 @@ mod tests {
         assert!(handle_res.is_ok());
     }
     #[test]
+    fn shutdown_different_addr() {
+        let server = Server::new();
+
+        let (client, _rx) = create_random_client("1.2.3.4:12345".parse().unwrap());
+        let client_pk = client.pk();
+        server.insert(client).wait().unwrap();
+
+        // emulate shutdown
+        let handle_res = server.shutdown_client(&client_pk, "1.2.3.4".parse().unwrap(), 12346).wait();
+        assert!(handle_res.is_err());
+
+        let state = server.state.read();
+
+        assert!(state.connected_clients.contains_key(&client_pk));
+    }
+    #[test]
     fn shutdown_not_connected() {
         let server = Server::new();
         let (client_pk, _) = gen_keypair();
@@ -1395,6 +1447,17 @@ mod tests {
 
         // emulate shutdown
         let handle_res = server.shutdown_client(&client_pk, client_ip_addr, client_port).wait();
+        assert!(handle_res.is_err());
+    }
+    #[test]
+    fn shutdown_inner_not_connected() {
+        let server = Server::new();
+        let (client_pk, _) = gen_keypair();
+
+        let mut state = server.state.write();
+
+        // emulate shutdown
+        let handle_res = server.shutdown_client_inner(&client_pk, &mut state).wait();
         assert!(handle_res.is_err());
     }
     #[test]
