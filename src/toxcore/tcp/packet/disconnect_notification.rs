@@ -2,7 +2,7 @@
 */
 
 use toxcore::binary_io::*;
-use nom::be_u8;
+use toxcore::tcp::connection_id::ConnectionId;
 
 /** Sent by client to server.
 Sent when client wants the server to forget about the connection related
@@ -29,13 +29,13 @@ Length | Content
 #[derive(Debug, PartialEq, Clone)]
 pub struct DisconnectNotification {
     /// The id of the disconnected client
-    pub connection_id: u8
+    pub connection_id: ConnectionId
 }
 
 impl FromBytes for DisconnectNotification {
     named!(from_bytes<DisconnectNotification>, do_parse!(
         tag!("\x03") >>
-        connection_id: verify!(be_u8, |id| id >= 0x10) >>
+        connection_id: call!(ConnectionId::from_bytes) >>
         (DisconnectNotification { connection_id })
     ));
 }
@@ -44,7 +44,7 @@ impl ToBytes for DisconnectNotification {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x03) >>
-            gen_be_u8!(self.connection_id)
+            gen_call!(|buf, connection_id| ConnectionId::to_bytes(connection_id, buf), &self.connection_id)
         )
     }
 }
@@ -56,7 +56,7 @@ mod test {
     encode_decode_test!(
         disconnect_notification_encode_decode,
         DisconnectNotification {
-            connection_id: 17
+            connection_id: ConnectionId::from_index(1)
         }
     );
 }

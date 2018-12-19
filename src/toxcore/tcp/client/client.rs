@@ -18,6 +18,7 @@ use toxcore::io_tokio::*;
 use toxcore::onion::packet::InnerOnionResponse;
 use toxcore::stats::Stats;
 use toxcore::tcp::codec::{Codec, EncodeError};
+use toxcore::tcp::connection_id::ConnectionId;
 use toxcore::tcp::handshake::make_client_handshake;
 use toxcore::tcp::links::*;
 use toxcore::tcp::packet::*;
@@ -142,8 +143,17 @@ impl Client {
     }
 
     fn handle_route_response(&self, packet: RouteResponse) -> IoFuture<()> {
+        let index = if let Some(index) = packet.connection_id.index() {
+            index
+        } else {
+            return Box::new( future::err(
+                Error::new(ErrorKind::Other,
+                    "RouteResponse: connection id is zero"
+            )))
+        };
+
         if self.connections.read().contains(&packet.pk) {
-            if self.links.write().insert_by_id(&packet.pk, packet.connection_id - 16) {
+            if self.links.write().insert_by_id(&packet.pk, index) {
                 Box::new(future::ok(()))
             } else {
                 Box::new( future::err(
@@ -163,7 +173,16 @@ impl Client {
     }
 
     fn handle_connect_notification(&self, packet: ConnectNotification) -> IoFuture<()> {
-        if self.links.write().upgrade(packet.connection_id - 16) {
+        let index = if let Some(index) = packet.connection_id.index() {
+            index
+        } else {
+            return Box::new( future::err(
+                Error::new(ErrorKind::Other,
+                    "ConnectNotification: connection id is zero"
+            )))
+        };
+
+        if self.links.write().upgrade(index) {
             Box::new(future::ok(()))
         } else {
             Box::new( future::err(
@@ -174,7 +193,16 @@ impl Client {
     }
 
     fn handle_disconnect_notification(&self, packet: DisconnectNotification) -> IoFuture<()> {
-        if self.links.write().downgrade(packet.connection_id - 16) {
+        let index = if let Some(index) = packet.connection_id.index() {
+            index
+        } else {
+            return Box::new( future::err(
+                Error::new(ErrorKind::Other,
+                    "DisconnectNotification: connection id is zero"
+            )))
+        };
+
+        if self.links.write().downgrade(index) {
             Box::new(future::ok(()))
         } else {
             Box::new( future::err(
@@ -207,8 +235,17 @@ impl Client {
     }
 
     fn handle_data(&self, packet: Data) -> IoFuture<()> {
+        let index = if let Some(index) = packet.connection_id.index() {
+            index
+        } else {
+            return Box::new( future::err(
+                Error::new(ErrorKind::Other,
+                    "Data: connection id is zero"
+            )))
+        };
+
         let links = self.links.read();
-        if let Some(link) = links.by_id(packet.connection_id - 16) {
+        if let Some(link) = links.by_id(index) {
             send_to(&self.incoming_tx, (self.pk, IncomingPacket::Data(link.pk, packet.data)))
         } else {
             Box::new( future::err(
@@ -327,7 +364,7 @@ impl Client {
         if let Some(index) = links.id_by_pk(&destination_pk) {
             if links.by_id(index).map(|link| link.status) == Some(LinkStatus::Online) {
                 self.send_packet(Packet::Data(Data {
-                    connection_id: index + 16,
+                    connection_id: ConnectionId::from_index(index),
                     data,
                 }))
             } else {
@@ -379,7 +416,7 @@ impl Client {
             if let Some(index) = links.id_by_pk(&pk) {
                 links.take(index);
                 Box::new(self.send_packet(Packet::DisconnectNotification(DisconnectNotification {
-                    connection_id: index + 16,
+                    connection_id: ConnectionId::from_index(index),
                 })).then(|_| Ok(())))
             } else {
                 // the link may not exist if we delete the connection before we
@@ -512,18 +549,18 @@ pub mod tests {
         let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let (new_pk, _new_sk) = gen_keypair();
-        let connection_id = 42;
+        let index = 42;
 
         client.connections.write().insert(new_pk);
 
         let route_response = Packet::RouteResponse(RouteResponse {
-            connection_id,
+            connection_id: ConnectionId::from_index(index),
             pk: new_pk,
         });
 
         client.handle_packet(route_response).wait().unwrap();
 
-        let link = client.links.read().by_id(connection_id - 16).cloned().unwrap();
+        let link = client.links.read().by_id(index).cloned().unwrap();
 
         assert_eq!(link.pk, new_pk);
         assert_eq!(link.status, LinkStatus::Registered);
@@ -535,19 +572,19 @@ pub mod tests {
 
         let (existing_pk, _existing_sk) = gen_keypair();
         let (new_pk, _new_sk) = gen_keypair();
-        let connection_id = 42;
+        let index = 42;
 
         client.connections.write().insert(new_pk);
-        client.links.write().insert_by_id(&existing_pk, connection_id - 16);
+        client.links.write().insert_by_id(&existing_pk, index);
 
         let route_response = Packet::RouteResponse(RouteResponse {
-            connection_id,
+            connection_id: ConnectionId::from_index(index),
             pk: new_pk,
         });
 
         assert!(client.handle_packet(route_response).wait().is_err());
 
-        let link = client.links.read().by_id(connection_id - 16).cloned().unwrap();
+        let link = client.links.read().by_id(index).cloned().unwrap();
 
         assert_eq!(link.pk, existing_pk);
         assert_eq!(link.status, LinkStatus::Registered);
@@ -557,15 +594,27 @@ pub mod tests {
     fn handle_route_response_unexpected() {
         let (_incoming_rx, _outgoing_rx, client) = create_client();
 
-        let connection_id = 42;
+        let index = 42;
         let route_response = Packet::RouteResponse(RouteResponse {
-            connection_id,
+            connection_id: ConnectionId::from_index(index),
             pk: gen_keypair().0,
         });
 
         assert!(client.handle_packet(route_response).wait().is_err());
 
-        assert!(client.links.read().by_id(connection_id - 16).is_none());
+        assert!(client.links.read().by_id(index).is_none());
+    }
+
+    #[test]
+    fn handle_route_response_0() {
+        let (_incoming_rx, _outgoing_rx, client) = create_client();
+
+        let route_response = Packet::RouteResponse(RouteResponse {
+            connection_id: ConnectionId::zero(),
+            pk: gen_keypair().0,
+        });
+
+        assert!(client.handle_packet(route_response).wait().is_err());
     }
 
     #[test]
@@ -573,17 +622,17 @@ pub mod tests {
         let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let (existing_pk, _existing_sk) = gen_keypair();
-        let connection_id = 42;
+        let index = 42;
 
-        client.links.write().insert_by_id(&existing_pk, connection_id - 16);
+        client.links.write().insert_by_id(&existing_pk, index);
 
         let connect_notification = Packet::ConnectNotification(ConnectNotification {
-            connection_id,
+            connection_id: ConnectionId::from_index(index),
         });
 
         client.handle_packet(connect_notification).wait().unwrap();
 
-        let link = client.links.read().by_id(connection_id - 16).cloned().unwrap();
+        let link = client.links.read().by_id(index).cloned().unwrap();
 
         assert_eq!(link.pk, existing_pk);
         assert_eq!(link.status, LinkStatus::Online);
@@ -593,14 +642,25 @@ pub mod tests {
     fn handle_connect_notification_unexpected() {
         let (_incoming_rx, _outgoing_rx, client) = create_client();
 
-        let connection_id = 42;
+        let index = 42;
         let connect_notification = Packet::ConnectNotification(ConnectNotification {
-            connection_id,
+            connection_id: ConnectionId::from_index(index),
         });
 
         assert!(client.handle_packet(connect_notification).wait().is_err());
 
-        assert!(client.links.read().by_id(connection_id - 16).is_none());
+        assert!(client.links.read().by_id(index).is_none());
+    }
+
+    #[test]
+    fn handle_connect_notification_0() {
+        let (_incoming_rx, _outgoing_rx, client) = create_client();
+
+        let connect_notification = Packet::ConnectNotification(ConnectNotification {
+            connection_id: ConnectionId::zero(),
+        });
+
+        assert!(client.handle_packet(connect_notification).wait().is_err());
     }
 
     #[test]
@@ -608,18 +668,18 @@ pub mod tests {
         let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let (existing_pk, _existing_sk) = gen_keypair();
-        let connection_id = 42;
+        let index = 42;
 
-        client.links.write().insert_by_id(&existing_pk, connection_id - 16);
-        client.links.write().upgrade(connection_id - 16);
+        client.links.write().insert_by_id(&existing_pk, index);
+        client.links.write().upgrade(index);
 
         let disconnect_notification = Packet::DisconnectNotification(DisconnectNotification {
-            connection_id,
+            connection_id: ConnectionId::from_index(index),
         });
 
         client.handle_packet(disconnect_notification).wait().unwrap();
 
-        let link = client.links.read().by_id(connection_id - 16).cloned().unwrap();
+        let link = client.links.read().by_id(index).cloned().unwrap();
 
         assert_eq!(link.pk, existing_pk);
         assert_eq!(link.status, LinkStatus::Registered);
@@ -629,14 +689,25 @@ pub mod tests {
     fn handle_disconnect_notification_unexpected() {
         let (_incoming_rx, _outgoing_rx, client) = create_client();
 
-        let connection_id = 42;
+        let index = 42;
         let disconnect_notification = Packet::DisconnectNotification(DisconnectNotification {
-            connection_id,
+            connection_id: ConnectionId::from_index(index),
         });
 
         assert!(client.handle_packet(disconnect_notification).wait().is_err());
 
-        assert!(client.links.read().by_id(connection_id - 16).is_none());
+        assert!(client.links.read().by_id(index).is_none());
+    }
+
+    #[test]
+    fn handle_disconnect_notification_0() {
+        let (_incoming_rx, _outgoing_rx, client) = create_client();
+
+        let disconnect_notification = Packet::DisconnectNotification(DisconnectNotification {
+            connection_id: ConnectionId::zero(),
+        });
+
+        assert!(client.handle_packet(disconnect_notification).wait().is_err());
     }
 
     #[test]
@@ -705,14 +776,14 @@ pub mod tests {
         let (incoming_rx, _outgoing_rx, client) = create_client();
 
         let (sender_pk, _sender_sk) = gen_keypair();
-        let connection_id = 42;
+        let index = 42;
 
-        client.links.write().insert_by_id(&sender_pk, connection_id - 16);
-        client.links.write().upgrade(connection_id - 16);
+        client.links.write().insert_by_id(&sender_pk, index);
+        client.links.write().upgrade(index);
 
         let data = vec![42; 123];
         let data_packet = Packet::Data(Data {
-            connection_id,
+            connection_id: ConnectionId::from_index(index),
             data: data.clone(),
         });
 
@@ -731,7 +802,24 @@ pub mod tests {
         let (incoming_rx, _outgoing_rx, client) = create_client();
 
         let data_packet = Packet::Data(Data {
-            connection_id: 42,
+            connection_id: ConnectionId::from_index(42),
+            data: vec![42; 123],
+        });
+
+        assert!(client.handle_packet(data_packet).wait().is_err());
+
+        // Necessary to drop tx so that rx.collect() can be finished
+        drop(client);
+
+        assert!(incoming_rx.collect().wait().unwrap().is_empty());
+    }
+
+    #[test]
+    fn handle_data_0() {
+        let (incoming_rx, _outgoing_rx, client) = create_client();
+
+        let data_packet = Packet::Data(Data {
+            connection_id: ConnectionId::zero(),
             data: vec![42; 123],
         });
 
@@ -790,15 +878,15 @@ pub mod tests {
         let (destination_pk, _destination_sk) = gen_keypair();
         let data = vec![42; 123];
 
-        let connection_id = 42;
-        client.links.write().insert_by_id(&destination_pk, connection_id - 16);
-        client.links.write().upgrade(connection_id - 16);
+        let index = 42;
+        client.links.write().insert_by_id(&destination_pk, index);
+        client.links.write().upgrade(index);
 
         client.send_data(destination_pk, data.clone()).wait().unwrap();
 
         let packet = unpack!(outgoing_rx.into_future().wait().unwrap().0.unwrap(), Packet::Data);
 
-        assert_eq!(packet.connection_id, connection_id);
+        assert_eq!(packet.connection_id, ConnectionId::from_index(index));
         assert_eq!(packet.data, data);
     }
 
@@ -899,16 +987,16 @@ pub mod tests {
         let (_incoming_rx, outgoing_rx, client) = create_client();
 
         let (connection_pk, _connection_sk) = gen_keypair();
-        let connection_id = 42;
+        let index = 42;
 
         client.connections.write().insert(connection_pk);
-        client.links.write().insert_by_id(&connection_pk, connection_id - 16);
+        client.links.write().insert_by_id(&connection_pk, index);
 
         client.remove_connection(connection_pk).wait().unwrap();
 
         let packet = unpack!(outgoing_rx.into_future().wait().unwrap().0.unwrap(), Packet::DisconnectNotification);
 
-        assert_eq!(packet.connection_id, connection_id);
+        assert_eq!(packet.connection_id, ConnectionId::from_index(index));
     }
 
     #[test]

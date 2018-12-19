@@ -6,7 +6,7 @@ use toxcore::crypto_core::*;
 use std::collections::HashMap;
 
 /// This constant is defined by c-toxcore
-pub const MAX_LINKS_N: usize = 240;
+pub const MAX_LINKS_N: u8 = 240;
 
 /// The status of the Link
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -54,7 +54,7 @@ pub struct Links {
     and respond the id with RouteResponse. Packets like `Data`
     use connection_id as an index for links.
     */
-    links: [Option<Link>; MAX_LINKS_N],
+    links: [Option<Link>; MAX_LINKS_N as usize],
     /// Map PK -> id to index links with O(1)
     pk_to_id: HashMap<PublicKey, u8>,
 }
@@ -93,12 +93,11 @@ impl Links {
     Return false if there is a `Link` with such PK or there is no hole at links[id]
     */
     pub fn insert_by_id(&mut self, pk: &PublicKey, index: u8) -> bool {
-        let index = index as usize;
         assert!(index < MAX_LINKS_N, "The index {} must be lower than {}", index, MAX_LINKS_N);
-        if !self.pk_to_id.contains_key(pk) && self.links[index].is_none() {
+        if !self.pk_to_id.contains_key(pk) && self.links[index as usize].is_none() {
             let link = Link::new(*pk);
-            self.links[index] = Some(link);
-            self.pk_to_id.insert(*pk, index as u8);
+            self.links[index as usize] = Some(link);
+            self.pk_to_id.insert(*pk, index);
             true
         } else {
             false
@@ -106,9 +105,8 @@ impl Links {
     }
     /// Get `Link` by id
     pub fn by_id(&self, index: u8) -> Option<&Link> {
-        let index = index as usize;
         if index < MAX_LINKS_N {
-            self.links[index].as_ref()
+            self.links[index as usize].as_ref()
         } else {
             None
         }
@@ -119,9 +117,8 @@ impl Links {
     }
     /// Takes the link out of the links, leaving a None in its place
     pub fn take(&mut self, index: u8) -> Option<Link> {
-        let index = index as usize;
         if index < MAX_LINKS_N {
-            if let Some(link) = self.links[index].take() {
+            if let Some(link) = self.links[index as usize].take() {
                 self.pk_to_id.remove(&link.pk);
                 Some(link)
             } else {
@@ -134,9 +131,8 @@ impl Links {
     /// Call Links::downgrade on the `Link` by id
     /// Return false of links[id] is None
     pub fn downgrade(&mut self, index: u8) -> bool {
-        let index = index as usize;
         assert!(index < MAX_LINKS_N, "The index {} must be lower than {}", index, MAX_LINKS_N);
-        if let Some(ref mut link) = self.links[index] {
+        if let Some(ref mut link) = self.links[index as usize] {
             link.downgrade();
             true
         } else {
@@ -146,9 +142,8 @@ impl Links {
     /// Call Links::upgrade on the `Link` by id
     /// Return false of links[id] is None
     pub fn upgrade(&mut self, index: u8) -> bool {
-        let index = index as usize;
         assert!(index < MAX_LINKS_N, "The index {} must be lower than {}", index, MAX_LINKS_N);
-        if let Some(ref mut link) = self.links[index] {
+        if let Some(ref mut link) = self.links[index as usize] {
             link.upgrade();
             true
         } else {
