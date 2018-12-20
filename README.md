@@ -4,7 +4,7 @@ A server application to run tox bootstrap node.
 
 ## Building and running
 
-You'll need [Rust] >= 1.26.0 and [libsodium].
+You'll need [Rust] >= 1.31.0.
 
 Build with:
 
@@ -78,7 +78,7 @@ In order to run with config, run with `--config <file>`.
 Example config.yml is below.
 ```yaml
 log-type: Stderr
-keys-file: keys
+keys-file: ./keys
 udp-address: 0.0.0.0:33445
 tcp-addresses:
   - 0.0.0.0:33445
@@ -88,12 +88,13 @@ bootstrap-nodes:
     addr: 198.98.51.198:33445
   - pk: DA4E4ED4B697F2E9B000EEFE3A34B554ACD3F45F5C96EAEA2516DD7FF9AF7B43
     addr: 185.25.116.107:33445
-no-lan: True
+threads: auto # or any u16 > 0
+lan-discovery: True
 ```
 Or you can use it with CLI like this
 ```sh
 tox-node --keys-file keys \
-    --bootstrap-node 1D5A5F2F5D6233058BF0259B09622FB40B482E4FA0931EB8FD3AB8E7BF7DAF6F 198.98.51.198:33445 \ 
+    --bootstrap-node 1D5A5F2F5D6233058BF0259B09622FB40B482E4FA0931EB8FD3AB8E7BF7DAF6F 198.98.51.198:33445 \
     --udp-address '0.0.0.0:33445' --tcp-address '0.0.0.0:33445' \
     --motd "{{start_date}} {{uptime}} Tcp: incoming {{tcp_packets_in}}, outgoing {{tcp_packets_out}}, Udp: incoming {{udp_packets_in}}, outgoing {{udp_packets_out}}"
 ```
