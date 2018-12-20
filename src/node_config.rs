@@ -6,7 +6,7 @@ use std::collections::BTreeSet as Set;
 
 use config::{Config, File as CfgFile};
 use serde::de::{self, Deserialize, Deserializer};
-use clap::{App, AppSettings, Arg, ArgMatches};
+use clap::{App, AppSettings, Arg, SubCommand, ArgMatches};
 use hex::FromHex;
 use itertools::Itertools;
 use regex::Regex;
@@ -169,6 +169,12 @@ pub fn cli_parse() -> NodeConfig {
         .about(crate_description!())
         .setting(AppSettings::ColoredHelp)
         .setting(AppSettings::SubcommandsNegateReqs)
+        .subcommand(SubCommand::with_name("config")
+            .arg(Arg::with_name("cfg-file")
+                .index(1)
+                .help("Load settings from saved config file. \
+                    Config file format is YAML")
+                .takes_value(true)))
         .arg(Arg::with_name("udp-address")
             .short("u")
             .long("udp-address")
