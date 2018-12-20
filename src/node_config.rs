@@ -154,7 +154,7 @@ pub struct NodeConfig {
     /// Message of the day
     pub motd: String,
     /// Whether LAN discovery is enabled
-    #[serde(rename = "no-lan")]
+    #[serde(rename = "lan-discovery")]
     pub lan_discovery_enabled: bool,
     /// Unused fields while parsing config file
     #[serde(skip_deserializing)]
@@ -248,9 +248,9 @@ pub fn cli_parse() -> NodeConfig {
                 }
             })
             .default_value("This is tox-rs"))
-        .arg(Arg::with_name("no-lan")
-            .long("no-lan")
-            .help("Disable LAN discovery"))
+        .arg(Arg::with_name("lan-discovery")
+            .long("lan-discovery")
+            .help("Enable LAN discovery (disabled by default)"))
         .get_matches();
 
     match matches.subcommand() {
@@ -265,7 +265,7 @@ fn parse_config(config_path: String) -> NodeConfig {
 
     settings.set_default("log-type", "Stderr").expect("Can't set default value for `log-type`");
     settings.set_default("motd", "This is tox-rs").expect("Can't set default value for `motd`");
-    settings.set_default("no-lan", "False").expect("Can't set default value for `no-lan`");
+    settings.set_default("lan-discovery", "False").expect("Can't set default value for `lan-discovery`");
     settings.set_default("threads", "1").expect("Can't set default value for `threads`");
 
     let config_file = if !Path::new(&config_path).exists() {
@@ -274,7 +274,7 @@ fn parse_config(config_path: String) -> NodeConfig {
         CfgFile::with_name(&config_path)
     };
 
-    settings.merge(config_file).expect("Merging config file with default value fails");
+    settings.merge(config_file).expect("Merging config file with default values failed");
 
     // Collect unrecognized fields to warn about them
     let mut unused = Set::new();
@@ -284,7 +284,6 @@ fn parse_config(config_path: String) -> NodeConfig {
 
     config.unused = unused;
     config.sk_passed_as_arg = false;
-    config.lan_discovery_enabled = !config.lan_discovery_enabled;
     config.keys_file = Some(config.keys_file_config.clone());
 
     config
@@ -342,7 +341,7 @@ fn run_args(matches: &ArgMatches) -> NodeConfig {
 
     let motd = value_t!(matches.value_of("motd"), String).unwrap_or_else(|e| e.exit());
 
-    let lan_discovery_enabled = !matches.is_present("no-lan");
+    let lan_discovery_enabled = matches.is_present("lan-discovery");
 
     let keys_file_config = String::new();
 
