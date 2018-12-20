@@ -1,8 +1,12 @@
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::num::ParseIntError;
 use std::str::FromStr;
+use std::path::Path;
+use std::collections::BTreeSet as Set;
 
-use clap::{App, AppSettings, Arg};
+use config::{Config, File as CfgFile};
+use serde::de::{self, Deserialize, Deserializer};
+use clap::{App, AppSettings, Arg, SubCommand, ArgMatches};
 use hex::FromHex;
 use itertools::Itertools;
 use regex::Regex;
@@ -11,22 +15,22 @@ use tox::toxcore::dht::packed_node::PackedNode;
 use tox::toxcore::dht::packet::BOOSTRAP_SERVER_MAX_MOTD_LENGTH;
 
 /// Config for threading.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum ThreadsConfig {
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize)]
+pub enum Threads {
     /// Detect number of threads automatically by the number of CPU cores.
     Auto,
     /// Exact number of threads.
     N(u16)
 }
 
-impl FromStr for ThreadsConfig {
+impl FromStr for Threads {
     type Err = ParseIntError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s == "auto" {
-            Ok(ThreadsConfig::Auto)
+            Ok(Threads::Auto)
         } else {
-            u16::from_str(s).map(ThreadsConfig::N)
+            u16::from_str(s).map(Threads::N)
         }
     }
 }
@@ -34,7 +38,7 @@ impl FromStr for ThreadsConfig {
 #[cfg(unix)]
 arg_enum! {
     /// Specifies where to write logs.
-    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    #[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize)]
     pub enum LogType {
         Stderr,
         Stdout,
@@ -46,7 +50,7 @@ arg_enum! {
 #[cfg(not(unix))]
 arg_enum! {
     /// Specifies where to write logs.
-    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    #[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize)]
     pub enum LogType {
         Stderr,
         Stdout,
@@ -56,12 +60,44 @@ arg_enum! {
 
 /// Bootstrap node with generic string address which might be either IP address
 /// or DNS name.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
 pub struct BootstrapNode {
     /// `PublicKey` of the node.
+    #[serde(deserialize_with = "de_from_hex")]
     pk: PublicKey,
     /// Generic string address which might be either IP address or DNS name.
     addr: String,
+}
+
+fn de_from_hex<'de, D>(deserializer: D) -> Result<PublicKey, D::Error> where D: Deserializer<'de> {
+    let s = String::deserialize(deserializer)?;
+
+    let bootstrap_pk_bytes: [u8; 32] = FromHex::from_hex(s)
+        .map_err(|e| de::Error::custom(format!("Can't make bytes from hex string {:?}", e)))?;
+    PublicKey::from_slice(&bootstrap_pk_bytes)
+        .ok_or(de::Error::custom("Can't make PublicKey"))
+}
+
+// TODO: Remove this function. Use default String type after bug fix released.
+// Bug is here `https://github.com/mehcode/config-rs/issues/74`
+fn de_log_type<'de, D>(deserializer: D) -> Result<LogType, D::Error> where D: Deserializer<'de> {
+    let s = String::deserialize(deserializer)?;
+
+    match &s[..] {
+        "Stderr" => Ok(LogType::Stderr),
+        "Stdout" => Ok(LogType::Stdout),
+        #[cfg(unix)]
+        "Syslog" => Ok(LogType::Syslog),
+        "None" => Ok(LogType::None),
+        e => Err(de::Error::custom(format!("Invalid LogType {}", e))),
+    }
+}
+
+fn de_thread<'de, D>(deserializer: D) -> Result<Threads, D::Error> where D: Deserializer<'de> {
+    let s = String::deserialize(deserializer)?;
+
+    Threads::from_str(&s)
+        .map_err(|e| de::Error::custom(format!("Can't parse Threads {:?}", e)))
 }
 
 impl BootstrapNode {
@@ -80,39 +116,65 @@ impl BootstrapNode {
 }
 
 /// Config parsed from command line arguments.
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct CliConfig {
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
+pub struct NodeConfig {
     /// UDP address to run DHT node
+    #[serde(rename = "udp-address")]
+    #[serde(default)]
     pub udp_addr: Option<SocketAddr>,
     /// TCP addresses to run TCP relay
+    #[serde(rename = "tcp-addresses")]
+    #[serde(default)]
     pub tcp_addrs: Vec<SocketAddr>,
     /// DHT SecretKey
+    #[serde(skip_deserializing)]
     pub sk: Option<SecretKey>,
     /// True if the SecretKey was passed as an argument instead of environment
     /// variable. Necessary to print a warning since the logger backend is not
     /// initialized when we parse arguments.
+    #[serde(skip_deserializing)]
     pub sk_passed_as_arg: bool,
     /// Path to the file where DHT keys are stored.
+    /// When run with config, this field is required.
+    #[serde(rename = "keys-file")]
+    pub keys_file_config: String,
+    #[serde(skip_deserializing)]
     pub keys_file: Option<String>,
     /// List of bootstrap nodes.
+    #[serde(rename = "bootstrap-nodes")]
+    #[serde(default)]
     pub bootstrap_nodes: Vec<BootstrapNode>,
     /// Number of threads for execution.
-    pub threads_config: ThreadsConfig,
+    #[serde(deserialize_with = "de_thread")]
+    pub threads: Threads,
     /// Specifies where to write logs.
+    #[serde(deserialize_with = "de_log_type")]
+    #[serde(rename = "log-type")]
     pub log_type: LogType,
     /// Message of the day
     pub motd: String,
     /// Whether LAN discovery is enabled
+    #[serde(rename = "no-lan")]
     pub lan_discovery_enabled: bool,
+    /// Unused fields while parsing config file
+    #[serde(skip_deserializing)]
+    pub unused: Set<String>,
 }
 
 /// Parse command line arguments.
-pub fn cli_parse() -> CliConfig {
+pub fn cli_parse() -> NodeConfig {
     let matches = App::new(crate_name!())
         .version(crate_version!())
         .author(crate_authors!("\n"))
         .about(crate_description!())
         .setting(AppSettings::ColoredHelp)
+        .setting(AppSettings::SubcommandsNegateReqs)
+        .subcommand(SubCommand::with_name("config")
+            .arg(Arg::with_name("cfg-file")
+                .index(1)
+                .help("Load settings from saved config file. \
+                    Config file format is YAML")
+                .takes_value(true)))
         .arg(Arg::with_name("udp-address")
             .short("u")
             .long("udp-address")
@@ -191,6 +253,50 @@ pub fn cli_parse() -> CliConfig {
             .help("Disable LAN discovery"))
         .get_matches();
 
+    match matches.subcommand() {
+        ("config", Some(m)) => run_config(m),
+        _ => run_args(&matches),
+    }
+}
+
+/// Parse settings from a saved file.
+fn parse_config(config_path: String) -> NodeConfig {
+    let mut settings = Config::default();
+
+    settings.set_default("log-type", "Stderr").expect("Can't set default value for `log-type`");
+    settings.set_default("motd", "This is tox-rs").expect("Can't set default value for `motd`");
+    settings.set_default("no-lan", "False").expect("Can't set default value for `no-lan`");
+    settings.set_default("threads", "1").expect("Can't set default value for `threads`");
+
+    let config_file = if !Path::new(&config_path).exists() {
+        panic!("Can't find config file {}", config_path);
+    } else {
+        CfgFile::with_name(&config_path)
+    };
+
+    settings.merge(config_file).expect("Merging config file with default value fails");
+
+    // Collect unrecognized fields to warn about them
+    let mut unused = Set::new();
+    let mut config: NodeConfig = serde_ignored::deserialize(settings, |path| {
+        unused.insert(path.to_string());
+    }).expect("Can't deserialize config");
+
+    config.unused = unused;
+    config.sk_passed_as_arg = false;
+    config.lan_discovery_enabled = !config.lan_discovery_enabled;
+    config.keys_file = Some(config.keys_file_config.clone());
+
+    config
+}
+
+fn run_config(matches: &ArgMatches) -> NodeConfig {
+    let config_path = value_t!(matches.value_of("cfg-file"), String).unwrap_or_else(|e| e.exit());
+
+    parse_config(config_path)
+}
+
+fn run_args(matches: &ArgMatches) -> NodeConfig {
     let udp_addr = if matches.is_present("udp-address") {
         Some(value_t!(matches.value_of("udp-address"), SocketAddr).unwrap_or_else(|e| e.exit()))
     } else {
@@ -230,7 +336,7 @@ pub fn cli_parse() -> CliConfig {
         })
         .collect();
 
-    let threads_config = value_t!(matches.value_of("threads"), ThreadsConfig).unwrap_or_else(|e| e.exit());
+    let threads = value_t!(matches.value_of("threads"), Threads).unwrap_or_else(|e| e.exit());
 
     let log_type = value_t!(matches.value_of("log-type"), LogType).unwrap_or_else(|e| e.exit());
 
@@ -238,16 +344,20 @@ pub fn cli_parse() -> CliConfig {
 
     let lan_discovery_enabled = !matches.is_present("no-lan");
 
-    CliConfig {
+    let keys_file_config = String::new();
+
+    NodeConfig {
         udp_addr,
         tcp_addrs,
         sk,
         sk_passed_as_arg,
         keys_file,
+        keys_file_config,
         bootstrap_nodes,
-        threads_config,
+        threads,
         log_type,
         motd,
         lan_discovery_enabled,
+        unused: Set::new(),
     }
 }
