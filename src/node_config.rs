@@ -93,11 +93,11 @@ fn de_log_type<'de, D>(deserializer: D) -> Result<LogType, D::Error> where D: De
     }
 }
 
-fn de_thread<'de, D>(deserializer: D) -> Result<Threads, D::Error> where D: Deserializer<'de> {
+fn de_threads<'de, D>(deserializer: D) -> Result<Threads, D::Error> where D: Deserializer<'de> {
     let s = String::deserialize(deserializer)?;
 
     Threads::from_str(&s)
-        .map_err(|e| de::Error::custom(format!("Can't parse Threads {:?}", e)))
+        .map_err(|e| de::Error::custom(format!("threads: {:?}", e)))
 }
 
 impl BootstrapNode {
@@ -145,7 +145,7 @@ pub struct NodeConfig {
     #[serde(default)]
     pub bootstrap_nodes: Vec<BootstrapNode>,
     /// Number of threads for execution.
-    #[serde(deserialize_with = "de_thread")]
+    #[serde(deserialize_with = "de_threads")]
     pub threads: Threads,
     /// Specifies where to write logs.
     #[serde(deserialize_with = "de_log_type")]
