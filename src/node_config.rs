@@ -89,7 +89,7 @@ fn de_log_type<'de, D>(deserializer: D) -> Result<LogType, D::Error> where D: De
         #[cfg(unix)]
         "Syslog" => Ok(LogType::Syslog),
         "None" => Ok(LogType::None),
-        e => Err(de::Error::custom(format!("Invalid LogType {}", e))),
+        other => Err(de::Error::custom(format!("log-type: invalid value '{}'", other))),
     }
 }
 
