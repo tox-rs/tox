@@ -3,6 +3,7 @@
 
 use toxcore::crypto_core::*;
 use toxcore::tcp::packet::*;
+use toxcore::tcp::connection_id::ConnectionId;
 use toxcore::tcp::links::Links;
 use toxcore::io_tokio::*;
 use toxcore::onion::packet::InnerOnionResponse;
@@ -137,21 +138,21 @@ impl Client {
     }
     /** Construct RouteResponse and send it to Client
     */
-    pub fn send_route_response(&self, pk: &PublicKey, connection_id: u8) -> IoFuture<()> {
+    pub fn send_route_response(&self, pk: &PublicKey, connection_id: ConnectionId) -> IoFuture<()> {
         self.send(
             Packet::RouteResponse(RouteResponse { connection_id, pk: *pk })
         )
     }
     /** Construct ConnectNotification and send it to Client ignoring IO error
     */
-    pub fn send_connect_notification(&self, connection_id: u8) -> IoFuture<()> {
+    pub fn send_connect_notification(&self, connection_id: ConnectionId) -> IoFuture<()> {
         self.send_ignore_error(
             Packet::ConnectNotification(ConnectNotification { connection_id })
         )
     }
     /** Construct DisconnectNotification and send it to Client ignoring IO error
     */
-    pub fn send_disconnect_notification(&self, connection_id: u8) -> IoFuture<()> {
+    pub fn send_disconnect_notification(&self, connection_id: ConnectionId) -> IoFuture<()> {
         self.send_ignore_error(
             Packet::DisconnectNotification(DisconnectNotification { connection_id })
         )
@@ -179,7 +180,7 @@ impl Client {
     }
     /** Construct Data and send it to Client
     */
-    pub fn send_data(&self, connection_id: u8, data: Vec<u8>) -> IoFuture<()> {
+    pub fn send_data(&self, connection_id: ConnectionId, data: Vec<u8>) -> IoFuture<()> {
         self.send(
             Packet::Data(Data { connection_id, data })
         )

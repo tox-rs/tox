@@ -177,6 +177,7 @@ mod tests {
     use ::toxcore::crypto_core::*;
     use ::toxcore::onion::packet::*;
     use ::toxcore::tcp::codec::*;
+    use ::toxcore::tcp::connection_id::ConnectionId;
 
     use std::io::{ErrorKind as IoErrorKind};
     use std::net::{
@@ -259,9 +260,9 @@ mod tests {
 
         let test_packets = vec![
             Packet::RouteRequest( RouteRequest { pk } ),
-            Packet::RouteResponse( RouteResponse { connection_id: 42, pk } ),
-            Packet::ConnectNotification( ConnectNotification { connection_id: 42 } ),
-            Packet::DisconnectNotification( DisconnectNotification { connection_id: 42 } ),
+            Packet::RouteResponse( RouteResponse { connection_id: ConnectionId::from_index(42), pk } ),
+            Packet::ConnectNotification( ConnectNotification { connection_id: ConnectionId::from_index(42) } ),
+            Packet::DisconnectNotification( DisconnectNotification { connection_id: ConnectionId::from_index(42) } ),
             Packet::PingRequest( PingRequest { ping_id: 4242 } ),
             Packet::PongResponse( PongResponse { ping_id: 4242 } ),
             Packet::OobSend( OobSend { destination_pk: pk, data: vec![13; 42] } ),
@@ -300,7 +301,7 @@ mod tests {
                     payload: vec![42; 123]
                 })
             } ),
-            Packet::Data( Data { connection_id: 42, data: vec![13; 2031] } )
+            Packet::Data( Data { connection_id: ConnectionId::from_index(42), data: vec![13; 2031] } )
         ];
         for packet in test_packets {
             alice_codec.encode(packet.clone(), &mut buf).expect("Alice should encode");
@@ -346,7 +347,7 @@ mod tests {
         let mut buf = BytesMut::new();
         let packet = Packet::PingRequest( PingRequest { ping_id: 4242 } );
 
-        alice_codec.encode(packet.clone(), &mut buf).expect("Alice should encode");
+        alice_codec.encode(packet, &mut buf).expect("Alice should encode");
         // Mallory cannot decode the payload of EncryptedPacket
         assert!(mallory_codec.decode(&mut buf).err().is_some());
     }
@@ -363,17 +364,32 @@ mod tests {
     }
     #[test]
     fn decode_packet_error() {
-        let (alice_channel, _) = create_channels();
+        let alice_session = Session::new();
+
+        // assume we got Alice's PK via handshake
+        let alice_pk = *alice_session.pk();
+
+        // assume we got Bob's PK & Nonce via handshake
+        let (bob_pk, bob_sk) = gen_keypair();
+        let bob_nonce = gen_nonce();
+
+        // Now both Alice and Bob may create secure Channels
+        let alice_channel = Channel::new(&alice_session, &bob_pk, &bob_nonce);
 
         let stats = Stats::new();
-        let mut alice_codec = Codec::new(alice_channel,stats);
+        let mut alice_codec = Codec::new(alice_channel, stats);
+
+        // packet with invalid id
+        let payload = seal(&[0x0F], &bob_nonce, &alice_pk, &bob_sk);
+        let packet = EncryptedPacket {
+            payload,
+        };
+        let mut packet_bytes = [0; 32];
+        let (_, size) = packet.to_bytes((&mut packet_bytes, 0)).unwrap();
 
         let mut buf = BytesMut::new();
+        buf.extend_from_slice(&packet_bytes[..size]);
 
-        // bad Data with connection id = 0
-        let packet = Packet::Data( Data { connection_id: 0, data: vec![13; 42] } );
-
-        alice_codec.encode(packet.clone(), &mut buf).expect("Alice should encode");
         assert!(alice_codec.decode(&mut buf).is_err());
     }
 
@@ -383,7 +399,7 @@ mod tests {
         let mut buf = BytesMut::new();
         let stats = Stats::new();
         let mut alice_codec = Codec::new(alice_channel, stats);
-        let packet = Packet::Data( Data { connection_id: 42, data: vec![13; 2032] } );
+        let packet = Packet::Data( Data { connection_id: ConnectionId::from_index(42), data: vec![13; 2032] } );
 
         // Alice cannot serialize Packet because it is too long
         assert!(alice_codec.encode(packet, &mut buf).is_err());

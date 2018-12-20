@@ -373,6 +373,7 @@ mod tests {
     use tokio_timer::clock::*;
 
     use toxcore::tcp::client::client::tests::*;
+    use toxcore::tcp::connection_id::ConnectionId;
     use toxcore::time::ConstNow;
     use toxcore::onion::packet::*;
 
@@ -562,18 +563,18 @@ mod tests {
 
         // make connections online
         relay_1.handle_packet(Packet::RouteResponse(RouteResponse {
-            connection_id: 42,
+            connection_id: ConnectionId::from_index(42),
             pk: destination_pk,
         })).wait().unwrap();
         relay_2.handle_packet(Packet::RouteResponse(RouteResponse {
-            connection_id: 42,
+            connection_id: ConnectionId::from_index(42),
             pk: destination_pk,
         })).wait().unwrap();
         relay_1.handle_packet(Packet::ConnectNotification(ConnectNotification {
-            connection_id: 42,
+            connection_id: ConnectionId::from_index(42),
         })).wait().unwrap();
         relay_2.handle_packet(Packet::ConnectNotification(ConnectNotification {
-            connection_id: 42,
+            connection_id: ConnectionId::from_index(42),
         })).wait().unwrap();
 
         connections.connections.write().insert(destination_pk, NodeConnection {

@@ -10,6 +10,7 @@ extern crate hex;
 extern crate failure;
 
 use tox::toxcore::crypto_core::*;
+use tox::toxcore::tcp::connection_id::ConnectionId;
 use tox::toxcore::tcp::packet::*;
 use tox::toxcore::tcp::handshake::make_client_handshake;
 use tox::toxcore::tcp::codec;
@@ -208,7 +209,7 @@ fn main() {
         let request = if i == 1 {
             tx.send(Packet::RouteRequest(RouteRequest {pk: friend_pk } ))
         } else {
-            tx.send(Packet::Data(Data { connection_id: 16, data: vec![42; 42] } ))
+            tx.send(Packet::Data(Data { connection_id: ConnectionId::from_index(0), data: vec![42; 42] } ))
         };
 
         request

@@ -4,6 +4,7 @@
 use toxcore::crypto_core::*;
 use toxcore::onion::packet::InnerOnionResponse;
 use toxcore::tcp::server::client::Client;
+use toxcore::tcp::connection_id::ConnectionId;
 use toxcore::tcp::links::*;
 use toxcore::tcp::packet::*;
 use toxcore::io_tokio::IoFuture;
@@ -162,7 +163,7 @@ impl Server {
                                 // they are linked, we should notify client_b
                                 // link from client_b.links should be downgraded
                                 client_b.links_mut().downgrade(a_id_in_client_b);
-                                client_b.send_disconnect_notification(a_id_in_client_b + 16)
+                                client_b.send_disconnect_notification(ConnectionId::from_index(a_id_in_client_b))
                             } else {
                                 // No a_id_in_client_b
                                 Box::new(future::ok(()))
@@ -194,13 +195,13 @@ impl Server {
 
             if pk == &packet.pk {
                 // send RouteResponse(0) if client requests its own pk
-                return client_a.send_route_response(pk, 0)
+                return client_a.send_route_response(pk, ConnectionId::zero())
             }
 
             // check if client_a is already linked
             if let Some(index) = client_a.links().id_by_pk(&packet.pk) {
                 // send RouteResponse if client was already linked to pk
-                return client_a.send_route_response(&packet.pk, index + 16)
+                return client_a.send_route_response(&packet.pk, ConnectionId::from_index(index))
             }
 
             // try to insert a new link
@@ -208,10 +209,10 @@ impl Server {
                 index
             } else {
                 // send RouteResponse(0) if no space to insert new link
-                return client_a.send_route_response(&packet.pk, 0)
+                return client_a.send_route_response(&packet.pk, ConnectionId::zero())
             };
 
-            let client_a_route_response = client_a.send_route_response(&packet.pk, b_id_in_client_a + 16);
+            let client_a_route_response = client_a.send_route_response(&packet.pk, ConnectionId::from_index(b_id_in_client_a));
 
             (b_id_in_client_a, client_a_route_response)
         };
@@ -241,12 +242,12 @@ impl Server {
         let client_a_notification = {
             let client_a = state.connected_clients.get_mut(pk).unwrap();
             client_a.links_mut().upgrade(b_id_in_client_a);
-            client_a.send_connect_notification(b_id_in_client_a + 16)
+            client_a.send_connect_notification(ConnectionId::from_index(b_id_in_client_a))
         };
         let client_b_notification = {
             let client_b = state.connected_clients.get_mut(&packet.pk).unwrap();
             client_b.links_mut().upgrade(a_id_in_client_b);
-            client_b.send_connect_notification(a_id_in_client_b + 16)
+            client_b.send_connect_notification(ConnectionId::from_index(a_id_in_client_b))
         };
 
         Box::new(
@@ -268,12 +269,21 @@ impl Server {
         Box::new(future::ok(()))
     }
     fn handle_disconnect_notification(&self, pk: &PublicKey, packet: &DisconnectNotification) -> IoFuture<()> {
+        let index = if let Some(index) = packet.connection_id.index() {
+            index
+        } else {
+            return Box::new( future::err(
+                Error::new(ErrorKind::Other,
+                    "DisconnectNotification: connection id is zero"
+            )))
+        };
+
         let mut state = self.state.write();
 
         // get client_a
         let a_link = if let Some(client_a) = state.connected_clients.get_mut(pk) {
             // unlink the link from client.links if any
-            if let Some(link) = client_a.links_mut().take(packet.connection_id - 16) {
+            if let Some(link) = client_a.links_mut().take(index) {
                 link
             } else {
                 trace!("DisconnectNotification.connection_id is not linked for the client {:?}", pk);
@@ -315,7 +325,7 @@ impl Server {
                 // it is linked, we should notify client_b
                 // link from client_b.links should be downgraded
                 client_b.links_mut().downgrade(a_id_in_client_b);
-                client_b.send_disconnect_notification(a_id_in_client_b + 16)
+                client_b.send_disconnect_notification(ConnectionId::from_index(a_id_in_client_b))
             }
         }
     }
@@ -414,6 +424,15 @@ impl Server {
         )))
     }
     fn handle_data(&self, pk: &PublicKey, packet: Data) -> IoFuture<()> {
+        let index = if let Some(index) = packet.connection_id.index() {
+            index
+        } else {
+            return Box::new( future::err(
+                Error::new(ErrorKind::Other,
+                    "Data: connection id is zero"
+            )))
+        };
+
         let state = self.state.read();
 
         // get client_a
@@ -427,7 +446,7 @@ impl Server {
         };
 
         // get the link from client.links if any
-        let a_link = if let Some(link) = client_a.links().by_id(packet.connection_id - 16) {
+        let a_link = if let Some(link) = client_a.links().by_id(index) {
             link.clone()
         } else {
             trace!("Data.connection_id is not linked for the client {:?}", pk);
@@ -460,7 +479,7 @@ impl Server {
                     return Box::new( future::ok(()) )
                 };
                 // it is linked, we should send data to client_b
-                client_b.send_data(a_id_in_client_b + 16, packet.data)
+                client_b.send_data(ConnectionId::from_index(a_id_in_client_b), packet.data)
             }
         }
     }
@@ -504,11 +523,10 @@ impl Server {
 
 #[cfg(test)]
 mod tests {
-    use ::toxcore::crypto_core::*;
+    use super::*;
+
     use ::toxcore::onion::packet::*;
-    use ::toxcore::tcp::packet::*;
     use ::toxcore::tcp::server::{Client, Server};
-    use ::toxcore::tcp::links::*;
     use ::toxcore::tcp::server::client::*;
 
     use futures::sync::mpsc;
@@ -562,7 +580,7 @@ mod tests {
         // the server should put RouteResponse into rx_1
         let (packet, rx_1) = rx_1.into_future().wait().unwrap();
         assert_eq!(packet.unwrap(), Packet::RouteResponse(
-            RouteResponse { pk: client_pk_2, connection_id: 16 }
+            RouteResponse { pk: client_pk_2, connection_id: ConnectionId::from_index(0) }
         ));
 
         {
@@ -586,7 +604,7 @@ mod tests {
         // the server should put RouteResponse into rx_1
         let (packet, rx_1) = rx_1.into_future().wait().unwrap();
         assert_eq!(packet.unwrap(), Packet::RouteResponse(
-            RouteResponse { pk: client_pk_2, connection_id: 16 }
+            RouteResponse { pk: client_pk_2, connection_id: ConnectionId::from_index(0) }
         ));
 
         {
@@ -606,19 +624,19 @@ mod tests {
         // the server should put RouteResponse into rx_2
         let (packet, rx_2) = rx_2.into_future().wait().unwrap();
         assert_eq!(packet.unwrap(), Packet::RouteResponse(
-            RouteResponse { pk: client_pk_1, connection_id: 16 }
+            RouteResponse { pk: client_pk_1, connection_id: ConnectionId::from_index(0) }
         ));
         // AND
         // the server should put ConnectNotification into rx_1
         let (packet, _rx_1) = rx_1.into_future().wait().unwrap();
         assert_eq!(packet.unwrap(), Packet::ConnectNotification(
-            ConnectNotification { connection_id: 16 }
+            ConnectNotification { connection_id: ConnectionId::from_index(0) }
         ));
         // AND
         // the server should put ConnectNotification into rx_2
         let (packet, rx_2) = rx_2.into_future().wait().unwrap();
         assert_eq!(packet.unwrap(), Packet::ConnectNotification(
-            ConnectNotification { connection_id: 16 }
+            ConnectNotification { connection_id: ConnectionId::from_index(0) }
         ));
 
         {
@@ -638,13 +656,13 @@ mod tests {
 
         // emulate send Data from client_1
         server.handle_packet(&client_pk_1, Packet::Data(
-            Data { connection_id: 16, data: vec![13, 42] }
+            Data { connection_id: ConnectionId::from_index(0), data: vec![13, 42] }
         )).wait().unwrap();
 
         // the server should put Data into rx_2
         let (packet, rx_2) = rx_2.into_future().wait().unwrap();
         assert_eq!(packet.unwrap(), Packet::Data(
-            Data { connection_id: 16, data: vec![13, 42] }
+            Data { connection_id: ConnectionId::from_index(0), data: vec![13, 42] }
         ));
 
         // emulate client_1 disconnected
@@ -652,7 +670,7 @@ mod tests {
         // the server should put DisconnectNotification into rx_2
         let (packet, _rx_2) = rx_2.into_future().wait().unwrap();
         assert_eq!(packet.unwrap(), Packet::DisconnectNotification(
-            DisconnectNotification { connection_id: 16 }
+            DisconnectNotification { connection_id: ConnectionId::from_index(0) }
         ));
 
         // check client_2.links[client_1] == Registered
@@ -680,7 +698,7 @@ mod tests {
         // the server should put RouteResponse into rx_1
         let (packet, _rx_1) = rx_1.into_future().wait().unwrap();
         assert_eq!(packet.unwrap(), Packet::RouteResponse(
-            RouteResponse { pk: client_pk_2, connection_id: 16 }
+            RouteResponse { pk: client_pk_2, connection_id: ConnectionId::from_index(0) }
         ));
 
         {
@@ -713,7 +731,7 @@ mod tests {
         // the server should put RouteResponse into rx_1
         let (packet, _rx_1) = rx_1.into_future().wait().unwrap();
         assert_eq!(packet.unwrap(), Packet::RouteResponse(
-            RouteResponse { pk: client_pk_1, connection_id: 0 }
+            RouteResponse { pk: client_pk_1, connection_id: ConnectionId::zero() }
         ));
     }
     #[test]
@@ -739,7 +757,7 @@ mod tests {
             // the server should put RouteResponse into rx_1
             let (packet, rx_1_nested) = rx_1.into_future().wait().unwrap();
             assert_eq!(packet.unwrap(), Packet::RouteResponse(
-                RouteResponse { pk: other_client_pk, connection_id: i + 16 }
+                RouteResponse { pk: other_client_pk, connection_id: ConnectionId::from_index(i) }
             ));
             rx_1 = rx_1_nested;
         }
@@ -755,7 +773,7 @@ mod tests {
         // the server should put RouteResponse into rx_1
         let (packet, _rx_1) = rx_1.into_future().wait().unwrap();
         assert_eq!(packet.unwrap(), Packet::RouteResponse(
-            RouteResponse { pk: other_client_pk, connection_id: 0 }
+            RouteResponse { pk: other_client_pk, connection_id: ConnectionId::zero() }
         ));
     }
     #[test]
@@ -768,7 +786,7 @@ mod tests {
 
         // emulate send ConnectNotification from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::ConnectNotification(
-            ConnectNotification { connection_id: 42 }
+            ConnectNotification { connection_id: ConnectionId::from_index(42) }
         )).wait();
         assert!(handle_res.is_ok());
     }
@@ -792,7 +810,7 @@ mod tests {
         // the server should put RouteResponse into rx_1
         let (packet, rx_1) = rx_1.into_future().wait().unwrap();
         assert_eq!(packet.unwrap(), Packet::RouteResponse(
-            RouteResponse { pk: client_pk_2, connection_id: 16 }
+            RouteResponse { pk: client_pk_2, connection_id: ConnectionId::from_index(0) }
         ));
 
         // emulate send RouteRequest from client_2
@@ -803,19 +821,19 @@ mod tests {
         // the server should put RouteResponse into rx_2
         let (packet, rx_2) = rx_2.into_future().wait().unwrap();
         assert_eq!(packet.unwrap(), Packet::RouteResponse(
-            RouteResponse { pk: client_pk_1, connection_id: 16 }
+            RouteResponse { pk: client_pk_1, connection_id: ConnectionId::from_index(0) }
         ));
         // AND
         // the server should put ConnectNotification into rx_1
         let (packet, rx_1) = rx_1.into_future().wait().unwrap();
         assert_eq!(packet.unwrap(), Packet::ConnectNotification(
-            ConnectNotification { connection_id: 16 }
+            ConnectNotification { connection_id: ConnectionId::from_index(0) }
         ));
         // AND
         // the server should put ConnectNotification into rx_2
         let (packet, rx_2) = rx_2.into_future().wait().unwrap();
         assert_eq!(packet.unwrap(), Packet::ConnectNotification(
-            ConnectNotification { connection_id: 16 }
+            ConnectNotification { connection_id: ConnectionId::from_index(0) }
         ));
 
         {
@@ -835,13 +853,13 @@ mod tests {
 
         // emulate send DisconnectNotification from client_1
         server.handle_packet(&client_pk_1, Packet::DisconnectNotification(
-            DisconnectNotification { connection_id: 16 }
+            DisconnectNotification { connection_id: ConnectionId::from_index(0) }
         )).wait().unwrap();
 
         // the server should put DisconnectNotification into rx_2
         let (packet, _rx_2) = rx_2.into_future().wait().unwrap();
         assert_eq!(packet.unwrap(), Packet::DisconnectNotification(
-            DisconnectNotification { connection_id: 16 }
+            DisconnectNotification { connection_id: ConnectionId::from_index(0) }
         ));
 
         {
@@ -860,7 +878,7 @@ mod tests {
 
         // emulate send DisconnectNotification from client_2
         server.handle_packet(&client_pk_2, Packet::DisconnectNotification(
-            DisconnectNotification { connection_id: 16 }
+            DisconnectNotification { connection_id: ConnectionId::from_index(0) }
         )).wait().unwrap();
 
         {
@@ -896,7 +914,7 @@ mod tests {
 
         // emulate send DisconnectNotification from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::DisconnectNotification(
-            DisconnectNotification { connection_id: 16 }
+            DisconnectNotification { connection_id: ConnectionId::from_index(0) }
         )).wait();
         assert!(handle_res.is_ok());
 
@@ -904,6 +922,17 @@ mod tests {
         // necessary to drop server so that rx.collect() can be finished
         drop(server);
         assert!(rx_2.collect().wait().unwrap().is_empty());
+    }
+    #[test]
+    fn handle_disconnect_notification_0() {
+        let server = Server::new();
+
+        let (client_pk, _) = gen_keypair();
+
+        let handle_res = server.handle_packet(&client_pk, Packet::DisconnectNotification(
+            DisconnectNotification { connection_id: ConnectionId::zero() }
+        )).wait();
+        assert!(handle_res.is_err());
     }
     #[test]
     fn handle_ping_request() {
@@ -1032,7 +1061,7 @@ mod tests {
 
         let (packet, _) = rx_2.into_future().wait().unwrap();
         assert_eq!(packet.unwrap(), Packet::DisconnectNotification(
-            DisconnectNotification { connection_id: index_2 + 16 }
+            DisconnectNotification { connection_id: ConnectionId::from_index(index_2) }
         ));
 
         let state = server.state.read();
@@ -1063,7 +1092,7 @@ mod tests {
         // the server should put RouteResponse into rx_1
         let (packet, _rx_1) = rx_1.into_future().wait().unwrap();
         assert_eq!(packet.unwrap(), Packet::RouteResponse(
-            RouteResponse { pk: client_pk_2, connection_id: 16 }
+            RouteResponse { pk: client_pk_2, connection_id: ConnectionId::from_index(0) }
         ));
 
         // emulate shutdown
@@ -1090,14 +1119,25 @@ mod tests {
         // the server should put RouteResponse into rx_1
         let (packet, _rx_1) = rx_1.into_future().wait().unwrap();
         assert_eq!(packet.unwrap(), Packet::RouteResponse(
-            RouteResponse { pk: client_pk_2, connection_id: 16 }
+            RouteResponse { pk: client_pk_2, connection_id: ConnectionId::from_index(0) }
         ));
 
         // emulate send Data from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::Data(
-            Data { connection_id: 16, data: vec![13, 42] }
+            Data { connection_id: ConnectionId::from_index(0), data: vec![13, 42] }
         )).wait();
         assert!(handle_res.is_ok());
+    }
+    #[test]
+    fn handle_data_0() {
+        let server = Server::new();
+
+        let (client_pk, _) = gen_keypair();
+
+        let handle_res = server.handle_packet(&client_pk, Packet::Data(
+            Data { connection_id: ConnectionId::zero(), data: vec![13, 42] }
+        )).wait();
+        assert!(handle_res.is_err());
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////
@@ -1112,7 +1152,7 @@ mod tests {
 
         // emulate send RouteResponse from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::RouteResponse(
-            RouteResponse { pk: client_pk_1, connection_id: 42 }
+            RouteResponse { pk: client_pk_1, connection_id: ConnectionId::from_index(42) }
         )).wait();
         assert!(handle_res.is_err());
     }
@@ -1126,7 +1166,7 @@ mod tests {
 
         // emulate send DisconnectNotification from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::DisconnectNotification(
-            DisconnectNotification { connection_id: 16 }
+            DisconnectNotification { connection_id: ConnectionId::from_index(0) }
         )).wait();
         assert!(handle_res.is_ok());
 
@@ -1191,7 +1231,7 @@ mod tests {
 
         // emulate send Data from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::Data(
-            Data { connection_id: 16, data: vec![13, 42] }
+            Data { connection_id: ConnectionId::from_index(0), data: vec![13, 42] }
         )).wait();
         assert!(handle_res.is_ok());
 
@@ -1325,7 +1365,7 @@ mod tests {
 
         // emulate send DisconnectNotification from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::DisconnectNotification(
-            DisconnectNotification { connection_id: 42 }
+            DisconnectNotification { connection_id: ConnectionId::from_index(42) }
         )).wait();
         assert!(handle_res.is_err());
     }
@@ -1346,7 +1386,7 @@ mod tests {
 
         // emulate send DisconnectNotification from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::DisconnectNotification(
-            DisconnectNotification { connection_id: 16 }
+            DisconnectNotification { connection_id: ConnectionId::from_index(0) }
         )).wait();
         assert!(handle_res.is_ok());
     }
@@ -1391,7 +1431,7 @@ mod tests {
 
         // emulate send Data from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::Data(
-            Data { connection_id: 16, data: vec![13, 42] }
+            Data { connection_id: ConnectionId::from_index(0), data: vec![13, 42] }
         )).wait();
         assert!(handle_res.is_err());
     }
@@ -1413,12 +1453,12 @@ mod tests {
         // the server should put RouteResponse into rx_1
         let (packet, _rx_1) = rx_1.into_future().wait().unwrap();
         assert_eq!(packet.unwrap(), Packet::RouteResponse(
-            RouteResponse { pk: client_pk_2, connection_id: 16 }
+            RouteResponse { pk: client_pk_2, connection_id: ConnectionId::from_index(0) }
         ));
 
         // emulate send Data from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::Data(
-            Data { connection_id: 16, data: vec![13, 42] }
+            Data { connection_id: ConnectionId::from_index(0), data: vec![13, 42] }
         )).wait();
         assert!(handle_res.is_ok());
     }
@@ -1480,7 +1520,7 @@ mod tests {
         // the server should put RouteResponse into rx_1
         let (packet, _rx_1) = rx_1.into_future().wait().unwrap();
         assert_eq!(packet.unwrap(), Packet::RouteResponse(
-            RouteResponse { pk: client_pk_2, connection_id: 16 }
+            RouteResponse { pk: client_pk_2, connection_id: ConnectionId::from_index(0) }
         ));
 
         // emulate shutdown
