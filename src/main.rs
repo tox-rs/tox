@@ -13,9 +13,15 @@ extern crate regex;
 extern crate syslog;
 extern crate tokio;
 extern crate tokio_codec;
+extern crate config;
+#[macro_use]
+extern crate serde_derive;
+extern crate serde;
+extern crate serde_ignored;
+extern crate serde_yaml;
 extern crate tox;
 
-mod cli_config;
+mod node_config;
 mod motd;
 
 use std::fs::{File, OpenOptions};
@@ -43,7 +49,7 @@ use tox::toxcore::stats::Stats;
 #[cfg(unix)]
 use syslog::Facility;
 
-use cli_config::*;
+use node_config::*;
 use motd::{Motd, Counters};
 
 /// Channel size for onion messages between UDP and TCP relay.
@@ -118,18 +124,18 @@ fn load_or_gen_keys(keys_file: &str) -> (PublicKey, SecretKey) {
 }
 
 /// Run a future with the runtime specified by config.
-fn run<F>(future: F, threads_config: ThreadsConfig)
+fn run<F>(future: F, threads: Threads)
     where F: Future<Item = (), Error = Error> + Send + 'static
 {
-    if threads_config == ThreadsConfig::N(1) {
+    if threads == Threads::N(1) {
         let mut runtime = runtime::current_thread::Runtime::new().expect("Failed to create runtime");
         runtime.block_on(future).expect("Execution was terminated with error");
     } else {
         let mut builder = runtime::Builder::new();
         builder.name_prefix("tox-node-");
-        match threads_config {
-            ThreadsConfig::N(n) => { builder.core_threads(n as usize); },
-            ThreadsConfig::Auto => { }, // builder will detect number of cores automatically
+        match threads {
+            Threads::N(n) => { builder.core_threads(n as usize); },
+            Threads::Auto => { }, // builder will detect number of cores automatically
         }
         let mut runtime = builder
             .build()
@@ -169,8 +175,8 @@ fn create_onion_streams() -> (TcpOnion, UdpOnion) {
     (tcp_onion, udp_onion)
 }
 
-fn run_tcp(cli_config: &CliConfig, dht_sk: SecretKey, tcp_onion: TcpOnion, stats: Stats) -> impl Future<Item = (), Error = Error> {
-    if cli_config.tcp_addrs.is_empty() {
+fn run_tcp(config: &NodeConfig, dht_sk: SecretKey, tcp_onion: TcpOnion, stats: Stats) -> impl Future<Item = (), Error = Error> {
+    if config.tcp_addrs.is_empty() {
         // If TCP address is not specified don't start TCP server and only drop
         // all onion packets from DHT server
         let tcp_onion_future = tcp_onion.rx
@@ -183,7 +189,7 @@ fn run_tcp(cli_config: &CliConfig, dht_sk: SecretKey, tcp_onion: TcpOnion, stats
     tcp_server.set_udp_onion_sink(tcp_onion.tx);
 
     let tcp_server_c = tcp_server.clone();
-    let tcp_server_futures = cli_config.tcp_addrs.iter().map(move |&addr| {
+    let tcp_server_futures = config.tcp_addrs.iter().map(move |&addr| {
         let tcp_server_c = tcp_server_c.clone();
         let dht_sk = dht_sk.clone();
         let listener = TcpListener::bind(&addr).expect("Failed to bind TCP listener");
@@ -204,15 +210,15 @@ fn run_tcp(cli_config: &CliConfig, dht_sk: SecretKey, tcp_onion: TcpOnion, stats
             })
         );
 
-    info!("Running TCP relay on {}", cli_config.tcp_addrs.iter().format(","));
+    info!("Running TCP relay on {}", config.tcp_addrs.iter().format(","));
 
     Either::B(tcp_server_future
         .join(tcp_onion_future)
         .map(|_| ()))
 }
 
-fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_onion: UdpOnion, tcp_stats: Stats) -> impl Future<Item = (), Error = Error> {
-    let udp_addr = if let Some(udp_addr) = cli_config.udp_addr {
+fn run_udp(config: &NodeConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_onion: UdpOnion, tcp_stats: Stats) -> impl Future<Item = (), Error = Error> {
+    let udp_addr = if let Some(udp_addr) = config.udp_addr {
         udp_addr
     } else {
         // If UDP address is not specified don't start DHT server and only drop
@@ -229,7 +235,7 @@ fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_on
     // Create a channel for server to communicate with network
     let (tx, rx) = mpsc::channel(DHT_CHANNEL_SIZE);
 
-    let lan_discovery_future = if cli_config.lan_discovery_enabled {
+    let lan_discovery_future = if config.lan_discovery_enabled {
         Either::A(LanDiscoverySender::new(tx.clone(), dht_pk, udp_addr.is_ipv6())
             .run()
             .map_err(Error::from))
@@ -239,9 +245,9 @@ fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_on
 
     let mut udp_server = UdpServer::new(tx, dht_pk, dht_sk.clone());
     let counters = Counters::new(tcp_stats, udp_stats.clone());
-    let motd = Motd::new(cli_config.motd.clone(), counters);
+    let motd = Motd::new(config.motd.clone(), counters);
     udp_server.set_bootstrap_info(version(), Box::new(move |_| motd.format().as_bytes().to_owned()));
-    udp_server.enable_lan_discovery(cli_config.lan_discovery_enabled);
+    udp_server.enable_lan_discovery(config.lan_discovery_enabled);
     udp_server.set_tcp_onion_sink(udp_onion.tx);
     udp_server.enable_ipv6_mode(udp_addr.is_ipv6());
 
@@ -255,11 +261,11 @@ fn run_udp(cli_config: &CliConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_on
             })
         );
 
-    if cli_config.bootstrap_nodes.is_empty() {
+    if config.bootstrap_nodes.is_empty() {
         warn!("No bootstrap nodes!");
     }
 
-    for node in cli_config.bootstrap_nodes.iter().flat_map(|node| node.resolve()) {
+    for node in config.bootstrap_nodes.iter().flat_map(|node| node.resolve()) {
         udp_server.add_initial_bootstrap(node);
     }
 
@@ -275,9 +281,9 @@ fn main() {
         panic!("Crypto initialization failed.");
     }
 
-    let cli_config = cli_parse();
+    let config = cli_parse();
 
-    match cli_config.log_type {
+    match config.log_type {
         LogType::Stderr => {
             let env = env_logger::Env::default()
                 .filter_or("RUST_LOG", "info");
@@ -299,14 +305,23 @@ fn main() {
         LogType::None => { },
     }
 
-    let (dht_pk, dht_sk) = if let Some(ref sk) = cli_config.sk {
+    for arg_unused in config.unused.clone() {
+        warn!("Unused configuration key: {:?}", arg_unused);
+    }
+
+    let (dht_pk, dht_sk) = if let Some(ref sk) = config.sk {
         (sk.public_key(), sk.clone())
-    } else if let Some(ref keys_file) = cli_config.keys_file {
+    } else if let Some(ref keys_file) = config.keys_file {
         load_or_gen_keys(keys_file)
     } else {
         panic!("Neither secret key nor keys file is specified")
     };
-    if cli_config.sk_passed_as_arg {
+
+    if config.tcp_addrs.is_empty() && config.udp_addr.is_none() {
+        panic!("Both TCP addresses and UDP address are not defined.")
+    }
+
+    if config.sk_passed_as_arg {
         warn!("You should not pass the secret key via arguments due to \
                security reasons. Use the environment variable instead");
     }
@@ -316,10 +331,10 @@ fn main() {
     let (tcp_onion, udp_onion) = create_onion_streams();
 
     let tcp_stats = Stats::new();
-    let udp_server_future = run_udp(&cli_config, dht_pk, &dht_sk, udp_onion, tcp_stats.clone());
-    let tcp_server_future = run_tcp(&cli_config, dht_sk, tcp_onion, tcp_stats);
+    let udp_server_future = run_udp(&config, dht_pk, &dht_sk, udp_onion, tcp_stats.clone());
+    let tcp_server_future = run_tcp(&config, dht_sk, tcp_onion, tcp_stats);
 
     let future = udp_server_future.select(tcp_server_future).map(|_| ()).map_err(|(e, _)| e);
 
-    run(future, cli_config.threads_config);
+    run(future, config.threads);
 }
