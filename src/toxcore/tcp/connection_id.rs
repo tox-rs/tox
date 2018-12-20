@@ -1,5 +1,7 @@
 //! Connection ID definition.
 
+use std::num::NonZeroU8;
+
 use toxcore::binary_io::*;
 use toxcore::tcp::links::MAX_LINKS_N;
 
@@ -10,38 +12,34 @@ use nom::be_u8;
 /// If a connection id is a number between [16, 255] it can be uniquely mapped
 /// to a connection index between [0, 239].
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub struct ConnectionId(u8);
+pub struct ConnectionId(Option<NonZeroU8>);
 
 impl ConnectionId {
     /// Zero connection id meaning invalid request.
     pub fn zero() -> Self {
-        ConnectionId(0)
+        ConnectionId(None)
     }
 
     /// Get connection id corresponding to the index.
     pub fn from_index(index: u8) -> Self {
         assert!(index < MAX_LINKS_N, "The index {} must be lower than {}", index, MAX_LINKS_N);
-        ConnectionId(index + 16)
+        ConnectionId(Some(NonZeroU8::new(index + 16).unwrap()))
     }
 
     /// Get index corresponding to the connection id. None if the connection id
     /// is zero.
     pub fn index(self) -> Option<u8> {
-        if self.0 >= 16 {
-            Some(self.0 - 16)
-        } else {
-            None
-        }
+        self.0.map(|connection_id| connection_id.get() - 16)
     }
 }
 
 impl FromBytes for ConnectionId {
-    named!(from_bytes<ConnectionId>, map!(verify!(be_u8, |id| id == 0 || id >= 0x10), |id| ConnectionId(id)));
+    named!(from_bytes<ConnectionId>, map!(verify!(be_u8, |id| id == 0 || id >= 0x10), |id| ConnectionId(NonZeroU8::new(id))));
 }
 
 impl ToBytes for ConnectionId {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        gen_be_u8!(buf, self.0)
+        gen_be_u8!(buf, self.0.map_or(0, |connection_id| connection_id.get()))
     }
 }
 
@@ -62,13 +60,13 @@ mod test {
     #[test]
     fn zero() {
         let connection_id = ConnectionId::zero();
-        assert_eq!(connection_id.0, 0);
+        assert_eq!(connection_id.0, None);
     }
 
     #[test]
     fn from_index() {
         let connection_id = ConnectionId::from_index(0);
-        assert_eq!(connection_id.0, 16);
+        assert_eq!(connection_id.0.unwrap().get(), 16);
     }
 
     #[test]
