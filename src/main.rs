@@ -17,7 +17,6 @@ extern crate config;
 #[macro_use]
 extern crate serde_derive;
 extern crate serde;
-extern crate serde_ignored;
 extern crate serde_yaml;
 extern crate tox;
 
@@ -305,8 +304,8 @@ fn main() {
         LogType::None => { },
     }
 
-    for arg_unused in config.unused.clone() {
-        warn!("Unused configuration key: {:?}", arg_unused);
+    for (key, _) in &config.unused {
+        warn!("Unused configuration key: {:?}", key);
     }
 
     let (dht_pk, dht_sk) = if let Some(ref sk) = config.sk {

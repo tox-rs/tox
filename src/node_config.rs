@@ -2,10 +2,11 @@ use std::net::{SocketAddr, ToSocketAddrs};
 use std::num::ParseIntError;
 use std::str::FromStr;
 use std::path::Path;
-use std::collections::BTreeSet as Set;
+use std::collections::HashMap;
 
 use config::{Config, File as CfgFile};
 use serde::de::{self, Deserialize, Deserializer};
+use serde_yaml::Value;
 use clap::{App, AppSettings, Arg, SubCommand, ArgMatches};
 use hex::FromHex;
 use itertools::Itertools;
@@ -135,10 +136,8 @@ pub struct NodeConfig {
     #[serde(skip_deserializing)]
     pub sk_passed_as_arg: bool,
     /// Path to the file where DHT keys are stored.
-    /// When run with config, this field is required.
+    /// Required with config.
     #[serde(rename = "keys-file")]
-    pub keys_file_config: String,
-    #[serde(skip_deserializing)]
     pub keys_file: Option<String>,
     /// List of bootstrap nodes.
     #[serde(rename = "bootstrap-nodes")]
@@ -157,8 +156,8 @@ pub struct NodeConfig {
     #[serde(rename = "lan-discovery")]
     pub lan_discovery_enabled: bool,
     /// Unused fields while parsing config file
-    #[serde(skip_deserializing)]
-    pub unused: Set<String>,
+    #[serde(flatten)]
+    pub unused: HashMap<String, Value>,
 }
 
 /// Parse command line arguments.
@@ -276,15 +275,11 @@ fn parse_config(config_path: String) -> NodeConfig {
 
     settings.merge(config_file).expect("Merging config file with default values failed");
 
-    // Collect unrecognized fields to warn about them
-    let mut unused = Set::new();
-    let mut config: NodeConfig = serde_ignored::deserialize(settings, |path| {
-        unused.insert(path.to_string());
-    }).expect("Can't deserialize config");
+    let config: NodeConfig = settings.try_into().expect("Can't deserialize config");
 
-    config.unused = unused;
-    config.sk_passed_as_arg = false;
-    config.keys_file = Some(config.keys_file_config.clone());
+    if config.keys_file.is_none() {
+        panic!("Can't deserialize config: 'keys-file' is not set");
+    }
 
     config
 }
@@ -343,20 +338,17 @@ fn run_args(matches: &ArgMatches) -> NodeConfig {
 
     let lan_discovery_enabled = matches.is_present("lan-discovery");
 
-    let keys_file_config = String::new();
-
     NodeConfig {
         udp_addr,
         tcp_addrs,
         sk,
         sk_passed_as_arg,
         keys_file,
-        keys_file_config,
         bootstrap_nodes,
         threads,
         log_type,
         motd,
         lan_discovery_enabled,
-        unused: Set::new(),
+        unused: HashMap::new(),
     }
 }
