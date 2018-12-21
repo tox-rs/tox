@@ -541,6 +541,7 @@ mod tests {
 
     #[test]
     fn server_is_clonable() {
+        crypto_init().unwrap();
         let server = Server::new();
         let (client_1, _rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         server.insert(client_1).wait().unwrap();
@@ -926,6 +927,7 @@ mod tests {
     }
     #[test]
     fn handle_disconnect_notification_0() {
+        crypto_init().unwrap();
         let server = Server::new();
 
         let (client_pk, _) = gen_keypair();
@@ -979,6 +981,7 @@ mod tests {
     }
     #[test]
     fn handle_onion_request() {
+        crypto_init().unwrap();
         let (udp_onion_sink, udp_onion_stream) = mpsc::channel(1);
         let mut server = Server::new();
         server.set_udp_onion_sink(udp_onion_sink);
@@ -1131,6 +1134,7 @@ mod tests {
     }
     #[test]
     fn handle_data_0() {
+        crypto_init().unwrap();
         let server = Server::new();
 
         let (client_pk, _) = gen_keypair();
@@ -1500,6 +1504,7 @@ mod tests {
     }
     #[test]
     fn shutdown_inner_not_connected() {
+        crypto_init().unwrap();
         let server = Server::new();
         let (client_pk, _) = gen_keypair();
 
@@ -1558,6 +1563,7 @@ mod tests {
     }
     #[test]
     fn send_onion_request_to_dropped_stream() {
+        crypto_init().unwrap();
         let (udp_onion_sink, udp_onion_stream) = mpsc::channel(1);
         let mut server = Server::new();
         server.set_udp_onion_sink(udp_onion_sink);

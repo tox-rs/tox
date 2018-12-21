@@ -255,6 +255,7 @@ mod tests {
     }
     #[test]
     fn server_handshake_with_different_keypair() {
+        crypto_init().unwrap();
         let (client_pk, client_sk) = gen_keypair();
         let (server_pk, server_sk) = gen_keypair();
         let (_, mallory_sk) = gen_keypair();
