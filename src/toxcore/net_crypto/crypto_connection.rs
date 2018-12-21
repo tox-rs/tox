@@ -462,7 +462,7 @@ impl CryptoConnection {
     /// Calculate packets receive rate.
     fn calculate_recv_rate(&mut self, now: Instant) {
         let dt = now - self.stats_calculation_time;
-        self.packet_recv_rate = self.packets_received as f64 / (dt.as_secs() as f64 + dt.subsec_millis() as f64 / 1000.0);
+        self.packet_recv_rate = f64::from(self.packets_received) / (dt.as_secs() as f64 + f64::from(dt.subsec_millis()) / 1000.0);
     }
 
     /// Calculate packets send rate.
@@ -488,7 +488,7 @@ impl CryptoConnection {
         // Based on rtt offset in number of positions for last_num_packets arrays (one position equals 50 ms)
         let delay = ((
             self.rtt.as_secs() * 1000 +
-                self.rtt.subsec_millis() as u64 +
+                u64::from(self.rtt.subsec_millis()) +
                 PACKET_COUNTER_AVERAGE_INTERVAL / 2 // add half of the interval to make delay rounded
         ) / PACKET_COUNTER_AVERAGE_INTERVAL) as usize;
         let delay = delay.min(CONGESTION_MAX_DELAY);
@@ -516,11 +516,11 @@ impl CryptoConnection {
 
         // Average number of successfully delivered packets per second
         let coeff = 1000.0 / (CONGESTION_QUEUE_ARRAY_SIZE as f64 * PACKET_COUNTER_AVERAGE_INTERVAL as f64);
-        let min_speed = total_sent as f64 * coeff;
-        let min_speed_request = (total_sent + total_resent) as f64 * coeff;
+        let min_speed = f64::from(total_sent) * coeff;
+        let min_speed_request = f64::from(total_sent + total_resent) * coeff;
 
         // Time necessary to send all packets from send queue
-        let send_array_time = send_array_len as f64 / min_speed;
+        let send_array_time = f64::from(send_array_len) / min_speed;
 
         // And, finally, estimated packets send rate
         let packet_send_rate = if send_array_time > SEND_QUEUE_CLEARANCE_TIME && send_array_len > CRYPTO_MIN_QUEUE_LENGTH {
@@ -560,7 +560,7 @@ impl CryptoConnection {
 
     /// Calculate the interval in ms for request packet.
     pub fn request_packet_interval(&self) -> Duration {
-        let request_packet_interval = REQUEST_PACKETS_COMPARE_CONSTANT / ((self.recv_array.len() as f64 + 1.0) / (self.packet_recv_rate + 1.0));
+        let request_packet_interval = REQUEST_PACKETS_COMPARE_CONSTANT / ((f64::from(self.recv_array.len()) + 1.0) / (self.packet_recv_rate + 1.0));
         let request_packet_interval = request_packet_interval.min(
             CRYPTO_PACKET_MIN_RATE / self.packet_recv_rate * CRYPTO_SEND_PACKET_INTERVAL as f64 + PACKET_COUNTER_AVERAGE_INTERVAL as f64
         );
@@ -752,7 +752,7 @@ mod tests {
         assert_eq!(connection.packets_sent, 0);
         assert_eq!(connection.packets_resent, 0);
         assert_eq!(connection.stats_calculation_time, next_now);
-        assert_eq!(connection.packet_recv_rate, 6000.0);
+        assert!((connection.packet_recv_rate - 6000.0).abs() < std::f64::EPSILON);
     }
 
     #[test]

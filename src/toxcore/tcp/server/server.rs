@@ -447,7 +447,7 @@ impl Server {
 
         // get the link from client.links if any
         let a_link = if let Some(link) = client_a.links().by_id(index) {
-            link.clone()
+            *link
         } else {
             trace!("Data.connection_id is not linked for the client {:?}", pk);
             // There is possibility that the first client disconnected but the second client
@@ -590,7 +590,7 @@ mod tests {
             let state = server.state.read();
 
             // check client_1.links[client_2] == Registered
-            let client_a = state.connected_clients.get(&client_pk_1).unwrap();
+            let client_a = &state.connected_clients[&client_pk_1];
             let link_id = client_a.links().id_by_pk(&client_pk_2).unwrap();
             assert_eq!(client_a.links().by_id(link_id).unwrap().status, LinkStatus::Registered);
         }
@@ -614,7 +614,7 @@ mod tests {
             let state = server.state.read();
 
             // check client_2.links[client_1] == None
-            let client_b = state.connected_clients.get(&client_pk_2).unwrap();
+            let client_b = &state.connected_clients[&client_pk_2];
             assert!(client_b.links().id_by_pk(&client_pk_1).is_none());
         }
 
@@ -646,12 +646,12 @@ mod tests {
             let state = server.state.read();
 
             // check client_1.links[client_2] == Online
-            let client_a = state.connected_clients.get(&client_pk_1).unwrap();
+            let client_a = &state.connected_clients[&client_pk_1];
             let link_id = client_a.links().id_by_pk(&client_pk_2).unwrap();
             assert_eq!(client_a.links().by_id(link_id).unwrap().status, LinkStatus::Online);
 
             // check client_2.links[client_1] == Online
-            let client_b = state.connected_clients.get(&client_pk_2).unwrap();
+            let client_b = &state.connected_clients[&client_pk_2];
             let link_id = client_b.links().id_by_pk(&client_pk_1).unwrap();
             assert_eq!(client_a.links().by_id(link_id).unwrap().status, LinkStatus::Online);
         }
@@ -677,7 +677,7 @@ mod tests {
 
         // check client_2.links[client_1] == Registered
         let state = server.state.read();
-        let client_b = state.connected_clients.get(&client_pk_2).unwrap();
+        let client_b = &state.connected_clients[&client_pk_2];
         assert_eq!(client_b.links().by_id(0).unwrap().status, LinkStatus::Registered);
     }
     #[test]
@@ -708,12 +708,12 @@ mod tests {
             let state = server.state.read();
 
             // check client_1.links[client_2] == Registered
-            let client_a = state.connected_clients.get(&client_pk_1).unwrap();
+            let client_a = &state.connected_clients[&client_pk_1];
             let link_id = client_a.links().id_by_pk(&client_pk_2).unwrap();
             assert_eq!(client_a.links().by_id(link_id).unwrap().status, LinkStatus::Registered);
 
             // check client_2.links[client_1] == None
-            let client_b = state.connected_clients.get(&client_pk_2).unwrap();
+            let client_b = &state.connected_clients[&client_pk_2];
             assert!(client_b.links().id_by_pk(&client_pk_1).is_none());
         }
     }
@@ -843,12 +843,12 @@ mod tests {
             let state = server.state.read();
 
             // check client_1.links[client_2] == Online
-            let client_a = state.connected_clients.get(&client_pk_1).unwrap();
+            let client_a = &state.connected_clients[&client_pk_1];
             let link_id = client_a.links().id_by_pk(&client_pk_2).unwrap();
             assert_eq!(client_a.links().by_id(link_id).unwrap().status, LinkStatus::Online);
 
             // check client_2.links[client_1] == Online
-            let client_b = state.connected_clients.get(&client_pk_2).unwrap();
+            let client_b = &state.connected_clients[&client_pk_2];
             let link_id = client_b.links().id_by_pk(&client_pk_1).unwrap();
             assert_eq!(client_a.links().by_id(link_id).unwrap().status, LinkStatus::Online);
         }
@@ -869,11 +869,11 @@ mod tests {
             let state = server.state.read();
 
             // check client_1.links[client_2] == None
-            let client_a = state.connected_clients.get(&client_pk_1).unwrap();
+            let client_a = &state.connected_clients[&client_pk_1];
             assert!(client_a.links().id_by_pk(&client_pk_2).is_none());
 
             // check client_2.links[client_1] == Registered
-            let client_b = state.connected_clients.get(&client_pk_2).unwrap();
+            let client_b = &state.connected_clients[&client_pk_2];
             let link_id = client_b.links().id_by_pk(&client_pk_1).unwrap();
             assert_eq!(client_b.links().by_id(link_id).unwrap().status, LinkStatus::Registered);
         }
@@ -888,7 +888,7 @@ mod tests {
             let state = server.state.read();
 
             // check client_2.links[client_1] == None
-            let client_b = state.connected_clients.get(&client_pk_2).unwrap();
+            let client_b = &state.connected_clients[&client_pk_2];
             assert!(client_b.links().id_by_pk(&client_pk_2).is_none());
         }
 
@@ -1069,7 +1069,7 @@ mod tests {
         ));
 
         let state = server.state.read();
-        let client = state.connected_clients.get(&client_pk_1).unwrap();
+        let client = &state.connected_clients[&client_pk_1];
 
         assert_eq!(client.ip_addr(), client_addr_3);
         assert_eq!(client.port(), client_port_3);

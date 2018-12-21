@@ -38,10 +38,9 @@ impl Encoder for ClientHandshakeCodec {
     fn encode(&mut self, handshake: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
         let mut handshake_buf = [0; CLIENT_HANDSHAKE_SIZE];
         handshake.to_bytes((&mut handshake_buf, 0))
-            .map(|(handshake_buf, handshake_size)| {
-                buf.extend_from_slice(&handshake_buf[..handshake_size]);
-                ()
-            })
+            .map(|(handshake_buf, handshake_size)|
+                buf.extend_from_slice(&handshake_buf[..handshake_size])
+            )
             .map_err(|e|
                 Error::new(ErrorKind::Other,
                            format!("Client handshake serialize error: {:?}", e))
@@ -78,10 +77,9 @@ impl Encoder for ServerHandshakeCodec {
     fn encode(&mut self, handshake: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
         let mut handshake_buf = [0; SERVER_HANDSHAKE_SIZE];
         handshake.to_bytes((&mut handshake_buf, 0))
-            .map(|(handshake_buf, handshake_size)| {
-                buf.extend_from_slice(&handshake_buf[..handshake_size]);
-                ()
-            })
+            .map(|(handshake_buf, handshake_size)|
+                buf.extend_from_slice(&handshake_buf[..handshake_size])
+            )
             .map_err(|e|
                 Error::new(ErrorKind::Other,
                            format!("Server handshake serialize error: {:?}", e))

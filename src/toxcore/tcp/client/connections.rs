@@ -141,7 +141,7 @@ impl Connections {
             self.add_connection_inner(client, node_pk)
         } else {
             let mut connections = self.connections.write();
-            let connection = connections.entry(node_pk).or_insert(NodeConnection::new());
+            let connection = connections.entry(node_pk).or_insert_with(NodeConnection::new);
 
             let connections_count = connection.connections.len();
             let online_connections_count = connection.connections.iter().filter(|relay_pk|
@@ -197,7 +197,7 @@ impl Connections {
     fn add_connection_inner(&self, client: &Client, node_pk: PublicKey) -> IoFuture<()> {
         // TODO: check MAX_FRIEND_TCP_CONNECTIONS?
         let mut connections = self.connections.write();
-        let connection = connections.entry(node_pk).or_insert(NodeConnection::new());
+        let connection = connections.entry(node_pk).or_insert_with(NodeConnection::new);
         connection.connections.insert(client.pk);
         let future = if connection.status == NodeConnectionStatus::TCP && client.is_sleeping() {
             // unsleep relay

@@ -104,16 +104,16 @@ impl Client {
     /// Handle packet received from TCP relay.
     pub fn handle_packet(&self, packet: Packet) -> IoFuture<()> {
         match packet {
-            Packet::RouteRequest(packet) => self.handle_route_request(packet),
-            Packet::RouteResponse(packet) => self.handle_route_response(packet),
-            Packet::ConnectNotification(packet) => self.handle_connect_notification(packet),
-            Packet::DisconnectNotification(packet) => self.handle_disconnect_notification(packet),
-            Packet::PingRequest(packet) => self.handle_ping_request(packet),
-            Packet::PongResponse(packet) => self.handle_pong_response(packet),
-            Packet::OobSend(packet) => self.handle_oob_send(packet),
+            Packet::RouteRequest(packet) => self.handle_route_request(&packet),
+            Packet::RouteResponse(packet) => self.handle_route_response(&packet),
+            Packet::ConnectNotification(packet) => self.handle_connect_notification(&packet),
+            Packet::DisconnectNotification(packet) => self.handle_disconnect_notification(&packet),
+            Packet::PingRequest(packet) => self.handle_ping_request(&packet),
+            Packet::PongResponse(packet) => self.handle_pong_response(&packet),
+            Packet::OobSend(packet) => self.handle_oob_send(&packet),
             Packet::OobReceive(packet) => self.handle_oob_receive(packet),
             Packet::Data(packet) => self.handle_data(packet),
-            Packet::OnionRequest(packet) => self.handle_onion_request(packet),
+            Packet::OnionRequest(packet) => self.handle_onion_request(&packet),
             Packet::OnionResponse(packet) => self.handle_onion_response(packet),
         }
     }
@@ -135,14 +135,14 @@ impl Client {
         }
     }
 
-    fn handle_route_request(&self, _packet: RouteRequest) -> IoFuture<()> {
+    fn handle_route_request(&self, _packet: &RouteRequest) -> IoFuture<()> {
         Box::new( future::err(
             Error::new(ErrorKind::Other,
                 "Server must not send RouteRequest to client"
         )))
     }
 
-    fn handle_route_response(&self, packet: RouteResponse) -> IoFuture<()> {
+    fn handle_route_response(&self, packet: &RouteResponse) -> IoFuture<()> {
         let index = if let Some(index) = packet.connection_id.index() {
             index
         } else {
@@ -172,7 +172,7 @@ impl Client {
         }
     }
 
-    fn handle_connect_notification(&self, packet: ConnectNotification) -> IoFuture<()> {
+    fn handle_connect_notification(&self, packet: &ConnectNotification) -> IoFuture<()> {
         let index = if let Some(index) = packet.connection_id.index() {
             index
         } else {
@@ -192,7 +192,7 @@ impl Client {
         }
     }
 
-    fn handle_disconnect_notification(&self, packet: DisconnectNotification) -> IoFuture<()> {
+    fn handle_disconnect_notification(&self, packet: &DisconnectNotification) -> IoFuture<()> {
         let index = if let Some(index) = packet.connection_id.index() {
             index
         } else {
@@ -212,18 +212,18 @@ impl Client {
         }
     }
 
-    fn handle_ping_request(&self, packet: PingRequest) -> IoFuture<()> {
+    fn handle_ping_request(&self, packet: &PingRequest) -> IoFuture<()> {
         self.send_packet(Packet::PongResponse(
             PongResponse { ping_id: packet.ping_id }
         ))
     }
 
-    fn handle_pong_response(&self, _packet: PongResponse) -> IoFuture<()> {
+    fn handle_pong_response(&self, _packet: &PongResponse) -> IoFuture<()> {
         // TODO check ping_id
         Box::new(future::ok(()))
     }
 
-    fn handle_oob_send(&self, _packet: OobSend) -> IoFuture<()> {
+    fn handle_oob_send(&self, _packet: &OobSend) -> IoFuture<()> {
         Box::new( future::err(
             Error::new(ErrorKind::Other,
                 "Server must not send OobSend to client"
@@ -255,7 +255,7 @@ impl Client {
         }
     }
 
-    fn handle_onion_request(&self, _packet: OnionRequest) -> IoFuture<()> {
+    fn handle_onion_request(&self, _packet: &OnionRequest) -> IoFuture<()> {
         Box::new( future::err(
             Error::new(ErrorKind::Other,
                 "Server must not send OnionRequest to client"
@@ -327,10 +327,9 @@ impl Client {
                     self_c.links.write().clear();
                     future::result(res)
                 })
-                .map_err(|e| {
-                    error!("TCP relay connection error: {}", e);
-                    ()
-                });
+                .map_err(|e|
+                    error!("TCP relay connection error: {}", e)
+                );
 
             tokio::spawn(future);
 
@@ -1191,7 +1190,6 @@ pub mod tests {
                 assert_eq!(relay_pk, server_pk);
                 assert_eq!(received_pk, client_pk_2);
                 assert_eq!(received_data, data_2);
-                ()
             }).map_err(|(e, _)| e))
             .and_then(move |_| incoming_rx_2.map_err(|()| unreachable!("rx can't fail")).into_future().map(move |(packet, _)| {
                 let (relay_pk, packet) = packet.unwrap();
@@ -1199,13 +1197,11 @@ pub mod tests {
                 assert_eq!(relay_pk, server_pk);
                 assert_eq!(received_pk, client_pk_1);
                 assert_eq!(received_data, data_1);
-                ()
             }).map_err(|(e, _)| e))
             .map(move |_| {
                 // tokio runtime won't become idle until we drop the connections
                 client_1.disconnect();
                 client_2.disconnect();
-                ()
             });
 
         let future = client_future_1

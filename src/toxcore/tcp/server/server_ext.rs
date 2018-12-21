@@ -117,10 +117,9 @@ impl ServerExt for Server {
                 tokio::spawn(
                     self_c.clone()
                         .run_connection(stream, dht_sk.clone(), stats.clone())
-                        .map_err(|e| {
-                            error!("Error while running tcp connection: {:?}", e);
-                            ()
-                        })
+                        .map_err(|e|
+                            error!("Error while running tcp connection: {:?}", e)
+                        )
                 );
                 Ok(())
             });
