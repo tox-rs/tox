@@ -2,10 +2,11 @@ use std::net::{SocketAddr, ToSocketAddrs};
 use std::num::ParseIntError;
 use std::str::FromStr;
 use std::path::Path;
-use std::collections::BTreeSet as Set;
+use std::collections::HashMap;
 
 use config::{Config, File as CfgFile};
 use serde::de::{self, Deserialize, Deserializer};
+use serde_yaml::Value;
 use clap::{App, AppSettings, Arg, SubCommand, ArgMatches};
 use hex::FromHex;
 use itertools::Itertools;
@@ -89,15 +90,15 @@ fn de_log_type<'de, D>(deserializer: D) -> Result<LogType, D::Error> where D: De
         #[cfg(unix)]
         "Syslog" => Ok(LogType::Syslog),
         "None" => Ok(LogType::None),
-        e => Err(de::Error::custom(format!("Invalid LogType {}", e))),
+        other => Err(de::Error::custom(format!("log-type: invalid value '{}'", other))),
     }
 }
 
-fn de_thread<'de, D>(deserializer: D) -> Result<Threads, D::Error> where D: Deserializer<'de> {
+fn de_threads<'de, D>(deserializer: D) -> Result<Threads, D::Error> where D: Deserializer<'de> {
     let s = String::deserialize(deserializer)?;
 
     Threads::from_str(&s)
-        .map_err(|e| de::Error::custom(format!("Can't parse Threads {:?}", e)))
+        .map_err(|e| de::Error::custom(format!("threads: {:?}", e)))
 }
 
 impl BootstrapNode {
@@ -135,17 +136,15 @@ pub struct NodeConfig {
     #[serde(skip_deserializing)]
     pub sk_passed_as_arg: bool,
     /// Path to the file where DHT keys are stored.
-    /// When run with config, this field is required.
+    /// Required with config.
     #[serde(rename = "keys-file")]
-    pub keys_file_config: String,
-    #[serde(skip_deserializing)]
     pub keys_file: Option<String>,
     /// List of bootstrap nodes.
     #[serde(rename = "bootstrap-nodes")]
     #[serde(default)]
     pub bootstrap_nodes: Vec<BootstrapNode>,
     /// Number of threads for execution.
-    #[serde(deserialize_with = "de_thread")]
+    #[serde(deserialize_with = "de_threads")]
     pub threads: Threads,
     /// Specifies where to write logs.
     #[serde(deserialize_with = "de_log_type")]
@@ -154,11 +153,11 @@ pub struct NodeConfig {
     /// Message of the day
     pub motd: String,
     /// Whether LAN discovery is enabled
-    #[serde(rename = "no-lan")]
+    #[serde(rename = "lan-discovery")]
     pub lan_discovery_enabled: bool,
     /// Unused fields while parsing config file
-    #[serde(skip_deserializing)]
-    pub unused: Set<String>,
+    #[serde(flatten)]
+    pub unused: HashMap<String, Value>,
 }
 
 /// Parse command line arguments.
@@ -248,9 +247,9 @@ pub fn cli_parse() -> NodeConfig {
                 }
             })
             .default_value("This is tox-rs"))
-        .arg(Arg::with_name("no-lan")
-            .long("no-lan")
-            .help("Disable LAN discovery"))
+        .arg(Arg::with_name("lan-discovery")
+            .long("lan-discovery")
+            .help("Enable LAN discovery (disabled by default)"))
         .get_matches();
 
     match matches.subcommand() {
@@ -265,7 +264,7 @@ fn parse_config(config_path: String) -> NodeConfig {
 
     settings.set_default("log-type", "Stderr").expect("Can't set default value for `log-type`");
     settings.set_default("motd", "This is tox-rs").expect("Can't set default value for `motd`");
-    settings.set_default("no-lan", "False").expect("Can't set default value for `no-lan`");
+    settings.set_default("lan-discovery", "False").expect("Can't set default value for `lan-discovery`");
     settings.set_default("threads", "1").expect("Can't set default value for `threads`");
 
     let config_file = if !Path::new(&config_path).exists() {
@@ -274,18 +273,13 @@ fn parse_config(config_path: String) -> NodeConfig {
         CfgFile::with_name(&config_path)
     };
 
-    settings.merge(config_file).expect("Merging config file with default value fails");
+    settings.merge(config_file).expect("Merging config file with default values failed");
 
-    // Collect unrecognized fields to warn about them
-    let mut unused = Set::new();
-    let mut config: NodeConfig = serde_ignored::deserialize(settings, |path| {
-        unused.insert(path.to_string());
-    }).expect("Can't deserialize config");
+    let config: NodeConfig = settings.try_into().expect("Can't deserialize config");
 
-    config.unused = unused;
-    config.sk_passed_as_arg = false;
-    config.lan_discovery_enabled = !config.lan_discovery_enabled;
-    config.keys_file = Some(config.keys_file_config.clone());
+    if config.keys_file.is_none() {
+        panic!("Can't deserialize config: 'keys-file' is not set");
+    }
 
     config
 }
@@ -342,9 +336,7 @@ fn run_args(matches: &ArgMatches) -> NodeConfig {
 
     let motd = value_t!(matches.value_of("motd"), String).unwrap_or_else(|e| e.exit());
 
-    let lan_discovery_enabled = !matches.is_present("no-lan");
-
-    let keys_file_config = String::new();
+    let lan_discovery_enabled = matches.is_present("lan-discovery");
 
     NodeConfig {
         udp_addr,
@@ -352,12 +344,11 @@ fn run_args(matches: &ArgMatches) -> NodeConfig {
         sk,
         sk_passed_as_arg,
         keys_file,
-        keys_file_config,
         bootstrap_nodes,
         threads,
         log_type,
         motd,
         lan_discovery_enabled,
-        unused: Set::new(),
+        unused: HashMap::new(),
     }
 }
