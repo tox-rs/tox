@@ -55,6 +55,12 @@ pub struct HolePunching {
     pub ping_id: u64,
 }
 
+impl Default for HolePunching {
+    fn default() -> Self {
+        HolePunching::new()
+    }
+}
+
 impl HolePunching {
     /// Create new `HolePunching` object.
     pub fn new() -> Self {
@@ -210,6 +216,28 @@ impl HolePunching {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hole_punch_new() {
+        let hole_punch = HolePunching::new();
+        assert!(hole_punch.is_punching_done);
+        assert_eq!(hole_punch.num_punch_tries, 0);
+        assert!(hole_punch.last_send_ping_time.is_none());
+        assert!(hole_punch.last_punching_time.is_none());
+        assert_eq!(hole_punch.first_punching_index, 0);
+        assert_eq!(hole_punch.last_punching_index, 0);
+    }
+
+    #[test]
+    fn hole_punch_default() {
+        let hole_punch = HolePunching::default();
+        assert!(hole_punch.is_punching_done);
+        assert_eq!(hole_punch.num_punch_tries, 0);
+        assert!(hole_punch.last_send_ping_time.is_none());
+        assert!(hole_punch.last_punching_time.is_none());
+        assert_eq!(hole_punch.first_punching_index, 0);
+        assert_eq!(hole_punch.last_punching_index, 0);
+    }
 
     #[test]
     fn hole_punch_get_common_ip_with_null_addrs() {

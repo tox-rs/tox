@@ -10,7 +10,7 @@ use std::sync::atomic::*;
 use std::sync::Mutex;
 
 /// Struct for various counters
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Stats {
     /// incoming/outgoing counters
     pub counters: Arc<Counters>
@@ -19,9 +19,7 @@ pub struct Stats {
 impl Stats {
     /// New Stats object
     pub fn new() -> Self {
-        Stats {
-            counters: Arc::new(Default::default())
-        }
+        Default::default()
     }
 }
 

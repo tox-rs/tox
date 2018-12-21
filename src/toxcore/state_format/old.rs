@@ -39,11 +39,10 @@ pub struct NospamKeys {
 /// Number of bytes of serialized [`NospamKeys`](./struct.NospamKeys.html).
 pub const NOSPAMKEYSBYTES: usize = NOSPAMBYTES + PUBLICKEYBYTES + SECRETKEYBYTES;
 
-
-/// The `Default` implementation generates random `NospamKeys`.
-impl Default for NospamKeys {
-    fn default() -> Self {
-        let nospam = NoSpam::new();
+impl NospamKeys {
+    /// Generates random `NospamKeys`.
+    pub fn random() -> Self {
+        let nospam = NoSpam::random();
         let (pk, sk) = gen_keypair();
         NospamKeys {
             nospam,
@@ -732,7 +731,7 @@ mod tests {
 
     encode_decode_test!(
         no_spam_keys_encode_decode,
-        NospamKeys::default()
+        NospamKeys::random()
     );
 
     encode_decode_test!(
@@ -843,7 +842,7 @@ mod tests {
         state_encode_decode,
         State {
             sections: vec![
-                Section::NospamKeys(NospamKeys::default()),
+                Section::NospamKeys(NospamKeys::random()),
                 Section::DhtState(DhtState(vec![
                     PackedNode {
                         pk: gen_keypair().0,

@@ -54,7 +54,7 @@ mod tests {
 
     encode_decode_test!(
         packet_friend_requests_encode_decode,
-        Packet::FriendRequests(FriendRequests::new(NoSpam::new(), vec![1,2,3,4]))
+        Packet::FriendRequests(FriendRequests::new(NoSpam::random(), vec![1,2,3,4]))
     );
 
     encode_decode_test!(

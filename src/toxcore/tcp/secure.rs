@@ -8,8 +8,8 @@ between two people using temporary [`Session`](./struct.Session.html)s.
 ```no_run
 use tox::toxcore::tcp::secure::*;
 
-let alice_session = Session::new();
-let bob_session = Session::new();
+let alice_session = Session::random();
+let bob_session = Session::random();
 
 // assume we got Alice's PK & Nonce via handshake
 let alice_pk = *alice_session.pk();
@@ -72,7 +72,7 @@ impl Session {
     /** Create a new `Session` with random pk, sk and nonce.
     You should send it to establish a secure [`Channel`](./struct.Channel.html)
     */
-    pub fn new() -> Session {
+    pub fn random() -> Session {
         let (pk, sk) = gen_keypair();
         let nonce = gen_nonce();
         Session { pk, sk, nonce }
@@ -141,8 +141,8 @@ mod tests {
 
     fn create_channels() -> (Channel, Channel) {
         crypto_init().unwrap();
-        let alice_session = Session::new();
-        let bob_session = Session::new();
+        let alice_session = Session::random();
+        let bob_session = Session::random();
 
         // assume we got Alice's PK & Nonce via handshake
         let alice_pk = *alice_session.pk();

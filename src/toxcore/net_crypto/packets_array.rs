@@ -36,6 +36,12 @@ pub struct PacketsArray<T> {
     pub buffer_end: u32,
 }
 
+impl<T: Clone> Default for PacketsArray<T> {
+    fn default() -> Self {
+        PacketsArray::new()
+    }
+}
+
 impl<T: Clone> PacketsArray<T> {
     /// Create new `PacketsArray`
     pub fn new() -> PacketsArray<T> {

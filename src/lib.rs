@@ -7,8 +7,6 @@ Repo: https://github.com/tox-rs/tox
 
 #![forbid(unsafe_code)]
 #![doc(html_logo_url = "https://raw.githubusercontent.com/tox-rs/logo/master/logo.png")]
-// Turn off clippy warnings that gives false positives
-#![allow(clippy::new_without_default, clippy::new_without_default_derive)]
 // Remove it when it will be fixed in nom parser
 #![allow(clippy::redundant_closure)]
 

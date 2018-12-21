@@ -231,8 +231,8 @@ mod tests {
     }
 
     fn create_channels() -> (Channel, Channel) {
-        let alice_session = Session::new();
-        let bob_session = Session::new();
+        let alice_session = Session::random();
+        let bob_session = Session::random();
 
         // assume we got Alice's PK & Nonce via handshake
         let alice_pk = *alice_session.pk();
@@ -370,7 +370,7 @@ mod tests {
     #[test]
     fn decode_packet_error() {
         crypto_init().unwrap();
-        let alice_session = Session::new();
+        let alice_session = Session::random();
 
         // assume we got Alice's PK via handshake
         let alice_pk = *alice_session.pk();
