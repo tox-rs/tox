@@ -15,7 +15,6 @@ use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 use toxcore::dht::packed_node::*;
 use toxcore::toxid::{NoSpam, NOSPAMBYTES};
-use toxcore::dht::daemon_state::*;
 use toxcore::onion::packet::*;
 
 const REQUEST_MSG_LEN: usize = 1024;
@@ -153,23 +152,22 @@ impl FromBytes for DhtState {
 
 impl ToBytes for DhtState {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        let mut bytes_buf = [0u8; DHT_STATE_BUFFER_SIZE];
-        let mut nodes_bytes: u32 = 0;
-        for node in self.0.clone() {
-            if let Ok((_, size)) = node.to_bytes((&mut bytes_buf, 0)) {
-                nodes_bytes += size as u32;
-            } else {}
-        }
+        let start_idx = buf.1;
 
-        do_gen!(buf,
+        let (buf, idx) = do_gen!(buf,
             gen_le_u16!(0x0002) >>
             gen_slice!(SECTION_MAGIC) >>
             gen_le_u32!(DHT_MAGICAL as u32) >>
-            gen_le_u32!(nodes_bytes) >>
+            gen_skip!(4) >>
             gen_le_u16!(DHT_SECTION_TYPE as u16) >>
             gen_le_u16!(DHT_2ND_MAGICAL as u16) >>
             gen_many_ref!(&self.0, |buf, node| PackedNode::to_bytes(node, buf))
-        )
+        )?;
+
+        let len = (idx - start_idx - 16) as u32;
+        LittleEndian::write_u32(&mut buf[start_idx + 8..], len);
+
+        Ok((buf, idx))
     }
 }
 
