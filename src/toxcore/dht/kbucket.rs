@@ -730,6 +730,7 @@ mod tests {
 
     #[test]
     fn kbucket_get_node() {
+        crypto_init().unwrap();
         let (pk, _) = gen_keypair();
         let mut kbucket = Kbucket::new(KBUCKET_DEFAULT_SIZE);
 
@@ -748,6 +749,7 @@ mod tests {
 
     #[test]
     fn kbucket_get_node_mut() {
+        crypto_init().unwrap();
         let (pk, _) = gen_keypair();
         let mut kbucket = Kbucket::new(KBUCKET_DEFAULT_SIZE);
 
@@ -769,6 +771,7 @@ mod tests {
 
     #[test]
     fn ktree_new() {
+        crypto_init().unwrap();
         let pk = gen_keypair().0;
         let ktree = Ktree::new(&pk);
         assert_eq!(pk, ktree.pk);
@@ -985,6 +988,7 @@ mod tests {
 
     #[test]
     fn ktree_contains() {
+        crypto_init().unwrap();
         let (pk, _) = gen_keypair();
         let mut ktree = Ktree::new(&pk);
 
@@ -1004,6 +1008,7 @@ mod tests {
 
     #[test]
     fn ktree_can_add() {
+        crypto_init().unwrap();
         let (pk, _) = gen_keypair();
         let mut ktree = Ktree::new(&pk);
 
@@ -1069,6 +1074,7 @@ mod tests {
 
     #[test]
     fn ktree_is_all_discarded() {
+        crypto_init().unwrap();
         let (pk, _) = gen_keypair();
         let mut ktree = Ktree::new(&pk);
 

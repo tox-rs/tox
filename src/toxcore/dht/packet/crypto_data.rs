@@ -172,6 +172,7 @@ mod tests {
 
     #[test]
     fn crypto_data_encrypt_decrypt() {
+        crypto_init().unwrap();
         let (_alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
@@ -196,6 +197,7 @@ mod tests {
 
     #[test]
     fn crypto_data_encrypt_decrypt_invalid_key() {
+        crypto_init().unwrap();
         let (_alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let (_eve_pk, eve_sk) = gen_keypair();
@@ -222,6 +224,7 @@ mod tests {
 
     #[test]
     fn crypto_data_encrypt_decrypt_invalid() {
+        crypto_init().unwrap();
         let (_alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);

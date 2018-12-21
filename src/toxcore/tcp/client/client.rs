@@ -519,6 +519,7 @@ pub mod tests {
     use toxcore::tcp::server::{Server, ServerExt};
 
     pub fn create_client() -> (mpsc::UnboundedReceiver<(PublicKey, IncomingPacket)>, mpsc::Receiver<Packet>, Client) {
+        crypto_init().unwrap();
         let relay_addr = "127.0.0.1:12345".parse().unwrap();
         let (relay_pk, _relay_sk) = gen_keypair();
         let (incoming_tx, incoming_rx) = mpsc::unbounded();
@@ -1127,6 +1128,7 @@ pub mod tests {
             Box::new(future)
         }
 
+        crypto_init().unwrap();
         // run server
         let (server_pk, server_sk) = gen_keypair();
 

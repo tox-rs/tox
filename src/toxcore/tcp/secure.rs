@@ -138,7 +138,9 @@ impl Channel {
 #[cfg(test)]
 mod tests {
     use ::toxcore::tcp::secure::*;
+
     fn create_channels() -> (Channel, Channel) {
+        crypto_init().unwrap();
         let alice_session = Session::new();
         let bob_session = Session::new();
 
@@ -158,6 +160,7 @@ mod tests {
     }
     #[test]
     fn test_secure_communication() {
+        crypto_init().unwrap();
         let (alice_channel, bob_channel) = create_channels();
 
         // And now they may communicate sending encrypted data to each other

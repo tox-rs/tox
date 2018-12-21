@@ -43,7 +43,6 @@ impl ToBytes for OnionResponse {
 mod test {
     use super::*;
 
-    use toxcore::crypto_core::*;
     use toxcore::onion::packet::{OnionAnnounceResponse, OnionDataResponse};
 
     encode_decode_test!(

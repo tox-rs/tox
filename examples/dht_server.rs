@@ -58,7 +58,7 @@ fn bind_socket(addr: SocketAddr) -> UdpSocket {
 fn main() {
     env_logger::init();
 
-    if !crypto_init() {
+    if crypto_init().is_err() {
         panic!("Crypto initialization failed.");
     }
 

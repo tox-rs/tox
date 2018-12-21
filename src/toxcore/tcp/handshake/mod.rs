@@ -195,6 +195,7 @@ mod tests {
     use toxcore::tcp::handshake::*;
 
     fn create_channels_with_handshake() -> (secure::Channel, secure::Channel) {
+        crypto_init().unwrap();
         let (client_pk, client_sk) = gen_keypair();
         let (server_pk, server_sk) = gen_keypair();
 
@@ -244,6 +245,7 @@ mod tests {
     }
     #[test]
     fn client_handshake_with_different_keypair() {
+        crypto_init().unwrap();
         let (client_pk, client_sk) = gen_keypair();
         let (server_pk, _) = gen_keypair();
         let (_, mallory_sk) = gen_keypair();
@@ -253,6 +255,7 @@ mod tests {
     }
     #[test]
     fn server_handshake_with_different_keypair() {
+        crypto_init().unwrap();
         let (client_pk, client_sk) = gen_keypair();
         let (server_pk, server_sk) = gen_keypair();
         let (_, mallory_sk) = gen_keypair();
@@ -264,6 +267,7 @@ mod tests {
     }
     #[test]
     fn client_handshake_with_bad_payload() {
+        crypto_init().unwrap();
         let (client_pk, client_sk) = gen_keypair();
         let (server_pk, server_sk) = gen_keypair();
         fn create_bad_client_handshake(client_pk: &PublicKey,
@@ -285,6 +289,7 @@ mod tests {
     #[test]
     fn server_handshake_with_bad_payload() {
         use self::secure::*;
+        crypto_init().unwrap();
         let (client_pk, _) = gen_keypair();
         let (_, server_sk) = gen_keypair();
         let common_key = encrypt_precompute(&client_pk, &server_sk);
@@ -310,6 +315,7 @@ mod tests {
         use tokio;
         use tokio::net::{TcpListener, TcpStream};
 
+        crypto_init().unwrap();
         let (client_pk, client_sk) = gen_keypair();
         let (server_pk, server_sk) = gen_keypair();
 

@@ -541,6 +541,7 @@ mod tests {
 
     #[test]
     fn server_is_clonable() {
+        crypto_init().unwrap();
         let server = Server::new();
         let (client_1, _rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         server.insert(client_1).wait().unwrap();
@@ -551,6 +552,7 @@ mod tests {
     /// A function that generates random keypair, random `std::net::IpAddr`,
     /// random port, creates mpsc channel and returns created with them Client
     fn create_random_client(saddr: SocketAddr) -> (Client, mpsc::Receiver<Packet>) {
+        crypto_init().unwrap();
         let (client_pk, _) = gen_keypair();
         let (tx, rx) = mpsc::channel(32);
         let client = Client::new(tx, &client_pk, saddr.ip(), saddr.port());
@@ -925,6 +927,7 @@ mod tests {
     }
     #[test]
     fn handle_disconnect_notification_0() {
+        crypto_init().unwrap();
         let server = Server::new();
 
         let (client_pk, _) = gen_keypair();
@@ -978,6 +981,7 @@ mod tests {
     }
     #[test]
     fn handle_onion_request() {
+        crypto_init().unwrap();
         let (udp_onion_sink, udp_onion_stream) = mpsc::channel(1);
         let mut server = Server::new();
         server.set_udp_onion_sink(udp_onion_sink);
@@ -1130,6 +1134,7 @@ mod tests {
     }
     #[test]
     fn handle_data_0() {
+        crypto_init().unwrap();
         let server = Server::new();
 
         let (client_pk, _) = gen_keypair();
@@ -1319,6 +1324,7 @@ mod tests {
     }
     #[test]
     fn handle_udp_onion_response_for_unknown_client() {
+        crypto_init().unwrap();
         let (udp_onion_sink, _) = mpsc::channel(1);
         let mut server = Server::new();
         server.set_udp_onion_sink(udp_onion_sink);
@@ -1348,6 +1354,7 @@ mod tests {
     // Here be all handle_* tests from PK or to PK not in connected clients list
     #[test]
     fn handle_route_request_not_connected() {
+        crypto_init().unwrap();
         let server = Server::new();
         let (client_pk_1, _) = gen_keypair();
         let (client_pk_2, _) = gen_keypair();
@@ -1360,6 +1367,7 @@ mod tests {
     }
     #[test]
     fn handle_disconnect_notification_not_connected() {
+        crypto_init().unwrap();
         let server = Server::new();
         let (client_pk_1, _) = gen_keypair();
 
@@ -1392,6 +1400,7 @@ mod tests {
     }
     #[test]
     fn handle_ping_request_not_connected() {
+        crypto_init().unwrap();
         let server = Server::new();
         let (client_pk_1, _) = gen_keypair();
 
@@ -1403,6 +1412,7 @@ mod tests {
     }
     #[test]
     fn handle_pong_response_not_connected() {
+        crypto_init().unwrap();
         let server = Server::new();
         let (client_pk_1, _) = gen_keypair();
 
@@ -1414,6 +1424,7 @@ mod tests {
     }
     #[test]
     fn handle_oob_send_not_connected() {
+        crypto_init().unwrap();
         let server = Server::new();
         let (client_pk_1, _) = gen_keypair();
         let (client_pk_2, _) = gen_keypair();
@@ -1426,6 +1437,7 @@ mod tests {
     }
     #[test]
     fn handle_data_not_connected() {
+        crypto_init().unwrap();
         let server = Server::new();
         let (client_pk_1, _) = gen_keypair();
 
@@ -1480,6 +1492,7 @@ mod tests {
     }
     #[test]
     fn shutdown_not_connected() {
+        crypto_init().unwrap();
         let server = Server::new();
         let (client_pk, _) = gen_keypair();
         let client_ip_addr = "1.2.3.4".parse().unwrap();
@@ -1491,6 +1504,7 @@ mod tests {
     }
     #[test]
     fn shutdown_inner_not_connected() {
+        crypto_init().unwrap();
         let server = Server::new();
         let (client_pk, _) = gen_keypair();
 
@@ -1549,6 +1563,7 @@ mod tests {
     }
     #[test]
     fn send_onion_request_to_dropped_stream() {
+        crypto_init().unwrap();
         let (udp_onion_sink, udp_onion_stream) = mpsc::channel(1);
         let mut server = Server::new();
         server.set_udp_onion_sink(udp_onion_sink);
