@@ -2,6 +2,7 @@
 */
 
 mod connections;
+#[allow(clippy::module_inception)]
 mod client;
 
 pub use self::connections::*;
