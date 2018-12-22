@@ -17,7 +17,7 @@ mod lan_discovery;
 mod crypto_handshake;
 mod crypto_data;
 mod cookie;
-mod errors;
+pub mod errors;
 
 pub use self::ping_request::*;
 pub use self::ping_response::*;

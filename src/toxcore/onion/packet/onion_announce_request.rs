@@ -5,9 +5,9 @@ use super::*;
 
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
+use crate::toxcore::dht::packet::errors::*;
 
 use nom::{le_u64, rest};
-use std::io::{Error, ErrorKind};
 
 /** It's used for announcing ourselves to onion node and for looking for other
 announced nodes.
@@ -89,22 +89,20 @@ impl InnerOnionAnnounceRequest {
     - fails to decrypt
     - fails to parse as `OnionAnnounceRequestPayload`
     */
-    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<OnionAnnounceRequestPayload, Error> {
+    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<OnionAnnounceRequestPayload, GetPayloadError> {
         let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
             .map_err(|()| {
                 debug!("Decrypting OnionAnnounceRequest failed!");
-                Error::new(ErrorKind::Other, "OnionAnnounceRequest decrypt error.")
+                GetPayloadError::decrypt()
             })?;
         match OnionAnnounceRequestPayload::from_bytes(&decrypted) {
-            IResult::Incomplete(e) => {
-                debug!(target: "Onion", "OnionAnnounceRequestPayload deserialize error: {:?}", e);
-                Err(Error::new(ErrorKind::Other,
-                    format!("OnionAnnounceRequestPayload deserialize error: {:?}", e)))
+            IResult::Incomplete(needed) => {
+                debug!(target: "Onion", "OnionAnnounceRequestPayload deserialize error: {:?}", needed);
+                Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
             },
             IResult::Error(e) => {
                 debug!(target: "Onion", "OnionAnnounceRequestPayload deserialize error: {:?}", e);
-                Err(Error::new(ErrorKind::Other,
-                    format!("OnionAnnounceRequestPayload deserialize error: {:?}", e)))
+                Err(GetPayloadError::deserialize(e, self.payload.to_vec()))
             },
             IResult::Done(_, inner) => {
                 Ok(inner)

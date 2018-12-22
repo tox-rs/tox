@@ -3,7 +3,7 @@
 #[macro_use]
 extern crate log;
 
-use std::io::Error;
+use std::io::{Error, ErrorKind};
 
 use futures::*;
 use futures::sync::mpsc;

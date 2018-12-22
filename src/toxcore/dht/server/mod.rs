@@ -4,14 +4,15 @@ This module works on top of other modules.
 */
 
 pub mod hole_punching;
+mod errors;
 
 use futures::{Future, Sink, Stream, future, stream};
 use futures::future::{Either, join_all};
 use futures::sync::mpsc;
 use parking_lot::RwLock;
 use tokio::timer::Interval;
+use tokio::timer::timeout::Error as TimeoutError;
 
-use std::io::{ErrorKind, Error};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -35,6 +36,7 @@ use crate::toxcore::tcp::packet::OnionRequest;
 use crate::toxcore::net_crypto::*;
 use crate::toxcore::dht::ip_port::IsGlobal;
 use crate::toxcore::utils::*;
+use crate::toxcore::dht::server::errors::*;
 
 /// Shorthand for the transmit half of the message channel.
 type Tx = mpsc::Sender<(Packet, SocketAddr)>;
@@ -265,7 +267,7 @@ impl Server {
     /// method iterates over all nodes from close nodes list, close nodes of
     /// friends and bootstrap nodes and sends `NodesRequest` packets if
     /// necessary.
-    fn dht_main_loop(&self) -> impl Future<Item = (), Error = Error> + Send {
+    fn dht_main_loop(&self) -> impl Future<Item = (), Error = DhtLoopError> + Send {
         // Check if we should send `NodesRequest` packet to a random node. This
         // request is sent every second 5 times and then every 20 seconds.
         fn send_random_request(last_nodes_req_time: &mut Instant, random_requests_count: &mut u32) -> bool {
@@ -286,27 +288,34 @@ impl Server {
         request_queue.clear_timed_out();
 
         // Send NodesRequest packets to nodes from the Server
-        let ping_nodes_to_bootstrap = self.ping_nodes_to_bootstrap(&mut request_queue, &mut nodes_to_bootstrap, self.pk);
-        let ping_close_nodes = self.ping_close_nodes(&mut request_queue, close_nodes.iter_mut(), self.pk);
+        let ping_nodes_to_bootstrap = self.ping_nodes_to_bootstrap(&mut request_queue, &mut nodes_to_bootstrap, self.pk)
+            .map_err(|e| DhtLoopError::from(e));
+        let ping_close_nodes = self.ping_close_nodes(&mut request_queue, close_nodes.iter_mut(), self.pk)
+            .map_err(|e| DhtLoopError::from(e));
         let send_nodes_req_random = if send_random_request(&mut self.last_nodes_req_time.write(), &mut self.random_requests_count.write()) {
-            Either::A(self.send_nodes_req_random(&mut request_queue, close_nodes.iter(), self.pk))
+            Either::A(self.send_nodes_req_random(&mut request_queue, close_nodes.iter(), self.pk)
+                .map_err(|e| DhtLoopError::from(e)))
         } else {
             Either::B(future::ok(()))
         };
 
         // Send NodesRequest packets to nodes from every DhtFriend
         let send_nodes_req_to_friends = friends.iter_mut().map(|friend| {
-            let ping_nodes_to_bootstrap = self.ping_nodes_to_bootstrap(&mut request_queue, &mut friend.nodes_to_bootstrap, friend.pk);
-            let ping_close_nodes = self.ping_close_nodes(&mut request_queue, friend.close_nodes.nodes.iter_mut(), friend.pk);
+            let ping_nodes_to_bootstrap = self.ping_nodes_to_bootstrap(&mut request_queue, &mut friend.nodes_to_bootstrap, friend.pk)
+                .map_err(|e| DhtLoopError::from(e));
+            let ping_close_nodes = self.ping_close_nodes(&mut request_queue, friend.close_nodes.nodes.iter_mut(), friend.pk)
+                .map_err(|e| DhtLoopError::from(e));
             let send_nodes_req_random = if send_random_request(&mut friend.last_nodes_req_time, &mut friend.random_requests_count) {
-                Either::A(self.send_nodes_req_random(&mut request_queue, friend.close_nodes.nodes.iter(), friend.pk))
+                Either::A(self.send_nodes_req_random(&mut request_queue, friend.close_nodes.nodes.iter(), friend.pk)
+                    .map_err(|e| DhtLoopError::from(e)))
             } else {
                 Either::B(future::ok(()))
             };
             ping_nodes_to_bootstrap.join3(ping_close_nodes, send_nodes_req_random)
         }).collect::<Vec<_>>();
 
-        let send_nat_ping_req = self.send_nat_ping_req(&mut request_queue, &mut friends);
+        let send_nat_ping_req = self.send_nat_ping_req(&mut request_queue, &mut friends)
+            .map_err(|e| DhtLoopError::from(e));
 
         ping_nodes_to_bootstrap.join5(
             ping_close_nodes,
@@ -318,11 +327,15 @@ impl Server {
 
     /// Run DHT periodical tasks. Result future will never be completed
     /// successfully.
-    pub fn run(self) -> impl Future<Item = (), Error = Error> + Send {
-        self.clone().run_pings_sending().join4(
-            self.clone().run_onion_key_refresing(),
-            self.clone().run_main_loop(),
+    pub fn run(self) -> impl Future<Item = (), Error = RunError> + Send {
+        self.clone().run_pings_sending()
+            .map_err(|e| RunError::from(e)).join4(
+            self.clone().run_onion_key_refreshing()
+                .map_err(|e| RunError::from(e)),
+            self.clone().run_main_loop()
+                .map_err(|e| RunError::from(e)),
             self.run_bootstrap_requests_sending()
+                .map_err(|e| RunError::from(e))
         ).map(|_| ())
     }
 
@@ -335,22 +348,23 @@ impl Server {
     /// nodes periodically if all nodes in Ktree are discarded (including the
     /// case when it's empty). It has to be an endless loop because we might
     /// loose the network connection and thereby loose all nodes in Ktree.
-    fn run_bootstrap_requests_sending(self) -> impl Future<Item = (), Error = Error> + Send {
+    fn run_bootstrap_requests_sending(self) -> impl Future<Item = (), Error = BootstrapRequestsError> + Send {
         let interval = Duration::from_secs(BOOTSTRAP_INTERVAL);
         let wakeups = Interval::new(Instant::now(), interval);
 
         wakeups
-            .map_err(|e| Error::new(ErrorKind::Other, format!("Bootstrap timer error: {:?}", e)))
+            .map_err(|e| BootstrapRequestsError::from(e))
             .for_each(move |_instant| {
                 trace!("Bootstrap wake up");
                 self.send_bootstrap_requests()
+                    .map_err(|e| BootstrapRequestsError::from(e))
             })
     }
 
     /// Check if all nodes in Ktree are discarded (including the case when
     /// it's empty) and if so then send `NodesRequest` packet to nodes from
     /// initial bootstrap list and from Ktree.
-    fn send_bootstrap_requests(&self) -> impl Future<Item = (), Error = Error> + Send {
+    fn send_bootstrap_requests(&self) -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
         let mut request_queue = self.request_queue.write();
         let close_nodes = self.close_nodes.read();
 
@@ -370,11 +384,11 @@ impl Server {
 
     /// Run DHT main loop periodically. Result future will never be completed
     /// successfully.
-    fn run_main_loop(self) -> impl Future<Item = (), Error = Error> + Send {
+    fn run_main_loop(self) -> impl Future<Item = (), Error = MainLoopError> + Send {
         let interval = Duration::from_secs(MAIN_LOOP_INTERVAL);
         let wakeups = Interval::new(Instant::now(), interval);
         wakeups
-            .map_err(|e| Error::new(ErrorKind::Other, format!("DHT server timer error: {:?}", e)))
+            .map_err(|e| MainLoopError::from(e))
             .for_each(move |_instant| {
                 trace!("DHT server wake up");
                 self.dht_main_loop().then(|res| {
@@ -388,11 +402,11 @@ impl Server {
 
     /// Refresh onion symmetric key periodically. Result future will never be
     /// completed successfully.
-    fn run_onion_key_refresing(self) -> impl Future<Item = (), Error = Error> + Send {
+    fn run_onion_key_refreshing(self) -> impl Future<Item = (), Error = OnionKeyRefreshingError> + Send {
         let interval = Duration::from_secs(ONION_REFRESH_KEY_INTERVAL);
         let wakeups = Interval::new(Instant::now() + interval, interval);
         wakeups
-            .map_err(|e| Error::new(ErrorKind::Other, format!("DHT server timer error: {:?}", e)))
+            .map_err(|e| OnionKeyRefreshingError::from(e))
             .for_each(move |_instant| {
                 trace!("Refreshing onion key");
                 self.refresh_onion_key();
@@ -402,19 +416,20 @@ impl Server {
 
     /// Run ping sending periodically. Result future will never be completed
     /// successfully.
-    fn run_pings_sending(self) -> impl Future<Item = (), Error = Error> + Send {
+    fn run_pings_sending(self) -> impl Future<Item = (), Error = PingsSendingError> + Send {
         let interval = Duration::from_secs(TIME_TO_PING);
         let wakeups = Interval::new(Instant::now() + interval, interval);
         wakeups
-            .map_err(|e| Error::new(ErrorKind::Other, format!("Ping timer error: {:?}", e)))
+            .map_err(|e| PingsSendingError::from(e))
             .for_each(move |_instant| {
                 trace!("Pings sending wake up");
                 self.send_pings()
+                    .map_err(|e| PingsSendingError::from(e))
             })
     }
 
     /// Send `PingRequest` packets to nodes from `nodes_to_ping` list.
-    fn send_pings(&self) -> impl Future<Item = (), Error = Error> + Send {
+    fn send_pings(&self) -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
         let nodes_to_ping = mem::replace(
             &mut *self.nodes_to_ping.write(),
             Kbucket::<PackedNode>::new(MAX_TO_PING)
@@ -473,7 +488,8 @@ impl Server {
 
     /// Iterate over nodes from close nodes list and send `NodesRequest` packets
     /// to them if necessary.
-    fn ping_close_nodes<'a, T>(&self, request_queue: &mut RequestQueue, nodes: T, pk: PublicKey) -> Box<dyn Future<Item = (), Error = Error> + Send>
+    fn ping_close_nodes<'a, T>(&self, request_queue: &mut RequestQueue, nodes: T, pk: PublicKey)
+        -> Box<dyn Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send>
         where T: Iterator<Item = &'a mut DhtNode> // if change to impl Future the result will be dependent on nodes lifetime
     {
         let futures = nodes
@@ -495,7 +511,8 @@ impl Server {
     /// Send `NodesRequest` packet to a random good node every 20 seconds or if
     /// it was sent less than `NODES_REQ_INTERVAL`. This function should be
     /// called every second.
-    fn send_nodes_req_random<'a, T>(&self, request_queue: &mut RequestQueue, nodes: T, pk: PublicKey) -> Box<dyn Future<Item = (), Error = Error> + Send>
+    fn send_nodes_req_random<'a, T>(&self, request_queue: &mut RequestQueue, nodes: T, pk: PublicKey)
+        -> Box<dyn Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send>
         where T: Iterator<Item = &'a DhtNode> // if change to impl Future the result will be dependent on nodes lifetime
     {
         let good_nodes = nodes
@@ -520,7 +537,8 @@ impl Server {
     }
 
     /// Send `PingRequest` packet to the node.
-    pub fn send_ping_req(&self, node: &PackedNode, request_queue: &mut RequestQueue) -> impl Future<Item = (), Error = Error> + Send {
+    pub fn send_ping_req(&self, node: &PackedNode, request_queue: &mut RequestQueue)
+        -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
         let payload = PingRequestPayload {
             id: request_queue.new_ping_id(node.pk),
         };
@@ -530,10 +548,20 @@ impl Server {
             &payload
         ));
         self.send_to_direct(node.saddr, ping_req)
+            .then(|r| {
+                if let Err(e) = r {
+                    warn!("Failed to send ping request packets: {}", e);
+                    if let Some(e) = e.into_inner() {
+                        return future::err(e)
+                    }
+                }
+                future::ok(())
+            })
     }
 
     /// Send `NodesRequest` packet to the node.
-    pub fn send_nodes_req(&self, node: &PackedNode, request_queue: &mut RequestQueue, search_pk: PublicKey) -> impl Future<Item = (), Error = Error> + Send {
+    pub fn send_nodes_req(&self, node: &PackedNode, request_queue: &mut RequestQueue, search_pk: PublicKey)
+        -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
         // Check if packet is going to be sent to ourselves.
         if self.pk == node.pk {
             trace!("Attempt to send NodesRequest to ourselves.");
@@ -549,11 +577,22 @@ impl Server {
             &self.pk,
             &payload
         ));
-        Either::B(self.send_to_direct(node.saddr, nodes_req))
+        Either::B(self.send_to_direct(node.saddr, nodes_req)
+            .then(|r| {
+                if let Err(e) = r {
+                    warn!("Failed to send nodes request packets: {}", e);
+                    if let Some(e) = e.into_inner() {
+                        return future::err(e)
+                    }
+                }
+                future::ok(())
+            })
+        )
     }
 
     /// Send `NatPingRequest` packet to all friends and try to punch holes.
-    fn send_nat_ping_req(&self, request_queue: &mut RequestQueue, friends: &mut Vec<DhtFriend>) -> impl Future<Item = (), Error = Error> + Send {
+    fn send_nat_ping_req(&self, request_queue: &mut RequestQueue, friends: &mut Vec<DhtFriend>)
+        -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
         let futures = friends.iter_mut()
             // we don't want to punch holes to fake friends under any circumstances
             .skip(FAKE_FRIENDS_NUMBER)
@@ -592,7 +631,8 @@ impl Server {
     }
 
     /// Try to punch holes to specified friend.
-    fn punch_holes(&self, request_queue: &mut RequestQueue, friend: &mut DhtFriend, returned_addrs: &[SocketAddr]) -> impl Future<Item = (), Error = Error> + Send {
+    fn punch_holes(&self, request_queue: &mut RequestQueue, friend: &mut DhtFriend, returned_addrs: &[SocketAddr])
+        -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
         let punch_addrs = friend.hole_punch.next_punch_addrs(returned_addrs);
 
         let packets = punch_addrs.into_iter().map(|addr| {
@@ -608,25 +648,43 @@ impl Server {
             (packet, addr)
         }).collect::<Vec<_>>();
 
-        Box::new(send_all_to_bounded(&self.tx, stream::iter_ok(packets), Duration::from_secs(DHT_SEND_TIMEOUT))
-                     .map_err(|e| Error::new(ErrorKind::Other, format!("{:?}", e))))
+        send_all_to_bounded(&self.tx, stream::iter_ok(packets), Duration::from_secs(DHT_SEND_TIMEOUT))
+            .then(|r| {
+                if let Err(e) = r {
+                    warn!("Failed to send hole punching packets: {}", e);
+                    if let Some(e) = e.into_inner() {
+                        return future::err(e)
+                    }
+                }
+                future::ok(())
+            })
     }
 
     /// Send `NatPingRequest` packet to all close nodes of friend in the hope
     /// that they will redirect it to this friend.
-    fn send_nat_ping_req_inner(&self, friend: &DhtFriend, nat_ping_req_packet: DhtRequest) -> impl Future<Item = (), Error = Error> + Send {
+    fn send_nat_ping_req_inner(&self, friend: &DhtFriend, nat_ping_req_packet: DhtRequest)
+        -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
         let packet = Packet::DhtRequest(nat_ping_req_packet);
         let futures = friend.close_nodes.nodes.iter().map(|node| {
             self.send_to_node(node, &packet)
+                .then(|r| {
+                    if let Err(e) = r {
+                        warn!("Failed to send nat ping request packet: {}", e);
+                        if let Some(e) = e.into_inner() {
+                            return future::err(e)
+                        }
+                    }
+                    future::ok(())
+                })
         }).collect::<Vec<_>>();
 
         join_all(futures).map(|_| ())
     }
 
     /// Function to handle incoming packets and send responses if necessary.
-    pub fn handle_packet(&self, packet: Packet, addr: SocketAddr) -> impl Future<Item = (), Error = Error> + Send {
+    pub fn handle_packet(&self, packet: Packet, addr: SocketAddr) -> impl Future<Item = (), Error = HandlePacketError> + Send {
         match packet {
-            Packet::PingRequest(packet) => Box::new(self.handle_ping_req(&packet, addr)) as Box<dyn Future<Item = _, Error = _> + Send>,
+            Packet::PingRequest(packet) => Box::new(self.handle_ping_req(&packet, addr)) as Box<dyn Future<Item=_, Error=_> + Send>,
             Packet::PingResponse(packet) => Box::new(self.handle_ping_resp(&packet, addr)),
             Packet::NodesRequest(packet) => Box::new(self.handle_nodes_req(&packet, addr)),
             Packet::NodesResponse(packet) => Box::new(self.handle_nodes_resp(&packet, addr)),
@@ -640,31 +698,33 @@ impl Server {
             Packet::OnionRequest2(packet) => Box::new(self.handle_onion_request_2(&packet, addr)),
             Packet::OnionAnnounceRequest(packet) => Box::new(self.handle_onion_announce_request(packet, addr)),
             Packet::OnionDataRequest(packet) => Box::new(self.handle_onion_data_request(packet)),
-            Packet::OnionResponse3(packet) => Box::new(self.handle_onion_response_3(packet)),
-            Packet::OnionResponse2(packet) => Box::new(self.handle_onion_response_2(packet)),
-            Packet::OnionResponse1(packet) => Box::new(self.handle_onion_response_1(packet)),
-            Packet::BootstrapInfo(packet) => Box::new(self.handle_bootstrap_info(&packet, addr)),
+            Packet::OnionResponse3(packet) => Box::new(self.handle_onion_response_3(packet)
+                .map_err(|e| HandlePacketError::from(e))),
+            Packet::OnionResponse2(packet) => Box::new(self.handle_onion_response_2(packet)
+                .map_err(|e| HandlePacketError::from(e))),
+            Packet::OnionResponse1(packet) => Box::new(self.handle_onion_response_1(packet)
+                .map_err(|e| HandlePacketError::from(e))),
+            Packet::BootstrapInfo(packet) => Box::new(self.handle_bootstrap_info(&packet, addr)
+                .map_err(|e| HandlePacketError::from(e))),
             // This packet should be handled in client only
-            Packet::CryptoData(packet) => Box::new(future::err(
-                Error::new(ErrorKind::Other,
-                           format!("Packet is not handled {:?}", packet)
-                ))),
+            Packet::CryptoData(_packet) => Box::new(future::err(
+                HandlePacketError::from(HandlePacketErrorKind::NotHandled)
+            )),
             // This packet should be handled in client only
-            Packet::OnionDataResponse(packet) => Box::new(future::err(
-                Error::new(ErrorKind::Other,
-                           format!("Packet is not handled {:?}", packet)
-                ))),
+            Packet::OnionDataResponse(_packet) => Box::new(future::err(
+                HandlePacketError::from(HandlePacketErrorKind::NotHandled)
+            )),
             // This packet should be handled in client only
-            Packet::OnionAnnounceResponse(packet) => Box::new(future::err(
-                Error::new(ErrorKind::Other,
-                           format!("Packet is not handled {:?}", packet)
-                ))),
+            Packet::OnionAnnounceResponse(_packet) => Box::new(future::err(
+                HandlePacketError::from(HandlePacketErrorKind::NotHandled)
+            )),
         }
     }
 
     /// Send UDP packet node. If the node has both IPv4 and IPv6 addresses,
     /// then it sends packet to both addresses.
-    fn send_to_node(&self, node: &DhtNode, packet: &Packet) -> impl Future<Item = (), Error = Error> + Send {
+    fn send_to_node(&self, node: &DhtNode, packet: &Packet)
+        -> impl Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send {
         let addrs = node.get_all_addrs();
 
         let futures = addrs.into_iter()
@@ -675,20 +735,19 @@ impl Server {
     }
 
     /// Send UDP packet to specified address.
-    fn send_to_direct(&self, addr: SocketAddr, packet: Packet) -> impl Future<Item = (), Error = Error> + Send {
-        send_to_bounded(&self.tx, (packet, addr), Duration::from_secs(DHT_SEND_TIMEOUT)).map_err(|e|
-            Error::new(ErrorKind::Other,
-                format!("Failed to send packet: {:?}", e)
-        ))
+    fn send_to_direct(&self, addr: SocketAddr, packet: Packet)
+        -> impl Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send {
+        send_to_bounded(&self.tx, (packet, addr), Duration::from_secs(DHT_SEND_TIMEOUT))
     }
 
     /// Handle received `PingRequest` packet and response with `PingResponse`
     /// packet. If node that sent this packet is not present in close nodes list
     /// and can be added there then it will be added to ping list.
-    fn handle_ping_req(&self, packet: &PingRequest, addr: SocketAddr) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_ping_req(&self, packet: &PingRequest, addr: SocketAddr)
+        -> impl Future<Item = (), Error = HandlePacketError> + Send {
         let precomputed_key = self.precomputed_keys.get(packet.pk);
         let payload = match packet.get_payload(&precomputed_key) {
-            Err(e) => return Either::A(future::err(Error::from(e))),
+            Err(e) => return Either::A(future::err(HandlePacketError::from(e))),
             Ok(payload) => payload,
         };
 
@@ -701,26 +760,36 @@ impl Server {
             &resp_payload
         ));
 
-        Either::B(self.ping_add(PackedNode::new(addr, &packet.pk))
-            .join(self.send_to_direct(addr, ping_resp))
+        Either::B(self.ping_add(&PackedNode::new(addr, &packet.pk))
+            .join(self.send_to_direct(addr, ping_resp)
+                .then(|r| {
+                    if let Err(e) = r {
+                        warn!("Failed to send nat ping response packet: {}", e);
+                        if let Some(e) = e.into_inner() {
+                            return future::err(e)
+                        }
+                    }
+                    future::ok(())
+                })
+            )
             .map(|_| ())
+            .map_err(|e| HandlePacketError::from(e))
         )
     }
 
     /// Handle received `PingResponse` packet and if it's correct add the node
     /// that sent this packet to close nodes lists.
-    fn handle_ping_resp(&self, packet: &PingResponse, addr: SocketAddr) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_ping_resp(&self, packet: &PingResponse, addr: SocketAddr) -> impl Future<Item = (), Error = HandlePacketError> + Send {
         let precomputed_key = self.precomputed_keys.get(packet.pk);
         let payload = match packet.get_payload(&precomputed_key) {
-            Err(e) => return future::err(Error::from(e)),
+            Err(e) => return future::err(HandlePacketError::from(e)),
             Ok(payload) => payload,
         };
 
         if payload.id == 0u64 {
             return future::err(
-                Error::new(ErrorKind::Other,
-                    "PingResponse.ping_id == 0"
-            ))
+                HandlePacketError::from(HandlePacketErrorKind::ZeroPingId)
+            )
         }
 
         let mut request_queue = self.request_queue.write();
@@ -738,7 +807,7 @@ impl Server {
             future::ok(())
         } else {
             future::err(
-                Error::new(ErrorKind::Other, "PingResponse.ping_id does not match")
+                HandlePacketError::from(HandlePacketErrorKind::PingIdMismatch)
             )
         }
     }
@@ -746,10 +815,11 @@ impl Server {
     /// Handle received `NodesRequest` packet and respond with `NodesResponse`
     /// packet. If node that sent this packet is not present in close nodes list
     /// and can be added there then it will be added to ping list.
-    fn handle_nodes_req(&self, packet: &NodesRequest, addr: SocketAddr) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_nodes_req(&self, packet: &NodesRequest, addr: SocketAddr)
+        -> impl Future<Item = (), Error = HandlePacketError> + Send {
         let precomputed_key = self.precomputed_keys.get(packet.pk);
         let payload = match packet.get_payload(&precomputed_key) {
-            Err(e) => return Either::A(future::err(Error::from(e))),
+            Err(e) => return Either::A(future::err(HandlePacketError::from(e))),
             Ok(payload) => payload,
         };
 
@@ -765,9 +835,19 @@ impl Server {
             &resp_payload
         ));
 
-        Either::B(self.ping_add(PackedNode::new(addr, &packet.pk))
-            .join(self.send_to_direct(addr, nodes_resp))
+        Either::B(self.ping_add(&PackedNode::new(addr, &packet.pk))
+            .join(self.send_to_direct(addr, nodes_resp)
+                .then(|r| {
+                    if let Err(e) = r {
+                        warn!("Failed to send nodes response packet: {}", e);
+                        if let Some(e) = e.into_inner() {
+                            return future::err(e)
+                        }
+                    }
+                    future::ok(())
+                }))
             .map(|_| ())
+            .map_err(|e| HandlePacketError::from(e))
         )
     }
 
@@ -775,10 +855,11 @@ impl Server {
     /// that sent this packet to close nodes lists. Nodes from response will be
     /// added to bootstrap nodes list to send `NodesRequest` packet to them
     /// later.
-    fn handle_nodes_resp(&self, packet: &NodesResponse, addr: SocketAddr) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_nodes_resp(&self, packet: &NodesResponse, addr: SocketAddr)
+        -> impl Future<Item = (), Error = HandlePacketError> + Send {
         let precomputed_key = self.precomputed_keys.get(packet.pk);
         let payload = match packet.get_payload(&precomputed_key) {
-            Err(e) => return future::err(Error::from(e)),
+            Err(e) => return future::err(HandlePacketError::from(e)),
             Ok(payload) => payload,
         };
 
@@ -842,43 +923,50 @@ impl Server {
 
     /// Handle received `CookieRequest` packet and pass it to `net_crypto`
     /// module.
-    fn handle_cookie_request(&self, packet: &CookieRequest, addr: SocketAddr) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_cookie_request(&self, packet: &CookieRequest, addr: SocketAddr)
+        -> impl Future<Item = (), Error = HandlePacketError> + Send {
         if let Some(ref net_crypto) = self.net_crypto {
-            Either::A(net_crypto.handle_udp_cookie_request(packet, addr))
+            Either::A(net_crypto.handle_udp_cookie_request(packet, addr)
+                .map_err(|e| HandlePacketError::from(e)))
         } else {
             Either::B( future::err(
-                Error::new(ErrorKind::Other, "Net crypto is not initialised")
+                HandlePacketError::from(HandlePacketErrorKind::NetCrypto)
             ))
         }
     }
 
     /// Handle received `CookieResponse` packet and pass it to `net_crypto`
     /// module.
-    fn handle_cookie_response(&self, packet: &CookieResponse, addr: SocketAddr) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_cookie_response(&self, packet: &CookieResponse, addr: SocketAddr)
+        -> impl Future<Item = (), Error = HandlePacketError> + Send {
         if let Some(ref net_crypto) = self.net_crypto {
-            Either::A(net_crypto.handle_udp_cookie_response(packet, addr))
+            Either::A(net_crypto.handle_udp_cookie_response(packet, addr)
+                .map_err(|e| HandlePacketError::from(e)))
         } else {
             Either::B( future::err(
-                Error::new(ErrorKind::Other, "Net crypto is not initialised")
+                HandlePacketError::from(HandlePacketErrorKind::NetCrypto)
             ))
         }
     }
 
     /// Handle received `CryptoHandshake` packet and pass it to `net_crypto`
     /// module.
-    fn handle_crypto_handshake(&self, packet: &CryptoHandshake, addr: SocketAddr) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_crypto_handshake(&self, packet: &CryptoHandshake, addr: SocketAddr)
+        -> impl Future<Item = (), Error = HandlePacketError> + Send {
         if let Some(ref net_crypto) = self.net_crypto {
-            Either::A(net_crypto.handle_udp_crypto_handshake(packet, addr))
+            Either::A(net_crypto.handle_udp_crypto_handshake(packet, addr)
+                .map_err(|e| HandlePacketError::from(e)))
         } else {
             Either::B( future::err(
-                Error::new(ErrorKind::Other, "Net crypto is not initialised")
+                HandlePacketError::from(HandlePacketErrorKind::NetCrypto)
             ))
         }
     }
 
     /// Handle received `DhtRequest` packet, redirect it if it's sent for
     /// someone else or parse it and handle the payload if it's sent for us.
-    fn handle_dht_req(&self, packet: DhtRequest, addr: SocketAddr) -> impl Future<Item = (), Error = Error> + Send { // TODO: split to functions
+    fn handle_dht_req(&self, packet: DhtRequest, addr: SocketAddr)
+        -> impl Future<Item = (), Error = HandlePacketError> + Send { // TODO: split to functions
         if packet.rpk == self.pk { // the target peer is me
             Either::A(self.handle_dht_req_for_us(&packet, addr))
         } else {
@@ -887,11 +975,12 @@ impl Server {
     }
 
     /// Parse received `DhtRequest` packet and handle the payload.
-    fn handle_dht_req_for_us(&self, packet: &DhtRequest, addr: SocketAddr) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_dht_req_for_us(&self, packet: &DhtRequest, addr: SocketAddr)
+        -> impl Future<Item = (), Error = HandlePacketError> + Send {
         let precomputed_key = self.precomputed_keys.get(packet.spk);
         let payload = packet.get_payload(&precomputed_key);
         let payload = match payload {
-            Err(e) => return Box::new(future::err(Error::from(e))) as Box<dyn Future<Item = _, Error = _> + Send>,
+            Err(e) => return Box::new(future::err(HandlePacketError::from(e))) as Box<dyn Future<Item = _, Error = _> + Send>,
             Ok(payload) => payload,
         };
 
@@ -923,11 +1012,22 @@ impl Server {
     }
 
     /// Redirect received `DhtRequest` packet.
-    fn handle_dht_req_for_others(&self, packet: DhtRequest) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_dht_req_for_others(&self, packet: DhtRequest)
+        -> impl Future<Item = (), Error = HandlePacketError> + Send {
         let close_nodes = self.close_nodes.read();
         if let Some(node) = close_nodes.get_node(&packet.rpk) { // search close_nodes to find target peer
             let packet = Packet::DhtRequest(packet);
-            Either::A(self.send_to_node(node, &packet))
+            Either::A(self.send_to_node(node, &packet)
+                .then(|r| {
+                    if let Err(e) = r {
+                        warn!("Failed to send dht request packet: {}", e);
+                        if let Some(e) = e.into_inner() {
+                            return future::err(HandlePacketError::from(e))
+                        }
+                    }
+                    future::ok(())
+                })
+            )
         } else {
             Either::B(future::ok(()))
         }
@@ -935,16 +1035,15 @@ impl Server {
 
     /// Handle received `NatPingRequest` packet and respond with
     /// `NatPingResponse` packet.
-    fn handle_nat_ping_req(&self, payload: NatPingRequest, spk: &PublicKey, addr: SocketAddr) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_nat_ping_req(&self, payload: NatPingRequest, spk: &PublicKey, addr: SocketAddr)
+        -> impl Future<Item = (), Error = HandlePacketError> + Send {
         let mut friends = self.friends.write();
 
         let friend = friends.iter_mut()
             .find(|friend| friend.pk == *spk);
         let friend = match friend {
             None => return Either::A( future::err(
-                Error::new(ErrorKind::Other,
-                           "Can't find friend"
-                ))),
+                HandlePacketError::from(HandlePacketErrorKind::NoFriend))),
             Some(friend) => friend,
         };
 
@@ -959,16 +1058,26 @@ impl Server {
             &self.pk,
             &resp_payload
         ));
-        Either::B(self.send_to_direct(addr, nat_ping_resp))
+        Either::B(self.send_to_direct(addr, nat_ping_resp)
+            .then(|r| {
+                if let Err(e) = r {
+                    warn!("Failed to send nat ping response packets: {}", e);
+                    if let Some(e) = e.into_inner() {
+                        return future::err(HandlePacketError::from(e))
+                    }
+                }
+                future::ok(())
+            })
+        )
     }
 
     /// Handle received `NatPingResponse` packet and enable hole punching if
     /// it's correct.
-    fn handle_nat_ping_resp(&self, payload: NatPingResponse, spk: &PublicKey) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_nat_ping_resp(&self, payload: NatPingResponse, spk: &PublicKey)
+        -> impl Future<Item = (), Error = HandlePacketError> + Send {
         if payload.id == 0 {
             return future::err(
-                Error::new(ErrorKind::Other,
-                    "NodesResponse.ping_id == 0"
+                HandlePacketError::from(HandlePacketErrorKind::ZeroPingId
             ))
         }
 
@@ -978,8 +1087,7 @@ impl Server {
             .find(|friend| friend.pk == *spk);
         let friend = match friend {
             None => return future::err(
-                Error::new(ErrorKind::Other,
-                           "Can't find friend"
+                HandlePacketError::from(HandlePacketErrorKind::NoFriend
                 )),
             Some(friend) => friend,
         };
@@ -995,14 +1103,15 @@ impl Server {
             future::ok(())
         } else {
             future::err(
-                Error::new(ErrorKind::Other, "NatPingResponse.ping_id does not match or timed out")
+                HandlePacketError::from(HandlePacketErrorKind::PingIdMismatch)
             )
         }
     }
 
     /// Handle received `LanDiscovery` packet and response with `NodesRequest`
     /// packet.
-    fn handle_lan_discovery(&self, packet: &LanDiscovery, addr: SocketAddr) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_lan_discovery(&self, packet: &LanDiscovery, addr: SocketAddr)
+        -> impl Future<Item = (), Error = HandlePacketError> + Send {
         // LanDiscovery is optional
         if !self.lan_discovery_enabled {
             return Either::A(future::ok(()));
@@ -1013,17 +1122,19 @@ impl Server {
             return Either::A(future::ok(()));
         }
 
-        Either::B(self.send_nodes_req(&PackedNode::new(addr, &packet.pk), &mut self.request_queue.write(), self.pk))
+        Either::B(self.send_nodes_req(&PackedNode::new(addr, &packet.pk), &mut self.request_queue.write(), self.pk)
+            .map_err(|e| HandlePacketError::from(e)))
     }
 
     /// Handle received `OnionRequest0` packet and send `OnionRequest1` packet
     /// to the next peer.
-    fn handle_onion_request_0(&self, packet: &OnionRequest0, addr: SocketAddr) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_onion_request_0(&self, packet: &OnionRequest0, addr: SocketAddr)
+        -> impl Future<Item = (), Error = HandlePacketError> + Send {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let shared_secret = self.precomputed_keys.get(packet.temporary_pk);
         let payload = packet.get_payload(&shared_secret);
         let payload = match payload {
-            Err(e) => return Either::A(future::err(e)),
+            Err(e) => return Either::A(future::err(HandlePacketError::from(e))),
             Ok(payload) => payload,
         };
 
@@ -1038,17 +1149,28 @@ impl Server {
             payload: payload.inner,
             onion_return
         });
-        Either::B(self.send_to_direct(payload.ip_port.to_saddr(), next_packet))
+        Either::B(self.send_to_direct(payload.ip_port.to_saddr(), next_packet)
+            .then(|r| {
+                if let Err(e) = r {
+                    warn!("Failed to send onion request 1 packets: {}", e);
+                    if let Some(e) = e.into_inner() {
+                        return future::err(HandlePacketError::from(e))
+                    }
+                }
+                future::ok(())
+            })
+        )
     }
 
     /// Handle received `OnionRequest1` packet and send `OnionRequest2` packet
     /// to the next peer.
-    fn handle_onion_request_1(&self, packet: &OnionRequest1, addr: SocketAddr) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_onion_request_1(&self, packet: &OnionRequest1, addr: SocketAddr)
+        -> impl Future<Item = (), Error = HandlePacketError> + Send {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let shared_secret = self.precomputed_keys.get(packet.temporary_pk);
         let payload = packet.get_payload(&shared_secret);
         let payload = match payload {
-            Err(e) => return Either::A(future::err(e)),
+            Err(e) => return Either::A(future::err(HandlePacketError::from(e))),
             Ok(payload) => payload,
         };
 
@@ -1063,17 +1185,28 @@ impl Server {
             payload: payload.inner,
             onion_return
         });
-        Either::B(self.send_to_direct(payload.ip_port.to_saddr(), next_packet))
+        Either::B(self.send_to_direct(payload.ip_port.to_saddr(), next_packet)
+            .then(|r| {
+                if let Err(e) = r {
+                    warn!("Failed to send onion request 2 packets: {}", e);
+                    if let Some(e) = e.into_inner() {
+                        return future::err(HandlePacketError::from(e))
+                    }
+                }
+                future::ok(())
+            })
+        )
     }
 
     /// Handle received `OnionRequest2` packet and send `OnionAnnounceRequest`
     /// or `OnionDataRequest` packet to the next peer.
-    fn handle_onion_request_2(&self, packet: &OnionRequest2, addr: SocketAddr) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_onion_request_2(&self, packet: &OnionRequest2, addr: SocketAddr)
+        -> impl Future<Item = (), Error = HandlePacketError> + Send {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let shared_secret = self.precomputed_keys.get(packet.temporary_pk);
         let payload = packet.get_payload(&shared_secret);
         let payload = match payload {
-            Err(e) => return Either::A(future::err(e)),
+            Err(e) => return Either::A(future::err(HandlePacketError::from(e))),
             Ok(payload) => payload,
         };
 
@@ -1092,7 +1225,17 @@ impl Server {
                 onion_return
             }),
         };
-        Either::B(self.send_to_direct(payload.ip_port.to_saddr(), next_packet))
+        Either::B(self.send_to_direct(payload.ip_port.to_saddr(), next_packet)
+            .then(|r| {
+                if let Err(e) = r {
+                    warn!("Failed to send onion announce request or onion data request packet: {}", e);
+                    if let Some(e) = e.into_inner() {
+                        return future::err(HandlePacketError::from(e))
+                    }
+                }
+                future::ok(())
+            })
+        )
     }
 
     /// Handle received `OnionAnnounceRequest` packet and response with
@@ -1101,12 +1244,13 @@ impl Server {
     /// The response packet will contain up to 4 closest to `search_pk` nodes
     /// from ktree. They are used to search closest to long term `PublicKey`
     /// nodes to announce.
-    fn handle_onion_announce_request(&self, packet: OnionAnnounceRequest, addr: SocketAddr) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_onion_announce_request(&self, packet: OnionAnnounceRequest, addr: SocketAddr)
+        -> impl Future<Item = (), Error = HandlePacketError> + Send {
         let mut onion_announce = self.onion_announce.write();
 
         let shared_secret = self.precomputed_keys.get(packet.inner.pk);
         let payload = match packet.inner.get_payload(&shared_secret) {
-            Err(e) => return Either::A(future::err(e)),
+            Err(e) => return Either::A(future::err(HandlePacketError::from(e))),
             Ok(payload) => payload,
         };
 
@@ -1129,23 +1273,44 @@ impl Server {
         Either::B(self.send_to_direct(addr, Packet::OnionResponse3(OnionResponse3 {
             onion_return: packet.onion_return,
             payload: InnerOnionResponse::OnionAnnounceResponse(response)
-        })))
+        }))
+            .then(|r| {
+                if let Err(e) = r {
+                    warn!("Failed to send onion response 3 packet: {}", e);
+                    if let Some(e) = e.into_inner() {
+                        return future::err(HandlePacketError::from(e))
+                    }
+                }
+                future::ok(())
+            })
+        )
     }
 
     /// Handle received `OnionDataRequest` packet and send `OnionResponse3`
     /// packet with inner `OnionDataResponse` to destination node through its
     /// onion path.
-    fn handle_onion_data_request(&self, packet: OnionDataRequest) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_onion_data_request(&self, packet: OnionDataRequest)
+        -> impl Future<Item = (), Error = HandlePacketError> + Send {
         let onion_announce = self.onion_announce.read();
         match onion_announce.handle_data_request(packet) {
-            Ok((response, addr)) => Either::A(self.send_to_direct(addr, Packet::OnionResponse3(response))),
-            Err(e) => Either::B(future::err(e))
+            Ok((response, addr)) => Either::A(self.send_to_direct(addr, Packet::OnionResponse3(response))
+                .then(|r| {
+                    if let Err(e) = r {
+                        warn!("Failed to send onion response 3 packets: {}", e);
+                        if let Some(e) = e.into_inner() {
+                            return future::err(HandlePacketError::from(e))
+                        }
+                    }
+                    future::ok(())
+                })
+            ),
+            Err(e) => Either::B(future::err(HandlePacketError::from(e)))
         }
     }
 
     /// Handle received `OnionResponse3` packet and send `OnionResponse2` packet
     /// to the next peer which address is stored in encrypted onion return.
-    fn handle_onion_response_3(&self, packet: OnionResponse3) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_onion_response_3(&self, packet: OnionResponse3) -> impl Future<Item = (), Error = OnionResponseError> + Send {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let payload = packet.onion_return.get_payload(&onion_symmetric_key);
         let payload = match payload {
@@ -1164,18 +1329,25 @@ impl Server {
                 onion_return: next_onion_return,
                 payload: packet.payload
             });
-            Either::B(self.send_to_direct(ip_port.to_saddr(), next_packet))
+            Either::B(self.send_to_direct(ip_port.to_saddr(), next_packet)
+                .then(|r| {
+                    if let Err(e) = r {
+                        warn!("Failed to send onion response 2 packets: {}", e);
+                        if let Some(e) = e.into_inner() {
+                            return future::err(OnionResponseError::from(e))
+                        }
+                    }
+                    future::ok(())
+                })
+            )
         } else {
-            Either::A( future::err(
-                Error::new(ErrorKind::Other,
-                    "OnionResponse3 next_onion_return is none".to_string()
-            )))
+            Either::A(future::err(OnionResponseError::from(OnionResponseErrorKind::Next)))
         }
     }
 
     /// Handle received `OnionResponse2` packet and send `OnionResponse1` packet
     /// to the next peer which address is stored in encrypted onion return.
-    fn handle_onion_response_2(&self, packet: OnionResponse2) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_onion_response_2(&self, packet: OnionResponse2) -> impl Future<Item = (), Error = OnionResponseError> + Send {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let payload = packet.onion_return.get_payload(&onion_symmetric_key);
         let payload = match payload {
@@ -1194,19 +1366,26 @@ impl Server {
                 onion_return: next_onion_return,
                 payload: packet.payload
             });
-            Either::B(self.send_to_direct(ip_port.to_saddr(), next_packet))
+            Either::B(self.send_to_direct(ip_port.to_saddr(), next_packet)
+                .then(|r| {
+                    if let Err(e) = r {
+                        warn!("Failed to send onion response 1 packets: {}", e);
+                        if let Some(e) = e.into_inner() {
+                            return future::err(OnionResponseError::from(e))
+                        }
+                    }
+                    future::ok(())
+                })
+            )
         } else {
-            Either::A( future::err(
-                Error::new(ErrorKind::Other,
-                    "OnionResponse2 next_onion_return is none".to_string()
-            )))
+            Either::A(future::err(OnionResponseError::from(OnionResponseErrorKind::Next)))
         }
     }
 
     /// Handle received `OnionResponse1` packet and send `OnionAnnounceResponse`
     /// or `OnionDataResponse` packet to the next peer which address is stored
     /// in encrypted onion return.
-    fn handle_onion_response_1(&self, packet: OnionResponse1) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_onion_response_1(&self, packet: OnionResponse1) -> impl Future<Item = (), Error = OnionResponseError> + Send {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let payload = packet.onion_return.get_payload(&onion_symmetric_key);
         let payload = match payload {
@@ -1227,32 +1406,34 @@ impl Server {
                         InnerOnionResponse::OnionAnnounceResponse(inner) => Packet::OnionAnnounceResponse(inner),
                         InnerOnionResponse::OnionDataResponse(inner) => Packet::OnionDataResponse(inner),
                     };
-                    Box::new(self.send_to_direct(ip_port.to_saddr(), next_packet)) as Box<dyn Future<Item = _, Error = _> + Send>
+                    Box::new(self.send_to_direct(ip_port.to_saddr(), next_packet)
+                        .then(|r| {
+                            if let Err(e) = r {
+                                warn!("Failed to send onion announce response or onion data response packet: {}", e);
+                                if let Some(e) = e.into_inner() {
+                                    return future::err(OnionResponseError::from(e))
+                                }
+                            }
+                            future::ok(())
+                        })
+                    ) as Box<dyn Future<Item = _, Error = _> + Send>
                 },
                 ProtocolType::TCP => {
                     if let Some(ref tcp_onion_sink) = self.tcp_onion_sink {
                         Box::new(tcp_onion_sink.clone() // clone sink for 1 send only
                             .send((packet.payload, ip_port.to_saddr()))
                             .map(|_sink| ()) // ignore sink because it was cloned
-                            .map_err(|_| {
-                                // This may only happen if sink is gone
-                                // So cast SendError<T> to a corresponding std::io::Error
-                                Error::from(ErrorKind::UnexpectedEof)
-                            })
+                            .map_err(|e| OnionResponseError::from(e))
                         )
                     } else {
                         Box::new( future::err(
-                            Error::new(ErrorKind::Other,
-                                "OnionResponse1 can't be redirected to TCP relay".to_string()
-                        )))
+                            OnionResponseError::from(OnionResponseErrorKind::Redirect)
+                        ))
                     }
                 },
             }
         } else {
-            Box::new( future::err(
-                Error::new(ErrorKind::Other,
-                    "OnionResponse1 next_onion_return is some".to_string()
-            )))
+            Box::new(future::err(OnionResponseError::from(OnionResponseErrorKind::Next)))
         }
     }
 
@@ -1270,7 +1451,8 @@ impl Server {
 
     /// Handle `OnionRequest` from TCP relay and send `OnionRequest1` packet
     /// to the next node in the onion path.
-    pub fn handle_tcp_onion_request(&self, packet: OnionRequest, addr: SocketAddr) -> impl Future<Item = (), Error = Error> + Send {
+    pub fn handle_tcp_onion_request(&self, packet: OnionRequest, addr: SocketAddr)
+        -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
         let onion_symmetric_key = self.onion_symmetric_key.read();
 
         let onion_return = OnionReturn::new(
@@ -1285,15 +1467,23 @@ impl Server {
             onion_return
         });
         self.send_to_direct(packet.ip_port.to_saddr(), next_packet)
+            .then(|r| {
+                if let Err(e) = r {
+                    warn!("Failed to send onion request 1 packet: {}", e);
+                    if let Some(e) = e.into_inner() {
+                        return future::err(e)
+                    }
+                }
+                future::ok(())
+            })
     }
 
     /// Handle `BootstrapInfo` packet and response with `BootstrapInfo` packet.
-    fn handle_bootstrap_info(&self, packet: &BootstrapInfo, addr: SocketAddr) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_bootstrap_info(&self, packet: &BootstrapInfo, addr: SocketAddr) -> impl Future<Item = (), Error = HandleBootstrapInfoError> + Send {
         if packet.motd.len() != BOOSTRAP_CLIENT_MAX_MOTD_LENGTH {
             return Either::A( future::err(
-                Error::new(ErrorKind::Other,
-                    "Wrong BootstrapInfo packet length".to_string()
-            )))
+                HandleBootstrapInfoError::from(HandleBootstrapInfoErrorKind::Length)
+            ))
         }
 
         if let Some(ref bootstrap_info) = self.bootstrap_info {
@@ -1310,7 +1500,17 @@ impl Server {
                 version: bootstrap_info.version,
                 motd,
             });
-            Either::B(self.send_to_direct(addr, packet))
+            Either::B(self.send_to_direct(addr, packet)
+                .then(|r| {
+                    if let Err(e) = r {
+                        warn!("Failed to send bootstrap info packet: {}", e);
+                        if let Some(e) = e.into_inner() {
+                            return future::err(HandleBootstrapInfoError::from(e))
+                        }
+                    }
+                    future::ok(())
+                })
+            )
         } else {
             // Do not respond to BootstrapInfo packets if bootstrap_info not defined
             Either::A(future::ok(()))

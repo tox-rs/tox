@@ -66,7 +66,8 @@ impl ServerExt for Server {
             .select(network_writer)
             .map(|_| ())
             .map_err(|(e, _)| e)
-            .select(self.run())
+            .select(self.run()
+                .map_err(|e| Error::new(ErrorKind::Other, format!("{:?}", e))))
             .map(|_| ())
             .map_err(|(e, _)| e))
     }
