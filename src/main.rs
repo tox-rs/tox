@@ -276,7 +276,7 @@ fn run_udp(config: &NodeConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_onion
 }
 
 fn main() {
-    if !crypto_init() {
+    if crypto_init().is_err() {
         panic!("Crypto initialization failed.");
     }
 
