@@ -85,10 +85,10 @@ impl Motd {
     fn summary(source: u64) -> String {
         match source {
             0..=999 => format!("{}",source),
-            1000..=999999 => format!("{0:.1}K", source as f32 / 1000.0),
-            1000000..=999999999 => format!("{0:.1}M", source as f32 / 1000000.0),
-            1000000000..=999999999999 => format!("{0:.1}G", source as f32 / 1000000000.0),
-            1000000000000..=u64::MAX => format!("{0:.1}T", source as f32 / 1000000000000.0),
+            1_000..=999_999 => format!("{0:.1}K", source as f32 / 1_000.0),
+            1_000_000..=999_999_999 => format!("{0:.1}M", source as f32 / 1_000_000.0),
+            1_000_000_000..=999_999_999_999 => format!("{0:.1}G", source as f32 / 1_000_000_000.0),
+            1_000_000_000_000..=u64::MAX => format!("{0:.1}T", source as f32 / 1_000_000_000_000.0),
             _ => unreachable!("Packets counter has an impossible value")
         }
     }

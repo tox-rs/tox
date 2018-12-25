@@ -67,7 +67,7 @@ fn version() -> u32 {
     assert!(major < 1000, "Invalid major version");
     assert!(minor < 1000, "Invalid minor version");
     assert!(patch < 1000, "Invalid patch version");
-    3000000000 + major * 1000000 + minor * 1000 + patch
+    3_000_000_000 + major * 1_000_000 + minor * 1000 + patch
 }
 
 /// Bind a UDP listener to the socket address.
@@ -304,7 +304,7 @@ fn main() {
         LogType::None => { },
     }
 
-    for (key, _) in &config.unused {
+    for key in config.unused.keys() {
         warn!("Unused configuration key: {:?}", key);
     }
 
