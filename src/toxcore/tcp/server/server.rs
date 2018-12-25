@@ -7,7 +7,6 @@ use toxcore::tcp::server::client::Client;
 use toxcore::tcp::connection_id::ConnectionId;
 use toxcore::tcp::links::*;
 use toxcore::tcp::packet::*;
-use toxcore::io_tokio::IoFuture;
 
 use std::io::{Error, ErrorKind};
 use std::collections::HashMap;
@@ -16,6 +15,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use futures::{Sink, Stream, Future, future, stream};
+use futures::future::Either;
 use futures::sync::mpsc;
 use parking_lot::RwLock;
 
@@ -58,13 +58,13 @@ impl Server {
     /** Insert the client into `connected_clients`. If `connected_clients`
     contains a client with the same pk it will be terminated.
     */
-    pub fn insert(&self, client: Client) -> IoFuture<()> {
+    pub fn insert(&self, client: Client) -> impl Future<Item = (), Error = Error> + Send {
         let mut state = self.state.write();
 
         let shutdown_future = if state.connected_clients.contains_key(&client.pk()) {
-            self.shutdown_client_inner(&client.pk(), &mut state)
+            Either::A(self.shutdown_client_inner(&client.pk(), &mut state))
         } else {
-            Box::new(future::ok(()))
+            Either::B(future::ok(()))
         };
 
         state.keys_by_addr
@@ -77,29 +77,31 @@ impl Server {
     /**The main processing function. Call in on each incoming packet from connected and
     handshaked client.
     */
-    pub fn handle_packet(&self, pk: &PublicKey, packet: Packet) -> IoFuture<()> {
+    pub fn handle_packet(&self, pk: &PublicKey, packet: Packet) -> impl Future<Item = (), Error = Error> + Send {
+        // TODO: use anonymous sum types when rust has them
+        // https://github.com/rust-lang/rfcs/issues/294
         match packet {
-            Packet::RouteRequest(packet) => self.handle_route_request(pk, &packet),
-            Packet::RouteResponse(packet) => self.handle_route_response(pk, &packet),
-            Packet::ConnectNotification(packet) => self.handle_connect_notification(pk, &packet),
-            Packet::DisconnectNotification(packet) => self.handle_disconnect_notification(pk, &packet),
-            Packet::PingRequest(packet) => self.handle_ping_request(pk, &packet),
-            Packet::PongResponse(packet) => self.handle_pong_response(pk, &packet),
-            Packet::OobSend(packet) => self.handle_oob_send(pk, packet),
-            Packet::OobReceive(packet) => self.handle_oob_receive(pk, &packet),
-            Packet::OnionRequest(packet) => self.handle_onion_request(pk, packet),
-            Packet::OnionResponse(packet) => self.handle_onion_response(pk, &packet),
-            Packet::Data(packet) => self.handle_data(pk, packet),
+            Packet::RouteRequest(packet) => Box::new(self.handle_route_request(pk, &packet)) as Box<dyn Future<Item = _, Error = _> + Send>,
+            Packet::RouteResponse(packet) => Box::new(self.handle_route_response(pk, &packet)),
+            Packet::ConnectNotification(packet) => Box::new(self.handle_connect_notification(pk, &packet)),
+            Packet::DisconnectNotification(packet) => Box::new(self.handle_disconnect_notification(pk, &packet)),
+            Packet::PingRequest(packet) => Box::new(self.handle_ping_request(pk, &packet)),
+            Packet::PongResponse(packet) => Box::new(self.handle_pong_response(pk, &packet)),
+            Packet::OobSend(packet) => Box::new(self.handle_oob_send(pk, packet)),
+            Packet::OobReceive(packet) => Box::new(self.handle_oob_receive(pk, &packet)),
+            Packet::OnionRequest(packet) => Box::new(self.handle_onion_request(pk, packet)),
+            Packet::OnionResponse(packet) => Box::new(self.handle_onion_response(pk, &packet)),
+            Packet::Data(packet) => Box::new(self.handle_data(pk, packet)),
         }
     }
     /** Send `OnionResponse` packet to the client by it's `std::net::IpAddr`.
     */
-    pub fn handle_udp_onion_response(&self, ip_addr: IpAddr, port: u16, payload: InnerOnionResponse) -> IoFuture<()> {
+    pub fn handle_udp_onion_response(&self, ip_addr: IpAddr, port: u16, payload: InnerOnionResponse) -> impl Future<Item = (), Error = Error> + Send {
         let state = self.state.read();
         if let Some(client) = state.keys_by_addr.get(&(ip_addr, port)).and_then(|pk| state.connected_clients.get(pk)) {
-            client.send_onion_response(payload)
+            Either::A(client.send_onion_response(payload))
         } else {
-            Box::new( future::err(
+            Either::B( future::err(
                 Error::new(ErrorKind::Other,
                     "Cannot find client by ip_addr to send onion response"
             )))
@@ -113,35 +115,35 @@ impl Server {
     list of connected clients. If there are any clients mutually linked to
     current client, we send them corresponding `DisconnectNotification`.
     */
-    pub fn shutdown_client(&self, pk: &PublicKey, ip_addr: IpAddr, port: u16) -> IoFuture<()> {
+    pub fn shutdown_client(&self, pk: &PublicKey, ip_addr: IpAddr, port: u16) -> impl Future<Item = (), Error = Error> + Send {
         let mut state = self.state.write();
 
         // check that the client's address isn't changed
         if let Some(client) = state.connected_clients.get(pk) {
             if client.ip_addr() != ip_addr || client.port() != port {
-                return Box::new(future::err(
+                return Either::A(future::err(
                     Error::new(ErrorKind::Other,
                                "Client with pk has different address"
                     )))
             }
         } else {
-            return Box::new(future::err(
+            return Either::A(future::err(
                 Error::new(ErrorKind::Other,
                            "Cannot find client by pk to shutdown it"
                 )))
         }
 
-        self.shutdown_client_inner(pk, &mut state)
+        Either::B(self.shutdown_client_inner(pk, &mut state))
     }
 
     /** Actual shutdown is done here.
     */
-    fn shutdown_client_inner(&self, pk: &PublicKey, state: &mut ServerState) -> IoFuture<()> {
+    fn shutdown_client_inner(&self, pk: &PublicKey, state: &mut ServerState) -> impl Future<Item = (), Error = Error> + Send {
         // remove client by pk from connected_clients
         let client_a = if let Some(client) = state.connected_clients.remove(pk) {
             client
         } else {
-            return Box::new(future::err(
+            return Either::A(future::err(
                 Error::new(ErrorKind::Other,
                            "Cannot find client by pk to shutdown it"
                 )))
@@ -154,7 +156,7 @@ impl Server {
                 match link.status {
                     LinkStatus::Registered => {
                         // Current client is not linked in client_b
-                        Box::new(future::ok(()))
+                        Either::A(future::ok(()))
                     },
                     LinkStatus::Online => {
                         let client_b_pk = link.pk;
@@ -163,23 +165,23 @@ impl Server {
                                 // they are linked, we should notify client_b
                                 // link from client_b.links should be downgraded
                                 client_b.links_mut().downgrade(a_id_in_client_b);
-                                client_b.send_disconnect_notification(ConnectionId::from_index(a_id_in_client_b))
+                                Either::B(client_b.send_disconnect_notification(ConnectionId::from_index(a_id_in_client_b)))
                             } else {
                                 // No a_id_in_client_b
-                                Box::new(future::ok(()))
+                                Either::A(future::ok(()))
                             }
                         } else  {
                             // client_b is not connected to the server
-                            Box::new(future::ok(()))
+                            Either::A(future::ok(()))
                         }
                     }
                 }
             });
-        Box::new(stream::futures_unordered(notifications).for_each(Ok))
+        Either::B(stream::futures_unordered(notifications).for_each(Ok))
     }
     // Here start the impl of `handle_***` methods
 
-    fn handle_route_request(&self, pk: &PublicKey, packet: &RouteRequest) -> IoFuture<()> {
+    fn handle_route_request(&self, pk: &PublicKey, packet: &RouteRequest) -> impl Future<Item = (), Error = Error> + Send {
         let mut state = self.state.write();
 
         let (b_id_in_client_a, client_a_route_response) = {
@@ -190,18 +192,18 @@ impl Server {
                 return Box::new(future::err(
                     Error::new(ErrorKind::Other,
                                "RouteRequest: no such PK"
-                    )))
+                    ))) as Box<dyn Future<Item = _, Error = _> + Send>
             };
 
             if pk == &packet.pk {
                 // send RouteResponse(0) if client requests its own pk
-                return client_a.send_route_response(pk, ConnectionId::zero())
+                return Box::new(client_a.send_route_response(pk, ConnectionId::zero()))
             }
 
             // check if client_a is already linked
             if let Some(index) = client_a.links().id_by_pk(&packet.pk) {
                 // send RouteResponse if client was already linked to pk
-                return client_a.send_route_response(&packet.pk, ConnectionId::from_index(index))
+                return Box::new(client_a.send_route_response(&packet.pk, ConnectionId::from_index(index)))
             }
 
             // try to insert a new link
@@ -209,7 +211,7 @@ impl Server {
                 index
             } else {
                 // send RouteResponse(0) if no space to insert new link
-                return client_a.send_route_response(&packet.pk, ConnectionId::zero())
+                return Box::new(client_a.send_route_response(&packet.pk, ConnectionId::zero()))
             };
 
             let client_a_route_response = client_a.send_route_response(&packet.pk, ConnectionId::from_index(b_id_in_client_a));
@@ -224,7 +226,7 @@ impl Server {
                 client
             } else {
                 // send RouteResponse only to current client
-                return client_a_route_response
+                return Box::new(client_a_route_response)
             };
 
             if let Some(index) = client_b.links().id_by_pk(pk) {
@@ -232,7 +234,7 @@ impl Server {
             } else {
                 // they are not linked
                 // send RouteResponse only to current client
-                return client_a_route_response
+                return Box::new(client_a_route_response)
             }
         };
 
@@ -257,22 +259,22 @@ impl Server {
                 .map(|_| ())
         )
     }
-    fn handle_route_response(&self, _pk: &PublicKey, _packet: &RouteResponse) -> IoFuture<()> {
-        Box::new(future::err(
+    fn handle_route_response(&self, _pk: &PublicKey, _packet: &RouteResponse) -> impl Future<Item = (), Error = Error> + Send {
+        future::err(
             Error::new(ErrorKind::Other,
                 "Client must not send RouteResponse to server"
-        )))
+        ))
     }
-    fn handle_connect_notification(&self, _pk: &PublicKey, _packet: &ConnectNotification) -> IoFuture<()> {
+    fn handle_connect_notification(&self, _pk: &PublicKey, _packet: &ConnectNotification) -> impl Future<Item = (), Error = Error> + Send {
         // Although normally a client should not send ConnectNotification to server
         //  we ignore it for backward compatibility
-        Box::new(future::ok(()))
+        future::ok(())
     }
-    fn handle_disconnect_notification(&self, pk: &PublicKey, packet: &DisconnectNotification) -> IoFuture<()> {
+    fn handle_disconnect_notification(&self, pk: &PublicKey, packet: &DisconnectNotification) -> impl Future<Item = (), Error = Error> + Send {
         let index = if let Some(index) = packet.connection_id.index() {
             index
         } else {
-            return Box::new( future::err(
+            return Either::A( future::err(
                 Error::new(ErrorKind::Other,
                     "DisconnectNotification: connection id is zero"
             )))
@@ -291,10 +293,10 @@ impl Server {
                 // haven't received DisconnectNotification yet and have sent yet another packet.
                 // In this case we don't want to throw an error and force disconnect the second client.
                 // TODO: failure can be used to return an error and handle it inside ServerProcessor
-                return Box::new(future::ok(()))
+                return Either::A(future::ok(()))
             }
         } else {
-            return Box::new( future::err(
+            return Either::A( future::err(
                 Error::new(ErrorKind::Other,
                     "DisconnectNotification: no such PK"
             )))
@@ -304,7 +306,7 @@ impl Server {
             LinkStatus::Registered => {
                 // Do nothing because
                 // client_b has not sent RouteRequest yet to connect to client_a
-                Box::new( future::ok(()) )
+                Either::A( future::ok(()) )
             },
             LinkStatus::Online => {
                 let client_b_pk = a_link.pk;
@@ -314,90 +316,90 @@ impl Server {
                 } else  {
                     // client_b is not connected to the server
                     // so ignore DisconnectNotification
-                    return Box::new( future::ok(()) )
+                    return Either::A( future::ok(()) )
                 };
                 let a_id_in_client_b = if let Some(id) = client_b.links().id_by_pk(pk) {
                     id
                 } else {
                     // No a_id_in_client_b
-                    return Box::new( future::ok(()) )
+                    return Either::A( future::ok(()) )
                 };
                 // it is linked, we should notify client_b
                 // link from client_b.links should be downgraded
                 client_b.links_mut().downgrade(a_id_in_client_b);
-                client_b.send_disconnect_notification(ConnectionId::from_index(a_id_in_client_b))
+                Either::B(client_b.send_disconnect_notification(ConnectionId::from_index(a_id_in_client_b)))
             }
         }
     }
-    fn handle_ping_request(&self, pk: &PublicKey, packet: &PingRequest) -> IoFuture<()> {
+    fn handle_ping_request(&self, pk: &PublicKey, packet: &PingRequest) -> impl Future<Item = (), Error = Error> + Send {
         if packet.ping_id == 0 {
-            return Box::new( future::err(
+            return Either::A( future::err(
                 Error::new(ErrorKind::Other,
                     "PingRequest.ping_id == 0"
             )))
         }
         let state = self.state.read();
         if let Some(client_a) = state.connected_clients.get(pk) {
-            client_a.send_pong_response(packet.ping_id)
+            Either::B(client_a.send_pong_response(packet.ping_id))
         } else {
-            Box::new( future::err(
+            Either::A( future::err(
                 Error::new(ErrorKind::Other,
                     "PingRequest: no such PK"
             )) )
         }
     }
-    fn handle_pong_response(&self, pk: &PublicKey, packet: &PongResponse) -> IoFuture<()> {
+    fn handle_pong_response(&self, pk: &PublicKey, packet: &PongResponse) -> impl Future<Item = (), Error = Error> + Send {
         if packet.ping_id == 0 {
-            return Box::new( future::err(
+            return future::err(
                 Error::new(ErrorKind::Other,
                     "PongResponse.ping_id == 0"
-            )))
+            ))
         }
         let mut state = self.state.write();
         if let Some(client_a) = state.connected_clients.get_mut(pk) {
             if packet.ping_id == client_a.ping_id() {
                 client_a.set_last_pong_resp(Instant::now());
 
-                Box::new( future::ok(()) )
+                future::ok(())
             } else {
-                Box::new( future::err(
+                future::err(
                     Error::new(ErrorKind::Other, "PongResponse.ping_id does not match")
-                ))
+                )
             }
         } else {
-            Box::new( future::err(
+            future::err(
                 Error::new(ErrorKind::Other,
                     "PongResponse: no such PK"
-            )) )
+            ))
         }
     }
-    fn handle_oob_send(&self, pk: &PublicKey, packet: OobSend) -> IoFuture<()> {
+    fn handle_oob_send(&self, pk: &PublicKey, packet: OobSend) -> impl Future<Item = (), Error = Error> + Send {
         if packet.data.is_empty() || packet.data.len() > 1024 {
-            return Box::new( future::err(
+            return Either::A( future::err(
                 Error::new(ErrorKind::Other,
                     "OobSend wrong data length"
             )))
         }
         let state = self.state.read();
         if let Some(client_b) = state.connected_clients.get(&packet.destination_pk) {
-            client_b.send_oob(pk, packet.data)
+            Either::B(client_b.send_oob(pk, packet.data))
         } else {
             // Do nothing because client_b is not connected to server
-            Box::new( future::ok(()) )
+            Either::A( future::ok(()) )
         }
     }
-    fn handle_oob_receive(&self, _pk: &PublicKey, _packet: &OobReceive) -> IoFuture<()> {
-        Box::new( future::err(
+    fn handle_oob_receive(&self, _pk: &PublicKey, _packet: &OobReceive) -> impl Future<Item = (), Error = Error> + Send {
+        future::err(
             Error::new(ErrorKind::Other,
                 "Client must not send OobReceive to server"
-        )))
+        ))
     }
-    fn handle_onion_request(&self, pk: &PublicKey, packet: OnionRequest) -> IoFuture<()> {
+    fn handle_onion_request(&self, pk: &PublicKey, packet: OnionRequest) -> impl Future<Item = (), Error = Error> + Send {
         if let Some(ref onion_sink) = self.onion_sink {
             let state = self.state.read();
             if let Some(client) = state.connected_clients.get(&pk) {
                 let saddr = SocketAddr::new(client.ip_addr(), client.port());
-                Box::new(onion_sink.clone() // clone sink for 1 send only
+                Either::A(onion_sink.clone() // clone sink for 1 send only
                     .send((packet, saddr))
                     .map(|_sink| ()) // ignore sink because it was cloned
                     .map_err(|_| {
@@ -407,27 +409,27 @@ impl Server {
                     })
                 )
             } else {
-               Box::new( future::err(
+               Either::B( future::err(
                    Error::new(ErrorKind::Other,
                        "OnionRequest: no such PK"
                )) )
             }
         } else {
             // Ignore OnionRequest as the server is not connected to onion subsystem
-            Box::new( future::ok(()) )
+            Either::B( future::ok(()) )
         }
     }
-    fn handle_onion_response(&self, _pk: &PublicKey, _packet: &OnionResponse) -> IoFuture<()> {
-        Box::new( future::err(
+    fn handle_onion_response(&self, _pk: &PublicKey, _packet: &OnionResponse) -> impl Future<Item = (), Error = Error> + Send {
+        future::err(
             Error::new(ErrorKind::Other,
                 "Client must not send OnionResponse to server"
-        )))
+        ))
     }
-    fn handle_data(&self, pk: &PublicKey, packet: Data) -> IoFuture<()> {
+    fn handle_data(&self, pk: &PublicKey, packet: Data) -> impl Future<Item = (), Error = Error> + Send {
         let index = if let Some(index) = packet.connection_id.index() {
             index
         } else {
-            return Box::new( future::err(
+            return Either::A( future::err(
                 Error::new(ErrorKind::Other,
                     "Data: connection id is zero"
             )))
@@ -439,7 +441,7 @@ impl Server {
         let client_a = if let Some(client) = state.connected_clients.get(pk) {
             client
         } else  {
-            return Box::new( future::err(
+            return Either::A( future::err(
                 Error::new(ErrorKind::Other,
                     "Data: no such PK"
             )));
@@ -454,14 +456,14 @@ impl Server {
             // haven't received DisconnectNotification yet and have sent yet another packet.
             // In this case we don't want to throw an error and force disconnect the second client.
             // TODO: failure can be used to return an error and handle it inside ServerProcessor
-            return Box::new(future::ok(()))
+            return Either::A(future::ok(()))
         };
 
         match a_link.status {
             LinkStatus::Registered => {
                 // Do nothing because
                 // client_b has not sent RouteRequest yet to connect to client_a
-                Box::new( future::ok(()) )
+                Either::A( future::ok(()) )
             },
             LinkStatus::Online => {
                 let client_b_pk = a_link.pk;
@@ -470,22 +472,22 @@ impl Server {
                     client
                 } else  {
                     // Do nothing because client_b is not connected to server
-                    return Box::new( future::ok(()) )
+                    return Either::A( future::ok(()) )
                 };
                 let a_id_in_client_b = if let Some(id) = client_b.links().id_by_pk(pk) {
                     id
                 } else {
                     // No a_id_in_client_b
-                    return Box::new( future::ok(()) )
+                    return Either::A( future::ok(()) )
                 };
                 // it is linked, we should send data to client_b
-                client_b.send_data(ConnectionId::from_index(a_id_in_client_b), packet.data)
+                Either::B(client_b.send_data(ConnectionId::from_index(a_id_in_client_b), packet.data))
             }
         }
     }
     /** Remove timedout connected clients
     */
-    fn remove_timedout_clients(&self, state: &mut ServerState) -> IoFuture<()> {
+    fn remove_timedout_clients(&self, state: &mut ServerState) -> impl Future<Item = (), Error = Error> + Send {
         let keys = state.connected_clients.iter()
             .filter(|(_key, client)| client.is_pong_timedout())
             .map(|(key, _client)| *key)
@@ -497,11 +499,11 @@ impl Server {
 
         let remove_stream = stream::futures_unordered(remove_timedouts);
 
-        Box::new(remove_stream.for_each(Ok))
+        remove_stream.for_each(Ok)
     }
     /** Send pings to all connected clients and terminate all timed out clients.
     */
-    pub fn send_pings(&self) -> IoFuture<()> {
+    pub fn send_pings(&self) -> impl Future<Item = (), Error = Error> + Send {
         let mut state = self.state.write();
 
         let remove_timedouts = self.remove_timedout_clients(&mut state);
@@ -513,11 +515,9 @@ impl Server {
 
         let ping_stream = stream::futures_unordered(ping_sender);
 
-        let res = remove_timedouts
+        remove_timedouts
             .join(ping_stream.for_each(Ok))
-            .map(|_| ());
-
-        Box::new(res)
+            .map(|_| ())
     }
 }
 
