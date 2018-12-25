@@ -41,15 +41,15 @@ pub const NOSPAMBYTES: usize = 4;
 impl NoSpam {
     /** Create new `NoSpam` with random bytes.
 
-    Two `new()` `NoSpam`s will always be different:
+    Two `random()` `NoSpam`s will always be different:
 
     ```
     use self::tox::toxcore::toxid::NoSpam;
 
-    assert!(NoSpam::new() != NoSpam::new());
+    assert!(NoSpam::random() != NoSpam::random());
     ```
     */
-    pub fn new() -> Self {
+    pub fn random() -> Self {
         let mut nospam = [0; NOSPAMBYTES];
         randombytes_into(&mut nospam);
         NoSpam(nospam)
@@ -79,7 +79,7 @@ impl fmt::UpperHex for NoSpam {
 ```
 use self::tox::toxcore::toxid::NoSpam;
 
-let nospam = NoSpam::new();
+let nospam = NoSpam::random();
 assert_eq!(format!("{}", nospam), format!("{:X}", nospam));
 ```
 */
@@ -144,7 +144,7 @@ impl ToxId {
     use self::tox::toxcore::toxid::{NoSpam, NOSPAMBYTES, ToxId};
 
     let (pk, _) = gen_keypair();
-    let nospam = NoSpam::new();
+    let nospam = NoSpam::random();
 
     let _checksum = ToxId::checksum(&pk, nospam);
 
@@ -180,7 +180,7 @@ impl ToxId {
     ```
     */
     pub fn new(pk: PublicKey) -> Self {
-        let nospam = NoSpam::new();
+        let nospam = NoSpam::random();
         let checksum = Self::checksum(&pk, nospam);
         ToxId { pk, nospam, checksum }
     }
@@ -206,7 +206,7 @@ impl ToxId {
     let mut toxid3 = toxid;
 
     // with same `NoSpam` IDs are identical
-    let nospam = NoSpam::new();
+    let nospam = NoSpam::random();
     toxid2.new_nospam(Some(nospam));
     toxid3.new_nospam(Some(nospam));
     assert_eq!(toxid2, toxid3);
@@ -218,7 +218,7 @@ impl ToxId {
         if let Some(nospam) = nospam {
             self.nospam = nospam;
         } else {
-            self.nospam = NoSpam::new();
+            self.nospam = NoSpam::random();
         }
         self.checksum = Self::checksum(&self.pk, self.nospam);
     }
@@ -324,7 +324,7 @@ mod tests {
     #[test]
     fn no_spam_new_test() {
         crypto_init().unwrap();
-        let ns = NoSpam::new();
+        let ns = NoSpam::random();
         // shouldn't be empty, unless your PRNG is crappy
         assert!(ns.0 != [0; NOSPAMBYTES])
     }
@@ -336,7 +336,7 @@ mod tests {
         crypto_init().unwrap();
         // check if formatted NoSpam is always upper-case hexadecimal with matching
         // length
-        let nospam = NoSpam::new();
+        let nospam = NoSpam::random();
         assert!(!test_is_hexdump_uppercase("Not HexDump"));
         assert!(test_is_hexdump_uppercase(&format!("{:X}", nospam)));
         assert!(test_is_hexdump_uppercase(&format!("{}", nospam)));
@@ -350,7 +350,7 @@ mod tests {
 
     encode_decode_test!(
         no_spam_encode_decode,
-        NoSpam::new()
+        NoSpam::random()
     );
 
     // ToxId::
@@ -371,7 +371,7 @@ mod tests {
         let mut toxid3 = toxid;
 
         // with same `NoSpam` IDs are identical
-        let nospam = NoSpam::new();
+        let nospam = NoSpam::random();
         toxid2.new_nospam(Some(nospam));
         toxid3.new_nospam(Some(nospam));
         assert_eq!(toxid2, toxid3);

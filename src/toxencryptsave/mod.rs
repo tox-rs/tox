@@ -89,10 +89,10 @@ impl PassKey {
     use self::tox::toxencryptsave::*;
 
     // fails with an empty passphrase
-    assert_eq!(PassKey::new(&[]), Err(KeyDerivationError::Null));
+    assert_eq!(PassKey::from_passphrase(&[]), Err(KeyDerivationError::Null));
     ```
     */
-    pub fn new(passphrase: &[u8]) -> Result<PassKey, KeyDerivationError> {
+    pub fn from_passphrase(passphrase: &[u8]) -> Result<PassKey, KeyDerivationError> {
         PassKey::with_salt(passphrase, gen_salt())
     }
 
@@ -162,8 +162,8 @@ impl PassKey {
     ```
     use tox::toxencryptsave::*;
 
-                              // ↓ don't
-    let passkey = PassKey::new(&[0]).expect("Failed to unwrap PassKey!");
+                                          // ↓ don't
+    let passkey = PassKey::from_passphrase(&[0]).expect("Failed to unwrap PassKey!");
 
     assert_eq!(passkey.encrypt(&[]), Err(EncryptionError::Null));
     ```
@@ -206,8 +206,8 @@ impl PassKey {
     ```
     use self::tox::toxencryptsave::*;
 
-                              // ↓ don't
-    let passkey = PassKey::new(&[0]).expect("Failed to unwrap PassKey!");
+                                          // ↓ don't
+    let passkey = PassKey::from_passphrase(&[0]).expect("Failed to unwrap PassKey!");
 
     // empty data
     assert_eq!(passkey.decrypt(&[]), Err(DecryptionError::Null));
@@ -264,7 +264,7 @@ assert_eq!(pass_encrypt(&[0], &[]), Err(KeyDerivationError::Null.into()));
 ```
 */
 pub fn pass_encrypt(data: &[u8], passphrase: &[u8]) -> Result<Vec<u8>, EncryptionError> {
-    PassKey::new(passphrase)?.encrypt(data)
+    PassKey::from_passphrase(passphrase)?.encrypt(data)
 }
 
 /**
@@ -428,7 +428,7 @@ impl From<KeyDerivationError> for DecryptionError {
 #[test]
 fn pass_key_new_test() {
     let passwd = [42; 123];
-    let pk = PassKey::new(&passwd).expect("Failed to unwrap PassKey!");
+    let pk = PassKey::from_passphrase(&passwd).expect("Failed to unwrap PassKey!");
 
     assert!(pk.salt.0.as_ref() != &passwd as &[u8]);
     assert!(pk.salt.0.as_ref() != [0; SALT_LENGTH].as_ref());

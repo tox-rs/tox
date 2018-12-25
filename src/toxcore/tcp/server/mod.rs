@@ -2,6 +2,7 @@
 */
 
 mod client;
+#[allow(clippy::module_inception)]
 mod server;
 mod server_ext;
 

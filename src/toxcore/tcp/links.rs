@@ -59,6 +59,12 @@ pub struct Links {
     pk_to_id: HashMap<PublicKey, u8>,
 }
 
+impl Default for Links {
+    fn default() -> Self {
+        Links::new()
+    }
+}
+
 impl Links {
     /// Create empty `Links`
     pub fn new() -> Links {
@@ -192,6 +198,20 @@ mod tests {
         link.upgrade();
         link.downgrade();
         assert_eq!(LinkStatus::Registered, link.status);
+    }
+
+    #[test]
+    fn links_new() {
+        let links = Links::new();
+        assert!(links.links.iter().all(|link| link.is_none()));
+        assert!(links.pk_to_id.is_empty());
+    }
+
+    #[test]
+    fn links_default() {
+        let links = Links::default();
+        assert!(links.links.iter().all(|link| link.is_none()));
+        assert!(links.pk_to_id.is_empty());
     }
 
     #[test]

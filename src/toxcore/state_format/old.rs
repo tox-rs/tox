@@ -8,13 +8,13 @@ use std::net::{
     Ipv6Addr,
 //    SocketAddr,
 };
+use byteorder::{ByteOrder, LittleEndian};
 use nom::{le_u16, be_u16, le_u8, le_u32, le_u64, rest};
 
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 use toxcore::dht::packed_node::*;
 use toxcore::toxid::{NoSpam, NOSPAMBYTES};
-use toxcore::dht::daemon_state::*;
 use toxcore::onion::packet::*;
 
 const REQUEST_MSG_LEN: usize = 1024;
@@ -39,11 +39,10 @@ pub struct NospamKeys {
 /// Number of bytes of serialized [`NospamKeys`](./struct.NospamKeys.html).
 pub const NOSPAMKEYSBYTES: usize = NOSPAMBYTES + PUBLICKEYBYTES + SECRETKEYBYTES;
 
-
-/// The `Default` implementation generates random `NospamKeys`.
-impl Default for NospamKeys {
-    fn default() -> Self {
-        let nospam = NoSpam::new();
+impl NospamKeys {
+    /// Generates random `NospamKeys`.
+    pub fn random() -> Self {
+        let nospam = NoSpam::random();
         let (pk, sk) = gen_keypair();
         NospamKeys {
             nospam,
@@ -152,23 +151,22 @@ impl FromBytes for DhtState {
 
 impl ToBytes for DhtState {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        let mut bytes_buf = [0u8; DHT_STATE_BUFFER_SIZE];
-        let mut nodes_bytes: u32 = 0;
-        for node in self.0.clone() {
-            if let Ok((_, size)) = node.to_bytes((&mut bytes_buf, 0)) {
-                nodes_bytes += size as u32;
-            } else {}
-        }
+        let start_idx = buf.1;
 
-        do_gen!(buf,
+        let (buf, idx) = do_gen!(buf,
             gen_le_u16!(0x0002) >>
             gen_slice!(SECTION_MAGIC) >>
             gen_le_u32!(DHT_MAGICAL as u32) >>
-            gen_le_u32!(nodes_bytes) >>
+            gen_skip!(4) >>
             gen_le_u16!(DHT_SECTION_TYPE as u16) >>
             gen_le_u16!(DHT_2ND_MAGICAL as u16) >>
             gen_many_ref!(&self.0, |buf, node| PackedNode::to_bytes(node, buf))
-        )
+        )?;
+
+        let len = (idx - start_idx - 16) as u32;
+        LittleEndian::write_u32(&mut buf[start_idx + 8..], len);
+
+        Ok((buf, idx))
     }
 }
 
@@ -525,6 +523,7 @@ impl FromBytes for FriendState {
 }
 
 impl ToBytes for FriendState {
+    #[allow(clippy::cyclomatic_complexity)]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         let mut fr_msg_pad = self.fr_msg.clone();
         let mut name_pad = self.name.0.clone();
@@ -667,91 +666,29 @@ impl FromBytes for Section {
 
 impl ToBytes for Section {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        match *self {
-            Section::NospamKeys(ref p) => {
-                do_gen!(buf,
-                    gen_le_u32!(NOSPAMKEYSBYTES) >>
-                    gen_call!(|buf, data| NospamKeys::to_bytes(data, buf), p)
-                )
-            },
-            Section::DhtState(ref p) => {
-                let mut bytes_buf = [0u8; DHT_STATE_BUFFER_SIZE];
-                let mut section_bytes: u32 = 12; // 12 = DHT_MAGICAL(4) + num of nodes bytes(4) + DHT_SECTION_TYPE(2) + DHT_2ND_MAGICAL(2)
-                for node in p.0.clone() {
-                    if let Ok((_, size)) = node.to_bytes((&mut bytes_buf, 0)) {
-                        section_bytes += size as u32;
-                    } else {}
-                }
+        let (buf, start_idx) = buf;
 
-                do_gen!(buf,
-                    gen_le_u32!(section_bytes) >>
-                    gen_call!(|buf, data| DhtState::to_bytes(data, buf), p)
-                )
-            },
-            Section::Friends(ref p) => {
-                let mut bytes_buf = [0u8; 1024 * 10];
-                let mut friends_bytes: u32 = 0;
-                for friend in p.0.clone() {
-                    if let Ok((_, size)) = friend.to_bytes((&mut bytes_buf, 0)) {
-                        friends_bytes += size as u32;
-                    } else {}
-                }
-
-                do_gen!(buf,
-                    gen_le_u32!(friends_bytes) >>
-                    gen_call!(|buf, data| Friends::to_bytes(data, buf), p)
-                )
-            },
-            Section::Name(ref p) => {
-                do_gen!(buf,
-                    gen_le_u32!(p.0.len()) >>
-                    gen_call!(|buf, data| Name::to_bytes(data, buf), p)
-                )
-            },
-            Section::StatusMsg(ref p) => {
-                do_gen!(buf,
-                    gen_le_u32!(p.0.len()) >>
-                    gen_call!(|buf, data| StatusMsg::to_bytes(data, buf), p)
-                )
-            },
-            Section::UserStatus(ref p) => {
-                do_gen!(buf,
-                    gen_le_u32!(USER_STATUS_LEN) >>
-                    gen_call!(|buf, data| UserStatus::to_bytes(data, buf), p)
-                )
-            },
-            Section::TcpRelays(ref p) => {
-                let mut bytes_buf = [0u8; DHT_STATE_BUFFER_SIZE];
-                let mut nodes_bytes: u32 = 0;
-                for node in p.0.clone() {
-                    let (_, size) = node.to_bytes((&mut bytes_buf, 0)).expect("TcpRelays to_bytes fails");
-                    nodes_bytes += size as u32;
-                }
-                do_gen!(buf,
-                    gen_le_u32!(nodes_bytes) >>
-                    gen_call!(|buf, data| TcpRelays::to_bytes(data, buf), p)
-                )
-            },
-            Section::PathNodes(ref p) => {
-                let mut bytes_buf = [0u8; DHT_STATE_BUFFER_SIZE];
-                let mut nodes_bytes: u32 = 0;
-                for node in p.0.clone() {
-                    let (_, size) = node.to_bytes((&mut bytes_buf, 0)).expect("PathNodes to_bytes fails");
-                    nodes_bytes += size as u32;
-                }
-
-                do_gen!(buf,
-                    gen_le_u32!(nodes_bytes) >>
-                    gen_call!(|buf, data| PathNodes::to_bytes(data, buf), p)
-                )
-            },
-            Section::Eof(ref p) => {
-                do_gen!(buf,
-                    gen_le_u32!(0x00) >>
-                    gen_call!(|buf, data| Eof::to_bytes(data, buf), p)
-                )
-            },
+        if buf.len() < start_idx + 4 {
+            return Err(GenError::BufferTooSmall(start_idx + 4));
         }
+
+        let buf = (buf, start_idx + 4);
+        let (buf, idx) = match *self {
+            Section::NospamKeys(ref p) => p.to_bytes(buf),
+            Section::DhtState(ref p) => p.to_bytes(buf),
+            Section::Friends(ref p) => p.to_bytes(buf),
+            Section::Name(ref p) => p.to_bytes(buf),
+            Section::StatusMsg(ref p) => p.to_bytes(buf),
+            Section::UserStatus(ref p) => p.to_bytes(buf),
+            Section::TcpRelays(ref p) => p.to_bytes(buf),
+            Section::PathNodes(ref p) => p.to_bytes(buf),
+            Section::Eof(ref p) => p.to_bytes(buf),
+        }?;
+
+        let len = (idx - start_idx - 8) as u32;
+        LittleEndian::write_u32(&mut buf[start_idx..], len);
+
+        Ok((buf, idx))
     }
 }
 
@@ -771,9 +708,9 @@ impl FromBytes for State {
     named!(from_bytes<State>, do_parse!(
         tag!(&[0; 4][..]) >>
         tag!(STATE_MAGIC) >>
-        section: many0!(flat_map!(length_data!(map!(le_u32, |len| len + 4)), Section::from_bytes)) >>
+        sections: many0!(flat_map!(length_data!(map!(le_u32, |len| len + 4)), Section::from_bytes)) >>
         (State {
-            sections: section.to_vec(),
+            sections: sections.to_vec(),
         })
     ));
 }
@@ -794,7 +731,7 @@ mod tests {
 
     encode_decode_test!(
         no_spam_keys_encode_decode,
-        NospamKeys::default()
+        NospamKeys::random()
     );
 
     encode_decode_test!(
@@ -905,7 +842,7 @@ mod tests {
         state_encode_decode,
         State {
             sections: vec![
-                Section::NospamKeys(NospamKeys::default()),
+                Section::NospamKeys(NospamKeys::random()),
                 Section::DhtState(DhtState(vec![
                     PackedNode {
                         pk: gen_keypair().0,

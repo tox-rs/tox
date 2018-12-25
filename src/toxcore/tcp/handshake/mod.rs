@@ -24,7 +24,7 @@ pub fn create_client_handshake(client_pk: &PublicKey,
                            client_sk: &SecretKey,
                            server_pk: &PublicKey)
     -> Result<(secure::Session, PrecomputedKey, ClientHandshake), Error> {
-    let session = secure::Session::new();
+    let session = secure::Session::random();
     let payload = HandshakePayload { session_pk: *session.pk(), session_nonce: *session.nonce() };
 
     let mut serialized_payload = [0; PAYLOAD_SIZE];
@@ -58,7 +58,7 @@ pub fn handle_client_handshake(server_sk: &SecretKey,
     let client_pk = payload.session_pk;
     let client_nonce = payload.session_nonce;
 
-    let session = secure::Session::new();
+    let session = secure::Session::random();
     let server_payload = HandshakePayload { session_pk: *session.pk(), session_nonce: *session.nonce() };
 
     let mut serialized_payload = [0; PAYLOAD_SIZE];
@@ -293,7 +293,7 @@ mod tests {
         let (client_pk, _) = gen_keypair();
         let (_, server_sk) = gen_keypair();
         let common_key = encrypt_precompute(&client_pk, &server_sk);
-        let client_session = Session::new();
+        let client_session = Session::random();
 
         fn create_bad_server_handshake(common_key: &PrecomputedKey)
             -> ServerHandshake

@@ -68,6 +68,6 @@ mod tests {
 
     encode_decode_test!(
         friend_requests_encode_decode,
-        FriendRequests::new(NoSpam::new(), vec![1,2,3,4])
+        FriendRequests::new(NoSpam::random(), vec![1,2,3,4])
     );
 }

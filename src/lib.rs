@@ -7,11 +7,8 @@ Repo: https://github.com/tox-rs/tox
 
 #![forbid(unsafe_code)]
 #![doc(html_logo_url = "https://raw.githubusercontent.com/tox-rs/logo/master/logo.png")]
-#![cfg_attr(feature = "cargo-clippy", feature(tool_lints))]
-// Turn off clippy warnings that gives false positives
-#![cfg_attr(feature = "cargo-clippy", allow(clippy::new_without_default, clippy::new_without_default_derive))]
 // Remove it when it will be fixed in nom parser
-#![cfg_attr(feature = "cargo-clippy", allow(clippy::redundant_closure))]
+#![allow(clippy::redundant_closure)]
 
 extern crate bytes;
 extern crate byteorder;
