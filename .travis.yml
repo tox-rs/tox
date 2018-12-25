@@ -1,24 +1,14 @@
 language: rust
+os:
+  - linux
+  - osx
 rust:
   - 1.31.0
   - stable
   - beta
   - nightly
-cache:
-  - apt
-  - cargo
 
-os:
-  - linux
-  - osx
-
-matrix:
-  allow_failures:
-  - rust: beta
-  - rust: nightly
-
-sudo: required
-
+sudo: false
 env:
   global:
     - RUST_BACKTRACE=1
@@ -31,27 +21,23 @@ before_install:
   - |
     if [[ "$TRAVIS_OS_NAME" == "linux" ]]
     then
-        ./scripts/verify-commit-messages.sh "$TRAVIS_COMMIT_RANGE" \
-        && ./scripts/bootstrap-ubuntu-14-04.sh
-    fi
-  - |
-    if [[ "$TRAVIS_OS_NAME" == "osx" ]]
-    then
-        ./scripts/bootstrap-osx.sh
-    fi
-
-install:
-  - |
-    if [[ "$TRAVIS_RUST_VERSION" == nightly ]]
-    then
-        rustup component add clippy-preview
+        ./scripts/verify-commit-messages.sh "$TRAVIS_COMMIT_RANGE" || exit 1;
     fi
 
 script:
   - cargo build --verbose
   - cargo test --verbose
-  - |
-    if [[ "$TRAVIS_RUST_VERSION" == nightly ]]
-    then
-        cargo clippy --verbose --all --tests
-    fi
+
+matrix:
+  allow_failures:
+    - rust: beta
+    - rust: nightly
+  include:
+    - os: linux
+      rust: stable
+      env:
+        NAME: clippy
+      install:
+        - rustup component add clippy
+      script:
+        - cargo clippy --verbose --all --tests
