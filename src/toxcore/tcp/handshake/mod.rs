@@ -12,7 +12,6 @@ pub use self::codec::*;
 use toxcore::binary_io::*;
 use toxcore::crypto_core::*;
 use toxcore::tcp::secure;
-use toxcore::io_tokio::IoFuture;
 
 use futures::{self, Stream, Sink, Future};
 use std::io::{Error, ErrorKind};
@@ -100,8 +99,8 @@ pub fn make_client_handshake(socket: TcpStream,
                             client_pk: &PublicKey,
                             client_sk: &SecretKey,
                             server_pk: &PublicKey)
-    -> IoFuture<(TcpStream, secure::Channel)> {
-    let res = futures::done(create_client_handshake(client_pk, client_sk, server_pk))
+    -> impl Future<Item = (TcpStream, secure::Channel), Error = Error> + Send {
+    futures::done(create_client_handshake(client_pk, client_sk, server_pk))
         .and_then(|(session, common_key, handshake)| {
             // send handshake
             Framed::new(socket, ClientHandshakeCodec)
@@ -140,16 +139,15 @@ pub fn make_client_handshake(socket: TcpStream,
                 .map(|channel| {
                     (socket, channel)
                 })
-        });
-    Box::new(res)
+        })
 }
 
 /// Receives handshake from the client, processes it and
 /// sends handshake to the client
 pub fn make_server_handshake(socket: TcpStream,
                             server_sk: SecretKey)
-    -> IoFuture<(TcpStream, secure::Channel, PublicKey)> {
-    let res = Framed::new(socket, ClientHandshakeCodec)
+    -> impl Future<Item = (TcpStream, secure::Channel, PublicKey), Error = Error> + Send {
+    Framed::new(socket, ClientHandshakeCodec)
         .into_future() // receive handshake from client
         .map_err(|(e, _socket)| {
             Error::new(
@@ -184,8 +182,7 @@ pub fn make_server_handshake(socket: TcpStream,
                 .map(move |socket| {
                     (socket.into_inner(), channel, client_pk)
                 })
-        });
-    Box::new(res)
+        })
 }
 
 #[cfg(test)]

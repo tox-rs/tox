@@ -10,6 +10,7 @@ use toxcore::onion::packet::InnerOnionResponse;
 use toxcore::time::*;
 use toxcore::utils::*;
 
+use std::io::Error;
 use std::net::IpAddr;
 use std::time::{Instant, Duration};
 
@@ -126,68 +127,67 @@ impl Client {
 
     /** Send a packet. This method does not ignore IO error
     */
-    fn send(&self, packet: Packet) -> IoFuture<()> {
+    fn send(&self, packet: Packet) -> impl Future<Item = (), Error = Error> + Send {
         send_to_bounded(&self.tx, packet, Duration::from_secs(TCP_SEND_TIMEOUT))
     }
     /** Send a packet. This method ignores IO error
     */
-    fn send_ignore_error(&self, packet: Packet) -> IoFuture<()> {
-        Box::new(self.send(packet)
+    fn send_ignore_error(&self, packet: Packet) -> impl Future<Item = (), Error = Error> + Send {
+        self.send(packet)
             .then(|_| Ok(()) ) // ignore if somehow failed to send it
-        )
     }
     /** Construct RouteResponse and send it to Client
     */
-    pub fn send_route_response(&self, pk: &PublicKey, connection_id: ConnectionId) -> IoFuture<()> {
+    pub fn send_route_response(&self, pk: &PublicKey, connection_id: ConnectionId) -> impl Future<Item = (), Error = Error> + Send {
         self.send(
             Packet::RouteResponse(RouteResponse { connection_id, pk: *pk })
         )
     }
     /** Construct ConnectNotification and send it to Client ignoring IO error
     */
-    pub fn send_connect_notification(&self, connection_id: ConnectionId) -> IoFuture<()> {
+    pub fn send_connect_notification(&self, connection_id: ConnectionId) -> impl Future<Item = (), Error = Error> + Send {
         self.send_ignore_error(
             Packet::ConnectNotification(ConnectNotification { connection_id })
         )
     }
     /** Construct DisconnectNotification and send it to Client ignoring IO error
     */
-    pub fn send_disconnect_notification(&self, connection_id: ConnectionId) -> IoFuture<()> {
+    pub fn send_disconnect_notification(&self, connection_id: ConnectionId) -> impl Future<Item = (), Error = Error> + Send {
         self.send_ignore_error(
             Packet::DisconnectNotification(DisconnectNotification { connection_id })
         )
     }
     /** Construct PongResponse and send it to Client
     */
-    pub fn send_pong_response(&self, ping_id: u64) -> IoFuture<()> {
+    pub fn send_pong_response(&self, ping_id: u64) -> impl Future<Item = (), Error = Error> + Send {
         self.send(
             Packet::PongResponse(PongResponse { ping_id })
         )
     }
     /** Construct OobReceive and send it to Client ignoring IO error
     */
-    pub fn send_oob(&self, sender_pk: &PublicKey, data: Vec<u8>) -> IoFuture<()> {
+    pub fn send_oob(&self, sender_pk: &PublicKey, data: Vec<u8>) -> impl Future<Item = (), Error = Error> + Send {
         self.send_ignore_error(
             Packet::OobReceive(OobReceive { sender_pk: *sender_pk, data })
         )
     }
     /** Construct OnionResponse and send it to Client
     */
-    pub fn send_onion_response(&self, payload: InnerOnionResponse) -> IoFuture<()> {
+    pub fn send_onion_response(&self, payload: InnerOnionResponse) -> impl Future<Item = (), Error = Error> + Send {
         self.send(
             Packet::OnionResponse(OnionResponse { payload })
         )
     }
     /** Construct Data and send it to Client
     */
-    pub fn send_data(&self, connection_id: ConnectionId, data: Vec<u8>) -> IoFuture<()> {
+    pub fn send_data(&self, connection_id: ConnectionId, data: Vec<u8>) -> impl Future<Item = (), Error = Error> + Send {
         self.send(
             Packet::Data(Data { connection_id, data })
         )
     }
     /** Construct PingRequest and send it to Client
     */
-    pub fn send_ping_request(&mut self) -> IoFuture<()> {
+    pub fn send_ping_request(&mut self) -> impl Future<Item = (), Error = Error> + Send {
         let ping_id = gen_ping_id();
 
         self.last_pinged = Instant::now();

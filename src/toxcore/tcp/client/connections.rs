@@ -25,7 +25,6 @@ use futures::sync::mpsc;
 use tokio::timer::Interval;
 
 use toxcore::crypto_core::*;
-use toxcore::io_tokio::*;
 use toxcore::tcp::client::client::*;
 use toxcore::tcp::packet::*;
 use toxcore::time::*;
@@ -118,14 +117,14 @@ impl Connections {
     /// for initial connection so that we are able to find friends and to send
     /// them our relays. Later when more relays are received from our friends
     /// they should be added via `add_relay_connection` method.
-    pub fn add_relay_global(&self, relay_addr: SocketAddr, relay_pk: PublicKey) -> IoFuture<()> {
+    pub fn add_relay_global(&self, relay_addr: SocketAddr, relay_pk: PublicKey) -> impl Future<Item = (), Error = Error> + Send {
         if let hash_map::Entry::Vacant(vacant) = self.clients.write().entry(relay_pk) {
             let client = Client::new(relay_pk, relay_addr, self.incoming_tx.clone());
             vacant.insert(client.clone());
-            client.spawn(self.dht_sk.clone(), self.dht_pk)
+            Either::A(client.spawn(self.dht_sk.clone(), self.dht_pk))
         } else {
             trace!("Attempt to add relay that already exists: {}", relay_addr);
-            Box::new(future::ok(()))
+            Either::B(future::ok(()))
         }
     }
 
@@ -133,12 +132,12 @@ impl Connections {
     /// we already connected to this friend via at least
     /// `RECOMMENDED_FRIEND_TCP_CONNECTIONS` relays. Connection to our friend
     /// via this relay will be added as well.
-    pub fn add_relay_connection(&self, relay_addr: SocketAddr, relay_pk: PublicKey, node_pk: PublicKey) -> IoFuture<()> {
+    pub fn add_relay_connection(&self, relay_addr: SocketAddr, relay_pk: PublicKey, node_pk: PublicKey) -> impl Future<Item = (), Error = Error> + Send {
         let mut clients = self.clients.write();
         // TODO: NLL
         if clients.contains_key(&relay_pk) {
             let client = clients.get(&relay_pk).unwrap();
-            self.add_connection_inner(client, node_pk)
+            Box::new(self.add_connection_inner(client, node_pk))
         } else {
             let mut connections = self.connections.write();
             let connection = connections.entry(node_pk).or_insert_with(NodeConnection::new);
@@ -155,7 +154,7 @@ impl Connections {
                 let future = client.add_connection(node_pk)
                     .join(client.spawn(self.dht_sk.clone(), self.dht_pk))
                     .map(|_| ());
-                Box::new(future)
+                Box::new(future) as Box<dyn Future<Item = _, Error = _> + Send>
             } else {
                 Box::new(future::ok(()))
             }
@@ -165,11 +164,11 @@ impl Connections {
     /// Add a connection to our friend via relay. It means that we will send
     /// `RouteRequest` packet to this relay and wait for the friend to become
     /// connected.
-    pub fn add_connection(&self, relay_pk: PublicKey, node_pk: PublicKey) -> IoFuture<()> {
+    pub fn add_connection(&self, relay_pk: PublicKey, node_pk: PublicKey) -> impl Future<Item = (), Error = Error> + Send {
         if let Some(client) = self.clients.read().get(&relay_pk) {
-            self.add_connection_inner(client, node_pk)
+            Either::A(self.add_connection_inner(client, node_pk))
         } else {
-            Box::new( future::err(
+            Either::B( future::err(
                 Error::new(ErrorKind::Other,
                     "add_connection: no such relay"
             )))
@@ -177,16 +176,16 @@ impl Connections {
     }
 
     /// Remove connection to a friend via relays.
-    pub fn remove_connection(&self, node_pk: PublicKey) -> IoFuture<()> {
+    pub fn remove_connection(&self, node_pk: PublicKey) -> impl Future<Item = (), Error = Error> + Send {
         if let Some(connection) = self.connections.write().remove(&node_pk) {
             let clients = self.clients.read();
             let futures = connection.clients(&clients)
                 .map(|client| client.remove_connection(node_pk).then(Ok))
                 .collect::<Vec<_>>();
-            Box::new(future::join_all(futures).map(|_| ()))
+            Either::A(future::join_all(futures).map(|_| ()))
         } else {
             // TODO: what if we didn't receive relays from friend and delete him?
-            Box::new( future::err(
+            Either::B( future::err(
                 Error::new(ErrorKind::Other,
                     "remove_connection: no connection to the node"
             )))
@@ -194,7 +193,7 @@ impl Connections {
     }
 
     /// Inner function to add a connection to our friend via relay.
-    fn add_connection_inner(&self, client: &Client, node_pk: PublicKey) -> IoFuture<()> {
+    fn add_connection_inner(&self, client: &Client, node_pk: PublicKey) -> impl Future<Item = (), Error = Error> + Send {
         // TODO: check MAX_FRIEND_TCP_CONNECTIONS?
         let mut connections = self.connections.write();
         let connection = connections.entry(node_pk).or_insert_with(NodeConnection::new);
@@ -205,12 +204,11 @@ impl Connections {
         } else {
             Either::B(future::ok(()))
         };
-        let future = future.join(client.add_connection(node_pk)).map(|_| ());
-        Box::new(future)
+        future.join(client.add_connection(node_pk)).map(|_| ())
     }
 
     /// Send `Data` packet to a node via one of the relays.
-    pub fn send_data(&self, node_pk: PublicKey, data: Vec<u8>) -> IoFuture<()> {
+    pub fn send_data(&self, node_pk: PublicKey, data: Vec<u8>) -> impl Future<Item = (), Error = Error> + Send {
         let connections = self.connections.read();
         if let Some(connection) = connections.get(&node_pk) {
             let clients = self.clients.read();
@@ -220,26 +218,26 @@ impl Connections {
             // send packet to the first relay only that can accept it
             // errors are ignored
             // TODO: return error if stream is exhausted?
-            Box::new(stream::futures_unordered(futures)
+            Either::A(stream::futures_unordered(futures)
                 .then(Ok)
                 .skip_while(|res| future::ok(res.is_err()))
                 .into_future()
                 .map(|_| ())
                 .map_err(|(e, _)| e))
         } else {
-            Box::new(future::ok(()))
+            Either::B(future::ok(()))
         }
 
         // TODO: send as OOB?
     }
 
     /// Send `OobSend` packet to a node via relay with specified `PublicKey`.
-    pub fn send_oob(&self, relay_pk: PublicKey, node_pk: PublicKey, data: Vec<u8>) -> IoFuture<()> {
+    pub fn send_oob(&self, relay_pk: PublicKey, node_pk: PublicKey, data: Vec<u8>) -> impl Future<Item = (), Error = Error> + Send {
         let clients = self.clients.read();
         if let Some(client) = clients.get(&relay_pk) {
-            client.send_oob(node_pk, data)
+            Either::A(client.send_oob(node_pk, data))
         } else {
-            Box::new( future::err(
+            Either::B( future::err(
                 Error::new(ErrorKind::Other,
                     "send_oob: relay is not connected"
             )))
@@ -247,12 +245,12 @@ impl Connections {
     }
 
     /// Send `OnionRequest` packet to relay with specified `PublicKey`.
-    pub fn send_onion(&self, relay_pk: PublicKey, onion_request: OnionRequest) -> IoFuture<()> {
+    pub fn send_onion(&self, relay_pk: PublicKey, onion_request: OnionRequest) -> impl Future<Item = (), Error = Error> + Send {
         let clients = self.clients.read();
         if let Some(client) = clients.get(&relay_pk) {
-            client.send_onion(onion_request)
+            Either::A(client.send_onion(onion_request))
         } else {
-            Box::new( future::err(
+            Either::B( future::err(
                 Error::new(ErrorKind::Other,
                     "send_onion: relay is not connected"
             )))
@@ -261,7 +259,7 @@ impl Connections {
 
     /// Change status of connection to the node. Connections module need to know
     /// whether connection is used to be able to put to sleep relay connections.
-    pub fn set_connection_status(&self, node_pk: PublicKey, status: NodeConnectionStatus) -> IoFuture<()> {
+    pub fn set_connection_status(&self, node_pk: PublicKey, status: NodeConnectionStatus) -> impl Future<Item = (), Error = Error> + Send {
         if let Some(connection) = self.connections.write().get_mut(&node_pk) {
             let future = if status == NodeConnectionStatus::TCP && connection.status == NodeConnectionStatus::UDP {
                 // unsleep clients
@@ -269,14 +267,14 @@ impl Connections {
                 let futures = connection.clients(&clients)
                     .map(|client| client.clone().spawn(self.dht_sk.clone(), self.dht_pk))
                     .collect::<Vec<_>>();
-                Box::new(future::join_all(futures).map(|_| ())) as IoFuture<()>
+                Either::A(future::join_all(futures).map(|_| ()))
             } else {
-                Box::new(future::ok(()))
+                Either::B(future::ok(()))
             };
             connection.status = status;
             future
         } else {
-            Box::new( future::err(
+            Either::B( future::err(
                 Error::new(ErrorKind::Other,
                     "set_connection_status: no such connection"
             )))
@@ -286,7 +284,7 @@ impl Connections {
     /// Main loop that should be run periodically. It removes unreachable and
     /// redundant relays, reconnects to relays if a connection was lost, puts
     /// relays to sleep if they are not used right now.
-    fn main_loop(&self) -> IoFuture<()> {
+    fn main_loop(&self) -> impl Future<Item = (), Error = Error> + Send {
         let mut clients = self.clients.write();
         let mut connections = self.connections.write();
 
@@ -348,20 +346,18 @@ impl Connections {
             // TODO: remove connections if there are too many?
         }
 
-        Box::new(future::join_all(futures).map(|_| ()))
+        future::join_all(futures).map(|_| ())
     }
 
     /// Run TCP periodical tasks. Result future will never be completed
     /// successfully.
-    pub fn run(self) -> IoFuture<()> {
+    pub fn run(self) -> impl Future<Item = (), Error = Error> + Send {
         let interval = Duration::from_secs(CONNECTIONS_INTERVAL);
         let wakeups = Interval::new(Instant::now(), interval);
 
-        let future = wakeups
+        wakeups
             .map_err(|e| Error::new(ErrorKind::Other, format!("TCP connections timer error: {:?}", e)))
-            .for_each(move |_instant| self.main_loop());
-
-        Box::new(future)
+            .for_each(move |_instant| self.main_loop())
     }
 }
 
