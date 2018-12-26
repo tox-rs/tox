@@ -76,7 +76,7 @@ fn de_from_hex<'de, D>(deserializer: D) -> Result<PublicKey, D::Error> where D: 
     let bootstrap_pk_bytes: [u8; 32] = FromHex::from_hex(s)
         .map_err(|e| de::Error::custom(format!("Can't make bytes from hex string {:?}", e)))?;
     PublicKey::from_slice(&bootstrap_pk_bytes)
-        .ok_or(de::Error::custom("Can't make PublicKey"))
+        .ok_or_else(|| de::Error::custom("Can't make PublicKey"))
 }
 
 // TODO: Remove this function. Use default String type after bug fix released.
@@ -259,7 +259,7 @@ pub fn cli_parse() -> NodeConfig {
 }
 
 /// Parse settings from a saved file.
-fn parse_config(config_path: String) -> NodeConfig {
+fn parse_config(config_path: &str) -> NodeConfig {
     let mut settings = Config::default();
 
     settings.set_default("log-type", "Stderr").expect("Can't set default value for `log-type`");
@@ -267,10 +267,10 @@ fn parse_config(config_path: String) -> NodeConfig {
     settings.set_default("lan-discovery", "False").expect("Can't set default value for `lan-discovery`");
     settings.set_default("threads", "1").expect("Can't set default value for `threads`");
 
-    let config_file = if !Path::new(&config_path).exists() {
+    let config_file = if !Path::new(config_path).exists() {
         panic!("Can't find config file {}", config_path);
     } else {
-        CfgFile::with_name(&config_path)
+        CfgFile::with_name(config_path)
     };
 
     settings.merge(config_file).expect("Merging config file with default values failed");
@@ -287,7 +287,7 @@ fn parse_config(config_path: String) -> NodeConfig {
 fn run_config(matches: &ArgMatches) -> NodeConfig {
     let config_path = value_t!(matches.value_of("cfg-file"), String).unwrap_or_else(|e| e.exit());
 
-    parse_config(config_path)
+    parse_config(&config_path)
 }
 
 fn run_args(matches: &ArgMatches) -> NodeConfig {
