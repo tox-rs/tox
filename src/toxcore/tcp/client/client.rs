@@ -102,143 +102,145 @@ impl Client {
     }
 
     /// Handle packet received from TCP relay.
-    pub fn handle_packet(&self, packet: Packet) -> IoFuture<()> {
+    pub fn handle_packet(&self, packet: Packet) -> impl Future<Item = (), Error = Error> + Send {
+        // TODO: use anonymous sum types when rust has them
+        // https://github.com/rust-lang/rfcs/issues/294
         match packet {
-            Packet::RouteRequest(packet) => self.handle_route_request(&packet),
-            Packet::RouteResponse(packet) => self.handle_route_response(&packet),
-            Packet::ConnectNotification(packet) => self.handle_connect_notification(&packet),
-            Packet::DisconnectNotification(packet) => self.handle_disconnect_notification(&packet),
-            Packet::PingRequest(packet) => self.handle_ping_request(&packet),
-            Packet::PongResponse(packet) => self.handle_pong_response(&packet),
-            Packet::OobSend(packet) => self.handle_oob_send(&packet),
-            Packet::OobReceive(packet) => self.handle_oob_receive(packet),
-            Packet::Data(packet) => self.handle_data(packet),
-            Packet::OnionRequest(packet) => self.handle_onion_request(&packet),
-            Packet::OnionResponse(packet) => self.handle_onion_response(packet),
+            Packet::RouteRequest(packet) => Box::new(self.handle_route_request(&packet)) as Box<dyn Future<Item = _, Error = _> + Send>,
+            Packet::RouteResponse(packet) => Box::new(self.handle_route_response(&packet)),
+            Packet::ConnectNotification(packet) => Box::new(self.handle_connect_notification(&packet)),
+            Packet::DisconnectNotification(packet) => Box::new(self.handle_disconnect_notification(&packet)),
+            Packet::PingRequest(packet) => Box::new(self.handle_ping_request(&packet)),
+            Packet::PongResponse(packet) => Box::new(self.handle_pong_response(&packet)),
+            Packet::OobSend(packet) => Box::new(self.handle_oob_send(&packet)),
+            Packet::OobReceive(packet) => Box::new(self.handle_oob_receive(packet)),
+            Packet::Data(packet) => Box::new(self.handle_data(packet)),
+            Packet::OnionRequest(packet) => Box::new(self.handle_onion_request(&packet)),
+            Packet::OnionResponse(packet) => Box::new(self.handle_onion_response(packet)),
         }
     }
 
     /// Send packet to this relay. If we are not connected to the relay an error
     /// will be returned.
-    fn send_packet(&self, packet: Packet) -> IoFuture<()> {
+    fn send_packet(&self, packet: Packet) -> impl Future<Item = (), Error = Error> + Send {
         if let ClientStatus::Connected(ref tx) = *self.status.read() {
-            send_to(tx, packet)
+            Either::A(send_to(tx, packet))
         } else {
             // Attempt to send packet to TCP relay with wrong status. For
             // instance it can happen when we received ping request from the
             // relay and right after that relay became sleeping so we are not
             // able to respond anymore.
-            Box::new( future::err(
+            Either::B( future::err(
                 Error::new(ErrorKind::Other,
                     format!("Attempt to send packet to TCP relay with wrong status: {:?}", packet)
             )))
         }
     }
 
-    fn handle_route_request(&self, _packet: &RouteRequest) -> IoFuture<()> {
-        Box::new( future::err(
+    fn handle_route_request(&self, _packet: &RouteRequest) -> impl Future<Item = (), Error = Error> + Send {
+        future::err(
             Error::new(ErrorKind::Other,
                 "Server must not send RouteRequest to client"
-        )))
+        ))
     }
 
-    fn handle_route_response(&self, packet: &RouteResponse) -> IoFuture<()> {
+    fn handle_route_response(&self, packet: &RouteResponse) -> impl Future<Item = (), Error = Error> + Send {
         let index = if let Some(index) = packet.connection_id.index() {
             index
         } else {
-            return Box::new( future::err(
+            return future::err(
                 Error::new(ErrorKind::Other,
                     "RouteResponse: connection id is zero"
-            )))
+            ))
         };
 
         if self.connections.read().contains(&packet.pk) {
             if self.links.write().insert_by_id(&packet.pk, index) {
-                Box::new(future::ok(()))
+                future::ok(())
             } else {
-                Box::new( future::err(
+                future::err(
                     Error::new(ErrorKind::Other,
                         "handle_route_response: connection_id is already linked"
-                )))
+                ))
             }
         } else {
             // in theory this can happen if we added connection and right
             // after that removed it
             // TODO: should it be handled better?
-            Box::new( future::err(
+            future::err(
                 Error::new(ErrorKind::Other,
                     "handle_route_response: unexpected route response"
-            )))
+            ))
         }
     }
 
-    fn handle_connect_notification(&self, packet: &ConnectNotification) -> IoFuture<()> {
+    fn handle_connect_notification(&self, packet: &ConnectNotification) -> impl Future<Item = (), Error = Error> + Send {
         let index = if let Some(index) = packet.connection_id.index() {
             index
         } else {
-            return Box::new( future::err(
+            return future::err(
                 Error::new(ErrorKind::Other,
                     "ConnectNotification: connection id is zero"
-            )))
+            ))
         };
 
         if self.links.write().upgrade(index) {
-            Box::new(future::ok(()))
+            future::ok(())
         } else {
-            Box::new( future::err(
+            future::err(
                 Error::new(ErrorKind::Other,
                     "handle_connect_notification: connection_id is not linked"
-            )))
+            ))
         }
     }
 
-    fn handle_disconnect_notification(&self, packet: &DisconnectNotification) -> IoFuture<()> {
+    fn handle_disconnect_notification(&self, packet: &DisconnectNotification) -> impl Future<Item = (), Error = Error> + Send {
         let index = if let Some(index) = packet.connection_id.index() {
             index
         } else {
-            return Box::new( future::err(
+            return future::err(
                 Error::new(ErrorKind::Other,
                     "DisconnectNotification: connection id is zero"
-            )))
+            ))
         };
 
         if self.links.write().downgrade(index) {
-            Box::new(future::ok(()))
+            future::ok(())
         } else {
-            Box::new( future::err(
+            future::err(
                 Error::new(ErrorKind::Other,
                     "handle_disconnect_notification: connection_id is not linked"
-            )))
+            ))
         }
     }
 
-    fn handle_ping_request(&self, packet: &PingRequest) -> IoFuture<()> {
+    fn handle_ping_request(&self, packet: &PingRequest) -> impl Future<Item = (), Error = Error> + Send {
         self.send_packet(Packet::PongResponse(
             PongResponse { ping_id: packet.ping_id }
         ))
     }
 
-    fn handle_pong_response(&self, _packet: &PongResponse) -> IoFuture<()> {
+    fn handle_pong_response(&self, _packet: &PongResponse) -> impl Future<Item = (), Error = Error> + Send {
         // TODO check ping_id
-        Box::new(future::ok(()))
+        future::ok(())
     }
 
-    fn handle_oob_send(&self, _packet: &OobSend) -> IoFuture<()> {
-        Box::new( future::err(
+    fn handle_oob_send(&self, _packet: &OobSend) -> impl Future<Item = (), Error = Error> + Send {
+        future::err(
             Error::new(ErrorKind::Other,
                 "Server must not send OobSend to client"
-        )))
+        ))
     }
 
-    fn handle_oob_receive(&self, packet: OobReceive) -> IoFuture<()> {
+    fn handle_oob_receive(&self, packet: OobReceive) -> impl Future<Item = (), Error = Error> + Send {
         send_to(&self.incoming_tx, (self.pk, IncomingPacket::Oob(packet.sender_pk, packet.data)))
     }
 
-    fn handle_data(&self, packet: Data) -> IoFuture<()> {
+    fn handle_data(&self, packet: Data) -> impl Future<Item = (), Error = Error> + Send {
         let index = if let Some(index) = packet.connection_id.index() {
             index
         } else {
-            return Box::new( future::err(
+            return Either::A( future::err(
                 Error::new(ErrorKind::Other,
                     "Data: connection id is zero"
             )))
@@ -246,31 +248,31 @@ impl Client {
 
         let links = self.links.read();
         if let Some(link) = links.by_id(index) {
-            send_to(&self.incoming_tx, (self.pk, IncomingPacket::Data(link.pk, packet.data)))
+            Either::B(send_to(&self.incoming_tx, (self.pk, IncomingPacket::Data(link.pk, packet.data))))
         } else {
-            Box::new( future::err(
+            Either::A( future::err(
                 Error::new(ErrorKind::Other,
                     "Data.connection_id is not linked"
             )))
         }
     }
 
-    fn handle_onion_request(&self, _packet: &OnionRequest) -> IoFuture<()> {
-        Box::new( future::err(
+    fn handle_onion_request(&self, _packet: &OnionRequest) -> impl Future<Item = (), Error = Error> + Send {
+        future::err(
             Error::new(ErrorKind::Other,
                 "Server must not send OnionRequest to client"
-        )))
+        ))
     }
 
-    fn handle_onion_response(&self, packet: OnionResponse) -> IoFuture<()> {
+    fn handle_onion_response(&self, packet: OnionResponse) -> impl Future<Item = (), Error = Error> + Send {
         send_to(&self.incoming_tx, (self.pk, IncomingPacket::Onion(packet.payload)))
     }
 
     /// Spawn a connection to this TCP relay if it is not connected already. The
     /// connection is spawned via `tokio::spawn` so the result future will be
     /// completed after first poll.
-    pub fn spawn(self, dht_sk: SecretKey, dht_pk: PublicKey) -> IoFuture<()> { // TODO: send pings periodically
-        Box::new(future::lazy(move || {
+    pub fn spawn(self, dht_sk: SecretKey, dht_pk: PublicKey) -> impl Future<Item = (), Error = Error> + Send { // TODO: send pings periodically
+        future::lazy(move || {
             let relay_pk = self.pk;
             let self_c = self.clone();
 
@@ -334,11 +336,11 @@ impl Client {
             tokio::spawn(future);
 
             future::ok(())
-        }))
+        })
     }
 
     /// Send `RouteRequest` packet with specified `PublicKey`.
-    fn send_route_request(&self, pk: PublicKey) -> IoFuture<()> {
+    fn send_route_request(&self, pk: PublicKey) -> impl Future<Item = (), Error = Error> + Send {
         self.send_packet(Packet::RouteRequest(RouteRequest {
             pk
         }))
@@ -346,34 +348,34 @@ impl Client {
 
     /// Send `RouteRequest` packets for all nodes we should be connected to via
     /// the relay. It should be done for every fresh connection to the relay.
-    fn send_route_requests(&self) -> IoFuture<()> {
+    fn send_route_requests(&self) -> impl Future<Item = (), Error = Error> + Send {
         let connections = self.connections.read();
         let futures = connections.iter()
             .map(|&pk| self.send_route_request(pk))
             .collect::<Vec<_>>();
-        Box::new(future::join_all(futures).map(|_| ()))
+        future::join_all(futures).map(|_| ())
     }
 
     /// Send `Data` packet to a node via relay.
-    pub fn send_data(&self, destination_pk: PublicKey, data: Vec<u8>) -> IoFuture<()> {
+    pub fn send_data(&self, destination_pk: PublicKey, data: Vec<u8>) -> impl Future<Item = (), Error = Error> + Send {
         // it is important that the result future succeeds only if packet is
         // sent since we take only one successful future from several relays
         // when send data packet
         let links = self.links.read();
         if let Some(index) = links.id_by_pk(&destination_pk) {
             if links.by_id(index).map(|link| link.status) == Some(LinkStatus::Online) {
-                self.send_packet(Packet::Data(Data {
+                Either::A(self.send_packet(Packet::Data(Data {
                     connection_id: ConnectionId::from_index(index),
                     data,
-                }))
+                })))
             } else {
-                Box::new( future::err(
+                Either::B( future::err(
                     Error::new(ErrorKind::Other,
                         "send_data: destination_pk is not online"
                 )))
             }
         } else {
-            Box::new( future::err(
+            Either::B( future::err(
                 Error::new(ErrorKind::Other,
                     "send_data: destination_pk is not linked"
             )))
@@ -381,7 +383,7 @@ impl Client {
     }
 
     /// Send `OobSend` packet to a node via relay.
-    pub fn send_oob(&self, destination_pk: PublicKey, data: Vec<u8>) -> IoFuture<()> {
+    pub fn send_oob(&self, destination_pk: PublicKey, data: Vec<u8>) -> impl Future<Item = (), Error = Error> + Send {
         self.send_packet(Packet::OobSend(OobSend {
             destination_pk,
             data,
@@ -389,42 +391,42 @@ impl Client {
     }
 
     /// Send `OnionRequest` packet to the relay.
-    pub fn send_onion(&self, onion_request: OnionRequest) -> IoFuture<()> {
+    pub fn send_onion(&self, onion_request: OnionRequest) -> impl Future<Item = (), Error = Error> + Send {
         self.send_packet(Packet::OnionRequest(onion_request))
     }
 
     /// Add connection to a friend via this relay. If we are connected to the
     /// relay `RouteRequest` packet will be sent. Also this packet will be sent
     /// when fresh connection is established.
-    pub fn add_connection(&self, pk: PublicKey) -> IoFuture<()> {
+    pub fn add_connection(&self, pk: PublicKey) -> impl Future<Item = (), Error = Error> + Send {
         if self.connections.write().insert(pk) {
             // ignore sending errors if we are not connected to the relay
             // in this case RouteRequest will be sent after connection
-            Box::new(self.send_route_request(pk).then(|_| Ok(())))
+            Either::A(self.send_route_request(pk).then(|_| Ok(())))
         } else {
-            Box::new(future::ok(()))
+            Either::B(future::ok(()))
         }
     }
 
     /// Remove connection to a friend via this relay. If we are connected to the
     /// relay and linked to the friend `DisconnectNotification` packet will be
     /// sent.
-    pub fn remove_connection(&self, pk: PublicKey) -> IoFuture<()> {
+    pub fn remove_connection(&self, pk: PublicKey) -> impl Future<Item = (), Error = Error> + Send {
         if self.connections.write().remove(&pk) {
             let mut links = self.links.write();
             if let Some(index) = links.id_by_pk(&pk) {
                 links.take(index);
-                Box::new(self.send_packet(Packet::DisconnectNotification(DisconnectNotification {
+                Either::A(self.send_packet(Packet::DisconnectNotification(DisconnectNotification {
                     connection_id: ConnectionId::from_index(index),
                 })).then(|_| Ok(())))
             } else {
                 // the link may not exist if we delete the connection before we
                 // receive RouteResponse packet
                 // TODO: should it be handled better?
-                Box::new(future::ok(()))
+                Either::B(future::ok(()))
             }
         } else {
-            Box::new( future::err(
+            Either::B( future::err(
                 Error::new(ErrorKind::Other,
                     "remove_connection: no such connection"
             )))
@@ -1095,8 +1097,8 @@ pub mod tests {
     #[test]
     fn spawn() {
         // waits until the relay becomes connected
-        fn on_connected(client: Client) -> IoFuture<()> {
-            let future = Interval::new(Instant::now(), Duration::from_millis(10))
+        fn on_connected(client: Client) -> impl Future<Item = (), Error = Error> + Send {
+            Interval::new(Instant::now(), Duration::from_millis(10))
                 .map_err(|e| Error::new(ErrorKind::Other, e))
                 .skip_while(move |_| match *client.status.read() {
                     ClientStatus::Connecting => future::ok(true),
@@ -1105,13 +1107,12 @@ pub mod tests {
                 })
                 .into_future()
                 .map(|_| ())
-                .map_err(|(e, _)| e);
-            Box::new(future)
+                .map_err(|(e, _)| e)
         }
 
         // waits until link with PublicKey becomes online
-        fn on_online(client: Client, pk: PublicKey) -> IoFuture<()> {
-            let future = Interval::new(Instant::now(), Duration::from_millis(10))
+        fn on_online(client: Client, pk: PublicKey) -> impl Future<Item = (), Error = Error> + Send {
+            Interval::new(Instant::now(), Duration::from_millis(10))
                 .map_err(|e| Error::new(ErrorKind::Other, e))
                 .skip_while(move |_| {
                     let links = client.links.read();
@@ -1123,8 +1124,7 @@ pub mod tests {
                 })
                 .into_future()
                 .map(|_| ())
-                .map_err(|(e, _)| e);
-            Box::new(future)
+                .map_err(|(e, _)| e)
         }
 
         crypto_init().unwrap();
