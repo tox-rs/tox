@@ -912,7 +912,7 @@ impl Server {
     /// module.
     fn handle_cookie_request(&self, packet: &CookieRequest, addr: SocketAddr) -> IoFuture<()> {
         if let Some(ref net_crypto) = self.net_crypto {
-            net_crypto.handle_udp_cookie_request(packet, addr)
+            Box::new(net_crypto.handle_udp_cookie_request(packet, addr))
         } else {
             Box::new( future::err(
                 Error::new(ErrorKind::Other, "Net crypto is not initialised")
@@ -924,7 +924,7 @@ impl Server {
     /// module.
     fn handle_cookie_response(&self, packet: &CookieResponse, addr: SocketAddr) -> IoFuture<()> {
         if let Some(ref net_crypto) = self.net_crypto {
-            net_crypto.handle_udp_cookie_response(packet, addr)
+            Box::new(net_crypto.handle_udp_cookie_response(packet, addr))
         } else {
             Box::new( future::err(
                 Error::new(ErrorKind::Other, "Net crypto is not initialised")
@@ -936,7 +936,7 @@ impl Server {
     /// module.
     fn handle_crypto_handshake(&self, packet: &CryptoHandshake, addr: SocketAddr) -> IoFuture<()> {
         if let Some(ref net_crypto) = self.net_crypto {
-            net_crypto.handle_udp_crypto_handshake(packet, addr)
+            Box::new(net_crypto.handle_udp_crypto_handshake(packet, addr))
         } else {
             Box::new( future::err(
                 Error::new(ErrorKind::Other, "Net crypto is not initialised")

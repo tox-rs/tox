@@ -25,6 +25,7 @@ use std::u16;
 
 use futures::{Future, Stream};
 use futures::future;
+use futures::future::Either;
 use futures::sync::mpsc;
 use parking_lot::RwLock;
 use tokio::timer::Interval;
@@ -171,7 +172,7 @@ impl NetCrypto {
     }
 
     /// Send `Packet` packet to UDP socket
-    fn send_to_udp(&self, addr: SocketAddr, packet: Packet) -> IoFuture<()> {
+    fn send_to_udp(&self, addr: SocketAddr, packet: Packet) -> impl Future<Item = (), Error = Error> + Send {
         send_to_bounded(&self.udp_tx, (packet, addr), Duration::from_millis(NET_CRYPTO_SEND_TIMEOUT))
     }
 
@@ -203,19 +204,19 @@ impl NetCrypto {
     }
 
     /// Handle `CookieRequest` packet received from UDP socket
-    pub fn handle_udp_cookie_request(&self, packet: &CookieRequest, addr: SocketAddr) -> IoFuture<()> {
+    pub fn handle_udp_cookie_request(&self, packet: &CookieRequest, addr: SocketAddr) -> impl Future<Item = (), Error = Error> + Send {
         match self.handle_cookie_request(packet) {
-            Ok(response) => self.send_to_udp(addr, Packet::CookieResponse(response)),
-            Err(e) => Box::new(future::err(e))
+            Ok(response) => Either::A(self.send_to_udp(addr, Packet::CookieResponse(response))),
+            Err(e) => Either::B(future::err(e))
         }
     }
 
     /// Handle `CookieResponse` and if it's correct change connection status to `HandshakeSending`.
-    pub fn handle_cookie_response(&self, connection: &mut CryptoConnection, packet: &CookieResponse) -> IoFuture<()> {
+    pub fn handle_cookie_response(&self, connection: &mut CryptoConnection, packet: &CookieResponse) -> impl Future<Item = (), Error = Error> + Send {
         let cookie_request_id = if let ConnectionStatus::CookieRequesting { cookie_request_id, .. } = connection.status {
             cookie_request_id
         } else {
-            return Box::new(future::err(Error::new(
+            return Either::A(future::err(Error::new(
                 ErrorKind::Other,
                 "Can't handle CookieResponse in current connection state"
             )))
@@ -223,11 +224,11 @@ impl NetCrypto {
 
         let payload = match packet.get_payload(&connection.dht_precomputed_key) {
             Ok(payload) => payload,
-            Err(e) => return Box::new(future::err(Error::from(e))),
+            Err(e) => return Either::A(future::err(Error::from(e))),
         };
 
         if payload.id != cookie_request_id {
-            return Box::new(future::err(Error::new(
+            return Either::A(future::err(Error::new(
                 ErrorKind::Other,
                 format!("Invalid cookie request id: expected {} but got {}", cookie_request_id, payload.id)
             )))
@@ -249,18 +250,18 @@ impl NetCrypto {
             packet: StatusPacket::new_crypto_handshake(handshake)
         };
 
-        self.send_status_packet(connection)
+        Either::B(self.send_status_packet(connection))
     }
 
     /// Handle `CookieResponse` packet received from UDP socket
-    pub fn handle_udp_cookie_response(&self, packet: &CookieResponse, addr: SocketAddr) -> IoFuture<()> {
+    pub fn handle_udp_cookie_response(&self, packet: &CookieResponse, addr: SocketAddr) -> impl Future<Item = (), Error = Error> + Send {
         let connection = self.key_by_addr(addr).and_then(|pk| self.connection_by_key(pk));
         if let Some(connection) = connection {
             let mut connection = connection.write();
             connection.update_udp_received_time();
-            self.handle_cookie_response(&mut connection, packet)
+            Either::A(self.handle_cookie_response(&mut connection, packet))
         } else {
-            Box::new(future::err(
+            Either::B(future::err(
                 Error::new(
                     ErrorKind::Other,
                     format!("No crypto connection for address {}", addr)
@@ -270,12 +271,12 @@ impl NetCrypto {
     }
 
     /// Handle `CryptoHandshake` and if it's correct change connection status to `NotConfirmed`.
-    pub fn handle_crypto_handshake(&self, connection: &mut CryptoConnection, packet: &CryptoHandshake) -> IoFuture<()> {
+    pub fn handle_crypto_handshake(&self, connection: &mut CryptoConnection, packet: &CryptoHandshake) -> impl Future<Item = (), Error = Error> + Send {
         if let ConnectionStatus::Established { .. } = connection.status {
             return Box::new(future::err(Error::new(
                 ErrorKind::Other,
                 "Can't handle CryptoHandshake in current connection state"
-            )))
+            ))) as Box<dyn Future<Item = _, Error = _> + Send>
         }
 
         let payload = match packet.get_payload(&connection.dht_precomputed_key) {
@@ -348,18 +349,18 @@ impl NetCrypto {
             ConnectionStatus::Established { .. } => unreachable!("Checked for Established status above"),
         };
 
-        self.send_status_packet(connection)
+        Box::new(self.send_status_packet(connection))
     }
 
     /// Handle `CryptoHandshake` packet received from UDP socket
-    pub fn handle_udp_crypto_handshake(&self, packet: &CryptoHandshake, addr: SocketAddr) -> IoFuture<()> {
+    pub fn handle_udp_crypto_handshake(&self, packet: &CryptoHandshake, addr: SocketAddr) -> impl Future<Item = (), Error = Error> + Send {
         let connection = self.key_by_addr(addr).and_then(|pk| self.connection_by_key(pk));
         if let Some(connection) = connection {
             let mut connection = connection.write();
             connection.update_udp_received_time();
-            self.handle_crypto_handshake(&mut connection, packet)
+            Either::A(self.handle_crypto_handshake(&mut connection, packet))
         } else {
-            Box::new(future::err( // TODO: create crypto connection
+            Either::B(future::err( // TODO: create crypto connection
                 Error::new(
                     ErrorKind::Other,
                     format!("No crypto connection for address {}", addr)
@@ -447,13 +448,13 @@ impl NetCrypto {
 
     /// Send received lossless packets from the beginning of the receiving
     /// buffer to lossless sink and delete them
-    fn process_ready_lossless_packets(&self, recv_array: &mut PacketsArray<RecvPacket>, pk: PublicKey) -> IoFuture<()> {
+    fn process_ready_lossless_packets(&self, recv_array: &mut PacketsArray<RecvPacket>, pk: PublicKey) -> impl Future<Item = (), Error = Error> + Send {
         let mut futures = Vec::new();
         while let Some(packet) = recv_array.pop_front() {
             let future = send_to(&self.lossless_tx, (pk, packet.data));
             futures.push(future);
         }
-        Box::new(future::join_all(futures).map(|_| ()))
+        future::join_all(futures).map(|_| ())
     }
 
     /// Find the time when the last acknowledged packet was sent. This time is
@@ -484,7 +485,7 @@ impl NetCrypto {
       packets from the beginning of this buffer
     - lossy type: just process the packet
     */
-    fn handle_crypto_data(&self, connection: &mut CryptoConnection, packet: &CryptoData, udp: bool) -> IoFuture<()> {
+    fn handle_crypto_data(&self, connection: &mut CryptoConnection, packet: &CryptoData, udp: bool) -> impl Future<Item = (), Error = Error> + Send {
         let (sent_nonce, mut received_nonce, peer_session_pk, session_precomputed_key) = match connection.status {
             ConnectionStatus::NotConfirmed { sent_nonce, received_nonce, peer_session_pk, ref session_precomputed_key, .. }
             | ConnectionStatus::Established { sent_nonce, received_nonce, peer_session_pk, ref session_precomputed_key } => {
@@ -494,7 +495,7 @@ impl NetCrypto {
                 return Box::new(future::err(Error::new(
                     ErrorKind::Other,
                     "Can't handle CryptoData in current connection state"
-                )))
+                ))) as Box<dyn Future<Item = _, Error = _> + Send>
             }
         };
 
@@ -555,13 +556,13 @@ impl NetCrypto {
             // Update end index of received buffer ignoring the error - we still
             // want to handle this packet even if connection is too slow
             connection.recv_array.set_buffer_end(payload.packet_number).ok();
-            Box::new(future::ok(()))
+            Box::new(future::ok(())) as Box<dyn Future<Item = _, Error = _> + Send>
         } else if packet_id > PACKET_ID_CRYPTO_RANGE_END && packet_id < PACKET_ID_LOSSY_RANGE_START {
             if let Err(e) = connection.recv_array.insert(payload.packet_number, RecvPacket::new(payload.data)) {
                 return Box::new(future::err(e))
             }
             connection.packets_received += 1;
-            self.process_ready_lossless_packets(&mut connection.recv_array, connection.peer_real_pk)
+            Box::new(self.process_ready_lossless_packets(&mut connection.recv_array, connection.peer_real_pk))
         } else if packet_id >= PACKET_ID_LOSSY_RANGE_START && packet_id <= PACKET_ID_LOSSY_RANGE_END {
             // Update end index of received buffer ignoring the error - we still
             // want to handle this packet even if connection is too slow
@@ -587,14 +588,14 @@ impl NetCrypto {
     }
 
     /// Handle `CryptoData` packet received from UDP socket
-    pub fn handle_udp_crypto_data(&self, packet: &CryptoData, addr: SocketAddr) -> IoFuture<()> {
+    pub fn handle_udp_crypto_data(&self, packet: &CryptoData, addr: SocketAddr) -> impl Future<Item = (), Error = Error> + Send {
         let connection = self.key_by_addr(addr).and_then(|pk| self.connection_by_key(pk));
         if let Some(connection) = connection {
             let mut connection = connection.write();
             connection.update_udp_received_time();
-            self.handle_crypto_data(&mut connection, packet, /* udp */ true)
+            Either::A(self.handle_crypto_data(&mut connection, packet, /* udp */ true))
         } else {
-            Box::new(future::err(
+            Either::B(future::err(
                 Error::new(
                     ErrorKind::Other,
                     format!("No crypto connection for address {}", addr)
@@ -604,13 +605,13 @@ impl NetCrypto {
     }
 
     /// Send packet to crypto connection choosing TCP or UDP protocol
-    fn send_packet(&self, packet: Packet, connection: &mut CryptoConnection) -> IoFuture<()> {
+    fn send_packet(&self, packet: Packet, connection: &mut CryptoConnection) -> impl Future<Item = (), Error = Error> + Send {
         // TODO: can backpressure be used instead of congestion control? It
         // seems it's possible to implement wrapper for bounded sender with
         // priority queue and just send packets there
         if let Some(addr) = connection.udp_addr {
             if connection.is_udp_alive() {
-                return self.send_to_udp(addr, packet)
+                return Box::new(self.send_to_udp(addr, packet)) as Box<dyn Future<Item = _, Error = _> + Send>
             }
 
             let udp_attempt_should_be_made = connection.udp_attempt_should_be_made() && {
@@ -621,7 +622,7 @@ impl NetCrypto {
 
             if udp_attempt_should_be_made {
                 connection.update_udp_send_attempt_time();
-                self.send_to_udp(addr, packet)
+                Box::new(self.send_to_udp(addr, packet)) as Box<dyn Future<Item = _, Error = _> + Send>
             } else {
                 Box::new(future::ok(()))
             }
@@ -634,15 +635,15 @@ impl NetCrypto {
 
     /// Send `CookieRequest` or `CryptoHandshake` packet if needed depending on
     /// connection status and update sent counter
-    fn send_status_packet(&self, connection: &mut CryptoConnection) -> IoFuture<()> {
+    fn send_status_packet(&self, connection: &mut CryptoConnection) -> impl Future<Item = (), Error = Error> + Send {
         match connection.packet_to_send() {
-            Some(packet) => self.send_packet(packet, connection),
-            None => Box::new(future::ok(())),
+            Some(packet) => Either::A(self.send_packet(packet, connection)),
+            None => Either::B(future::ok(())),
         }
     }
 
     /// Send `CryptoData` packet if the connection is established.
-    fn send_data_packet(&self, connection: &mut CryptoConnection, data: Vec<u8>, packet_number: u32) -> IoFuture<()> {
+    fn send_data_packet(&self, connection: &mut CryptoConnection, data: Vec<u8>, packet_number: u32) -> impl Future<Item = (), Error = Error> + Send {
         let packet = match connection.status {
             ConnectionStatus::NotConfirmed { ref mut sent_nonce, ref session_precomputed_key, .. }
             | ConnectionStatus::Established { ref mut sent_nonce, ref session_precomputed_key, .. } => {
@@ -655,13 +656,13 @@ impl NetCrypto {
                 increment_nonce(sent_nonce);
                 packet
             },
-            _ => return Box::new(future::err(Error::new(ErrorKind::Other, "Connection is not established"))),
+            _ => return Either::A(future::err(Error::new(ErrorKind::Other, "Connection is not established"))),
         };
-        self.send_packet(Packet::CryptoData(packet), connection)
+        Either::B(self.send_packet(Packet::CryptoData(packet), connection))
     }
 
     /// Send request packet with indices of not received packets.
-    fn send_request_packet(&self, connection: &mut CryptoConnection) -> IoFuture<()> {
+    fn send_request_packet(&self, connection: &mut CryptoConnection) -> impl Future<Item = (), Error = Error> + Send {
         let data = NetCrypto::generate_request_packet(&connection.recv_array);
         let packet_number = connection.send_array.buffer_end;
         // TODO: set only if packet was sent successfully?
@@ -670,7 +671,7 @@ impl NetCrypto {
     }
 
     /// Send packets that were requested.
-    fn send_requested_packets(&self, connection: &mut CryptoConnection) -> IoFuture<()> {
+    fn send_requested_packets(&self, connection: &mut CryptoConnection) -> impl Future<Item = (), Error = Error> + Send {
         let now = clock_now();
         let packets = connection.send_array.iter_mut()
             .filter(|(_, packet)| packet.requested)
@@ -682,13 +683,13 @@ impl NetCrypto {
         let futures = packets.into_iter().map(|(i, data)|
             self.send_data_packet(connection, data, i)
         ).collect::<Vec<_>>();
-        Box::new(future::join_all(futures).map(|_| ()))
+        future::join_all(futures).map(|_| ())
     }
 
     /// The main loop that should be run at least 20 times per second
-    fn main_loop(&self) -> IoFuture<()> {
+    fn main_loop(&self) -> impl Future<Item = (), Error = Error> + Send {
         let connections = self.connections.read();
-        let mut futures = Vec::new();
+        let mut futures: Vec<Box<dyn Future<Item = _, Error = _> + Send>> = Vec::new();
         let mut timed_out = Vec::new();
 
         // Only one cycle over all connections to prevent many lock acquirements
@@ -701,14 +702,14 @@ impl NetCrypto {
             }
 
             let send_future = self.send_status_packet(&mut connection);
-            futures.push(send_future);
+            futures.push(Box::new(send_future));
 
             if connection.is_not_confirmed() || connection.is_established() {
                 let should_send = connection.request_packet_sent_time.map_or(true, |time|
                     clock_elapsed(time) > Duration::from_millis(CRYPTO_SEND_PACKET_INTERVAL)
                 );
                 if should_send {
-                    futures.push(self.send_request_packet(&mut connection));
+                    futures.push(Box::new(self.send_request_packet(&mut connection)));
                 }
             }
 
@@ -719,14 +720,14 @@ impl NetCrypto {
                         clock_elapsed(time) > request_packet_interval
                     );
                     if should_send {
-                        futures.push(self.send_request_packet(&mut connection));
+                        futures.push(Box::new(self.send_request_packet(&mut connection)));
                     }
                 }
 
                 // TODO: either use send_rate or remove it
                 connection.update_congestion_stats();
 
-                futures.push(self.send_requested_packets(&mut connection));
+                futures.push(Box::new(self.send_requested_packets(&mut connection)));
             }
         }
 
@@ -744,20 +745,18 @@ impl NetCrypto {
             }
         }
 
-        Box::new(future::join_all(futures).map(|_| ()))
+        future::join_all(futures).map(|_| ())
     }
 
     /// Run `net_crypto` periodical tasks. Result future will never be completed
     /// successfully.
-    pub fn run(self) -> IoFuture<()> {
+    pub fn run(self) -> impl Future<Item = (), Error = Error> + Send {
         let interval = Duration::from_secs(PACKET_COUNTER_AVERAGE_INTERVAL);
         let wakeups = Interval::new(Instant::now(), interval);
 
-        let future = wakeups
+        wakeups
             .map_err(|e| Error::new(ErrorKind::Other, format!("Net crypto timer error: {:?}", e)))
-            .for_each(move |_instant| self.main_loop());
-
-        Box::new(future)
+            .for_each(move |_instant| self.main_loop())
     }
 }
 
