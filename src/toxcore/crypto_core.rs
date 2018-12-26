@@ -281,10 +281,10 @@ pub mod tests {
         crypto_init().unwrap();
         let a = random_u32();
         let b = random_u32();
-        assert!(a != 0);
-        assert!(b != 0);
+        assert_ne!(a, 0);
+        assert_ne!(b, 0);
         // The probability to fail equals 5.4*10^-20
-        assert!(a != b);
+        assert_ne!(a, b);
     }
 
 
@@ -293,10 +293,10 @@ pub mod tests {
         crypto_init().unwrap();
         let a = random_u64();
         let b = random_u64();
-        assert!(a != 0);
-        assert!(b != 0);
+        assert_ne!(a, 0);
+        assert_ne!(b, 0);
         // The probability to fail equals 2.9*10^-39
-        assert!(a != b);
+        assert_ne!(a, b);
     }
 
     #[test]
@@ -304,10 +304,10 @@ pub mod tests {
         crypto_init().unwrap();
         let a = random_usize();
         let b = random_usize();
-        assert!(a != 0);
-        assert!(b != 0);
+        assert_ne!(a, 0);
+        assert_ne!(b, 0);
         // The probability to fail equals 2.9*10^-39
-        assert!(a != b);
+        assert_ne!(a, b);
     }
 
     #[test]
@@ -454,7 +454,7 @@ pub mod tests {
         let mut nonce = gen_nonce();
         let cmp_nonce = nonce;
         increment_nonce(&mut nonce);
-        assert!(nonce != cmp_nonce);
+        assert_ne!(nonce, cmp_nonce);
     }
 
     // increment_nonce_number()

@@ -254,8 +254,8 @@ mod tests {
         let id2 = links.insert(&pk2).unwrap();
 
         // Two links inserted, the id of the 1st is 0, the id of the 2nd is 1
-        assert!(id1 == 0);
-        assert!(id2 == 1);
+        assert_eq!(id1, 0);
+        assert_eq!(id2, 1);
 
         // Remove link[0]
         links.take(0);
@@ -265,7 +265,7 @@ mod tests {
         let id3 = links.insert(&pk3).unwrap();
 
         // The id of the link must be 0
-        assert!(id3 == 0);
+        assert_eq!(id3, 0);
     }
 
     #[test]

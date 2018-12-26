@@ -38,7 +38,7 @@ fn pass_encrypt_test() {
     assert_eq!(&plaintext as &[u8], &pass_decrypt(&encrypted, &passphrase).unwrap() as &[u8]);
 
     let encrypted2 = pass_encrypt(&plaintext, &passphrase).unwrap();
-    assert!(encrypted != encrypted2);
+    assert_ne!(encrypted, encrypted2);
 }
 
 
