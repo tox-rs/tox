@@ -72,10 +72,10 @@ impl From<Context<DecodeErrorKind>> for DecodeError {
 }
 
 /// Error that can happen when decoding `Packet` from bytes
-#[derive(Clone, Debug, Eq, PartialEq, Fail)]
+#[derive(Clone, Debug, PartialEq, Eq, Fail)]
 pub enum DecodeErrorKind {
     /// Error indicates that we received too big packet
-    #[fail(display = "Packet should not be longer then 2048 bytes: {} bytes longer", len)]
+    #[fail(display = "Packet should not be longer than 2048 bytes: {} bytes", len)]
     TooBigPacket {
         /// Length of received packet
         len: usize
@@ -96,12 +96,9 @@ pub enum DecodeErrorKind {
         /// Received packet
         packet: Vec<u8>,
     },
-    /// For From<DecodeError> trait.
-    #[fail(display = "Error: {}", msg)]
-    String {
-        /// Error message
-        msg: String,
-    }
+    /// General IO error that can happen with UDP socket.
+    #[fail(display = "IO Error")]
+    Io,
 }
 
 /// Error that can happen when encoding `Packet` to bytes
@@ -150,17 +147,17 @@ impl From<Context<EncodeErrorKind>> for EncodeError {
 }
 
 impl From<IoError> for DecodeError {
-    fn from(e: IoError) -> DecodeError {
+    fn from(error: IoError) -> DecodeError {
         DecodeError {
-            ctx: Context::new(DecodeErrorKind::String { msg: e.to_string() })
+            ctx: error.context(DecodeErrorKind::Io)
         }
     }
 }
 
 impl From<IoError> for EncodeError {
-    fn from(e: IoError) -> EncodeError {
+    fn from(error: IoError) -> EncodeError {
         EncodeError {
-            ctx: Context::new(EncodeErrorKind::String { msg: e.to_string() })
+            ctx: error.context(EncodeErrorKind::Io)
         }
     }
 }
@@ -174,12 +171,9 @@ pub enum EncodeErrorKind {
         /// Serialization error
         error: GenError
     },
-    /// For From<ENcodeError> trait.
-    #[fail(display = "Error: {}", msg)]
-    String {
-        /// Error message
-        msg: String,
-    }
+    /// General IO error that can happen with UDP socket.
+    #[fail(display = "IO Error")]
+    Io,
 }
 
 /// Struct to use for {de-,}serializing DHT UDP packets.
@@ -422,8 +416,8 @@ mod tests {
         buf.extend_from_slice(b"\xFF");
 
         let res = codec.decode(&mut buf);
-        assert!(res.is_err());
         // not enought bytes to decode EncryptedPacket
+        assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), DecodeErrorKind::Deserialize { error: ErrorKind::Alt, packet: vec![0xff] });
     }
     #[test]
@@ -479,8 +473,8 @@ mod tests {
     fn encode_error_kind() {
         let serialize = EncodeErrorKind::Serialize { error: GenError::InvalidOffset };
         assert_eq!(format!("{}", serialize), "Serialize Packet error: InvalidOffset".to_owned());
-        let string = DecodeErrorKind::String { msg: "error msg".to_owned() };
-        assert_eq!(format!("{}", string), "Error: error msg".to_owned());
+        let io_error = DecodeErrorKind::Io;
+        assert_eq!(format!("{}", io_error), "IO Error".to_owned());
     }
     #[test]
     fn decode_error_kind() {
@@ -489,8 +483,8 @@ mod tests {
         let incomplete_packet = DecodeErrorKind::IncompletePacket { needed: Needed::Size(5), packet: vec![1,2,3,4] };
         assert_eq!(format!("{}", incomplete_packet), "Packet should not be incomplete: Size(5), packet: [1, 2, 3, 4]".to_owned());
         let too_bit_packet = DecodeErrorKind::TooBigPacket { len: 5 };
-        assert_eq!(format!("{}", too_bit_packet), "Packet should not be longer then 2048 bytes: 5 bytes longer".to_owned());
-        let string = DecodeErrorKind::String { msg: "error msg".to_owned() };
-        assert_eq!(format!("{}", string), "Error: error msg".to_owned());
+        assert_eq!(format!("{}", too_bit_packet), "Packet should not be longer than 2048 bytes: 5 bytes".to_owned());
+        let io_error = DecodeErrorKind::Io;
+        assert_eq!(format!("{}", io_error), "IO Error".to_owned());
     }
 }

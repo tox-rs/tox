@@ -9,7 +9,7 @@ use tokio::net::{UdpSocket, UdpFramed};
 use failure::Fail;
 
 use toxcore::io_tokio::*;
-use toxcore::dht::codec::{DecodeError, DhtCodec};
+use toxcore::dht::codec::*;
 use toxcore::dht::packet::Packet;
 use toxcore::dht::server::Server;
 use toxcore::stats::Stats;
@@ -35,12 +35,7 @@ impl ServerExt for Server {
                 Err(ref e) => {
                     error!("packet receive error = {:?}", e);
                     // ignore packet decode errors
-                    let fail: &Fail = e;
-                    if let Some(cause) = fail.cause() {
-                        cause.downcast_ref::<DecodeError>().is_none()
-                    } else {
-                        true
-                    }
+                    *e.kind() != DecodeErrorKind::Io
                 }
             }
         ).and_then(|event| event).for_each(move |(packet, addr)| {
