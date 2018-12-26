@@ -2949,11 +2949,13 @@ mod tests {
     fn refresh_onion_key() {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
 
-        let onion_symmetric_key = alice.onion_symmetric_key.read().clone();
+        let onion_symmetric_key_1 = alice.onion_symmetric_key.read().clone();
 
         alice.refresh_onion_key();
 
-        assert!(*alice.onion_symmetric_key.read() != onion_symmetric_key)
+        let onion_symmetric_key_2 = alice.onion_symmetric_key.read().clone();
+
+        assert_ne!(onion_symmetric_key_1, onion_symmetric_key_2)
     }
 
     #[test]

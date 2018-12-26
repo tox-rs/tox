@@ -277,7 +277,7 @@ mod tests {
             payload
         };
 
-        assert!(cookie.hash() != cookie_1.hash());
-        assert!(cookie.hash() != cookie_2.hash());
+        assert_ne!(cookie.hash(), cookie_1.hash());
+        assert_ne!(cookie.hash(), cookie_2.hash());
     }
 }

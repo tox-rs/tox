@@ -12,7 +12,7 @@ let encrypted = pass_encrypt(plaintext, password)
     .expect("Failed to encrypt >.<\"");
 
 // confirm that the data is encrypted
-assert!(plaintext != encrypted.as_slice());
+assert_ne!(plaintext, encrypted.as_slice());
 assert!(is_encrypted(&encrypted));
 
 // decrypted is same as plaintext
@@ -430,10 +430,10 @@ fn pass_key_new_test() {
     let passwd = [42; 123];
     let pk = PassKey::from_passphrase(&passwd).expect("Failed to unwrap PassKey!");
 
-    assert!(pk.salt.0.as_ref() != &passwd as &[u8]);
-    assert!(pk.salt.0.as_ref() != [0; SALT_LENGTH].as_ref());
-    assert!(pk.key.0.as_ref() != &passwd as &[u8]);
-    assert!(pk.key.0 != [0; KEY_LENGTH]);
+    assert_ne!(pk.salt.0.as_ref(), &passwd as &[u8]);
+    assert_ne!(pk.salt.0.as_ref(), [0; SALT_LENGTH].as_ref());
+    assert_ne!(pk.key.0.as_ref(), &passwd as &[u8]);
+    assert_ne!(pk.key.0, [0; KEY_LENGTH]);
 }
 
 // PassKey::with_salt()
@@ -445,6 +445,6 @@ fn pass_key_with_salt_test() {
     let pk = PassKey::with_salt(&passwd, salt).unwrap();
 
     assert_eq!(&*pk.salt, &salt);
-    assert!(pk.key.0.as_ref() != &passwd as &[u8]);
-    assert!(pk.key.0 != [0; KEY_LENGTH]);
+    assert_ne!(pk.key.0.as_ref(), &passwd as &[u8]);
+    assert_ne!(pk.key.0, [0; KEY_LENGTH]);
 }

@@ -46,7 +46,7 @@ impl NoSpam {
     ```
     use self::tox::toxcore::toxid::NoSpam;
 
-    assert!(NoSpam::random() != NoSpam::random());
+    assert_ne!(NoSpam::random(), NoSpam::random());
     ```
     */
     pub fn random() -> Self {
@@ -200,7 +200,7 @@ impl ToxId {
     let mut toxid2 = toxid;
     toxid2.new_nospam(None);
 
-    assert!(toxid != toxid2);
+    assert_ne!(toxid, toxid2);
     assert_eq!(toxid.pk, toxid2.pk);
 
     let mut toxid3 = toxid;
@@ -326,7 +326,7 @@ mod tests {
         crypto_init().unwrap();
         let ns = NoSpam::random();
         // shouldn't be empty, unless your PRNG is crappy
-        assert!(ns.0 != [0; NOSPAMBYTES])
+        assert_ne!(ns.0, [0; NOSPAMBYTES])
     }
 
     // NoSpam::fmt()
@@ -365,7 +365,7 @@ mod tests {
         let mut toxid2 = toxid;
         toxid2.new_nospam(None);
 
-        assert!(toxid != toxid2);
+        assert_ne!(toxid, toxid2);
         assert_eq!(toxid.pk, toxid2.pk);
 
         let mut toxid3 = toxid;

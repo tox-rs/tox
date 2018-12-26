@@ -430,10 +430,10 @@ mod tests {
         let ping_id_5 = onion_announce.ping_id(time_1, pk_1, ip_addr_1, port_2);
 
         assert_eq!(ping_id, ping_id_1);
-        assert!(ping_id != ping_id_2);
-        assert!(ping_id != ping_id_3);
-        assert!(ping_id != ping_id_4);
-        assert!(ping_id != ping_id_5);
+        assert_ne!(ping_id, ping_id_2);
+        assert_ne!(ping_id, ping_id_3);
+        assert_ne!(ping_id, ping_id_4);
+        assert_ne!(ping_id, ping_id_5);
     }
 
     fn create_random_entry(saddr: SocketAddr) -> OnionAnnounceEntry {
