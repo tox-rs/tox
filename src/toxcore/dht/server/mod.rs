@@ -15,7 +15,7 @@ use std::io::{ErrorKind, Error};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use std::mem;
+use std::{iter, mem};
 
 use toxcore::time::*;
 use toxcore::crypto_core::*;
@@ -183,17 +183,12 @@ impl Server {
         // - close nodes of these two friends can be used as pool of random
         //   nodes for onion client.
         // It's the same way as c-toxcore acts but it's not the best way. So it
-        // has to be rewritten in a more cleaner and safer manner. See this
-        // proposal to get some thoughts how it could be done:
-        // https://github.com/zugz/tox-onionPathsProposal/blob/master/onionPathsProposal.md
-        let mut friends = Vec::with_capacity(FAKE_FRIENDS_NUMBER);
-        for _ in 0 .. FAKE_FRIENDS_NUMBER {
-            friends.push(DhtFriend::new(gen_keypair().0));
-        }
-        // TODO: replace with iter::repeat_with on 1.28 rust:
-        // let friends = iter::repeat_with(|| DhtFriend::new(gen_keypair().0))
-        //     .take(FAKE_FRIENDS_NUMBER)
-        //     .collect();
+        // has to be rewritten in a cleaner and safer manner. Most likely onion
+        // will be replaced by DHT announcements:
+        // https://github.com/zugz/tox-DHTAnnouncements/blob/master/DHTAnnouncements.md
+        let friends = iter::repeat_with(|| DhtFriend::new(gen_keypair().0))
+            .take(FAKE_FRIENDS_NUMBER)
+            .collect();
 
         let precomputed_keys = PrecomputedCache::new(sk.clone(), PRECOMPUTED_LRU_CACHE_SIZE);
 
