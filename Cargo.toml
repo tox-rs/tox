@@ -1,6 +1,6 @@
 [package]
 name = "tox-node"
-version = "0.0.5"
+version = "0.0.6"
 authors = [
   "Roman Proskuryakov <humbug@deeptown.org>",
   "Evgeny Kurnevsky <kurnevsky@gmail.com>",
@@ -30,7 +30,7 @@ config = "0.9.1"
 serde = "1.0"
 serde_derive = "1.0"
 serde_yaml = "0.8.8"
-tox = { git = "https://github.com/tox-rs/tox/" }
+tox = "0.0.8"
 
 [target.'cfg(unix)'.dependencies]
 syslog = "4.0"
