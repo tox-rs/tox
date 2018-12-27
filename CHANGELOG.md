@@ -1,3 +1,15 @@
+# 0.0.6 (December 27, 2018)
+
+* Fix clippy warnings (#40)
+* Pretty fixes (examples, readme) (#39)
+* Add subcommand config (#37)
+* Use DHT ServerExt (#38)
+* Use bounded streams (#36)
+* Migrate to sodiumoxide 0.2 (#35)
+* Add counters to motd (#35)
+* Ignore bootstrap nodes with invalid address (#34)
+* Do not override log level (#32)
+
 # 0.0.5 (October 27, 2018)
 
 * Update tox core version (#30)
