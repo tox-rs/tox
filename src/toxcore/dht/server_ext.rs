@@ -35,7 +35,7 @@ impl ServerExt for Server {
                 Err(ref e) => {
                     error!("packet receive error = {:?}", e);
                     // ignore packet decode errors
-                    *e.kind() != DecodeErrorKind::Io
+                    *e.kind() == DecodeErrorKind::Io
                 }
             }
         ).and_then(|event| event).for_each(move |(packet, addr)| {
@@ -106,31 +106,35 @@ mod tests {
         let client_addr = "127.0.0.1:0".parse().unwrap();
         let client_socket = UdpSocket::bind(&client_addr).unwrap();
 
-        let stats = Stats::new();
-        let codec = DhtCodec::new(stats);
-        let (sink, stream) = UdpFramed::new(client_socket, codec).split();
+        // Send invalid request first to ensure that the server won't crash
+        let client_future = client_socket.send_dgram(&[42; 123][..], &server_addr).and_then(move |(client_socket, _)| {
+            let stats = Stats::new();
+            let codec = DhtCodec::new(stats);
+            let (sink, stream) = UdpFramed::new(client_socket, codec).split();
 
-        // Send ping request
-        let ping_id = 42;
-        let ping_request_payload = PingRequestPayload {
-            id: ping_id,
-        };
-        let ping_request = PingRequest::new(&shared_secret, &client_pk, &ping_request_payload);
-        let ping_request_future = sink.send((Packet::PingRequest(ping_request), server_addr))
-            .map_err(|e| Error::new(ErrorKind::Other, e.compat()));
+            // Send ping request
+            let ping_id = 42;
+            let ping_request_payload = PingRequestPayload {
+                id: ping_id,
+            };
+            let ping_request = PingRequest::new(&shared_secret, &client_pk, &ping_request_payload);
+            let ping_request_future = sink.send((Packet::PingRequest(ping_request), server_addr))
+                .map_err(|e| Error::new(ErrorKind::Other, e.compat()));
 
-        // And wait for ping response
-        let ping_response_future = stream.filter_map(|(packet, _)| match packet {
-            Packet::PingResponse(ping_response) => Some(ping_response),
-            _ => None,
-        }).into_future().map(move |(ping_response, _)| {
-            let ping_response = ping_response.unwrap();
-            let ping_response_paylad = ping_response.get_payload(&shared_secret).unwrap();
-            assert_eq!(ping_response_paylad.id, ping_id);
-        }).map_err(|(e, _)| Error::new(ErrorKind::Other, e.compat()));;
+            // And wait for ping response
+            let ping_response_future = stream.filter_map(|(packet, _)| match packet {
+                Packet::PingResponse(ping_response) => Some(ping_response),
+                _ => None,
+            }).into_future().map(move |(ping_response, _)| {
+                let ping_response = ping_response.unwrap();
+                let ping_response_paylad = ping_response.get_payload(&shared_secret).unwrap();
+                assert_eq!(ping_response_paylad.id, ping_id);
+            }).map_err(|(e, _)| Error::new(ErrorKind::Other, e.compat()));
 
-        let future = ping_request_future.join(ping_response_future).map(|_| ());
-        let future = future.select(server_future).map(|_| ()).map_err(|(e, _)| e);
+            ping_request_future.join(ping_response_future).map(|_| ())
+        });
+
+        let future = client_future.select(server_future).map(|_| ()).map_err(|(e, _)| e);
         let future = future.then(|r| {
             assert!(r.is_ok());
             r
