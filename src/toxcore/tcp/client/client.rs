@@ -1137,7 +1137,7 @@ pub mod tests {
 
         let server = Server::new();
         let stats = Stats::new();
-        let server_future = server.run(listener, server_sk, stats)
+        let server_future = server.run(listener, server_sk, stats, 2)
             .map_err(|e| Error::new(ErrorKind::Other, e.compat()));
 
         // run first client

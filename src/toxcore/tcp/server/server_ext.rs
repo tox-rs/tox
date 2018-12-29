@@ -102,25 +102,30 @@ pub trait ServerExt {
     /// Running TCP ping sender and incoming `TcpStream`. This function uses
     /// `tokio::spawn` inside so it should be executed via tokio to be able to
     /// get tokio default executor.
-    fn run(self: Self, listner: TcpListener, dht_sk: SecretKey, stats: Stats) -> Box<Future<Item = (), Error = ServerRunError> + Send>;
+    fn run(self: Self, listner: TcpListener, dht_sk: SecretKey, stats: Stats, connections_limit: usize) -> Box<Future<Item = (), Error = ServerRunError> + Send>;
     /// Running TCP server on incoming `TcpStream`
     fn run_connection(self: Self, stream: TcpStream, dht_sk: SecretKey, stats: Stats) -> Box<Future<Item = (), Error = ConnectionError> + Send>;
 }
 
 impl ServerExt for Server {
-    fn run(self: Self, listner: TcpListener, dht_sk: SecretKey, stats: Stats) -> Box<Future<Item = (), Error = ServerRunError> + Send> {
+    fn run(self: Self, listner: TcpListener, dht_sk: SecretKey, stats: Stats, connections_limit: usize) -> Box<Future<Item = (), Error = ServerRunError> + Send> {
         let self_c = self.clone();
 
         let connections_future = listner.incoming()
             .map_err(|error| ServerRunError::IncomingError { error })
             .for_each(move |stream| {
-                tokio::spawn(
-                    self_c.clone()
-                        .run_connection(stream, dht_sk.clone(), stats.clone())
-                        .map_err(|e|
-                            error!("Error while running tcp connection: {:?}", e)
-                        )
-                );
+                if self_c.count() < connections_limit {
+                    tokio::spawn(
+                        self_c.clone()
+                            .run_connection(stream, dht_sk.clone(), stats.clone())
+                            .map_err(|e|
+                                error!("Error while running tcp connection: {:?}", e)
+                            )
+                    );
+                } else {
+                    trace!("Tcp server has reached the limit of {} connections", connections_limit);
+                }
+
                 Ok(())
             });
 
@@ -334,7 +339,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
 
         let stats = Stats::new();
-        let server = Server::new().run(listener, server_sk, stats.clone())
+        let server = Server::new().run(listener, server_sk, stats.clone(), 1)
             .map_err(Error::from);
 
         let now = Instant::now();
