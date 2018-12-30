@@ -752,7 +752,7 @@ mod tests {
         assert_eq!(connection.packets_sent, 0);
         assert_eq!(connection.packets_resent, 0);
         assert_eq!(connection.stats_calculation_time, next_now);
-        assert!((connection.packet_recv_rate - 6000.0).abs() < std::f64::EPSILON);
+        assert!((connection.packet_recv_rate - 6000.0).abs() < 1.0);
     }
 
     #[test]
