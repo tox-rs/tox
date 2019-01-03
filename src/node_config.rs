@@ -112,6 +112,9 @@ pub struct NodeConfig {
     #[serde(rename = "tcp-addresses")]
     #[serde(default)]
     pub tcp_addrs: Vec<SocketAddr>,
+    /// Maximum number of active TCP connections relay can hold.
+    #[serde(rename = "tcp-connections-limit")]
+    pub tcp_connections_limit: usize,
     /// DHT SecretKey
     #[serde(skip_deserializing)]
     pub sk: Option<SecretKey>,
@@ -172,6 +175,13 @@ pub fn cli_parse() -> NodeConfig {
             .takes_value(true)
             .use_delimiter(true)
             .required_unless("udp-address"))
+        .arg(Arg::with_name("tcp-connections-limit")
+            .short("c")
+            .long("tcp-connections-limit")
+            .help("Maximum number of active TCP connections relay can hold")
+            .requires("tcp-address")
+            .takes_value(true)
+            .default_value("512"))
         .arg(Arg::with_name("secret-key")
             .short("s")
             .long("secret-key")
@@ -250,6 +260,7 @@ fn parse_config(config_path: &str) -> NodeConfig {
     settings.set_default("motd", "This is tox-rs").expect("Can't set default value for `motd`");
     settings.set_default("lan-discovery", "False").expect("Can't set default value for `lan-discovery`");
     settings.set_default("threads", "1").expect("Can't set default value for `threads`");
+    settings.set_default("tcp-connections-limit", "512").expect("Can't set default value for `tcp-connections-limit`");
 
     let config_file = if !Path::new(config_path).exists() {
         panic!("Can't find config file {}", config_path);
@@ -286,6 +297,8 @@ fn run_args(matches: &ArgMatches) -> NodeConfig {
     } else {
         Vec::new()
     };
+
+    let tcp_connections_limit = value_t!(matches.value_of("tcp-connections-limit"), usize).unwrap_or_else(|e| e.exit());
 
     let sk = matches.value_of("secret-key").map(|s| {
         let sk_bytes: [u8; 32] = FromHex::from_hex(s).expect("Invalid DHT secret key");
@@ -325,6 +338,7 @@ fn run_args(matches: &ArgMatches) -> NodeConfig {
     NodeConfig {
         udp_addr,
         tcp_addrs,
+        tcp_connections_limit,
         sk,
         sk_passed_as_arg,
         keys_file,
