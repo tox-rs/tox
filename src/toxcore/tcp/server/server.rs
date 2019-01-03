@@ -74,12 +74,6 @@ impl Server {
 
         shutdown_future
     }
-    /** The number of active connections.
-    */
-    pub fn count(&self) -> usize {
-        let state = self.state.read();
-        state.connected_clients.len()
-    }
     /** The main processing function. Call in on each incoming packet from connected and
     handshaked client.
     */
@@ -563,19 +557,6 @@ mod tests {
         let (tx, rx) = mpsc::channel(32);
         let client = Client::new(tx, &client_pk, saddr.ip(), saddr.port());
         (client, rx)
-    }
-
-    #[test]
-    fn count() {
-        crypto_init().unwrap();
-        let server = Server::new();
-
-        assert_eq!(server.count(), 0);
-
-        let (client_1, _rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
-        server.insert(client_1).wait().unwrap();
-
-        assert_eq!(server.count(), 1);
     }
 
     #[test]

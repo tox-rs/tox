@@ -2,6 +2,8 @@
 */
 
 use std::io::{Error as IoError};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use futures::{future, Future, Sink, Stream};
@@ -109,18 +111,25 @@ pub trait ServerExt {
 
 impl ServerExt for Server {
     fn run(self: Self, listner: TcpListener, dht_sk: SecretKey, stats: Stats, connections_limit: usize) -> Box<Future<Item = (), Error = ServerRunError> + Send> {
+        let connections_count = Arc::new(AtomicUsize::new(0));
+
         let self_c = self.clone();
 
         let connections_future = listner.incoming()
             .map_err(|error| ServerRunError::IncomingError { error })
             .for_each(move |stream| {
-                if self_c.count() < connections_limit {
+                if connections_count.load(Ordering::SeqCst) < connections_limit {
+                    connections_count.fetch_add(1, Ordering::SeqCst);
+                    let connections_count_c = connections_count.clone();
                     tokio::spawn(
                         self_c.clone()
                             .run_connection(stream, dht_sk.clone(), stats.clone())
                             .map_err(|e|
                                 error!("Error while running tcp connection: {:?}", e)
-                            )
+                            ).then(move |res| {
+                                connections_count_c.fetch_sub(1, Ordering::SeqCst);
+                                res
+                            })
                     );
                 } else {
                     trace!("Tcp server has reached the limit of {} connections", connections_limit);
