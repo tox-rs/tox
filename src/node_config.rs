@@ -70,37 +70,6 @@ pub struct BootstrapNode {
     addr: String,
 }
 
-fn de_from_hex<'de, D>(deserializer: D) -> Result<PublicKey, D::Error> where D: Deserializer<'de> {
-    let s = String::deserialize(deserializer)?;
-
-    let bootstrap_pk_bytes: [u8; 32] = FromHex::from_hex(s)
-        .map_err(|e| de::Error::custom(format!("Can't make bytes from hex string {:?}", e)))?;
-    PublicKey::from_slice(&bootstrap_pk_bytes)
-        .ok_or_else(|| de::Error::custom("Can't make PublicKey"))
-}
-
-// TODO: Remove this function. Use default String type after bug fix released.
-// Bug is here `https://github.com/mehcode/config-rs/issues/74`
-fn de_log_type<'de, D>(deserializer: D) -> Result<LogType, D::Error> where D: Deserializer<'de> {
-    let s = String::deserialize(deserializer)?;
-
-    match &s[..] {
-        "Stderr" => Ok(LogType::Stderr),
-        "Stdout" => Ok(LogType::Stdout),
-        #[cfg(unix)]
-        "Syslog" => Ok(LogType::Syslog),
-        "None" => Ok(LogType::None),
-        other => Err(de::Error::custom(format!("log-type: invalid value '{}'", other))),
-    }
-}
-
-fn de_threads<'de, D>(deserializer: D) -> Result<Threads, D::Error> where D: Deserializer<'de> {
-    let s = String::deserialize(deserializer)?;
-
-    Threads::from_str(&s)
-        .map_err(|e| de::Error::custom(format!("threads: {:?}", e)))
-}
-
 impl BootstrapNode {
     /// Resolve string address of the node to possible multiple `SocketAddr`s.
     pub fn resolve(&self) -> impl Iterator<Item = PackedNode> {
@@ -114,6 +83,22 @@ impl BootstrapNode {
         };
         addrs.map(move |addr| PackedNode::new(addr, &pk))
     }
+}
+
+fn de_from_hex<'de, D>(deserializer: D) -> Result<PublicKey, D::Error> where D: Deserializer<'de> {
+    let s = String::deserialize(deserializer)?;
+
+    let bootstrap_pk_bytes: [u8; 32] = FromHex::from_hex(s)
+        .map_err(|e| de::Error::custom(format!("Can't make bytes from hex string {:?}", e)))?;
+    PublicKey::from_slice(&bootstrap_pk_bytes)
+        .ok_or_else(|| de::Error::custom("Can't make PublicKey"))
+}
+
+fn de_threads<'de, D>(deserializer: D) -> Result<Threads, D::Error> where D: Deserializer<'de> {
+    let s = String::deserialize(deserializer)?;
+
+    Threads::from_str(&s)
+        .map_err(|e| de::Error::custom(format!("threads: {:?}", e)))
 }
 
 /// Config parsed from command line arguments.
@@ -147,7 +132,6 @@ pub struct NodeConfig {
     #[serde(deserialize_with = "de_threads")]
     pub threads: Threads,
     /// Specifies where to write logs.
-    #[serde(deserialize_with = "de_log_type")]
     #[serde(rename = "log-type")]
     pub log_type: LogType,
     /// Message of the day
