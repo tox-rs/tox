@@ -32,10 +32,6 @@ impl LanDiscoveryError {
     pub fn kind(&self) -> &LanDiscoveryErrorKind {
         self.ctx.get_context()
     }
-
-    pub(crate) fn send_to(error: IoError) -> LanDiscoveryError {
-        LanDiscoveryError::from(LanDiscoveryErrorKind::SendTo { error })
-    }
 }
 
 impl Fail for LanDiscoveryError {
@@ -55,17 +51,14 @@ impl fmt::Display for LanDiscoveryError {
 }
 
 /// The specific kind of error that can occur.
-#[derive(Debug, Fail)]
+#[derive(Debug, Eq, PartialEq, Fail)]
 pub enum LanDiscoveryErrorKind {
     /// Ping wakeup timer error
     #[fail(display = "Lan discovery wakeup timer error")]
     Wakeup,
     /// Send packet(s) error
-    #[fail(display = "Send packet(s) error: {:?}", error)]
-    SendTo {
-        /// IO error during sending packet(s).
-        error: IoError,
-    },
+    #[fail(display = "Send packet(s) error")]
+    SendTo,
 }
 
 impl From<LanDiscoveryErrorKind> for LanDiscoveryError {
@@ -84,6 +77,14 @@ impl From<TimerError> for LanDiscoveryError {
     fn from(error: TimerError) -> LanDiscoveryError {
         LanDiscoveryError {
             ctx: error.context(LanDiscoveryErrorKind::Wakeup)
+        }
+    }
+}
+
+impl From<IoError> for LanDiscoveryError {
+    fn from(error: IoError) -> LanDiscoveryError {
+        LanDiscoveryError {
+            ctx: error.context(LanDiscoveryErrorKind::SendTo)
         }
     }
 }
@@ -218,9 +219,8 @@ impl LanDiscoverySender {
                 self.send().then(|r| {
                     if let Err(e) = r {
                         warn!("Failed to send LAN discovery packets: {}", e);
-                        if e.is_inner() {
-                            let io_error = e.into_inner().expect("Missing inner error.");
-                            return future::err(LanDiscoveryError::send_to(io_error));
+                        if let Some(e) = e.into_inner() {
+                            return future::err(LanDiscoveryError::from(e))
                         }
                     }
                     future::ok(())
