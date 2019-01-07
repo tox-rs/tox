@@ -616,7 +616,8 @@ impl Server {
             (packet, addr)
         }).collect::<Vec<_>>();
 
-        send_all_to_bounded(&self.tx, stream::iter_ok(packets), Duration::from_secs(DHT_SEND_TIMEOUT))
+        Box::new(send_all_to_bounded(&self.tx, stream::iter_ok(packets), Duration::from_secs(DHT_SEND_TIMEOUT))
+                     .map_err(|e| Error::new(ErrorKind::Other, format!("{:?}", e))))
     }
 
     /// Send `NatPingRequest` packet to all close nodes of friend in the hope

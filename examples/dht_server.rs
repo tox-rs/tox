@@ -10,6 +10,8 @@ extern crate hex;
 extern crate log;
 extern crate env_logger;
 
+use std::io::Error;
+
 use futures::*;
 use futures::sync::mpsc;
 use hex::FromHex;
@@ -93,7 +95,7 @@ fn main() {
     }
 
     let future = server.run_socket(socket, rx, stats)
-        .select(lan_discovery_sender.run()).map(|_| ()).map_err(|(e, _)| e)
+        .select(lan_discovery_sender.run().map_err(|e| Error::from(e))).map(|_| ()).map_err(|(e, _)| e)
         .map_err(|err| {
             error!("Processing ended with error: {:?}", err);
             ()
