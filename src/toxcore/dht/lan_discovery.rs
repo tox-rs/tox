@@ -81,8 +81,8 @@ impl From<TimerError> for LanDiscoveryError {
     }
 }
 
-impl From<IoError> for LanDiscoveryError {
-    fn from(error: IoError) -> LanDiscoveryError {
+impl From<mpsc::SendError<(Packet, SocketAddr)>> for LanDiscoveryError {
+    fn from(error: mpsc::SendError<(Packet, SocketAddr)>) -> LanDiscoveryError {
         LanDiscoveryError {
             ctx: error.context(LanDiscoveryErrorKind::SendTo)
         }
@@ -194,7 +194,7 @@ impl LanDiscoverySender {
     }
 
     /// Send `LanDiscovery` packets.
-    fn send(&mut self) -> impl Future<Item=(), Error=TimeoutError<IoError>> + Send {
+    fn send(&mut self) -> impl Future<Item=(), Error=TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send {
         let addrs = self.get_broadcast_socket_addrs();
         let lan_packet = Packet::LanDiscovery(LanDiscovery {
             pk: self.dht_pk,

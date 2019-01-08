@@ -43,7 +43,7 @@ pub fn send_to_bounded<T: Send + 'static, Tx, E: Debug>(tx: &Tx, v: T, timeout: 
 }
 
 /// Send item to a sink using reference
-pub fn send_all_to<T: Send + 'static, S, Tx, E: Debug>(tx: &Tx, s: S) -> impl Future<Item=(), Error=IoError> + Send
+pub fn send_all_to<T: Send + 'static, S, Tx, E: Debug>(tx: &Tx, s: S) -> impl Future<Item=(), Error=E> + Send
     where S: Stream<Item = T, Error = E> + Send + 'static,
           Tx: Sink<SinkItem = T, SinkError = E> + Send + Clone + 'static
 {
@@ -51,15 +51,10 @@ pub fn send_all_to<T: Send + 'static, S, Tx, E: Debug>(tx: &Tx, s: S) -> impl Fu
         .clone() // clone tx sender for 1 send only
         .send_all(s)
         .map(|_tx| ()) // ignore tx because it was cloned
-        .map_err(|e| {
-            // This may only happen if rx is gone
-            debug!("Send to a sink error {:?}", e);
-            IoError::new(IoErrorKind::Other, format!("{:?}",e))
-        })
 }
 
 /// Send item to a sink using reference with timeout
-pub fn send_all_to_bounded<T: Send + 'static, S, Tx, E: Debug>(tx: &Tx, s: S, timeout: Duration) -> impl Future<Item=(), Error=TimeoutError<IoError>> + Send
+pub fn send_all_to_bounded<T: Send + 'static, S, Tx, E: Debug>(tx: &Tx, s: S, timeout: Duration) -> impl Future<Item=(), Error=TimeoutError<E>> + Send
     where S: Stream<Item = T, Error = E> + Send + 'static,
           Tx: Sink<SinkItem = T, SinkError = E> + Send + Clone + 'static
 {
