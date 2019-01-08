@@ -74,7 +74,7 @@ impl Server {
 
         shutdown_future
     }
-    /**The main processing function. Call in on each incoming packet from connected and
+    /** The main processing function. Call in on each incoming packet from connected and
     handshaked client.
     */
     pub fn handle_packet(&self, pk: &PublicKey, packet: Packet) -> impl Future<Item = (), Error = Error> + Send {

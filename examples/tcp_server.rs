@@ -14,6 +14,8 @@ use tox::toxcore::stats::Stats;
 use tokio::net::TcpListener;
 use futures::Future;
 
+const TCP_CONNECTIONS_LIMIT: usize = 1024;
+
 fn main() {
     env_logger::init();
     // Server constant PK for examples/tests
@@ -34,7 +36,7 @@ fn main() {
     let server = Server::new();
 
     let stats = Stats::new();
-    let future = server.run(listener, server_sk, stats)
+    let future = server.run(listener, server_sk, stats, TCP_CONNECTIONS_LIMIT)
         .map_err(|_| ());
 
     tokio::run(future);
