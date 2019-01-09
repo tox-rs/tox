@@ -739,7 +739,10 @@ impl Server {
 
     /// Send UDP packet to specified address.
     fn send_to_direct(&self, addr: SocketAddr, packet: Packet) -> impl Future<Item = (), Error = Error> + Send {
-        send_to_bounded(&self.tx, (packet, addr), Duration::from_secs(DHT_SEND_TIMEOUT))
+        send_to_bounded(&self.tx, (packet, addr), Duration::from_secs(DHT_SEND_TIMEOUT)).map_err(|e|
+            Error::new(ErrorKind::Other,
+                format!("Failed to send packet: {:?}", e)
+        ))
     }
 
     /// Handle received `PingRequest` packet and response with `PingResponse`

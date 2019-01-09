@@ -173,7 +173,10 @@ impl NetCrypto {
 
     /// Send `Packet` packet to UDP socket
     fn send_to_udp(&self, addr: SocketAddr, packet: Packet) -> impl Future<Item = (), Error = Error> + Send {
-        send_to_bounded(&self.udp_tx, (packet, addr), Duration::from_millis(NET_CRYPTO_SEND_TIMEOUT))
+        send_to_bounded(&self.udp_tx, (packet, addr), Duration::from_millis(NET_CRYPTO_SEND_TIMEOUT)).map_err(|e|
+            Error::new(ErrorKind::Other,
+                format!("Failed to send packet: {:?}", e)
+        ))
     }
 
     /// Get long term `PublicKey` of the peer by its UDP address
@@ -311,6 +314,10 @@ impl NetCrypto {
         if cookie.dht_pk != connection.peer_dht_pk {
             return Box::new(
                 send_to(&self.dht_pk_tx, (connection.peer_real_pk, cookie.dht_pk))
+                    .map_err(|e|
+                        Error::new(ErrorKind::Other,
+                            format!("Failed to send packet: {:?}", e)
+                    ))
                     .and_then(|()| future::err(Error::new(
                         ErrorKind::Other,
                         "Cookie contains invalid dht pk"
@@ -451,7 +458,10 @@ impl NetCrypto {
     fn process_ready_lossless_packets(&self, recv_array: &mut PacketsArray<RecvPacket>, pk: PublicKey) -> impl Future<Item = (), Error = Error> + Send {
         let mut futures = Vec::new();
         while let Some(packet) = recv_array.pop_front() {
-            let future = send_to(&self.lossless_tx, (pk, packet.data));
+            let future = send_to(&self.lossless_tx, (pk, packet.data)).map_err(|e|
+                Error::new(ErrorKind::Other,
+                    format!("Failed to send packet: {:?}", e)
+            ));
             futures.push(future);
         }
         future::join_all(futures).map(|_| ())
@@ -567,7 +577,10 @@ impl NetCrypto {
             // Update end index of received buffer ignoring the error - we still
             // want to handle this packet even if connection is too slow
             connection.recv_array.set_buffer_end(payload.packet_number).ok();
-            send_to(&self.lossy_tx, (connection.peer_real_pk, payload.data))
+            Box::new(send_to(&self.lossy_tx, (connection.peer_real_pk, payload.data)).map_err(|e|
+                Error::new(ErrorKind::Other,
+                    format!("Failed to send packet: {:?}", e)
+            ))) as Box<dyn Future<Item = _, Error = _> + Send>
         } else {
             return Box::new(future::err(Error::new(
                 ErrorKind::Other,
