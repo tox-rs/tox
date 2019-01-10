@@ -24,10 +24,10 @@ use futures::future::Either;
 use futures::sync::mpsc;
 use tokio::timer::Interval;
 
-use toxcore::crypto_core::*;
-use toxcore::tcp::client::client::*;
-use toxcore::tcp::packet::*;
-use toxcore::time::*;
+use crate::toxcore::crypto_core::*;
+use crate::toxcore::tcp::client::client::*;
+use crate::toxcore::tcp::packet::*;
+use crate::toxcore::time::*;
 
 /// The amount of maximum connections for each friend.
 const MAX_FRIEND_TCP_CONNECTIONS: usize =  6;
@@ -368,10 +368,10 @@ mod tests {
     use tokio_executor;
     use tokio_timer::clock::*;
 
-    use toxcore::tcp::client::client::tests::*;
-    use toxcore::tcp::connection_id::ConnectionId;
-    use toxcore::time::ConstNow;
-    use toxcore::onion::packet::*;
+    use crate::toxcore::tcp::client::client::tests::*;
+    use crate::toxcore::tcp::connection_id::ConnectionId;
+    use crate::toxcore::time::ConstNow;
+    use crate::toxcore::onion::packet::*;
 
     #[test]
     fn add_relay_global() {

@@ -5,10 +5,10 @@ use nom::be_u64;
 
 use std::time::SystemTime;
 
-use toxcore::binary_io::*;
-use toxcore::crypto_core::*;
-use toxcore::time::*;
-use toxcore::dht::packet::errors::*;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::crypto_core::*;
+use crate::toxcore::time::*;
+use crate::toxcore::dht::packet::errors::*;
 
 /// Number of seconds that generated cookie is valid
 pub const COOKIE_TIMEOUT: u64 = 15;

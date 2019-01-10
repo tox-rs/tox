@@ -1,8 +1,8 @@
 /*! LanDiscovery packet
 */
 
-use toxcore::binary_io::*;
-use toxcore::crypto_core::*;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::crypto_core::*;
 
 /** LanDiscovery packet struct.
 LanDiscovery packets contain the DHT public key of the sender. When a LanDiscovery packet
@@ -45,7 +45,7 @@ impl FromBytes for LanDiscovery {
 
 #[cfg(test)]
 mod tests {
-    use toxcore::dht::packet::lan_discovery::*;
+    use crate::toxcore::dht::packet::lan_discovery::*;
 
     encode_decode_test!(
         lan_discovery_encode_decode,

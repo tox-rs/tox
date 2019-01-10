@@ -3,10 +3,10 @@
 
 use nom::{be_u64, rest};
 
-use toxcore::binary_io::*;
-use toxcore::crypto_core::*;
-use toxcore::dht::codec::*;
-use toxcore::dht::packet::errors::*;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::crypto_core::*;
+use crate::toxcore::dht::codec::*;
+use crate::toxcore::dht::packet::errors::*;
 
 /** Ping response packet struct. When `PingRequest` is received DHT node should
 respond with `PingResponse` that contains the same ping id inside it's encrypted
@@ -149,8 +149,8 @@ impl ToBytes for PingResponsePayload {
 
 #[cfg(test)]
 mod tests {
-    use toxcore::dht::packet::ping_response::*;
-    use toxcore::dht::packet::Packet;
+    use crate::toxcore::dht::packet::ping_response::*;
+    use crate::toxcore::dht::packet::Packet;
 
     encode_decode_test!(
         ping_response_payload_encode_decode,

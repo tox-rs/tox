@@ -3,7 +3,7 @@
 
 use super::*;
 
-use toxcore::binary_io::*;
+use crate::toxcore::binary_io::*;
 
 /** Third onion response packet. It's sent back from the destination node to the
 third node from onion chain.

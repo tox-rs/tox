@@ -3,10 +3,10 @@
 
 use nom::{be_u64, rest};
 
-use toxcore::binary_io::*;
-use toxcore::crypto_core::*;
-use toxcore::dht::codec::*;
-use toxcore::dht::packet::errors::*;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::crypto_core::*;
+use crate::toxcore::dht::codec::*;
+use crate::toxcore::dht::packet::errors::*;
 
 /** Nodes request packet struct. It's used to get up to 4 closest nodes to
 requested public key. Every 20 seconds DHT node sends `NodesRequest` packet to
@@ -141,8 +141,8 @@ impl FromBytes for NodesRequestPayload {
 
 #[cfg(test)]
 mod tests {
-    use toxcore::dht::packet::nodes_request::*;
-    use toxcore::dht::packet::Packet;
+    use crate::toxcore::dht::packet::nodes_request::*;
+    use crate::toxcore::dht::packet::Packet;
 
     encode_decode_test!(
         nodes_request_payload_encode_decode,

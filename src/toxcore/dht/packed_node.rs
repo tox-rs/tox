@@ -11,8 +11,8 @@ use std::net::{
     SocketAddrV4
 };
 
-use toxcore::binary_io::*;
-use toxcore::crypto_core::*;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::crypto_core::*;
 
 /** `PackedNode` format is a way to store the node info in a small yet easy to
 parse format.

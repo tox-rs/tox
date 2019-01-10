@@ -1,8 +1,8 @@
 /*! DisconnectNotification packet
 */
 
-use toxcore::binary_io::*;
-use toxcore::tcp::connection_id::ConnectionId;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::tcp::connection_id::ConnectionId;
 
 /** Sent by client to server.
 Sent when client wants the server to forget about the connection related

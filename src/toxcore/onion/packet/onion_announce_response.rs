@@ -3,8 +3,8 @@
 
 use super::*;
 
-use toxcore::binary_io::*;
-use toxcore::crypto_core::*;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::crypto_core::*;
 
 use nom::{le_u64, rest};
 use std::io::{Error, ErrorKind};

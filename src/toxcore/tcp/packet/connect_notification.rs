@@ -1,8 +1,8 @@
 /*! ConnectNotification packet
 */
 
-use toxcore::binary_io::*;
-use toxcore::tcp::connection_id::ConnectionId;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::tcp::connection_id::ConnectionId;
 
 /** Sent by server to client.
 Tell the client that connection_id is now connected meaning the other

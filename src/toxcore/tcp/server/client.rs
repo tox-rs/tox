@@ -1,14 +1,14 @@
 /*! The inner implementation of client used only by relay server.
 */
 
-use toxcore::crypto_core::*;
-use toxcore::tcp::packet::*;
-use toxcore::tcp::connection_id::ConnectionId;
-use toxcore::tcp::links::Links;
-use toxcore::io_tokio::*;
-use toxcore::onion::packet::InnerOnionResponse;
-use toxcore::time::*;
-use toxcore::utils::*;
+use crate::toxcore::crypto_core::*;
+use crate::toxcore::tcp::packet::*;
+use crate::toxcore::tcp::connection_id::ConnectionId;
+use crate::toxcore::tcp::links::Links;
+use crate::toxcore::io_tokio::*;
+use crate::toxcore::onion::packet::InnerOnionResponse;
+use crate::toxcore::time::*;
+use crate::toxcore::utils::*;
 
 use std::io::Error;
 use std::net::IpAddr;

@@ -8,11 +8,11 @@ use futures::sync::mpsc::Receiver;
 use tokio::net::{UdpSocket, UdpFramed};
 use failure::Fail;
 
-use toxcore::io_tokio::*;
-use toxcore::dht::codec::*;
-use toxcore::dht::packet::Packet;
-use toxcore::dht::server::Server;
-use toxcore::stats::Stats;
+use crate::toxcore::io_tokio::*;
+use crate::toxcore::dht::codec::*;
+use crate::toxcore::dht::packet::Packet;
+use crate::toxcore::dht::server::Server;
+use crate::toxcore::stats::Stats;
 
 /// Extension trait for running DHT server on `UdpSocket`.
 pub trait ServerExt {
@@ -80,8 +80,8 @@ mod tests {
     use futures::sync::mpsc;
     use tokio;
 
-    use toxcore::crypto_core::*;
-    use toxcore::dht::packet::*;
+    use crate::toxcore::crypto_core::*;
+    use crate::toxcore::dht::packet::*;
 
     #[test]
     fn run_socket() {

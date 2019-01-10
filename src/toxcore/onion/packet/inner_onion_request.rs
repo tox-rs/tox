@@ -3,7 +3,7 @@
 
 use super::*;
 
-use toxcore::binary_io::*;
+use crate::toxcore::binary_io::*;
 
 /** Onion requests that can be enclosed in onion packets and sent through onion
 path.

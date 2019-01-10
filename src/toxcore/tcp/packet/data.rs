@@ -1,8 +1,8 @@
 /*! Data packet
 */
 
-use toxcore::binary_io::*;
-use toxcore::tcp::connection_id::ConnectionId;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::tcp::connection_id::ConnectionId;
 
 use nom::rest;
 

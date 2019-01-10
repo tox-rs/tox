@@ -8,9 +8,9 @@ use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
 use std::collections::HashMap;
 
-use toxcore::dht::dht_friend::*;
-use toxcore::dht::server::*;
-use toxcore::utils::*;
+use crate::toxcore::dht::dht_friend::*;
+use crate::toxcore::dht::server::*;
+use crate::toxcore::utils::*;
 
 /// Interval in seconds for sending `NatPingRequest` packet and doing hole
 /// punching.

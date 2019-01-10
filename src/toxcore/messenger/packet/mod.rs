@@ -1,7 +1,7 @@
 /*! Top-level Messenger Packets
 */
 
-use toxcore::binary_io::*;
+use crate::toxcore::binary_io::*;
 
 mod online;
 mod offline;

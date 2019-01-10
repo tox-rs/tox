@@ -33,8 +33,8 @@ pub use self::crypto_data::*;
 pub use self::cookie::*;
 pub use self::errors::*;
 
-use toxcore::binary_io::*;
-use toxcore::onion::packet::*;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::onion::packet::*;
 
 /** DHT packet enum that encapsulates all types of DHT packets.
 */

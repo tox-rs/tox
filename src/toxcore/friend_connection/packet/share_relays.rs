@@ -1,8 +1,8 @@
 /*! ShareRalays struct
 */
 
-use toxcore::binary_io::*;
-use toxcore::dht::packed_node::*;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::dht::packed_node::*;
 
 /** ShareRelays is a struct that holds at most 3 TCP relays as a PackedNode format.
 

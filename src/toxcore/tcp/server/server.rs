@@ -1,12 +1,12 @@
 /*! The implementation of relay server
 */
 
-use toxcore::crypto_core::*;
-use toxcore::onion::packet::InnerOnionResponse;
-use toxcore::tcp::server::client::Client;
-use toxcore::tcp::connection_id::ConnectionId;
-use toxcore::tcp::links::*;
-use toxcore::tcp::packet::*;
+use crate::toxcore::crypto_core::*;
+use crate::toxcore::onion::packet::InnerOnionResponse;
+use crate::toxcore::tcp::server::client::Client;
+use crate::toxcore::tcp::connection_id::ConnectionId;
+use crate::toxcore::tcp::links::*;
+use crate::toxcore::tcp::packet::*;
 
 use std::io::{Error, ErrorKind};
 use std::collections::HashMap;
@@ -525,9 +525,9 @@ impl Server {
 mod tests {
     use super::*;
 
-    use ::toxcore::onion::packet::*;
-    use ::toxcore::tcp::server::{Client, Server};
-    use ::toxcore::tcp::server::client::*;
+    use crate::toxcore::onion::packet::*;
+    use crate::toxcore::tcp::server::{Client, Server};
+    use crate::toxcore::tcp::server::client::*;
 
     use futures::sync::mpsc;
     use futures::{Stream, Future};
@@ -537,7 +537,7 @@ mod tests {
     use tokio_executor;
     use tokio_timer::clock::*;
 
-    use toxcore::time::*;
+    use crate::toxcore::time::*;
 
     #[test]
     fn server_is_clonable() {

@@ -1,7 +1,7 @@
 /*! Online struct
 */
 
-use toxcore::binary_io::*;
+use crate::toxcore::binary_io::*;
 
 /** Online is a struct that holds nothing.
 

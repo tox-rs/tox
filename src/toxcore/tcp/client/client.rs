@@ -13,16 +13,16 @@ use tokio_codec::Framed;
 use tokio;
 use tokio::net::TcpStream;
 
-use toxcore::crypto_core::*;
-use toxcore::io_tokio::*;
-use toxcore::onion::packet::InnerOnionResponse;
-use toxcore::stats::Stats;
-use toxcore::tcp::codec::{Codec, EncodeError};
-use toxcore::tcp::connection_id::ConnectionId;
-use toxcore::tcp::handshake::make_client_handshake;
-use toxcore::tcp::links::*;
-use toxcore::tcp::packet::*;
-use toxcore::time::*;
+use crate::toxcore::crypto_core::*;
+use crate::toxcore::io_tokio::*;
+use crate::toxcore::onion::packet::InnerOnionResponse;
+use crate::toxcore::stats::Stats;
+use crate::toxcore::tcp::codec::{Codec, EncodeError};
+use crate::toxcore::tcp::connection_id::ConnectionId;
+use crate::toxcore::tcp::handshake::make_client_handshake;
+use crate::toxcore::tcp::links::*;
+use crate::toxcore::tcp::packet::*;
+use crate::toxcore::time::*;
 
 /// Buffer size (in packets) for outgoing packets. This number shouldn't be high
 /// to minimize latency. If some relay can't take more packets we can use
@@ -516,8 +516,8 @@ pub mod tests {
     use tokio::net::TcpListener;
     use tokio::timer::Interval;
 
-    use toxcore::onion::packet::*;
-    use toxcore::tcp::server::{Server, ServerExt};
+    use crate::toxcore::onion::packet::*;
+    use crate::toxcore::tcp::server::{Server, ServerExt};
 
     pub fn create_client() -> (mpsc::UnboundedReceiver<(PublicKey, IncomingPacket)>, mpsc::Receiver<Packet>, Client) {
         crypto_init().unwrap();

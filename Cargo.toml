@@ -18,6 +18,7 @@ repository = "https://github.com/tox-rs/tox/"
 keywords = ["p2p", "instant-messaging", "tox", "toxcore", "networking"]
 categories = ["multimedia"]
 license = "MIT OR GPL-3.0+"
+edition = "2018"
 
 [badges]
 travis-ci = { repository = "tox-rs/tox" }

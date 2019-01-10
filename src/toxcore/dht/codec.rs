@@ -6,9 +6,9 @@ use std::io::Error as IoError;
 
 use failure::{Backtrace, Context, Fail};
 
-use toxcore::dht::packet::*;
-use toxcore::binary_io::*;
-use toxcore::stats::*;
+use crate::toxcore::dht::packet::*;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::stats::*;
 
 use bytes::BytesMut;
 use cookie_factory::GenError;
@@ -236,8 +236,8 @@ impl Encoder for DhtCodec {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use toxcore::onion::packet::*;
-    use toxcore::crypto_core::*;
+    use crate::toxcore::onion::packet::*;
+    use crate::toxcore::crypto_core::*;
 
     const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - secretbox::NONCEBYTES;
     const ONION_RETURN_2_PAYLOAD_SIZE: usize = ONION_RETURN_2_SIZE - secretbox::NONCEBYTES;

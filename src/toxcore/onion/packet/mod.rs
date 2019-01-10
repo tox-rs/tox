@@ -27,9 +27,9 @@ pub use self::onion_response_1::*;
 pub use self::onion_response_2::*;
 pub use self::onion_response_3::*;
 
-use toxcore::binary_io::*;
-use toxcore::crypto_core::*;
-use toxcore::dht::packed_node::PackedNode;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::crypto_core::*;
+use crate::toxcore::dht::packed_node::PackedNode;
 
 use nom::{be_u16, le_u8, rest};
 use std::net::{

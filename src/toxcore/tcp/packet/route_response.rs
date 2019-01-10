@@ -1,9 +1,9 @@
 /*! RouteResponse packet
 */
 
-use toxcore::binary_io::*;
-use toxcore::crypto_core::*;
-use toxcore::tcp::connection_id::ConnectionId;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::crypto_core::*;
+use crate::toxcore::tcp::connection_id::ConnectionId;
 
 /** Sent by server to client.
 The response to the routing request, tell the client if the

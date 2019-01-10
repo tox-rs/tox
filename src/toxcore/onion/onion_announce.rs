@@ -5,11 +5,11 @@ use std::io::{ErrorKind, Error};
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant, SystemTime};
 
-use toxcore::binary_io::*;
-use toxcore::crypto_core::*;
-use toxcore::time::*;
-use toxcore::onion::packet::*;
-use toxcore::dht::kbucket::Distance;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::crypto_core::*;
+use crate::toxcore::time::*;
+use crate::toxcore::onion::packet::*;
+use crate::toxcore::dht::kbucket::Distance;
 
 /// Number of secret random bytes to make onion ping id unique for each node.
 pub const SECRET_BYTES_SIZE: usize = 32;
@@ -341,7 +341,7 @@ mod tests {
     use tokio_executor;
     use tokio_timer::clock::*;
 
-    use toxcore::time::ConstNow;
+    use crate::toxcore::time::ConstNow;
 
     const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - secretbox::NONCEBYTES;
 

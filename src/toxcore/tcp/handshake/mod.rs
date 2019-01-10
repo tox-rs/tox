@@ -9,9 +9,9 @@ pub mod codec;
 pub use self::packet::*;
 pub use self::codec::*;
 
-use toxcore::binary_io::*;
-use toxcore::crypto_core::*;
-use toxcore::tcp::secure;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::crypto_core::*;
+use crate::toxcore::tcp::secure;
 
 use futures::{self, Stream, Sink, Future};
 use std::io::{Error, ErrorKind};
@@ -187,9 +187,9 @@ pub fn make_server_handshake(socket: TcpStream,
 
 #[cfg(test)]
 mod tests {
-    use toxcore::crypto_core::*;
-    use toxcore::tcp::*;
-    use toxcore::tcp::handshake::*;
+    use crate::toxcore::crypto_core::*;
+    use crate::toxcore::tcp::*;
+    use crate::toxcore::tcp::handshake::*;
 
     fn create_channels_with_handshake() -> (secure::Channel, secure::Channel) {
         crypto_init().unwrap();

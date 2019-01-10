@@ -29,12 +29,12 @@ use futures::sync::mpsc;
 use parking_lot::RwLock;
 use tokio::timer::Interval;
 
-use toxcore::binary_io::*;
-use toxcore::crypto_core::*;
-use toxcore::dht::packet::*;
-use toxcore::dht::precomputed_cache::*;
-use toxcore::io_tokio::*;
-use toxcore::time::*;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::crypto_core::*;
+use crate::toxcore::dht::packet::*;
+use crate::toxcore::dht::precomputed_cache::*;
+use crate::toxcore::io_tokio::*;
+use crate::toxcore::time::*;
 
 /// Maximum size of `Packet` when we try to send it to UDP address even if
 /// it's considered dead.
@@ -769,7 +769,7 @@ mod tests {
     use tokio_executor;
     use tokio_timer::clock::*;
 
-    use toxcore::time::ConstNow;
+    use crate::toxcore::time::ConstNow;
 
     #[test]
     fn net_crypto_clone() {

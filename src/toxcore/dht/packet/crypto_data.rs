@@ -4,9 +4,9 @@
 use byteorder::{ByteOrder, BigEndian};
 use nom::{be_u16, be_u32, rest};
 
-use toxcore::binary_io::*;
-use toxcore::crypto_core::*;
-use toxcore::dht::packet::errors::*;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::crypto_core::*;
+use crate::toxcore::dht::packet::errors::*;
 
 /// The maximum size of `CryptoData` packet including two bytes of nonce and
 /// packet kind byte.

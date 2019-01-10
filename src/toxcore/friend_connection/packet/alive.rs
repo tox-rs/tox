@@ -1,7 +1,7 @@
 /*! Alive struct
 */
 
-use toxcore::binary_io::*;
+use crate::toxcore::binary_io::*;
 
 /** Alive is a struct that holds nothing.
 
