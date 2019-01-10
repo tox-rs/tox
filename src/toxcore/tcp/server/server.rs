@@ -186,7 +186,7 @@ impl Server {
 
         let (b_id_in_client_a, client_a_route_response) = {
             // get client_a
-            let mut client_a = if let Some(client) = state.connected_clients.get_mut(pk) {
+            let client_a = if let Some(client) = state.connected_clients.get_mut(pk) {
                 client
             } else {
                 return Box::new(future::err(
@@ -311,7 +311,7 @@ impl Server {
             LinkStatus::Online => {
                 let client_b_pk = a_link.pk;
                 // get client_b
-                let mut client_b = if let Some(client) = state.connected_clients.get_mut(&client_b_pk) {
+                let client_b = if let Some(client) = state.connected_clients.get_mut(&client_b_pk) {
                     client
                 } else  {
                     // client_b is not connected to the server
