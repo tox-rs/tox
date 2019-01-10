@@ -192,7 +192,7 @@ fn run_tcp(config: &NodeConfig, dht_sk: SecretKey, tcp_onion: TcpOnion, stats: S
         let tcp_server_c = tcp_server_c.clone();
         let dht_sk = dht_sk.clone();
         let listener = TcpListener::bind(&addr).expect("Failed to bind TCP listener");
-        tcp_server_c.run(listener, dht_sk, stats.clone())
+        tcp_server_c.run(listener, dht_sk, stats.clone(), config.tcp_connections_limit)
             .map_err(Error::from)
     });
 

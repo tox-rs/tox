@@ -82,6 +82,7 @@ keys-file: ./keys
 udp-address: 0.0.0.0:33445
 tcp-addresses:
   - 0.0.0.0:33445
+tcp-connections-limit: 512
 motd: "{{start_date}} {{uptime}} Tcp: incoming {{tcp_packets_in}}, outgoing {{tcp_packets_out}}, Udp: incoming {{udp_packets_in}}, outgoing {{udp_packets_out}}"
 bootstrap-nodes:
   - pk: 1D5A5F2F5D6233058BF0259B09622FB40B482E4FA0931EB8FD3AB8E7BF7DAF6F
