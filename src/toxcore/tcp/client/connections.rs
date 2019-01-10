@@ -134,9 +134,7 @@ impl Connections {
     /// via this relay will be added as well.
     pub fn add_relay_connection(&self, relay_addr: SocketAddr, relay_pk: PublicKey, node_pk: PublicKey) -> impl Future<Item = (), Error = Error> + Send {
         let mut clients = self.clients.write();
-        // TODO: NLL
-        if clients.contains_key(&relay_pk) {
-            let client = clients.get(&relay_pk).unwrap();
+        if let Some(client) = clients.get(&relay_pk) {
             Box::new(self.add_connection_inner(client, node_pk))
         } else {
             let mut connections = self.connections.write();
