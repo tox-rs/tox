@@ -1,13 +1,5 @@
-extern crate tox;
-extern crate futures;
-extern crate tokio;
-extern crate tokio_codec;
-
 #[macro_use]
 extern crate log;
-extern crate env_logger;
-extern crate hex;
-extern crate failure;
 
 use tox::toxcore::crypto_core::*;
 use tox::toxcore::tcp::connection_id::ConnectionId;

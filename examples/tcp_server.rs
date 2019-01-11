@@ -1,11 +1,5 @@
-extern crate tox;
-extern crate futures;
-extern crate tokio;
-extern crate tokio_codec;
-
 #[macro_use]
 extern crate log;
-extern crate env_logger;
 
 use tox::toxcore::crypto_core::*;
 use tox::toxcore::tcp::server::{Server, ServerExt};

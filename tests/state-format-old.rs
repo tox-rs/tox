@@ -1,5 +1,3 @@
-extern crate tox;
-
 use tox::toxcore::binary_io::*;
 use tox::toxcore::state_format::old::*;
 

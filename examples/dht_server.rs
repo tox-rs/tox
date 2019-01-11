@@ -1,14 +1,7 @@
 // an example of DHT node with current code
 //
-extern crate tox;
-extern crate failure;
-extern crate futures;
-extern crate tokio;
-extern crate hex;
-
 #[macro_use]
 extern crate log;
-extern crate env_logger;
 
 use std::io::Error;
 

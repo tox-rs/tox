@@ -111,9 +111,6 @@ impl PassKey {
     E.g.
 
     ```
-    extern crate sodiumoxide;
-    extern crate tox;
-
     # fn main() {
     use sodiumoxide::crypto::pwhash::gen_salt;
     use tox::toxencryptsave::*;
