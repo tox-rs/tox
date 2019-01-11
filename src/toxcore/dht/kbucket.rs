@@ -57,7 +57,7 @@ impl Into<DhtNode> for PackedNode {
 pub trait Distance {
     /// Check whether distance between PK1 and own PK is smaller than distance
     /// between PK2 and own PK.
-    fn distance(&self, _: &PublicKey, _: &PublicKey) -> Ordering;
+    fn distance(&self, pk1: &PublicKey, pk2: &PublicKey) -> Ordering;
 }
 
 impl Distance for PublicKey {
