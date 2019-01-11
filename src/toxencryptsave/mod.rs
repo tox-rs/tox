@@ -21,6 +21,8 @@ assert_eq!(plaintext,
 ```
 */
 
+use failure::Fail;
+
 use sodiumoxide::crypto::pwhash::{
     MEMLIMIT_INTERACTIVE, OPSLIMIT_INTERACTIVE,
     Salt, OpsLimit,

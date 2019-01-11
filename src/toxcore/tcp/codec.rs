@@ -8,6 +8,7 @@ use crate::toxcore::tcp::packet::*;
 use crate::toxcore::tcp::secure::*;
 use crate::toxcore::stats::*;
 
+use failure::Fail;
 use nom::{ErrorKind, Needed, Offset};
 use bytes::BytesMut;
 use tokio_codec::{Decoder, Encoder};

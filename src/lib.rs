@@ -16,8 +16,6 @@ extern crate log;
 extern crate nom;
 #[macro_use]
 extern crate cookie_factory;
-#[macro_use]
-extern crate failure;
 
 /** Core Tox module. Provides an API on top of which other modules and
     applications may be build.

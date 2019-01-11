@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
+use failure::Fail;
 use futures::{future, Future, Sink, Stream};
 use futures::sync::mpsc;
 use tokio;
