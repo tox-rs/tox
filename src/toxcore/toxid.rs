@@ -8,8 +8,8 @@
 
 use std::fmt;
 
-use toxcore::binary_io::*;
-use toxcore::crypto_core::*;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::crypto_core::*;
 
 /** Calculate XOR checksum for 2 [u8; 2].
 
@@ -301,8 +301,8 @@ impl fmt::Display for ToxId {
 
 #[cfg(test)]
 mod tests {
-    use ::toxcore::crypto_core::*;
-    use ::toxcore::toxid::*;
+    use crate::toxcore::crypto_core::*;
+    use crate::toxcore::toxid::*;
 
     fn test_is_hexdump_uppercase(s: &str) -> bool {
         fn test_is_hexdump_uppercase_b(b: u8) -> bool {

@@ -17,24 +17,24 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::{iter, mem};
 
-use toxcore::time::*;
-use toxcore::crypto_core::*;
-use toxcore::dht::packet::*;
-use toxcore::dht::packed_node::*;
-use toxcore::dht::kbucket::*;
-use toxcore::dht::nodes_queue::*;
-use toxcore::dht::precomputed_cache::*;
-use toxcore::onion::packet::*;
-use toxcore::onion::onion_announce::*;
-use toxcore::dht::request_queue::*;
-use toxcore::io_tokio::*;
-use toxcore::dht::dht_friend::*;
-use toxcore::dht::dht_node::*;
-use toxcore::dht::server::hole_punching::*;
-use toxcore::tcp::packet::OnionRequest;
-use toxcore::net_crypto::*;
-use toxcore::dht::ip_port::IsGlobal;
-use toxcore::utils::*;
+use crate::toxcore::time::*;
+use crate::toxcore::crypto_core::*;
+use crate::toxcore::dht::packet::*;
+use crate::toxcore::dht::packed_node::*;
+use crate::toxcore::dht::kbucket::*;
+use crate::toxcore::dht::nodes_queue::*;
+use crate::toxcore::dht::precomputed_cache::*;
+use crate::toxcore::onion::packet::*;
+use crate::toxcore::onion::onion_announce::*;
+use crate::toxcore::dht::request_queue::*;
+use crate::toxcore::io_tokio::*;
+use crate::toxcore::dht::dht_friend::*;
+use crate::toxcore::dht::dht_node::*;
+use crate::toxcore::dht::server::hole_punching::*;
+use crate::toxcore::tcp::packet::OnionRequest;
+use crate::toxcore::net_crypto::*;
+use crate::toxcore::dht::ip_port::IsGlobal;
+use crate::toxcore::utils::*;
 
 /// Shorthand for the transmit half of the message channel.
 type Tx = mpsc::Sender<(Packet, SocketAddr)>;
@@ -1409,7 +1409,7 @@ mod tests {
     use tokio_executor;
     use tokio_timer::clock::*;
 
-    use toxcore::time::ConstNow;
+    use crate::toxcore::time::ConstNow;
 
     const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - secretbox::NONCEBYTES;
     const ONION_RETURN_2_PAYLOAD_SIZE: usize = ONION_RETURN_2_SIZE - secretbox::NONCEBYTES;

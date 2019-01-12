@@ -16,12 +16,12 @@ use std::cmp::{Ord, Ordering};
 use std::convert::Into;
 use std::net::SocketAddr;
 
-use toxcore::crypto_core::*;
-use toxcore::dht::dht_node::*;
-use toxcore::dht::packed_node::*;
-use toxcore::dht::ip_port::IsGlobal;
-use toxcore::dht::nodes_queue::*;
-use toxcore::time::*;
+use crate::toxcore::crypto_core::*;
+use crate::toxcore::dht::dht_node::*;
+use crate::toxcore::dht::packed_node::*;
+use crate::toxcore::dht::ip_port::IsGlobal;
+use crate::toxcore::dht::nodes_queue::*;
+use crate::toxcore::time::*;
 
 /** Calculate the [`k-bucket`](./struct.Ktree.html) index of a PK compared
 to "own" PK.
@@ -57,7 +57,7 @@ impl Into<DhtNode> for PackedNode {
 pub trait Distance {
     /// Check whether distance between PK1 and own PK is smaller than distance
     /// between PK2 and own PK.
-    fn distance(&self, &PublicKey, &PublicKey) -> Ordering;
+    fn distance(&self, pk1: &PublicKey, pk2: &PublicKey) -> Ordering;
 }
 
 impl Distance for PublicKey {
@@ -552,7 +552,7 @@ mod tests {
     use tokio_executor;
     use tokio_timer::clock::*;
 
-    use toxcore::time::ConstNow;
+    use crate::toxcore::time::ConstNow;
 
     // PublicKey::distance()
 

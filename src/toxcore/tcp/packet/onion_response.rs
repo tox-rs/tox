@@ -1,8 +1,8 @@
 /*! OnionResponse packet
 */
 
-use toxcore::binary_io::*;
-use toxcore::onion::packet::InnerOnionResponse;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::onion::packet::InnerOnionResponse;
 
 /** Sent by server to client.
 The server just sends payload from `OnionResponse1` packet that it got from a
@@ -43,7 +43,7 @@ impl ToBytes for OnionResponse {
 mod test {
     use super::*;
 
-    use toxcore::onion::packet::{OnionAnnounceResponse, OnionDataResponse};
+    use crate::toxcore::onion::packet::{OnionAnnounceResponse, OnionDataResponse};
 
     encode_decode_test!(
         onion_response_with_announce_encode_decode,

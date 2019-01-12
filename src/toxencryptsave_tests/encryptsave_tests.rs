@@ -1,5 +1,5 @@
-use toxencryptsave::*;
-use toxcore::crypto_core::*;
+use crate::toxencryptsave::*;
+use crate::toxcore::crypto_core::*;
 
 
 // is_encrypted()

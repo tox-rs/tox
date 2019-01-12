@@ -1,7 +1,7 @@
 /*! Offline struct
 */
 
-use toxcore::binary_io::*;
+use crate::toxcore::binary_io::*;
 
 /** Offline is a struct that holds nothing.
 

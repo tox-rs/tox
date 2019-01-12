@@ -10,29 +10,12 @@ Repo: https://github.com/tox-rs/tox
 // Remove it when it will be fixed in nom parser
 #![allow(clippy::redundant_closure)]
 
-extern crate bytes;
-extern crate byteorder;
-extern crate futures;
 #[macro_use]
 extern crate log;
 #[macro_use]
 extern crate nom;
 #[macro_use]
 extern crate cookie_factory;
-extern crate sodiumoxide;
-
-extern crate tokio;
-extern crate tokio_codec;
-extern crate get_if_addrs;
-extern crate parking_lot;
-#[macro_use]
-extern crate failure;
-extern crate lru;
-
-#[cfg(test)]
-extern crate tokio_timer;
-#[cfg(test)]
-extern crate tokio_executor;
 
 /** Core Tox module. Provides an API on top of which other modules and
     applications may be build.

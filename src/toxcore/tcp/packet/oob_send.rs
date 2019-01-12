@@ -1,8 +1,8 @@
 /*! OobSend packet
 */
 
-use toxcore::binary_io::*;
-use toxcore::crypto_core::*;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::crypto_core::*;
 
 use nom::rest;
 

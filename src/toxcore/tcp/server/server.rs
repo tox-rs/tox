@@ -1,12 +1,12 @@
 /*! The implementation of relay server
 */
 
-use toxcore::crypto_core::*;
-use toxcore::onion::packet::InnerOnionResponse;
-use toxcore::tcp::server::client::Client;
-use toxcore::tcp::connection_id::ConnectionId;
-use toxcore::tcp::links::*;
-use toxcore::tcp::packet::*;
+use crate::toxcore::crypto_core::*;
+use crate::toxcore::onion::packet::InnerOnionResponse;
+use crate::toxcore::tcp::server::client::Client;
+use crate::toxcore::tcp::connection_id::ConnectionId;
+use crate::toxcore::tcp::links::*;
+use crate::toxcore::tcp::packet::*;
 
 use std::io::{Error, ErrorKind};
 use std::collections::HashMap;
@@ -184,73 +184,64 @@ impl Server {
     fn handle_route_request(&self, pk: &PublicKey, packet: &RouteRequest) -> impl Future<Item = (), Error = Error> + Send {
         let mut state = self.state.write();
 
-        let (b_id_in_client_a, client_a_route_response) = {
-            // get client_a
-            let mut client_a = if let Some(client) = state.connected_clients.get_mut(pk) {
-                client
-            } else {
-                return Box::new(future::err(
-                    Error::new(ErrorKind::Other,
-                               "RouteRequest: no such PK"
-                    ))) as Box<dyn Future<Item = _, Error = _> + Send>
-            };
+        // get client_a
+        let client_a = if let Some(client) = state.connected_clients.get_mut(pk) {
+            client
+        } else {
+            return Box::new(future::err(
+                Error::new(ErrorKind::Other,
+                           "RouteRequest: no such PK"
+                ))) as Box<dyn Future<Item = _, Error = _> + Send>
+        };
 
-            if pk == &packet.pk {
-                // send RouteResponse(0) if client requests its own pk
-                return Box::new(client_a.send_route_response(pk, ConnectionId::zero()))
-            }
+        if pk == &packet.pk {
+            // send RouteResponse(0) if client requests its own pk
+            return Box::new(client_a.send_route_response(pk, ConnectionId::zero()))
+        }
 
-            // check if client_a is already linked
-            if let Some(index) = client_a.links().id_by_pk(&packet.pk) {
-                // send RouteResponse if client was already linked to pk
-                return Box::new(client_a.send_route_response(&packet.pk, ConnectionId::from_index(index)))
-            }
+        // check if client_a is already linked
+        if let Some(index) = client_a.links().id_by_pk(&packet.pk) {
+            // send RouteResponse if client was already linked to pk
+            return Box::new(client_a.send_route_response(&packet.pk, ConnectionId::from_index(index)))
+        }
 
-            // try to insert a new link
-            let b_id_in_client_a = if let Some(index) = client_a.links_mut().insert(&packet.pk) {
-                index
-            } else {
-                // send RouteResponse(0) if no space to insert new link
-                return Box::new(client_a.send_route_response(&packet.pk, ConnectionId::zero()))
-            };
+        // try to insert a new link
+        let b_id_in_client_a = if let Some(index) = client_a.links_mut().insert(&packet.pk) {
+            index
+        } else {
+            // send RouteResponse(0) if no space to insert new link
+            return Box::new(client_a.send_route_response(&packet.pk, ConnectionId::zero()))
+        };
 
-            let client_a_route_response = client_a.send_route_response(&packet.pk, ConnectionId::from_index(b_id_in_client_a));
+        let client_a_route_response = client_a.send_route_response(&packet.pk, ConnectionId::from_index(b_id_in_client_a));
 
-            (b_id_in_client_a, client_a_route_response)
+        // get client_b
+        let client_b = if let Some(client) = state.connected_clients.get(&packet.pk) {
+            client
+        } else {
+            // send RouteResponse only to current client
+            return Box::new(client_a_route_response)
         };
 
         // check if current pk is linked inside other_client
-        let a_id_in_client_b = {
-            // get client_b
-            let client_b = if let Some(client) = state.connected_clients.get(&packet.pk) {
-                client
-            } else {
-                // send RouteResponse only to current client
-                return Box::new(client_a_route_response)
-            };
-
-            if let Some(index) = client_b.links().id_by_pk(pk) {
-                index
-            } else {
-                // they are not linked
-                // send RouteResponse only to current client
-                return Box::new(client_a_route_response)
-            }
+        let a_id_in_client_b = if let Some(index) = client_b.links().id_by_pk(pk) {
+            index
+        } else {
+            // they are not linked
+            // send RouteResponse only to current client
+            return Box::new(client_a_route_response)
         };
 
         // they are both linked, send RouteResponse and
         // send each other ConnectNotification
         // we don't care if connect notifications fail
-        let client_a_notification = {
-            let client_a = state.connected_clients.get_mut(pk).unwrap();
-            client_a.links_mut().upgrade(b_id_in_client_a);
-            client_a.send_connect_notification(ConnectionId::from_index(b_id_in_client_a))
-        };
-        let client_b_notification = {
-            let client_b = state.connected_clients.get_mut(&packet.pk).unwrap();
-            client_b.links_mut().upgrade(a_id_in_client_b);
-            client_b.send_connect_notification(ConnectionId::from_index(a_id_in_client_b))
-        };
+        let client_a = state.connected_clients.get_mut(pk).unwrap();
+        client_a.links_mut().upgrade(b_id_in_client_a);
+        let client_a_notification = client_a.send_connect_notification(ConnectionId::from_index(b_id_in_client_a));
+
+        let client_b = state.connected_clients.get_mut(&packet.pk).unwrap();
+        client_b.links_mut().upgrade(a_id_in_client_b);
+        let client_b_notification = client_b.send_connect_notification(ConnectionId::from_index(a_id_in_client_b));
 
         Box::new(
             client_a_route_response
@@ -311,7 +302,7 @@ impl Server {
             LinkStatus::Online => {
                 let client_b_pk = a_link.pk;
                 // get client_b
-                let mut client_b = if let Some(client) = state.connected_clients.get_mut(&client_b_pk) {
+                let client_b = if let Some(client) = state.connected_clients.get_mut(&client_b_pk) {
                     client
                 } else  {
                     // client_b is not connected to the server
@@ -525,9 +516,9 @@ impl Server {
 mod tests {
     use super::*;
 
-    use ::toxcore::onion::packet::*;
-    use ::toxcore::tcp::server::{Client, Server};
-    use ::toxcore::tcp::server::client::*;
+    use crate::toxcore::onion::packet::*;
+    use crate::toxcore::tcp::server::{Client, Server};
+    use crate::toxcore::tcp::server::client::*;
 
     use futures::sync::mpsc;
     use futures::{Stream, Future};
@@ -537,7 +528,7 @@ mod tests {
     use tokio_executor;
     use tokio_timer::clock::*;
 
-    use toxcore::time::*;
+    use crate::toxcore::time::*;
 
     #[test]
     fn server_is_clonable() {

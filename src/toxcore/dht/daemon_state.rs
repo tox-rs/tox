@@ -7,11 +7,11 @@ Toxcore daemon may serialize its states to file with some interval.
 use futures::{future, Future, Stream, stream};
 use futures::future::Either;
 
-use toxcore::dht::server::*;
-use toxcore::dht::packed_node::*;
-use toxcore::state_format::old::*;
-use toxcore::binary_io::*;
-use toxcore::dht::kbucket::*;
+use crate::toxcore::dht::server::*;
+use crate::toxcore::dht::packed_node::*;
+use crate::toxcore::state_format::old::*;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::dht::kbucket::*;
 
 use std::fmt;
 
@@ -152,8 +152,8 @@ impl DaemonState {
 mod tests {
     use super::*;
 
-    use toxcore::crypto_core::*;
-    use toxcore::dht::packet::*;
+    use crate::toxcore::crypto_core::*;
+    use crate::toxcore::dht::packet::*;
 
     use futures::sync::mpsc;
 

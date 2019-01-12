@@ -4,9 +4,9 @@
 
 use std::net::SocketAddr;
 
-use toxcore::crypto_core::*;
-use toxcore::dht::kbucket::*;
-use toxcore::dht::packed_node::*;
+use crate::toxcore::crypto_core::*;
+use crate::toxcore::dht::kbucket::*;
+use crate::toxcore::dht::packed_node::*;
 
 /** `NodesQueue` holds `PackedNode`s that are close to a some `PublicKey`.
 

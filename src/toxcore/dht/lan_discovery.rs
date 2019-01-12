@@ -17,9 +17,9 @@ use tokio::timer::Interval;
 use tokio::timer::Error as TimerError;
 use tokio::timer::timeout::Error as TimeoutError;
 
-use toxcore::crypto_core::*;
-use toxcore::io_tokio::*;
-use toxcore::dht::packet::*;
+use crate::toxcore::crypto_core::*;
+use crate::toxcore::io_tokio::*;
+use crate::toxcore::dht::packet::*;
 
 /// Error that can happen during lan discovery
 #[derive(Debug)]

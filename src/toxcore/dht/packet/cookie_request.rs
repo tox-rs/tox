@@ -3,9 +3,9 @@
 
 use nom::be_u64;
 
-use toxcore::binary_io::*;
-use toxcore::crypto_core::*;
-use toxcore::dht::packet::errors::*;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::crypto_core::*;
+use crate::toxcore::dht::packet::errors::*;
 
 /** CookieRequest packet struct.
 According to https://zetok.github.io/tox-spec/#net-crypto
@@ -149,7 +149,7 @@ impl FromBytes for CookieRequestPayload {
 
 #[cfg(test)]
 mod tests {
-    use toxcore::dht::packet::cookie_request::*;
+    use crate::toxcore::dht::packet::cookie_request::*;
 
     encode_decode_test!(
         cookie_request_encode_decode,

@@ -26,7 +26,7 @@ pub use self::onion_request::OnionRequest;
 pub use self::onion_response::OnionResponse;
 pub use self::data::Data;
 
-use toxcore::binary_io::*;
+use crate::toxcore::binary_io::*;
 
 use nom::be_u16;
 

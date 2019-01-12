@@ -3,10 +3,10 @@
 
 use nom::rest;
 
-use toxcore::binary_io::*;
-use toxcore::onion::packet::*;
-use toxcore::crypto_core::*;
-use toxcore::toxid::NoSpam;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::onion::packet::*;
+use crate::toxcore::crypto_core::*;
+use crate::toxcore::toxid::NoSpam;
 
 const ONION_SEND_BASE: usize =  PUBLICKEYBYTES + SIZE_IPPORT + MACBYTES;
 const ONION_SEND_1: usize = secretbox::NONCEBYTES + ONION_SEND_BASE * 3;

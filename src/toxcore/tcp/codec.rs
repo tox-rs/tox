@@ -3,11 +3,12 @@
 
 use std::io::{Error as IoError};
 
-use toxcore::binary_io::*;
-use toxcore::tcp::packet::*;
-use toxcore::tcp::secure::*;
-use toxcore::stats::*;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::tcp::packet::*;
+use crate::toxcore::tcp::secure::*;
+use crate::toxcore::stats::*;
 
+use failure::Fail;
 use nom::{ErrorKind, Needed, Offset};
 use bytes::BytesMut;
 use tokio_codec::{Decoder, Encoder};
@@ -174,10 +175,10 @@ impl Encoder for Codec {
 
 #[cfg(test)]
 mod tests {
-    use ::toxcore::crypto_core::*;
-    use ::toxcore::onion::packet::*;
-    use ::toxcore::tcp::codec::*;
-    use ::toxcore::tcp::connection_id::ConnectionId;
+    use crate::toxcore::crypto_core::*;
+    use crate::toxcore::onion::packet::*;
+    use crate::toxcore::tcp::codec::*;
+    use crate::toxcore::tcp::connection_id::ConnectionId;
 
     use std::io::{ErrorKind as IoErrorKind};
     use std::net::{

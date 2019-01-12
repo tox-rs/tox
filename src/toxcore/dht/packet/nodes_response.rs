@@ -3,11 +3,11 @@
 
 use nom::{le_u8, be_u64, rest};
 
-use toxcore::binary_io::*;
-use toxcore::crypto_core::*;
-use toxcore::dht::packed_node::PackedNode;
-use toxcore::dht::codec::*;
-use toxcore::dht::packet::errors::*;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::crypto_core::*;
+use crate::toxcore::dht::packed_node::PackedNode;
+use crate::toxcore::dht::codec::*;
+use crate::toxcore::dht::packet::errors::*;
 
 /** Nodes response packet struct. When DHT node receives `NodesRequest` it
 should respond with `NodesResponse` that contains up to to 4 closest nodes to
@@ -157,8 +157,8 @@ impl FromBytes for NodesResponsePayload {
 
 #[cfg(test)]
 mod tests {
-    use toxcore::dht::packet::nodes_response::*;
-    use toxcore::dht::packet::Packet;
+    use crate::toxcore::dht::packet::nodes_response::*;
+    use crate::toxcore::dht::packet::Packet;
     use std::net::SocketAddr;
 
     encode_decode_test!(

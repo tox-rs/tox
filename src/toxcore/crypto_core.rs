@@ -7,7 +7,7 @@ pub use sodiumoxide::crypto::secretbox;
 
 use byteorder::{ByteOrder, LittleEndian, NativeEndian};
 
-use toxcore::binary_io::*;
+use crate::toxcore::binary_io::*;
 
 // TODO: check if `#[inline]` is actually useful
 

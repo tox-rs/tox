@@ -9,9 +9,9 @@ Here, GOOD node is the node responded within 162 seconds, BAD node is the node n
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::time::{Duration, Instant};
 
-use toxcore::crypto_core::*;
-use toxcore::dht::packed_node::*;
-use toxcore::time::*;
+use crate::toxcore::crypto_core::*;
+use crate::toxcore::dht::packed_node::*;
+use crate::toxcore::time::*;
 
 /// Ping interval in seconds for each node in our lists.
 pub const PING_INTERVAL: u64 = 60;

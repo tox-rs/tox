@@ -5,9 +5,9 @@ use std::time::{Duration, Instant};
 
 use super::packets_array::*;
 
-use toxcore::crypto_core::*;
-use toxcore::dht::packet::*;
-use toxcore::time::*;
+use crate::toxcore::crypto_core::*;
+use crate::toxcore::dht::packet::*;
+use crate::toxcore::time::*;
 
 /// Interval in ms between sending cookie request/handshake packets.
 pub const CRYPTO_SEND_PACKET_INTERVAL: u64 = 1000;
@@ -594,7 +594,7 @@ mod tests {
     use tokio_executor;
     use tokio_timer::clock::*;
 
-    use toxcore::time::ConstNow;
+    use crate::toxcore::time::ConstNow;
 
     #[test]
     fn status_packet_should_be_sent() {

@@ -102,7 +102,7 @@ macro_rules! encode_decode_test (
         #[test]
         fn $test() {
             #[cfg(test)]
-            use toxcore::crypto_core::*;
+            use crate::toxcore::crypto_core::*;
 
             crypto_init().unwrap();
 

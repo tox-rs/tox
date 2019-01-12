@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
+use failure::Fail;
 use futures::{future, Future, Sink, Stream};
 use futures::sync::mpsc;
 use tokio;
@@ -13,11 +14,11 @@ use tokio::net::{TcpStream, TcpListener};
 use tokio_codec::Framed;
 use tokio::timer::{Error as TimerError, Interval};
 
-use toxcore::crypto_core::*;
-use toxcore::tcp::codec::{DecodeError, EncodeError, Codec};
-use toxcore::tcp::handshake::make_server_handshake;
-use toxcore::tcp::server::{Client, Server};
-use toxcore::stats::*;
+use crate::toxcore::crypto_core::*;
+use crate::toxcore::tcp::codec::{DecodeError, EncodeError, Codec};
+use crate::toxcore::tcp::handshake::make_server_handshake;
+use crate::toxcore::tcp::server::{Client, Server};
+use crate::toxcore::stats::*;
 
 /// Interval in seconds for Tcp Ping sender
 const TCP_PING_INTERVAL: u64 = 1;
@@ -231,15 +232,15 @@ mod tests {
     use tokio;
     use tokio::runtime::Runtime;
 
-    use toxcore::tcp::codec::Codec;
-    use toxcore::tcp::handshake::make_client_handshake;
-    use toxcore::tcp::packet::{Packet, PingRequest, PongResponse};
+    use crate::toxcore::tcp::codec::Codec;
+    use crate::toxcore::tcp::handshake::make_client_handshake;
+    use crate::toxcore::tcp::packet::{Packet, PingRequest, PongResponse};
 
     use tokio_executor;
     use tokio_timer::clock::*;
 
-    use toxcore::time::*;
-    use toxcore::tcp::server::client::*;
+    use crate::toxcore::time::*;
+    use crate::toxcore::tcp::server::client::*;
 
     #[test]
     fn server_run_error_display() {

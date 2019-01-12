@@ -1,7 +1,7 @@
 /*! PingRequest packet
 */
 
-use toxcore::binary_io::*;
+use crate::toxcore::binary_io::*;
 
 use nom::be_u64;
 

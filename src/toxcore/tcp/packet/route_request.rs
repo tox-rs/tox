@@ -1,8 +1,8 @@
 /*! RouteRequest packet
 */
 
-use toxcore::binary_io::*;
-use toxcore::crypto_core::*;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::crypto_core::*;
 
 /** Sent by client to server.
 Send a routing request to the server that we want to connect

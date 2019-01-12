@@ -5,12 +5,12 @@ Module for friend.
 use std::time::Instant;
 use std::net::SocketAddr;
 
-use toxcore::time::*;
-use toxcore::dht::kbucket::*;
-use toxcore::dht::nodes_queue::*;
-use toxcore::crypto_core::*;
-use toxcore::dht::packed_node::*;
-use toxcore::dht::server::hole_punching::*;
+use crate::toxcore::time::*;
+use crate::toxcore::dht::kbucket::*;
+use crate::toxcore::dht::nodes_queue::*;
+use crate::toxcore::crypto_core::*;
+use crate::toxcore::dht::packed_node::*;
+use crate::toxcore::dht::server::hole_punching::*;
 
 /// Number of bootstrap nodes each friend has.
 pub const FRIEND_BOOTSTRAP_NODES_COUNT: u8 = 4;
@@ -102,8 +102,8 @@ mod tests {
     use tokio_executor;
     use tokio_timer::clock::*;
 
-    use toxcore::dht::dht_node::*;
-    use toxcore::time::ConstNow;
+    use crate::toxcore::dht::dht_node::*;
+    use crate::toxcore::time::ConstNow;
 
     #[test]
     fn addr_is_unknown() {

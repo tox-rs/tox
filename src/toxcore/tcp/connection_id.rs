@@ -2,8 +2,8 @@
 
 use std::num::NonZeroU8;
 
-use toxcore::binary_io::*;
-use toxcore::tcp::links::MAX_LINKS_N;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::tcp::links::MAX_LINKS_N;
 
 use nom::be_u8;
 

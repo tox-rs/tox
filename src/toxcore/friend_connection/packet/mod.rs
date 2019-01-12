@@ -1,7 +1,7 @@
 /*! Top-level Friend connection Packets
 */
 
-use toxcore::binary_io::*;
+use crate::toxcore::binary_io::*;
 
 mod alive;
 mod share_relays;
@@ -44,8 +44,8 @@ impl FromBytes for Packet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use toxcore::toxid::NoSpam;
-    use toxcore::dht::packed_node::*;
+    use crate::toxcore::toxid::NoSpam;
+    use crate::toxcore::dht::packed_node::*;
 
     encode_decode_test!(
         packet_alive_encode_decode,

@@ -3,7 +3,7 @@
 
 use nom::{be_u32, rest};
 
-use toxcore::binary_io::*;
+use crate::toxcore::binary_io::*;
 
 /** Sent by both client and server, only server will respond.
 When server receives this packet it may respond with the version of the library
@@ -62,7 +62,7 @@ impl FromBytes for BootstrapInfo {
 
 #[cfg(test)]
 mod tests {
-    use toxcore::dht::packet::bootstrap_info::*;
+    use crate::toxcore::dht::packet::bootstrap_info::*;
 
     encode_decode_test!(
         bootstrap_info_encode_decode,

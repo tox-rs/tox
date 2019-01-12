@@ -1,10 +1,10 @@
 /*! CryptoHandshake packet
 */
 
-use toxcore::binary_io::*;
-use toxcore::crypto_core::*;
-use toxcore::dht::packet::cookie::EncryptedCookie;
-use toxcore::dht::packet::errors::*;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::crypto_core::*;
+use crate::toxcore::dht::packet::cookie::EncryptedCookie;
+use crate::toxcore::dht::packet::errors::*;
 
 /** Packet used to establish `net_crypto` connection between two peers.
 

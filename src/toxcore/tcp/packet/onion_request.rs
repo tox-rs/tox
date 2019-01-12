@@ -1,9 +1,9 @@
 /*! OnionRequest packet
 */
 
-use toxcore::binary_io::*;
-use toxcore::crypto_core::*;
-use toxcore::onion::packet::{
+use crate::toxcore::binary_io::*;
+use crate::toxcore::crypto_core::*;
+use crate::toxcore::onion::packet::{
     IpPort,
     ONION_MAX_PACKET_SIZE,
     ONION_RETURN_1_SIZE,
@@ -88,7 +88,7 @@ impl ToBytes for OnionRequest {
 mod test {
     use super::*;
 
-    use toxcore::onion::packet::ProtocolType;
+    use crate::toxcore::onion::packet::ProtocolType;
 
     encode_decode_test!(
         onion_request_encode_decode,

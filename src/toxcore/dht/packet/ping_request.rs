@@ -3,10 +3,10 @@
 
 use nom::{be_u64, rest};
 
-use toxcore::binary_io::*;
-use toxcore::crypto_core::*;
-use toxcore::dht::codec::*;
-use toxcore::dht::packet::errors::*;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::crypto_core::*;
+use crate::toxcore::dht::codec::*;
+use crate::toxcore::dht::packet::errors::*;
 
 /** Ping request packet struct. Every 60 seconds DHT node sends `PingRequest`
 packet to peers to check whether it is alive. When `PingRequest` is received
@@ -152,8 +152,8 @@ impl ToBytes for PingRequestPayload {
 
 #[cfg(test)]
 mod tests {
-    use toxcore::dht::packet::ping_request::*;
-    use toxcore::dht::packet::Packet;
+    use crate::toxcore::dht::packet::ping_request::*;
+    use crate::toxcore::dht::packet::Packet;
 
     encode_decode_test!(
         ping_request_payload_encode_decode,

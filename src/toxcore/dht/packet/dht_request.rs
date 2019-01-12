@@ -3,10 +3,10 @@
 
 use nom::{be_u64, rest};
 
-use toxcore::binary_io::*;
-use toxcore::crypto_core::*;
-use toxcore::dht::codec::*;
-use toxcore::dht::packet::errors::*;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::crypto_core::*;
+use crate::toxcore::dht::codec::*;
+use crate::toxcore::dht::packet::errors::*;
 
 /** DHT Request packet struct.
 DHT Request packet consists of NatPingRequest and NatPingResponse.

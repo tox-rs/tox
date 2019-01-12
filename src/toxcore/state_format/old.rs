@@ -11,11 +11,11 @@ use std::net::{
 use byteorder::{ByteOrder, LittleEndian};
 use nom::{le_u16, be_u16, le_u8, le_u32, le_u64, rest};
 
-use toxcore::binary_io::*;
-use toxcore::crypto_core::*;
-use toxcore::dht::packed_node::*;
-use toxcore::toxid::{NoSpam, NOSPAMBYTES};
-use toxcore::onion::packet::*;
+use crate::toxcore::binary_io::*;
+use crate::toxcore::crypto_core::*;
+use crate::toxcore::dht::packed_node::*;
+use crate::toxcore::toxid::{NoSpam, NOSPAMBYTES};
+use crate::toxcore::onion::packet::*;
 
 const REQUEST_MSG_LEN: usize = 1024;
 

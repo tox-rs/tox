@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use toxcore::crypto_core::*;
-use toxcore::time::*;
+use crate::toxcore::crypto_core::*;
+use crate::toxcore::time::*;
 
 /** Struct that stores and manages requests IDs and timeouts.
 
@@ -75,7 +75,7 @@ mod tests {
     use tokio_executor;
     use tokio_timer::clock::*;
 
-    use toxcore::time::ConstNow;
+    use crate::toxcore::time::ConstNow;
 
     #[test]
     fn clone() {
