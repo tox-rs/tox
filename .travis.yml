@@ -65,7 +65,8 @@ matrix:
       before_cache:
         - rm -rf /home/travis/.cargo/registry
       install:
-        - cargo install cargo-travis --debug || echo "cargo-travis has been already installed"
+        - cargo install cargo-update --debug || echo "cargo-update has been already installed"
+        - cargo install-update -i cargo-travis
       script:
         - mkdir -p target # fix for cargo-coveralls
         - cargo coveralls
