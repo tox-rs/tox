@@ -48,8 +48,8 @@ use tox::toxcore::stats::Stats;
 #[cfg(unix)]
 use syslog::Facility;
 
-use node_config::*;
-use motd::{Motd, Counters};
+use crate::node_config::*;
+use crate::motd::{Motd, Counters};
 
 /// Channel size for onion messages between UDP and TCP relay.
 const ONION_CHANNEL_SIZE: usize = 32;
