@@ -1,24 +1,7 @@
-extern crate chrono;
 #[macro_use]
 extern crate clap;
-extern crate env_logger;
-extern crate failure;
-extern crate futures;
-extern crate hex;
-extern crate itertools;
 #[macro_use]
 extern crate log;
-extern crate regex;
-#[cfg(unix)]
-extern crate syslog;
-extern crate tokio;
-extern crate tokio_codec;
-extern crate config;
-#[macro_use]
-extern crate serde_derive;
-extern crate serde;
-extern crate serde_yaml;
-extern crate tox;
 
 mod node_config;
 mod motd;
@@ -48,8 +31,8 @@ use tox::toxcore::stats::Stats;
 #[cfg(unix)]
 use syslog::Facility;
 
-use node_config::*;
-use motd::{Motd, Counters};
+use crate::node_config::*;
+use crate::motd::{Motd, Counters};
 
 /// Channel size for onion messages between UDP and TCP relay.
 const ONION_CHANNEL_SIZE: usize = 32;
