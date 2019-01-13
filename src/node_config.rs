@@ -5,7 +5,7 @@ use std::path::Path;
 use std::collections::HashMap;
 
 use config::{Config, File as CfgFile};
-use serde::de::{self, Deserialize, Deserializer};
+use serde::{de, Deserialize, Deserializer};
 use serde_yaml::Value;
 use clap::{App, AppSettings, Arg, SubCommand, ArgMatches};
 use hex::FromHex;
