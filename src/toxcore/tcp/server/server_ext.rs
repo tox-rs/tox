@@ -12,7 +12,9 @@ use futures::sync::mpsc;
 use tokio;
 use tokio::net::{TcpStream, TcpListener};
 use tokio_codec::Framed;
+use tokio::prelude::FutureExt;
 use tokio::timer::{Error as TimerError, Interval};
+use tokio::timer::timeout::{Error as TimeoutError};
 
 use crate::toxcore::crypto_core::*;
 use crate::toxcore::tcp::codec::{DecodeError, EncodeError, Codec};
@@ -22,6 +24,9 @@ use crate::toxcore::stats::*;
 
 /// Interval in seconds for Tcp Ping sender
 const TCP_PING_INTERVAL: u64 = 1;
+
+/// Timeout in seconds for the TCP handshake.
+const TCP_HANDSHAKE_TIMEOUT: u64 = 10;
 
 const SERVER_CHANNEL_SIZE: usize = 64;
 
@@ -82,7 +87,7 @@ pub enum ConnectionError {
     ServerHandshakeError {
         /// Server handshake error
         #[fail(cause)]
-        error: IoError
+        error: TimeoutError<IoError>
     },
     /// Packet handling error
     #[fail(display = "Packet handling error: {:?}", error)]
@@ -166,7 +171,8 @@ impl ServerExt for Server {
 
         debug!("A new TCP client connected from {}", addr);
 
-        let register_client = make_server_handshake(stream, dht_sk.clone())
+        let register_client = (make_server_handshake(stream, dht_sk.clone()))
+            .timeout(Duration::from_secs(TCP_HANDSHAKE_TIMEOUT))
             .map_err(|error| ConnectionError::ServerHandshakeError { error })
             .map(|(stream, channel, client_pk)| {
                 debug!("Handshake for TCP client {:?} is completed", client_pk);
@@ -272,7 +278,7 @@ mod tests {
             error: IoError::new(IoErrorKind::Other, "io error"),
         });
         format!("{}", ConnectionError::ServerHandshakeError {
-            error: IoError::new(IoErrorKind::Other, "io error"),
+            error: TimeoutError::elapsed(),
         });
         format!("{}", ConnectionError::PacketHandlingError {
             error: IoError::new(IoErrorKind::Other, "io error"),
