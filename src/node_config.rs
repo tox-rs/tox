@@ -178,10 +178,11 @@ pub fn cli_parse() -> NodeConfig {
         .arg(Arg::with_name("tcp-connections-limit")
             .short("c")
             .long("tcp-connections-limit")
-            .help("Maximum number of active TCP connections relay can hold")
+            .help("Maximum number of active TCP connections relay can hold. \
+                   Defaults to 512 when tcp-address is specified")
             .requires("tcp-address")
             .takes_value(true)
-            .default_value("512"))
+            .default_value_if("tcp-address", None, "512"))
         .arg(Arg::with_name("secret-key")
             .short("s")
             .long("secret-key")
@@ -298,7 +299,11 @@ fn run_args(matches: &ArgMatches) -> NodeConfig {
         Vec::new()
     };
 
-    let tcp_connections_limit = value_t!(matches.value_of("tcp-connections-limit"), usize).unwrap_or_else(|e| e.exit());
+    let tcp_connections_limit = if matches.is_present("tcp-connections-limit") {
+        value_t!(matches.value_of("tcp-connections-limit"), usize).unwrap_or_else(|e| e.exit())
+    } else {
+        512
+    };
 
     let sk = matches.value_of("secret-key").map(|s| {
         let sk_bytes: [u8; 32] = FromHex::from_hex(s).expect("Invalid DHT secret key");
