@@ -44,7 +44,9 @@ failure = "0.1"
 lru = "0.1"
 
 [dev-dependencies]
+clap = "2.32.0"
 env_logger = "0.6"
 hex = "0.3"
 tokio-timer = "0.2"
 tokio-executor = "0.1"
+unwrap = "1.2.1"
