@@ -626,102 +626,39 @@ impl Server {
     /// Function to handle incoming packets and send responses if necessary.
     pub fn handle_packet(&self, packet: Packet, addr: SocketAddr) -> impl Future<Item = (), Error = Error> + Send {
         match packet {
-            Packet::PingRequest(packet) => {
-                debug!("Received ping request");
-                Box::new(self.handle_ping_req(&packet, addr)) as Box<dyn Future<Item = _, Error = _> + Send>
-            },
-            Packet::PingResponse(packet) => {
-                debug!("Received ping response");
-                Box::new(self.handle_ping_resp(&packet, addr))
-            },
-            Packet::NodesRequest(packet) => {
-                debug!("Received NodesRequest");
-                Box::new(self.handle_nodes_req(&packet, addr))
-            },
-            Packet::NodesResponse(packet) => {
-                debug!("Received NodesResponse");
-                Box::new(self.handle_nodes_resp(&packet, addr))
-            },
-            Packet::CookieRequest(packet) => {
-                debug!("Received CookieRequest");
-                Box::new(self.handle_cookie_request(&packet, addr))
-            },
-            Packet::CookieResponse(packet) => {
-                debug!("Received CookieResponse");
-                Box::new(self.handle_cookie_response(&packet, addr))
-            },
-            Packet::CryptoHandshake(packet) => {
-                debug!("Received CryptoHandshake");
-                Box::new(self.handle_crypto_handshake(&packet, addr))
-            },
-            Packet::DhtRequest(packet) => {
-                debug!("Received DhtRequest");
-                Box::new(self.handle_dht_req(packet, addr))
-            },
-            Packet::LanDiscovery(packet) => {
-                debug!("Received LanDiscovery");
-                Box::new(self.handle_lan_discovery(&packet, addr))
-            },
-            Packet::OnionRequest0(packet) => {
-                debug!("Received OnionRequest0");
-                Box::new(self.handle_onion_request_0(&packet, addr))
-            },
-            Packet::OnionRequest1(packet) => {
-                debug!("Received OnionRequest1");
-                Box::new(self.handle_onion_request_1(&packet, addr))
-            },
-            Packet::OnionRequest2(packet) => {
-                debug!("Received OnionRequest2");
-                Box::new(self.handle_onion_request_2(&packet, addr))
-            },
-            Packet::OnionAnnounceRequest(packet) => {
-                debug!("Received OnionAnnounceRequest");
-                Box::new(self.handle_onion_announce_request(packet, addr))
-            },
-            Packet::OnionDataRequest(packet) => {
-                debug!("Received OnionDataRequest");
-                Box::new(self.handle_onion_data_request(packet))
-            },
-            Packet::OnionResponse3(packet) => {
-                debug!("Received OnionResponse3");
-                Box::new(self.handle_onion_response_3(packet))
-            },
-            Packet::OnionResponse2(packet) => {
-                debug!("Received OnionResponse2");
-                Box::new(self.handle_onion_response_2(packet))
-            },
-            Packet::OnionResponse1(packet) => {
-                debug!("Received OnionResponse1");
-                Box::new(self.handle_onion_response_1(packet))
-            },
-            Packet::BootstrapInfo(packet) => {
-                debug!("Received BootstrapInfo");
-                Box::new(self.handle_bootstrap_info(&packet, addr))
-            },
+            Packet::PingRequest(packet) => Box::new(self.handle_ping_req(&packet, addr)) as Box<dyn Future<Item = _, Error = _> + Send>,
+            Packet::PingResponse(packet) => Box::new(self.handle_ping_resp(&packet, addr)),
+            Packet::NodesRequest(packet) => Box::new(self.handle_nodes_req(&packet, addr)),
+            Packet::NodesResponse(packet) => Box::new(self.handle_nodes_resp(&packet, addr)),
+            Packet::CookieRequest(packet) => Box::new(self.handle_cookie_request(&packet, addr)),
+            Packet::CookieResponse(packet) => Box::new(self.handle_cookie_response(&packet, addr)),
+            Packet::CryptoHandshake(packet) => Box::new(self.handle_crypto_handshake(&packet, addr)),
+            Packet::DhtRequest(packet) => Box::new(self.handle_dht_req(packet, addr)),
+            Packet::LanDiscovery(packet) => Box::new(self.handle_lan_discovery(&packet, addr)),
+            Packet::OnionRequest0(packet) => Box::new(self.handle_onion_request_0(&packet, addr)),
+            Packet::OnionRequest1(packet) => Box::new(self.handle_onion_request_1(&packet, addr)),
+            Packet::OnionRequest2(packet) => Box::new(self.handle_onion_request_2(&packet, addr)),
+            Packet::OnionAnnounceRequest(packet) => Box::new(self.handle_onion_announce_request(packet, addr)),
+            Packet::OnionDataRequest(packet) => Box::new(self.handle_onion_data_request(packet)),
+            Packet::OnionResponse3(packet) => Box::new(self.handle_onion_response_3(packet)),
+            Packet::OnionResponse2(packet) => Box::new(self.handle_onion_response_2(packet)),
+            Packet::OnionResponse1(packet) => Box::new(self.handle_onion_response_1(packet)),
+            Packet::BootstrapInfo(packet) => Box::new(self.handle_bootstrap_info(&packet, addr)),
             // This packet should be handled in client only
-            Packet::CryptoData(packet) => {
-                debug!("This packet should be handled in client only, {:?}", packet);
-                Box::new(future::err(
-                    Error::new(ErrorKind::Other,
-                               format!("Packet is not handled {:?}", packet)
-                    )))
-            },
+            Packet::CryptoData(packet) => Box::new(future::err(
+                Error::new(ErrorKind::Other,
+                           format!("Packet is not handled {:?}", packet)
+                ))),
             // This packet should be handled in client only
-            Packet::OnionDataResponse(packet) => {
-                debug!("This packet should be handled in client only, {:?}", packet);
-                Box::new(future::err(
-                    Error::new(ErrorKind::Other,
-                               format!("Packet is not handled {:?}", packet)
-                    )))
-            },
+            Packet::OnionDataResponse(packet) => Box::new(future::err(
+                Error::new(ErrorKind::Other,
+                           format!("Packet is not handled {:?}", packet)
+                ))),
             // This packet should be handled in client only
-            Packet::OnionAnnounceResponse(packet) => {
-                debug!("This packet should be handled in client only, {:?}", packet);
-                Box::new(future::err(
-                    Error::new(ErrorKind::Other,
-                               format!("Packet is not handled {:?}", packet)
-                    )))
-            },
+            Packet::OnionAnnounceResponse(packet) => Box::new(future::err(
+                Error::new(ErrorKind::Other,
+                           format!("Packet is not handled {:?}", packet)
+                ))),
         }
     }
 
