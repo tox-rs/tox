@@ -124,7 +124,10 @@ impl Client {
     /// will be returned.
     fn send_packet(&self, packet: Packet) -> impl Future<Item = (), Error = Error> + Send {
         if let ClientStatus::Connected(ref tx) = *self.status.read() {
-            Either::A(send_to(tx, packet))
+            Either::A(send_to(tx, packet).map_err(|e|
+                Error::new(ErrorKind::Other,
+                    format!("Failed to send packet: {:?}", e)
+            )))
         } else {
             // Attempt to send packet to TCP relay with wrong status. For
             // instance it can happen when we received ping request from the
@@ -233,7 +236,10 @@ impl Client {
     }
 
     fn handle_oob_receive(&self, packet: OobReceive) -> impl Future<Item = (), Error = Error> + Send {
-        send_to(&self.incoming_tx, (self.pk, IncomingPacket::Oob(packet.sender_pk, packet.data)))
+        send_to(&self.incoming_tx, (self.pk, IncomingPacket::Oob(packet.sender_pk, packet.data))).map_err(|e|
+            Error::new(ErrorKind::Other,
+                format!("Failed to send packet: {:?}", e)
+        ))
     }
 
     fn handle_data(&self, packet: Data) -> impl Future<Item = (), Error = Error> + Send {
@@ -248,7 +254,10 @@ impl Client {
 
         let links = self.links.read();
         if let Some(link) = links.by_id(index) {
-            Either::B(send_to(&self.incoming_tx, (self.pk, IncomingPacket::Data(link.pk, packet.data))))
+            Either::B(send_to(&self.incoming_tx, (self.pk, IncomingPacket::Data(link.pk, packet.data))).map_err(|e|
+                Error::new(ErrorKind::Other,
+                    format!("Failed to send packet: {:?}", e)
+            )))
         } else {
             Either::A( future::err(
                 Error::new(ErrorKind::Other,
@@ -265,7 +274,10 @@ impl Client {
     }
 
     fn handle_onion_response(&self, packet: OnionResponse) -> impl Future<Item = (), Error = Error> + Send {
-        send_to(&self.incoming_tx, (self.pk, IncomingPacket::Onion(packet.payload)))
+        send_to(&self.incoming_tx, (self.pk, IncomingPacket::Onion(packet.payload))).map_err(|e|
+            Error::new(ErrorKind::Other,
+                format!("Failed to send packet: {:?}", e)
+        ))
     }
 
     /// Spawn a connection to this TCP relay if it is not connected already. The

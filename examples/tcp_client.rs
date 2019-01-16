@@ -6,7 +6,6 @@ use tox::toxcore::tcp::connection_id::ConnectionId;
 use tox::toxcore::tcp::packet::*;
 use tox::toxcore::tcp::handshake::make_client_handshake;
 use tox::toxcore::tcp::codec;
-use tox::toxcore::io_tokio::IoFuture;
 use tox::toxcore::stats::Stats;
 
 use failure::{Error, err_msg};
@@ -27,7 +26,7 @@ use std::{thread, time};
 //  The future will live untill all copies of tx is dropped or there is a IO error
 //  Since we pass a copy of tx as arg (to send PongResponses), the client will live untill IO error
 //  Comment out pong responser and client will be destroyed when there will be no messages to send
-fn create_client(rx: mpsc::Receiver<Packet>, tx: mpsc::Sender<Packet>) -> IoFuture<()> {
+fn create_client(rx: mpsc::Receiver<Packet>, tx: mpsc::Sender<Packet>) -> impl Future<Item = (), Error = Error> + Send {
     // Use `gen_keypair` to generate random keys
     // Client constant keypair for examples/tests
     let client_pk = PublicKey([252, 72, 40, 127, 213, 13, 0, 95,
@@ -71,7 +70,7 @@ fn create_client(rx: mpsc::Receiver<Packet>, tx: mpsc::Sender<Packet>) -> IoFutu
 
     let stats = Stats::new();
 
-    let client = TcpStream::connect(&addr)
+    TcpStream::connect(&addr)
         .map_err(Error::from)
         .and_then(move |socket| {
             make_client_handshake(socket, &client_pk, &client_sk, &server_pk)
@@ -124,9 +123,7 @@ fn create_client(rx: mpsc::Receiver<Packet>, tx: mpsc::Sender<Packet>) -> IoFutu
         .then(|res| {
             debug!("client ended with {:?}", res);
             Ok(())
-        });
-
-    Box::new(client)
+        })
 }
 
 #[allow(dead_code)]

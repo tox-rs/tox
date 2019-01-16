@@ -8,7 +8,6 @@ use futures::sync::mpsc::Receiver;
 use tokio::net::{UdpSocket, UdpFramed};
 use failure::Fail;
 
-use crate::toxcore::io_tokio::*;
 use crate::toxcore::dht::codec::*;
 use crate::toxcore::dht::packet::Packet;
 use crate::toxcore::dht::server::Server;
@@ -17,11 +16,11 @@ use crate::toxcore::stats::Stats;
 /// Extension trait for running DHT server on `UdpSocket`.
 pub trait ServerExt {
     /// Run DHT server on `UdpSocket`.
-    fn run_socket(self, socket: UdpSocket, rx: Receiver<(Packet, SocketAddr)>, stats: Stats) -> IoFuture<()>;
+    fn run_socket(self, socket: UdpSocket, rx: Receiver<(Packet, SocketAddr)>, stats: Stats) -> Box<Future<Item = (), Error = Error> + Send>;
 }
 
 impl ServerExt for Server {
-    fn run_socket(self, socket: UdpSocket, rx: Receiver<(Packet, SocketAddr)>, stats: Stats) -> IoFuture<()> {
+    fn run_socket(self, socket: UdpSocket, rx: Receiver<(Packet, SocketAddr)>, stats: Stats) -> Box<Future<Item = (), Error = Error> + Send> {
         let udp_addr = socket.local_addr()
             .expect("Failed to get socket address");
 

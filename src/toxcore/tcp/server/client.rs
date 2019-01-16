@@ -10,7 +10,7 @@ use crate::toxcore::onion::packet::InnerOnionResponse;
 use crate::toxcore::time::*;
 use crate::toxcore::utils::*;
 
-use std::io::Error;
+use std::io::{Error, ErrorKind};
 use std::net::IpAddr;
 use std::time::{Instant, Duration};
 
@@ -128,7 +128,10 @@ impl Client {
     /** Send a packet. This method does not ignore IO error
     */
     fn send(&self, packet: Packet) -> impl Future<Item = (), Error = Error> + Send {
-        send_to_bounded(&self.tx, packet, Duration::from_secs(TCP_SEND_TIMEOUT))
+        send_to_bounded(&self.tx, packet, Duration::from_secs(TCP_SEND_TIMEOUT)).map_err(|e|
+            Error::new(ErrorKind::Other,
+                format!("Failed to send packet: {:?}", e)
+        ))
     }
     /** Send a packet. This method ignores IO error
     */
