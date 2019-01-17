@@ -147,9 +147,8 @@ pub struct NodeConfig {
     pub unused: HashMap<String, Value>,
 }
 
-/// Parse command line arguments.
-pub fn cli_parse() -> NodeConfig {
-    let matches = App::new(crate_name!())
+fn app() -> App<'static, 'static> {
+    App::new(crate_name!())
         .version(crate_version!())
         .author(crate_authors!("\n"))
         .about(crate_description!())
@@ -245,7 +244,11 @@ pub fn cli_parse() -> NodeConfig {
         .arg(Arg::with_name("lan-discovery")
             .long("lan-discovery")
             .help("Enable LAN discovery (disabled by default)"))
-        .get_matches();
+}
+
+/// Parse command line arguments.
+pub fn cli_parse() -> NodeConfig {
+    let matches = app().get_matches();
 
     match matches.subcommand() {
         ("config", Some(m)) => run_config(m),
@@ -353,5 +356,255 @@ fn run_args(matches: &ArgMatches) -> NodeConfig {
         motd,
         lan_discovery_enabled,
         unused: HashMap::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn args_udp_only() {
+        let saddr = "127.0.0.1:33445";
+        let matches = app().get_matches_from(vec![
+            "tox-node",
+            "--keys-file",
+            "./keys",
+            "--udp-address",
+            saddr,
+        ]);
+        let config = run_args(&matches);
+        assert_eq!(config.keys_file.unwrap(), "./keys");
+        assert_eq!(config.udp_addr.unwrap(), saddr.parse().unwrap());
+        assert!(config.tcp_addrs.is_empty());
+        assert!(!config.lan_discovery_enabled);
+    }
+
+    #[test]
+    fn args_tcp_only() {
+        let saddr_1 = "127.0.0.1:33445";
+        let saddr_2 = "127.0.0.1:33446";
+        let matches = app().get_matches_from(vec![
+            "tox-node",
+            "--keys-file",
+            "./keys",
+            "--tcp-address",
+            saddr_1,
+            "--tcp-address",
+            saddr_2,
+        ]);
+        let config = run_args(&matches);
+        assert_eq!(config.keys_file.unwrap(), "./keys");
+        assert!(config.udp_addr.is_none());
+        assert_eq!(config.tcp_addrs, vec![
+            saddr_1.parse().unwrap(),
+            saddr_2.parse().unwrap()
+        ]);
+        assert!(!config.lan_discovery_enabled);
+    }
+
+    #[test]
+    fn args_udp_tcp() {
+        let saddr_1 = "127.0.0.1:33445";
+        let saddr_2 = "127.0.0.1:33446";
+        let matches = app().get_matches_from(vec![
+            "tox-node",
+            "--keys-file",
+            "./keys",
+            "--udp-address",
+            saddr_1,
+            "--tcp-address",
+            saddr_2,
+        ]);
+        let config = run_args(&matches);
+        assert_eq!(config.keys_file.unwrap(), "./keys");
+        assert_eq!(config.udp_addr.unwrap(), saddr_1.parse().unwrap());
+        assert_eq!(config.tcp_addrs, vec![saddr_2.parse().unwrap()]);
+        assert!(!config.lan_discovery_enabled);
+    }
+
+    #[test]
+    fn args_udp_tcp_with_secret_key() {
+        let saddr_1 = "127.0.0.1:33445";
+        let saddr_2 = "127.0.0.1:33446";
+        let sk = "d5ff9ceafe9e1145bc807dc94b4ee911a5878705b5f9ee68f6ccc51e498f313c";
+        let matches = app().get_matches_from(vec![
+            "tox-node",
+            "--secret-key",
+            sk,
+            "--udp-address",
+            saddr_1,
+            "--tcp-address",
+            saddr_2,
+        ]);
+        let config = run_args(&matches);
+        assert_eq!(config.sk.unwrap(), {
+            let sk_bytes = <[u8; 32]>::from_hex(sk).unwrap();
+            SecretKey::from_slice(&sk_bytes).unwrap()
+        });
+        assert!(config.sk_passed_as_arg);
+        assert_eq!(config.udp_addr.unwrap(), saddr_1.parse().unwrap());
+        assert_eq!(config.tcp_addrs, vec![saddr_2.parse().unwrap()]);
+        assert!(!config.lan_discovery_enabled);
+    }
+
+    #[test]
+    fn args_udp_or_tcp_required() {
+        let matches = app().get_matches_from_safe(vec![
+            "tox-node",
+            "--keys-file",
+            "./keys",
+        ]);
+        assert!(matches.is_err());
+    }
+
+    #[test]
+    fn args_keys_file_or_secret_key_required() {
+        let matches = app().get_matches_from_safe(vec![
+            "tox-node",
+            "--udp-address",
+            "127.0.0.1:33445",
+        ]);
+        assert!(matches.is_err());
+    }
+
+    #[test]
+    fn args_keys_file_and_secret_key_conflicts() {
+        let matches = app().get_matches_from_safe(vec![
+            "tox-node",
+            "--keys-file",
+            "./keys",
+            "--secret-key",
+            "d5ff9ceafe9e1145bc807dc94b4ee911a5878705b5f9ee68f6ccc51e498f313c",
+            "--udp-address",
+            "127.0.0.1:33445",
+        ]);
+        assert!(matches.is_err());
+    }
+
+    #[test]
+    fn args_motd() {
+        let motd = "abcdef";
+        let matches = app().get_matches_from(vec![
+            "tox-node",
+            "--keys-file",
+            "./keys",
+            "--udp-address",
+            "127.0.0.1:33445",
+            "--motd",
+            motd,
+        ]);
+        let config = run_args(&matches);
+        assert_eq!(config.motd, motd);
+    }
+
+    #[test]
+    fn args_lan_discovery() {
+        let matches = app().get_matches_from(vec![
+            "tox-node",
+            "--keys-file",
+            "./keys",
+            "--udp-address",
+            "127.0.0.1:33445",
+            "--lan-discovery",
+        ]);
+        let config = run_args(&matches);
+        assert!(config.lan_discovery_enabled);
+    }
+
+    #[test]
+    fn args_bootstrap_nodes() {
+        let pk_1 = "F404ABAA1C99A9D37D61AB54898F56793E1DEF8BD46B1038B9D822E8460FAB67";
+        let addr_1 = "node.tox.biribiri.org:33445";
+        let pk_2 = "8E7D0B859922EF569298B4D261A8CCB5FEA14FB91ED412A7603A585A25698832";
+        let addr_2 = "85.172.30.117:33445";
+        let matches = app().get_matches_from(vec![
+            "tox-node",
+            "--keys-file",
+            "./keys",
+            "--udp-address",
+            "127.0.0.1:33445",
+            "--bootstrap-node",
+            pk_1,
+            addr_1,
+            "--bootstrap-node",
+            pk_2,
+            addr_2,
+        ]);
+        let config = run_args(&matches);
+        let node_1 = BootstrapNode {
+            pk: {
+                let pk_bytes = <[u8; 32]>::from_hex(pk_1).unwrap();
+                PublicKey::from_slice(&pk_bytes).unwrap()
+            },
+            addr: addr_1.into(),
+        };
+        let node_2 = BootstrapNode {
+            pk: {
+                let pk_bytes = <[u8; 32]>::from_hex(pk_2).unwrap();
+                PublicKey::from_slice(&pk_bytes).unwrap()
+            },
+            addr: addr_2.into(),
+        };
+        assert_eq!(config.bootstrap_nodes, vec![node_1, node_2]);
+    }
+
+    #[test]
+    fn args_log_type() {
+        let matches = app().get_matches_from(vec![
+            "tox-node",
+            "--keys-file",
+            "./keys",
+            "--udp-address",
+            "127.0.0.1:33445",
+            "--log-type",
+            "None"
+        ]);
+        let config = run_args(&matches);
+        assert_eq!(config.log_type, LogType::None);
+    }
+
+    #[test]
+    fn args_tcp_connections_limit() {
+        let matches = app().get_matches_from(vec![
+            "tox-node",
+            "--keys-file",
+            "./keys",
+            "--tcp-address",
+            "127.0.0.1:33445",
+            "--tcp-connections-limit",
+            "42"
+        ]);
+        let config = run_args(&matches);
+        assert_eq!(config.tcp_connections_limit, 42);
+    }
+
+    #[test]
+    fn args_tcp_connections_limit_requires_tcp_addr() {
+        let matches = app().get_matches_from_safe(vec![
+            "tox-node",
+            "--keys-file",
+            "./keys",
+            "--udp-address",
+            "127.0.0.1:33445",
+            "--tcp-connections-limit",
+            "42"
+        ]);
+        assert!(matches.is_err());
+    }
+
+    #[test]
+    fn args_threads() {
+        let matches = app().get_matches_from(vec![
+            "tox-node",
+            "--keys-file",
+            "./keys",
+            "--udp-address",
+            "127.0.0.1:33445",
+            "--threads",
+            "42"
+        ]);
+        let config = run_args(&matches);
+        assert_eq!(config.threads, Threads::N(42));
     }
 }
