@@ -46,8 +46,6 @@ type TcpOnionTx = mpsc::Sender<(InnerOnionResponse, SocketAddr)>;
 /// After random requests count exceeds this number `NODES_REQ_INTERVAL` will be
 /// used.
 pub const MAX_BOOTSTRAP_TIMES: u32 = 5;
-/// Interval in seconds of sending `NatPingRequest` packet.
-pub const NAT_PING_REQ_INTERVAL: u64 = 3;
 /// How often onion key should be refreshed.
 pub const ONION_REFRESH_KEY_INTERVAL: u64 = 7200;
 /// Interval in seconds for random `NodesRequest`.
