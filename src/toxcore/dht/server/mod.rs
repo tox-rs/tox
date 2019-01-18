@@ -67,6 +67,8 @@ pub const PRECOMPUTED_LRU_CACHE_SIZE: usize = KBUCKET_DEFAULT_SIZE as usize * KB
     KBUCKET_DEFAULT_SIZE as usize * (2 + 10); // For friend's close_nodes of 2 fake friends + 10 friends reserved
 /// Timeout in seconds for packet sending
 pub const DHT_SEND_TIMEOUT: u64 = 1;
+/// How often DHT main loop should be called.
+const MAIN_LOOP_INTERVAL: u64 = 1;
 
 /// Struct that contains necessary data for `BootstrapInfo` packet.
 #[derive(Clone)]
@@ -369,7 +371,7 @@ impl Server {
     /// Run DHT main loop periodically. Result future will never be completed
     /// successfully.
     fn run_main_loop(self) -> impl Future<Item = (), Error = Error> + Send {
-        let interval = Duration::from_secs(1);
+        let interval = Duration::from_secs(MAIN_LOOP_INTERVAL);
         let wakeups = Interval::new(Instant::now(), interval);
         wakeups
             .map_err(|e| Error::new(ErrorKind::Other, format!("DHT server timer error: {:?}", e)))
