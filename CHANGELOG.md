@@ -1,3 +1,17 @@
+# 0.0.9 (January 27, 2019)
+
+* Add dht::MAIN_LOOP_INTERVAL const (#304)
+* Update parking_lot and env_logger deps (#303)
+* Do not require exact minor version of the deps (#301)
+* Remove useless logs from dht::Server::handle_packet (#300)
+* Add timeout for the TCP handshake (10 seconds) (#299)
+* Use impl Future instead of IoFuture (#295)
+* Move to Edition 2018 (#298)
+* Add limit for TCP connections count (#297)
+* Use failure crate in lan_discovery with Error-ErrorKind pattern (#285)
+* Relax assert rule for floats to avoid sporadic test failures (#296, #302)
+* Fix crash on invalid DHT packets (#294)
+
 # 0.0.8 (December 27, 2018)
 
 * Update the onion proposal link (#292)
