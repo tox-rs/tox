@@ -78,46 +78,11 @@ cargo clippy --all --tests
  - more
 
 ## Progress
-*Not listed items are on TODO*. If you're interested in them arriving sooner,
-consider helping :wink:
 
- - [ ] implementing toxcore
-    - [ ] DHT Node
-        - [x] ping requests & responses
-        - [x] nodes requests & responses
-        - [x] CookieRequest
-        - [x] CookieResponse
-        - [x] CryptoHandshake
-        - [x] CryptoData
-        - [x] LanDiscovery
-        - [x] OnionRequest[0,1,2]
-        - [x] OnionResponse[3,2,1]
-        - [x] OnionAnnounceRequest & OnionDataRequest
-        - [ ] OnionAnnounceResponse & OnionDataResponse (need onion client)
-        - [x] BootstrapInfo
-        - [x] NAT ping requests & responses
-    - [ ] TCP Relay
-        - [x] Handshake
-        - [x] RouteRequest
-        - [x] RouteResponse
-        - [x] ConnectNotification
-        - [x] DisconnectNotification
-        - [x] PingRequest
-        - [x] PongResponse
-        - [x] OobSend
-        - [x] OobReceive
-        - [x] OnionRequest
-        - [x] OnionResponse
-        - [x] Data
-    - [x] toxencryptsave (aka TES)
- - [x] Rust API
+A fully working tox-node written in pure Rust with a DHT server and a TCP relay
+can be found [here](https://github.com/tox-rs/tox-node).
 
-   It will be a subject to changes, and most likely parts that are currently
-   public will at later point become hidden. That though depends on the needs.
- - [x] Documentation
-    - [x] Simply great. Further improvements in progress.
- - [x] tests
-    - [x] tests cover almost all functionality
+Right now we are working on the client part.
 
 
 ## Authors
