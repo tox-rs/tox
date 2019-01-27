@@ -1,3 +1,12 @@
+# 0.0.7 (January 27, 2019)
+
+* Update dependencies (#47)
+* Add unit tests for cli args parsing (#46)
+* Do not require tcp-address arg (#45)
+* Move to Edition 2018 (#44)
+* Add limits for TCP connections count (#43)
+* Remove custom deserializer for log type (#42)
+
 # 0.0.6 (December 27, 2018)
 
 * Fix clippy warnings (#40)
