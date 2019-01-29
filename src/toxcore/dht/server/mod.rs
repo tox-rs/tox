@@ -1638,7 +1638,9 @@ mod tests {
             motd: Vec::new(),
         });
 
-        assert!(alice.handle_packet(packet, addr).wait().is_err());
+        let res = alice.handle_packet(packet, addr).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::BootstrapInfo);
 
         // Necessary to drop tx so that rx.collect() can be finished
         drop(alice);
@@ -1711,7 +1713,9 @@ mod tests {
         let req_payload = PingRequestPayload { id: 42 };
         let ping_req = Packet::PingRequest(PingRequest::new(&precomp, &alice.pk, &req_payload));
 
-        assert!(alice.handle_packet(ping_req, addr).wait().is_err());
+        let res = alice.handle_packet(ping_req, addr).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
     }
 
     // handle_ping_resp
@@ -1766,7 +1770,9 @@ mod tests {
         let payload = PingResponsePayload { id: ping_id };
         let ping_resp = Packet::PingResponse(PingResponse::new(&precomp, &alice.pk, &payload));
 
-        assert!(alice.handle_packet(ping_resp, addr).wait().is_err());
+        let res = alice.handle_packet(ping_resp, addr).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
     }
 
     #[test]
@@ -1779,7 +1785,9 @@ mod tests {
         let payload = PingResponsePayload { id: 0 };
         let ping_resp = Packet::PingResponse(PingResponse::new(&precomp, &bob_pk, &payload));
 
-        assert!(alice.handle_packet(ping_resp, addr).wait().is_err());
+        let res = alice.handle_packet(ping_resp, addr).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::ZeroPingId);
     }
 
     #[test]
@@ -1794,7 +1802,9 @@ mod tests {
         let payload = PingResponsePayload { id: ping_id + 1 };
         let ping_resp = Packet::PingResponse(PingResponse::new(&precomp, &bob_pk, &payload));
 
-        assert!(alice.handle_packet(ping_resp, addr).wait().is_err());
+        let res = alice.handle_packet(ping_resp, addr).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::PingIdMismatch);
     }
 
     // handle_nodes_req
@@ -1927,7 +1937,9 @@ mod tests {
         let req_payload = NodesRequestPayload { pk: bob_pk, id: 42 };
         let nodes_req = Packet::NodesRequest(NodesRequest::new(&precomp, &alice.pk, &req_payload));
 
-        assert!(alice.handle_packet(nodes_req, addr).wait().is_err());
+        let res = alice.handle_packet(nodes_req, addr).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
     }
 
     // handle_nodes_resp
@@ -1984,7 +1996,9 @@ mod tests {
         ], id: 38 };
         let nodes_resp = Packet::NodesResponse(NodesResponse::new(&precomp, &alice.pk, &resp_payload));
 
-        assert!(alice.handle_packet(nodes_resp, addr).wait().is_err());
+        let res = alice.handle_packet(nodes_resp, addr).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
     }
 
     #[test]
@@ -2088,7 +2102,9 @@ mod tests {
         };
         let cookie_request = Packet::CookieRequest(CookieRequest::new(&precomp, &bob_pk, &cookie_request_payload));
 
-        assert!(alice.handle_packet(cookie_request, addr).wait().is_err());
+        let res = alice.handle_packet(cookie_request, addr).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::NetCrypto);
     }
 
     // handle_cookie_response
@@ -2106,7 +2122,9 @@ mod tests {
         };
         let cookie_response = Packet::CookieResponse(CookieResponse::new(&precomp, &cookie_response_payload));
 
-        assert!(alice.handle_packet(cookie_response, addr).wait().is_err());
+        let res = alice.handle_packet(cookie_response, addr).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::NetCrypto);
     }
 
     // handle_crypto_handshake
@@ -2126,7 +2144,9 @@ mod tests {
         };
         let crypto_handshake = Packet::CryptoHandshake(CryptoHandshake::new(&precomp, &crypto_handshake_payload, cookie));
 
-        assert!(alice.handle_packet(crypto_handshake, addr).wait().is_err());
+        let res = alice.handle_packet(crypto_handshake, addr).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::NetCrypto);
     }
 
     // handle_dht_req
@@ -2186,7 +2206,9 @@ mod tests {
             payload: vec![42; 123]
         });
 
-        assert!(alice.handle_packet(dht_req, addr).wait().is_err());
+        let res = alice.handle_packet(dht_req, addr).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
     }
 
     // handle_nat_ping_request
@@ -2253,7 +2275,9 @@ mod tests {
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
         let dht_req = Packet::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, &nat_payload));
 
-        assert!(alice.handle_packet(dht_req, addr).wait().is_err());
+        let res = alice.handle_packet(dht_req, addr).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::ZeroPingId);
     }
 
     #[test]
@@ -2267,7 +2291,9 @@ mod tests {
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
         let dht_req = Packet::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, &nat_payload));
 
-        assert!(alice.handle_packet(dht_req, addr).wait().is_err());
+        let res = alice.handle_packet(dht_req, addr).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::NoFriend);
     }
 
     // handle_onion_request_0
@@ -2317,7 +2343,9 @@ mod tests {
             payload: vec![42; 123] // not encrypted with dht pk
         });
 
-        assert!(alice.handle_packet(packet, addr).wait().is_err());
+        let res = alice.handle_packet(packet, addr).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
     }
 
     // handle_onion_request_1
@@ -2375,7 +2403,9 @@ mod tests {
             }
         });
 
-        assert!(alice.handle_packet(packet, addr).wait().is_err());
+        let res = alice.handle_packet(packet, addr).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
     }
 
     // handle_onion_request_2
@@ -2476,7 +2506,9 @@ mod tests {
             }
         });
 
-        assert!(alice.handle_packet(packet, addr).wait().is_err());
+        let res = alice.handle_packet(packet, addr).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
     }
 
     // handle_onion_announce_request
@@ -2539,7 +2571,9 @@ mod tests {
             onion_return: onion_return.clone()
         });
 
-        assert!(alice.handle_packet(packet, addr).wait().is_err());
+        let res = alice.handle_packet(packet, addr).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
     }
 
     // handle_onion_data_request
@@ -2712,7 +2746,9 @@ mod tests {
             payload: InnerOnionResponse::OnionDataResponse(inner.clone())
         });
 
-        assert!(alice.handle_packet(packet, addr).wait().is_err());
+        let res = alice.handle_packet(packet, addr).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::OnionResponse);
     }
 
     // handle_onion_response_2
@@ -2803,7 +2839,9 @@ mod tests {
             payload: InnerOnionResponse::OnionDataResponse(inner.clone())
         });
 
-        assert!(alice.handle_packet(packet, addr).wait().is_err());
+        let res = alice.handle_packet(packet, addr).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::OnionResponse);
     }
 
     // handle_onion_response_1
@@ -2932,7 +2970,9 @@ mod tests {
             payload: InnerOnionResponse::OnionAnnounceResponse(inner.clone())
         });
 
-        assert!(alice.handle_packet(packet, addr).wait().is_err());
+        let res = alice.handle_packet(packet, addr).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::OnionResponse);
     }
 
     #[test]
@@ -2987,7 +3027,9 @@ mod tests {
             payload: InnerOnionResponse::OnionDataResponse(inner.clone())
         });
 
-        assert!(alice.handle_packet(packet, addr).wait().is_err());
+        let res = alice.handle_packet(packet, addr).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::OnionResponse);
     }
 
     // send_nat_ping_req()
@@ -3545,7 +3587,9 @@ mod tests {
 
         let data = Packet::CryptoData(CryptoData::new(&precomp, gen_nonce(), &data_payload));
 
-        assert!(alice.handle_packet(data, addr).wait().is_err());
+        let res = alice.handle_packet(data, addr).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::NotHandled);
     }
 
     #[test]
@@ -3558,7 +3602,9 @@ mod tests {
             payload: vec![42; 123]
         });
 
-        assert!(alice.handle_packet(data, addr).wait().is_err());
+        let res = alice.handle_packet(data, addr).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::NotHandled);
     }
 
     #[test]
@@ -3575,6 +3621,8 @@ mod tests {
 
         let data = Packet::OnionAnnounceResponse(OnionAnnounceResponse::new(&precomp, 12345, &payload));
 
-        assert!(alice.handle_packet(data, addr).wait().is_err());
+        let res = alice.handle_packet(data, addr).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::NotHandled);
     }
 }
