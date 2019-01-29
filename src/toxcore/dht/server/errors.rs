@@ -56,7 +56,7 @@ pub enum HandlePacketErrorKind {
     #[fail(display = "Sending response error")]
     SendTo,
     /// Error indicates that received packet is not handled here.
-    #[fail(display = "Not handled error")]
+    #[fail(display = "This packet kind is not handled here error")]
     NotHandled,
     /// Error indicates that received packet's ping_id is zero.
     #[fail(display = "Zero ping id error")]
@@ -170,7 +170,7 @@ pub enum OnionResponseErrorKind {
     #[fail(display = "Sending response faces unexpected eof")]
     Eof,
     /// Error indicates that sending response packet faces redirecting failure.
-    #[fail(display = "Sending response redirecting fails")]
+    #[fail(display = "Sending response redirecting error")]
     Redirect,
 }
 
@@ -419,8 +419,8 @@ impl fmt::Display for DhtLoopError {
 /// The specific kind of error that can occur.
 #[derive(Clone, Debug, Eq, PartialEq, Fail)]
 pub enum DhtLoopErrorKind {
-    /// Main loop wakeup timer error
-    #[fail(display = "Main loop wakeup timer error")]
+    /// Dht loop wakeup timer error
+    #[fail(display = "Dht loop wakeup timer error")]
     Wakeup,
     /// Send packet(s) error
     #[fail(display = "Send packet(s) error")]
@@ -681,3 +681,186 @@ impl From<BootstrapRequestsError> for RunError {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn handle_packet_error() {
+        let error = HandlePacketError::from(HandlePacketErrorKind::ZeroPingId);
+        assert!(error.cause().is_none());
+        assert!(error.backtrace().is_some());
+        assert_eq!(format!("{}", error), "Zero ping id error".to_owned());
+    }
+
+    #[test]
+    fn handle_packet_error_kind() {
+        let get_payload = HandlePacketErrorKind::GetPayload;
+        assert_eq!(format!("{}", get_payload), "Get payload of received packet error".to_owned());
+
+        let onion_response = HandlePacketErrorKind::OnionResponse;
+        assert_eq!(format!("{}", onion_response), "Onion response error".to_owned());
+
+        let bootstrap_info = HandlePacketErrorKind::BootstrapInfo;
+        assert_eq!(format!("{}", bootstrap_info), "BootstrapInfo handling error".to_owned());
+
+        let send_to = HandlePacketErrorKind::SendTo;
+        assert_eq!(format!("{}", send_to), "Sending response error".to_owned());
+
+        let not_handled = HandlePacketErrorKind::NotHandled;
+        assert_eq!(format!("{}", not_handled), "This packet kind is not handled here error".to_owned());
+
+        let zero_ping_id = HandlePacketErrorKind::ZeroPingId;
+        assert_eq!(format!("{}", zero_ping_id), "Zero ping id error".to_owned());
+
+        let ping_id_mismatch = HandlePacketErrorKind::PingIdMismatch;
+        assert_eq!(format!("{}", ping_id_mismatch), "Ping id mismatch error".to_owned());
+
+        let no_friend = HandlePacketErrorKind::NoFriend;
+        assert_eq!(format!("{}", no_friend), "Friend does not exist error".to_owned());
+
+        let net_crypto = HandlePacketErrorKind::NetCrypto;
+        assert_eq!(format!("{}", net_crypto), "NetCrypto is not initialized error".to_owned());
+
+        let onion = HandlePacketErrorKind::OnionOrNetCrypto;
+        assert_eq!(format!("{}", onion), "Onion or NetCrypto related error".to_owned());
+    }
+
+    #[test]
+    fn onion_response_error() {
+        let error = OnionResponseError::from(OnionResponseErrorKind::Next);
+        assert!(error.cause().is_none());
+        assert!(error.backtrace().is_some());
+        assert_eq!(format!("{}", error), "Next onion return is none".to_owned());
+    }
+
+    #[test]
+    fn onion_response_error_kind() {
+        let next = OnionResponseErrorKind::Next;
+        assert_eq!(format!("{}", next), "Next onion return is none".to_owned());
+
+        let send_to = OnionResponseErrorKind::SendTo;
+        assert_eq!(format!("{}", send_to), "Sending response error".to_owned());
+
+        let eof = OnionResponseErrorKind::Eof;
+        assert_eq!(format!("{}", eof), "Sending response faces unexpected eof".to_owned());
+
+        let redirect = OnionResponseErrorKind::Redirect;
+        assert_eq!(format!("{}", redirect), "Sending response redirecting error".to_owned());
+    }
+
+    #[test]
+    fn bootstrap_info_error() {
+        let error = HandleBootstrapInfoError::from(HandleBootstrapInfoErrorKind::Length);
+        assert!(error.cause().is_none());
+        assert!(error.backtrace().is_some());
+        assert_eq!(format!("{}", error), "Length of BootstrapInfo packet error".to_owned());
+    }
+
+    #[test]
+    fn bootstrap_info_error_kind() {
+        let length = HandleBootstrapInfoErrorKind::Length;
+        assert_eq!(format!("{}", length), "Length of BootstrapInfo packet error".to_owned());
+
+        let send_to = HandleBootstrapInfoErrorKind::SendTo;
+        assert_eq!(format!("{}", send_to), "Sending response error".to_owned());
+    }
+
+    #[test]
+    fn bootstrap_requests_error() {
+        let error = BootstrapRequestsError::from(BootstrapRequestsErrorKind::Wakeup);
+        assert!(error.cause().is_none());
+        assert!(error.backtrace().is_some());
+        assert_eq!(format!("{}", error), "Bootstrap wakeup timer error".to_owned());
+    }
+
+    #[test]
+    fn bootstrap_requests_error_kind() {
+        let wake_up = BootstrapRequestsErrorKind::Wakeup;
+        assert_eq!(format!("{}", wake_up), "Bootstrap wakeup timer error".to_owned());
+
+        let send_to = BootstrapRequestsErrorKind::SendTo;
+        assert_eq!(format!("{}", send_to), "Send packet(s) error".to_owned());
+    }
+
+    #[test]
+    fn main_loop_error() {
+        let error = MainLoopError::from(MainLoopErrorKind::Wakeup);
+        assert!(error.cause().is_none());
+        assert!(error.backtrace().is_some());
+        assert_eq!(format!("{}", error), "Main loop wakeup timer error".to_owned());
+    }
+
+    #[test]
+    fn dht_loop_error() {
+        let error = DhtLoopError::from(DhtLoopErrorKind::Wakeup);
+        assert!(error.cause().is_none());
+        assert!(error.backtrace().is_some());
+        assert_eq!(format!("{}", error), "Dht loop wakeup timer error".to_owned());
+    }
+
+    #[test]
+    fn dht_loop_error_kind() {
+        let wake_up = DhtLoopErrorKind::Wakeup;
+        assert_eq!(format!("{}", wake_up), "Dht loop wakeup timer error".to_owned());
+
+        let send_to = DhtLoopErrorKind::SendTo;
+        assert_eq!(format!("{}", send_to), "Send packet(s) error".to_owned());
+    }
+
+    #[test]
+    fn onion_key_refreshing_error() {
+        let error = OnionKeyRefreshingError::from(OnionKeyRefreshingErrorKind::Wakeup);
+        assert!(error.cause().is_none());
+        assert!(error.backtrace().is_some());
+        assert_eq!(format!("{}", error), "Onion key refreshing wakeup timer error".to_owned());
+    }
+
+    #[test]
+    fn onion_key_refreshing_error_kind() {
+        let wake_up = OnionKeyRefreshingErrorKind::Wakeup;
+        assert_eq!(format!("{}", wake_up), "Onion key refreshing wakeup timer error".to_owned());
+
+        let send_to = OnionKeyRefreshingErrorKind::SendTo;
+        assert_eq!(format!("{}", send_to), "Send packet(s) error".to_owned());
+    }
+
+    #[test]
+    fn pings_sending_error() {
+        let error = PingsSendingError::from(PingsSendingErrorKind::Wakeup);
+        assert!(error.cause().is_none());
+        assert!(error.backtrace().is_some());
+        assert_eq!(format!("{}", error), "Pings sending wakeup timer error".to_owned());
+    }
+
+    #[test]
+    fn pings_sending_error_kind() {
+        let wake_up = PingsSendingErrorKind::Wakeup;
+        assert_eq!(format!("{}", wake_up), "Pings sending wakeup timer error".to_owned());
+
+        let send_to = PingsSendingErrorKind::SendTo;
+        assert_eq!(format!("{}", send_to), "Send packet(s) error".to_owned());
+    }
+    #[test]
+    fn run_error() {
+        let error = RunError::from(RunErrorKind::MainLoop);
+        assert!(error.cause().is_none());
+        assert!(error.backtrace().is_some());
+        assert_eq!(format!("{}", error), "Main loop error".to_owned());
+    }
+
+    #[test]
+    fn run_error_kind() {
+        let pings_sending = RunErrorKind::PingsSending;
+        assert_eq!(format!("{}", pings_sending), "Sending pings error".to_owned());
+
+        let onion = RunErrorKind::OnionKeyRefreshing;
+        assert_eq!(format!("{}", onion), "Refreshing onion key error".to_owned());
+
+        let main_loop = RunErrorKind::MainLoop;
+        assert_eq!(format!("{}", main_loop), "Main loop error".to_owned());
+
+        let bootstrap_req = RunErrorKind::BootstrapRequests;
+        assert_eq!(format!("{}", bootstrap_req), "Sending bootstrap requests error".to_owned());
+    }
+}
