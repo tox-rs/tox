@@ -684,6 +684,10 @@ impl From<BootstrapRequestsError> for RunError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::sink::Sink;
+    use futures::future::Future;
+    use std::io::ErrorKind;
+    use crate::toxcore::crypto_core::*;
 
     #[test]
     fn handle_packet_error() {
@@ -691,6 +695,156 @@ mod tests {
         assert!(error.cause().is_none());
         assert!(error.backtrace().is_some());
         assert_eq!(format!("{}", error), "Zero ping id error".to_owned());
+    }
+
+    #[test]
+    fn handle_packet_send_error() {
+        let (tx, rx) = mpsc::channel(32);
+
+        let packet = Packet::BootstrapInfo(BootstrapInfo {
+            version: 1717,
+            motd: vec![1, 2, 3, 4],
+        });
+        let sock: SocketAddr = "127.0.0.1:33445".parse().unwrap();
+
+        drop(rx);
+        let res = tx.send((packet, sock)).wait();
+        assert!(res.is_err());
+        let new_error = HandlePacketError::from(res.err().unwrap());
+        assert_eq!(*new_error.kind(), HandlePacketErrorKind::SendTo);
+    }
+
+    #[test]
+    fn handle_packet_io_error() {
+        let e = IoError::new(ErrorKind::Other, "Test error");
+        let new_error = HandlePacketError::from(e);
+        assert_eq!(*new_error.kind(), HandlePacketErrorKind::OnionOrNetCrypto);
+    }
+
+    #[test]
+    fn onion_response_send_error() {
+        let (tx, rx) = mpsc::channel(32);
+
+        let packet = Packet::BootstrapInfo(BootstrapInfo {
+            version: 1717,
+            motd: vec![1, 2, 3, 4],
+        });
+        let sock: SocketAddr = "127.0.0.1:33445".parse().unwrap();
+
+        drop(rx);
+        let res = tx.send((packet, sock)).wait();
+        assert!(res.is_err());
+        let new_error = OnionResponseError::from(res.err().unwrap());
+        assert_eq!(*new_error.kind(), OnionResponseErrorKind::SendTo);
+    }
+
+    #[test]
+    fn inner_onion_response_send_error() {
+        let (tx, rx) = mpsc::channel(32);
+
+        let packet = InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
+            sendback_data: 12345,
+            nonce: gen_nonce(),
+            payload: vec![42; 123]
+        });
+        let sock: SocketAddr = "127.0.0.1:33445".parse().unwrap();
+
+        drop(rx);
+        let res = tx.send((packet, sock)).wait();
+        assert!(res.is_err());
+        let new_error = OnionResponseError::from(res.err().unwrap());
+        assert_eq!(*new_error.kind(), OnionResponseErrorKind::Eof);
+    }
+
+    #[test]
+    fn bootstrap_info_send_error() {
+        let (tx, rx) = mpsc::channel(32);
+
+        let packet = Packet::BootstrapInfo(BootstrapInfo {
+            version: 1717,
+            motd: vec![1, 2, 3, 4],
+        });
+        let sock: SocketAddr = "127.0.0.1:33445".parse().unwrap();
+
+        drop(rx);
+        let res = tx.send((packet, sock)).wait();
+        assert!(res.is_err());
+        let new_error = HandleBootstrapInfoError::from(res.err().unwrap());
+        assert_eq!(*new_error.kind(), HandleBootstrapInfoErrorKind::SendTo);
+    }
+
+    #[test]
+    fn bootstrap_requests_send_error() {
+        let (tx, rx) = mpsc::channel(32);
+
+        let packet = Packet::BootstrapInfo(BootstrapInfo {
+            version: 1717,
+            motd: vec![1, 2, 3, 4],
+        });
+        let sock: SocketAddr = "127.0.0.1:33445".parse().unwrap();
+
+        drop(rx);
+        let res = tx.send((packet, sock)).wait();
+        assert!(res.is_err());
+        let new_error = BootstrapRequestsError::from(res.err().unwrap());
+        assert_eq!(*new_error.kind(), BootstrapRequestsErrorKind::SendTo);
+    }
+
+    #[test]
+    fn dht_loop_send_error() {
+        let (tx, rx) = mpsc::channel(32);
+
+        let packet = Packet::BootstrapInfo(BootstrapInfo {
+            version: 1717,
+            motd: vec![1, 2, 3, 4],
+        });
+        let sock: SocketAddr = "127.0.0.1:33445".parse().unwrap();
+
+        drop(rx);
+        let res = tx.send((packet, sock)).wait();
+        assert!(res.is_err());
+        let new_error = DhtLoopError::from(res.err().unwrap());
+        assert_eq!(*new_error.kind(), DhtLoopErrorKind::SendTo);
+    }
+
+    #[test]
+    fn onion_key_refreshing_send_error() {
+        let (tx, rx) = mpsc::channel(32);
+
+        let packet = Packet::BootstrapInfo(BootstrapInfo {
+            version: 1717,
+            motd: vec![1, 2, 3, 4],
+        });
+        let sock: SocketAddr = "127.0.0.1:33445".parse().unwrap();
+
+        drop(rx);
+        let res = tx.send((packet, sock)).wait();
+        assert!(res.is_err());
+        let new_error = OnionKeyRefreshingError::from(res.err().unwrap());
+        assert_eq!(*new_error.kind(), OnionKeyRefreshingErrorKind::SendTo);
+
+        let run_error = RunError::from(new_error);
+        assert_eq!(*run_error.kind(), RunErrorKind::OnionKeyRefreshing);
+    }
+
+    #[test]
+    fn pings_send_error() {
+        let (tx, rx) = mpsc::channel(32);
+
+        let packet = Packet::BootstrapInfo(BootstrapInfo {
+            version: 1717,
+            motd: vec![1, 2, 3, 4],
+        });
+        let sock: SocketAddr = "127.0.0.1:33445".parse().unwrap();
+
+        drop(rx);
+        let res = tx.send((packet, sock)).wait();
+        assert!(res.is_err());
+        let new_error = PingsSendingError::from(res.err().unwrap());
+        assert_eq!(*new_error.kind(), PingsSendingErrorKind::SendTo);
+
+        let run_error = RunError::from(new_error);
+        assert_eq!(*run_error.kind(), RunErrorKind::PingsSending);
     }
 
     #[test]
@@ -789,6 +943,9 @@ mod tests {
         assert!(error.cause().is_none());
         assert!(error.backtrace().is_some());
         assert_eq!(format!("{}", error), "Main loop wakeup timer error".to_owned());
+
+        let run_error = RunError::from(error);
+        assert_eq!(*run_error.kind(), RunErrorKind::MainLoop);
     }
 
     #[test]
