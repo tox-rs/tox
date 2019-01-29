@@ -71,7 +71,7 @@ fn main() {
     let lan_discovery_sender = LanDiscoverySender::new(tx.clone(), server_pk, local_addr.is_ipv6());
 
     let mut server = Server::new(tx, server_pk, server_sk);
-    server.set_bootstrap_info(07032018, Box::new(|_| "This is tox-rs".as_bytes().to_owned()));
+    server.set_bootstrap_info(3_000_000_000, Box::new(|_| b"This is tox-rs".to_vec()));
     server.enable_lan_discovery(true);
     server.enable_ipv6_mode(local_addr.is_ipv6());
 
@@ -88,11 +88,8 @@ fn main() {
     }
 
     let future = server.run_socket(socket, rx, stats)
-        .select(lan_discovery_sender.run().map_err(|e| Error::from(e))).map(|_| ()).map_err(|(e, _)| e)
-        .map_err(|err| {
-            error!("Processing ended with error: {:?}", err);
-            ()
-        });
+        .select(lan_discovery_sender.run().map_err(Error::from)).map(|_| ()).map_err(|(e, _)| e)
+        .map_err(|err| error!("Processing ended with error: {:?}", err));
 
     info!("Running DHT server on {}", local_addr);
 
