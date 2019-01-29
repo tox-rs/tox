@@ -5,7 +5,7 @@ use super::*;
 
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
-use crate::toxcore::dht::packet::errors::*;
+use crate::toxcore::dht::packet::*;
 
 /** Third onion request packet. It's sent from the second to the third node from
 onion chain. Payload should be encrypted with temporary generated `SecretKey` and

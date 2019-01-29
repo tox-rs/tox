@@ -452,7 +452,7 @@ impl Server {
     /// a friend and we don't know it's address then this method will send
     /// `PingRequest` immediately instead of adding to a `nodes_to_ping`
     /// list.
-    fn ping_add(&self, node: PackedNode) -> impl Future<Item = (), Error = Error> + Send {
+    fn ping_add(&self, node: &PackedNode) -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
         let close_nodes = self.close_nodes.read();
 
         if !close_nodes.can_add(&node) {
@@ -467,7 +467,7 @@ impl Server {
             return Either::B(self.send_ping_req(&node, &mut self.request_queue.write()))
         }
 
-        self.nodes_to_ping.write().try_add(&self.pk, node, /* evict */ true);
+        self.nodes_to_ping.write().try_add(&self.pk, *node, /* evict */ true);
 
         Either::A(future::ok(()))
     }
@@ -475,7 +475,8 @@ impl Server {
     /// Send `NodesRequest` packets to nodes from bootstrap list. This is
     /// necessary to check whether node is alive before adding it to close
     /// nodes lists.
-    fn ping_nodes_to_bootstrap(&self, request_queue: &mut RequestQueue, nodes_to_bootstrap: &mut Kbucket<PackedNode>, pk: PublicKey) -> impl Future<Item = (), Error = Error> + Send {
+    fn ping_nodes_to_bootstrap(&self, request_queue: &mut RequestQueue, nodes_to_bootstrap: &mut Kbucket<PackedNode>, pk: PublicKey)
+        -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
         let capacity = nodes_to_bootstrap.capacity() as u8;
         let nodes_to_bootstrap = mem::replace(nodes_to_bootstrap, Kbucket::new(capacity));
 

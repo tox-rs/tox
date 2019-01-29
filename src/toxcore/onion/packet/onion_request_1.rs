@@ -5,7 +5,7 @@ use super::*;
 
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
-use crate::toxcore::dht::packet::errors::*;
+use crate::toxcore::dht::packet::*;
 
 use nom::rest;
 

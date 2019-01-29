@@ -67,7 +67,7 @@ impl ServerExt for Server {
             .map(|_| ())
             .map_err(|(e, _)| e)
             .select(self.run()
-                .map_err(|e| Error::new(ErrorKind::Other, format!("{:?}", e))))
+                .map_err(|e| Error::new(ErrorKind::Other, e.compat())))
             .map(|_| ())
             .map_err(|(e, _)| e))
     }
