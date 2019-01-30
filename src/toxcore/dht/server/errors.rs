@@ -11,6 +11,7 @@ use tokio::timer::timeout::Error as TimeoutError;
 use failure::{Backtrace, Context, Fail};
 use crate::toxcore::dht::packet::*;
 use crate::toxcore::onion::packet::*;
+use crate::toxcore::net_crypto::errors::HandlePacketError as NetCryptoHandlePacketError;
 
 /// Error that can happen when calling `handle_*` of packet.
 #[derive(Debug)]
@@ -71,6 +72,9 @@ pub enum HandlePacketErrorKind {
     /// Error indicates that NetCrypto is not initialized.
     #[fail(display = "NetCrypto is not initialized error")]
     NetCrypto,
+    /// Error indicates that handling NetCrypto packet made an error.
+    #[fail(display = "Handling NetCrypto packet has error")]
+    HandleNetCrypto,
     /// Error indicates that onion or net crypto processing fails.
     /// ## This enum entry is temporary for onion or net crypto module's transition to failure
     #[fail(display = "Onion or NetCrypto related error")]
@@ -117,6 +121,14 @@ impl From<HandleBootstrapInfoError> for HandlePacketError {
     fn from(error: HandleBootstrapInfoError) -> HandlePacketError {
         HandlePacketError {
             ctx: error.context(HandlePacketErrorKind::BootstrapInfo)
+        }
+    }
+}
+
+impl From<NetCryptoHandlePacketError> for HandlePacketError {
+    fn from(error: NetCryptoHandlePacketError) -> HandlePacketError {
+        HandlePacketError {
+            ctx: error.context(HandlePacketErrorKind::HandleNetCrypto)
         }
     }
 }

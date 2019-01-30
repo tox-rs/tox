@@ -1,8 +1,9 @@
 /*! The implementation of packets buffer
 */
 
-use std::io::{Error, ErrorKind};
 use std::iter;
+
+use crate::toxcore::net_crypto::errors::*;
 
 /// Maximum size of receiving and sending packet buffers.
 ///
@@ -69,21 +70,15 @@ impl<T> PacketsArray<T> {
     ///
     /// Returns an error when index is too far and buffer can't hold it or when
     /// packet with this index already exists
-    pub fn insert(&mut self, index: u32, packet: T) -> Result<(), Error> {
+    pub fn insert(&mut self, index: u32, packet: T) -> Result<(), PacketsArrayError> {
         if index.overflowing_sub(self.buffer_start).0 >= CRYPTO_PACKET_BUFFER_SIZE {
-            return Err(Error::new(
-                ErrorKind::Other,
-                format!("The index {} is too big and can't be hold", index)
-            ))
+            return Err(PacketsArrayError::too_big(index))
         }
 
         let i = real_index(index);
 
         if self.buffer[i].is_some() {
-            return Err(Error::new(
-                ErrorKind::Other,
-                format!("The packet with index {} already exists", index)
-            ))
+            return Err(PacketsArrayError::already_exist(index))
         }
 
         self.buffer[i] = Some(Box::new(packet));
@@ -97,12 +92,9 @@ impl<T> PacketsArray<T> {
     /// Write packet at the end index and increment this index
     ///
     /// Returns an error when the buffer is full
-    pub fn push_back(&mut self, packet: T) -> Result<(), Error> {
+    pub fn push_back(&mut self, packet: T) -> Result<(), PacketsArrayError> {
         if self.len() == CRYPTO_PACKET_BUFFER_SIZE {
-            return Err(Error::new(
-                ErrorKind::Other,
-                "Packets array is full"
-            ))
+            return Err(PacketsArrayError::from(PacketsArrayErrorKind::ArrayFull))
         }
 
         self.buffer[real_index(self.buffer_end)] = Some(Box::new(packet));
@@ -174,19 +166,13 @@ impl<T> PacketsArray<T> {
     ///
     /// Returns an error when index is too far and buffer can't hold it or when
     /// index is lower then end index
-    pub fn set_buffer_end(&mut self, index: u32) -> Result<(), Error> {
+    pub fn set_buffer_end(&mut self, index: u32) -> Result<(), PacketsArrayError> {
         if index.overflowing_sub(self.buffer_start).0 > CRYPTO_PACKET_BUFFER_SIZE {
-            return Err(Error::new(
-                ErrorKind::Other,
-                format!("The index {} is too big and can't be hold", index)
-            ))
+            return Err(PacketsArrayError::too_big(index))
         }
 
         if index.overflowing_sub(self.buffer_end).0 > CRYPTO_PACKET_BUFFER_SIZE {
-            return Err(Error::new(
-                ErrorKind::Other,
-                format!("Index {} is lower than the end index", index)
-            ))
+            return Err(PacketsArrayError::lower_index(index))
         }
 
         self.buffer_end = index;
@@ -197,14 +183,11 @@ impl<T> PacketsArray<T> {
     /// Set start index removing all packet before this index
     ///
     /// Returns an error when index is outside of buffer bounds
-    pub fn set_buffer_start(&mut self, index: u32) -> Result<(), Error> {
+    pub fn set_buffer_start(&mut self, index: u32) -> Result<(), PacketsArrayError> {
         let len = self.len();
 
         if self.buffer_end.overflowing_sub(index).0 > len || index.overflowing_sub(self.buffer_start).0 > len {
-            return Err(Error::new(
-                ErrorKind::Other,
-                format!("Index {} is outside of buffer bounds", index)
-            ))
+            return Err(PacketsArrayError::outside_index(index))
         }
 
         for packet in &mut self.buffer[real_index(self.buffer_start) .. real_index(index)] {
@@ -269,7 +252,9 @@ mod tests {
     fn insert_exists() {
         let mut array = PacketsArray::<()>::new();
         assert!(array.insert(7, ()).is_ok());
-        assert!(array.insert(7, ()).is_err());
+        let res = array.insert(7, ());
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), PacketsArrayErrorKind::AlreadyExist { index: 7 });
         assert!(array.insert(6, ()).is_ok());
         assert!(array.insert(8, ()).is_ok());
     }
@@ -277,11 +262,15 @@ mod tests {
     #[test]
     fn insert_too_big_index() {
         let mut array = PacketsArray::<()>::new();
-        assert!(array.insert(CRYPTO_PACKET_BUFFER_SIZE, ()).is_err());
+        let res = array.insert(CRYPTO_PACKET_BUFFER_SIZE, ());
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), PacketsArrayErrorKind::TooBig { index: CRYPTO_PACKET_BUFFER_SIZE });
         assert_eq!(array.buffer_start, 0);
         assert_eq!(array.buffer_end, 0);
         array.buffer_start = u32::max_value();
-        assert!(array.insert(CRYPTO_PACKET_BUFFER_SIZE - 1, ()).is_err());
+        let res = array.insert(CRYPTO_PACKET_BUFFER_SIZE - 1, ());
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), PacketsArrayErrorKind::TooBig { index: CRYPTO_PACKET_BUFFER_SIZE - 1 });
         assert_eq!(array.buffer_start, u32::max_value());
         assert_eq!(array.buffer_end, 0);
     }
@@ -310,7 +299,9 @@ mod tests {
     fn push_back_full() {
         let mut array = PacketsArray::<()>::new();
         array.buffer_end = CRYPTO_PACKET_BUFFER_SIZE;
-        assert!(array.push_back(()).is_err());
+        let res = array.push_back(());
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), PacketsArrayErrorKind::ArrayFull);
         assert_eq!(array.buffer_start, 0);
         assert_eq!(array.buffer_end, CRYPTO_PACKET_BUFFER_SIZE);
     }
@@ -396,7 +387,9 @@ mod tests {
     #[test]
     fn set_buffer_end_too_big_index() {
         let mut array = PacketsArray::<()>::new();
-        assert!(array.set_buffer_end(CRYPTO_PACKET_BUFFER_SIZE + 1).is_err());
+        let res = array.set_buffer_end(CRYPTO_PACKET_BUFFER_SIZE + 1);
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), PacketsArrayErrorKind::TooBig { index: CRYPTO_PACKET_BUFFER_SIZE + 1 });
         assert_eq!(array.buffer_start, 0);
         assert_eq!(array.buffer_end, 0);
     }
@@ -405,7 +398,9 @@ mod tests {
     fn set_buffer_end_lower_than_end_index() {
         let mut array = PacketsArray::<()>::new();
         array.buffer_end = 7;
-        assert!(array.set_buffer_end(6).is_err());
+        let res = array.set_buffer_end(6);
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), PacketsArrayErrorKind::LowerIndex { index: 6 });
         assert_eq!(array.buffer_start, 0);
         assert_eq!(array.buffer_end, 7);
     }
@@ -442,7 +437,9 @@ mod tests {
         let mut array = PacketsArray::<()>::new();
         array.buffer_start = 7;
         array.buffer_end = 7;
-        assert!(array.set_buffer_start(1).is_err());
+        let res = array.set_buffer_start(1);
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), PacketsArrayErrorKind::OutsideIndex { index: 1 });
         assert_eq!(array.buffer_start, 7);
         assert_eq!(array.buffer_end, 7);
     }
