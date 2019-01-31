@@ -13,14 +13,13 @@ PK; and additionally used to store nodes closest to friends.
 */
 
 use std::cmp::{Ord, Ordering};
-use std::convert::Into;
+use std::convert::{From, Into};
 use std::net::SocketAddr;
 
 use crate::toxcore::crypto_core::*;
 use crate::toxcore::dht::dht_node::*;
 use crate::toxcore::dht::packed_node::*;
 use crate::toxcore::dht::ip_port::IsGlobal;
-use crate::toxcore::dht::nodes_queue::*;
 use crate::toxcore::time::*;
 
 /** Calculate the [`k-bucket`](./struct.Ktree.html) index of a PK compared
@@ -47,12 +46,6 @@ pub fn kbucket_index(&PublicKey(ref own_pk): &PublicKey,
     None  // PKs are equal
 }
 
-impl Into<DhtNode> for PackedNode {
-    fn into(self) -> DhtNode {
-        DhtNode::new(self)
-    }
-}
-
 /// Trait for functionality related to distance between `PublicKey`s.
 pub trait Distance {
     /// Check whether distance between PK1 and own PK is smaller than distance
@@ -76,12 +69,76 @@ impl Distance for PublicKey {
     }
 }
 
+/// Node that can be stored in a `Kbucket`.
+pub trait KbucketNode : Sized {
+    /// Node's `PublicKey`.
+    fn pk(&self) -> PublicKey;
+    /// Check if the node can be updated with a new one.
+    fn is_outdated(&self, other: &PackedNode) -> bool;
+    /// Update the existing node with a new one.
+    fn update(&mut self, other: &PackedNode);
+    /// Check if the node can be evicted.
+    fn is_evictable(&self) -> bool;
+    /// Find the index of a node that should be evicted in case if `Kbucket` is
+    /// full. It must return `Some` if and only if nodes list contains at least
+    /// one evictable node.
+    fn eviction_index(nodes: &[Self]) -> Option<usize>;
+}
+
+impl KbucketNode for PackedNode {
+    fn pk(&self) -> PublicKey {
+        self.pk
+    }
+    fn is_outdated(&self, other: &PackedNode) -> bool {
+        self.saddr != other.saddr
+    }
+    fn update(&mut self, other: &PackedNode) {
+        self.saddr = other.saddr;
+    }
+    fn is_evictable(&self) -> bool {
+        false
+    }
+    fn eviction_index(_nodes: &[Self]) -> Option<usize> {
+        None
+    }
+}
+
+impl KbucketNode for DhtNode {
+    fn pk(&self) -> PublicKey {
+        self.pk
+    }
+    fn is_outdated(&self, other: &PackedNode) -> bool {
+        self.assoc4.saddr.map(SocketAddr::V4) != Some(other.saddr) &&
+            self.assoc6.saddr.map(SocketAddr::V6) != Some(other.saddr)
+    }
+    fn update(&mut self, other: &PackedNode) {
+        match other.saddr {
+            SocketAddr::V4(sock_v4) => {
+                self.assoc4.saddr = Some(sock_v4);
+                self.assoc4.last_resp_time = Some(clock_now());
+            },
+            SocketAddr::V6(sock_v6) => {
+                self.assoc6.saddr = Some(sock_v6);
+                self.assoc6.last_resp_time = Some(clock_now());
+            }
+        }
+    }
+    fn is_evictable(&self) -> bool {
+        self.is_bad()
+    }
+    fn eviction_index(nodes: &[Self]) -> Option<usize> {
+        nodes.iter().rposition(|n| n.is_discarded()).or_else(||
+            nodes.iter().rposition(|n| n.is_bad())
+        )
+    }
+}
+
 /**
 Structure for holding nodes.
 
 Number of nodes it can contain is set during creation.
 
-Nodes stored in `Kbucket` are in [`DhtNode`](./struct.DhtNode.html)
+Nodes stored in `Kbucket` are in [`KbucketNode`](./struct.KbucketNode.html)
 format.
 
 Nodes in kbucket are sorted by closeness to the PK; closest node is the first
@@ -95,17 +152,23 @@ PK; and additionally used to store nodes closest to friends.
 [Kademlia whitepaper](https://pdos.csail.mit.edu/~petar/papers/maymounkov-kademlia-lncs.pdf).
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Kbucket {
+pub struct Kbucket<T> {
     /// Amount of nodes it can hold.
     pub capacity: u8,
     /// Nodes that kbucket has, sorted by distance to PK.
-    pub nodes: Vec<DhtNode>,
+    pub nodes: Vec<T>,
+}
+
+impl<T> Into<Vec<T>> for Kbucket<T> {
+    fn into(self) -> Vec<T> {
+        self.nodes
+    }
 }
 
 /// Default number of nodes that kbucket can hold.
 pub const KBUCKET_DEFAULT_SIZE: u8 = 8;
 
-impl Kbucket {
+impl<T: KbucketNode + From<PackedNode>> Kbucket<T> {
     /** Create a new `Kbucket` to store nodes close to the `PublicKey`.
 
     Can hold up to `capacity` nodes.
@@ -119,17 +182,17 @@ impl Kbucket {
     }
 
     fn find(&self, base_pk: &PublicKey, pk: &PublicKey) -> Option<usize> {
-        self.nodes.binary_search_by(|n| base_pk.distance(&n.pk, pk)).ok()
+        self.nodes.binary_search_by(|n| base_pk.distance(&n.pk(), pk)).ok()
     }
 
-    /// Get reference to a `DhtNode` by it's `PublicKey`.
-    pub fn get_node(&self, base_pk: &PublicKey, pk: &PublicKey) -> Option<&DhtNode> {
+    /// Get reference to a `KbucketNode` by it's `PublicKey`.
+    pub fn get_node(&self, base_pk: &PublicKey, pk: &PublicKey) -> Option<&T> {
         self.find(base_pk, pk)
             .map(move |node_index| &self.nodes[node_index])
     }
 
-    /// Get mutable reference to a `DhtNode` by it's `PublicKey`.
-    pub fn get_node_mut(&mut self, base_pk: &PublicKey, pk: &PublicKey) -> Option<&mut DhtNode> {
+    /// Get mutable reference to a `KbucketNode` by it's `PublicKey`.
+    pub fn get_node_mut(&mut self, base_pk: &PublicKey, pk: &PublicKey) -> Option<&mut T> {
         self.find(base_pk, pk)
             .map(move |node_index| &mut self.nodes[node_index])
     }
@@ -138,7 +201,7 @@ impl Kbucket {
     Try to add [`PackedNode`] to the kbucket.
 
     - If the [`PackedNode`] with given `PublicKey` is already in the `Kbucket`,
-      the [`DhtNode`] is updated (since its `SocketAddr` can differ).
+      the [`KbucketNode`] is updated (since its `SocketAddr` can differ).
     - If kbucket is not full, node is appended.
     - If kbucket is full and `evict` is `true`, node's closeness is compared to
       nodes already in kbucket, and if it's closer than some node, it prepends
@@ -155,28 +218,17 @@ impl Kbucket {
     `can_add` function. If node is already in the [`Kbucket`], `can_add` will
     return `true` only when it has different address or is in a bad state.
 
-    [`DhtNode`]: ./struct.DhtNode.html
+    [`KbucketNode`]: ./struct.KbucketNode.html
     [`PackedNode`]: ../packed_node/struct.PackedNode.html
     */
     pub fn try_add(&mut self, base_pk: &PublicKey, new_node: &PackedNode, evict: bool) -> bool {
-        debug!(target: "Kbucket", "Trying to add PackedNode.");
-        trace!(target: "Kbucket", "With kbucket: {:?}; PK: {:?} and new node: {:?}",
-            self, base_pk, new_node);
+        trace!(target: "Kbucket", "Trying to add PackedNode: {:?}.", new_node);
 
-        match self.nodes.binary_search_by(|n| base_pk.distance(&n.pk, &new_node.pk)) {
+        match self.nodes.binary_search_by(|n| base_pk.distance(&n.pk(), &new_node.pk)) {
             Ok(index) => {
                 debug!(target: "Kbucket",
                     "Updated: the node was already in the kbucket.");
-                match new_node.saddr {
-                    SocketAddr::V4(sock_v4) => {
-                        self.nodes[index].assoc4.saddr = Some(sock_v4);
-                        self.nodes[index].assoc4.last_resp_time = Some(clock_now());
-                    },
-                    SocketAddr::V6(sock_v6) => {
-                        self.nodes[index].assoc6.saddr = Some(sock_v6);
-                        self.nodes[index].assoc6.last_resp_time = Some(clock_now());
-                    }
-                }
+                self.nodes[index].update(new_node);
                 true
             },
             Err(index) if !evict || index == self.nodes.len() => {
@@ -184,10 +236,7 @@ impl Kbucket {
                 // we are not going to evict the farthest node or the current
                 // node is the farthest one
                 if self.is_full() {
-                    let index = self.nodes.iter().rposition(|n| n.is_discarded()).or_else(||
-                        self.nodes.iter().rposition(|n| n.is_bad())
-                    );
-                    match index {
+                    match T::eviction_index(&self.nodes) {
                         Some(index) => {
                             debug!(target: "Kbucket",
                                 "No free space left in the kbucket, the last bad node removed.");
@@ -226,21 +275,21 @@ impl Kbucket {
         }
     }
 
-    /** Remove [`DhtNode`](./struct.DhtNode.html) with given PK from the
+    /** Remove [`KbucketNode`](./struct.KbucketNode.html) with given PK from the
     `Kbucket`.
 
     Note that you must pass the same `base_pk` each call or the internal
     state will be undefined. Also `base_pk` must be equal to `base_pk` you added
     a node with. Normally you don't call this function on your own but Ktree does.
 
-    If there's no `DhtNode` with given PK, nothing is being done.
+    If there's no `KbucketNode` with given PK, nothing is being done.
     */
-    pub fn remove(&mut self, base_pk: &PublicKey, node_pk: &PublicKey) -> Option<DhtNode> {
-        trace!(target: "Kbucket", "Removing DhtNode with PK: {:?}", node_pk);
-        match self.nodes.binary_search_by(|n| base_pk.distance(&n.pk, node_pk)) {
+    pub fn remove(&mut self, base_pk: &PublicKey, node_pk: &PublicKey) -> Option<T> {
+        trace!(target: "Kbucket", "Removing KbucketNode with PK: {:?}", node_pk);
+        match self.nodes.binary_search_by(|n| base_pk.distance(&n.pk(), node_pk)) {
             Ok(index) => Some(self.nodes.remove(index)),
             Err(_) => {
-                trace!("No DhtNode to remove with PK: {:?}", node_pk);
+                trace!("No KbucketNode to remove with PK: {:?}", node_pk);
                 None
             }
         }
@@ -248,7 +297,7 @@ impl Kbucket {
 
     /// Check if node with given PK is in the `Kbucket`.
     pub fn contains(&self, base_pk: &PublicKey, pk: &PublicKey) -> bool {
-        self.nodes.binary_search_by(|n| base_pk.distance(&n.pk, pk)).is_ok()
+        self.nodes.binary_search_by(|n| base_pk.distance(&n.pk(), pk)).is_ok()
     }
 
     /// Get the capacity of the Kbucket.
@@ -295,17 +344,15 @@ impl Kbucket {
     [`PackedNode`]: ./struct.PackedNode.html
     */
     pub fn can_add(&self, base_pk: &PublicKey, new_node: &PackedNode, evict: bool) -> bool {
-        match self.nodes.binary_search_by(|n| base_pk.distance(&n.pk, &new_node.pk)) {
+        match self.nodes.binary_search_by(|n| base_pk.distance(&n.pk(), &new_node.pk)) {
             Ok(index) =>
                 // if node is bad then we'd want to update it's address
-                self.nodes[index].is_bad() ||
-                    self.nodes[index].assoc4.saddr.map(SocketAddr::V4) != Some(new_node.saddr) &&
-                        self.nodes[index].assoc6.saddr.map(SocketAddr::V6) != Some(new_node.saddr),
+                self.nodes[index].is_evictable() || self.nodes[index].is_outdated(new_node),
             Err(index) if !evict || index == self.nodes.len() =>
                 // can't find node in the kbucket
                 // we are not going to evict the farthest node or the current
                 // node is the farthest one
-                !self.is_full() || self.nodes.iter().any(|n| n.is_bad()),
+                !self.is_full() || self.nodes.iter().any(|n| n.is_evictable()),
             Err(_index) =>
                 // can't find node in the kbucket
                 // we are going to evict the farthest node if the kbucket is full
@@ -313,17 +360,17 @@ impl Kbucket {
         }
     }
 
-    /// Create iterator over [`DhtNode`](./struct.DhtNode.html)s in `Ktree`.
-    /// Nodes that this iterator produces are sorted by distance to a base
-    /// `PublicKey` (in ascending order).
-    pub fn iter(&self) -> impl Iterator<Item = &DhtNode> {
+    /// Create iterator over [`KbucketNode`](./struct.KbucketNode.html)s in
+    /// `Ktree`. Nodes that this iterator produces are sorted by distance to a
+    /// base `PublicKey` (in ascending order).
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
         self.nodes.iter()
     }
 
-    /// Create mutable iterator over [`DhtNode`](./struct.DhtNode.html)s in
-    /// `Ktree`. Nodes that this iterator produces are sorted by distance to a
-    /// base `PublicKey` (in ascending order).
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut DhtNode> {
+    /// Create mutable iterator over [`KbucketNode`](./struct.KbucketNode.html)s
+    /// in `Ktree`. Nodes that this iterator produces are sorted by distance to
+    /// a base `PublicKey` (in ascending order).
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> {
         self.nodes.iter_mut()
     }
 }
@@ -346,7 +393,7 @@ pub struct Ktree {
     /// `PublicKey` for which `Ktree` holds close nodes.
     pk: PublicKey,
     /// List of [`Kbucket`](./struct.Kbucket.html)s.
-    pub kbuckets: Vec<Kbucket>,
+    pub kbuckets: Vec<Kbucket<DhtNode>>,
 }
 
 /** Maximum number of [`Kbucket`](./struct.Kbucket.html)s that [`Ktree`]
@@ -457,20 +504,20 @@ impl Ktree {
 
     It should not contain LAN ip node if the request is from global ip.
     */
-    pub fn get_closest(&self, pk: &PublicKey, only_global: bool) -> NodesQueue {
+    pub fn get_closest(&self, pk: &PublicKey, only_global: bool) -> Kbucket<PackedNode> {
         debug!(target: "Ktree", "Getting closest nodes.");
         trace!(target: "Ktree", "With PK: {:?} and self: {:?}", pk, self);
 
-        let mut queue = NodesQueue::new(4);
+        let mut kbucket = Kbucket::new(4);
         for node in self.iter().filter(|node| !node.is_bad()) {
             if let Some(pn) = node.to_packed_node() {
                 if !only_global || IsGlobal::is_global(&pn.saddr.ip()) {
-                    queue.try_add(pk, &pn);
+                    kbucket.try_add(pk, &pn, /* evict */ true);
                 }
             }
         }
-        trace!("Returning nodes: {:?}", queue);
-        queue
+        trace!("Returning nodes: {:?}", kbucket);
+        kbucket
     }
 
     /**
@@ -593,7 +640,7 @@ mod tests {
     #[test]
     fn kbucket_try_add() {
         let pk = PublicKey([0; PUBLICKEYBYTES]);
-        let mut kbucket = Kbucket::new(KBUCKET_DEFAULT_SIZE);
+        let mut kbucket = Kbucket::<DhtNode>::new(KBUCKET_DEFAULT_SIZE);
 
         for i in 0 .. 8 {
             let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + u16::from(i));
@@ -629,7 +676,7 @@ mod tests {
     #[test]
     fn kbucket_try_add_should_replace_bad_nodes() {
         let pk = PublicKey([0; PUBLICKEYBYTES]);
-        let mut kbucket = Kbucket::new(1);
+        let mut kbucket = Kbucket::<DhtNode>::new(1);
 
         let node_1 = PackedNode::new(
             "1.2.3.4:12345".parse().unwrap(),
@@ -657,7 +704,7 @@ mod tests {
     #[test]
     fn kbucket_try_add_evict_should_replace_bad_nodes() {
         let pk = PublicKey([0; PUBLICKEYBYTES]);
-        let mut kbucket = Kbucket::new(1);
+        let mut kbucket = Kbucket::<DhtNode>::new(1);
 
         let node_1 = PackedNode::new(
             "1.2.3.4:12345".parse().unwrap(),
@@ -687,7 +734,7 @@ mod tests {
     #[test]
     fn kbucket_remove() {
         let pk = PublicKey([0; PUBLICKEYBYTES]);
-        let mut kbucket = Kbucket::new(KBUCKET_DEFAULT_SIZE);
+        let mut kbucket = Kbucket::<DhtNode>::new(KBUCKET_DEFAULT_SIZE);
 
         let node = PackedNode::new(
             "1.2.3.4:12345".parse().unwrap(),
@@ -712,7 +759,7 @@ mod tests {
     #[test]
     fn kbucket_is_empty() {
         let pk = PublicKey([0; PUBLICKEYBYTES]);
-        let mut kbucket = Kbucket::new(KBUCKET_DEFAULT_SIZE);
+        let mut kbucket = Kbucket::<DhtNode>::new(KBUCKET_DEFAULT_SIZE);
 
         assert!(kbucket.is_empty());
 
@@ -732,7 +779,7 @@ mod tests {
     fn kbucket_get_node() {
         crypto_init().unwrap();
         let (pk, _) = gen_keypair();
-        let mut kbucket = Kbucket::new(KBUCKET_DEFAULT_SIZE);
+        let mut kbucket = Kbucket::<DhtNode>::new(KBUCKET_DEFAULT_SIZE);
 
         let node_pk = gen_keypair().0;
 
@@ -751,7 +798,7 @@ mod tests {
     fn kbucket_get_node_mut() {
         crypto_init().unwrap();
         let (pk, _) = gen_keypair();
-        let mut kbucket = Kbucket::new(KBUCKET_DEFAULT_SIZE);
+        let mut kbucket = Kbucket::<DhtNode>::new(KBUCKET_DEFAULT_SIZE);
 
         let node_pk = gen_keypair().0;
 

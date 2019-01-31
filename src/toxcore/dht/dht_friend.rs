@@ -7,8 +7,8 @@ use std::net::SocketAddr;
 
 use crate::toxcore::time::*;
 use crate::toxcore::dht::kbucket::*;
-use crate::toxcore::dht::nodes_queue::*;
 use crate::toxcore::crypto_core::*;
+use crate::toxcore::dht::dht_node::*;
 use crate::toxcore::dht::packed_node::*;
 use crate::toxcore::dht::server::hole_punching::*;
 
@@ -25,7 +25,7 @@ pub struct DhtFriend {
     /// Friend's close nodes. If this list contains a node with the same
     /// `PublicKey` as the friend has this means that we know friend's IP
     /// address and successfully reached him.
-    pub close_nodes: Kbucket,
+    pub close_nodes: Kbucket<DhtNode>,
     /// Time when we sent `NodesRequest` packet to a random node from close
     /// nodes list.
     pub last_nodes_req_time: Instant,
@@ -33,7 +33,7 @@ pub struct DhtFriend {
     /// nodes list.
     pub random_requests_count: u32,
     /// List of nodes to send `NodesRequest` packet.
-    pub nodes_to_bootstrap: NodesQueue,
+    pub nodes_to_bootstrap: Kbucket<PackedNode>,
     /// Struct for hole punching.
     pub hole_punch: HolePunching,
 }
@@ -46,7 +46,7 @@ impl DhtFriend {
             close_nodes: Kbucket::new(FRIEND_CLOSE_NODES_COUNT),
             last_nodes_req_time: clock_now(),
             random_requests_count: 0,
-            nodes_to_bootstrap: NodesQueue::new(FRIEND_BOOTSTRAP_NODES_COUNT),
+            nodes_to_bootstrap: Kbucket::new(FRIEND_BOOTSTRAP_NODES_COUNT),
             hole_punch: HolePunching::new(),
         }
     }
@@ -102,7 +102,6 @@ mod tests {
     use tokio_executor;
     use tokio_timer::clock::*;
 
-    use crate::toxcore::dht::dht_node::*;
     use crate::toxcore::time::ConstNow;
 
     #[test]

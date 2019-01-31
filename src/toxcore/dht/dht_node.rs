@@ -187,6 +187,12 @@ impl DhtNode {
     }
 }
 
+impl From<PackedNode> for DhtNode {
+    fn from(node: PackedNode) -> Self {
+        DhtNode::new(node)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
