@@ -62,6 +62,19 @@ pub fn random_usize() -> usize {
     random_u64() as usize
 }
 
+/// Return unbiased random number from `[0, limit)` interval.
+pub fn random_limit_usize(limit: usize) -> usize {
+    // TODO: possibly migrate to rand crate, it has more performant version
+    // of this algorithm implemented with UniformSampler trait
+    let cap = usize::max_value() - usize::max_value() % limit;
+    loop {
+        let n = random_usize();
+        if n < cap {
+            return n % limit;
+        }
+    }
+}
+
 /** Check if Tox public key `PUBLICKEYBYTES` is valid. Should be used only for
     input validation.
 
@@ -308,6 +321,13 @@ pub mod tests {
         assert_ne!(b, 0);
         // The probability to fail equals 2.9*10^-39
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn random_limit_usize_test() {
+        crypto_init().unwrap();
+        let n = random_limit_usize(7);
+        assert!(n < 7);
     }
 
     #[test]
