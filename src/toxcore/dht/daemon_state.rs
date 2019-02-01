@@ -12,6 +12,7 @@ use crate::toxcore::dht::packed_node::*;
 use crate::toxcore::state_format::old::*;
 use crate::toxcore::binary_io::*;
 use crate::toxcore::dht::kbucket::*;
+use crate::toxcore::dht::ktree::*;
 
 use std::fmt;
 

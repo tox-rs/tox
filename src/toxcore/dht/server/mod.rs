@@ -22,6 +22,7 @@ use crate::toxcore::crypto_core::*;
 use crate::toxcore::dht::packet::*;
 use crate::toxcore::dht::packed_node::*;
 use crate::toxcore::dht::kbucket::*;
+use crate::toxcore::dht::ktree::*;
 use crate::toxcore::dht::precomputed_cache::*;
 use crate::toxcore::onion::packet::*;
 use crate::toxcore::onion::onion_announce::*;
