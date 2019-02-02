@@ -86,7 +86,7 @@ impl Ktree {
 
     Returns `true` if node was added successfully, `false` otherwise.
     */
-    pub fn try_add(&mut self, node: &PackedNode) -> bool {
+    pub fn try_add(&mut self, node: PackedNode) -> bool {
         debug!(target: "Ktree", "Trying to add PackedNode.");
         trace!(target: "Ktree", "With PN: {:?}; and self: {:?}", node, self);
 
@@ -131,7 +131,7 @@ impl Ktree {
         for node in self.iter().filter(|node| !node.is_bad()) {
             if let Some(pn) = node.to_packed_node() {
                 if !only_global || IsGlobal::is_global(&pn.saddr.ip()) {
-                    kbucket.try_add(pk, &pn, /* evict */ true);
+                    kbucket.try_add(pk, pn, /* evict */ true);
                 }
             }
         }
@@ -241,7 +241,7 @@ mod tests {
             let pk = PublicKey(pk);
             let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + u16::from(i));
             let node = PackedNode::new(addr, &pk);
-            assert!(ktree.try_add(&node));
+            assert!(ktree.try_add(node));
         }
 
         // first kbucket if full so it can't accommodate one more node, even if
@@ -253,7 +253,7 @@ mod tests {
             "1.2.3.5:12345".parse().unwrap(),
             &pk
         );
-        assert!(!ktree.try_add(&node));
+        assert!(!ktree.try_add(node));
 
         // but nodes still can be added to other kbuckets
         let pk = PublicKey([1; PUBLICKEYBYTES]);
@@ -261,7 +261,7 @@ mod tests {
             "1.2.3.5:12346".parse().unwrap(),
             &pk
         );
-        assert!(ktree.try_add(&node));
+        assert!(ktree.try_add(node));
     }
 
     #[test]
@@ -274,7 +274,7 @@ mod tests {
             &pk
         );
 
-        assert!(!ktree.try_add(&node));
+        assert!(!ktree.try_add(node));
     }
 
     // Ktree::remove()
@@ -293,7 +293,7 @@ mod tests {
         assert!(ktree.remove(&node.pk).is_none());
         assert!(ktree.is_empty());
 
-        assert!(ktree.try_add(&node));
+        assert!(ktree.try_add(node));
 
         assert!(!ktree.is_empty());
 
@@ -315,7 +315,7 @@ mod tests {
         }
 
         for i in 0 .. 8 {
-            assert!(ktree.try_add(&node_by_idx(i)));
+            assert!(ktree.try_add(node_by_idx(i)));
         }
 
         let closest: Vec<_> = ktree.get_closest(&PublicKey([0; PUBLICKEYBYTES]), true).into();
@@ -343,7 +343,7 @@ mod tests {
         );
 
         assert!(!ktree.contains(&node.pk));
-        assert!(ktree.try_add(&node));
+        assert!(ktree.try_add(node));
         assert!(ktree.contains(&node.pk));
     }
 
@@ -361,7 +361,7 @@ mod tests {
         );
 
         assert!(ktree.can_add(&node));
-        assert!(ktree.try_add(&node));
+        assert!(ktree.try_add(node));
         assert!(!ktree.can_add(&node));
     }
 
@@ -378,7 +378,7 @@ mod tests {
         for i in 0 .. 8 {
             let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + u16::from(i));
             let node = PackedNode::new(addr, &PublicKey([i + 1; PUBLICKEYBYTES]));
-            assert!(ktree.try_add(&node));
+            assert!(ktree.try_add(node));
         }
 
         assert_eq!(ktree.iter().count(), 8);
@@ -402,7 +402,7 @@ mod tests {
         for i in 0 .. 8 {
             let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + u16::from(i));
             let node = PackedNode::new(addr, &PublicKey([i + 1; PUBLICKEYBYTES]));
-            assert!(ktree.try_add(&node));
+            assert!(ktree.try_add(node));
         }
 
         assert_eq!(ktree.iter_mut().count(), 8);
@@ -425,13 +425,13 @@ mod tests {
             pk: gen_keypair().0,
             saddr: "127.0.0.1:33445".parse().unwrap(),
         };
-        assert!(ktree.try_add(&pn));
+        assert!(ktree.try_add(pn));
 
         let pn = PackedNode {
             pk: gen_keypair().0,
             saddr: "127.0.0.1:12345".parse().unwrap(),
         };
-        assert!(ktree.try_add(&pn));
+        assert!(ktree.try_add(pn));
 
         assert!(!ktree.is_all_discarded());
 

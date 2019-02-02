@@ -65,14 +65,27 @@ impl Distance for PublicKey {
     }
 }
 
-/// Node that can be stored in a `Kbucket`.
-pub trait KbucketNode : Sized {
-    /// Node's `PublicKey`.
+/// Anything that has `PublicKey`.
+pub trait HasPK {
+    /// `PublicKey`.
     fn pk(&self) -> PublicKey;
+}
+
+impl HasPK for PackedNode {
+    fn pk(&self) -> PublicKey {
+        self.pk
+    }
+}
+
+/// Node that can be stored in a `Kbucket`.
+pub trait KbucketNode : Sized + HasPK {
+    /// The type of nodes that can be added to a `Kbucket`.
+    type NewNode: HasPK;
+
     /// Check if the node can be updated with a new one.
-    fn is_outdated(&self, other: &PackedNode) -> bool;
+    fn is_outdated(&self, other: &Self::NewNode) -> bool;
     /// Update the existing node with a new one.
-    fn update(&mut self, other: &PackedNode);
+    fn update(&mut self, other: &Self::NewNode);
     /// Check if the node can be evicted.
     fn is_evictable(&self) -> bool;
     /// Find the index of a node that should be evicted in case if `Kbucket` is
@@ -82,9 +95,8 @@ pub trait KbucketNode : Sized {
 }
 
 impl KbucketNode for PackedNode {
-    fn pk(&self) -> PublicKey {
-        self.pk
-    }
+    type NewNode = PackedNode;
+
     fn is_outdated(&self, other: &PackedNode) -> bool {
         self.saddr != other.saddr
     }
@@ -118,15 +130,15 @@ PK; and additionally used to store nodes closest to friends.
 [Kademlia whitepaper](https://pdos.csail.mit.edu/~petar/papers/maymounkov-kademlia-lncs.pdf).
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Kbucket<T> {
+pub struct Kbucket<Node> {
     /// Amount of nodes it can hold.
     pub capacity: u8,
     /// Nodes that kbucket has, sorted by distance to PK.
-    pub nodes: Vec<T>,
+    pub nodes: Vec<Node>,
 }
 
-impl<T> Into<Vec<T>> for Kbucket<T> {
-    fn into(self) -> Vec<T> {
+impl<Node> Into<Vec<Node>> for Kbucket<Node> {
+    fn into(self) -> Vec<Node> {
         self.nodes
     }
 }
@@ -134,7 +146,7 @@ impl<T> Into<Vec<T>> for Kbucket<T> {
 /// Default number of nodes that kbucket can hold.
 pub const KBUCKET_DEFAULT_SIZE: u8 = 8;
 
-impl<T: KbucketNode + From<PackedNode>> Kbucket<T> {
+impl<NewNode: HasPK, Node: KbucketNode<NewNode = NewNode> + From<NewNode>> Kbucket<Node> {
     /** Create a new `Kbucket` to store nodes close to the `PublicKey`.
 
     Can hold up to `capacity` nodes.
@@ -152,13 +164,13 @@ impl<T: KbucketNode + From<PackedNode>> Kbucket<T> {
     }
 
     /// Get reference to a `KbucketNode` by it's `PublicKey`.
-    pub fn get_node(&self, base_pk: &PublicKey, pk: &PublicKey) -> Option<&T> {
+    pub fn get_node(&self, base_pk: &PublicKey, pk: &PublicKey) -> Option<&Node> {
         self.find(base_pk, pk)
             .map(move |node_index| &self.nodes[node_index])
     }
 
     /// Get mutable reference to a `KbucketNode` by it's `PublicKey`.
-    pub fn get_node_mut(&mut self, base_pk: &PublicKey, pk: &PublicKey) -> Option<&mut T> {
+    pub fn get_node_mut(&mut self, base_pk: &PublicKey, pk: &PublicKey) -> Option<&mut Node> {
         self.find(base_pk, pk)
             .map(move |node_index| &mut self.nodes[node_index])
     }
@@ -187,14 +199,14 @@ impl<T: KbucketNode + From<PackedNode>> Kbucket<T> {
     [`KbucketNode`]: ./struct.KbucketNode.html
     [`PackedNode`]: ../packed_node/struct.PackedNode.html
     */
-    pub fn try_add(&mut self, base_pk: &PublicKey, new_node: &PackedNode, evict: bool) -> bool {
-        trace!(target: "Kbucket", "Trying to add PackedNode: {:?}.", new_node);
+    pub fn try_add(&mut self, base_pk: &PublicKey, new_node: NewNode, evict: bool) -> bool {
+        trace!(target: "Kbucket", "Trying to add PackedNode: {:?}.", new_node.pk());
 
-        match self.nodes.binary_search_by(|n| base_pk.distance(&n.pk(), &new_node.pk)) {
+        match self.nodes.binary_search_by(|n| base_pk.distance(&n.pk(), &new_node.pk())) {
             Ok(index) => {
                 debug!(target: "Kbucket",
                     "Updated: the node was already in the kbucket.");
-                self.nodes[index].update(new_node);
+                self.nodes[index].update(&new_node);
                 true
             },
             Err(index) if !evict || index == self.nodes.len() => {
@@ -202,13 +214,13 @@ impl<T: KbucketNode + From<PackedNode>> Kbucket<T> {
                 // we are not going to evict the farthest node or the current
                 // node is the farthest one
                 if self.is_full() {
-                    match T::eviction_index(&self.nodes) {
+                    match Node::eviction_index(&self.nodes) {
                         Some(index) => {
                             debug!(target: "Kbucket",
                                 "No free space left in the kbucket, the last bad node removed.");
                             // replace the farthest bad node
                             self.nodes.remove(index);
-                            self.nodes.push((*new_node).into());
+                            self.nodes.push(new_node.into());
                             true
                         },
                         None => {
@@ -222,7 +234,7 @@ impl<T: KbucketNode + From<PackedNode>> Kbucket<T> {
                     // there's still free space in the kbucket for a node
                     debug!(target: "Kbucket",
                         "Node inserted inside the kbucket.");
-                    self.nodes.insert(index, (*new_node).into());
+                    self.nodes.insert(index, new_node.into());
                     true
                 }
             },
@@ -235,7 +247,7 @@ impl<T: KbucketNode + From<PackedNode>> Kbucket<T> {
                     self.nodes.pop();
                 }
                 debug!(target: "Kbucket", "Node inserted inside the kbucket.");
-                self.nodes.insert(index, (*new_node).into());
+                self.nodes.insert(index, new_node.into());
                 true
             },
         }
@@ -250,7 +262,7 @@ impl<T: KbucketNode + From<PackedNode>> Kbucket<T> {
 
     If there's no `KbucketNode` with given PK, nothing is being done.
     */
-    pub fn remove(&mut self, base_pk: &PublicKey, node_pk: &PublicKey) -> Option<T> {
+    pub fn remove(&mut self, base_pk: &PublicKey, node_pk: &PublicKey) -> Option<Node> {
         trace!(target: "Kbucket", "Removing KbucketNode with PK: {:?}", node_pk);
         match self.nodes.binary_search_by(|n| base_pk.distance(&n.pk(), node_pk)) {
             Ok(index) => Some(self.nodes.remove(index)),
@@ -309,8 +321,8 @@ impl<T: KbucketNode + From<PackedNode>> Kbucket<T> {
     [`Kbucket`]: ./struct.Kbucket.html
     [`PackedNode`]: ./struct.PackedNode.html
     */
-    pub fn can_add(&self, base_pk: &PublicKey, new_node: &PackedNode, evict: bool) -> bool {
-        match self.nodes.binary_search_by(|n| base_pk.distance(&n.pk(), &new_node.pk)) {
+    pub fn can_add(&self, base_pk: &PublicKey, new_node: &NewNode, evict: bool) -> bool {
+        match self.nodes.binary_search_by(|n| base_pk.distance(&n.pk(), &new_node.pk())) {
             Ok(index) =>
                 // if node is bad then we'd want to update it's address
                 self.nodes[index].is_evictable() || self.nodes[index].is_outdated(new_node),
@@ -329,14 +341,14 @@ impl<T: KbucketNode + From<PackedNode>> Kbucket<T> {
     /// Create iterator over [`KbucketNode`](./struct.KbucketNode.html)s in
     /// `Ktree`. Nodes that this iterator produces are sorted by distance to a
     /// base `PublicKey` (in ascending order).
-    pub fn iter(&self) -> impl Iterator<Item = &T> {
+    pub fn iter(&self) -> impl Iterator<Item = &Node> {
         self.nodes.iter()
     }
 
     /// Create mutable iterator over [`KbucketNode`](./struct.KbucketNode.html)s
     /// in `Ktree`. Nodes that this iterator produces are sorted by distance to
     /// a base `PublicKey` (in ascending order).
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> {
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Node> {
         self.nodes.iter_mut()
     }
 }
@@ -402,7 +414,7 @@ mod tests {
         for i in 0 .. 8 {
             let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + u16::from(i));
             let node = PackedNode::new(addr, &PublicKey([i + 2; PUBLICKEYBYTES]));
-            assert!(kbucket.try_add(&pk, &node, /* evict */ false));
+            assert!(kbucket.try_add(&pk, node, /* evict */ false));
         }
 
         let closer_node = PackedNode::new(
@@ -419,15 +431,15 @@ mod tests {
         );
 
         // can't add a new farther node
-        assert!(!kbucket.try_add(&pk, &farther_node, /* evict */ false));
+        assert!(!kbucket.try_add(&pk, farther_node, /* evict */ false));
         // can't add a new farther node with eviction
-        assert!(!kbucket.try_add(&pk, &farther_node, /* evict */ true));
+        assert!(!kbucket.try_add(&pk, farther_node, /* evict */ true));
         // can't add a new closer node
-        assert!(!kbucket.try_add(&pk, &closer_node, /* evict */ false));
+        assert!(!kbucket.try_add(&pk, closer_node, /* evict */ false));
         // can add a new closer node with eviction
-        assert!(kbucket.try_add(&pk, &closer_node, /* evict */ true));
+        assert!(kbucket.try_add(&pk, closer_node, /* evict */ true));
         // can update a node
-        assert!(kbucket.try_add(&pk, &existing_node, /* evict */ false));
+        assert!(kbucket.try_add(&pk, existing_node, /* evict */ false));
     }
 
     #[test]
@@ -444,8 +456,8 @@ mod tests {
             &PublicKey([2; PUBLICKEYBYTES])
         );
 
-        assert!(kbucket.try_add(&pk, &node_2, /* evict */ false));
-        assert!(!kbucket.try_add(&pk, &node_1, /* evict */ false));
+        assert!(kbucket.try_add(&pk, node_2, /* evict */ false));
+        assert!(!kbucket.try_add(&pk, node_1, /* evict */ false));
 
         let mut enter = tokio_executor::enter().unwrap();
         let clock = Clock::new_with_now(ConstNow(
@@ -454,7 +466,7 @@ mod tests {
 
         // replacing bad node
         with_default(&clock, &mut enter, |_| {
-            assert!(kbucket.try_add(&pk, &node_1, /* evict */ false));
+            assert!(kbucket.try_add(&pk, node_1, /* evict */ false));
         });
     }
 
@@ -472,8 +484,8 @@ mod tests {
             &PublicKey([2; PUBLICKEYBYTES])
         );
 
-        assert!(kbucket.try_add(&pk, &node_1, /* evict */ true));
-        assert!(!kbucket.try_add(&pk, &node_2, /* evict */ true));
+        assert!(kbucket.try_add(&pk, node_1, /* evict */ true));
+        assert!(!kbucket.try_add(&pk, node_2, /* evict */ true));
 
         let mut enter = tokio_executor::enter().unwrap();
         let clock = Clock::new_with_now(ConstNow(
@@ -482,7 +494,7 @@ mod tests {
 
         // replacing bad node
         with_default(&clock, &mut enter, |_| {
-            assert!(kbucket.try_add(&pk, &node_2, /* evict */ true));
+            assert!(kbucket.try_add(&pk, node_2, /* evict */ true));
         });
     }
 
@@ -502,7 +514,7 @@ mod tests {
         assert!(kbucket.remove(&pk, &node.pk).is_none());
         assert!(kbucket.is_empty());
 
-        assert!(kbucket.try_add(&pk, &node, /* evict */ true));
+        assert!(kbucket.try_add(&pk, node, /* evict */ true));
 
         assert!(!kbucket.is_empty());
 
@@ -525,7 +537,7 @@ mod tests {
             &PublicKey([1; PUBLICKEYBYTES])
         );
 
-        assert!(kbucket.try_add(&pk, &node, /* evict */ true));
+        assert!(kbucket.try_add(&pk, node, /* evict */ true));
 
         assert!(!kbucket.is_empty());
     }
@@ -545,7 +557,7 @@ mod tests {
             saddr: "127.0.0.1:33445".parse().unwrap(),
         };
 
-        assert!(kbucket.try_add(&pk, &pn, true));
+        assert!(kbucket.try_add(&pk, pn, true));
         assert!(kbucket.get_node(&pk, &node_pk).is_some());
     }
 
@@ -564,7 +576,7 @@ mod tests {
             saddr: "127.0.0.1:33445".parse().unwrap(),
         };
 
-        assert!(kbucket.try_add(&pk, &pn, true));
+        assert!(kbucket.try_add(&pk, pn, true));
         assert!(kbucket.get_node_mut(&pk, &node_pk).is_some());
     }
 
@@ -605,9 +617,9 @@ mod tests {
         let (base_pk, n1, n2, n3) = position_test_data();
         // insert order: n1 n2 n3 maps to position
         // n1 => 0, n2 => 1, n3 => 2
-        kbucket.try_add(&base_pk, &n1, true);
-        kbucket.try_add(&base_pk, &n2, true);
-        kbucket.try_add(&base_pk, &n3, true);
+        kbucket.try_add(&base_pk, n1, true);
+        kbucket.try_add(&base_pk, n2, true);
+        kbucket.try_add(&base_pk, n3, true);
         assert_eq!(kbucket.find(&base_pk, &n1.pk), Some(0));
         assert_eq!(kbucket.find(&base_pk, &n2.pk), Some(1));
         assert_eq!(kbucket.find(&base_pk, &n3.pk), Some(2));
@@ -619,9 +631,9 @@ mod tests {
         let (base_pk, n1, n2, n3) = position_test_data();
         // insert order: n3 n2 n1 maps to position
         // n1 => 0, n2 => 1, n3 => 2
-        kbucket.try_add(&base_pk, &n3, true);
-        kbucket.try_add(&base_pk, &n2, true);
-        kbucket.try_add(&base_pk, &n1, true);
+        kbucket.try_add(&base_pk, n3, true);
+        kbucket.try_add(&base_pk, n2, true);
+        kbucket.try_add(&base_pk, n1, true);
         assert_eq!(kbucket.find(&base_pk, &n1.pk), Some(0));
         assert_eq!(kbucket.find(&base_pk, &n2.pk), Some(1));
         assert_eq!(kbucket.find(&base_pk, &n3.pk), Some(2));
@@ -635,9 +647,9 @@ mod tests {
         let mut kbucket = Kbucket::<DhtNode>::new(KBUCKET_DEFAULT_SIZE);
         let (base_pk, n1, n2, n3) = position_test_data();
         // prepare kbucket
-        kbucket.try_add(&base_pk, &n1, true); // => 0
-        kbucket.try_add(&base_pk, &n2, true); // => 1
-        kbucket.try_add(&base_pk, &n3, true); // => 2
+        kbucket.try_add(&base_pk, n1, true); // => 0
+        kbucket.try_add(&base_pk, n2, true); // => 1
+        kbucket.try_add(&base_pk, n3, true); // => 2
         // test removing from the beginning (n1 => 0)
         kbucket.remove(&base_pk, &n1.pk);
         assert_eq!(kbucket.find(&base_pk, &n1.pk), None);
@@ -650,9 +662,9 @@ mod tests {
         let mut kbucket = Kbucket::<DhtNode>::new(KBUCKET_DEFAULT_SIZE);
         let (base_pk, n1, n2, n3) = position_test_data();
         // prepare kbucket
-        kbucket.try_add(&base_pk, &n1, true); // => 0
-        kbucket.try_add(&base_pk, &n2, true); // => 1
-        kbucket.try_add(&base_pk, &n3, true); // => 2
+        kbucket.try_add(&base_pk, n1, true); // => 0
+        kbucket.try_add(&base_pk, n2, true); // => 1
+        kbucket.try_add(&base_pk, n3, true); // => 2
         // test removing from the middle (n2 => 1)
         kbucket.remove(&base_pk, &n2.pk);
         assert_eq!(kbucket.find(&base_pk, &n1.pk), Some(0));
@@ -665,9 +677,9 @@ mod tests {
         let mut kbucket = Kbucket::<DhtNode>::new(KBUCKET_DEFAULT_SIZE);
         let (base_pk, n1, n2, n3) = position_test_data();
         // prepare kbucket
-        kbucket.try_add(&base_pk, &n1, true); // => 0
-        kbucket.try_add(&base_pk, &n2, true); // => 1
-        kbucket.try_add(&base_pk, &n3, true); // => 2
+        kbucket.try_add(&base_pk, n1, true); // => 0
+        kbucket.try_add(&base_pk, n2, true); // => 1
+        kbucket.try_add(&base_pk, n3, true); // => 2
         // test removing from the end (n3 => 2)
         kbucket.remove(&base_pk, &n3.pk);
         assert_eq!(kbucket.find(&base_pk, &n1.pk), Some(0));

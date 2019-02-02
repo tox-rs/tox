@@ -83,7 +83,7 @@ impl DhtFriend {
     }
 
     /// Try to add a node to the friend's close nodes list.
-    pub fn try_add_to_close(&mut self, node: &PackedNode) -> bool {
+    pub fn try_add_to_close(&mut self, node: PackedNode) -> bool {
         self.close_nodes.try_add(&self.pk, node, /* evict */ true)
     }
 
@@ -110,8 +110,8 @@ mod tests {
         let pk = gen_keypair().0;
         let mut friend = DhtFriend::new(pk);
 
-        assert!(friend.try_add_to_close(&PackedNode::new("192.168.1.1:12345".parse().unwrap(), &gen_keypair().0)));
-        assert!(friend.try_add_to_close(&PackedNode::new("192.168.1.2:12345".parse().unwrap(), &gen_keypair().0)));
+        assert!(friend.try_add_to_close(PackedNode::new("192.168.1.1:12345".parse().unwrap(), &gen_keypair().0)));
+        assert!(friend.try_add_to_close(PackedNode::new("192.168.1.2:12345".parse().unwrap(), &gen_keypair().0)));
 
         assert!(!friend.is_addr_known())
     }
@@ -122,10 +122,10 @@ mod tests {
         let pk = gen_keypair().0;
         let mut friend = DhtFriend::new(pk);
 
-        assert!(friend.try_add_to_close(&PackedNode::new("192.168.1.1:12345".parse().unwrap(), &gen_keypair().0)));
-        assert!(friend.try_add_to_close(&PackedNode::new("192.168.1.2:12345".parse().unwrap(), &gen_keypair().0)));
+        assert!(friend.try_add_to_close(PackedNode::new("192.168.1.1:12345".parse().unwrap(), &gen_keypair().0)));
+        assert!(friend.try_add_to_close(PackedNode::new("192.168.1.2:12345".parse().unwrap(), &gen_keypair().0)));
 
-        assert!(friend.try_add_to_close(&PackedNode::new("192.168.1.3:12345".parse().unwrap(), &pk)));
+        assert!(friend.try_add_to_close(PackedNode::new("192.168.1.3:12345".parse().unwrap(), &pk)));
 
         assert!(friend.is_addr_known())
     }
@@ -148,7 +148,7 @@ mod tests {
         ];
 
         for (&node, &addr) in nodes.iter().zip(addrs.iter()) {
-            friend.try_add_to_close(&node);
+            friend.try_add_to_close(node);
             let dht_node = friend.close_nodes.get_node_mut(&pk, &node.pk).unwrap();
             dht_node.update_returned_addr(addr);
         }
@@ -181,7 +181,7 @@ mod tests {
         ];
 
         for (&node, &addr) in nodes.iter().zip(addrs.iter()) {
-            friend.try_add_to_close(&node);
+            friend.try_add_to_close(node);
             let dht_node = friend.close_nodes.get_node_mut(&pk, &node.pk).unwrap();
             dht_node.update_returned_addr(addr);
         }
@@ -205,7 +205,7 @@ mod tests {
         for i in 0 .. 8 {
             let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + u16::from(i));
             let node = PackedNode::new(addr, &PublicKey([i + 2; PUBLICKEYBYTES]));
-            assert!(friend.try_add_to_close(&node));
+            assert!(friend.try_add_to_close(node));
         }
 
         let closer_node = PackedNode::new(
@@ -215,6 +215,6 @@ mod tests {
 
         // should add a new closer node with eviction
         assert!(friend.can_add_to_close(&closer_node));
-        assert!(friend.try_add_to_close(&closer_node));
+        assert!(friend.try_add_to_close(closer_node));
     }
 }
