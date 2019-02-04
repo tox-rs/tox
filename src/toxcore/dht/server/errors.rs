@@ -6,6 +6,7 @@ use std::net::SocketAddr;
 use futures::sync::mpsc;
 use std::io::Error as IoError;
 use tokio::timer::Error as TimerError;
+use tokio::timer::timeout::Error as TimeoutError;
 
 use failure::{Backtrace, Context, Fail};
 use crate::toxcore::dht::packet::*;
@@ -82,8 +83,8 @@ impl From<HandlePacketErrorKind> for HandlePacketError {
     }
 }
 
-impl From<mpsc::SendError<(Packet, SocketAddr)>> for HandlePacketError {
-    fn from(error: mpsc::SendError<(Packet, SocketAddr)>) -> HandlePacketError {
+impl From<TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> for HandlePacketError {
+    fn from(error: TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>) -> HandlePacketError {
         HandlePacketError {
             ctx: error.context(HandlePacketErrorKind::SendTo)
         }
@@ -254,8 +255,8 @@ impl From<Context<HandleBootstrapInfoErrorKind>> for HandleBootstrapInfoError {
     }
 }
 
-impl From<mpsc::SendError<(Packet, SocketAddr)>> for HandleBootstrapInfoError {
-    fn from(error: mpsc::SendError<(Packet, SocketAddr)>) -> HandleBootstrapInfoError {
+impl From<TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> for HandleBootstrapInfoError {
+    fn from(error: TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>) -> HandleBootstrapInfoError {
         HandleBootstrapInfoError {
             ctx: error.context(HandleBootstrapInfoErrorKind::SendTo)
         }
@@ -322,8 +323,8 @@ impl From<TimerError> for BootstrapRequestsError {
     }
 }
 
-impl From<mpsc::SendError<(Packet, SocketAddr)>> for BootstrapRequestsError {
-    fn from(error: mpsc::SendError<(Packet, SocketAddr)>) -> BootstrapRequestsError {
+impl From<TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> for BootstrapRequestsError {
+    fn from(error: TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>) -> BootstrapRequestsError {
         BootstrapRequestsError {
             ctx: error.context(BootstrapRequestsErrorKind::SendTo)
         }
@@ -447,8 +448,8 @@ impl From<TimerError> for DhtLoopError {
     }
 }
 
-impl From<mpsc::SendError<(Packet, SocketAddr)>> for DhtLoopError {
-    fn from(error: mpsc::SendError<(Packet, SocketAddr)>) -> DhtLoopError {
+impl From<TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> for DhtLoopError {
+    fn from(error: TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>) -> DhtLoopError {
         DhtLoopError {
             ctx: error.context(DhtLoopErrorKind::SendTo)
         }
@@ -583,8 +584,8 @@ impl From<TimerError> for PingsSendingError {
     }
 }
 
-impl From<mpsc::SendError<(Packet, SocketAddr)>> for PingsSendingError {
-    fn from(error: mpsc::SendError<(Packet, SocketAddr)>) -> PingsSendingError {
+impl From<TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> for PingsSendingError {
+    fn from(error: TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>) -> PingsSendingError {
         PingsSendingError {
             ctx: error.context(PingsSendingErrorKind::SendTo)
         }
@@ -687,7 +688,9 @@ mod tests {
     use futures::sink::Sink;
     use futures::future::Future;
     use std::io::ErrorKind;
+    use std::time::Duration;
     use crate::toxcore::crypto_core::*;
+    use crate::toxcore::io_tokio::*;
 
     #[test]
     fn handle_packet_error() {
@@ -708,7 +711,7 @@ mod tests {
         let sock: SocketAddr = "127.0.0.1:33445".parse().unwrap();
 
         drop(rx);
-        let res = tx.send((packet, sock)).wait();
+        let res = send_to_bounded(&tx, (packet, sock), Duration::from_secs(1)).wait();
         assert!(res.is_err());
         let new_error = HandlePacketError::from(res.err().unwrap());
         assert_eq!(*new_error.kind(), HandlePacketErrorKind::SendTo);
@@ -767,7 +770,7 @@ mod tests {
         let sock: SocketAddr = "127.0.0.1:33445".parse().unwrap();
 
         drop(rx);
-        let res = tx.send((packet, sock)).wait();
+        let res = send_to_bounded(&tx, (packet, sock), Duration::from_secs(1)).wait();
         assert!(res.is_err());
         let new_error = HandleBootstrapInfoError::from(res.err().unwrap());
         assert_eq!(*new_error.kind(), HandleBootstrapInfoErrorKind::SendTo);
@@ -784,7 +787,7 @@ mod tests {
         let sock: SocketAddr = "127.0.0.1:33445".parse().unwrap();
 
         drop(rx);
-        let res = tx.send((packet, sock)).wait();
+        let res = send_to_bounded(&tx, (packet, sock), Duration::from_secs(1)).wait();
         assert!(res.is_err());
         let new_error = BootstrapRequestsError::from(res.err().unwrap());
         assert_eq!(*new_error.kind(), BootstrapRequestsErrorKind::SendTo);
@@ -801,7 +804,7 @@ mod tests {
         let sock: SocketAddr = "127.0.0.1:33445".parse().unwrap();
 
         drop(rx);
-        let res = tx.send((packet, sock)).wait();
+        let res = send_to_bounded(&tx, (packet, sock), Duration::from_secs(1)).wait();
         assert!(res.is_err());
         let new_error = DhtLoopError::from(res.err().unwrap());
         assert_eq!(*new_error.kind(), DhtLoopErrorKind::SendTo);
@@ -838,7 +841,7 @@ mod tests {
         let sock: SocketAddr = "127.0.0.1:33445".parse().unwrap();
 
         drop(rx);
-        let res = tx.send((packet, sock)).wait();
+        let res = send_to_bounded(&tx, (packet, sock), Duration::from_secs(1)).wait();
         assert!(res.is_err());
         let new_error = PingsSendingError::from(res.err().unwrap());
         assert_eq!(*new_error.kind(), PingsSendingErrorKind::SendTo);
