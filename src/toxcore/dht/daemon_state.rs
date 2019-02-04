@@ -12,6 +12,7 @@ use crate::toxcore::dht::packed_node::*;
 use crate::toxcore::state_format::old::*;
 use crate::toxcore::binary_io::*;
 use crate::toxcore::dht::kbucket::*;
+use crate::toxcore::dht::ktree::*;
 
 use std::fmt;
 
@@ -176,7 +177,7 @@ mod tests {
         let addr_org = "1.2.3.4:1234".parse().unwrap();
         let pk_org = gen_keypair().0;
         let pn = PackedNode { pk: pk_org, saddr: addr_org };
-        alice.close_nodes.write().try_add(&pn);
+        alice.close_nodes.write().try_add(pn);
 
         let serialized_vec = DaemonState::serialize_old(&alice);
         DaemonState::deserialize_old(&alice, &serialized_vec).wait().unwrap();

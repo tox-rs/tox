@@ -10,6 +10,7 @@ use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::time::{Duration, Instant};
 
 use crate::toxcore::crypto_core::*;
+use crate::toxcore::dht::kbucket::*;
 use crate::toxcore::dht::packed_node::*;
 use crate::toxcore::time::*;
 
@@ -184,6 +185,47 @@ impl DhtNode {
                 self.assoc6.ret_last_resp_time = Some(clock_now());
             },
         }
+    }
+}
+
+impl From<PackedNode> for DhtNode {
+    fn from(node: PackedNode) -> Self {
+        DhtNode::new(node)
+    }
+}
+
+impl HasPK for DhtNode {
+    fn pk(&self) -> PublicKey {
+        self.pk
+    }
+}
+
+impl KbucketNode for DhtNode {
+    type NewNode = PackedNode;
+
+    fn is_outdated(&self, other: &PackedNode) -> bool {
+        self.assoc4.saddr.map(SocketAddr::V4) != Some(other.saddr) &&
+            self.assoc6.saddr.map(SocketAddr::V6) != Some(other.saddr)
+    }
+    fn update(&mut self, other: &PackedNode) {
+        match other.saddr {
+            SocketAddr::V4(sock_v4) => {
+                self.assoc4.saddr = Some(sock_v4);
+                self.assoc4.last_resp_time = Some(clock_now());
+            },
+            SocketAddr::V6(sock_v6) => {
+                self.assoc6.saddr = Some(sock_v6);
+                self.assoc6.last_resp_time = Some(clock_now());
+            }
+        }
+    }
+    fn is_evictable(&self) -> bool {
+        self.is_bad()
+    }
+    fn eviction_index(nodes: &[Self]) -> Option<usize> {
+        nodes.iter().rposition(|n| n.is_discarded()).or_else(||
+            nodes.iter().rposition(|n| n.is_bad())
+        )
     }
 }
 
