@@ -508,10 +508,10 @@ impl Server {
             return Box::new(future::ok(()))
         }
 
-        let mut random_node_idx = random_usize() % good_nodes.len();
+        let mut random_node_idx = random_limit_usize(good_nodes.len());
         // Increase probability of sending packet to a close node (has lower index)
         if random_node_idx != 0 {
-            random_node_idx -= random_usize() % (random_node_idx + 1);
+            random_node_idx -= random_limit_usize(random_node_idx + 1);
         }
 
         let random_node = &good_nodes[random_node_idx];
