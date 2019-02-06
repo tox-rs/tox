@@ -267,7 +267,7 @@ impl Server {
     /// method iterates over all nodes from close nodes list, close nodes of
     /// friends and bootstrap nodes and sends `NodesRequest` packets if
     /// necessary.
-    fn dht_main_loop(&self) -> impl Future<Item = (), Error = DhtLoopError> + Send {
+    fn dht_main_loop(&self) -> impl Future<Item = (), Error = RunError> + Send {
         // Check if we should send `NodesRequest` packet to a random node. This
         // request is sent every second 5 times and then every 20 seconds.
         fn send_random_request(last_nodes_req_time: &mut Instant, random_requests_count: &mut u32) -> bool {
@@ -289,12 +289,12 @@ impl Server {
 
         // Send NodesRequest packets to nodes from the Server
         let ping_nodes_to_bootstrap = self.ping_nodes_to_bootstrap(&mut request_queue, &mut nodes_to_bootstrap, self.pk)
-            .map_err(|e| DhtLoopError::from(e));
+            .map_err(|e| RunError::from(e));
         let ping_close_nodes = self.ping_close_nodes(&mut request_queue, close_nodes.iter_mut(), self.pk)
-            .map_err(|e| DhtLoopError::from(e));
+            .map_err(|e| RunError::from(e));
         let send_nodes_req_random = if send_random_request(&mut self.last_nodes_req_time.write(), &mut self.random_requests_count.write()) {
             Either::A(self.send_nodes_req_random(&mut request_queue, close_nodes.iter(), self.pk)
-                .map_err(|e| DhtLoopError::from(e)))
+                .map_err(|e| RunError::from(e)))
         } else {
             Either::B(future::ok(()))
         };
@@ -302,12 +302,12 @@ impl Server {
         // Send NodesRequest packets to nodes from every DhtFriend
         let send_nodes_req_to_friends = friends.iter_mut().map(|friend| {
             let ping_nodes_to_bootstrap = self.ping_nodes_to_bootstrap(&mut request_queue, &mut friend.nodes_to_bootstrap, friend.pk)
-                .map_err(|e| DhtLoopError::from(e));
+                .map_err(|e| RunError::from(e));
             let ping_close_nodes = self.ping_close_nodes(&mut request_queue, friend.close_nodes.nodes.iter_mut(), friend.pk)
-                .map_err(|e| DhtLoopError::from(e));
+                .map_err(|e| RunError::from(e));
             let send_nodes_req_random = if send_random_request(&mut friend.last_nodes_req_time, &mut friend.random_requests_count) {
                 Either::A(self.send_nodes_req_random(&mut request_queue, friend.close_nodes.nodes.iter(), friend.pk)
-                    .map_err(|e| DhtLoopError::from(e)))
+                    .map_err(|e| RunError::from(e)))
             } else {
                 Either::B(future::ok(()))
             };
@@ -315,7 +315,7 @@ impl Server {
         }).collect::<Vec<_>>();
 
         let send_nat_ping_req = self.send_nat_ping_req(&mut request_queue, &mut friends)
-            .map_err(|e| DhtLoopError::from(e));
+            .map_err(|e| RunError::from(e));
 
         ping_nodes_to_bootstrap.join5(
             ping_close_nodes,
@@ -328,14 +328,10 @@ impl Server {
     /// Run DHT periodical tasks. Result future will never be completed
     /// successfully.
     pub fn run(self) -> impl Future<Item = (), Error = RunError> + Send {
-        self.clone().run_pings_sending()
-            .map_err(|e| RunError::from(e)).join4(
-            self.clone().run_onion_key_refreshing()
-                .map_err(|e| RunError::from(e)),
-            self.clone().run_main_loop()
-                .map_err(|e| RunError::from(e)),
+        self.clone().run_pings_sending().join4(
+            self.clone().run_onion_key_refreshing(),
+            self.clone().run_main_loop(),
             self.run_bootstrap_requests_sending()
-                .map_err(|e| RunError::from(e))
         ).map(|_| ())
     }
 
@@ -348,16 +344,16 @@ impl Server {
     /// nodes periodically if all nodes in Ktree are discarded (including the
     /// case when it's empty). It has to be an endless loop because we might
     /// loose the network connection and thereby loose all nodes in Ktree.
-    fn run_bootstrap_requests_sending(self) -> impl Future<Item = (), Error = BootstrapRequestsError> + Send {
+    fn run_bootstrap_requests_sending(self) -> impl Future<Item = (), Error = RunError> + Send {
         let interval = Duration::from_secs(BOOTSTRAP_INTERVAL);
         let wakeups = Interval::new(Instant::now(), interval);
 
         wakeups
-            .map_err(|e| BootstrapRequestsError::from(e))
+            .map_err(|e| RunError::from(e))
             .for_each(move |_instant| {
                 trace!("Bootstrap wake up");
                 self.send_bootstrap_requests()
-                    .map_err(|e| BootstrapRequestsError::from(e))
+                    .map_err(|e| RunError::from(e))
             })
     }
 
@@ -384,11 +380,11 @@ impl Server {
 
     /// Run DHT main loop periodically. Result future will never be completed
     /// successfully.
-    fn run_main_loop(self) -> impl Future<Item = (), Error = MainLoopError> + Send {
+    fn run_main_loop(self) -> impl Future<Item = (), Error = RunError> + Send {
         let interval = Duration::from_secs(MAIN_LOOP_INTERVAL);
         let wakeups = Interval::new(Instant::now(), interval);
         wakeups
-            .map_err(|e| MainLoopError::from(e))
+            .map_err(|e| RunError::from(e))
             .for_each(move |_instant| {
                 trace!("DHT server wake up");
                 self.dht_main_loop().then(|res| {
@@ -402,11 +398,11 @@ impl Server {
 
     /// Refresh onion symmetric key periodically. Result future will never be
     /// completed successfully.
-    fn run_onion_key_refreshing(self) -> impl Future<Item = (), Error = OnionKeyRefreshingError> + Send {
+    fn run_onion_key_refreshing(self) -> impl Future<Item = (), Error = RunError> + Send {
         let interval = Duration::from_secs(ONION_REFRESH_KEY_INTERVAL);
         let wakeups = Interval::new(Instant::now() + interval, interval);
         wakeups
-            .map_err(|e| OnionKeyRefreshingError::from(e))
+            .map_err(|e| RunError::from(e))
             .for_each(move |_instant| {
                 trace!("Refreshing onion key");
                 self.refresh_onion_key();
@@ -416,15 +412,15 @@ impl Server {
 
     /// Run ping sending periodically. Result future will never be completed
     /// successfully.
-    fn run_pings_sending(self) -> impl Future<Item = (), Error = PingsSendingError> + Send {
+    fn run_pings_sending(self) -> impl Future<Item = (), Error = RunError> + Send {
         let interval = Duration::from_secs(TIME_TO_PING);
         let wakeups = Interval::new(Instant::now() + interval, interval);
         wakeups
-            .map_err(|e| PingsSendingError::from(e))
+            .map_err(|e| RunError::from(e))
             .for_each(move |_instant| {
                 trace!("Pings sending wake up");
                 self.send_pings()
-                    .map_err(|e| PingsSendingError::from(e))
+                    .map_err(|e| RunError::from(e))
             })
     }
 

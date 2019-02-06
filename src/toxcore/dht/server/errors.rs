@@ -263,336 +263,7 @@ impl From<TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> for HandleBootstr
     }
 }
 
-/// Error that can happen when calling `run_bootstrap_requests_sending`.
-#[derive(Debug)]
-pub struct BootstrapRequestsError {
-    ctx: Context<BootstrapRequestsErrorKind>,
-}
-
-impl BootstrapRequestsError {
-    /// Return the kind of this error.
-    pub fn kind(&self) -> &BootstrapRequestsErrorKind {
-        self.ctx.get_context()
-    }
-}
-
-impl Fail for BootstrapRequestsError {
-    fn cause(&self) -> Option<&Fail> {
-        self.ctx.cause()
-    }
-
-    fn backtrace(&self) -> Option<&Backtrace> {
-        self.ctx.backtrace()
-    }
-}
-
-impl fmt::Display for BootstrapRequestsError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.ctx.fmt(f)
-    }
-}
-
-/// The specific kind of error that can occur.
-#[derive(Clone, Debug, Eq, PartialEq, Fail)]
-pub enum BootstrapRequestsErrorKind {
-    /// Bootstrap request wakeup timer error
-    #[fail(display = "Bootstrap wakeup timer error")]
-    Wakeup,
-    /// Send packet(s) error
-    #[fail(display = "Send packet(s) error")]
-    SendTo,
-}
-
-impl From<BootstrapRequestsErrorKind> for BootstrapRequestsError {
-    fn from(kind: BootstrapRequestsErrorKind) -> BootstrapRequestsError {
-        BootstrapRequestsError::from(Context::new(kind))
-    }
-}
-
-impl From<Context<BootstrapRequestsErrorKind>> for BootstrapRequestsError {
-    fn from(ctx: Context<BootstrapRequestsErrorKind>) -> BootstrapRequestsError {
-        BootstrapRequestsError { ctx }
-    }
-}
-
-impl From<TimerError> for BootstrapRequestsError {
-    fn from(error: TimerError) -> BootstrapRequestsError {
-        BootstrapRequestsError {
-            ctx: error.context(BootstrapRequestsErrorKind::Wakeup)
-        }
-    }
-}
-
-impl From<TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> for BootstrapRequestsError {
-    fn from(error: TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>) -> BootstrapRequestsError {
-        BootstrapRequestsError {
-            ctx: error.context(BootstrapRequestsErrorKind::SendTo)
-        }
-    }
-}
-
-/// Error that can happen when calling `run_main_loop`.
-#[derive(Debug)]
-pub struct MainLoopError {
-    ctx: Context<MainLoopErrorKind>,
-}
-
-impl MainLoopError {
-    /// Return the kind of this error.
-    pub fn kind(&self) -> &MainLoopErrorKind {
-        self.ctx.get_context()
-    }
-}
-
-impl Fail for MainLoopError {
-    fn cause(&self) -> Option<&Fail> {
-        self.ctx.cause()
-    }
-
-    fn backtrace(&self) -> Option<&Backtrace> {
-        self.ctx.backtrace()
-    }
-}
-
-impl fmt::Display for MainLoopError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.ctx.fmt(f)
-    }
-}
-
-/// The specific kind of error that can occur.
-#[derive(Clone, Debug, Eq, PartialEq, Fail)]
-pub enum MainLoopErrorKind {
-    /// Main loop wakeup timer error
-    #[fail(display = "Main loop wakeup timer error")]
-    Wakeup,
-}
-
-impl From<MainLoopErrorKind> for MainLoopError {
-    fn from(kind: MainLoopErrorKind) -> MainLoopError {
-        MainLoopError::from(Context::new(kind))
-    }
-}
-
-impl From<Context<MainLoopErrorKind>> for MainLoopError {
-    fn from(ctx: Context<MainLoopErrorKind>) -> MainLoopError {
-        MainLoopError { ctx }
-    }
-}
-
-impl From<TimerError> for MainLoopError {
-    fn from(error: TimerError) -> MainLoopError {
-        MainLoopError {
-            ctx: error.context(MainLoopErrorKind::Wakeup)
-        }
-    }
-}
-
-/// Error that can happen when calling `dht_main_loop`.
-#[derive(Debug)]
-pub struct DhtLoopError {
-    ctx: Context<DhtLoopErrorKind>,
-}
-
-impl DhtLoopError {
-    /// Return the kind of this error.
-    pub fn kind(&self) -> &DhtLoopErrorKind {
-        self.ctx.get_context()
-    }
-}
-
-impl Fail for DhtLoopError {
-    fn cause(&self) -> Option<&Fail> {
-        self.ctx.cause()
-    }
-
-    fn backtrace(&self) -> Option<&Backtrace> {
-        self.ctx.backtrace()
-    }
-}
-
-impl fmt::Display for DhtLoopError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.ctx.fmt(f)
-    }
-}
-
-/// The specific kind of error that can occur.
-#[derive(Clone, Debug, Eq, PartialEq, Fail)]
-pub enum DhtLoopErrorKind {
-    /// Dht loop wakeup timer error
-    #[fail(display = "Dht loop wakeup timer error")]
-    Wakeup,
-    /// Send packet(s) error
-    #[fail(display = "Send packet(s) error")]
-    SendTo,
-}
-
-impl From<DhtLoopErrorKind> for DhtLoopError {
-    fn from(kind: DhtLoopErrorKind) -> DhtLoopError {
-        DhtLoopError::from(Context::new(kind))
-    }
-}
-
-impl From<Context<DhtLoopErrorKind>> for DhtLoopError {
-    fn from(ctx: Context<DhtLoopErrorKind>) -> DhtLoopError {
-        DhtLoopError { ctx }
-    }
-}
-
-impl From<TimerError> for DhtLoopError {
-    fn from(error: TimerError) -> DhtLoopError {
-        DhtLoopError {
-            ctx: error.context(DhtLoopErrorKind::Wakeup)
-        }
-    }
-}
-
-impl From<TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> for DhtLoopError {
-    fn from(error: TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>) -> DhtLoopError {
-        DhtLoopError {
-            ctx: error.context(DhtLoopErrorKind::SendTo)
-        }
-    }
-}
-
-/// Error that can happen when calling `run_onion_key_refreshing`.
-#[derive(Debug)]
-pub struct OnionKeyRefreshingError {
-    ctx: Context<OnionKeyRefreshingErrorKind>,
-}
-
-impl OnionKeyRefreshingError {
-    /// Return the kind of this error.
-    pub fn kind(&self) -> &OnionKeyRefreshingErrorKind {
-        self.ctx.get_context()
-    }
-}
-
-impl Fail for OnionKeyRefreshingError {
-    fn cause(&self) -> Option<&Fail> {
-        self.ctx.cause()
-    }
-
-    fn backtrace(&self) -> Option<&Backtrace> {
-        self.ctx.backtrace()
-    }
-}
-
-impl fmt::Display for OnionKeyRefreshingError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.ctx.fmt(f)
-    }
-}
-
-/// The specific kind of error that can occur.
-#[derive(Clone, Debug, Eq, PartialEq, Fail)]
-pub enum OnionKeyRefreshingErrorKind {
-    /// Onion key refreshing wakeup timer error
-    #[fail(display = "Onion key refreshing wakeup timer error")]
-    Wakeup,
-    /// Send packet(s) error
-    #[fail(display = "Send packet(s) error")]
-    SendTo,
-}
-
-impl From<OnionKeyRefreshingErrorKind> for OnionKeyRefreshingError {
-    fn from(kind: OnionKeyRefreshingErrorKind) -> OnionKeyRefreshingError {
-        OnionKeyRefreshingError::from(Context::new(kind))
-    }
-}
-
-impl From<Context<OnionKeyRefreshingErrorKind>> for OnionKeyRefreshingError {
-    fn from(ctx: Context<OnionKeyRefreshingErrorKind>) -> OnionKeyRefreshingError {
-        OnionKeyRefreshingError { ctx }
-    }
-}
-
-impl From<TimerError> for OnionKeyRefreshingError {
-    fn from(error: TimerError) -> OnionKeyRefreshingError {
-        OnionKeyRefreshingError {
-            ctx: error.context(OnionKeyRefreshingErrorKind::Wakeup)
-        }
-    }
-}
-
-impl From<mpsc::SendError<(Packet, SocketAddr)>> for OnionKeyRefreshingError {
-    fn from(error: mpsc::SendError<(Packet, SocketAddr)>) -> OnionKeyRefreshingError {
-        OnionKeyRefreshingError {
-            ctx: error.context(OnionKeyRefreshingErrorKind::SendTo)
-        }
-    }
-}
-
-/// Error that can happen when calling `run_pings_sending`.
-#[derive(Debug)]
-pub struct PingsSendingError {
-    ctx: Context<PingsSendingErrorKind>,
-}
-
-impl PingsSendingError {
-    /// Return the kind of this error.
-    pub fn kind(&self) -> &PingsSendingErrorKind {
-        self.ctx.get_context()
-    }
-}
-
-impl Fail for PingsSendingError {
-    fn cause(&self) -> Option<&Fail> {
-        self.ctx.cause()
-    }
-
-    fn backtrace(&self) -> Option<&Backtrace> {
-        self.ctx.backtrace()
-    }
-}
-
-impl fmt::Display for PingsSendingError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.ctx.fmt(f)
-    }
-}
-
-/// The specific kind of error that can occur.
-#[derive(Clone, Debug, Eq, PartialEq, Fail)]
-pub enum PingsSendingErrorKind {
-    /// Pings sending wakeup timer error
-    #[fail(display = "Pings sending wakeup timer error")]
-    Wakeup,
-    /// Send packet(s) error
-    #[fail(display = "Send packet(s) error")]
-    SendTo,
-}
-
-impl From<PingsSendingErrorKind> for PingsSendingError {
-    fn from(kind: PingsSendingErrorKind) -> PingsSendingError {
-        PingsSendingError::from(Context::new(kind))
-    }
-}
-
-impl From<Context<PingsSendingErrorKind>> for PingsSendingError {
-    fn from(ctx: Context<PingsSendingErrorKind>) -> PingsSendingError {
-        PingsSendingError { ctx }
-    }
-}
-
-impl From<TimerError> for PingsSendingError {
-    fn from(error: TimerError) -> PingsSendingError {
-        PingsSendingError {
-            ctx: error.context(PingsSendingErrorKind::Wakeup)
-        }
-    }
-}
-
-impl From<TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> for PingsSendingError {
-    fn from(error: TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>) -> PingsSendingError {
-        PingsSendingError {
-            ctx: error.context(PingsSendingErrorKind::SendTo)
-        }
-    }
-}
-
-/// Error that can happen when calling `run`.
+/// Error that can happen when calling `run_*`.
 #[derive(Debug)]
 pub struct RunError {
     ctx: Context<RunErrorKind>,
@@ -624,18 +295,12 @@ impl fmt::Display for RunError {
 /// The specific kind of error that can occur.
 #[derive(Clone, Debug, Eq, PartialEq, Fail)]
 pub enum RunErrorKind {
-    /// Sending pings error
-    #[fail(display = "Sending pings error")]
-    PingsSending,
-    /// Refreshing onion key error
-    #[fail(display = "Refreshing onion key error")]
-    OnionKeyRefreshing,
-    /// Main loop error
-    #[fail(display = "Main loop error")]
-    MainLoop,
-    /// Sending bootstrap requests error
-    #[fail(display = "Sending bootstrap requests error")]
-    BootstrapRequests,
+    /// Various loop wakeup timer error
+    #[fail(display = "Dht loop wakeup timer error")]
+    Wakeup,
+    /// Send packet(s) error
+    #[fail(display = "Send packet(s) error")]
+    SendTo,
 }
 
 impl From<RunErrorKind> for RunError {
@@ -650,34 +315,18 @@ impl From<Context<RunErrorKind>> for RunError {
     }
 }
 
-impl From<PingsSendingError> for RunError {
-    fn from(error: PingsSendingError) -> RunError {
+impl From<TimerError> for RunError {
+    fn from(error: TimerError) -> RunError {
         RunError {
-            ctx: error.context(RunErrorKind::PingsSending)
+            ctx: error.context(RunErrorKind::Wakeup)
         }
     }
 }
 
-impl From<OnionKeyRefreshingError> for RunError {
-    fn from(error: OnionKeyRefreshingError) -> RunError {
+impl From<TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> for RunError {
+    fn from(error: TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>) -> RunError {
         RunError {
-            ctx: error.context(RunErrorKind::OnionKeyRefreshing)
-        }
-    }
-}
-
-impl From<MainLoopError> for RunError {
-    fn from(error: MainLoopError) -> RunError {
-        RunError {
-            ctx: error.context(RunErrorKind::MainLoop)
-        }
-    }
-}
-
-impl From<BootstrapRequestsError> for RunError {
-    fn from(error: BootstrapRequestsError) -> RunError {
-        RunError {
-            ctx: error.context(RunErrorKind::BootstrapRequests)
+            ctx: error.context(RunErrorKind::SendTo)
         }
     }
 }
@@ -777,7 +426,7 @@ mod tests {
     }
 
     #[test]
-    fn bootstrap_requests_send_error() {
+    fn run_send_error() {
         let (tx, rx) = mpsc::channel(32);
 
         let packet = Packet::BootstrapInfo(BootstrapInfo {
@@ -789,65 +438,8 @@ mod tests {
         drop(rx);
         let res = send_to_bounded(&tx, (packet, sock), Duration::from_secs(1)).wait();
         assert!(res.is_err());
-        let new_error = BootstrapRequestsError::from(res.err().unwrap());
-        assert_eq!(*new_error.kind(), BootstrapRequestsErrorKind::SendTo);
-    }
-
-    #[test]
-    fn dht_loop_send_error() {
-        let (tx, rx) = mpsc::channel(32);
-
-        let packet = Packet::BootstrapInfo(BootstrapInfo {
-            version: 1717,
-            motd: vec![1, 2, 3, 4],
-        });
-        let sock: SocketAddr = "127.0.0.1:33445".parse().unwrap();
-
-        drop(rx);
-        let res = send_to_bounded(&tx, (packet, sock), Duration::from_secs(1)).wait();
-        assert!(res.is_err());
-        let new_error = DhtLoopError::from(res.err().unwrap());
-        assert_eq!(*new_error.kind(), DhtLoopErrorKind::SendTo);
-    }
-
-    #[test]
-    fn onion_key_refreshing_send_error() {
-        let (tx, rx) = mpsc::channel(32);
-
-        let packet = Packet::BootstrapInfo(BootstrapInfo {
-            version: 1717,
-            motd: vec![1, 2, 3, 4],
-        });
-        let sock: SocketAddr = "127.0.0.1:33445".parse().unwrap();
-
-        drop(rx);
-        let res = tx.send((packet, sock)).wait();
-        assert!(res.is_err());
-        let new_error = OnionKeyRefreshingError::from(res.err().unwrap());
-        assert_eq!(*new_error.kind(), OnionKeyRefreshingErrorKind::SendTo);
-
-        let run_error = RunError::from(new_error);
-        assert_eq!(*run_error.kind(), RunErrorKind::OnionKeyRefreshing);
-    }
-
-    #[test]
-    fn pings_send_error() {
-        let (tx, rx) = mpsc::channel(32);
-
-        let packet = Packet::BootstrapInfo(BootstrapInfo {
-            version: 1717,
-            motd: vec![1, 2, 3, 4],
-        });
-        let sock: SocketAddr = "127.0.0.1:33445".parse().unwrap();
-
-        drop(rx);
-        let res = send_to_bounded(&tx, (packet, sock), Duration::from_secs(1)).wait();
-        assert!(res.is_err());
-        let new_error = PingsSendingError::from(res.err().unwrap());
-        assert_eq!(*new_error.kind(), PingsSendingErrorKind::SendTo);
-
-        let run_error = RunError::from(new_error);
-        assert_eq!(*run_error.kind(), RunErrorKind::PingsSending);
+        let new_error = RunError::from(res.err().unwrap());
+        assert_eq!(*new_error.kind(), RunErrorKind::SendTo);
     }
 
     #[test]
@@ -924,103 +516,19 @@ mod tests {
     }
 
     #[test]
-    fn bootstrap_requests_error() {
-        let error = BootstrapRequestsError::from(BootstrapRequestsErrorKind::Wakeup);
-        assert!(error.cause().is_none());
-        assert!(error.backtrace().is_some());
-        assert_eq!(format!("{}", error), "Bootstrap wakeup timer error".to_owned());
-    }
-
-    #[test]
-    fn bootstrap_requests_error_kind() {
-        let wake_up = BootstrapRequestsErrorKind::Wakeup;
-        assert_eq!(format!("{}", wake_up), "Bootstrap wakeup timer error".to_owned());
-
-        let send_to = BootstrapRequestsErrorKind::SendTo;
-        assert_eq!(format!("{}", send_to), "Send packet(s) error".to_owned());
-    }
-
-    #[test]
-    fn main_loop_error() {
-        let error = MainLoopError::from(MainLoopErrorKind::Wakeup);
-        assert!(error.cause().is_none());
-        assert!(error.backtrace().is_some());
-        assert_eq!(format!("{}", error), "Main loop wakeup timer error".to_owned());
-
-        let run_error = RunError::from(error);
-        assert_eq!(*run_error.kind(), RunErrorKind::MainLoop);
-    }
-
-    #[test]
-    fn dht_loop_error() {
-        let error = DhtLoopError::from(DhtLoopErrorKind::Wakeup);
+    fn run_error() {
+        let error = RunError::from(RunErrorKind::Wakeup);
         assert!(error.cause().is_none());
         assert!(error.backtrace().is_some());
         assert_eq!(format!("{}", error), "Dht loop wakeup timer error".to_owned());
     }
 
     #[test]
-    fn dht_loop_error_kind() {
-        let wake_up = DhtLoopErrorKind::Wakeup;
+    fn run_error_kind() {
+        let wake_up = RunErrorKind::Wakeup;
         assert_eq!(format!("{}", wake_up), "Dht loop wakeup timer error".to_owned());
 
-        let send_to = DhtLoopErrorKind::SendTo;
+        let send_to = RunErrorKind::SendTo;
         assert_eq!(format!("{}", send_to), "Send packet(s) error".to_owned());
-    }
-
-    #[test]
-    fn onion_key_refreshing_error() {
-        let error = OnionKeyRefreshingError::from(OnionKeyRefreshingErrorKind::Wakeup);
-        assert!(error.cause().is_none());
-        assert!(error.backtrace().is_some());
-        assert_eq!(format!("{}", error), "Onion key refreshing wakeup timer error".to_owned());
-    }
-
-    #[test]
-    fn onion_key_refreshing_error_kind() {
-        let wake_up = OnionKeyRefreshingErrorKind::Wakeup;
-        assert_eq!(format!("{}", wake_up), "Onion key refreshing wakeup timer error".to_owned());
-
-        let send_to = OnionKeyRefreshingErrorKind::SendTo;
-        assert_eq!(format!("{}", send_to), "Send packet(s) error".to_owned());
-    }
-
-    #[test]
-    fn pings_sending_error() {
-        let error = PingsSendingError::from(PingsSendingErrorKind::Wakeup);
-        assert!(error.cause().is_none());
-        assert!(error.backtrace().is_some());
-        assert_eq!(format!("{}", error), "Pings sending wakeup timer error".to_owned());
-    }
-
-    #[test]
-    fn pings_sending_error_kind() {
-        let wake_up = PingsSendingErrorKind::Wakeup;
-        assert_eq!(format!("{}", wake_up), "Pings sending wakeup timer error".to_owned());
-
-        let send_to = PingsSendingErrorKind::SendTo;
-        assert_eq!(format!("{}", send_to), "Send packet(s) error".to_owned());
-    }
-    #[test]
-    fn run_error() {
-        let error = RunError::from(RunErrorKind::MainLoop);
-        assert!(error.cause().is_none());
-        assert!(error.backtrace().is_some());
-        assert_eq!(format!("{}", error), "Main loop error".to_owned());
-    }
-
-    #[test]
-    fn run_error_kind() {
-        let pings_sending = RunErrorKind::PingsSending;
-        assert_eq!(format!("{}", pings_sending), "Sending pings error".to_owned());
-
-        let onion = RunErrorKind::OnionKeyRefreshing;
-        assert_eq!(format!("{}", onion), "Refreshing onion key error".to_owned());
-
-        let main_loop = RunErrorKind::MainLoop;
-        assert_eq!(format!("{}", main_loop), "Main loop error".to_owned());
-
-        let bootstrap_req = RunErrorKind::BootstrapRequests;
-        assert_eq!(format!("{}", bootstrap_req), "Sending bootstrap requests error".to_owned());
     }
 }
