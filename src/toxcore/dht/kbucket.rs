@@ -81,9 +81,12 @@ impl HasPK for PackedNode {
 pub trait KbucketNode : Sized + HasPK {
     /// The type of nodes that can be added to a `Kbucket`.
     type NewNode: HasPK;
+    /// The type of nodes that can be checked if they can be added to a
+    /// `Kbucket`.
+    type CheckNode: HasPK;
 
     /// Check if the node can be updated with a new one.
-    fn is_outdated(&self, other: &Self::NewNode) -> bool;
+    fn is_outdated(&self, other: &Self::CheckNode) -> bool;
     /// Update the existing node with a new one.
     fn update(&mut self, other: &Self::NewNode);
     /// Check if the node can be evicted.
@@ -96,6 +99,7 @@ pub trait KbucketNode : Sized + HasPK {
 
 impl KbucketNode for PackedNode {
     type NewNode = PackedNode;
+    type CheckNode = PackedNode;
 
     fn is_outdated(&self, other: &PackedNode) -> bool {
         self.saddr != other.saddr
@@ -146,7 +150,12 @@ impl<Node> Into<Vec<Node>> for Kbucket<Node> {
 /// Default number of nodes that kbucket can hold.
 pub const KBUCKET_DEFAULT_SIZE: u8 = 8;
 
-impl<NewNode: HasPK, Node: KbucketNode<NewNode = NewNode> + From<NewNode>> Kbucket<Node> {
+impl<NewNode, CheckNode, Node> Kbucket<Node>
+where
+    NewNode: HasPK,
+    CheckNode: HasPK,
+    Node: KbucketNode<NewNode = NewNode, CheckNode = CheckNode> + From<NewNode>
+{
     /** Create a new `Kbucket` to store nodes close to the `PublicKey`.
 
     Can hold up to `capacity` nodes.
@@ -321,7 +330,7 @@ impl<NewNode: HasPK, Node: KbucketNode<NewNode = NewNode> + From<NewNode>> Kbuck
     [`Kbucket`]: ./struct.Kbucket.html
     [`PackedNode`]: ./struct.PackedNode.html
     */
-    pub fn can_add(&self, base_pk: &PublicKey, new_node: &NewNode, evict: bool) -> bool {
+    pub fn can_add(&self, base_pk: &PublicKey, new_node: &CheckNode, evict: bool) -> bool {
         match self.nodes.binary_search_by(|n| base_pk.distance(&n.pk(), &new_node.pk())) {
             Ok(index) =>
                 // if node is bad then we'd want to update it's address
