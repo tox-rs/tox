@@ -3,12 +3,13 @@
 #[macro_use]
 extern crate log;
 
-use std::io::Error;
+use std::io::{Error, ErrorKind};
 
 use futures::*;
 use futures::sync::mpsc;
 use hex::FromHex;
 use tokio::net::UdpSocket;
+use failure::Fail;
 
 use std::net::SocketAddr;
 
@@ -88,8 +89,9 @@ fn main() {
     }
 
     let future = server.run_socket(socket, rx, stats)
-        .select(lan_discovery_sender.run().map_err(Error::from)).map(|_| ()).map_err(|(e, _)| e)
-        .map_err(|err| error!("Processing ended with error: {:?}", err));
+        .select(lan_discovery_sender.run().map_err(|e| Error::new(ErrorKind::Other, e.compat())))
+        .map(|_| ())
+        .map_err(|(e, _)| error!("Processing ended with error: {:?}", e));
 
     info!("Running DHT server on {}", local_addr);
 

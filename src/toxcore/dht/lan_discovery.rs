@@ -5,8 +5,6 @@ use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
 
 use std::fmt;
-use std::io::Error as IoError;
-use std::io::ErrorKind as IoErrorKind;
 
 use failure::{Backtrace, Context, Fail};
 use futures::{future, stream, Future, Stream};
@@ -86,13 +84,6 @@ impl From<mpsc::SendError<(Packet, SocketAddr)>> for LanDiscoveryError {
         LanDiscoveryError {
             ctx: error.context(LanDiscoveryErrorKind::SendTo)
         }
-    }
-}
-
-/// From trait for temporary use during transition from io:Error to custom enum error of failure crate
-impl From<LanDiscoveryError> for IoError {
-    fn from(item: LanDiscoveryError) -> Self {
-        IoError::new(IoErrorKind::Other, format!("LanDiscoveryError occurred. error: {:?}", item))
     }
 }
 

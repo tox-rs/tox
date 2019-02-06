@@ -5,9 +5,9 @@ use super::*;
 
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
+use crate::toxcore::dht::packet::*;
 
 use nom::rest;
-use std::io::{Error, ErrorKind};
 
 /// Encrypted payload should contain `IpPort`, `PublicKey` and inner encrypted
 /// payload that should contain at least `IpPort` struct.
@@ -88,22 +88,20 @@ impl OnionRequest0 {
     - fails to decrypt
     - fails to parse as `OnionRequest0Payload`
     */
-    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<OnionRequest0Payload, Error> {
+    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<OnionRequest0Payload, GetPayloadError> {
         let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
             .map_err(|()| {
                 debug!("Decrypting OnionRequest0 failed!");
-                Error::new(ErrorKind::Other, "OnionRequest0 decrypt error.")
+                GetPayloadError::decrypt()
             })?;
         match OnionRequest0Payload::from_bytes(&decrypted) {
-            IResult::Incomplete(e) => {
-                debug!(target: "Onion", "OnionRequest0Payload deserialize error: {:?}", e);
-                Err(Error::new(ErrorKind::Other,
-                    format!("OnionRequest0Payload deserialize error: {:?}", e)))
+            IResult::Incomplete(needed) => {
+                debug!(target: "Onion", "OnionRequest0Payload deserialize error: {:?}", needed);
+                Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
             },
             IResult::Error(e) => {
                 debug!(target: "Onion", "OnionRequest0Payload deserialize error: {:?}", e);
-                Err(Error::new(ErrorKind::Other,
-                    format!("OnionRequest0Payload deserialize error: {:?}", e)))
+                Err(GetPayloadError::deserialize(e, self.payload.to_vec()))
             },
             IResult::Done(_, inner) => {
                 Ok(inner)
