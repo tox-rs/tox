@@ -156,37 +156,12 @@ pub enum HandlePacketErrorKind {
     /// Error indicates that getting payload of received packet error.
     #[fail(display = "Get payload of received packet error")]
     GetPayload,
-    /// Error indicates that onion response error.
-    #[fail(display = "Onion response error")]
-    OnionResponse,
-    /// Error indicates that BootstrapInfo error.
-    #[fail(display = "BootstrapInfo handling error")]
-    BootstrapInfo,
     /// Error indicates that sending response packet error.
     #[fail(display = "Sending response error")]
     SendTo,
     /// Error indicates that sending lossless response packet error.
     #[fail(display = "Sending lossless response error")]
     SendToLossless,
-    /// Error indicates that received packet is not handled here.
-    #[fail(display = "This packet kind is not handled here error")]
-    NotHandled,
-    /// Error indicates that received packet's ping_id is zero.
-    #[fail(display = "Zero ping id error")]
-    ZeroPingId,
-    /// Error indicates that received packet's ping_id does not match.
-    #[fail(display = "Ping id mismatch error")]
-    PingIdMismatch,
-    /// Error indicates that there is no friend.
-    #[fail(display = "Friend does not exist error")]
-    NoFriend,
-    /// Error indicates that NetCrypto is not initialized.
-    #[fail(display = "NetCrypto is not initialized error")]
-    NetCrypto,
-    /// Error indicates that onion or net crypto processing fails.
-    /// ## This enum entry is temporary for onion or net crypto module's transition to failure
-    #[fail(display = "Onion or NetCrypto related error")]
-    OnionOrNetCrypto,
     /// Error indicates that NetCrypto can't handle packet in current connection state.
     #[fail(display = "Can't handle CookieResponse in current connection state")]
     CannotHandle,

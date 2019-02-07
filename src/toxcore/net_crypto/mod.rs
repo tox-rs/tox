@@ -848,7 +848,9 @@ mod tests {
             payload: vec![42; 88]
         };
 
-        assert!(net_crypto.handle_cookie_request(&cookie_request).is_err());
+        let res = net_crypto.handle_cookie_request(&cookie_request);
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
     }
 
     #[test]
@@ -931,7 +933,9 @@ mod tests {
 
         let addr = "127.0.0.1:12345".parse().unwrap();
 
-        assert!(net_crypto.handle_udp_cookie_request(&cookie_request, addr).wait().is_err());
+        let res = net_crypto.handle_udp_cookie_request(&cookie_request, addr).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
     }
 
     #[test]
@@ -1027,7 +1031,9 @@ mod tests {
         };
         let cookie_response = CookieResponse::new(&connection.dht_precomputed_key, &cookie_response_payload);
 
-        assert!(net_crypto.handle_cookie_response(&mut connection, &cookie_response).wait().is_err());
+        let res = net_crypto.handle_cookie_response(&mut connection, &cookie_response).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::CannotHandle);
     }
 
     #[test]
@@ -1164,7 +1170,9 @@ mod tests {
         };
         let cookie_response = CookieResponse::new(&dht_precomputed_key, &cookie_response_payload);
 
-        assert!(net_crypto.handle_udp_cookie_response(&cookie_response, addr).wait().is_err());
+        let res = net_crypto.handle_udp_cookie_response(&cookie_response, addr).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::NoConnection { addr: "127.0.0.1:12345".parse().unwrap() });
     }
 
     #[test]
@@ -1346,7 +1354,9 @@ mod tests {
         };
         let crypto_handshake = CryptoHandshake::new(&connection.dht_precomputed_key, &crypto_handshake_payload, our_encrypted_cookie);
 
-        assert!(net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).wait().is_err());
+        let res = net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::CannotHandle);
     }
 
     #[test]
@@ -1390,7 +1400,9 @@ mod tests {
         };
         let crypto_handshake = CryptoHandshake::new(&connection.dht_precomputed_key, &crypto_handshake_payload, our_encrypted_cookie);
 
-        assert!(net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).wait().is_err());
+        let res = net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::Sha512);
     }
 
     #[test]
@@ -1435,7 +1447,9 @@ mod tests {
         };
         let crypto_handshake = CryptoHandshake::new(&connection.dht_precomputed_key, &crypto_handshake_payload, our_encrypted_cookie);
 
-        assert!(net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).wait().is_err());
+        let res = net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::CookieTimedOut);
     }
 
     #[test]
@@ -1479,7 +1493,9 @@ mod tests {
         };
         let crypto_handshake = CryptoHandshake::new(&connection.dht_precomputed_key, &crypto_handshake_payload, our_encrypted_cookie);
 
-        assert!(net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).wait().is_err());
+        let res = net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::InvalidRealPk);
     }
 
     #[test]
@@ -1525,7 +1541,9 @@ mod tests {
         };
         let crypto_handshake = CryptoHandshake::new(&connection.dht_precomputed_key, &crypto_handshake_payload, our_encrypted_cookie);
 
-        assert!(net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).wait().is_err());
+        let res = net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::InvalidDhtPk);
 
         let (keys, _dht_pk_rx) = dht_pk_rx.into_future().wait().unwrap();
         let (received_real_pk, received_dht_pk) = keys.unwrap();
@@ -1853,7 +1871,9 @@ mod tests {
         };
         let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, &crypto_data_payload);
 
-        assert!(net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait().is_err());
+        let res = net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::PacketsArray);
 
         assert_eq!(unpack!(connection.status, ConnectionStatus::Established, received_nonce), received_nonce);
 
@@ -1995,7 +2015,9 @@ mod tests {
         };
         let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, &crypto_data_payload);
 
-        assert!(net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait().is_err());
+        let res = net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::PacketsArray);
 
         assert_eq!(unpack!(connection.status, ConnectionStatus::Established, received_nonce), received_nonce);
 
@@ -2248,7 +2270,9 @@ mod tests {
         };
         let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, &crypto_data_payload);
 
-        assert!(net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait().is_err());
+        let res = net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::PacketId { id: 255 });
 
         assert_eq!(unpack!(connection.status, ConnectionStatus::Established, received_nonce), received_nonce);
 
@@ -2301,7 +2325,9 @@ mod tests {
         };
         let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, &crypto_data_payload);
 
-        assert!(net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait().is_err());
+        let res = net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::Empty);
 
         assert_eq!(unpack!(connection.status, ConnectionStatus::Established, received_nonce), received_nonce);
 
@@ -2347,7 +2373,9 @@ mod tests {
         };
         let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, &crypto_data_payload);
 
-        assert!(net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait().is_err());
+        let res = net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::CannotHandleCryptoData);
     }
 
     #[test]
