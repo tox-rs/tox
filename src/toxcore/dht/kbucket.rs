@@ -94,7 +94,9 @@ pub trait KbucketNode : Sized + HasPK {
     /// Find the index of a node that should be evicted in case if `Kbucket` is
     /// full. It must return `Some` if and only if nodes list contains at least
     /// one evictable node.
-    fn eviction_index(nodes: &[Self]) -> Option<usize>;
+    fn eviction_index(nodes: &[Self]) -> Option<usize> {
+        nodes.iter().rposition(|node| node.is_evictable())
+    }
 }
 
 impl KbucketNode for PackedNode {
