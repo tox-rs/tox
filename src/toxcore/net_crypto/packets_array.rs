@@ -427,7 +427,9 @@ mod tests {
     #[test]
     fn set_buffer_start_too_big_index() {
         let mut array = PacketsArray::<()>::new();
-        assert!(array.set_buffer_start(1).is_err());
+        let res = array.set_buffer_start(1);
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), PacketsArrayErrorKind::OutsideIndex { index: 1 });
         assert_eq!(array.buffer_start, 0);
         assert_eq!(array.buffer_end, 0);
     }

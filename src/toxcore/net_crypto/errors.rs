@@ -287,27 +287,6 @@ pub enum SendDataErrorKind {
     /// Connection is not established.
     #[fail(display = "Connection is not established")]
     NoConnection,
-    /// Index already exists error
-    #[fail(display = "The packet with index {:?} already exists", index)]
-    AlreadyExist {
-        /// The index that already exists
-        index: u32,
-    },
-    /// Packets array is full
-    #[fail(display = "Packets array is full")]
-    ArrayFull,
-    /// Index is lower than the end index
-    #[fail(display = "Index {:?} is lower than the end index", index)]
-    LowerIndex {
-        /// The index that lower than the end index
-        index: u32,
-    },
-    /// Index is outside of buffer bounds
-    #[fail(display = "Index {:?} is outside of buffer bounds", index)]
-    OutsideIndex {
-        /// The index that is outside of buffer bounds
-        index: u32,
-    },
     /// Error indicates that sending response packet error.
     #[fail(display = "Sending response error")]
     SendTo,
@@ -398,5 +377,236 @@ impl From<SendDataError> for RunError {
         RunError {
             ctx: error.context(RunErrorKind::SendData)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::toxcore::io_tokio::*;
+
+    use std::time::Duration;
+    use futures::future::Future;
+
+    #[test]
+    fn packets_array_error() {
+        let error = PacketsArrayError::from(PacketsArrayErrorKind::ArrayFull);
+        assert!(error.cause().is_none());
+        assert!(error.backtrace().is_some());
+        assert_eq!(format!("{}", error), "Packets array is full".to_owned());
+    }
+
+    #[test]
+    fn packets_array_too_big() {
+        let error = PacketsArrayError::too_big(1);
+        assert_eq!(*error.kind(), PacketsArrayErrorKind::TooBig { index: 1 });
+        assert_eq!(format!("{}", error), "The index 1 is too big and can't be hold".to_owned());
+    }
+
+    #[test]
+    fn packets_array_already_exist() {
+        let error = PacketsArrayError::already_exist(1);
+        assert_eq!(*error.kind(), PacketsArrayErrorKind::AlreadyExist { index: 1 });
+        assert_eq!(format!("{}", error), "The packet with index 1 already exists".to_owned());
+    }
+
+    #[test]
+    fn packets_array_lower_index() {
+        let error = PacketsArrayError::lower_index(1);
+        assert_eq!(*error.kind(), PacketsArrayErrorKind::LowerIndex { index: 1 });
+        assert_eq!(format!("{}", error), "Index 1 is lower than the end index".to_owned());
+    }
+
+    #[test]
+    fn packets_array_outside_index() {
+        let error = PacketsArrayError::outside_index(1);
+        assert_eq!(*error.kind(), PacketsArrayErrorKind::OutsideIndex { index: 1 });
+        assert_eq!(format!("{}", error), "Index 1 is outside of buffer bounds".to_owned());
+    }
+
+    #[test]
+    fn handle_packet_error() {
+        let error = HandlePacketError::from(HandlePacketErrorKind::CannotHandle);
+        assert!(error.cause().is_none());
+        assert!(error.backtrace().is_some());
+    }
+
+    #[test]
+    fn handle_packet_invalid_request_id() {
+        let error = HandlePacketError::invalid_request_id(1, 0);
+        assert_eq!(*error.kind(), HandlePacketErrorKind::InvalidRequestId { expect: 1, got: 0 });
+        assert_eq!(format!("{}", error), "Invalid cookie request id: expected 1 but got 0".to_owned());
+    }
+
+    #[test]
+    fn handle_packet_no_connection() {
+        let sock = "127.0.0.1:33445".parse().unwrap();
+        let error = HandlePacketError::no_connection(sock);
+        assert_eq!(*error.kind(), HandlePacketErrorKind::NoConnection { addr: sock });
+        assert_eq!(format!("{}", error), "No crypto connection for address: V4(127.0.0.1:33445)".to_owned());
+    }
+
+    #[test]
+    fn handle_packet_packet_id() {
+        let error = HandlePacketError::packet_id(1);
+        assert_eq!(*error.kind(), HandlePacketErrorKind::PacketId { id: 1 });
+        assert_eq!(format!("{}", error), "Invalid packet id: 1".to_owned());
+    }
+
+    #[test]
+    fn handle_packet_get_payload() {
+        let error = HandlePacketError::from(HandlePacketErrorKind::GetPayload);
+        assert_eq!(*error.kind(), HandlePacketErrorKind::GetPayload);
+        assert_eq!(format!("{}", error), "Get payload of received packet error".to_owned());
+
+        let get_payload_error = GetPayloadError::from(GetPayloadErrorKind::Decrypt);
+        let error = HandlePacketError::from(get_payload_error);
+        assert_eq!(*error.kind(), HandlePacketErrorKind::GetPayload);
+        assert_eq!(format!("{}", error), "Get payload of received packet error".to_owned());
+    }
+
+    #[test]
+    fn handle_packet_send_to() {
+        let (tx, rx) = mpsc::channel(32);
+
+        let packet = Packet::BootstrapInfo(BootstrapInfo {
+            version: 1717,
+            motd: vec![1, 2, 3, 4],
+        });
+        let sock: SocketAddr = "127.0.0.1:33445".parse().unwrap();
+
+        drop(rx);
+        let res = send_to_bounded(&tx, (packet, sock), Duration::from_secs(1)).wait();
+        assert!(res.is_err());
+        let error = HandlePacketError::from(res.err().unwrap());
+        assert_eq!(*error.kind(), HandlePacketErrorKind::SendTo);
+        assert_eq!(format!("{}", error), "Sending response error".to_owned());
+    }
+
+    #[test]
+    fn handle_packet_send_to_lossless() {
+        let (tx, rx) = mpsc::channel(32);
+
+        let pk = gen_keypair().0;
+        let data = vec![1, 2, 3];
+
+        drop(rx);
+        let res = send_to(&tx, (pk, data)).wait();
+        assert!(res.is_err());
+        let error = HandlePacketError::from(res.err().unwrap());
+        assert_eq!(*error.kind(), HandlePacketErrorKind::SendToLossless);
+        assert_eq!(format!("{}", error), "Sending lossless response error".to_owned());
+    }
+
+    #[test]
+    fn handle_packet_cannot_handle() {
+        let error = HandlePacketError::from(HandlePacketErrorKind::CannotHandle);
+        assert_eq!(*error.kind(), HandlePacketErrorKind::CannotHandle);
+        assert_eq!(format!("{}", error), "Can't handle CookieResponse in current connection state".to_owned());
+    }
+
+    #[test]
+    fn handle_packet_cannot_handle_crypto_data() {
+        let error = HandlePacketError::from(HandlePacketErrorKind::CannotHandleCryptoData);
+        assert_eq!(*error.kind(), HandlePacketErrorKind::CannotHandleCryptoData);
+        assert_eq!(format!("{}", error), "Can't handle CryptoData in current connection state".to_owned());
+    }
+
+    #[test]
+    fn handle_packet_sha512() {
+        let error = HandlePacketError::from(HandlePacketErrorKind::Sha512);
+        assert_eq!(*error.kind(), HandlePacketErrorKind::Sha512);
+        assert_eq!(format!("{}", error), "Invalid SHA512 hash of cookie".to_owned());
+    }
+
+    #[test]
+    fn handle_packet_cookie_timedout() {
+        let error = HandlePacketError::from(HandlePacketErrorKind::CookieTimedOut);
+        assert_eq!(*error.kind(), HandlePacketErrorKind::CookieTimedOut);
+        assert_eq!(format!("{}", error), "Cookie is timed out".to_owned());
+    }
+
+    #[test]
+    fn handle_packet_invalid_real_pk() {
+        let error = HandlePacketError::from(HandlePacketErrorKind::InvalidRealPk);
+        assert_eq!(*error.kind(), HandlePacketErrorKind::InvalidRealPk);
+        assert_eq!(format!("{}", error), "Cookie contains invalid real pk".to_owned());
+    }
+
+    #[test]
+    fn handle_packet_invalid_dht_pk() {
+        let error = HandlePacketError::from(HandlePacketErrorKind::InvalidDhtPk);
+        assert_eq!(*error.kind(), HandlePacketErrorKind::InvalidDhtPk);
+        assert_eq!(format!("{}", error), "Cookie contains invalid dht pk".to_owned());
+    }
+
+    #[test]
+    fn handle_packet_packets_array() {
+        let error = PacketsArrayError::from(PacketsArrayErrorKind::ArrayFull);
+        let error = HandlePacketError::from(error);
+        assert_eq!(*error.kind(), HandlePacketErrorKind::PacketsArray);
+        assert_eq!(format!("{}", error), "PacketsArrayError occurs".to_owned());
+    }
+
+    #[test]
+    fn handle_packet_empty() {
+        let error = HandlePacketError::from(HandlePacketErrorKind::Empty);
+        assert_eq!(*error.kind(), HandlePacketErrorKind::Empty);
+        assert_eq!(format!("{}", error), "Real data is empty".to_owned());
+    }
+
+    #[test]
+    fn send_data_error() {
+        let error = SendDataError::from(SendDataErrorKind::NoConnection);
+        assert!(error.cause().is_none());
+        assert!(error.backtrace().is_some());
+    }
+
+    #[test]
+    fn send_data_no_connection() {
+        let error = SendDataError::from(SendDataErrorKind::NoConnection);
+        assert_eq!(*error.kind(), SendDataErrorKind::NoConnection);
+        assert_eq!(format!("{}", error), "Connection is not established".to_owned());
+    }
+
+    #[test]
+    fn send_data_send_to() {
+        let (tx, rx) = mpsc::channel(32);
+
+        let packet = Packet::BootstrapInfo(BootstrapInfo {
+            version: 1717,
+            motd: vec![1, 2, 3, 4],
+        });
+        let sock: SocketAddr = "127.0.0.1:33445".parse().unwrap();
+
+        drop(rx);
+        let res = send_to_bounded(&tx, (packet, sock), Duration::from_secs(1)).wait();
+        assert!(res.is_err());
+        let error = SendDataError::from(res.err().unwrap());
+        assert_eq!(*error.kind(), SendDataErrorKind::SendTo);
+        assert_eq!(format!("{}", error), "Sending response error".to_owned());
+    }
+
+    #[test]
+    fn run_error() {
+        let error = RunError::from(RunErrorKind::Wakeup);
+        assert!(error.cause().is_none());
+        assert!(error.backtrace().is_some());
+    }
+
+    #[test]
+    fn run_send_data() {
+        let error = SendDataError::from(SendDataErrorKind::NoConnection);
+        let error = RunError::from(error);
+        assert_eq!(*error.kind(), RunErrorKind::SendData);
+        assert_eq!(format!("{}", error), "Sending crypto data packet error".to_owned());
+    }
+
+    #[test]
+    fn run_wakeup() {
+        let error = RunError::from(RunErrorKind::Wakeup);
+        assert_eq!(*error.kind(), RunErrorKind::Wakeup);
+        assert_eq!(format!("{}", error), "Netcrypto periodical wakeup timer error".to_owned());
     }
 }
