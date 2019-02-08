@@ -162,9 +162,12 @@ pub enum HandlePacketErrorKind {
     /// Error indicates that sending lossless response packet error.
     #[fail(display = "Sending lossless response error")]
     SendToLossless,
+    /// Error indicates that sending dhtpk packet error.
+    #[fail(display = "Sending dhtpk packet error")]
+    SendToDhtpk,
     /// Error indicates that NetCrypto can't handle packet in current connection state.
     #[fail(display = "Can't handle CookieResponse in current connection state")]
-    CannotHandle,
+    InvalidState,
     /// Error indicates that NetCrypto can't handle crypto data packet in current connection state.
     #[fail(display = "Can't handle CryptoData in current connection state")]
     CannotHandleCryptoData,
@@ -184,7 +187,7 @@ pub enum HandlePacketErrorKind {
     },
     /// Error indicates that invalid SHA512 hash of cookie
     #[fail(display = "Invalid SHA512 hash of cookie")]
-    Sha512,
+    BadSha512,
     /// Error indicates that cookie is timed out
     #[fail(display = "Cookie is timed out")]
     CookieTimedOut,
@@ -196,10 +199,10 @@ pub enum HandlePacketErrorKind {
     InvalidDhtPk,
     /// Error indicates that there is PacketsArrayError
     #[fail(display = "PacketsArrayError occurs")]
-    PacketsArray,
+    PacketsArrayError,
     /// Error indicates that real data is empty
     #[fail(display = "Real data is empty")]
-    Empty,
+    DataEmpty,
     /// Error indicates that invalid packet id.
     #[fail(display = "Invalid packet id: {:?}", id)]
     PacketId {
@@ -230,6 +233,14 @@ impl From<mpsc::SendError<(PublicKey, Vec<u8>)>> for HandlePacketError {
     }
 }
 
+impl From<mpsc::SendError<(PublicKey, PublicKey)>> for HandlePacketError {
+    fn from(error: mpsc::SendError<(PublicKey, PublicKey)>) -> HandlePacketError {
+        HandlePacketError {
+            ctx: error.context(HandlePacketErrorKind::SendToDhtpk)
+        }
+    }
+}
+
 impl From<Context<HandlePacketErrorKind>> for HandlePacketError {
     fn from(ctx: Context<HandlePacketErrorKind>) -> HandlePacketError {
         HandlePacketError { ctx }
@@ -247,7 +258,7 @@ impl From<GetPayloadError> for HandlePacketError {
 impl From<PacketsArrayError> for HandlePacketError {
     fn from(error: PacketsArrayError) -> HandlePacketError {
         HandlePacketError {
-            ctx: error.context(HandlePacketErrorKind::PacketsArray)
+            ctx: error.context(HandlePacketErrorKind::PacketsArrayError)
         }
     }
 }
@@ -393,7 +404,6 @@ mod tests {
     fn packets_array_error() {
         let error = PacketsArrayError::from(PacketsArrayErrorKind::ArrayFull);
         assert!(error.cause().is_none());
-        assert!(error.backtrace().is_some());
         assert_eq!(format!("{}", error), "Packets array is full".to_owned());
     }
 
@@ -427,9 +437,8 @@ mod tests {
 
     #[test]
     fn handle_packet_error() {
-        let error = HandlePacketError::from(HandlePacketErrorKind::CannotHandle);
+        let error = HandlePacketError::from(HandlePacketErrorKind::InvalidState);
         assert!(error.cause().is_none());
-        assert!(error.backtrace().is_some());
     }
 
     #[test]
@@ -500,9 +509,24 @@ mod tests {
     }
 
     #[test]
-    fn handle_packet_cannot_handle() {
-        let error = HandlePacketError::from(HandlePacketErrorKind::CannotHandle);
-        assert_eq!(*error.kind(), HandlePacketErrorKind::CannotHandle);
+    fn handle_packet_send_to_dhtpk() {
+        let (tx, rx) = mpsc::channel(32);
+
+        let pk = gen_keypair().0;
+        let dhtpk = gen_keypair().0;
+
+        drop(rx);
+        let res = send_to(&tx, (pk, dhtpk)).wait();
+        assert!(res.is_err());
+        let error = HandlePacketError::from(res.err().unwrap());
+        assert_eq!(*error.kind(), HandlePacketErrorKind::SendToDhtpk);
+        assert_eq!(format!("{}", error), "Sending dhtpk packet error".to_owned());
+    }
+
+    #[test]
+    fn handle_packet_invalid_state() {
+        let error = HandlePacketError::from(HandlePacketErrorKind::InvalidState);
+        assert_eq!(*error.kind(), HandlePacketErrorKind::InvalidState);
         assert_eq!(format!("{}", error), "Can't handle CookieResponse in current connection state".to_owned());
     }
 
@@ -514,9 +538,9 @@ mod tests {
     }
 
     #[test]
-    fn handle_packet_sha512() {
-        let error = HandlePacketError::from(HandlePacketErrorKind::Sha512);
-        assert_eq!(*error.kind(), HandlePacketErrorKind::Sha512);
+    fn handle_packet_bad_sha512() {
+        let error = HandlePacketError::from(HandlePacketErrorKind::BadSha512);
+        assert_eq!(*error.kind(), HandlePacketErrorKind::BadSha512);
         assert_eq!(format!("{}", error), "Invalid SHA512 hash of cookie".to_owned());
     }
 
@@ -542,17 +566,17 @@ mod tests {
     }
 
     #[test]
-    fn handle_packet_packets_array() {
+    fn handle_packet_packets_array_error() {
         let error = PacketsArrayError::from(PacketsArrayErrorKind::ArrayFull);
         let error = HandlePacketError::from(error);
-        assert_eq!(*error.kind(), HandlePacketErrorKind::PacketsArray);
+        assert_eq!(*error.kind(), HandlePacketErrorKind::PacketsArrayError);
         assert_eq!(format!("{}", error), "PacketsArrayError occurs".to_owned());
     }
 
     #[test]
-    fn handle_packet_empty() {
-        let error = HandlePacketError::from(HandlePacketErrorKind::Empty);
-        assert_eq!(*error.kind(), HandlePacketErrorKind::Empty);
+    fn handle_packet_data_empty() {
+        let error = HandlePacketError::from(HandlePacketErrorKind::DataEmpty);
+        assert_eq!(*error.kind(), HandlePacketErrorKind::DataEmpty);
         assert_eq!(format!("{}", error), "Real data is empty".to_owned());
     }
 
@@ -560,7 +584,6 @@ mod tests {
     fn send_data_error() {
         let error = SendDataError::from(SendDataErrorKind::NoConnection);
         assert!(error.cause().is_none());
-        assert!(error.backtrace().is_some());
     }
 
     #[test]
@@ -592,7 +615,6 @@ mod tests {
     fn run_error() {
         let error = RunError::from(RunErrorKind::Wakeup);
         assert!(error.cause().is_none());
-        assert!(error.backtrace().is_some());
     }
 
     #[test]

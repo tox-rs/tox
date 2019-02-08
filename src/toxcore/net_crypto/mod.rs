@@ -221,7 +221,7 @@ impl NetCrypto {
         let cookie_request_id = if let ConnectionStatus::CookieRequesting { cookie_request_id, .. } = connection.status {
             cookie_request_id
         } else {
-            return Either::A(future::err(HandlePacketError::from(HandlePacketErrorKind::CannotHandle)))
+            return Either::A(future::err(HandlePacketError::from(HandlePacketErrorKind::InvalidState)))
         };
 
         let payload = match packet.get_payload(&connection.dht_precomputed_key) {
@@ -272,7 +272,7 @@ impl NetCrypto {
     pub fn handle_crypto_handshake(&self, connection: &mut CryptoConnection, packet: &CryptoHandshake)
         -> impl Future<Item = (), Error = HandlePacketError> + Send {
         if let ConnectionStatus::Established { .. } = connection.status {
-            return Box::new(future::err(HandlePacketError::from(HandlePacketErrorKind::CannotHandle)))
+            return Box::new(future::err(HandlePacketError::from(HandlePacketErrorKind::InvalidState)))
                 as Box<dyn Future<Item=_, Error=_> + Send>
         }
 
@@ -282,7 +282,7 @@ impl NetCrypto {
         };
 
         if packet.cookie.hash() != payload.cookie_hash {
-            return Box::new(future::err(HandlePacketError::from(HandlePacketErrorKind::Sha512)))
+            return Box::new(future::err(HandlePacketError::from(HandlePacketErrorKind::BadSha512)))
         }
 
         let cookie = match packet.cookie.get_payload(&self.symmetric_key) {
@@ -300,8 +300,8 @@ impl NetCrypto {
         if cookie.dht_pk != connection.peer_dht_pk {
             return Box::new(
                 send_to(&self.dht_pk_tx, (connection.peer_real_pk, cookie.dht_pk))
-                    .map_err(|_|
-                        HandlePacketError::from(HandlePacketErrorKind::SendTo))
+                    .map_err(|e|
+                        HandlePacketError::from(e))
                     .and_then(|()| future::err(HandlePacketError::from(HandlePacketErrorKind::InvalidDhtPk)))
             )
         }
@@ -507,7 +507,7 @@ impl NetCrypto {
         // And get the ID of the packet
         let packet_id = match payload.data.first() {
             Some(&packet_id) => packet_id,
-            None => return Box::new(future::err(HandlePacketError::from(HandlePacketErrorKind::Empty)))
+            None => return Box::new(future::err(HandlePacketError::from(HandlePacketErrorKind::DataEmpty)))
         };
 
         if packet_id == PACKET_ID_KILL {
@@ -1033,7 +1033,7 @@ mod tests {
 
         let res = net_crypto.handle_cookie_response(&mut connection, &cookie_response).wait();
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::CannotHandle);
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::InvalidState);
     }
 
     #[test]
@@ -1356,7 +1356,7 @@ mod tests {
 
         let res = net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).wait();
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::CannotHandle);
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::InvalidState);
     }
 
     #[test]
@@ -1402,7 +1402,7 @@ mod tests {
 
         let res = net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).wait();
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::Sha512);
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::BadSha512);
     }
 
     #[test]
@@ -1873,7 +1873,7 @@ mod tests {
 
         let res = net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait();
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::PacketsArray);
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::PacketsArrayError);
 
         assert_eq!(unpack!(connection.status, ConnectionStatus::Established, received_nonce), received_nonce);
 
@@ -2017,7 +2017,7 @@ mod tests {
 
         let res = net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait();
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::PacketsArray);
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::PacketsArrayError);
 
         assert_eq!(unpack!(connection.status, ConnectionStatus::Established, received_nonce), received_nonce);
 
@@ -2327,7 +2327,7 @@ mod tests {
 
         let res = net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait();
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::Empty);
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::DataEmpty);
 
         assert_eq!(unpack!(connection.status, ConnectionStatus::Established, received_nonce), received_nonce);
 

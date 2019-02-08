@@ -73,7 +73,7 @@ pub enum HandlePacketErrorKind {
     #[fail(display = "NetCrypto is not initialized error")]
     NetCrypto,
     /// Error indicates that handling NetCrypto packet made an error.
-    #[fail(display = "Handling NetCrypto packet has error")]
+    #[fail(display = "Handling NetCrypto packet failed")]
     HandleNetCrypto,
     /// Error indicates that onion or net crypto processing fails.
     /// ## This enum entry is temporary for onion or net crypto module's transition to failure
