@@ -1,6 +1,8 @@
 /*! DhtRequest packet
 */
 
+use std::time::SystemTime;
+
 use nom::{be_u64, rest};
 
 use crate::toxcore::binary_io::*;
@@ -8,6 +10,7 @@ use crate::toxcore::crypto_core::*;
 use crate::toxcore::dht::codec::*;
 use crate::toxcore::dht::packet::errors::*;
 use crate::toxcore::packed_node::*;
+use crate::toxcore::time::*;
 
 /** DHT Request packet struct.
 DHT Request packet consists of NatPingRequest and NatPingResponse.
@@ -365,6 +368,17 @@ impl ToBytes for DhtPkAnnouncePayload {
                 gen_many_ref!(&self.nodes, |buf, node| TcpUdpPackedNode::to_bytes(node, buf))
             )
         )
+    }
+}
+
+impl DhtPkAnnouncePayload {
+    /// Create new `DhtPkAnnouncePayload` with `no_reply` set to current time.
+    pub fn new(dht_pk: PublicKey, nodes: Vec<TcpUdpPackedNode>) -> Self {
+        DhtPkAnnouncePayload {
+            no_reply: unix_time(SystemTime::now()),
+            dht_pk,
+            nodes,
+        }
     }
 }
 

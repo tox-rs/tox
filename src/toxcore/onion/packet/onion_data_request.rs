@@ -5,6 +5,7 @@ use super::*;
 
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
+use crate::toxcore::dht::packet::*;
 
 use nom::rest;
 
@@ -64,6 +65,57 @@ impl ToBytes for InnerOnionDataRequest {
             gen_slice!(self.temporary_pk.as_ref()) >>
             gen_slice!(self.payload)
         )
+    }
+}
+
+impl InnerOnionDataRequest {
+    /// Create `InnerOnionDataRequest` from `OnionDataResponsePayload`
+    /// encrypting it with `shared_key` and `nonce`
+    pub fn new(
+        shared_secret: &PrecomputedKey,
+        destination_pk: PublicKey,
+        temporary_pk: PublicKey,
+        nonce: Nonce,
+        payload: &OnionDataResponsePayload
+    ) -> InnerOnionDataRequest {
+        let mut buf = [0; 293]; // TODO: check FriendRequest size
+        let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
+        let payload = seal_precomputed(&buf[..size], &nonce, shared_secret);
+
+        InnerOnionDataRequest {
+            destination_pk,
+            nonce,
+            temporary_pk,
+            payload,
+        }
+    }
+
+    /** Decrypt payload and try to parse it as `OnionDataResponsePayload`.
+
+    Returns `Error` in case of failure:
+
+    - fails to decrypt
+    - fails to parse as `OnionDataResponsePayload`
+    */
+    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<OnionDataResponsePayload, GetPayloadError> {
+        let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
+            .map_err(|()| {
+                debug!("Decrypting OnionDataResponsePayload failed!");
+                GetPayloadError::decrypt()
+            })?;
+        match OnionDataResponsePayload::from_bytes(&decrypted) {
+            IResult::Incomplete(needed) => {
+                debug!(target: "Onion", "OnionDataResponsePayload deserialize error: {:?}", needed);
+                Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
+            },
+            IResult::Error(e) => {
+                debug!(target: "Onion", "OnionDataResponsePayload deserialize error: {:?}", e);
+                Err(GetPayloadError::deserialize(e, self.payload.to_vec()))
+            },
+            IResult::Done(_, inner) => {
+                Ok(inner)
+            }
+        }
     }
 }
 

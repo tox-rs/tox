@@ -25,6 +25,7 @@ use futures::sync::mpsc;
 use tokio::timer::Interval;
 
 use crate::toxcore::crypto_core::*;
+use crate::toxcore::dht::packed_node::PackedNode;
 use crate::toxcore::tcp::client::client::*;
 use crate::toxcore::tcp::packet::*;
 use crate::toxcore::time::*;
@@ -203,6 +204,25 @@ impl Connections {
             Either::B(future::ok(()))
         };
         future.join(client.add_connection(node_pk)).map(|_| ())
+    }
+
+    /// Get up to `count` random TCP relays we are connected to.
+    pub fn get_relays(&self, count: u8) -> Vec<PackedNode> {
+        let clients = self.clients.read();
+
+        if clients.is_empty() {
+            return Vec::new();
+        }
+
+        let skip = random_limit_usize(clients.len());
+        clients
+            .values()
+            .filter(|client| client.is_connected())
+            .cycle()
+            .skip(skip)
+            .take(count as usize)
+            .map(|client| PackedNode::new(client.addr, &client.pk))
+            .collect()
     }
 
     /// Send `Data` packet to a node via one of the relays.

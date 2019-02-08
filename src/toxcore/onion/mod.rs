@@ -41,6 +41,10 @@ onion return addresses.
 
 */
 
+mod nodes_pool;
 pub mod onion_announce;
+pub mod onion_client;
 pub mod onion_path;
 pub mod packet;
+mod paths_pool;
+pub mod request_queue;
