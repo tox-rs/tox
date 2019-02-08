@@ -41,5 +41,6 @@ onion return addresses.
 
 */
 
+pub mod client;
 pub mod onion_announce;
 pub mod packet;
