@@ -42,4 +42,5 @@ onion return addresses.
 */
 
 pub mod onion_announce;
+pub mod onion_path;
 pub mod packet;
