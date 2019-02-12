@@ -6,11 +6,13 @@ use crate::toxcore::binary_io::*;
 mod online;
 mod offline;
 mod nickname;
+mod file_control;
 mod file_data;
 
 pub use self::online::*;
 pub use self::offline::*;
 pub use self::nickname::*;
+pub use self::file_control::*;
 pub use self::file_data::*;
 
 /** Messenger packet enum that encapsulates all types of Messenger packets.
@@ -23,6 +25,8 @@ pub enum Packet {
     Offline(Offline),
     /// [`Nickname`](./struct.Nickname.html) structure.
     Nickname(Nickname),
+    /// [`FileControl`](./struct.FileControl.html) structure.
+    FileControl(FileControl),
     /// [`FileData`](./struct.FileData.html) structure.
     FileData(FileData),
 }
@@ -33,6 +37,7 @@ impl ToBytes for Packet {
             Packet::Online(ref p) => p.to_bytes(buf),
             Packet::Offline(ref p) => p.to_bytes(buf),
             Packet::Nickname(ref p) => p.to_bytes(buf),
+            Packet::FileControl(ref p) => p.to_bytes(buf),
             Packet::FileData(ref p) => p.to_bytes(buf),
         }
     }
@@ -43,6 +48,8 @@ impl FromBytes for Packet {
         map!(Online::from_bytes, Packet::Online) |
         map!(Offline::from_bytes, Packet::Offline) |
         map!(Nickname::from_bytes, Packet::Nickname) |
+        map!(Nickname::from_bytes, Packet::Nickname) |
+        map!(FileControl::from_bytes, Packet::FileControl) |
         map!(FileData::from_bytes, Packet::FileData)
     ));
 }
@@ -64,6 +71,11 @@ mod tests {
     encode_decode_test!(
         packet_nickname_encode_decode,
         Packet::Nickname(Nickname::new("1234".to_string()))
+    );
+
+    encode_decode_test!(
+        packet_file_control_encode_decode,
+        Packet::FileControl(FileControl::new(TransferDirection::Send, 1, ControlType::Seek(100)))
     );
 
     encode_decode_test!(
