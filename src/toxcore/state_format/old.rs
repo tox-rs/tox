@@ -9,7 +9,7 @@ use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
 use crate::toxcore::dht::packed_node::*;
 use crate::toxcore::toxid::{NoSpam, NOSPAMBYTES};
-use crate::toxcore::ip_port::*;
+use crate::toxcore::packed_node::*;
 
 const REQUEST_MSG_LEN: usize = 1024;
 
@@ -281,33 +281,6 @@ impl FromBytes for StatusMsg {
         status_msg: value!(status_msg_bytes.to_vec()) >>
         (StatusMsg(status_msg))
     ));
-}
-
-/// Variant of PackedNode to contain both TCP and UDP
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TcpUdpPackedNode {
-    ip_port: IpPort,
-    pk: PublicKey,
-}
-
-impl FromBytes for TcpUdpPackedNode {
-    named!(from_bytes<TcpUdpPackedNode>, do_parse!(
-        ip_port: call!(IpPort::from_bytes, IpPortPadding::NoPadding) >>
-        pk: call!(PublicKey::from_bytes) >>
-        (TcpUdpPackedNode {
-            ip_port,
-            pk,
-        })
-    ));
-}
-
-impl ToBytes for TcpUdpPackedNode {
-    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        do_gen!(buf,
-            gen_call!(|buf, data| IpPort::to_bytes(data, buf, IpPortPadding::NoPadding), &self.ip_port) >>
-            gen_slice!(self.pk.as_ref())
-        )
-    }
 }
 
 /// Contains list in `TcpUdpPackedNode` format.
@@ -640,6 +613,8 @@ impl ToBytes for State {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::toxcore::ip_port::*;
 
     encode_decode_test!(
         no_spam_keys_encode_decode,
