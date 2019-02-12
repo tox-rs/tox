@@ -2,12 +2,6 @@
 //! better will become available.*
 
 use std::default::Default;
-use std::net::{
-    IpAddr,
-    Ipv4Addr,
-    Ipv6Addr,
-//    SocketAddr,
-};
 use byteorder::{ByteOrder, LittleEndian};
 use nom::{le_u16, be_u16, le_u8, le_u32, le_u64, rest};
 
@@ -15,7 +9,7 @@ use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
 use crate::toxcore::dht::packed_node::*;
 use crate::toxcore::toxid::{NoSpam, NOSPAMBYTES};
-use crate::toxcore::onion::packet::*;
+use crate::toxcore::ip_port::*;
 
 const REQUEST_MSG_LEN: usize = 1024;
 
@@ -289,98 +283,16 @@ impl FromBytes for StatusMsg {
     ));
 }
 
-/// struct for old state_format IpPort
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct OldIpPort {
-    /// Type of protocol
-    pub protocol: ProtocolType,
-    /// IP address
-    pub ip_addr: IpAddr,
-    /// Port number
-    pub port: u16
-}
-
-impl FromBytes for OldIpPort {
-    named!(from_bytes<OldIpPort>, alt!(call!(OldIpPort::from_udp_bytes) | call!(OldIpPort::from_tcp_bytes)));
-}
-
-impl ToBytes for OldIpPort {
-    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        do_gen!(buf,
-            gen_be_u8!(self.ip_type()) >>
-            gen_call!(|buf, ip_addr| IpAddr::to_bytes(ip_addr, buf), &self.ip_addr) >>
-            gen_be_u16!(self.port)
-        )
-    }
-}
-
-impl OldIpPort {
-    /** Get IP Type byte.
-
-    * 1st bit - protocol
-    * 4th bit - address family
-
-    Value | Type
-    ----- | ----
-    `2`   | UDP IPv4
-    `10`  | UDP IPv6
-    `130` | TCP IPv4
-    `138` | TCP IPv6
-
-    */
-    fn ip_type(&self) -> u8 {
-        if self.ip_addr.is_ipv4() {
-            match self.protocol {
-                ProtocolType::UDP => 2,
-                ProtocolType::TCP => 130,
-            }
-        } else {
-            match self.protocol {
-                ProtocolType::UDP => 10,
-                ProtocolType::TCP => 138,
-            }
-        }
-    }
-
-    named!(
-        #[allow(unused_variables)]
-        #[doc = "Parse `IpPort` with UDP protocol type."],
-        from_udp_bytes<OldIpPort>,
-        do_parse!(
-            ip_addr: switch!(le_u8,
-                2 => map!(Ipv4Addr::from_bytes, IpAddr::V4) |
-                10 => map!(Ipv6Addr::from_bytes, IpAddr::V6)
-            ) >>
-            port: be_u16 >>
-            (OldIpPort { protocol: ProtocolType::UDP, ip_addr, port })
-        )
-    );
-
-    named!(
-        #[allow(unused_variables)]
-        #[doc = "Parse `IpPort` with TCP protocol type."],
-        from_tcp_bytes<OldIpPort>,
-        do_parse!(
-            ip_addr: switch!(le_u8,
-                130 => map!(Ipv4Addr::from_bytes, IpAddr::V4) |
-                138 => map!(Ipv6Addr::from_bytes, IpAddr::V6)
-            ) >>
-            port: be_u16 >>
-            (OldIpPort { protocol: ProtocolType::TCP, ip_addr, port })
-        )
-    );
-}
-
 /// Variant of PackedNode to contain both TCP and UDP
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TcpUdpPackedNode {
-    ip_port: OldIpPort,
+    ip_port: IpPort,
     pk: PublicKey,
 }
 
 impl FromBytes for TcpUdpPackedNode {
     named!(from_bytes<TcpUdpPackedNode>, do_parse!(
-        ip_port: call!(OldIpPort::from_bytes) >>
+        ip_port: call!(IpPort::from_bytes, false) >>
         pk: call!(PublicKey::from_bytes) >>
         (TcpUdpPackedNode {
             ip_port,
@@ -392,7 +304,7 @@ impl FromBytes for TcpUdpPackedNode {
 impl ToBytes for TcpUdpPackedNode {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
-            gen_call!(|buf, data| OldIpPort::to_bytes(data, buf), &self.ip_port) >>
+            gen_call!(|buf, data| IpPort::to_bytes(data, buf, false), &self.ip_port) >>
             gen_slice!(self.pk.as_ref())
         )
     }
@@ -799,7 +711,7 @@ mod tests {
         TcpRelays(vec![
             TcpUdpPackedNode {
                 pk: gen_keypair().0,
-                ip_port: OldIpPort {
+                ip_port: IpPort {
                     protocol: ProtocolType::TCP,
                     ip_addr: "1.2.3.4".parse().unwrap(),
                     port: 1234,
@@ -807,7 +719,7 @@ mod tests {
             },
             TcpUdpPackedNode {
                 pk: gen_keypair().0,
-                ip_port: OldIpPort {
+                ip_port: IpPort {
                     protocol: ProtocolType::UDP,
                     ip_addr: "1.2.3.5".parse().unwrap(),
                     port: 12345,
@@ -821,7 +733,7 @@ mod tests {
         PathNodes(vec![
             TcpUdpPackedNode {
                 pk: gen_keypair().0,
-                ip_port: OldIpPort {
+                ip_port: IpPort {
                     protocol: ProtocolType::TCP,
                     ip_addr: "1.2.3.4".parse().unwrap(),
                     port: 1234,
@@ -829,7 +741,7 @@ mod tests {
             },
             TcpUdpPackedNode {
                 pk: gen_keypair().0,
-                ip_port: OldIpPort {
+                ip_port: IpPort {
                     protocol: ProtocolType::UDP,
                     ip_addr: "1.2.3.5".parse().unwrap(),
                     port: 12345,
@@ -881,7 +793,7 @@ mod tests {
                 Section::TcpRelays(TcpRelays(vec![
                     TcpUdpPackedNode {
                         pk: gen_keypair().0,
-                        ip_port: OldIpPort {
+                        ip_port: IpPort {
                             protocol: ProtocolType::TCP,
                             ip_addr: "1.2.3.4".parse().unwrap(),
                             port: 1234,
@@ -889,7 +801,7 @@ mod tests {
                     },
                     TcpUdpPackedNode {
                         pk: gen_keypair().0,
-                        ip_port: OldIpPort {
+                        ip_port: IpPort {
                             protocol: ProtocolType::UDP,
                             ip_addr: "1.2.3.5".parse().unwrap(),
                             port: 12345,
@@ -899,7 +811,7 @@ mod tests {
                 Section::PathNodes(PathNodes(vec![
                     TcpUdpPackedNode {
                         pk: gen_keypair().0,
-                        ip_port: OldIpPort {
+                        ip_port: IpPort {
                             protocol: ProtocolType::TCP,
                             ip_addr: "1.2.3.4".parse().unwrap(),
                             port: 1234,
@@ -907,7 +819,7 @@ mod tests {
                     },
                     TcpUdpPackedNode {
                         pk: gen_keypair().0,
-                        ip_port: OldIpPort {
+                        ip_port: IpPort {
                             protocol: ProtocolType::UDP,
                             ip_addr: "1.2.3.5".parse().unwrap(),
                             port: 12345,

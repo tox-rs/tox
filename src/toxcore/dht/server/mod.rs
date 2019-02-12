@@ -29,6 +29,7 @@ use crate::toxcore::onion::packet::*;
 use crate::toxcore::onion::onion_announce::*;
 use crate::toxcore::dht::request_queue::*;
 use crate::toxcore::io_tokio::*;
+use crate::toxcore::ip_port::*;
 use crate::toxcore::dht::dht_friend::*;
 use crate::toxcore::dht::dht_node::*;
 use crate::toxcore::dht::server::hole_punching::*;

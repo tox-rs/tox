@@ -366,10 +366,10 @@ mod tests {
     use tokio_executor;
     use tokio_timer::clock::*;
 
+    use crate::toxcore::ip_port::*;
     use crate::toxcore::tcp::client::client::tests::*;
     use crate::toxcore::tcp::connection_id::ConnectionId;
     use crate::toxcore::time::ConstNow;
-    use crate::toxcore::onion::packet::*;
 
     #[test]
     fn add_relay_global() {
