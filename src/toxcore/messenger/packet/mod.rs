@@ -9,6 +9,7 @@ mod offline;
 mod message;
 mod nickname;
 mod file_control;
+mod typing;
 mod user_status;
 mod file_data;
 
@@ -18,6 +19,7 @@ pub use self::offline::*;
 pub use self::message::*;
 pub use self::nickname::*;
 pub use self::file_control::*;
+pub use self::typing::*;
 pub use self::user_status::*;
 pub use self::file_data::*;
 
@@ -39,6 +41,8 @@ pub enum Packet {
     UserStatus(UserStatus),
     /// [`FileControl`](./struct.FileControl.html) structure.
     FileControl(FileControl),
+    /// [`Typing`](./struct.Typing.html) structure.
+    Typing(Typing),
     /// [`FileData`](./struct.FileData.html) structure.
     FileData(FileData),
 }
@@ -53,6 +57,7 @@ impl ToBytes for Packet {
             Packet::Nickname(ref p) => p.to_bytes(buf),
             Packet::UserStatus(ref p) => p.to_bytes(buf),
             Packet::FileControl(ref p) => p.to_bytes(buf),
+            Packet::Typing(ref p) => p.to_bytes(buf),
             Packet::FileData(ref p) => p.to_bytes(buf),
         }
     }
@@ -67,6 +72,7 @@ impl FromBytes for Packet {
         map!(Nickname::from_bytes, Packet::Nickname) |
         map!(UserStatus::from_bytes, Packet::UserStatus) |
         map!(FileControl::from_bytes, Packet::FileControl) |
+        map!(Typing::from_bytes, Packet::Typing) |
         map!(FileData::from_bytes, Packet::FileData)
     ));
 }
@@ -108,6 +114,11 @@ mod tests {
     encode_decode_test!(
         packet_file_control_encode_decode,
         Packet::FileControl(FileControl::new(TransferDirection::Send, 1, ControlType::Seek(100)))
+    );
+
+    encode_decode_test!(
+        packet_typing_encode_decode,
+        Packet::Typing(Typing::new(TypingStatus::NotTyping))
     );
 
     encode_decode_test!(
