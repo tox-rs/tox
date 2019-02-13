@@ -12,6 +12,7 @@ mod file_control;
 mod typing;
 mod user_status;
 mod file_data;
+mod status_message;
 
 pub use self::online::*;
 pub use self::action::*;
@@ -22,6 +23,7 @@ pub use self::file_control::*;
 pub use self::typing::*;
 pub use self::user_status::*;
 pub use self::file_data::*;
+pub use self::status_message::*;
 
 /** Messenger packet enum that encapsulates all types of Messenger packets.
 */
@@ -45,6 +47,8 @@ pub enum Packet {
     Typing(Typing),
     /// [`FileData`](./struct.FileData.html) structure.
     FileData(FileData),
+    /// [`StatusMessage`](./struct.StatusMessage.html) structure.
+    StatusMessage(StatusMessage),
 }
 
 impl ToBytes for Packet {
@@ -59,6 +63,7 @@ impl ToBytes for Packet {
             Packet::FileControl(ref p) => p.to_bytes(buf),
             Packet::Typing(ref p) => p.to_bytes(buf),
             Packet::FileData(ref p) => p.to_bytes(buf),
+            Packet::StatusMessage(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -72,6 +77,8 @@ impl FromBytes for Packet {
         map!(Nickname::from_bytes, Packet::Nickname) |
         map!(UserStatus::from_bytes, Packet::UserStatus) |
         map!(FileControl::from_bytes, Packet::FileControl) |
+        map!(FileData::from_bytes, Packet::FileData) |
+        map!(StatusMessage::from_bytes, Packet::StatusMessage) |
         map!(Typing::from_bytes, Packet::Typing) |
         map!(FileData::from_bytes, Packet::FileData)
     ));
@@ -124,5 +131,10 @@ mod tests {
     encode_decode_test!(
         packet_file_data_encode_decode,
         Packet::FileData(FileData::new(1, vec![1,2,3,4]))
+    );
+
+    encode_decode_test!(
+        packet_status_message_encode_decode,
+        Packet::StatusMessage(StatusMessage::new("1234".to_string()))
     );
 }
