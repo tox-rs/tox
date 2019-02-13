@@ -6,6 +6,7 @@ use crate::toxcore::binary_io::*;
 mod online;
 mod action;
 mod offline;
+mod message;
 mod nickname;
 mod file_control;
 mod file_data;
@@ -13,6 +14,7 @@ mod file_data;
 pub use self::online::*;
 pub use self::action::*;
 pub use self::offline::*;
+pub use self::message::*;
 pub use self::nickname::*;
 pub use self::file_control::*;
 pub use self::file_data::*;
@@ -27,6 +29,8 @@ pub enum Packet {
     Action(Action),
     /// [`Offline`](./struct.Offline.html) structure.
     Offline(Offline),
+    /// [`Message`](./struct.Message.html) structure.
+    Message(Message),
     /// [`Nickname`](./struct.Nickname.html) structure.
     Nickname(Nickname),
     /// [`FileControl`](./struct.FileControl.html) structure.
@@ -41,6 +45,7 @@ impl ToBytes for Packet {
             Packet::Online(ref p) => p.to_bytes(buf),
             Packet::Action(ref p) => p.to_bytes(buf),
             Packet::Offline(ref p) => p.to_bytes(buf),
+            Packet::Message(ref p) => p.to_bytes(buf),
             Packet::Nickname(ref p) => p.to_bytes(buf),
             Packet::FileControl(ref p) => p.to_bytes(buf),
             Packet::FileData(ref p) => p.to_bytes(buf),
@@ -53,6 +58,7 @@ impl FromBytes for Packet {
         map!(Online::from_bytes, Packet::Online) |
         map!(Action::from_bytes, Packet::Action) |
         map!(Offline::from_bytes, Packet::Offline) |
+        map!(Message::from_bytes, Packet::Message) |
         map!(Nickname::from_bytes, Packet::Nickname) |
         map!(Nickname::from_bytes, Packet::Nickname) |
         map!(FileControl::from_bytes, Packet::FileControl) |
@@ -77,6 +83,11 @@ mod tests {
     encode_decode_test!(
         packet_offline_encode_decode,
         Packet::Offline(Offline)
+    );
+
+    encode_decode_test!(
+        packet_message_encode_decode,
+        Packet::Message(Message::new("1234".to_string()))
     );
 
     encode_decode_test!(
