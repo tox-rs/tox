@@ -94,7 +94,7 @@ impl OnionReturn {
     #[allow(clippy::needless_pass_by_value)]
     fn inner_to_bytes<'a>(ip_port: &IpPort, inner: Option<&OnionReturn>, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
-            gen_call!(|buf, ip_port| IpPort::to_bytes(ip_port, buf, true), ip_port) >>
+            gen_call!(|buf, ip_port| IpPort::to_bytes(ip_port, buf, IpPortPadding::WithPadding), ip_port) >>
             gen_call!(|buf, inner| match inner {
                 Some(inner) => OnionReturn::to_bytes(inner, buf),
                 None => Ok(buf)
@@ -103,7 +103,7 @@ impl OnionReturn {
     }
 
     named!(inner_from_bytes<(IpPort, Option<OnionReturn>)>, do_parse!(
-        ip_port: call!(IpPort::from_bytes, true) >>
+        ip_port: call!(IpPort::from_bytes, IpPortPadding::WithPadding) >>
         rest_len: rest_len >>
         inner: cond!(rest_len > 0, OnionReturn::from_bytes) >>
         (ip_port, inner)

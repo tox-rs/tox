@@ -57,7 +57,7 @@ impl FromBytes for OnionRequest {
     named!(from_bytes<OnionRequest>, do_parse!(
         tag!("\x08") >>
         nonce: call!(Nonce::from_bytes) >>
-        ip_port: call!(IpPort::from_bytes, true) >>
+        ip_port: call!(IpPort::from_bytes, IpPortPadding::WithPadding) >>
         temporary_pk: call!(PublicKey::from_bytes) >>
         payload: verify!(
             rest,
@@ -76,7 +76,7 @@ impl ToBytes for OnionRequest {
             ) >>
             gen_be_u8!(0x08) >>
             gen_slice!(self.nonce.as_ref()) >>
-            gen_call!(|buf, ip_port| IpPort::to_bytes(ip_port, buf, true), &self.ip_port) >>
+            gen_call!(|buf, ip_port| IpPort::to_bytes(ip_port, buf, IpPortPadding::WithPadding), &self.ip_port) >>
             gen_slice!(self.temporary_pk.as_ref()) >>
             gen_slice!(self.payload)
         )

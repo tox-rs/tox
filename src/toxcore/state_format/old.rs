@@ -292,7 +292,7 @@ pub struct TcpUdpPackedNode {
 
 impl FromBytes for TcpUdpPackedNode {
     named!(from_bytes<TcpUdpPackedNode>, do_parse!(
-        ip_port: call!(IpPort::from_bytes, false) >>
+        ip_port: call!(IpPort::from_bytes, IpPortPadding::NoPadding) >>
         pk: call!(PublicKey::from_bytes) >>
         (TcpUdpPackedNode {
             ip_port,
@@ -304,7 +304,7 @@ impl FromBytes for TcpUdpPackedNode {
 impl ToBytes for TcpUdpPackedNode {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
-            gen_call!(|buf, data| IpPort::to_bytes(data, buf, false), &self.ip_port) >>
+            gen_call!(|buf, data| IpPort::to_bytes(data, buf, IpPortPadding::NoPadding), &self.ip_port) >>
             gen_slice!(self.pk.as_ref())
         )
     }

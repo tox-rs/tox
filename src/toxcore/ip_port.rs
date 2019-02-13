@@ -18,6 +18,16 @@ pub const SIZE_IPPORT: usize = 19;
 /// the same stored size.
 pub const IPV4_PADDING_SIZE: usize = 12;
 
+/// Defines whether 12 bytes padding should be inserted after IPv4 address to
+/// align it with IPv6 address.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum IpPortPadding {
+    /// Padding should be inserted.
+    WithPadding,
+    /// Padding should not be inserted.
+    NoPadding,
+}
+
 /** Transport protocol type: `UDP` or `TCP`.
 
 The binary representation of `ProtocolType` is a single bit: 0 for `UDP`, 1 for
@@ -85,12 +95,12 @@ impl IpPort {
     }
 
     /// Parse `IpPort` with UDP protocol type with optional padding.
-    pub fn from_udp_bytes(input: &[u8], padding: bool) -> IResult<&[u8], IpPort> {
+    pub fn from_udp_bytes(input: &[u8], padding: IpPortPadding) -> IResult<&[u8], IpPort> {
         do_parse!(input,
             ip_addr: switch!(le_u8,
                 2 => terminated!(
                     map!(Ipv4Addr::from_bytes, IpAddr::V4),
-                    cond!(padding, take!(IPV4_PADDING_SIZE))
+                    cond!(padding == IpPortPadding::WithPadding, take!(IPV4_PADDING_SIZE))
                 ) |
                 10 => map!(Ipv6Addr::from_bytes, IpAddr::V6)
             ) >>
@@ -100,12 +110,12 @@ impl IpPort {
     }
 
     /// Parse `IpPort` with TCP protocol type with optional padding.
-    pub fn from_tcp_bytes(input: &[u8], padding: bool) -> IResult<&[u8], IpPort> {
+    pub fn from_tcp_bytes(input: &[u8], padding: IpPortPadding) -> IResult<&[u8], IpPort> {
         do_parse!(input,
             ip_addr: switch!(le_u8,
                 130 => terminated!(
                     map!(Ipv4Addr::from_bytes, IpAddr::V4),
-                    cond!(padding, take!(IPV4_PADDING_SIZE))
+                    cond!(padding == IpPortPadding::WithPadding, take!(IPV4_PADDING_SIZE))
                 ) |
                 138 => map!(Ipv6Addr::from_bytes, IpAddr::V6)
             ) >>
@@ -115,12 +125,12 @@ impl IpPort {
     }
 
     /// Parse `IpPort` with optional padding.
-    pub fn from_bytes(input: &[u8], padding: bool) -> IResult<&[u8], IpPort> {
+    pub fn from_bytes(input: &[u8], padding: IpPortPadding) -> IResult<&[u8], IpPort> {
         alt!(input, call!(IpPort::from_udp_bytes, padding) | call!(IpPort::from_tcp_bytes, padding))
     }
 
     /// Write `IpPort` with UDP protocol type with optional padding.
-    pub fn to_udp_bytes<'a>(&self, buf: (&'a mut [u8], usize), padding: bool) -> Result<(&'a mut [u8], usize), GenError> {
+    pub fn to_udp_bytes<'a>(&self, buf: (&'a mut [u8], usize), padding: IpPortPadding) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_cond!(self.protocol == ProtocolType::TCP, |buf| gen_error(buf, 0)) >>
             gen_call!(|buf, ip_port| IpPort::to_bytes(ip_port, buf, padding), self)
@@ -128,7 +138,7 @@ impl IpPort {
     }
 
     /// Write `IpPort` with TCP protocol type with optional padding.
-    pub fn to_tcp_bytes<'a>(&self, buf: (&'a mut [u8], usize), padding: bool) -> Result<(&'a mut [u8], usize), GenError> {
+    pub fn to_tcp_bytes<'a>(&self, buf: (&'a mut [u8], usize), padding: IpPortPadding) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_cond!(self.protocol == ProtocolType::UDP, |buf| gen_error(buf, 0)) >>
             gen_call!(|buf, ip_port| IpPort::to_bytes(ip_port, buf, padding), self)
@@ -136,11 +146,11 @@ impl IpPort {
     }
 
     /// Write `IpPort` with optional padding.
-    pub fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize), padding: bool) -> Result<(&'a mut [u8], usize), GenError> {
+    pub fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize), padding: IpPortPadding) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(self.ip_type()) >>
             gen_call!(|buf, ip_addr| IpAddr::to_bytes(ip_addr, buf), &self.ip_addr) >>
-            gen_cond!(padding && self.ip_addr.is_ipv4(), gen_slice!(&[0; IPV4_PADDING_SIZE])) >>
+            gen_cond!(padding == IpPortPadding::WithPadding && self.ip_addr.is_ipv4(), gen_slice!(&[0; IPV4_PADDING_SIZE])) >>
             gen_be_u16!(self.port)
         )
     }
@@ -183,9 +193,9 @@ mod tests {
                     port: 12345
                 };
                 let mut buf = [0; SIZE_IPPORT];
-                let (_, size) = value.to_bytes((&mut buf, 0), true).unwrap();
+                let (_, size) = value.to_bytes((&mut buf, 0), IpPortPadding::WithPadding).unwrap();
                 assert_eq!(size, SIZE_IPPORT);
-                let (rest, decoded_value) = IpPort::from_bytes(&buf[..size], true).unwrap();
+                let (rest, decoded_value) = IpPort::from_bytes(&buf[..size], IpPortPadding::WithPadding).unwrap();
                 assert!(rest.is_empty());
                 assert_eq!(decoded_value, value);
             }
@@ -205,9 +215,9 @@ mod tests {
                     port: 12345
                 };
                 let mut buf = [0; SIZE_IPPORT - IPV4_PADDING_SIZE];
-                let (_, size) = value.to_bytes((&mut buf, 0), false).unwrap();
+                let (_, size) = value.to_bytes((&mut buf, 0), IpPortPadding::NoPadding).unwrap();
                 assert_eq!(size, SIZE_IPPORT - IPV4_PADDING_SIZE);
-                let (rest, decoded_value) = IpPort::from_bytes(&buf[..size], false).unwrap();
+                let (rest, decoded_value) = IpPort::from_bytes(&buf[..size], IpPortPadding::NoPadding).unwrap();
                 assert!(rest.is_empty());
                 assert_eq!(decoded_value, value);
             }
