@@ -137,7 +137,7 @@ pub struct OnionRequest0Payload {
 
 impl FromBytes for OnionRequest0Payload{
     named!(from_bytes<OnionRequest0Payload>, do_parse!(
-        ip_port: call!(IpPort::from_udp_bytes) >>
+        ip_port: call!(IpPort::from_udp_bytes, IpPortPadding::WithPadding) >>
         temporary_pk: call!(PublicKey::from_bytes) >>
         inner: rest >>
         (OnionRequest0Payload {
@@ -151,7 +151,7 @@ impl FromBytes for OnionRequest0Payload{
 impl ToBytes for OnionRequest0Payload {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
-            gen_call!(|buf, ip_port| IpPort::to_udp_bytes(ip_port, buf), &self.ip_port) >>
+            gen_call!(|buf, ip_port| IpPort::to_udp_bytes(ip_port, buf, IpPortPadding::WithPadding), &self.ip_port) >>
             gen_slice!(self.temporary_pk.as_ref()) >>
             gen_slice!(self.inner)
         )

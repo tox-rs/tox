@@ -516,6 +516,7 @@ impl Server {
 mod tests {
     use super::*;
 
+    use crate::toxcore::ip_port::*;
     use crate::toxcore::onion::packet::*;
     use crate::toxcore::tcp::server::{Client, Server};
     use crate::toxcore::tcp::server::client::*;

@@ -30,22 +30,10 @@ pub use self::onion_response_3::*;
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
 use crate::toxcore::dht::packed_node::PackedNode;
+use crate::toxcore::ip_port::*;
 
-use nom::{be_u16, le_u8, rest};
-use std::net::{
-    IpAddr,
-    Ipv4Addr,
-    Ipv6Addr,
-    SocketAddr,
-};
+use nom::{le_u8, rest};
 use std::io::{Error, ErrorKind};
-
-/// IPv4 is padded with 12 bytes of zeroes so that both IPv4 and
-/// IPv6 have the same stored size.
-pub const IPV4_PADDING_SIZE: usize = 12;
-
-/// Size of serialized `IpPort` struct.
-pub const SIZE_IPPORT: usize = 19;
 
 /// Size of first `OnionReturn` struct with no inner `OnionReturn`s.
 pub const ONION_RETURN_1_SIZE: usize = secretbox::NONCEBYTES + SIZE_IPPORT + MACBYTES; // 59
@@ -57,161 +45,6 @@ pub const ONION_RETURN_3_SIZE: usize = secretbox::NONCEBYTES + SIZE_IPPORT + MAC
 /// The maximum size of onion packet including public key, nonce, packet kind
 /// byte, onion return.
 pub const ONION_MAX_PACKET_SIZE: usize = 1400;
-
-/** Transport protocol type: `UDP` or `TCP`.
-
-The binary representation of `ProtocolType` is a single bit: 0 for `UDP`, 1 for
-`TCP`. If encoded as standalone value, the bit is stored in the least
-significant bit of a byte.
-
-*/
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum ProtocolType {
-    /// `UDP` type if the least significant bit is 0.
-    UDP,
-    /// `TCP` type if the least significant bit is 1.
-    TCP
-}
-
-/** `IpAddr` with a port number. IPv4 is padded with 12 bytes of zeros
-so that both IPv4 and IPv6 have the same stored size.
-
-Serialized form:
-
-Length      | Content
------------ | ------
-`1`         | IpType
-`4` or `16` | IPv4 or IPv6 address
-`0` or `12` | Padding for IPv4
-`2`         | Port
-
-*/
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct IpPort {
-    /// Type of protocol
-    pub protocol: ProtocolType,
-    /// IP address
-    pub ip_addr: IpAddr,
-    /// Port number
-    pub port: u16
-}
-
-impl FromBytes for IpPort {
-    named!(from_bytes<IpPort>, alt!(call!(IpPort::from_udp_bytes) | call!(IpPort::from_tcp_bytes)));
-}
-
-impl ToBytes for IpPort {
-    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        do_gen!(buf,
-            gen_be_u8!(self.ip_type()) >>
-            gen_call!(|buf, ip_addr| IpAddr::to_bytes(ip_addr, buf), &self.ip_addr) >>
-            gen_cond!(self.ip_addr.is_ipv4(), gen_slice!(&[0; IPV4_PADDING_SIZE])) >>
-            gen_be_u16!(self.port)
-        )
-    }
-}
-
-impl IpPort {
-    /** Get IP Type byte.
-
-    * 1st bit - protocol
-    * 4th bit - address family
-
-    Value | Type
-    ----- | ----
-    `2`   | UDP IPv4
-    `10`  | UDP IPv6
-    `130` | TCP IPv4
-    `138` | TCP IPv6
-
-    */
-    fn ip_type(&self) -> u8 {
-        if self.ip_addr.is_ipv4() {
-            match self.protocol {
-                ProtocolType::UDP => 2,
-                ProtocolType::TCP => 130,
-            }
-        } else {
-            match self.protocol {
-                ProtocolType::UDP => 10,
-                ProtocolType::TCP => 138,
-            }
-        }
-    }
-
-    named!(
-        #[allow(unused_variables)]
-        #[doc = "Parse `IpPort` with UDP protocol type."],
-        from_udp_bytes<IpPort>,
-        do_parse!(
-            ip_addr: switch!(le_u8,
-                2 => terminated!(
-                    map!(Ipv4Addr::from_bytes, IpAddr::V4),
-                    take!(IPV4_PADDING_SIZE)
-                ) |
-                10 => map!(Ipv6Addr::from_bytes, IpAddr::V6)
-            ) >>
-            port: be_u16 >>
-            (IpPort { protocol: ProtocolType::UDP, ip_addr, port })
-        )
-    );
-
-    named!(
-        #[allow(unused_variables)]
-        #[doc = "Parse `IpPort` with TCP protocol type."],
-        from_tcp_bytes<IpPort>,
-        do_parse!(
-            ip_addr: switch!(le_u8,
-                130 => terminated!(
-                    map!(Ipv4Addr::from_bytes, IpAddr::V4),
-                    take!(IPV4_PADDING_SIZE)
-                ) |
-                138 => map!(Ipv6Addr::from_bytes, IpAddr::V6)
-            ) >>
-            port: be_u16 >>
-            (IpPort { protocol: ProtocolType::TCP, ip_addr, port })
-        )
-    );
-
-    /// Write `IpPort` with UDP protocol type.
-    pub fn to_udp_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        do_gen!(buf,
-            gen_cond!(self.protocol == ProtocolType::TCP, |buf| gen_error(buf, 0)) >>
-            gen_call!(|buf, ip_port| IpPort::to_bytes(ip_port, buf), self)
-        )
-    }
-
-    /// Write `IpPort` with TCP protocol type.
-    pub fn to_tcp_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        do_gen!(buf,
-            gen_cond!(self.protocol == ProtocolType::UDP, |buf| gen_error(buf, 0)) >>
-            gen_call!(|buf, ip_port| IpPort::to_bytes(ip_port, buf), self)
-        )
-    }
-
-    /// Create new `IpPort` from `SocketAddr` with UDP type.
-    pub fn from_udp_saddr(saddr: SocketAddr) -> IpPort {
-        IpPort {
-            protocol: ProtocolType::UDP,
-            ip_addr: saddr.ip(),
-            port: saddr.port()
-        }
-    }
-
-    /// Create new `IpPort` from `SocketAddr` with TCP type.
-    pub fn from_tcp_saddr(saddr: SocketAddr) -> IpPort {
-        IpPort {
-            protocol: ProtocolType::TCP,
-            ip_addr: saddr.ip(),
-            port: saddr.port()
-        }
-    }
-
-    /// Convert `IpPort` to `SocketAddr`.
-    pub fn to_saddr(&self) -> SocketAddr {
-        SocketAddr::new(self.ip_addr, self.port)
-    }
-}
 
 /** Encrypted onion return addresses. Payload contains encrypted with symmetric
 key `IpPort` and possibly inner `OnionReturn`.
@@ -261,7 +94,7 @@ impl OnionReturn {
     #[allow(clippy::needless_pass_by_value)]
     fn inner_to_bytes<'a>(ip_port: &IpPort, inner: Option<&OnionReturn>, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
-            gen_call!(|buf, ip_port| IpPort::to_bytes(ip_port, buf), ip_port) >>
+            gen_call!(|buf, ip_port| IpPort::to_bytes(ip_port, buf, IpPortPadding::WithPadding), ip_port) >>
             gen_call!(|buf, inner| match inner {
                 Some(inner) => OnionReturn::to_bytes(inner, buf),
                 None => Ok(buf)
@@ -270,7 +103,7 @@ impl OnionReturn {
     }
 
     named!(inner_from_bytes<(IpPort, Option<OnionReturn>)>, do_parse!(
-        ip_port: call!(IpPort::from_bytes) >>
+        ip_port: call!(IpPort::from_bytes, IpPortPadding::WithPadding) >>
         rest_len: rest_len >>
         inner: cond!(rest_len > 0, OnionReturn::from_bytes) >>
         (ip_port, inner)
@@ -353,24 +186,6 @@ mod tests {
     const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - secretbox::NONCEBYTES;
 
     encode_decode_test!(
-        ip_port_udp_encode_decode,
-        IpPort {
-            protocol: ProtocolType::UDP,
-            ip_addr: "5.6.7.8".parse().unwrap(),
-            port: 12345
-        }
-    );
-
-    encode_decode_test!(
-        ip_port_tcp_encode_decode,
-        IpPort {
-            protocol: ProtocolType::TCP,
-            ip_addr: "5.6.7.8".parse().unwrap(),
-            port: 12345
-        }
-    );
-
-    encode_decode_test!(
         onion_return_encode_decode,
         OnionReturn {
             nonce: secretbox::gen_nonce(),
@@ -383,28 +198,6 @@ mod tests {
     encode_decode_test!(announce_status_found, AnnounceStatus::Found);
 
     encode_decode_test!(announce_status_accounced, AnnounceStatus::Announced);
-
-    #[test]
-    fn ip_port_from_to_udp_saddr() {
-        let ip_port_1 = IpPort {
-            protocol: ProtocolType::UDP,
-            ip_addr: "5.6.7.8".parse().unwrap(),
-            port: 12345
-        };
-        let ip_port_2 = IpPort::from_udp_saddr(ip_port_1.to_saddr());
-        assert_eq!(ip_port_2, ip_port_1);
-    }
-
-    #[test]
-    fn ip_port_from_to_tcp_saddr() {
-        let ip_port_1 = IpPort {
-            protocol: ProtocolType::TCP,
-            ip_addr: "5.6.7.8".parse().unwrap(),
-            port: 12345
-        };
-        let ip_port_2 = IpPort::from_tcp_saddr(ip_port_1.to_saddr());
-        assert_eq!(ip_port_2, ip_port_1);
-    }
 
     #[test]
     fn onion_return_encrypt_decrypt() {

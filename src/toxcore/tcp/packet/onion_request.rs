@@ -3,11 +3,10 @@
 
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
+use crate::toxcore::ip_port::*;
 use crate::toxcore::onion::packet::{
-    IpPort,
     ONION_MAX_PACKET_SIZE,
     ONION_RETURN_1_SIZE,
-    SIZE_IPPORT
 };
 
 use nom::rest;
@@ -58,7 +57,7 @@ impl FromBytes for OnionRequest {
     named!(from_bytes<OnionRequest>, do_parse!(
         tag!("\x08") >>
         nonce: call!(Nonce::from_bytes) >>
-        ip_port: call!(IpPort::from_bytes) >>
+        ip_port: call!(IpPort::from_bytes, IpPortPadding::WithPadding) >>
         temporary_pk: call!(PublicKey::from_bytes) >>
         payload: verify!(
             rest,
@@ -77,7 +76,7 @@ impl ToBytes for OnionRequest {
             ) >>
             gen_be_u8!(0x08) >>
             gen_slice!(self.nonce.as_ref()) >>
-            gen_call!(|buf, ip_port| IpPort::to_bytes(ip_port, buf), &self.ip_port) >>
+            gen_call!(|buf, ip_port| IpPort::to_bytes(ip_port, buf, IpPortPadding::WithPadding), &self.ip_port) >>
             gen_slice!(self.temporary_pk.as_ref()) >>
             gen_slice!(self.payload)
         )
@@ -87,8 +86,6 @@ impl ToBytes for OnionRequest {
 #[cfg(test)]
 mod test {
     use super::*;
-
-    use crate::toxcore::onion::packet::ProtocolType;
 
     encode_decode_test!(
         onion_request_encode_decode,

@@ -6,6 +6,7 @@ use nom::rest;
 use crate::toxcore::binary_io::*;
 use crate::toxcore::onion::packet::*;
 use crate::toxcore::crypto_core::*;
+use crate::toxcore::ip_port::SIZE_IPPORT;
 use crate::toxcore::toxid::NoSpam;
 
 const ONION_SEND_BASE: usize =  PUBLICKEYBYTES + SIZE_IPPORT + MACBYTES;

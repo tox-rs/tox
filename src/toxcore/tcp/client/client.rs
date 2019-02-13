@@ -528,6 +528,7 @@ pub mod tests {
     use tokio::net::TcpListener;
     use tokio::timer::Interval;
 
+    use crate::toxcore::ip_port::*;
     use crate::toxcore::onion::packet::*;
     use crate::toxcore::tcp::server::{Server, ServerExt};
 

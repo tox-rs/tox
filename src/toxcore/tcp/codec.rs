@@ -177,6 +177,7 @@ impl Encoder for Codec {
 mod tests {
     use crate::toxcore::crypto_core::*;
     use crate::toxcore::onion::packet::*;
+    use crate::toxcore::ip_port::*;
     use crate::toxcore::tcp::codec::*;
     use crate::toxcore::tcp::connection_id::ConnectionId;
 
