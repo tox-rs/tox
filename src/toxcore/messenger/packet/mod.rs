@@ -4,12 +4,14 @@
 use crate::toxcore::binary_io::*;
 
 mod online;
+mod action;
 mod offline;
 mod nickname;
 mod file_control;
 mod file_data;
 
 pub use self::online::*;
+pub use self::action::*;
 pub use self::offline::*;
 pub use self::nickname::*;
 pub use self::file_control::*;
@@ -21,6 +23,8 @@ pub use self::file_data::*;
 pub enum Packet {
     /// [`Online`](./struct.Online.html) structure.
     Online(Online),
+    /// [`Action`](./struct.Action.html) structure.
+    Action(Action),
     /// [`Offline`](./struct.Offline.html) structure.
     Offline(Offline),
     /// [`Nickname`](./struct.Nickname.html) structure.
@@ -35,6 +39,7 @@ impl ToBytes for Packet {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         match *self {
             Packet::Online(ref p) => p.to_bytes(buf),
+            Packet::Action(ref p) => p.to_bytes(buf),
             Packet::Offline(ref p) => p.to_bytes(buf),
             Packet::Nickname(ref p) => p.to_bytes(buf),
             Packet::FileControl(ref p) => p.to_bytes(buf),
@@ -46,6 +51,7 @@ impl ToBytes for Packet {
 impl FromBytes for Packet {
     named!(from_bytes<Packet>, alt!(
         map!(Online::from_bytes, Packet::Online) |
+        map!(Action::from_bytes, Packet::Action) |
         map!(Offline::from_bytes, Packet::Offline) |
         map!(Nickname::from_bytes, Packet::Nickname) |
         map!(Nickname::from_bytes, Packet::Nickname) |
@@ -61,6 +67,11 @@ mod tests {
     encode_decode_test!(
         packet_online_encode_decode,
         Packet::Online(Online)
+    );
+
+    encode_decode_test!(
+        packet_action_encode_decode,
+        Packet::Action(Action::new("1234".to_string()))
     );
 
     encode_decode_test!(
