@@ -7,6 +7,7 @@ use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
 use crate::toxcore::dht::codec::*;
 use crate::toxcore::dht::packet::errors::*;
+use crate::toxcore::packed_node::*;
 
 /** DHT Request packet struct.
 DHT Request packet consists of NatPingRequest and NatPingResponse.
@@ -239,8 +240,8 @@ variable  | Payload
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DhtPkAnnounce {
-    /// `PublicKey` for the current encrypted payload
-    pub pk: PublicKey,
+    /// Long term `PublicKey` that was used for the inner encrypted payload
+    pub real_pk: PublicKey,
     /// Nonce for the current encrypted payload
     pub nonce: Nonce,
     /// Encrypted payload
@@ -250,10 +251,10 @@ pub struct DhtPkAnnounce {
 impl FromBytes for DhtPkAnnounce {
     named!(from_bytes<DhtPkAnnounce>, do_parse!(
         tag!(&[0x9c][..]) >>
-        pk: call!(PublicKey::from_bytes) >>
+        real_pk: call!(PublicKey::from_bytes) >>
         nonce: call!(Nonce::from_bytes) >>
         payload: rest >>
-        (DhtPkAnnounce { pk, nonce, payload: payload.to_vec() })
+        (DhtPkAnnounce { real_pk, nonce, payload: payload.to_vec() })
     ));
 }
 
@@ -261,9 +262,108 @@ impl ToBytes for DhtPkAnnounce {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x9c) >>
-            gen_slice!(self.pk.as_ref()) >>
+            gen_slice!(self.real_pk.as_ref()) >>
             gen_slice!(self.nonce.as_ref()) >>
             gen_slice!(self.payload.as_slice())
+        )
+    }
+}
+
+impl DhtPkAnnounce {
+    /// Create `DhtPkAnnounce` from `DhtPkAnnouncePayload` encrypting it with
+    /// `shared_key`
+    pub fn new(shared_secret: &PrecomputedKey, real_pk: PublicKey, payload: &DhtPkAnnouncePayload) -> DhtPkAnnounce {
+        let nonce = gen_nonce();
+        let mut buf = [0; 245];
+        let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
+        let payload = seal_precomputed(&buf[..size], &nonce, shared_secret);
+
+        DhtPkAnnounce {
+            real_pk,
+            nonce,
+            payload,
+        }
+    }
+
+    /** Decrypt payload and try to parse it as `DhtPkAnnouncePayload`.
+
+    Returns `Error` in case of failure:
+
+    - fails to decrypt
+    - fails to parse as `DhtPkAnnouncePayload`
+    */
+    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<DhtPkAnnouncePayload, GetPayloadError> {
+        let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
+            .map_err(|()| {
+                debug!("Decrypting DhtPkAnnouncePayload failed!");
+                GetPayloadError::decrypt()
+            })?;
+        match DhtPkAnnouncePayload::from_bytes(&decrypted) {
+            IResult::Incomplete(needed) => {
+                debug!(target: "DhtRequest", "DhtPkAnnouncePayload deserialize error: {:?}", needed);
+                Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
+            },
+            IResult::Error(e) => {
+                debug!(target: "DhtRequest", "DhtPkAnnouncePayload deserialize error: {:?}", e);
+                Err(GetPayloadError::deserialize(e, self.payload.to_vec()))
+            },
+            IResult::Done(_, inner) => {
+                Ok(inner)
+            }
+        }
+    }
+}
+
+/** Packet used to announce our DHT `PublicKey` to a friend. Can be sent as
+inner packet of `OnionDataResponse` and `DhtRequest` packets.
+
+Serialized form:
+
+Length     | Content
+---------- | ------
+`1`        | `0x9C`
+`8`        | `no_replay`
+`32`       | Friend's DHT `PublicKey`
+`[0, 204]` | Nodes in packed format
+
+*/
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DhtPkAnnouncePayload {
+    /// Number used as a protection against reply attacks. The packet should be
+    /// accepted only if it's higher than the number in the last received packet.
+    pub no_replay: u64,
+    /// Announced DHT `PublicKey`.
+    pub dht_pk: PublicKey,
+    /// Up to 4 nodes that can be either DHT close node or TCP relay we
+    /// connected to.
+    pub nodes: Vec<TcpUdpPackedNode>,
+}
+
+impl FromBytes for DhtPkAnnouncePayload {
+    named!(from_bytes<DhtPkAnnouncePayload>, do_parse!(
+        tag!(&[0x9c][..]) >>
+        no_replay: be_u64 >>
+        dht_pk: call!(PublicKey::from_bytes) >>
+        nodes: many0!(TcpUdpPackedNode::from_bytes) >>
+        cond_reduce!(nodes.len() <= 4, eof!()) >>
+        (DhtPkAnnouncePayload {
+            no_replay,
+            dht_pk,
+            nodes,
+        })
+    ));
+}
+
+impl ToBytes for DhtPkAnnouncePayload {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        do_gen!(buf,
+            gen_be_u8!(0x9c) >>
+            gen_be_u64!(self.no_replay) >>
+            gen_slice!(self.dht_pk.as_ref()) >>
+            gen_cond!(
+                self.nodes.len() <= 4,
+                gen_many_ref!(&self.nodes, |buf, node| TcpUdpPackedNode::to_bytes(node, buf))
+            )
         )
     }
 }
@@ -336,35 +436,80 @@ impl ToBytes for HardeningResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use nom::{Needed, ErrorKind};
 
+    use crate::toxcore::ip_port::*;
+
     encode_decode_test!(
-        nat_ping_request_payload_encode_decode,
+        nat_ping_request_encode_decode,
         DhtRequestPayload::NatPingRequest(NatPingRequest { id: 42 })
     );
 
     encode_decode_test!(
-        nat_ping_response_payload_encode_decode,
+        nat_ping_response_encode_decode,
         DhtRequestPayload::NatPingResponse(NatPingResponse { id: 42 })
     );
 
     encode_decode_test!(
-        dht_pk_announce_payload_encode_decode,
+        dht_pk_announce_encode_decode,
         DhtRequestPayload::DhtPkAnnounce(DhtPkAnnounce {
-            pk: gen_keypair().0,
+            real_pk: gen_keypair().0,
             nonce: gen_nonce(),
             payload: vec![42; 123]
         })
     );
 
     encode_decode_test!(
-        hardening_request_payload_encode_decode,
+        hardening_request_encode_decode,
         DhtRequestPayload::HardeningRequest(HardeningRequest)
     );
 
     encode_decode_test!(
-        hardening_response_payload_encode_decode,
+        hardening_response_encode_decode,
         DhtRequestPayload::HardeningResponse(HardeningResponse)
+    );
+
+    encode_decode_test!(
+        dht_pk_announce_payload_encode_decode,
+        DhtPkAnnouncePayload {
+            no_replay: 42,
+            dht_pk: gen_keypair().0,
+            nodes: vec![
+                TcpUdpPackedNode {
+                    ip_port: IpPort {
+                        protocol: ProtocolType::UDP,
+                        ip_addr: "127.0.0.1".parse().unwrap(),
+                        port: 12345,
+                    },
+                    pk: gen_keypair().0,
+                },
+                TcpUdpPackedNode {
+                    ip_port: IpPort {
+                        protocol: ProtocolType::UDP,
+                        ip_addr: "127.0.0.1".parse().unwrap(),
+                        port: 12346,
+                    },
+                    pk: gen_keypair().0,
+                },
+                TcpUdpPackedNode {
+                    ip_port: IpPort {
+                        protocol: ProtocolType::TCP,
+                        ip_addr: "127.0.0.2".parse().unwrap(),
+                        port: 12345,
+                    },
+                    pk: gen_keypair().0,
+                },
+                TcpUdpPackedNode {
+                    ip_port: IpPort {
+                        protocol: ProtocolType::TCP,
+                        ip_addr: "127.0.0.2".parse().unwrap(),
+                        port: 12346,
+                    },
+                    pk: gen_keypair().0,
+                },
+            ],
+        }
     );
 
     #[test]
@@ -376,6 +521,7 @@ mod tests {
         let test_payloads = vec![
             DhtRequestPayload::NatPingRequest(NatPingRequest { id: 42 }),
             DhtRequestPayload::NatPingResponse(NatPingResponse { id: 42 }),
+            DhtRequestPayload::DhtPkAnnounce(DhtPkAnnounce { real_pk: gen_keypair().0, nonce: gen_nonce(), payload: vec![42; 123] }),
             DhtRequestPayload::HardeningRequest(HardeningRequest),
             DhtRequestPayload::HardeningResponse(HardeningResponse)
         ];
@@ -401,6 +547,7 @@ mod tests {
         let test_payloads = vec![
             DhtRequestPayload::NatPingRequest(NatPingRequest { id: 42 }),
             DhtRequestPayload::NatPingResponse(NatPingResponse { id: 42 }),
+            DhtRequestPayload::DhtPkAnnounce(DhtPkAnnounce { real_pk: gen_keypair().0, nonce: gen_nonce(), payload: vec![42; 123] }),
             DhtRequestPayload::HardeningRequest(HardeningRequest),
             DhtRequestPayload::HardeningResponse(HardeningResponse)
         ];
@@ -449,5 +596,91 @@ mod tests {
         let decoded_payload = invalid_packet.get_payload(&precomputed_key);
         assert!(decoded_payload.is_err());
         assert_eq!(*decoded_payload.err().unwrap().kind(), GetPayloadErrorKind::IncompletePayload { needed: Needed::Size(2), payload: invalid_packet.payload });
+    }
+
+    #[test]
+    fn dht_pk_announce_payload_encrypt_decrypt() {
+        crypto_init().unwrap();
+        let (alice_pk, alice_sk) = gen_keypair();
+        let (bob_pk, _bob_sk) = gen_keypair();
+        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
+        let payload = DhtPkAnnouncePayload {
+            no_replay: 42,
+            dht_pk: gen_keypair().0,
+            nodes: vec![
+                TcpUdpPackedNode {
+                    ip_port: IpPort {
+                        protocol: ProtocolType::UDP,
+                        ip_addr: "127.0.0.1".parse().unwrap(),
+                        port: 12345,
+                    },
+                    pk: gen_keypair().0,
+                },
+            ],
+        };
+        // encode payload with shared secret
+        let packet = DhtPkAnnounce::new(&shared_secret, alice_pk, &payload);
+        // decode payload with shared secret
+        let decoded_payload = packet.get_payload(&shared_secret).unwrap();
+        // payloads should be equal
+        assert_eq!(decoded_payload, payload);
+    }
+
+    #[test]
+    fn dht_pk_announce_payload_encrypt_decrypt_invalid_key() {
+        crypto_init().unwrap();
+        let (alice_pk, alice_sk) = gen_keypair();
+        let (bob_pk, _bob_sk) = gen_keypair();
+        let (_eve_pk, eve_sk) = gen_keypair();
+        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
+        let shared_secret_invalid = encrypt_precompute(&bob_pk, &eve_sk);
+        let payload = DhtPkAnnouncePayload {
+            no_replay: 42,
+            dht_pk: gen_keypair().0,
+            nodes: vec![
+                TcpUdpPackedNode {
+                    ip_port: IpPort {
+                        protocol: ProtocolType::UDP,
+                        ip_addr: "127.0.0.1".parse().unwrap(),
+                        port: 12345,
+                    },
+                    pk: gen_keypair().0,
+                },
+            ],
+        };
+        // encode payload with shared secret
+        let packet = DhtPkAnnounce::new(&shared_secret, alice_pk, &payload);
+        // try to decode payload with invalid shared secret
+        let decoded_payload = packet.get_payload(&shared_secret_invalid);
+        assert!(decoded_payload.is_err());
+    }
+
+    #[test]
+    fn dht_pk_announce_payload_encrypt_decrypt_invalid() {
+        crypto_init().unwrap();
+        let (alice_pk, alice_sk) = gen_keypair();
+        let (bob_pk, _bob_sk) = gen_keypair();
+        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
+        let nonce = gen_nonce();
+        // Try long invalid array
+        let invalid_payload = [42; 123];
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
+        let invalid_packet = DhtPkAnnounce {
+            real_pk: alice_pk,
+            nonce,
+            payload: invalid_payload_encoded
+        };
+        let decoded_payload = invalid_packet.get_payload(&shared_secret);
+        assert!(decoded_payload.is_err());
+        // Try short incomplete array
+        let invalid_payload = [];
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
+        let invalid_packet = DhtPkAnnounce {
+            real_pk: alice_pk,
+            nonce,
+            payload: invalid_payload_encoded
+        };
+        let decoded_payload = invalid_packet.get_payload(&shared_secret);
+        assert!(decoded_payload.is_err());
     }
 }

@@ -26,6 +26,7 @@ pub mod toxcore {
     pub mod binary_io;
     pub mod io_tokio;
     pub mod ip_port;
+    pub mod packed_node;
     pub mod crypto_core;
     pub mod time;
     pub mod state_format;
