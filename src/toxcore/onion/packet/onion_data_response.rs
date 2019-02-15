@@ -305,7 +305,7 @@ mod tests {
         let nonce = gen_nonce();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
         let payload = OnionDataResponseInnerPayload::DhtPkAnnounce(DhtPkAnnouncePayload {
-            no_replay: 42,
+            no_reply: 42,
             dht_pk: gen_keypair().0,
             nodes: vec![
                 TcpUdpPackedNode {
@@ -336,7 +336,7 @@ mod tests {
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
         let shared_secret_invalid = encrypt_precompute(&bob_pk, &eve_sk);
         let payload = OnionDataResponseInnerPayload::DhtPkAnnounce(DhtPkAnnouncePayload {
-            no_replay: 42,
+            no_reply: 42,
             dht_pk: gen_keypair().0,
             nodes: vec![
                 TcpUdpPackedNode {

@@ -322,7 +322,7 @@ Serialized form:
 Length     | Content
 ---------- | ------
 `1`        | `0x9C`
-`8`        | `no_replay`
+`8`        | `no_reply`
 `32`       | Friend's DHT `PublicKey`
 `[0, 204]` | Nodes in packed format
 
@@ -331,7 +331,7 @@ Length     | Content
 pub struct DhtPkAnnouncePayload {
     /// Number used as a protection against reply attacks. The packet should be
     /// accepted only if it's higher than the number in the last received packet.
-    pub no_replay: u64,
+    pub no_reply: u64,
     /// Announced DHT `PublicKey`.
     pub dht_pk: PublicKey,
     /// Up to 4 nodes that can be either DHT close node or TCP relay we
@@ -342,12 +342,12 @@ pub struct DhtPkAnnouncePayload {
 impl FromBytes for DhtPkAnnouncePayload {
     named!(from_bytes<DhtPkAnnouncePayload>, do_parse!(
         tag!(&[0x9c][..]) >>
-        no_replay: be_u64 >>
+        no_reply: be_u64 >>
         dht_pk: call!(PublicKey::from_bytes) >>
         nodes: many0!(TcpUdpPackedNode::from_bytes) >>
         cond_reduce!(nodes.len() <= 4, eof!()) >>
         (DhtPkAnnouncePayload {
-            no_replay,
+            no_reply,
             dht_pk,
             nodes,
         })
@@ -358,7 +358,7 @@ impl ToBytes for DhtPkAnnouncePayload {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x9c) >>
-            gen_be_u64!(self.no_replay) >>
+            gen_be_u64!(self.no_reply) >>
             gen_slice!(self.dht_pk.as_ref()) >>
             gen_cond!(
                 self.nodes.len() <= 4,
@@ -473,7 +473,7 @@ mod tests {
     encode_decode_test!(
         dht_pk_announce_payload_encode_decode,
         DhtPkAnnouncePayload {
-            no_replay: 42,
+            no_reply: 42,
             dht_pk: gen_keypair().0,
             nodes: vec![
                 TcpUdpPackedNode {
@@ -605,7 +605,7 @@ mod tests {
         let (bob_pk, _bob_sk) = gen_keypair();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
         let payload = DhtPkAnnouncePayload {
-            no_replay: 42,
+            no_reply: 42,
             dht_pk: gen_keypair().0,
             nodes: vec![
                 TcpUdpPackedNode {
@@ -635,7 +635,7 @@ mod tests {
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
         let shared_secret_invalid = encrypt_precompute(&bob_pk, &eve_sk);
         let payload = DhtPkAnnouncePayload {
-            no_replay: 42,
+            no_reply: 42,
             dht_pk: gen_keypair().0,
             nodes: vec![
                 TcpUdpPackedNode {
