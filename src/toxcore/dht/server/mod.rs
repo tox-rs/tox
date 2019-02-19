@@ -545,7 +545,7 @@ impl Server {
             &self.pk,
             &payload
         ));
-        self.send_to_direct(node.saddr, ping_req)
+        self.send_to(node.saddr, ping_req)
     }
 
     /// Send `NodesRequest` packet to the node.
@@ -566,7 +566,7 @@ impl Server {
             &self.pk,
             &payload
         ));
-        Either::B(self.send_to_direct(node.saddr, nodes_req))
+        Either::B(self.send_to(node.saddr, nodes_req))
     }
 
     /// Send `NatPingRequest` packet to all friends and try to punch holes.
@@ -635,9 +635,11 @@ impl Server {
     fn send_nat_ping_req_inner(&self, friend: &DhtFriend, nat_ping_req_packet: DhtRequest)
         -> impl Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send {
         let packet = Packet::DhtRequest(nat_ping_req_packet);
-        let futures = friend.close_nodes.nodes.iter().map(|node| {
-            self.send_to_node(node, &packet)
-        }).collect::<Vec<_>>();
+        let futures = friend.close_nodes.nodes
+            .iter()
+            .flat_map(|node| node.to_packed_node().into_iter())
+            .map(|node| self.send_to(node.saddr, packet.clone()))
+            .collect::<Vec<_>>();
 
         join_all(futures).map(|_| ())
     }
@@ -679,21 +681,8 @@ impl Server {
         }
     }
 
-    /// Send UDP packet node. If the node has both IPv4 and IPv6 addresses,
-    /// then it sends packet to both addresses.
-    fn send_to_node(&self, node: &DhtNode, packet: &Packet)
-        -> impl Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send {
-        let addrs = node.get_all_addrs();
-
-        let futures = addrs.into_iter()
-            .map(|addr| self.send_to_direct(addr, packet.clone()))
-            .collect::<Vec<_>>();
-
-        join_all(futures).map(|_| ())
-    }
-
     /// Send UDP packet to specified address.
-    fn send_to_direct(&self, addr: SocketAddr, packet: Packet)
+    fn send_to(&self, addr: SocketAddr, packet: Packet)
         -> impl Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send {
         send_to_bounded(&self.tx, (packet, addr), Duration::from_secs(DHT_SEND_TIMEOUT))
     }
@@ -719,7 +708,7 @@ impl Server {
         ));
 
         Either::B(self.ping_add(&PackedNode::new(addr, &packet.pk))
-            .join(self.send_to_direct(addr, ping_resp))
+            .join(self.send_to(addr, ping_resp))
             .map(|_| ())
             .map_err(|e| HandlePacketError::from(e))
         )
@@ -784,7 +773,7 @@ impl Server {
         ));
 
         Either::B(self.ping_add(&PackedNode::new(addr, &packet.pk))
-            .join(self.send_to_direct(addr, nodes_resp))
+            .join(self.send_to(addr, nodes_resp))
             .map(|_| ())
             .map_err(|e| HandlePacketError::from(e))
         )
@@ -954,9 +943,9 @@ impl Server {
     fn handle_dht_req_for_others(&self, packet: DhtRequest)
         -> impl Future<Item = (), Error = HandlePacketError> + Send {
         let close_nodes = self.close_nodes.read();
-        if let Some(node) = close_nodes.get_node(&packet.rpk) { // search close_nodes to find target peer
+        if let Some(node) = close_nodes.get_node(&packet.rpk).and_then(|node| node.to_packed_node()) {
             let packet = Packet::DhtRequest(packet);
-            Either::A(self.send_to_node(node, &packet)
+            Either::A(self.send_to(node.saddr, packet)
                 .map_err(|e| HandlePacketError::from(e)))
         } else {
             Either::B(future::ok(()))
@@ -988,7 +977,7 @@ impl Server {
             &self.pk,
             &resp_payload
         ));
-        Either::B(self.send_to_direct(addr, nat_ping_resp)
+        Either::B(self.send_to(addr, nat_ping_resp)
             .map_err(|e| HandlePacketError::from(e)))
     }
 
@@ -1070,7 +1059,7 @@ impl Server {
             payload: payload.inner,
             onion_return
         });
-        Either::B(self.send_to_direct(payload.ip_port.to_saddr(), next_packet)
+        Either::B(self.send_to(payload.ip_port.to_saddr(), next_packet)
             .map_err(|e| HandlePacketError::from(e)))
     }
 
@@ -1097,7 +1086,7 @@ impl Server {
             payload: payload.inner,
             onion_return
         });
-        Either::B(self.send_to_direct(payload.ip_port.to_saddr(), next_packet)
+        Either::B(self.send_to(payload.ip_port.to_saddr(), next_packet)
             .map_err(|e| HandlePacketError::from(e)))
     }
 
@@ -1128,7 +1117,7 @@ impl Server {
                 onion_return
             }),
         };
-        Either::B(self.send_to_direct(payload.ip_port.to_saddr(), next_packet)
+        Either::B(self.send_to(payload.ip_port.to_saddr(), next_packet)
             .map_err(|e| HandlePacketError::from(e))
         )
     }
@@ -1165,7 +1154,7 @@ impl Server {
         };
         let response = OnionAnnounceResponse::new(&shared_secret, payload.sendback_data, &response_payload);
 
-        Either::B(self.send_to_direct(addr, Packet::OnionResponse3(OnionResponse3 {
+        Either::B(self.send_to(addr, Packet::OnionResponse3(OnionResponse3 {
             onion_return: packet.onion_return,
             payload: InnerOnionResponse::OnionAnnounceResponse(response)
         }))
@@ -1180,7 +1169,7 @@ impl Server {
         -> impl Future<Item = (), Error = HandlePacketError> + Send {
         let onion_announce = self.onion_announce.read();
         match onion_announce.handle_data_request(packet) {
-            Ok((response, addr)) => Either::A(self.send_to_direct(addr, Packet::OnionResponse3(response))
+            Ok((response, addr)) => Either::A(self.send_to(addr, Packet::OnionResponse3(response))
                 .map_err(|e| HandlePacketError::from(e))
             ),
             Err(e) => Either::B(future::err(HandlePacketError::from(e)))
@@ -1208,7 +1197,7 @@ impl Server {
                 onion_return: next_onion_return,
                 payload: packet.payload
             });
-            Either::B(self.send_to_direct(ip_port.to_saddr(), next_packet)
+            Either::B(self.send_to(ip_port.to_saddr(), next_packet)
                 .map_err(|e| HandlePacketError::from(e))
             )
         } else {
@@ -1237,7 +1226,7 @@ impl Server {
                 onion_return: next_onion_return,
                 payload: packet.payload
             });
-            Either::B(self.send_to_direct(ip_port.to_saddr(), next_packet)
+            Either::B(self.send_to(ip_port.to_saddr(), next_packet)
                 .map_err(|e| HandlePacketError::from(e))
             )
         } else {
@@ -1269,7 +1258,7 @@ impl Server {
                         InnerOnionResponse::OnionAnnounceResponse(inner) => Packet::OnionAnnounceResponse(inner),
                         InnerOnionResponse::OnionDataResponse(inner) => Packet::OnionDataResponse(inner),
                     };
-                    Box::new(self.send_to_direct(ip_port.to_saddr(), next_packet)
+                    Box::new(self.send_to(ip_port.to_saddr(), next_packet)
                         .map_err(|e| HandlePacketError::from(e))
                     ) as Box<dyn Future<Item = _, Error = _> + Send>
                 },
@@ -1321,7 +1310,7 @@ impl Server {
             payload: packet.payload,
             onion_return
         });
-        self.send_to_direct(packet.ip_port.to_saddr(), next_packet)
+        self.send_to(packet.ip_port.to_saddr(), next_packet)
     }
 
     /// Handle `BootstrapInfo` packet and response with `BootstrapInfo` packet.
@@ -1346,7 +1335,7 @@ impl Server {
                 version: bootstrap_info.version,
                 motd,
             });
-            Either::B(self.send_to_direct(addr, packet)
+            Either::B(self.send_to(addr, packet)
                 .map_err(|e| HandleBootstrapInfoError::from(e))
             )
         } else {
