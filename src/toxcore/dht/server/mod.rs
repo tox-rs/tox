@@ -121,7 +121,7 @@ pub struct Server {
     /// Sink to send friend's `SocketAddr` when it gets known.
     friend_saddr_sink: Option<mpsc::UnboundedSender<PackedNode>>,
     /// Struct that stores and manages requests IDs and timeouts.
-    pub request_queue: Arc<RwLock<RequestQueue>>,
+    request_queue: Arc<RwLock<RequestQueue>>,
     /// Close nodes list which contains nodes close to own DHT `PublicKey`.
     pub close_nodes: Arc<RwLock<Ktree>>,
     /// Symmetric key used for onion return encryption.
@@ -540,8 +540,14 @@ impl Server {
         Box::new(self.send_nodes_req(&random_node, request_queue, pk))
     }
 
+    /// Ping node with `NodesRequest` packet with self DHT `PublicKey`.
+    pub fn ping_node(&self, node: &PackedNode) -> impl Future<Item = (), Error = PingError> + Send {
+        let mut request_queue = self.request_queue.write();
+        self.send_nodes_req(node, &mut request_queue, self.pk).map_err(PingError::from)
+    }
+
     /// Send `PingRequest` packet to the node.
-    pub fn send_ping_req(&self, node: &PackedNode, request_queue: &mut RequestQueue)
+    fn send_ping_req(&self, node: &PackedNode, request_queue: &mut RequestQueue)
         -> impl Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send {
         let payload = PingRequestPayload {
             id: request_queue.new_ping_id(node.pk),
@@ -555,7 +561,7 @@ impl Server {
     }
 
     /// Send `NodesRequest` packet to the node.
-    pub fn send_nodes_req(&self, node: &PackedNode, request_queue: &mut RequestQueue, search_pk: PublicKey)
+    fn send_nodes_req(&self, node: &PackedNode, request_queue: &mut RequestQueue, search_pk: PublicKey)
         -> impl Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send {
         // Check if packet is going to be sent to ourselves.
         if self.pk == node.pk {
@@ -3555,5 +3561,24 @@ mod tests {
         let res = alice.handle_packet(data, addr).wait();
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::NotHandled);
+    }
+
+    #[test]
+    fn ping_node() {
+        let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
+
+        let node = PackedNode::new(addr, &bob_pk);
+
+        alice.ping_node(&node).wait().unwrap();
+
+        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (packet, addr_to_send) = received.unwrap();
+
+        assert_eq!(addr_to_send, addr);
+
+        let nodes_req = unpack!(packet, Packet::NodesRequest);
+        let nodes_req_payload = nodes_req.get_payload(&precomp).unwrap();
+
+        assert_eq!(nodes_req_payload.pk, alice.pk);
     }
 }
