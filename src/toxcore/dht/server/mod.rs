@@ -117,7 +117,7 @@ pub struct Server {
     /// Tx split of a channel to send packets to this peer via UDP socket.
     pub tx: Tx,
     /// Struct that stores and manages requests IDs and timeouts.
-    pub request_queue: Arc<RwLock<RequestQueue>>,
+    request_queue: Arc<RwLock<RequestQueue>>,
     /// Close nodes list which contains nodes close to own DHT `PublicKey`.
     pub close_nodes: Arc<RwLock<Ktree>>,
     /// Symmetric key used for onion return encryption.
@@ -534,8 +534,14 @@ impl Server {
         Box::new(self.send_nodes_req(&random_node, request_queue, pk))
     }
 
+    /// Ping node with `NodesRequest` packet with self DHT `PublicKey`.
+    pub fn ping_node(&self, node: &PackedNode) -> impl Future<Item = (), Error = PingError> + Send {
+        let mut request_queue = self.request_queue.write();
+        self.send_nodes_req(node, &mut request_queue, self.pk).map_err(PingError::from)
+    }
+
     /// Send `PingRequest` packet to the node.
-    pub fn send_ping_req(&self, node: &PackedNode, request_queue: &mut RequestQueue)
+    fn send_ping_req(&self, node: &PackedNode, request_queue: &mut RequestQueue)
         -> impl Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send {
         let payload = PingRequestPayload {
             id: request_queue.new_ping_id(node.pk),
@@ -549,7 +555,7 @@ impl Server {
     }
 
     /// Send `NodesRequest` packet to the node.
-    pub fn send_nodes_req(&self, node: &PackedNode, request_queue: &mut RequestQueue, search_pk: PublicKey)
+    fn send_nodes_req(&self, node: &PackedNode, request_queue: &mut RequestQueue, search_pk: PublicKey)
         -> impl Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send {
         // Check if packet is going to be sent to ourselves.
         if self.pk == node.pk {
