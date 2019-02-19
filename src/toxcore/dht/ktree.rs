@@ -118,16 +118,16 @@ impl Ktree {
 
     Functionality for [`SendNodes`](./struct.SendNodes.html).
 
-    Returns less than 4 nodes only if `Ktree` contains less than 4
+    Returns less than `count` nodes only if `Ktree` contains less than `count`
     nodes.
 
     It should not contain LAN ip node if the request is from global ip.
     */
-    pub fn get_closest(&self, pk: &PublicKey, only_global: bool) -> Kbucket<PackedNode> {
+    pub fn get_closest(&self, pk: &PublicKey, count: u8, only_global: bool) -> Kbucket<PackedNode> {
         debug!(target: "Ktree", "Getting closest nodes.");
         trace!(target: "Ktree", "With PK: {:?} and self: {:?}", pk, self);
 
-        let mut kbucket = Kbucket::new(4);
+        let mut kbucket = Kbucket::new(count);
         for node in self.iter().filter(|node| !node.is_bad()) {
             if let Some(pn) = node.to_packed_node() {
                 if !only_global || IsGlobal::is_global(&pn.saddr.ip()) {
@@ -318,11 +318,11 @@ mod tests {
             assert!(ktree.try_add(node_by_idx(i)));
         }
 
-        let closest: Vec<_> = ktree.get_closest(&PublicKey([0; PUBLICKEYBYTES]), true).into();
+        let closest: Vec<_> = ktree.get_closest(&PublicKey([0; PUBLICKEYBYTES]), 4, true).into();
         let should_be = (0 .. 4).map(node_by_idx).collect::<Vec<_>>();
         assert_eq!(closest, should_be);
 
-        let closest: Vec<_> = ktree.get_closest(&PublicKey([255; PUBLICKEYBYTES]), true).into();
+        let closest: Vec<_> = ktree.get_closest(&PublicKey([255; PUBLICKEYBYTES]), 4, true).into();
         let should_be = (4 .. 8).rev().map(node_by_idx).collect::<Vec<_>>();
         assert_eq!(closest, should_be);
     }
