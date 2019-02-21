@@ -18,7 +18,7 @@ const MAX_DATA_REQUEST_SIZE: usize = MAX_ONION_DATA_SIZE - MIN_ONION_DATA_REQUES
 /// Minimum size in bytes of Onion Data Response packet
 const MIN_ONION_DATA_RESPONSE_SIZE: usize = 1 + secretbox::NONCEBYTES + PUBLICKEYBYTES + MACBYTES; // 1 is for packet_id
 /// Maximum size in bytes of message of friend requests packet
-const MAX_ONION_CLIENT_DATA_SIZE: usize = MAX_DATA_REQUEST_SIZE - MIN_ONION_DATA_RESPONSE_SIZE;
+pub const MAX_ONION_CLIENT_DATA_SIZE: usize = MAX_DATA_REQUEST_SIZE - MIN_ONION_DATA_RESPONSE_SIZE;
 
 /** FriendRequests is a struct that holds info of nospam and greeting message.
 

@@ -66,7 +66,7 @@ impl OnionDataResponse {
     /// Create `OnionDataResponse` from `OnionDataResponsePayload` encrypting it
     /// with `shared_key` and `nonce`
     pub fn new(shared_secret: &PrecomputedKey, temporary_pk: PublicKey, nonce: Nonce, payload: &OnionDataResponsePayload) -> OnionDataResponse {
-        let mut buf = [0; 293]; // TODO: check FriendRequest size
+        let mut buf = [0; 293];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
         let payload = seal_precomputed(&buf[..size], &nonce, shared_secret);
 
@@ -153,7 +153,7 @@ impl OnionDataResponsePayload {
     /// Create `OnionDataResponsePayload` from `OnionDataResponseInnerPayload`
     /// encrypting it with `shared_key` and `nonce`
     pub fn new(shared_secret: &PrecomputedKey, real_pk: PublicKey, nonce: &Nonce, payload: &OnionDataResponseInnerPayload) -> OnionDataResponsePayload {
-        let mut buf = [0; 245]; // TODO: check FriendRequest size
+        let mut buf = [0; 245];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
         let payload = seal_precomputed(&buf[..size], nonce, shared_secret);
 
@@ -199,12 +199,14 @@ impl OnionDataResponsePayload {
 pub enum OnionDataResponseInnerPayload {
     /// [`DhtPkAnnouncePayload`](../../dht/packet/struct.DhtPkAnnouncePayload.html) structure.
     DhtPkAnnounce(DhtPkAnnouncePayload),
-    // TODO: FriendRequest
+    /// [`FriendRequest`](../../dht/packet/struct.FriendRequest.html) structure.
+    FriendRequest(FriendRequest),
 }
 
 impl FromBytes for OnionDataResponseInnerPayload {
     named!(from_bytes<OnionDataResponseInnerPayload>, alt!(
-        map!(DhtPkAnnouncePayload::from_bytes, OnionDataResponseInnerPayload::DhtPkAnnounce)
+        map!(DhtPkAnnouncePayload::from_bytes, OnionDataResponseInnerPayload::DhtPkAnnounce) |
+        map!(FriendRequest::from_bytes, OnionDataResponseInnerPayload::FriendRequest)
     ));
 }
 
@@ -212,6 +214,7 @@ impl ToBytes for OnionDataResponseInnerPayload {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         match *self {
             OnionDataResponseInnerPayload::DhtPkAnnounce(ref p) => p.to_bytes(buf),
+            OnionDataResponseInnerPayload::FriendRequest(ref p) => p.to_bytes(buf),
         }
     }
 }
