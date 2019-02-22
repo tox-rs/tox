@@ -50,4 +50,17 @@ impl<T> RequestQueue<T> { // TODO: unify with DHT?
             clock_elapsed(time) <= timeout
         );
     }
+
+    /// Returns the Instant of a HashMap according to `f`.
+    pub fn find<F>(&self, f: F) -> Option<(&Instant, &T)>
+        where F: Fn(&T) -> bool {
+        self.ping_map.iter()
+            .find_map(|(_ping_id, (ping_time, data))| {
+                if f(data) {
+                    Some((ping_time, data))
+                } else {
+                    None
+                }
+            })
+    }
 }

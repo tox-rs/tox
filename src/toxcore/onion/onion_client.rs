@@ -64,6 +64,8 @@ const ONION_DHTPK_SEND_INTERVAL: u64 = 30;
 /// via DHT request.
 const DHT_DHTPK_SEND_INTERVAL: u64 = 20;
 
+const MIN_NODE_PING_TIME: u64 = 10;
+
 #[derive(Clone, Debug)]
 struct OnionFriend {
     /// Friend's long term `PublicKey`.
@@ -292,6 +294,22 @@ impl OnionClient {
         }
     }
 
+    fn is_redundant_ping(pk: PublicKey, search_pk: PublicKey, request_queue: &RequestQueue<AnnounceRequestData>) -> bool {
+        let check_pks = |data: &AnnounceRequestData| -> bool {
+            if let Some(friend_pk) = data.friend_pk {
+                data.pk == pk && search_pk == friend_pk
+            } else {
+                data.pk == pk
+            }
+        };
+        let request = request_queue.find(check_pks);
+        if let Some((ping_time, _request_data)) = request {
+            clock_elapsed(*ping_time) < Duration::from_secs(MIN_NODE_PING_TIME)
+        } else {
+            false
+        }
+    }
+
     /// Handle `OnionAnnounceResponse` packet.
     pub fn handle_announce_response(&self, packet: &OnionAnnounceResponse, _addr: SocketAddr) -> Box<Future<Item = (), Error = Error> + Send> {
         let state = &mut *self.state.write();
@@ -358,9 +376,12 @@ impl OnionClient {
         let mut futures = Vec::with_capacity(payload.nodes.len());
 
         for node in &payload.nodes {
-            // TODO: reduce pings frequency? (see good_to_ping in c-toxcore)
-
             if !nodes_list.can_add(&announce_packet_data.search_pk, &node, /* evict */ true) {
+                continue;
+            }
+
+            // To prevent to send redundant ping packet.
+            if OnionClient::is_redundant_ping(node.pk, announce_packet_data.search_pk, &state.announce_requests) {
                 continue;
             }
 
