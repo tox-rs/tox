@@ -99,6 +99,10 @@ const ONION_DHTPK_SEND_INTERVAL: u64 = 30;
 /// via DHT request.
 const DHT_DHTPK_SEND_INTERVAL: u64 = 20;
 
+/// Minimum interval for sending requests to received in `OnionAnnounceResponse`
+/// packet nodes.
+const MIN_NODE_PING_TIME: u64 = 10;
+
 /// Friend related data stored in the onion client.
 #[derive(Clone, Debug)]
 struct OnionFriend {
@@ -343,6 +347,21 @@ impl OnionClient {
         }
     }
 
+    /// Check if a node was pinged recently.
+    fn is_pinged_recently(&self, pk: PublicKey, search_pk: PublicKey, request_queue: &RequestQueue<AnnounceRequestData>) -> bool {
+        let check_pks = |data: &AnnounceRequestData| -> bool {
+            let request_search_pk = if let Some(friend_pk) = data.friend_pk {
+                friend_pk
+            } else {
+                self.real_pk
+            };
+            data.pk == pk && search_pk == request_search_pk
+        };
+        request_queue.get_values()
+            .any(|(ping_time, request_data)| check_pks(request_data) &&
+                clock_elapsed(ping_time) < Duration::from_secs(MIN_NODE_PING_TIME))
+    }
+
     /// Handle `OnionAnnounceResponse` packet.
     pub fn handle_announce_response(&self, packet: &OnionAnnounceResponse, addr: SocketAddr) -> impl Future<Item = (), Error = HandleAnnounceResponseError> + Send {
         let state = &mut *self.state.lock();
@@ -421,10 +440,13 @@ impl OnionClient {
         let mut futures = Vec::with_capacity(payload.nodes.len());
 
         for node in &payload.nodes {
-            // TODO: reduce pings frequency? (see good_to_ping in c-toxcore)
-
             // skip LAN nodes if the packet wasn't received from LAN
             if !IsGlobal::is_global(&node.ip()) && IsGlobal::is_global(&addr.ip()) {
+                continue;
+            }
+
+            // do not ping nodes that was pinged recently
+            if self.is_pinged_recently(node.pk, announce_packet_data.search_pk, &state.announce_requests) {
                 continue;
             }
 
