@@ -6,8 +6,12 @@ use super::*;
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
 use crate::toxcore::dht::packet::*;
+use crate::toxcore::friend_connection::packet::MAX_ONION_CLIENT_DATA_SIZE;
 
 use nom::rest;
+
+/// Maximum size in bytes of Onion Data Response payload
+const MAX_ONION_RESPONSE_PAYLOAD_SIZE: usize = MAX_ONION_CLIENT_DATA_SIZE + PUBLICKEYBYTES + MACBYTES;
 
 /** When onion node receives `OnionDataRequest` packet it converts it to
 `OnionDataResponse` and sends to destination node if it announced itself
@@ -66,7 +70,7 @@ impl OnionDataResponse {
     /// Create `OnionDataResponse` from `OnionDataResponsePayload` encrypting it
     /// with `shared_key` and `nonce`
     pub fn new(shared_secret: &PrecomputedKey, temporary_pk: PublicKey, nonce: Nonce, payload: &OnionDataResponsePayload) -> OnionDataResponse {
-        let mut buf = [0; 293]; // TODO: check FriendRequest size
+        let mut buf = [0; MAX_ONION_RESPONSE_PAYLOAD_SIZE];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
         let payload = seal_precomputed(&buf[..size], &nonce, shared_secret);
 
@@ -153,7 +157,7 @@ impl OnionDataResponsePayload {
     /// Create `OnionDataResponsePayload` from `OnionDataResponseInnerPayload`
     /// encrypting it with `shared_key` and `nonce`
     pub fn new(shared_secret: &PrecomputedKey, real_pk: PublicKey, nonce: &Nonce, payload: &OnionDataResponseInnerPayload) -> OnionDataResponsePayload {
-        let mut buf = [0; 245]; // TODO: check FriendRequest size
+        let mut buf = [0; MAX_ONION_CLIENT_DATA_SIZE];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
         let payload = seal_precomputed(&buf[..size], nonce, shared_secret);
 
@@ -199,12 +203,14 @@ impl OnionDataResponsePayload {
 pub enum OnionDataResponseInnerPayload {
     /// [`DhtPkAnnouncePayload`](../../dht/packet/struct.DhtPkAnnouncePayload.html) structure.
     DhtPkAnnounce(DhtPkAnnouncePayload),
-    // TODO: FriendRequest
+    /// [`FriendRequest`](../../dht/packet/struct.FriendRequest.html) structure.
+    FriendRequest(FriendRequest),
 }
 
 impl FromBytes for OnionDataResponseInnerPayload {
     named!(from_bytes<OnionDataResponseInnerPayload>, alt!(
-        map!(DhtPkAnnouncePayload::from_bytes, OnionDataResponseInnerPayload::DhtPkAnnounce)
+        map!(DhtPkAnnouncePayload::from_bytes, OnionDataResponseInnerPayload::DhtPkAnnounce) |
+        map!(FriendRequest::from_bytes, OnionDataResponseInnerPayload::FriendRequest)
     ));
 }
 
@@ -212,6 +218,7 @@ impl ToBytes for OnionDataResponseInnerPayload {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         match *self {
             OnionDataResponseInnerPayload::DhtPkAnnounce(ref p) => p.to_bytes(buf),
+            OnionDataResponseInnerPayload::FriendRequest(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -221,6 +228,7 @@ mod tests {
     use super::*;
 
     use crate::toxcore::packed_node::*;
+    use crate::toxcore::toxid::NoSpam;
 
     encode_decode_test!(
         onion_data_response_encode_decode,
@@ -373,5 +381,21 @@ mod tests {
         };
         let decoded_payload = invalid_packet.get_payload(&nonce, &shared_secret);
         assert!(decoded_payload.is_err());
+    }
+
+    #[test]
+    fn onion_data_response_payload_encrypt_decrypt_friend_request() {
+        crypto_init().unwrap();
+        let (alice_pk, alice_sk) = gen_keypair();
+        let (bob_pk, _bob_sk) = gen_keypair();
+        let nonce = gen_nonce();
+        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
+        let friend_request = FriendRequest::new(NoSpam::random(), "1234".to_owned());
+        let payload = OnionDataResponseInnerPayload::FriendRequest(friend_request);
+        // encode payload
+        let packet = OnionDataResponsePayload::new(&shared_secret, alice_pk, &nonce, &payload);
+        // decode payload
+        let decoded_payload = packet.get_payload(&nonce, &shared_secret).unwrap();
+        assert_eq!(payload, decoded_payload);
     }
 }

@@ -13,6 +13,7 @@ mod onion_request_2;
 mod onion_response_1;
 mod onion_response_2;
 mod onion_response_3;
+mod friend_request;
 
 pub use self::onion_announce_request::*;
 pub use self::onion_announce_response::*;
@@ -26,6 +27,7 @@ pub use self::onion_request_2::*;
 pub use self::onion_response_1::*;
 pub use self::onion_response_2::*;
 pub use self::onion_response_3::*;
+pub use self::friend_request::*;
 
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
