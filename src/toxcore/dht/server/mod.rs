@@ -6,6 +6,7 @@ This module works on top of other modules.
 pub mod hole_punching;
 mod errors;
 
+use failure::Fail;
 use futures::{Future, Sink, Stream, future, stream};
 use futures::future::{Either, join_all};
 use futures::sync::mpsc;
@@ -117,6 +118,8 @@ pub struct Server {
     pub pk: PublicKey,
     /// Tx split of a channel to send packets to this peer via UDP socket.
     pub tx: Tx,
+    /// Sink to send friend's `SocketAddr` when it gets known.
+    friend_saddr_sink: Option<mpsc::UnboundedSender<PackedNode>>,
     /// Struct that stores and manages requests IDs and timeouts.
     pub request_queue: Arc<RwLock<RequestQueue>>,
     /// Close nodes list which contains nodes close to own DHT `PublicKey`.
@@ -201,6 +204,7 @@ impl Server {
             sk,
             pk,
             tx,
+            friend_saddr_sink: None,
             request_queue: Arc::new(RwLock::new(RequestQueue::new(Duration::from_secs(PING_TIMEOUT)))),
             close_nodes: Arc::new(RwLock::new(Ktree::new(&pk))),
             onion_symmetric_key: Arc::new(RwLock::new(secretbox::gen_key())),
@@ -714,19 +718,38 @@ impl Server {
         )
     }
 
+    /// Add node to close list after we received a response from it. If it's a
+    /// friend then send it's IP address to appropriate sink.
+    fn try_add_to_close(&self, close_nodes: &mut Ktree, friends: &mut HashMap<PublicKey, DhtFriend>, node: PackedNode) -> impl Future<Item = (), Error = HandlePacketError> {
+        close_nodes.try_add(node);
+        for friend in friends.values_mut() {
+            friend.try_add_to_close(node);
+        }
+        if let Some(ref friend_saddr_sink) = self.friend_saddr_sink {
+            if friends.contains_key(&node.pk) {
+                Either::A(send_to(friend_saddr_sink, node)
+                    .map_err(|e| e.context(HandlePacketErrorKind::FriendSaddr).into()))
+            } else {
+                Either::B(future::ok(()))
+            }
+        } else {
+            Either::B(future::ok(()))
+        }
+    }
+
     /// Handle received `PingResponse` packet and if it's correct add the node
     /// that sent this packet to close nodes lists.
     fn handle_ping_resp(&self, packet: &PingResponse, addr: SocketAddr) -> impl Future<Item = (), Error = HandlePacketError> + Send {
         let precomputed_key = self.precomputed_keys.get(packet.pk);
         let payload = match packet.get_payload(&precomputed_key) {
-            Err(e) => return future::err(HandlePacketError::from(e)),
+            Err(e) => return Either::A(future::err(HandlePacketError::from(e))),
             Ok(payload) => payload,
         };
 
         if payload.id == 0u64 {
-            return future::err(
+            return Either::A(future::err(
                 HandlePacketError::from(HandlePacketErrorKind::ZeroPingId)
-            )
+            ))
         }
 
         let mut request_queue = self.request_queue.write();
@@ -735,17 +758,11 @@ impl Server {
             let mut close_nodes = self.close_nodes.write();
             let mut friends = self.friends.write();
 
-            let pn = PackedNode::new(addr, &packet.pk);
-            close_nodes.try_add(pn);
-            for friend in friends.values_mut() {
-                friend.try_add_to_close(pn);
-            }
-
-            future::ok(())
+            Either::B(self.try_add_to_close(&mut close_nodes, &mut friends, PackedNode::new(addr, &packet.pk)))
         } else {
-            future::err(
+            Either::A(future::err(
                 HandlePacketError::from(HandlePacketErrorKind::PingIdMismatch)
-            )
+            ))
         }
     }
 
@@ -787,7 +804,7 @@ impl Server {
         -> impl Future<Item = (), Error = HandlePacketError> + Send {
         let precomputed_key = self.precomputed_keys.get(packet.pk);
         let payload = match packet.get_payload(&precomputed_key) {
-            Err(e) => return future::err(HandlePacketError::from(e)),
+            Err(e) => return Either::A(future::err(HandlePacketError::from(e))),
             Ok(payload) => payload,
         };
 
@@ -800,12 +817,7 @@ impl Server {
             let mut friends = self.friends.write();
             let mut nodes_to_bootstrap = self.nodes_to_bootstrap.write();
 
-            // Add node that sent NodesResponse to close nodes lists
-            let pn = PackedNode::new(addr, &packet.pk);
-            close_nodes.try_add(pn);
-            for friend in friends.values_mut() {
-                friend.try_add_to_close(pn);
-            }
+            let future = self.try_add_to_close(&mut close_nodes, &mut friends, PackedNode::new(addr, &packet.pk));
 
             // Process nodes from NodesResponse
             for &node in &payload.nodes {
@@ -825,12 +837,13 @@ impl Server {
 
                 self.update_returned_addr(&node, &packet.pk, &mut close_nodes, &mut friends);
             }
-            future::ok(())
+
+            Either::B(future)
         } else {
             // Some old version toxcore responds with wrong ping_id.
             // So we do not treat this as our own error.
             trace!("NodesResponse.ping_id does not match");
-            future::ok(())
+            Either::A(future::ok(()))
         }
     }
 
@@ -1282,13 +1295,6 @@ impl Server {
         *self.onion_symmetric_key.write() = secretbox::gen_key();
     }
 
-    /// Add `PackedNode` to close nodes list.
-    #[cfg(test)]
-    fn try_add_to_close_nodes(&self, pn: PackedNode) -> bool {
-        let mut close_nodes = self.close_nodes.write();
-        close_nodes.try_add(pn)
-    }
-
     /// Handle `OnionRequest` from TCP relay and send `OnionRequest1` packet
     /// to the next node in the onion path.
     pub fn handle_tcp_onion_request(&self, packet: OnionRequest, addr: SocketAddr)
@@ -1358,6 +1364,11 @@ impl Server {
         self.net_crypto = Some(net_crypto);
     }
 
+    /// Set sink to send friend's `SocketAddr` when it gets known.
+    pub fn set_friend_saddr_sink(&mut self, friend_saddr_sink: mpsc::UnboundedSender<PackedNode>) {
+        self.friend_saddr_sink = Some(friend_saddr_sink);
+    }
+
     /// Get `PrecomputedKey`s cache.
     pub fn get_precomputed_keys(&self) -> PrecomputedCache {
         self.precomputed_keys.clone()
@@ -1409,7 +1420,7 @@ mod tests {
         let (alice, _precomp, bob_pk, _bob_sk, _rx, _addr) = create_node();
 
         let packed_node = PackedNode::new("211.192.153.67:33445".parse().unwrap(), &bob_pk);
-        assert!(alice.try_add_to_close_nodes(packed_node));
+        assert!(alice.close_nodes.write().try_add(packed_node));
 
         let friend_pk = gen_keypair().0;
         alice.add_friend(friend_pk);
@@ -1549,7 +1560,7 @@ mod tests {
         alice.add_friend(bob_pk);
 
         let packed_node = PackedNode::new(addr, &bob_pk);
-        assert!(alice.try_add_to_close_nodes(packed_node));
+        assert!(alice.close_nodes.write().try_add(packed_node));
 
         let ping_id = alice.request_queue.write().new_ping_id(bob_pk);
 
@@ -1581,11 +1592,60 @@ mod tests {
     }
 
     #[test]
+    fn handle_ping_resp_not_a_friend() {
+        let (mut alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
+
+        let (friend_saddr_tx, friend_saddr_rx) = mpsc::unbounded();
+        alice.set_friend_saddr_sink(friend_saddr_tx);
+
+        let packed_node = PackedNode::new(addr, &bob_pk);
+        assert!(alice.close_nodes.write().try_add(packed_node));
+
+        let ping_id = alice.request_queue.write().new_ping_id(bob_pk);
+
+        let resp_payload = PingResponsePayload { id: ping_id };
+        let ping_resp = Packet::PingResponse(PingResponse::new(&precomp, &bob_pk, &resp_payload));
+
+        alice.handle_packet(ping_resp, addr).wait().unwrap();
+
+        // Necessary to drop tx so that rx.collect() can be finished
+        drop(alice);
+
+        assert!(friend_saddr_rx.collect().wait().unwrap().is_empty());
+    }
+
+    #[test]
+    fn handle_ping_resp_friend_saddr() {
+        let (mut alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
+
+        let (friend_saddr_tx, friend_saddr_rx) = mpsc::unbounded();
+        alice.set_friend_saddr_sink(friend_saddr_tx);
+
+        alice.add_friend(bob_pk);
+
+        let packed_node = PackedNode::new(addr, &bob_pk);
+        assert!(alice.close_nodes.write().try_add(packed_node));
+
+        let ping_id = alice.request_queue.write().new_ping_id(bob_pk);
+
+        let resp_payload = PingResponsePayload { id: ping_id };
+        let ping_resp = Packet::PingResponse(PingResponse::new(&precomp, &bob_pk, &resp_payload));
+
+        alice.handle_packet(ping_resp, addr).wait().unwrap();
+
+        let (received_node, _friend_saddr_rx) = friend_saddr_rx.into_future().wait().unwrap();
+        let received_node = received_node.unwrap();
+
+        assert_eq!(received_node.pk, bob_pk);
+        assert_eq!(received_node.saddr, addr);
+    }
+
+    #[test]
     fn handle_ping_resp_invalid_payload() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let packed_node = PackedNode::new(addr, &bob_pk);
-        assert!(alice.try_add_to_close_nodes(packed_node));
+        assert!(alice.close_nodes.write().try_add(packed_node));
 
         let ping_id = alice.request_queue.write().new_ping_id(bob_pk);
 
@@ -1603,7 +1663,7 @@ mod tests {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let packed_node = PackedNode::new(addr, &bob_pk);
-        assert!(alice.try_add_to_close_nodes(packed_node));
+        assert!(alice.close_nodes.write().try_add(packed_node));
 
         let payload = PingResponsePayload { id: 0 };
         let ping_resp = Packet::PingResponse(PingResponse::new(&precomp, &bob_pk, &payload));
@@ -1618,7 +1678,7 @@ mod tests {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let packed_node = PackedNode::new(addr, &bob_pk);
-        assert!(alice.try_add_to_close_nodes(packed_node));
+        assert!(alice.close_nodes.write().try_add(packed_node));
 
         let ping_id = alice.request_queue.write().new_ping_id(bob_pk);
 
@@ -1637,7 +1697,7 @@ mod tests {
 
         let packed_node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &bob_pk);
 
-        assert!(alice.try_add_to_close_nodes(packed_node));
+        assert!(alice.close_nodes.write().try_add(packed_node));
 
         let req_payload = NodesRequestPayload { pk: bob_pk, id: 42 };
         let nodes_req = Packet::NodesRequest(NodesRequest::new(&precomp, &bob_pk, &req_payload));
@@ -1694,7 +1754,7 @@ mod tests {
 
         let packed_node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &bob_pk);
 
-        assert!(alice.try_add_to_close_nodes(packed_node));
+        assert!(alice.close_nodes.write().try_add(packed_node));
 
         let req_payload = NodesRequestPayload { pk: bob_pk, id: 42 };
         let nodes_req = Packet::NodesRequest(NodesRequest::new(&precomp, &bob_pk, &req_payload));
@@ -1730,7 +1790,7 @@ mod tests {
 
         let packed_node = PackedNode::new("192.168.42.42:12345".parse().unwrap(), &bob_pk);
 
-        assert!(alice.try_add_to_close_nodes(packed_node));
+        assert!(alice.close_nodes.write().try_add(packed_node));
 
         let req_payload = NodesRequestPayload { pk: bob_pk, id: 42 };
         let nodes_req = Packet::NodesRequest(NodesRequest::new(&precomp, &bob_pk, &req_payload));
@@ -1807,6 +1867,34 @@ mod tests {
         // Node that sent NodesResponse should be added to close nodes list and
         // have updated last_resp_time
         assert_eq!(node.assoc4.last_resp_time.unwrap(), time);
+    }
+
+    #[test]
+    fn handle_nodes_resp_friend_saddr() {
+        let (mut alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
+
+        let (friend_saddr_tx, friend_saddr_rx) = mpsc::unbounded();
+        alice.set_friend_saddr_sink(friend_saddr_tx);
+
+        alice.add_friend(bob_pk);
+
+        let packed_node = PackedNode::new(addr, &bob_pk);
+        assert!(alice.close_nodes.write().try_add(packed_node));
+
+        let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
+
+        let ping_id = alice.request_queue.write().new_ping_id(bob_pk);
+
+        let resp_payload = NodesResponsePayload { nodes: vec![node], id: ping_id };
+        let nodes_resp = Packet::NodesResponse(NodesResponse::new(&precomp, &bob_pk, &resp_payload));
+
+        alice.handle_packet(nodes_resp, addr).wait().unwrap();
+
+        let (received_node, _friend_saddr_rx) = friend_saddr_rx.into_future().wait().unwrap();
+        let received_node = received_node.unwrap();
+
+        assert_eq!(received_node.pk, bob_pk);
+        assert_eq!(received_node.saddr, addr);
     }
 
     #[test]
@@ -2003,7 +2091,7 @@ mod tests {
 
         // if receiver' pk != node's pk and receiver's pk exists in close_nodes, returns ok()
         let pn = PackedNode::new(charlie_addr, &charlie_pk);
-        alice.try_add_to_close_nodes(pn);
+        assert!(alice.close_nodes.write().try_add(pn));
 
         let nat_req = NatPingRequest { id: 42 };
         let nat_payload = DhtRequestPayload::NatPingRequest(nat_req);
@@ -3364,7 +3452,7 @@ mod tests {
         alice.add_initial_bootstrap(pn);
 
         let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &node_pk);
-        alice.try_add_to_close_nodes(pn);
+        assert!(alice.close_nodes.write().try_add(pn));
 
         // test with ipv6 mode
         alice.enable_ipv6_mode(true);
@@ -3381,11 +3469,14 @@ mod tests {
         let (mut alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         let (node_pk, node_sk) = gen_keypair();
 
-        let pn = PackedNode::new("[FF::01]:33445".parse().unwrap(), &bob_pk);
-        alice.try_add_to_close_nodes(pn);
+        let mut close_nodes = alice.close_nodes.write();
 
+        let pn = PackedNode::new("[FF::01]:33445".parse().unwrap(), &bob_pk);
+        assert!(close_nodes.try_add(pn));
         let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), &node_pk);
-        alice.try_add_to_close_nodes(pn);
+        assert!(close_nodes.try_add(pn));
+
+        drop(close_nodes);
 
         // test with ipv6 mode
         alice.enable_ipv6_mode(true);

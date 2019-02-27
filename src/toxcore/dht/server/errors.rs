@@ -79,6 +79,9 @@ pub enum HandlePacketErrorKind {
     /// ## This enum entry is temporary for onion or net crypto module's transition to failure
     #[fail(display = "Onion or NetCrypto related error")]
     OnionOrNetCrypto,
+    /// Failed to send friend's IP address to the sink.
+    #[fail(display = "Failed to send friend's IP address to the sink")]
+    FriendSaddr,
 }
 
 impl From<HandlePacketErrorKind> for HandlePacketError {
