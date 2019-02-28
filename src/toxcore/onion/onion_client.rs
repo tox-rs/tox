@@ -294,20 +294,18 @@ impl OnionClient {
         }
     }
 
-    fn is_redundant_ping(pk: PublicKey, search_pk: PublicKey, request_queue: &RequestQueue<AnnounceRequestData>) -> bool {
+    fn is_redundant_ping(&self, pk: PublicKey, search_pk: PublicKey, request_queue: &RequestQueue<AnnounceRequestData>) -> bool {
         let check_pks = |data: &AnnounceRequestData| -> bool {
-            if let Some(friend_pk) = data.friend_pk {
-                data.pk == pk && search_pk == friend_pk
+            let request_search_pk = if let Some(friend_pk) = data.friend_pk {
+                friend_pk
             } else {
-                data.pk == pk
-            }
+                self.dht.pk
+            };
+            data.pk == pk && search_pk == request_search_pk
         };
-        let request = request_queue.find(check_pks);
-        if let Some((ping_time, _request_data)) = request {
-            clock_elapsed(*ping_time) < Duration::from_secs(MIN_NODE_PING_TIME)
-        } else {
-            false
-        }
+        request_queue.get_values()
+            .any(|(ping_time, request_data)| check_pks(request_data) &&
+                clock_elapsed(ping_time) < Duration::from_secs(MIN_NODE_PING_TIME))
     }
 
     /// Handle `OnionAnnounceResponse` packet.
@@ -381,7 +379,7 @@ impl OnionClient {
             }
 
             // To prevent to send redundant ping packet.
-            if OnionClient::is_redundant_ping(node.pk, announce_packet_data.search_pk, &state.announce_requests) {
+            if self.is_redundant_ping(node.pk, announce_packet_data.search_pk, &state.announce_requests) {
                 continue;
             }
 

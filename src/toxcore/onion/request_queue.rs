@@ -51,16 +51,11 @@ impl<T> RequestQueue<T> { // TODO: unify with DHT?
         );
     }
 
-    /// Returns the Instant of a HashMap according to `f`.
-    pub fn find<F>(&self, f: F) -> Option<(&Instant, &T)>
-        where F: Fn(&T) -> bool {
-        self.ping_map.iter()
-            .find_map(|(_ping_id, (ping_time, data))| {
-                if f(data) {
-                    Some((ping_time, data))
-                } else {
-                    None
-                }
-            })
+    /// Returns the Values of ping_map which is not timedout.
+    pub fn get_values(&self) -> impl Iterator<Item=(Instant, &T)> {
+        self.ping_map
+            .values()
+            .filter(move |(time, _request_data)| clock_elapsed(*time) <= self.timeout)
+            .map(|(time, data)| (time.clone(), data))
     }
 }
