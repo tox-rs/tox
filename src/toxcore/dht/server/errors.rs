@@ -346,6 +346,63 @@ impl From<TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> for RunError {
     }
 }
 
+/// Error that can happen when calling `run_*`.
+#[derive(Debug)]
+pub struct PingError {
+    ctx: Context<PingErrorKind>,
+}
+
+impl PingError {
+    /// Return the kind of this error.
+    pub fn kind(&self) -> &PingErrorKind {
+        self.ctx.get_context()
+    }
+}
+
+impl Fail for PingError {
+    fn cause(&self) -> Option<&Fail> {
+        self.ctx.cause()
+    }
+
+    fn backtrace(&self) -> Option<&Backtrace> {
+        self.ctx.backtrace()
+    }
+}
+
+impl fmt::Display for PingError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.ctx.fmt(f)
+    }
+}
+
+/// The specific kind of error that can occur.
+#[derive(Clone, Debug, Eq, PartialEq, Fail)]
+pub enum PingErrorKind {
+    /// Send packet(s) error
+    #[fail(display = "Send packet(s) error")]
+    SendTo,
+}
+
+impl From<PingErrorKind> for PingError {
+    fn from(kind: PingErrorKind) -> PingError {
+        PingError::from(Context::new(kind))
+    }
+}
+
+impl From<Context<PingErrorKind>> for PingError {
+    fn from(ctx: Context<PingErrorKind>) -> PingError {
+        PingError { ctx }
+    }
+}
+
+impl From<TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> for PingError {
+    fn from(error: TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>) -> PingError {
+        PingError {
+            ctx: error.context(PingErrorKind::SendTo)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -544,6 +601,20 @@ mod tests {
         assert_eq!(format!("{}", wake_up), "Dht loop wakeup timer error".to_owned());
 
         let send_to = RunErrorKind::SendTo;
+        assert_eq!(format!("{}", send_to), "Send packet(s) error".to_owned());
+    }
+
+    #[test]
+    fn ping_error() {
+        let error = PingError::from(PingErrorKind::SendTo);
+        assert!(error.cause().is_none());
+        assert!(error.backtrace().is_some());
+        assert_eq!(format!("{}", error), "Send packet(s) error".to_owned());
+    }
+
+    #[test]
+    fn ping_error_kind() {
+        let send_to = PingErrorKind::SendTo;
         assert_eq!(format!("{}", send_to), "Send packet(s) error".to_owned());
     }
 }

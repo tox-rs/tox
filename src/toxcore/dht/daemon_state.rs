@@ -140,9 +140,8 @@ impl DaemonState {
                 return Either::A(future::err(DeserializeError::deserialize(error, serialized_data.to_vec()))),
         };
 
-        let mut request_queue = server.request_queue.write();
         let nodes_sender = nodes.iter()
-            .map(|node| server.send_nodes_req(node, &mut request_queue, server.pk));
+            .map(|node| server.ping_node(node));
 
         let nodes_stream = stream::futures_unordered(nodes_sender).then(|_| Ok(()));
         Either::B(nodes_stream.for_each(|()| Ok(())))
