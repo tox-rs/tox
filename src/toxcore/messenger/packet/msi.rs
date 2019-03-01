@@ -1,25 +1,33 @@
 /*! Msi struct. Used by tox-av
 */
 
-use nom::le_u8;
+use nom::{ErrorKind, le_u8};
+use bitflags::*;
 
 use crate::toxcore::binary_io::*;
 
 /// Maximum size in bytes of msi message packet
 const MAX_MSI_PAYLOAD_SIZE: usize = 256;
 
-/*
-Msi Capabilities
+bitflags! {
+    /// Capabilities kind of msi packet. Used by bitwise OR.
+    pub struct CapabilitiesKind: u8 {
+        /// Send audio
+        const SEND_AUDIO = 4;
+        /// Send video
+        const SEND_VIDEO = 8;
+        /// Receive audio
+        const RECEIVE_AUDIO = 16;
+        /// Receive video
+        const RECEIVE_VIDEO = 32;
+    }
+}
 
-const MSI_CAP_S_AUDIO: u8 = 4;  /* sending audio */
-const MSI_CAP_S_VIDEO: u8 = 8;  /* sending video */
-const MSI_CAP_R_AUDIO: u8 = 16; /* receiving audio */
-const MSI_CAP_R_VIDEO: u8 = 32; /* receiving video */
-*/
-
-#[repr(u8)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct Capabilities(CapabilitiesKind);
+
 /// Errors of msi session
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MsiErrorKind {
     /// Error of none
     MsiNone = 0,
@@ -39,9 +47,11 @@ pub enum MsiErrorKind {
     Undisclosed,
 }
 
-#[repr(u8)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct MsiError(MsiErrorKind);
+
 /// Kind of msi request
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RequestKind {
     /// Msi request of init
     Init = 1,
@@ -54,16 +64,9 @@ pub enum RequestKind {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct Request(RequestKind);
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct MsiError(MsiErrorKind);
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct Capabilities(u8);
-
 impl FromBytes for Request {
     named!(from_bytes<Request>, do_parse!(
-        tag!("\x01") >>
-        verify!(le_u8, |size| size == 1) >>
+        tag!("\x01\x01") >>
         value: call!(RequestKind::from_bytes) >>
         (Request(value))
     ));
@@ -81,8 +84,7 @@ impl ToBytes for Request {
 
 impl FromBytes for MsiError {
     named!(from_bytes<MsiError>, do_parse!(
-        tag!("\x02") >>
-        verify!(le_u8, |size| size == 1) >>
+        tag!("\x02\x01") >>
         value: call!(MsiErrorKind::from_bytes) >>
         (MsiError(value))
     ));
@@ -98,11 +100,19 @@ impl ToBytes for MsiError {
     }
 }
 
+impl FromBytes for CapabilitiesKind {
+    named!(from_bytes<CapabilitiesKind>, do_parse!(
+        value: le_u8 >>
+        (CapabilitiesKind {
+            bits: value,
+        })
+    ));
+}
+
 impl FromBytes for Capabilities {
     named!(from_bytes<Capabilities>, do_parse!(
-        tag!("\x03") >>
-        verify!(le_u8, |size| size == 1) >>
-        value: le_u8 >>
+        tag!("\x03\x01") >>
+        value: call!(CapabilitiesKind::from_bytes) >>
         (Capabilities(value))
     ));
 }
@@ -112,11 +122,31 @@ impl ToBytes for Capabilities {
         do_gen!(buf,
             gen_le_u8!(0x03) >> // Capabilities
             gen_le_u8!(0x01) >> // Size
-            gen_le_u8!(self.0 as u8)
+            gen_le_u8!(self.0.bits)
         )
     }
 }
 
+impl FromBytes for RequestKind {
+    named!(from_bytes<RequestKind>, switch!(le_u8,
+        1 => value!(RequestKind::Init) |
+        2 => value!(RequestKind::Push) |
+        3 => value!(RequestKind::Pop)
+    ));
+}
+
+impl FromBytes for MsiErrorKind {
+    named!(from_bytes<MsiErrorKind>, switch!(le_u8,
+        0 => value!(MsiErrorKind::MsiNone) |
+        1 => value!(MsiErrorKind::InvalidMessage) |
+        2 => value!(MsiErrorKind::InvalidParam) |
+        3 => value!(MsiErrorKind::InvalidState) |
+        4 => value!(MsiErrorKind::StrayMessage) |
+        5 => value!(MsiErrorKind::System) |
+        6 => value!(MsiErrorKind::Handle) |
+        7 => value!(MsiErrorKind::Undisclosed)
+    ));
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum MsiSubPacket {
@@ -141,27 +171,6 @@ impl ToBytes for MsiSubPacket {
             MsiSubPacket::Capabilities(ref p) => p.to_bytes(buf),
         }
     }
-}
-
-impl FromBytes for RequestKind {
-    named!(from_bytes<RequestKind>, switch!(le_u8,
-        1 => value!(RequestKind::Init) |
-        2 => value!(RequestKind::Push) |
-        3 => value!(RequestKind::Pop)
-    ));
-}
-
-impl FromBytes for MsiErrorKind {
-    named!(from_bytes<MsiErrorKind>, switch!(le_u8,
-        0 => value!(MsiErrorKind::MsiNone) |
-        1 => value!(MsiErrorKind::InvalidMessage) |
-        2 => value!(MsiErrorKind::InvalidParam) |
-        3 => value!(MsiErrorKind::InvalidState) |
-        4 => value!(MsiErrorKind::StrayMessage) |
-        5 => value!(MsiErrorKind::System) |
-        6 => value!(MsiErrorKind::Handle) |
-        7 => value!(MsiErrorKind::Undisclosed)
-    ));
 }
 
 /** Msi is a struct that holds info for Media Session Interface.
@@ -192,52 +201,53 @@ Length    | Content
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Msi {
-    sub_packets: Vec<MsiSubPacket>,
+    request: Request,
+    error: Option<MsiError>,
+    capabilities: Capabilities,
 }
+
+const NOM_CUSTOM_ERR_REQUEST_SUBPACKET_OMITTED: u32 = 1;
+const NOM_CUSTOM_ERR_CAPABILITIES_SUBPACKET_OMITTED: u32 = 2;
 
 impl Msi {
     /// Make new msi struct
-    pub fn new(request: RequestKind, error: MsiErrorKind, capabilities: u8) -> Self {
+    pub fn new(request: RequestKind, error: Option<MsiErrorKind>, capabilities: CapabilitiesKind) -> Self {
         Msi {
-            sub_packets: vec![
-                MsiSubPacket::Request(
-                    Request(request)
-                ),
-                MsiSubPacket::MsiError(
-                    MsiError(error)
-                ),
-                MsiSubPacket::Capabilities(
-                    Capabilities(capabilities)
-                )
-            ]
+            request: Request(request),
+            error: error.map(|error| MsiError(error)),
+            capabilities: Capabilities(capabilities),
         }
     }
 
-    fn remove_redundant(input: &[u8], sub_packets: Vec<MsiSubPacket>) -> IResult<&[u8], Vec<MsiSubPacket>> {
-        let mut result = Vec::new();
-        let mut request = Vec::new();
-        let mut error = Vec::new();
-        let mut capabilities = Vec::new();
-
+    fn remove_redundant(input: &[u8], sub_packets: Vec<MsiSubPacket>) -> IResult<&[u8], Msi> {
+        let mut request = None;
+        let mut error = None;
+        let mut capabilities = None;
         for sub in sub_packets {
             match sub {
-                MsiSubPacket::Request(_) => { request.push(sub); },
-                MsiSubPacket::MsiError(_) => { error.push(sub); },
-                MsiSubPacket::Capabilities(_) => { capabilities.push(sub); },
+                MsiSubPacket::Request(req) => { request = Some(req); },
+                MsiSubPacket::MsiError(err) => { error = Some(err); },
+                MsiSubPacket::Capabilities(capa) => { capabilities = Some(capa); },
             };
         }
-        if let Some(packet) = request.last() {
-            result.push(*packet);
-        }
-        if let Some(packet) = error.last() {
-            result.push(*packet);
-        }
-        if let Some(packet) = capabilities.last() {
-            result.push(*packet);
-        }
-        IResult::Done(input, result)
-    }
+        let request = if let Some(request) = request {
+            request
+        } else {
+            return IResult::Error(ErrorKind::Custom(NOM_CUSTOM_ERR_REQUEST_SUBPACKET_OMITTED));
+        };
+        let capabilities = if let Some(capabilities) = capabilities {
+            capabilities
+        } else {
+            return IResult::Error(ErrorKind::Custom(NOM_CUSTOM_ERR_CAPABILITIES_SUBPACKET_OMITTED));
+        };
 
+        let msi = Msi {
+            request,
+            error,
+            capabilities,
+        };
+        IResult::Done(input, msi)
+    }
 }
 
 impl FromBytes for Msi {
@@ -245,10 +255,8 @@ impl FromBytes for Msi {
         tag!("\x45") >>
         verify!(rest_len, |len| len < MAX_MSI_PAYLOAD_SIZE) >>
         sub_pack: many_till!(call!(MsiSubPacket::from_bytes), tag!("\x00")) >>
-        sub_packets: call!(Msi::remove_redundant, sub_pack.0) >>
-        (Msi {
-            sub_packets
-        })
+        msi: call!(Msi::remove_redundant, sub_pack.0) >>
+        (msi)
     ));
 }
 
@@ -256,7 +264,9 @@ impl ToBytes for Msi {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_le_u8!(0x45) >>
-            gen_many_ref!(&self.sub_packets, |buf, header| MsiSubPacket::to_bytes(header, buf)) >>
+            gen_call!(|buf, request| Request::to_bytes(request, buf), &self.request) >>
+            gen_cond!(self.error.is_some(), gen_call!(|buf, error| MsiError::to_bytes(error, buf), &self.error.unwrap())) >>
+            gen_call!(|buf, capabilities| Capabilities::to_bytes(capabilities, buf), &self.capabilities) >>
             gen_le_u8!(0x00)
         )
     }
@@ -268,7 +278,7 @@ mod tests {
 
     encode_decode_test!(
         msi_encode_decode,
-        Msi::new(RequestKind::Init, MsiErrorKind::MsiNone, 4)
+        Msi::new(RequestKind::Init, Some(MsiErrorKind::MsiNone), CapabilitiesKind::SEND_AUDIO)
     );
 
     #[test]
@@ -287,7 +297,7 @@ mod tests {
             1, 1, 1, // request
             1, 1, 2, // redundant request
             2, 1, 1, // last error
-            3, 1, 1, // last capabilities
+            3, 1, 4, // last capabilities
             1, 1, 3, // last request, it should remain
             0,
         ];
@@ -297,7 +307,7 @@ mod tests {
         assert_eq!(after_value[..size], [0x45,
             1, 1, 3, // last request of input
             2, 1, 1,
-            3, 1, 1,
+            3, 1, 4,
             0,
         ])
     }

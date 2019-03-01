@@ -140,7 +140,7 @@ mod tests {
 
     encode_decode_test!(
         packet_msi_encode_decode,
-        Packet::Msi(Msi::new(RequestKind::Init, MsiErrorKind::MsiNone, 4))
+        Packet::Msi(Msi::new(RequestKind::Init, None, CapabilitiesKind::SEND_AUDIO))
     );
 
     encode_decode_test!(

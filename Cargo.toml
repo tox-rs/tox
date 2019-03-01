@@ -42,6 +42,7 @@ get_if_addrs = "0.5"
 parking_lot = "0.7"
 failure = "0.1"
 lru = "0.1"
+bitflags = "1.0"
 
 [dev-dependencies]
 env_logger = "0.6"
