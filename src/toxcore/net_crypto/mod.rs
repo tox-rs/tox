@@ -741,7 +741,7 @@ impl NetCrypto {
     /// Run `net_crypto` periodical tasks. Result future will never be completed
     /// successfully.
     pub fn run(self) -> impl Future<Item = (), Error = RunError> + Send {
-        let interval = Duration::from_secs(PACKET_COUNTER_AVERAGE_INTERVAL);
+        let interval = Duration::from_millis(PACKET_COUNTER_AVERAGE_INTERVAL);
         let wakeups = Interval::new(Instant::now(), interval);
 
         wakeups
