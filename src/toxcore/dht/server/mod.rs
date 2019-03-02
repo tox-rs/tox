@@ -1968,7 +1968,7 @@ mod tests {
         let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (real_pk, _real_sk) = gen_keypair();
+        let (real_pk, real_sk) = gen_keypair();
         let (bob_pk, bob_sk) = gen_keypair();
         let (bob_real_pk, _bob_real_sk) = gen_keypair();
         let precomp = precompute(&alice.pk, &bob_sk);
@@ -1980,6 +1980,7 @@ mod tests {
             dht_pk,
             dht_sk,
             real_pk,
+            real_sk,
             precomputed_keys: alice.get_precomputed_keys(),
         });
 
