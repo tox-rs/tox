@@ -8,6 +8,7 @@ mod action;
 mod offline;
 mod message;
 mod nickname;
+mod msi;
 mod file_control;
 mod typing;
 mod user_status;
@@ -19,6 +20,7 @@ pub use self::action::*;
 pub use self::offline::*;
 pub use self::message::*;
 pub use self::nickname::*;
+pub use self::msi::*;
 pub use self::file_control::*;
 pub use self::typing::*;
 pub use self::user_status::*;
@@ -49,6 +51,8 @@ pub enum Packet {
     FileData(FileData),
     /// [`StatusMessage`](./struct.StatusMessage.html) structure.
     StatusMessage(StatusMessage),
+    /// [`Msi`](./struct.Msi.html) structure.
+    Msi(Msi),
 }
 
 impl ToBytes for Packet {
@@ -63,6 +67,7 @@ impl ToBytes for Packet {
             Packet::FileControl(ref p) => p.to_bytes(buf),
             Packet::Typing(ref p) => p.to_bytes(buf),
             Packet::FileData(ref p) => p.to_bytes(buf),
+            Packet::Msi(ref p) => p.to_bytes(buf),
             Packet::StatusMessage(ref p) => p.to_bytes(buf),
         }
     }
@@ -73,14 +78,14 @@ impl FromBytes for Packet {
         map!(Online::from_bytes, Packet::Online) |
         map!(Action::from_bytes, Packet::Action) |
         map!(Offline::from_bytes, Packet::Offline) |
-        map!(Message::from_bytes, Packet::Message) |
         map!(Nickname::from_bytes, Packet::Nickname) |
+        map!(Message::from_bytes, Packet::Message) |
         map!(UserStatus::from_bytes, Packet::UserStatus) |
         map!(FileControl::from_bytes, Packet::FileControl) |
         map!(FileData::from_bytes, Packet::FileData) |
+        map!(Msi::from_bytes, Packet::Msi) |
         map!(StatusMessage::from_bytes, Packet::StatusMessage) |
-        map!(Typing::from_bytes, Packet::Typing) |
-        map!(FileData::from_bytes, Packet::FileData)
+        map!(Typing::from_bytes, Packet::Typing)
     ));
 }
 
@@ -131,6 +136,11 @@ mod tests {
     encode_decode_test!(
         packet_file_data_encode_decode,
         Packet::FileData(FileData::new(1, vec![1,2,3,4]))
+    );
+
+    encode_decode_test!(
+        packet_msi_encode_decode,
+        Packet::Msi(Msi::new(RequestKind::Init, None, CapabilitiesKind::SEND_AUDIO))
     );
 
     encode_decode_test!(
