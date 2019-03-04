@@ -10,24 +10,30 @@ use crate::toxcore::dht::packet::*;
 use crate::toxcore::time::*;
 
 /// Interval in ms between sending cookie request/handshake packets.
-pub const CRYPTO_SEND_PACKET_INTERVAL: u64 = 1000;
+pub const CRYPTO_SEND_PACKET_INTERVAL_MS: u64 = 1000;
+
+/// Interval between sending cookie request/handshake packets.
+pub const CRYPTO_SEND_PACKET_INTERVAL: Duration = Duration::from_millis(CRYPTO_SEND_PACKET_INTERVAL_MS);
 
 /// The maximum number of times we try to send the cookie request and handshake
 /// before giving up
 pub const MAX_NUM_SENDPACKET_TRIES: u8 = 8;
 
-/// If we don't receive UDP packets for this amount of time in seconds the
-/// direct UDP connection is considered dead
-pub const UDP_DIRECT_TIMEOUT: u64 = 8;
+/// If we don't receive UDP packets for this amount of time the direct UDP
+/// connection is considered dead
+pub const UDP_DIRECT_TIMEOUT: Duration = Duration::from_secs(8);
 
-/// Default rtt in milliseconds
-pub const DEFAULT_RTT: u64 = 1000;
+/// Default RTT (round trip time)
+pub const DEFAULT_RTT: Duration = Duration::from_millis(1000);
 
-/// rtt in milliseconds for TCP connections
-pub const TCP_RTT: u64 = 500;
+/// RTT (round trip time) for TCP connections
+pub const TCP_RTT: Duration = Duration::from_millis(500);
+
+/// The dT for the average packet receiving rate calculations (in ms).
+pub const PACKET_COUNTER_AVERAGE_INTERVAL_MS: u64 = 50;
 
 /// The dT for the average packet receiving rate calculations.
-pub const PACKET_COUNTER_AVERAGE_INTERVAL: u64 = 50;
+pub const PACKET_COUNTER_AVERAGE_INTERVAL: Duration = Duration::from_millis(PACKET_COUNTER_AVERAGE_INTERVAL_MS);
 
 /// How many last sizes of `send_array` should be recorded for congestion
 /// control.
@@ -40,8 +46,8 @@ pub const CONGESTION_LAST_SENT_ARRAY_SIZE: usize = CONGESTION_QUEUE_ARRAY_SIZE *
 /// Minimum packets rate per second.
 pub const CRYPTO_PACKET_MIN_RATE: f64 = 4.0;
 
-/// Timeout for increasing speed after congestion event (in ms).
-pub const CONGESTION_EVENT_TIMEOUT: u64 = 1000;
+/// Timeout for increasing speed after congestion event.
+pub const CONGESTION_EVENT_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// If the send queue grows so that it will take more than 2 seconds to send all
 /// its packet we will reduce send rate.
@@ -106,7 +112,7 @@ impl StatusPacket {
 
     /// Check if one second is elapsed since last time when the packet was sent
     fn is_time_elapsed(&self) -> bool {
-        clock_elapsed(self.sent_time) > Duration::from_millis(CRYPTO_SEND_PACKET_INTERVAL)
+        clock_elapsed(self.sent_time) > CRYPTO_SEND_PACKET_INTERVAL
     }
 
     /// Check if packet should be sent to the peer
@@ -320,7 +326,7 @@ impl CryptoConnection {
             udp_send_attempt_time: None,
             send_array: PacketsArray::new(),
             recv_array: PacketsArray::new(),
-            rtt: Duration::from_millis(DEFAULT_RTT),
+            rtt: DEFAULT_RTT,
             request_packet_sent_time: None,
             stats_calculation_time: clock_now(),
             packets_received: 0,
@@ -380,7 +386,7 @@ impl CryptoConnection {
             udp_send_attempt_time: None,
             send_array: PacketsArray::new(),
             recv_array: PacketsArray::new(),
-            rtt: Duration::from_millis(DEFAULT_RTT),
+            rtt: DEFAULT_RTT,
             request_packet_sent_time: None,
             stats_calculation_time: clock_now(),
             packets_received: 0,
@@ -440,7 +446,7 @@ impl CryptoConnection {
     /// Check if we received the last UDP packet not later than 8 seconds ago
     pub fn is_udp_alive(&self) -> bool {
         self.udp_received_time
-            .map(|time| clock_elapsed(time) < Duration::from_secs(UDP_DIRECT_TIMEOUT))
+            .map(|time| clock_elapsed(time) < UDP_DIRECT_TIMEOUT)
             .unwrap_or(false)
     }
 
@@ -449,7 +455,7 @@ impl CryptoConnection {
     /// packet via TCP relay
     pub fn udp_attempt_should_be_made(&self) -> bool {
         self.udp_send_attempt_time
-            .map(|time| clock_elapsed(time) >= Duration::from_secs(UDP_DIRECT_TIMEOUT / 2))
+            .map(|time| clock_elapsed(time) >= UDP_DIRECT_TIMEOUT / 2)
             .unwrap_or(true)
     }
 
@@ -483,8 +489,8 @@ impl CryptoConnection {
         let delay = ((
             self.rtt.as_secs() * 1000 +
                 u64::from(self.rtt.subsec_millis()) +
-                PACKET_COUNTER_AVERAGE_INTERVAL / 2 // add half of the interval to make delay rounded
-        ) / PACKET_COUNTER_AVERAGE_INTERVAL) as usize;
+                PACKET_COUNTER_AVERAGE_INTERVAL_MS / 2 // add half of the interval to make delay rounded
+        ) / PACKET_COUNTER_AVERAGE_INTERVAL_MS) as usize;
         let delay = delay.min(CONGESTION_MAX_DELAY);
 
         // Total number of sent packets per CONGESTION_QUEUE_ARRAY_SIZE * PACKET_COUNTER_AVERAGE_INTERVAL interval
@@ -509,7 +515,7 @@ impl CryptoConnection {
         }
 
         // Average number of successfully delivered packets per second
-        let coeff = 1000.0 / (CONGESTION_QUEUE_ARRAY_SIZE as f64 * PACKET_COUNTER_AVERAGE_INTERVAL as f64);
+        let coeff = 1000.0 / (CONGESTION_QUEUE_ARRAY_SIZE as f64 * PACKET_COUNTER_AVERAGE_INTERVAL_MS as f64);
         let min_speed = f64::from(total_sent) * coeff;
         let min_speed_request = f64::from(total_sent + total_resent) * coeff;
 
@@ -521,7 +527,7 @@ impl CryptoConnection {
             // It will take more than SEND_QUEUE_CLEARANCE_TIME seconds to send
             // all packets from send queue. Reduce packets send rate in this case
             min_speed / (send_array_time / SEND_QUEUE_CLEARANCE_TIME)
-        } else if self.last_congestion_event.map_or(true, |time| (now - time) > Duration::from_millis(CONGESTION_EVENT_TIMEOUT)) {
+        } else if self.last_congestion_event.map_or(true, |time| (now - time) > CONGESTION_EVENT_TIMEOUT) {
             // Congestion event happened long ago so increase packets send rate
             min_speed * 1.2
         } else {
@@ -556,11 +562,11 @@ impl CryptoConnection {
     pub fn request_packet_interval(&self) -> Duration {
         let request_packet_interval = REQUEST_PACKETS_COMPARE_CONSTANT / ((f64::from(self.recv_array.len()) + 1.0) / (self.packet_recv_rate + 1.0));
         let request_packet_interval = request_packet_interval.min(
-            CRYPTO_PACKET_MIN_RATE / self.packet_recv_rate * CRYPTO_SEND_PACKET_INTERVAL as f64 + PACKET_COUNTER_AVERAGE_INTERVAL as f64
+            CRYPTO_PACKET_MIN_RATE / self.packet_recv_rate * CRYPTO_SEND_PACKET_INTERVAL_MS as f64 + PACKET_COUNTER_AVERAGE_INTERVAL_MS as f64
         );
         let request_packet_interval = (request_packet_interval.round() as u64)
-            .max(PACKET_COUNTER_AVERAGE_INTERVAL) // lower bound
-            .min(CRYPTO_SEND_PACKET_INTERVAL); // upper bound
+            .max(PACKET_COUNTER_AVERAGE_INTERVAL_MS) // lower bound
+            .min(CRYPTO_SEND_PACKET_INTERVAL_MS); // upper bound
         Duration::from_millis(request_packet_interval)
     }
 
@@ -608,7 +614,7 @@ mod tests {
 
         let mut enter = tokio_executor::enter().unwrap();
         let clock = Clock::new_with_now(ConstNow(
-            packet.sent_time + Duration::from_millis(CRYPTO_SEND_PACKET_INTERVAL + 1000)
+            packet.sent_time + CRYPTO_SEND_PACKET_INTERVAL + Duration::from_secs(1)
         ));
 
         with_default(&clock, &mut enter, |_| {
@@ -637,7 +643,7 @@ mod tests {
 
         let mut enter = tokio_executor::enter().unwrap();
         let clock = Clock::new_with_now(ConstNow(
-            packet.sent_time + Duration::from_millis(CRYPTO_SEND_PACKET_INTERVAL + 1000)
+            packet.sent_time + CRYPTO_SEND_PACKET_INTERVAL + Duration::from_secs(1)
         ));
 
         with_default(&clock, &mut enter, |_| {
@@ -736,7 +742,7 @@ mod tests {
         connection.packets_sent = 200;
         connection.packets_resent = 100;
 
-        let next_now = now + Duration::from_millis(PACKET_COUNTER_AVERAGE_INTERVAL);
+        let next_now = now + PACKET_COUNTER_AVERAGE_INTERVAL;
         let mut enter = tokio_executor::enter().unwrap();
         let clock = Clock::new_with_now(ConstNow(next_now));
 
