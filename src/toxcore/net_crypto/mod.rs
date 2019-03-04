@@ -67,8 +67,8 @@ const PACKET_ID_LOSSY_RANGE_START: u8 = 192;
 /// `PACKET_ID_LOSSY_RANGE_END` are considered lossy packets.
 const PACKET_ID_LOSSY_RANGE_END: u8 = 254;
 
-/// Timeout in seconds for packet sending
-const NET_CRYPTO_SEND_TIMEOUT: u64 = 50;
+/// Timeout for packet sending
+const NET_CRYPTO_SEND_TIMEOUT: Duration = Duration::from_millis(50);
 
 /// Shorthand for the transmit half of the message channel for sending DHT
 /// packets.
@@ -180,7 +180,7 @@ impl NetCrypto {
 
     /// Send `Packet` packet to UDP socket
     fn send_to_udp(&self, addr: SocketAddr, packet: Packet) -> impl Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send {
-        send_to_bounded(&self.udp_tx, (packet, addr), Duration::from_millis(NET_CRYPTO_SEND_TIMEOUT))
+        send_to_bounded(&self.udp_tx, (packet, addr), NET_CRYPTO_SEND_TIMEOUT)
     }
 
     /// Get long term `PublicKey` of the peer by its UDP address
@@ -542,7 +542,7 @@ impl NetCrypto {
 
         let result = if packet_id == PACKET_ID_REQUEST {
             // Use const RTT in case of TCP connection
-            let rtt = if udp { connection.rtt } else { Duration::from_millis(TCP_RTT) };
+            let rtt = if udp { connection.rtt } else { TCP_RTT };
             NetCrypto::handle_request_packet(&mut connection.send_array, &payload.data[1..], rtt, &mut last_sent_time);
             // Update end index of received buffer ignoring the error - we still
             // want to handle this packet even if connection is too slow
@@ -696,7 +696,7 @@ impl NetCrypto {
 
             if connection.is_not_confirmed() || connection.is_established() {
                 let should_send = connection.request_packet_sent_time.map_or(true, |time|
-                    clock_elapsed(time) > Duration::from_millis(CRYPTO_SEND_PACKET_INTERVAL)
+                    clock_elapsed(time) > CRYPTO_SEND_PACKET_INTERVAL
                 );
                 if should_send {
                     futures.push(Box::new(self.send_request_packet(&mut connection)));
@@ -741,8 +741,7 @@ impl NetCrypto {
     /// Run `net_crypto` periodical tasks. Result future will never be completed
     /// successfully.
     pub fn run(self) -> impl Future<Item = (), Error = RunError> + Send {
-        let interval = Duration::from_secs(PACKET_COUNTER_AVERAGE_INTERVAL);
-        let wakeups = Interval::new(Instant::now(), interval);
+        let wakeups = Interval::new(Instant::now(), PACKET_COUNTER_AVERAGE_INTERVAL);
 
         wakeups
             .map_err(|e| RunError::from(e))
@@ -2808,7 +2807,7 @@ mod tests {
         let cookie_request_id = unpack!(connection.status.clone(), ConnectionStatus::CookieRequesting, cookie_request_id);
         let mut packet = unpack!(connection.status.clone(), ConnectionStatus::CookieRequesting, packet);
         packet.num_sent = MAX_NUM_SENDPACKET_TRIES;
-        packet.sent_time -= Duration::from_millis(CRYPTO_SEND_PACKET_INTERVAL + 1000);
+        packet.sent_time -= CRYPTO_SEND_PACKET_INTERVAL + Duration::from_secs(1);
         connection.status = ConnectionStatus::CookieRequesting {
             cookie_request_id,
             packet
