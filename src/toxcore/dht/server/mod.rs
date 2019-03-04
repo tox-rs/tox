@@ -240,10 +240,12 @@ impl Server {
     }
 
     /// Get closest nodes from both close_nodes and friend's close_nodes
-    fn get_closest(&self, base_pk: &PublicKey, only_global: bool) -> Kbucket<PackedNode> {
-        let close_nodes = self.close_nodes.read();
-        let friends = self.friends.read();
-
+    fn get_closest_inner(
+        close_nodes: &Ktree,
+        friends: &HashMap<PublicKey, DhtFriend>,
+        base_pk: &PublicKey,
+        only_global: bool
+    ) -> Kbucket<PackedNode> {
         let mut kbucket = close_nodes.get_closest(base_pk, only_global);
 
         for node in friends.values().flat_map(|friend| friend.close_nodes.iter()) {
@@ -257,17 +259,33 @@ impl Server {
         kbucket
     }
 
-    /// Add a friend.
-    /// `node_to_bootstrap` of new friend is filled with close nodes for fast bootstrapping.
+    /// Get closest nodes from both close_nodes and friend's close_nodes
+    fn get_closest(&self, base_pk: &PublicKey, only_global: bool) -> Kbucket<PackedNode> {
+        let close_nodes = self.close_nodes.read();
+        let friends = self.friends.read();
+
+        Server::get_closest_inner(&close_nodes, &friends, base_pk, only_global)
+    }
+
+    /// Add a friend to the DHT friends list to look for it's IP address. After
+    /// IP address it will be sent to `friend_saddr_sink`.
     pub fn add_friend(&self, friend_pk: PublicKey) {
+        let mut friends = self.friends.write();
+
+        if friends.contains_key(&friend_pk) {
+            return;
+        }
+
+        let close_nodes = self.close_nodes.read();
+
         let mut friend = DhtFriend::new(friend_pk);
-        let close_nodes = self.get_closest(&friend.pk, true);
+        let close_nodes = Server::get_closest_inner(&close_nodes, &friends, &friend.pk, true);
 
         for &node in close_nodes.iter() {
             friend.nodes_to_bootstrap.try_add(&friend.pk, node, /* evict */ true);
         }
 
-        self.friends.write().insert(friend_pk, friend);
+        friends.insert(friend_pk, friend);
     }
 
     /// The main loop of DHT server which should be called every second. This
@@ -1422,7 +1440,7 @@ mod tests {
     }
 
     #[test]
-    fn add_friend_test() {
+    fn add_friend() {
         let (alice, _precomp, bob_pk, _bob_sk, _rx, _addr) = create_node();
 
         let packed_node = PackedNode::new("211.192.153.67:33445".parse().unwrap(), &bob_pk);
@@ -1433,6 +1451,23 @@ mod tests {
 
         let inserted_friend = &alice.friends.read()[&friend_pk];
         assert!(inserted_friend.nodes_to_bootstrap.contains(&friend_pk, &bob_pk));
+    }
+
+    #[test]
+    fn readd_friend() {
+        let (alice, _precomp, bob_pk, _bob_sk, _rx, _addr) = create_node();
+
+        let friend_pk = gen_keypair().0;
+        alice.add_friend(friend_pk);
+
+        let packed_node = PackedNode::new("127.0.0.1:33445".parse().unwrap(), &bob_pk);
+        assert!(alice.friends.write().get_mut(&friend_pk).unwrap().try_add_to_close(packed_node));
+
+        // adding the same friend shouldn't replace existing `DhtFriend`
+        alice.add_friend(friend_pk);
+
+        // so it should still contain the added node
+        assert!(alice.friends.read()[&friend_pk].close_nodes.contains(&friend_pk, &bob_pk));
     }
 
     // handle_bootstrap_info
