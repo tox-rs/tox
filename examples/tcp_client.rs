@@ -17,7 +17,7 @@ use futures::future;
 use futures::future::Either;
 use futures::sync::mpsc;
 
-use tokio_codec::Framed;
+use tokio::codec::Framed;
 use tokio::net::TcpStream;
 
 use std::{thread, time};

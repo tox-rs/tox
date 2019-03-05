@@ -9,7 +9,7 @@ use futures::{future, Future, Stream};
 use futures::future::Either;
 use futures::sync::mpsc;
 use parking_lot::RwLock;
-use tokio_codec::Framed;
+use tokio::codec::Framed;
 use tokio;
 use tokio::net::TcpStream;
 

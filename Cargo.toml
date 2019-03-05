@@ -34,8 +34,6 @@ byteorder = "1"
 futures = "0.1"
 log = "0.4"
 sodiumoxide = "0.2"
-tokio = "0.1"
-tokio-codec = "0.1"
 nom = "3.2"
 cookie-factory = "0.2"
 get_if_addrs = "0.5"
@@ -43,6 +41,11 @@ parking_lot = "0.7"
 failure = "0.1"
 lru = "0.1"
 bitflags = "1.0"
+
+[dependencies.tokio]
+version = "0.1"
+default-features = false
+features = ["tcp", "udp", "timer", "codec", "rt-full"]
 
 [dev-dependencies]
 env_logger = "0.6"

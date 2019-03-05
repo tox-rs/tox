@@ -7,7 +7,7 @@ use crate::toxcore::tcp::handshake::packet::*;
 use nom::Offset;
 use bytes::BytesMut;
 use std::io::{Error, ErrorKind};
-use tokio_codec::{Decoder, Encoder};
+use tokio::codec::{Decoder, Encoder};
 
 /// implements tokio-io's Decoder and Encoder to deal with Client handshake
 pub struct ClientHandshakeCodec;
