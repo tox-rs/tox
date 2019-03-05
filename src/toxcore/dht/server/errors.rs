@@ -53,7 +53,7 @@ pub enum HandlePacketErrorKind {
     OnionResponse,
     /// Error indicates that BootstrapInfo error.
     #[fail(display = "BootstrapInfo handling error")]
-    BootstrapInfo,
+    BootstrapInfoLength,
     /// Error indicates that sending response packet error.
     #[fail(display = "Sending response error")]
     SendTo,
@@ -116,14 +116,6 @@ impl From<OnionResponseError> for HandlePacketError {
     fn from(error: OnionResponseError) -> HandlePacketError {
         HandlePacketError {
             ctx: error.context(HandlePacketErrorKind::OnionResponse)
-        }
-    }
-}
-
-impl From<HandleBootstrapInfoError> for HandlePacketError {
-    fn from(error: HandleBootstrapInfoError) -> HandlePacketError {
-        HandlePacketError {
-            ctx: error.context(HandlePacketErrorKind::BootstrapInfo)
         }
     }
 }
@@ -214,66 +206,6 @@ impl From<mpsc::SendError<(InnerOnionResponse, SocketAddr)>> for OnionResponseEr
     fn from(error: mpsc::SendError<(InnerOnionResponse, SocketAddr)>) -> OnionResponseError {
         OnionResponseError {
             ctx: error.context(OnionResponseErrorKind::Eof)
-        }
-    }
-}
-
-/// Error that can happen when calling `handle_bootstrap_info`.
-#[derive(Debug)]
-pub struct HandleBootstrapInfoError {
-    ctx: Context<HandleBootstrapInfoErrorKind>,
-}
-
-impl HandleBootstrapInfoError {
-    /// Return the kind of this error.
-    pub fn kind(&self) -> &HandleBootstrapInfoErrorKind {
-        self.ctx.get_context()
-    }
-}
-
-impl Fail for HandleBootstrapInfoError {
-    fn cause(&self) -> Option<&Fail> {
-        self.ctx.cause()
-    }
-
-    fn backtrace(&self) -> Option<&Backtrace> {
-        self.ctx.backtrace()
-    }
-}
-
-impl fmt::Display for HandleBootstrapInfoError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.ctx.fmt(f)
-    }
-}
-
-/// The specific kind of error that can occur.
-#[derive(Clone, Debug, Eq, PartialEq, Fail)]
-pub enum HandleBootstrapInfoErrorKind {
-    /// Error indicates that length of received BootstrapInfo packet error.
-    #[fail(display = "Length of BootstrapInfo packet error")]
-    Length,
-    /// Error indicates that sending response packet error.
-    #[fail(display = "Sending response error")]
-    SendTo,
-}
-
-impl From<HandleBootstrapInfoErrorKind> for HandleBootstrapInfoError {
-    fn from(kind: HandleBootstrapInfoErrorKind) -> HandleBootstrapInfoError {
-        HandleBootstrapInfoError::from(Context::new(kind))
-    }
-}
-
-impl From<Context<HandleBootstrapInfoErrorKind>> for HandleBootstrapInfoError {
-    fn from(ctx: Context<HandleBootstrapInfoErrorKind>) -> HandleBootstrapInfoError {
-        HandleBootstrapInfoError { ctx }
-    }
-}
-
-impl From<TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> for HandleBootstrapInfoError {
-    fn from(error: TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>) -> HandleBootstrapInfoError {
-        HandleBootstrapInfoError {
-            ctx: error.context(HandleBootstrapInfoErrorKind::SendTo)
         }
     }
 }
@@ -481,23 +413,6 @@ mod tests {
     }
 
     #[test]
-    fn bootstrap_info_send_error() {
-        let (tx, rx) = mpsc::channel(32);
-
-        let packet = Packet::BootstrapInfo(BootstrapInfo {
-            version: 1717,
-            motd: vec![1, 2, 3, 4],
-        });
-        let sock: SocketAddr = "127.0.0.1:33445".parse().unwrap();
-
-        drop(rx);
-        let res = send_to_bounded(&tx, (packet, sock), Duration::from_secs(1)).wait();
-        assert!(res.is_err());
-        let new_error = HandleBootstrapInfoError::from(res.err().unwrap());
-        assert_eq!(*new_error.kind(), HandleBootstrapInfoErrorKind::SendTo);
-    }
-
-    #[test]
     fn run_send_error() {
         let (tx, rx) = mpsc::channel(32);
 
@@ -522,7 +437,7 @@ mod tests {
         let onion_response = HandlePacketErrorKind::OnionResponse;
         assert_eq!(format!("{}", onion_response), "Onion response error".to_owned());
 
-        let bootstrap_info = HandlePacketErrorKind::BootstrapInfo;
+        let bootstrap_info = HandlePacketErrorKind::BootstrapInfoLength;
         assert_eq!(format!("{}", bootstrap_info), "BootstrapInfo handling error".to_owned());
 
         let send_to = HandlePacketErrorKind::SendTo;
@@ -568,23 +483,6 @@ mod tests {
 
         let redirect = OnionResponseErrorKind::Redirect;
         assert_eq!(format!("{}", redirect), "Sending response redirecting error".to_owned());
-    }
-
-    #[test]
-    fn bootstrap_info_error() {
-        let error = HandleBootstrapInfoError::from(HandleBootstrapInfoErrorKind::Length);
-        assert!(error.cause().is_none());
-        assert!(error.backtrace().is_some());
-        assert_eq!(format!("{}", error), "Length of BootstrapInfo packet error".to_owned());
-    }
-
-    #[test]
-    fn bootstrap_info_error_kind() {
-        let length = HandleBootstrapInfoErrorKind::Length;
-        assert_eq!(format!("{}", length), "Length of BootstrapInfo packet error".to_owned());
-
-        let send_to = HandleBootstrapInfoErrorKind::SendTo;
-        assert_eq!(format!("{}", send_to), "Sending response error".to_owned());
     }
 
     #[test]
