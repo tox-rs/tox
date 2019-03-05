@@ -15,7 +15,7 @@ use crate::toxcore::tcp::secure;
 
 use futures::{self, Stream, Sink, Future};
 use std::io::{Error, ErrorKind};
-use tokio_codec::Framed;
+use tokio::codec::Framed;
 use tokio::net::TcpStream;
 
 /// Create a handshake from client to server

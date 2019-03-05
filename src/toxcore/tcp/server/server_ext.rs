@@ -11,7 +11,7 @@ use futures::{future, Future, Sink, Stream};
 use futures::sync::mpsc;
 use tokio;
 use tokio::net::{TcpStream, TcpListener};
-use tokio_codec::Framed;
+use tokio::codec::Framed;
 use tokio::prelude::FutureExt;
 use tokio::timer::{Error as TimerError, Interval};
 use tokio::timer::timeout::{Error as TimeoutError};

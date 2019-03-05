@@ -11,7 +11,7 @@ use crate::toxcore::stats::*;
 use failure::Fail;
 use nom::{ErrorKind, Needed, Offset};
 use bytes::BytesMut;
-use tokio_codec::{Decoder, Encoder};
+use tokio::codec::{Decoder, Encoder};
 
 /// Error that can happen when decoding `Packet` from bytes
 #[derive(Debug, Fail)]

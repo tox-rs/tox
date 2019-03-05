@@ -13,7 +13,7 @@ use crate::toxcore::stats::*;
 use bytes::BytesMut;
 use cookie_factory::GenError;
 use nom::{ErrorKind, Needed};
-use tokio_codec::{Decoder, Encoder};
+use tokio::codec::{Decoder, Encoder};
 
 /// A serialized `Packet` should be not longer than 2048 bytes.
 pub const MAX_DHT_PACKET_SIZE: usize = 2048;
