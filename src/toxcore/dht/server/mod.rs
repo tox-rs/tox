@@ -288,6 +288,12 @@ impl Server {
         friends.insert(friend_pk, friend);
     }
 
+    /// Remove a friend from the DHT friends list to stop looking for it's IP
+    /// address.
+    pub fn remove_friend(&self, friend_pk: PublicKey) {
+        self.friends.write().remove(&friend_pk);
+    }
+
     /// The main loop of DHT server which should be called every second. This
     /// method iterates over all nodes from close nodes list, close nodes of
     /// friends and bootstrap nodes and sends `NodesRequest` packets if
@@ -1467,6 +1473,20 @@ mod tests {
 
         // so it should still contain the added node
         assert!(alice.friends.read()[&friend_pk].close_nodes.contains(&friend_pk, &bob_pk));
+    }
+
+    #[test]
+    fn remove_friend() {
+        let (alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
+
+        let friend_pk = gen_keypair().0;
+        alice.add_friend(friend_pk);
+
+        assert!(alice.friends.read().contains_key(&friend_pk));
+
+        alice.remove_friend(friend_pk);
+
+        assert!(!alice.friends.read().contains_key(&friend_pk));
     }
 
     // handle_bootstrap_info
