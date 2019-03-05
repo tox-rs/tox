@@ -692,8 +692,7 @@ impl Server {
             Packet::OnionResponse3(packet) => Box::new(self.handle_onion_response_3(packet)),
             Packet::OnionResponse2(packet) => Box::new(self.handle_onion_response_2(packet)),
             Packet::OnionResponse1(packet) => Box::new(self.handle_onion_response_1(packet)),
-            Packet::BootstrapInfo(packet) => Box::new(self.handle_bootstrap_info(&packet, addr)
-                .map_err(|e| HandlePacketError::from(e))),
+            Packet::BootstrapInfo(packet) => Box::new(self.handle_bootstrap_info(&packet, addr)),
             // This packet should be handled in client only
             Packet::CryptoData(_packet) => Box::new(future::err(
                 HandlePacketError::from(HandlePacketErrorKind::NotHandled)
@@ -1340,10 +1339,10 @@ impl Server {
     }
 
     /// Handle `BootstrapInfo` packet and response with `BootstrapInfo` packet.
-    fn handle_bootstrap_info(&self, packet: &BootstrapInfo, addr: SocketAddr) -> impl Future<Item = (), Error = HandleBootstrapInfoError> + Send {
+    fn handle_bootstrap_info(&self, packet: &BootstrapInfo, addr: SocketAddr) -> impl Future<Item = (), Error = HandlePacketError> + Send {
         if packet.motd.len() != BOOSTRAP_CLIENT_MAX_MOTD_LENGTH {
             return Either::A( future::err(
-                HandleBootstrapInfoError::from(HandleBootstrapInfoErrorKind::Length)
+                HandlePacketError::from(HandlePacketErrorKind::BootstrapInfoLength)
             ))
         }
 
@@ -1362,7 +1361,7 @@ impl Server {
                 motd,
             });
             Either::B(self.send_to(addr, packet)
-                .map_err(|e| HandleBootstrapInfoError::from(e))
+                .map_err(|e| HandlePacketError::from(e))
             )
         } else {
             // Do not respond to BootstrapInfo packets if bootstrap_info not defined
@@ -1515,7 +1514,7 @@ mod tests {
 
         let res = alice.handle_packet(packet, addr).wait();
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::BootstrapInfo);
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::BootstrapInfoLength);
 
         // Necessary to drop tx so that rx.collect() can be finished
         drop(alice);
