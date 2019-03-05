@@ -244,9 +244,10 @@ impl Server {
         close_nodes: &Ktree,
         friends: &HashMap<PublicKey, DhtFriend>,
         base_pk: &PublicKey,
+        count: u8,
         only_global: bool
     ) -> Kbucket<PackedNode> {
-        let mut kbucket = close_nodes.get_closest(base_pk, only_global);
+        let mut kbucket = close_nodes.get_closest(base_pk, count, only_global);
 
         for node in friends.values().flat_map(|friend| friend.close_nodes.iter()) {
             if let Some(pn) = node.to_packed_node() {
@@ -260,11 +261,11 @@ impl Server {
     }
 
     /// Get closest nodes from both close_nodes and friend's close_nodes
-    fn get_closest(&self, base_pk: &PublicKey, only_global: bool) -> Kbucket<PackedNode> {
+    pub fn get_closest(&self, base_pk: &PublicKey, count: u8, only_global: bool) -> Kbucket<PackedNode> {
         let close_nodes = self.close_nodes.read();
         let friends = self.friends.read();
 
-        Server::get_closest_inner(&close_nodes, &friends, base_pk, only_global)
+        Server::get_closest_inner(&close_nodes, &friends, base_pk, count, only_global)
     }
 
     /// Add a friend to the DHT friends list to look for it's IP address. After
@@ -279,7 +280,7 @@ impl Server {
         let close_nodes = self.close_nodes.read();
 
         let mut friend = DhtFriend::new(friend_pk);
-        let close_nodes = Server::get_closest_inner(&close_nodes, &friends, &friend.pk, true);
+        let close_nodes = Server::get_closest_inner(&close_nodes, &friends, &friend.pk, 4, true);
 
         for &node in close_nodes.iter() {
             friend.nodes_to_bootstrap.try_add(&friend.pk, node, /* evict */ true);
@@ -806,7 +807,7 @@ impl Server {
             Ok(payload) => payload,
         };
 
-        let close_nodes = self.get_closest(&payload.pk, IsGlobal::is_global(&addr.ip()));
+        let close_nodes = self.get_closest(&payload.pk, 4, IsGlobal::is_global(&addr.ip()));
 
         let resp_payload = NodesResponsePayload {
             nodes: close_nodes.into(),
@@ -1183,7 +1184,7 @@ impl Server {
             addr
         );
 
-        let close_nodes = self.get_closest(&payload.search_pk, IsGlobal::is_global(&addr.ip()));
+        let close_nodes = self.get_closest(&payload.search_pk, 4, IsGlobal::is_global(&addr.ip()));
 
         let response_payload = OnionAnnounceResponsePayload {
             announce_status,
