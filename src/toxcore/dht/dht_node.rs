@@ -202,6 +202,7 @@ impl HasPK for DhtNode {
 
 impl KbucketNode for DhtNode {
     type NewNode = PackedNode;
+    type CheckNode = PackedNode;
 
     fn is_outdated(&self, other: &PackedNode) -> bool {
         self.assoc4.saddr.map(SocketAddr::V4) != Some(other.saddr) &&
