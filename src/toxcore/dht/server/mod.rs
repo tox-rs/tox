@@ -121,7 +121,7 @@ pub struct Server {
     /// Sink to send friend's `SocketAddr` when it gets known.
     friend_saddr_sink: Option<mpsc::UnboundedSender<PackedNode>>,
     /// Struct that stores and manages requests IDs and timeouts.
-    request_queue: Arc<RwLock<RequestQueue>>,
+    request_queue: Arc<RwLock<RequestQueue<PublicKey>>>,
     /// Close nodes list which contains nodes close to own DHT `PublicKey`.
     pub close_nodes: Arc<RwLock<Ktree>>,
     /// Symmetric key used for onion return encryption.
@@ -503,7 +503,7 @@ impl Server {
     /// Send `NodesRequest` packets to nodes from bootstrap list. This is
     /// necessary to check whether node is alive before adding it to close
     /// nodes lists.
-    fn ping_nodes_to_bootstrap(&self, request_queue: &mut RequestQueue, nodes_to_bootstrap: &mut Kbucket<PackedNode>, pk: PublicKey)
+    fn ping_nodes_to_bootstrap(&self, request_queue: &mut RequestQueue<PublicKey>, nodes_to_bootstrap: &mut Kbucket<PackedNode>, pk: PublicKey)
         -> impl Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send {
         let capacity = nodes_to_bootstrap.capacity() as u8;
         let nodes_to_bootstrap = mem::replace(nodes_to_bootstrap, Kbucket::new(capacity));
@@ -517,7 +517,7 @@ impl Server {
 
     /// Iterate over nodes from close nodes list and send `NodesRequest` packets
     /// to them if necessary.
-    fn ping_close_nodes<'a, T>(&self, request_queue: &mut RequestQueue, nodes: T, pk: PublicKey)
+    fn ping_close_nodes<'a, T>(&self, request_queue: &mut RequestQueue<PublicKey>, nodes: T, pk: PublicKey)
         -> Box<dyn Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send>
         where T: Iterator<Item = &'a mut DhtNode> // if change to impl Future the result will be dependent on nodes lifetime
     {
@@ -540,7 +540,7 @@ impl Server {
     /// Send `NodesRequest` packet to a random good node every 20 seconds or if
     /// it was sent less than `NODES_REQ_INTERVAL`. This function should be
     /// called every second.
-    fn send_nodes_req_random<'a, T>(&self, request_queue: &mut RequestQueue, nodes: T, pk: PublicKey)
+    fn send_nodes_req_random<'a, T>(&self, request_queue: &mut RequestQueue<PublicKey>, nodes: T, pk: PublicKey)
         -> Box<dyn Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send>
         where T: Iterator<Item = &'a DhtNode> // if change to impl Future the result will be dependent on nodes lifetime
     {
@@ -572,7 +572,7 @@ impl Server {
     }
 
     /// Send `PingRequest` packet to the node.
-    fn send_ping_req(&self, node: &PackedNode, request_queue: &mut RequestQueue)
+    fn send_ping_req(&self, node: &PackedNode, request_queue: &mut RequestQueue<PublicKey>)
         -> impl Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send {
         let payload = PingRequestPayload {
             id: request_queue.new_ping_id(node.pk),
@@ -586,7 +586,7 @@ impl Server {
     }
 
     /// Send `NodesRequest` packet to the node.
-    fn send_nodes_req(&self, node: &PackedNode, request_queue: &mut RequestQueue, search_pk: PublicKey)
+    fn send_nodes_req(&self, node: &PackedNode, request_queue: &mut RequestQueue<PublicKey>, search_pk: PublicKey)
         -> impl Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send {
         // Check if packet is going to be sent to ourselves.
         if self.pk == node.pk {
@@ -607,7 +607,7 @@ impl Server {
     }
 
     /// Send `NatPingRequest` packet to all friends and try to punch holes.
-    fn send_nat_ping_req(&self, request_queue: &mut RequestQueue, friends: &mut HashMap<PublicKey, DhtFriend>)
+    fn send_nat_ping_req(&self, request_queue: &mut RequestQueue<PublicKey>, friends: &mut HashMap<PublicKey, DhtFriend>)
         -> impl Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send {
         let futures = friends.values_mut()
             .filter(|friend| !friend.is_addr_known())
@@ -645,7 +645,7 @@ impl Server {
     }
 
     /// Try to punch holes to specified friend.
-    fn punch_holes(&self, request_queue: &mut RequestQueue, friend: &mut DhtFriend, returned_addrs: &[SocketAddr])
+    fn punch_holes(&self, request_queue: &mut RequestQueue<PublicKey>, friend: &mut DhtFriend, returned_addrs: &[SocketAddr])
         -> impl Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send {
         let punch_addrs = friend.hole_punch.next_punch_addrs(returned_addrs);
 
@@ -784,7 +784,7 @@ impl Server {
 
         let mut request_queue = self.request_queue.write();
 
-        if request_queue.check_ping_id(packet.pk, payload.id) {
+        if request_queue.check_ping_id(payload.id, |&pk| pk == packet.pk).is_some() {
             let mut close_nodes = self.close_nodes.write();
             let mut friends = self.friends.write();
 
@@ -840,7 +840,7 @@ impl Server {
 
         let mut request_queue = self.request_queue.write();
 
-        if request_queue.check_ping_id(packet.pk, payload.id) {
+        if request_queue.check_ping_id(payload.id, |&pk| pk == packet.pk).is_some() {
             trace!("Received nodes with NodesResponse from {}: {:?}", addr, payload.nodes);
 
             let mut close_nodes = self.close_nodes.write();
@@ -1591,7 +1591,7 @@ mod tests {
                 let ping_req = unpack!(packet, Packet::PingRequest);
                 let precomputed_key = precompute(&ping_req.pk, &bob_sk);
                 let ping_req_payload = ping_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(bob_pk, ping_req_payload.id));
+                assert!(request_queue.check_ping_id(ping_req_payload.id, |&pk| pk == bob_pk).is_some());
             }
         }).collect().wait().unwrap();
 
@@ -3168,12 +3168,12 @@ mod tests {
             if addr == "127.0.0.1:33445".parse().unwrap() {
                 let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
+                assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == bob_pk).is_some());
                 assert_eq!(nodes_req_payload.pk, alice.pk);
             } else {
                 let precomputed_key = precompute(&nodes_req.pk, &node_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(node_pk, nodes_req_payload.id));
+                assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == node_pk).is_some());
                 assert_eq!(nodes_req_payload.pk, alice.pk);
             }
         }).collect().wait().unwrap();
@@ -3199,11 +3199,11 @@ mod tests {
             if addr == "127.0.0.1:33445".parse().unwrap() {
                 let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
                 let ping_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(bob_pk, ping_req_payload.id));
+                assert!(request_queue.check_ping_id(ping_req_payload.id, |&pk| pk == bob_pk).is_some());
             } else {
                 let precomputed_key = precompute(&nodes_req.pk, &node_sk);
                 let ping_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(node_pk, ping_req_payload.id));
+                assert!(request_queue.check_ping_id(ping_req_payload.id, |&pk| pk == node_pk).is_some());
             }
         }).collect().wait().unwrap();
     }
@@ -3241,12 +3241,12 @@ mod tests {
             if addr == "127.0.0.1:33445".parse().unwrap() {
                 let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
+                assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == bob_pk).is_some());
                 assert_eq!(nodes_req_payload.pk, alice.pk);
             } else {
                 let precomputed_key = precompute(&nodes_req.pk, &node_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(node_pk, nodes_req_payload.id));
+                assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == node_pk).is_some());
                 assert_eq!(nodes_req_payload.pk, alice.pk);
             }
         }).collect().wait().unwrap();
@@ -3329,12 +3329,12 @@ mod tests {
             if addr == "127.0.0.1:33445".parse().unwrap() {
                 let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
+                assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == bob_pk).is_some());
                 assert_eq!(nodes_req_payload.pk, friend_pk);
             } else {
                 let precomputed_key = precompute(&nodes_req.pk, &node_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(node_pk, nodes_req_payload.id));
+                assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == node_pk).is_some());
                 assert_eq!(nodes_req_payload.pk, friend_pk);
             }
         }).collect().wait().unwrap();
@@ -3370,12 +3370,12 @@ mod tests {
             if addr == "127.0.0.1:33445".parse().unwrap() {
                 let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
+                assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == bob_pk).is_some());
                 assert_eq!(nodes_req_payload.pk, friend_pk);
             } else {
                 let precomputed_key = precompute(&nodes_req.pk, &node_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(node_pk, nodes_req_payload.id));
+                assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == node_pk).is_some());
                 assert_eq!(nodes_req_payload.pk, friend_pk);
             }
         }).collect().wait().unwrap();
@@ -3465,11 +3465,11 @@ mod tests {
             if addr == "[FF::01]:33445".parse().unwrap() {
                 let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
+                assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == bob_pk).is_some());
             } else {
                 let precomputed_key = precompute(&nodes_req.pk, &node_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(node_pk, nodes_req_payload.id));
+                assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == node_pk).is_some());
             }
         }).collect().wait().unwrap();
     }
@@ -3496,11 +3496,11 @@ mod tests {
             if addr == "[FF::01]:33445".parse().unwrap() {
                 let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
+                assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == bob_pk).is_some());
             } else {
                 let precomputed_key = precompute(&nodes_req.pk, &node_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(node_pk, nodes_req_payload.id));
+                assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == node_pk).is_some());
             }
         }).collect().wait().unwrap();
     }
@@ -3558,11 +3558,11 @@ mod tests {
                 if addr == "[FF::01]:33445".parse().unwrap() {
                     let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
                     let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                    assert!(request_queue.check_ping_id(bob_pk, nodes_req_payload.id));
+                    assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == bob_pk).is_some());
                 } else {
                     let precomputed_key = precompute(&nodes_req.pk, &node_sk);
                     let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                    assert!(request_queue.check_ping_id(node_pk, nodes_req_payload.id));
+                    assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == node_pk).is_some());
                 }
             }).collect().wait().unwrap();
         });
