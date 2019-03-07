@@ -24,6 +24,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::u16;
 
+use failure::Fail;
 use futures::{Future, Stream};
 use futures::future;
 use futures::future::Either;
@@ -175,6 +176,27 @@ impl NetCrypto {
             connections: Arc::new(RwLock::new(HashMap::new())),
             keys_by_addr: Arc::new(RwLock::new(HashMap::new())),
             precomputed_keys: args.precomputed_keys,
+        }
+    }
+
+    /// Send lossless packet to a friend via established connection.
+    pub fn send_lossless(&self, real_pk: PublicKey, packet: Vec<u8>) -> impl Future<Item = (), Error = SendLosslessPacketError> {
+        if packet.first().map_or(true, |&packet_id| packet_id <= PACKET_ID_CRYPTO_RANGE_END || packet_id >= PACKET_ID_LOSSY_RANGE_START) {
+            return Either::B(future::err(SendLosslessPacketErrorKind::InvalidPacketId.into()));
+        }
+
+        if let Some(connection) = self.connections.read().get(&real_pk) {
+            let mut connection = connection.write();
+            let packet_number = connection.send_array.buffer_end;
+            if let Err(e) = connection.send_array.push_back(SentPacket::new(packet.clone())) {
+                Either::B(future::err(e.context(SendLosslessPacketErrorKind::FullSendArray).into()))
+            } else {
+                connection.packets_sent += 1;
+                Either::A(self.send_data_packet(&mut connection, packet, packet_number)
+                    .map_err(|e| e.context(SendLosslessPacketErrorKind::SendTo).into()))
+            }
+        } else {
+            Either::B(future::err(SendLosslessPacketErrorKind::NoConnection.into()))
         }
     }
 
@@ -3283,5 +3305,133 @@ mod tests {
         drop(net_crypto.udp_tx);
 
         assert_eq!(udp_rx.collect().wait().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn send_lossless() {
+        crypto_init().unwrap();
+        let (udp_tx, udp_rx) = mpsc::channel(2);
+        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
+        let (lossless_tx, _lossless_rx) = mpsc::unbounded();
+        let (lossy_tx, _lossy_rx) = mpsc::unbounded();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, real_sk) = gen_keypair();
+        let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
+        let net_crypto = NetCrypto::new(NetCryptoNewArgs {
+            udp_tx,
+            dht_pk_tx,
+            lossless_tx,
+            lossy_tx,
+            dht_pk,
+            dht_sk: dht_sk.clone(),
+            real_pk,
+            real_sk,
+            precomputed_keys,
+        });
+
+        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+
+        let addr = "127.0.0.1:12345".parse().unwrap();
+        connection.udp_addr = Some(addr);
+
+        let received_nonce = gen_nonce();
+        let sent_nonce = gen_nonce();
+        let (peer_session_pk, _peer_session_sk) = gen_keypair();
+        let (_session_pk, session_sk) = gen_keypair();
+        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        connection.status = ConnectionStatus::Established {
+            sent_nonce,
+            received_nonce,
+            peer_session_pk,
+            session_precomputed_key: session_precomputed_key.clone(),
+        };
+
+        let connection = Arc::new(RwLock::new(connection));
+        net_crypto.connections.write().insert(peer_real_pk, connection.clone());
+        net_crypto.keys_by_addr.write().insert((addr.ip(), addr.port()), peer_real_pk);
+
+        let data = vec![16, 42];
+
+        net_crypto.send_lossless(peer_real_pk, data.clone()).wait().unwrap();
+
+        let connection = connection.read();
+
+        assert_eq!(connection.packets_sent, 1);
+
+        // the packet should be added to send_array
+
+        assert_eq!(connection.send_array.buffer[0].clone().unwrap().data, data);
+
+        // the packet should be sent to node
+
+        let (received, _udp_rx) = udp_rx.into_future().wait().unwrap();
+        let (received, addr_to_send) = received.unwrap();
+
+        assert_eq!(addr_to_send, addr);
+
+        let packet = unpack!(received, Packet::CryptoData);
+        let payload = packet.get_payload(&session_precomputed_key, &sent_nonce).unwrap();
+        assert_eq!(payload.buffer_start, 0);
+        assert_eq!(payload.packet_number, 0);
+        assert_eq!(payload.data, data);
+    }
+
+    #[test]
+    fn send_lossless_no_connection() {
+        crypto_init().unwrap();
+        let (udp_tx, _udp_rx) = mpsc::channel(2);
+        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
+        let (lossless_tx, _lossless_rx) = mpsc::unbounded();
+        let (lossy_tx, _lossy_rx) = mpsc::unbounded();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, real_sk) = gen_keypair();
+        let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
+        let net_crypto = NetCrypto::new(NetCryptoNewArgs {
+            udp_tx,
+            dht_pk_tx,
+            lossless_tx,
+            lossy_tx,
+            dht_pk,
+            dht_sk: dht_sk.clone(),
+            real_pk,
+            real_sk,
+            precomputed_keys,
+        });
+
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+
+        let error = net_crypto.send_lossless(peer_real_pk, vec![16, 42]).wait().err().unwrap();
+        assert_eq!(*error.kind(), SendLosslessPacketErrorKind::NoConnection);
+    }
+
+    #[test]
+    fn send_lossless_invalid_packet_id() {
+        crypto_init().unwrap();
+        let (udp_tx, _udp_rx) = mpsc::channel(2);
+        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
+        let (lossless_tx, _lossless_rx) = mpsc::unbounded();
+        let (lossy_tx, _lossy_rx) = mpsc::unbounded();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, real_sk) = gen_keypair();
+        let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
+        let net_crypto = NetCrypto::new(NetCryptoNewArgs {
+            udp_tx,
+            dht_pk_tx,
+            lossless_tx,
+            lossy_tx,
+            dht_pk,
+            dht_sk: dht_sk.clone(),
+            real_pk,
+            real_sk,
+            precomputed_keys,
+        });
+
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+
+        let error = net_crypto.send_lossless(peer_real_pk, vec![10, 42]).wait().err().unwrap();
+        assert_eq!(*error.kind(), SendLosslessPacketErrorKind::InvalidPacketId);
     }
 }
