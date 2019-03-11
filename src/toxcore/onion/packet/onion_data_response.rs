@@ -11,7 +11,7 @@ use crate::toxcore::friend_connection::packet::MAX_ONION_CLIENT_DATA_SIZE;
 use nom::rest;
 
 /// Maximum size in bytes of Onion Data Response payload
-const MAX_ONION_RESPONSE_PAYLOAD_SIZE: usize = MAX_ONION_CLIENT_DATA_SIZE + PUBLICKEYBYTES + MACBYTES;
+pub const MAX_ONION_RESPONSE_PAYLOAD_SIZE: usize = MAX_ONION_CLIENT_DATA_SIZE + PUBLICKEYBYTES + MACBYTES;
 
 /** When onion node receives `OnionDataRequest` packet it converts it to
 `OnionDataResponse` and sends to destination node if it announced itself

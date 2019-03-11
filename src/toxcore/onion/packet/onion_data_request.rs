@@ -5,6 +5,8 @@ use super::*;
 
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
+use crate::toxcore::dht::packet::*;
+use crate::toxcore::onion::packet::MAX_ONION_RESPONSE_PAYLOAD_SIZE;
 
 use nom::rest;
 
@@ -64,6 +66,55 @@ impl ToBytes for InnerOnionDataRequest {
             gen_slice!(self.temporary_pk.as_ref()) >>
             gen_slice!(self.payload)
         )
+    }
+}
+
+impl InnerOnionDataRequest {
+    /// Create `InnerOnionDataRequest` from `OnionDataResponsePayload`
+    /// encrypting it with `shared_key` and `nonce`
+    pub fn new(
+        shared_secret: &PrecomputedKey,
+        destination_pk: PublicKey,
+        temporary_pk: PublicKey,
+        nonce: Nonce,
+        payload: &OnionDataResponsePayload
+    ) -> InnerOnionDataRequest {
+        let mut buf = [0; MAX_ONION_RESPONSE_PAYLOAD_SIZE];
+        let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
+        let payload = seal_precomputed(&buf[..size], &nonce, shared_secret);
+
+        InnerOnionDataRequest {
+            destination_pk,
+            nonce,
+            temporary_pk,
+            payload,
+        }
+    }
+
+    /** Decrypt payload and try to parse it as `OnionDataResponsePayload`.
+    Returns `Error` in case of failure:
+    - fails to decrypt
+    - fails to parse as `OnionDataResponsePayload`
+    */
+    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<OnionDataResponsePayload, GetPayloadError> {
+        let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
+            .map_err(|()| {
+                debug!("Decrypting OnionDataResponsePayload failed!");
+                GetPayloadError::decrypt()
+            })?;
+        match OnionDataResponsePayload::from_bytes(&decrypted) {
+            IResult::Incomplete(needed) => {
+                debug!(target: "Onion", "OnionDataResponsePayload deserialize error: {:?}", needed);
+                Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
+            },
+            IResult::Error(e) => {
+                debug!(target: "Onion", "OnionDataResponsePayload deserialize error: {:?}", e);
+                Err(GetPayloadError::deserialize(e, self.payload.to_vec()))
+            },
+            IResult::Done(_, inner) => {
+                Ok(inner)
+            }
+        }
     }
 }
 
@@ -145,4 +196,66 @@ mod tests {
             }
         }
     );
+
+    #[test]
+    fn inner_onion_data_request_encrypt_decrypt() {
+        crypto_init().unwrap();
+        let (real_pk, _real_sk) = gen_keypair();
+        let (data_pk, _data_sk) = gen_keypair();
+        let (temporary_pk, temporary_sk) = gen_keypair();
+        let nonce = gen_nonce();
+        let shared_secret = encrypt_precompute(&data_pk, &temporary_sk);
+        let payload = OnionDataResponsePayload {
+            real_pk: gen_keypair().0,
+            payload: vec![42; 123],
+        };
+        // encode payload with shared secret
+        let packet = InnerOnionDataRequest::new(&shared_secret, real_pk, temporary_pk, nonce, &payload);
+        // decode payload with shared secret
+        let decoded_payload = packet.get_payload(&shared_secret).unwrap();
+        // payloads should be equal
+        assert_eq!(decoded_payload, payload);
+    }
+
+    #[test]
+    fn inner_onion_data_request_encrypt_decrypt_invalid_key() {
+        crypto_init().unwrap();
+        let (real_pk, _real_sk) = gen_keypair();
+        let (data_pk, _data_sk) = gen_keypair();
+        let (temporary_pk, temporary_sk) = gen_keypair();
+        let (_invalid_pk, invalid_sk) = gen_keypair();
+        let nonce = gen_nonce();
+        let shared_secret = encrypt_precompute(&data_pk, &temporary_sk);
+        let shared_secret_invalid = encrypt_precompute(&temporary_pk, &invalid_sk);
+        let payload = OnionDataResponsePayload {
+            real_pk: gen_keypair().0,
+            payload: vec![42; 123],
+        };
+        // encode payload with shared secret
+        let packet = InnerOnionDataRequest::new(&shared_secret, real_pk, temporary_pk, nonce, &payload);
+        // try to decode payload with invalid shared secret
+        let decoded_payload = packet.get_payload(&shared_secret_invalid);
+        assert!(decoded_payload.is_err());
+    }
+
+    #[test]
+    fn inner_onion_data_request_encrypt_decrypt_invalid() {
+        crypto_init().unwrap();
+        let (real_pk, _real_sk) = gen_keypair();
+        let (data_pk, _data_sk) = gen_keypair();
+        let (temporary_pk, temporary_sk) = gen_keypair();
+        let nonce = gen_nonce();
+        let shared_secret = encrypt_precompute(&data_pk, &temporary_sk);
+        // Try short incomplete array
+        let invalid_payload = [];
+        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
+        let invalid_packet = InnerOnionDataRequest {
+            destination_pk: real_pk,
+            nonce,
+            temporary_pk,
+            payload: invalid_payload_encoded
+        };
+        let decoded_payload = invalid_packet.get_payload(&shared_secret);
+        assert!(decoded_payload.is_err());
+    }
 }
