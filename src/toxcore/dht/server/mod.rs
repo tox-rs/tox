@@ -700,10 +700,7 @@ impl Server {
             Packet::OnionResponse2(packet) => Box::new(self.handle_onion_response_2(packet)),
             Packet::OnionResponse1(packet) => Box::new(self.handle_onion_response_1(packet)),
             Packet::BootstrapInfo(packet) => Box::new(self.handle_bootstrap_info(&packet, addr)),
-            // This packet should be handled in client only
-            Packet::CryptoData(_packet) => Box::new(future::err(
-                HandlePacketError::from(HandlePacketErrorKind::NotHandled)
-            )),
+            Packet::CryptoData(packet) => Box::new(self.handle_crypto_data(&packet, addr)),
             // This packet should be handled in client only
             Packet::OnionDataResponse(_packet) => Box::new(future::err(
                 HandlePacketError::from(HandlePacketErrorKind::NotHandled)
@@ -926,6 +923,19 @@ impl Server {
         -> impl Future<Item = (), Error = HandlePacketError> + Send {
         if let Some(ref net_crypto) = self.net_crypto {
             Either::A(net_crypto.handle_udp_crypto_handshake(packet, addr)
+                .map_err(|e| HandlePacketError::from(e)))
+        } else {
+            Either::B( future::err(
+                HandlePacketError::from(HandlePacketErrorKind::NetCrypto)
+            ))
+        }
+    }
+
+    /// Handle received `CryptoData` packet and pass it to `net_crypto` module.
+    fn handle_crypto_data(&self, packet: &CryptoData, addr: SocketAddr)
+        -> impl Future<Item = (), Error = HandlePacketError> + Send {
+        if let Some(ref net_crypto) = self.net_crypto {
+            Either::A(net_crypto.handle_udp_crypto_data(packet, addr)
                 .map_err(|e| HandlePacketError::from(e)))
         } else {
             Either::B( future::err(
@@ -3569,7 +3579,7 @@ mod tests {
     }
 
     #[test]
-    fn handle_crypto_data() {
+    fn handle_crypto_data_uninitialized() {
         let (alice, precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let data_payload = CryptoDataPayload {
@@ -3582,7 +3592,7 @@ mod tests {
 
         let res = alice.handle_packet(data, addr).wait();
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::NotHandled);
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::NetCrypto);
     }
 
     #[test]
