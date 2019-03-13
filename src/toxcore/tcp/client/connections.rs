@@ -25,6 +25,7 @@ use futures::sync::mpsc;
 use tokio::timer::Interval;
 
 use crate::toxcore::crypto_core::*;
+use crate::toxcore::dht::packed_node::PackedNode;
 use crate::toxcore::tcp::client::client::*;
 use crate::toxcore::tcp::packet::*;
 use crate::toxcore::time::*;
@@ -277,6 +278,25 @@ impl Connections {
                     "set_connection_status: no such connection"
             )))
         }
+    }
+
+    /// Get up to `count` random TCP relays we are connected to.
+    pub fn get_random_relays(&self, count: u8) -> Vec<PackedNode> {
+        let relays = self.clients
+            .read()
+            .values()
+            .filter(|client| client.is_connected())
+            .map(|client| PackedNode::new(client.addr, &client.pk))
+            .collect::<Vec<_>>();
+
+        if relays.is_empty() {
+            return Vec::new();
+        }
+
+        // TODO: shuffle relays instead
+        let skip = random_limit_usize(relays.len());
+        let take = (count as usize).min(relays.len());
+        relays.into_iter().cycle().skip(skip).take(take).collect()
     }
 
     /// Main loop that should be run periodically. It removes unreachable and
@@ -733,6 +753,45 @@ mod tests {
         let (node_pk, _node_sk) = gen_keypair();
 
         assert!(connections.set_connection_status(node_pk, NodeConnectionStatus::UDP).wait().is_err());
+    }
+
+    #[test]
+    fn get_random_relays() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (incoming_tx, _incoming_rx) = mpsc::unbounded();
+        let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
+
+        let (_incoming_rx_1, _outgoing_rx_1, relay_1) = create_client();
+        let (_incoming_rx_2, _outgoing_rx_2, relay_2) = create_client();
+        let relay_pk_1 = relay_1.pk;
+        let relay_pk_2 = relay_2.pk;
+
+        connections.clients.write().insert(relay_pk_1, relay_1);
+        connections.clients.write().insert(relay_pk_2, relay_2);
+
+        // add one more disconnected relay to make sure that it won't be
+        // included to `get_random_relays` result
+        let relay_pk_3 = gen_keypair().0;
+        let relay_addr_3 = "127.0.0.1:33445".parse().unwrap();
+        let (incoming_tx_3, _incoming_rx_3) = mpsc::unbounded();
+        let relay_3 = Client::new(relay_pk_3, relay_addr_3, incoming_tx_3);
+
+        connections.clients.write().insert(relay_pk_3, relay_3);
+
+        let relays = connections.get_random_relays(1);
+        assert_eq!(relays.len(), 1);
+        let relays = connections.get_random_relays(4);
+        assert_eq!(relays.len(), 2);
+    }
+
+    #[test]
+    fn get_random_relays_empty() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (incoming_tx, _incoming_rx) = mpsc::unbounded();
+        let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
+
+        let relays = connections.get_random_relays(1);
+        assert!(relays.is_empty());
     }
 
     #[test]
