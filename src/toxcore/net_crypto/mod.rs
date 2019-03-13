@@ -179,6 +179,26 @@ impl NetCrypto {
         }
     }
 
+    /// Add connection to a friend when its DHT `PublicKey` is known.
+    pub fn add_connection(&self, peer_real_pk: PublicKey, peer_dht_pk: PublicKey) {
+        let mut connections = self.connections.write();
+
+        if connections.contains_key(&peer_real_pk) {
+            return;
+        }
+
+        let dht_precomputed_key = precompute(&peer_dht_pk, &self.dht_sk);
+        let connection = CryptoConnection::new(
+            &dht_precomputed_key,
+            self.dht_pk,
+            self.real_pk,
+            peer_real_pk,
+            peer_dht_pk
+        );
+        let connection = Arc::new(RwLock::new(connection));
+        connections.insert(peer_real_pk, connection);
+    }
+
     /// Send lossless packet to a friend via established connection.
     pub fn send_lossless(&self, real_pk: PublicKey, packet: Vec<u8>) -> impl Future<Item = (), Error = SendLosslessPacketError> {
         if packet.first().map_or(true, |&packet_id| packet_id <= PACKET_ID_CRYPTO_RANGE_END || packet_id >= PACKET_ID_LOSSY_RANGE_START) {
@@ -3433,5 +3453,81 @@ mod tests {
 
         let error = net_crypto.send_lossless(peer_real_pk, vec![10, 42]).wait().err().unwrap();
         assert_eq!(*error.kind(), SendLosslessPacketErrorKind::InvalidPacketId);
+    }
+
+    #[test]
+    fn add_connection() {
+        crypto_init().unwrap();
+        let (udp_tx, _udp_rx) = mpsc::channel(2);
+        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
+        let (lossless_tx, _lossless_rx) = mpsc::unbounded();
+        let (lossy_tx, _lossy_rx) = mpsc::unbounded();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, real_sk) = gen_keypair();
+        let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
+        let net_crypto = NetCrypto::new(NetCryptoNewArgs {
+            udp_tx,
+            dht_pk_tx,
+            lossless_tx,
+            lossy_tx,
+            dht_pk,
+            dht_sk: dht_sk.clone(),
+            real_pk,
+            real_sk,
+            precomputed_keys,
+        });
+
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let (peer_dht_pk, peer_dht_sk) = gen_keypair();
+        net_crypto.add_connection(peer_real_pk, peer_dht_pk);
+
+        let connections = net_crypto.connections.read();
+        let connection = connections[&peer_real_pk].read();
+
+        assert_eq!(connection.peer_real_pk, peer_real_pk);
+        assert_eq!(connection.peer_dht_pk, peer_dht_pk);
+
+        let status_packet = unpack!(connection.status.clone(), ConnectionStatus::CookieRequesting, packet);
+        let cookie_request = unpack!(status_packet.dht_packet(), Packet::CookieRequest);
+        let cookie_request_payload = cookie_request.get_payload(&precompute(&dht_pk, &peer_dht_sk)).unwrap();
+
+        assert_eq!(cookie_request_payload.pk, real_pk);
+    }
+
+    #[test]
+    fn add_connection_already_exists() {
+        crypto_init().unwrap();
+        let (udp_tx, _udp_rx) = mpsc::channel(2);
+        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
+        let (lossless_tx, _lossless_rx) = mpsc::unbounded();
+        let (lossy_tx, _lossy_rx) = mpsc::unbounded();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, real_sk) = gen_keypair();
+        let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
+        let net_crypto = NetCrypto::new(NetCryptoNewArgs {
+            udp_tx,
+            dht_pk_tx,
+            lossless_tx,
+            lossy_tx,
+            dht_pk,
+            dht_sk: dht_sk.clone(),
+            real_pk,
+            real_sk,
+            precomputed_keys,
+        });
+
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
+        net_crypto.add_connection(peer_real_pk, peer_dht_pk);
+
+        // adding a friend that already exists won't do anything
+        let (another_peer_dht_pk, _another_peer_dht_sk) = gen_keypair();
+        net_crypto.add_connection(peer_real_pk, another_peer_dht_pk);
+
+        let connections = net_crypto.connections.read();
+        let connection = connections[&peer_real_pk].read();
+
+        assert_eq!(connection.peer_real_pk, peer_real_pk);
+        assert_eq!(connection.peer_dht_pk, peer_dht_pk);
     }
 }
