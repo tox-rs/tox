@@ -18,7 +18,7 @@ pub use self::crypto_connection::*;
 use self::packets_array::*;
 use self::errors::*;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::{SocketAddr, IpAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -150,6 +150,9 @@ pub struct NetCrypto {
     real_sk: SecretKey,
     /// Symmetric key used for cookies encryption
     symmetric_key: secretbox::Key,
+    /// List of friends used to check whether should we accept an incoming
+    /// `NetCrypto` connection.
+    friends: Arc<RwLock<HashSet<PublicKey>>>,
     /// Connection by long term public key of DHT node map
     connections: Arc<RwLock<HashMap<PublicKey, Arc<RwLock<CryptoConnection>>>>>,
     /// Long term keys by IP address of DHT node map. `SocketAddr` can't be used
@@ -173,10 +176,21 @@ impl NetCrypto {
             real_pk: args.real_pk,
             real_sk: args.real_sk,
             symmetric_key: secretbox::gen_key(),
+            friends: Arc::new(RwLock::new(HashSet::new())),
             connections: Arc::new(RwLock::new(HashMap::new())),
             keys_by_addr: Arc::new(RwLock::new(HashMap::new())),
             precomputed_keys: args.precomputed_keys,
         }
+    }
+
+    /// Add a friend to accept incoming connections from him.
+    pub fn add_friend(&self, real_pk: PublicKey) {
+        self.friends.write().insert(real_pk);
+    }
+
+    /// Remove a friend to stop accepting incoming connections from him.
+    pub fn remove_friend(&self, real_pk: PublicKey) {
+        self.friends.write().remove(&real_pk);
     }
 
     /// Add connection to a friend when its DHT `PublicKey` is known.
@@ -315,6 +329,34 @@ impl NetCrypto {
         }
     }
 
+    /// Check that incoming `CryptoHandshake` request is valid:
+    /// - cookie is not timed out
+    /// - hash for the cookie inside the payload is correct
+    fn validate_crypto_handshake(&self, packet: &CryptoHandshake)
+        -> Result<(Cookie, CryptoHandshakePayload, PrecomputedKey), HandlePacketError> {
+        let cookie = match packet.cookie.get_payload(&self.symmetric_key) {
+            Ok(cookie) => cookie,
+            Err(e) => return Err(e.into()),
+        };
+
+        if cookie.is_timed_out() {
+            return Err(HandlePacketErrorKind::CookieTimedOut.into());
+        }
+
+        let real_precomputed_key = precompute(&cookie.real_pk, &self.real_sk);
+
+        let payload = match packet.get_payload(&real_precomputed_key) {
+            Ok(payload) => payload,
+            Err(e) => return Err(HandlePacketError::from(e)),
+        };
+
+        if packet.cookie.hash() != payload.cookie_hash {
+            return Err(HandlePacketErrorKind::BadSha512.into());
+        }
+
+        Ok((cookie, payload, real_precomputed_key))
+    }
+
     /// Handle `CryptoHandshake` and if it's correct change connection status to `NotConfirmed`.
     pub fn handle_crypto_handshake(&self, connection: &mut CryptoConnection, packet: &CryptoHandshake)
         -> impl Future<Item = (), Error = HandlePacketError> + Send {
@@ -323,26 +365,11 @@ impl NetCrypto {
                 as Box<dyn Future<Item=_, Error=_> + Send>
         }
 
-        let real_precomputed_key = precompute(&connection.peer_real_pk, &self.real_sk);
-
-        let payload = match packet.get_payload(&real_precomputed_key) {
-            Ok(payload) => payload,
-            Err(e) => return Box::new(future::err(HandlePacketError::from(e))),
+        let (cookie, payload, real_precomputed_key) = match self.validate_crypto_handshake(packet) {
+            Ok(result) => result,
+            Err(e) => return Box::new(future::err(e)),
         };
 
-        if packet.cookie.hash() != payload.cookie_hash {
-            return Box::new(future::err(HandlePacketError::from(HandlePacketErrorKind::BadSha512)))
-        }
-
-        let cookie = match packet.cookie.get_payload(&self.symmetric_key) {
-            Ok(cookie) => cookie,
-            Err(e) => return Box::new(future::err(HandlePacketError::from(e))),
-        };
-
-        if cookie.is_timed_out() {
-            return Box::new(future::err(HandlePacketError::from(
-                HandlePacketErrorKind::CookieTimedOut)))
-        }
         if cookie.real_pk != connection.peer_real_pk {
             return Box::new(future::err(HandlePacketError::from(HandlePacketErrorKind::InvalidRealPk)))
         }
@@ -391,6 +418,40 @@ impl NetCrypto {
         )
     }
 
+    /// Handle incoming `CryptoHandshake` in case when we don't have associated
+    /// with sender connection.
+    fn handle_crypto_handshake_new_connection(&self, packet: &CryptoHandshake, addr: Option<SocketAddr>)
+        -> impl Future<Item = (), Error = HandlePacketError> + Send {
+        let (cookie, payload, _real_precomputed_key) = match self.validate_crypto_handshake(packet) {
+            Ok(result) => result,
+            Err(e) => return Either::A(future::err(e)),
+        };
+
+        if !self.friends.read().contains(&cookie.real_pk) {
+            return Either::A(future::err(HandlePacketErrorKind::UnexpectedCryptoHandshake.into()));
+        }
+
+        let mut connection = CryptoConnection::new_not_confirmed(
+            &self.real_sk,
+            cookie.real_pk,
+            cookie.dht_pk,
+            payload.base_nonce,
+            payload.session_pk,
+            payload.cookie,
+            &self.symmetric_key,
+        );
+        connection.udp_addr = addr;
+        let connection = Arc::new(RwLock::new(connection));
+
+        self.connections.write().insert(cookie.real_pk, connection);
+        if let Some(addr) = addr {
+            self.keys_by_addr.write().insert((addr.ip(), addr.port()), cookie.real_pk);
+        }
+
+        Either::B(send_to(&self.dht_pk_tx, (cookie.real_pk, cookie.dht_pk))
+            .map_err(|e| HandlePacketError::from(e)))
+    }
+
     /// Handle `CryptoHandshake` packet received from UDP socket
     pub fn handle_udp_crypto_handshake(&self, packet: &CryptoHandshake, addr: SocketAddr)
         -> impl Future<Item = (), Error = HandlePacketError> + Send {
@@ -400,8 +461,7 @@ impl NetCrypto {
             connection.update_udp_received_time();
             Either::A(self.handle_crypto_handshake(&mut connection, packet))
         } else {
-            // TODO: create crypto connection
-            Either::B(future::err(HandlePacketError::no_connection(addr)))
+            Either::B(self.handle_crypto_handshake_new_connection(packet, Some(addr)))
         }
     }
 
@@ -826,6 +886,36 @@ mod tests {
         });
 
         let _net_crypto_c = net_crypto.clone();
+    }
+
+    #[test]
+    fn add_remove_friend() {
+        crypto_init().unwrap();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
+        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
+        let (lossless_tx, _lossless_rx) = mpsc::unbounded();
+        let (lossy_tx, _lossy_rx) = mpsc::unbounded();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, real_sk) = gen_keypair();
+        let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
+        let net_crypto = NetCrypto::new(NetCryptoNewArgs {
+            udp_tx,
+            dht_pk_tx,
+            lossless_tx,
+            lossy_tx,
+            dht_pk,
+            dht_sk,
+            real_pk,
+            real_sk,
+            precomputed_keys,
+        });
+
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+
+        net_crypto.add_friend(peer_real_pk);
+        assert!(net_crypto.friends.read().contains(&peer_real_pk));
+        net_crypto.remove_friend(peer_real_pk);
+        assert!(!net_crypto.friends.read().contains(&peer_real_pk));
     }
 
     #[test]
@@ -1548,14 +1638,15 @@ mod tests {
         });
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, peer_real_sk) = gen_keypair();
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let (another_peer_real_pk, another_peer_real_sk) = gen_keypair();
         let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
-        let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
+        let real_precomputed_key = precompute(&real_pk, &another_peer_real_sk);
         let base_nonce = gen_nonce();
         let session_pk = gen_keypair().0;
-        let our_cookie = Cookie::new(peer_dht_pk, peer_dht_pk);
+        let our_cookie = Cookie::new(another_peer_real_pk, peer_dht_pk);
         let our_encrypted_cookie = EncryptedCookie::new(&net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: secretbox::gen_nonce(),
@@ -1698,6 +1789,122 @@ mod tests {
 
         let payload = packet.get_payload(&real_precomputed_key).unwrap();
         assert_eq!(payload.cookie_hash, cookie.hash());
+    }
+
+    #[test]
+    fn handle_udp_crypto_handshake_new_connection() {
+        crypto_init().unwrap();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
+        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
+        let (lossless_tx, _lossless_rx) = mpsc::unbounded();
+        let (lossy_tx, _lossy_rx) = mpsc::unbounded();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, real_sk) = gen_keypair();
+        let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
+        let net_crypto = NetCrypto::new(NetCryptoNewArgs {
+            udp_tx,
+            dht_pk_tx,
+            lossless_tx,
+            lossy_tx,
+            dht_pk,
+            dht_sk: dht_sk.clone(),
+            real_pk,
+            real_sk,
+            precomputed_keys,
+        });
+
+        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
+        let (peer_real_pk, peer_real_sk) = gen_keypair();
+
+        net_crypto.add_friend(peer_real_pk);
+
+        let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
+        let base_nonce = gen_nonce();
+        let session_pk = gen_keypair().0;
+        let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
+        let our_encrypted_cookie = EncryptedCookie::new(&net_crypto.symmetric_key, &our_cookie);
+        let cookie = EncryptedCookie {
+            nonce: secretbox::gen_nonce(),
+            payload: vec![43; 88]
+        };
+        let crypto_handshake_payload = CryptoHandshakePayload {
+            base_nonce,
+            session_pk,
+            cookie_hash: our_encrypted_cookie.hash(),
+            cookie: cookie.clone()
+        };
+        let crypto_handshake = CryptoHandshake::new(&real_precomputed_key, &crypto_handshake_payload, our_encrypted_cookie);
+
+        let addr = "127.0.0.1:12345".parse().unwrap();
+
+        net_crypto.handle_udp_crypto_handshake(&crypto_handshake, addr).wait().unwrap();
+
+        let connections = net_crypto.connections.read();
+        let connection = connections.get(&peer_real_pk).unwrap().read().clone();
+
+        assert_eq!(connection.udp_addr, Some(addr));
+
+        let received_nonce = unpack!(connection.status, ConnectionStatus::NotConfirmed, received_nonce);
+        let peer_session_pk = unpack!(connection.status, ConnectionStatus::NotConfirmed, peer_session_pk);
+
+        assert_eq!(received_nonce, base_nonce);
+        assert_eq!(peer_session_pk, session_pk);
+
+        let packet = unpack!(connection.status, ConnectionStatus::NotConfirmed, packet);
+        let packet = unpack!(packet.dht_packet(), Packet::CryptoHandshake);
+        assert_eq!(packet.cookie, cookie);
+
+        let payload = packet.get_payload(&real_precomputed_key).unwrap();
+        assert_eq!(payload.cookie_hash, cookie.hash());
+    }
+
+    #[test]
+    fn handle_udp_crypto_handshake_unexpected() {
+        crypto_init().unwrap();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
+        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
+        let (lossless_tx, _lossless_rx) = mpsc::unbounded();
+        let (lossy_tx, _lossy_rx) = mpsc::unbounded();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, real_sk) = gen_keypair();
+        let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
+        let net_crypto = NetCrypto::new(NetCryptoNewArgs {
+            udp_tx,
+            dht_pk_tx,
+            lossless_tx,
+            lossy_tx,
+            dht_pk,
+            dht_sk: dht_sk.clone(),
+            real_pk,
+            real_sk,
+            precomputed_keys,
+        });
+
+        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
+        let (peer_real_pk, peer_real_sk) = gen_keypair();
+
+        let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
+        let base_nonce = gen_nonce();
+        let session_pk = gen_keypair().0;
+        let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
+        let our_encrypted_cookie = EncryptedCookie::new(&net_crypto.symmetric_key, &our_cookie);
+        let cookie = EncryptedCookie {
+            nonce: secretbox::gen_nonce(),
+            payload: vec![43; 88]
+        };
+        let crypto_handshake_payload = CryptoHandshakePayload {
+            base_nonce,
+            session_pk,
+            cookie_hash: our_encrypted_cookie.hash(),
+            cookie: cookie.clone()
+        };
+        let crypto_handshake = CryptoHandshake::new(&real_precomputed_key, &crypto_handshake_payload, our_encrypted_cookie);
+
+        let addr = "127.0.0.1:12345".parse().unwrap();
+
+        let error = net_crypto.handle_udp_crypto_handshake(&crypto_handshake, addr).wait().err().unwrap();
+
+        assert_eq!(*error.kind(), HandlePacketErrorKind::UnexpectedCryptoHandshake);
     }
 
     #[test]

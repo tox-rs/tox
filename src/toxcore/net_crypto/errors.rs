@@ -185,6 +185,9 @@ pub enum HandlePacketErrorKind {
         /// The address for connection which don't exist
         addr: SocketAddr,
     },
+    /// Unexpected crypto handshake.
+    #[fail(display = "Unexpected crypto handshake")]
+    UnexpectedCryptoHandshake,
     /// Error indicates that invalid SHA512 hash of cookie
     #[fail(display = "Invalid SHA512 hash of cookie")]
     BadSha512,
@@ -512,6 +515,13 @@ mod tests {
         let error = HandlePacketError::no_connection(sock);
         assert_eq!(*error.kind(), HandlePacketErrorKind::NoConnection { addr: sock });
         assert_eq!(format!("{}", error), "No crypto connection for address: V4(127.0.0.1:33445)".to_owned());
+    }
+
+    #[test]
+    fn handle_packet_unexpected_crypto_handshake() {
+        let error = HandlePacketError::from(HandlePacketErrorKind::UnexpectedCryptoHandshake);
+        assert_eq!(*error.kind(), HandlePacketErrorKind::UnexpectedCryptoHandshake);
+        assert_eq!(format!("{}", error), "Unexpected crypto handshake".to_owned());
     }
 
     #[test]
