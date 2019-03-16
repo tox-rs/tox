@@ -194,7 +194,7 @@ impl NetCrypto {
     }
 
     /// Add connection to a friend when its DHT `PublicKey` is known.
-    pub fn add_connection(&self, peer_real_pk: PublicKey, peer_dht_pk: PublicKey) {
+    pub fn add_connection(&self, peer_real_pk: PublicKey, peer_dht_pk: PublicKey, saddr: Option<SocketAddr>) {
         let mut connections = self.connections.write();
 
         if connections.contains_key(&peer_real_pk) {
@@ -202,15 +202,40 @@ impl NetCrypto {
         }
 
         let dht_precomputed_key = precompute(&peer_dht_pk, &self.dht_sk);
-        let connection = CryptoConnection::new(
+        let mut connection = CryptoConnection::new(
             &dht_precomputed_key,
             self.dht_pk,
             self.real_pk,
             peer_real_pk,
             peer_dht_pk
         );
+        connection.udp_addr = saddr;
         let connection = Arc::new(RwLock::new(connection));
         connections.insert(peer_real_pk, connection);
+        if let Some(saddr) = saddr {
+            self.keys_by_addr.write().insert((saddr.ip(), saddr.port()), peer_real_pk);
+        }
+    }
+
+    /// Set friend's UDP IP address when it gets known.
+    pub fn set_friend_udp_addr(&self, real_pk: PublicKey, saddr: SocketAddr) {
+        let connections = self.connections.read();
+        let mut connection = if let Some(connection) = connections.get(&real_pk) {
+            connection.write()
+        } else {
+            return
+        };
+
+        if connection.udp_addr == Some(saddr) {
+            return
+        }
+
+        let mut keys_by_addr = self.keys_by_addr.write();
+        if let Some(saddr) = connection.udp_addr {
+            keys_by_addr.remove(&(saddr.ip(), saddr.port()));
+        }
+        connection.udp_addr = Some(saddr);
+        keys_by_addr.insert((saddr.ip(), saddr.port()), real_pk);
     }
 
     /// Send lossless packet to a friend via established connection.
@@ -3684,15 +3709,19 @@ mod tests {
             precomputed_keys,
         });
 
+        let addr = "127.0.0.1:12345".parse().unwrap();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
         let (peer_dht_pk, peer_dht_sk) = gen_keypair();
-        net_crypto.add_connection(peer_real_pk, peer_dht_pk);
+        net_crypto.add_connection(peer_real_pk, peer_dht_pk, Some(addr));
 
         let connections = net_crypto.connections.read();
         let connection = connections[&peer_real_pk].read();
 
         assert_eq!(connection.peer_real_pk, peer_real_pk);
         assert_eq!(connection.peer_dht_pk, peer_dht_pk);
+        assert_eq!(connection.udp_addr, Some(addr));
+
+        assert_eq!(net_crypto.keys_by_addr.read()[&(addr.ip(), addr.port())], peer_real_pk);
 
         let status_packet = unpack!(connection.status.clone(), ConnectionStatus::CookieRequesting, packet);
         let cookie_request = unpack!(status_packet.dht_packet(), Packet::CookieRequest);
@@ -3723,18 +3752,133 @@ mod tests {
             precomputed_keys,
         });
 
+        let addr = "127.0.0.1:12345".parse().unwrap();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        net_crypto.add_connection(peer_real_pk, peer_dht_pk);
+        net_crypto.add_connection(peer_real_pk, peer_dht_pk, Some(addr));
 
         // adding a friend that already exists won't do anything
+        let another_addr = "127.0.0.1:12346".parse().unwrap();
         let (another_peer_dht_pk, _another_peer_dht_sk) = gen_keypair();
-        net_crypto.add_connection(peer_real_pk, another_peer_dht_pk);
+        net_crypto.add_connection(peer_real_pk, another_peer_dht_pk, Some(another_addr));
 
         let connections = net_crypto.connections.read();
         let connection = connections[&peer_real_pk].read();
 
         assert_eq!(connection.peer_real_pk, peer_real_pk);
         assert_eq!(connection.peer_dht_pk, peer_dht_pk);
+        assert_eq!(connection.udp_addr, Some(addr));
+
+        assert_eq!(net_crypto.keys_by_addr.read()[&(addr.ip(), addr.port())], peer_real_pk);
+    }
+
+    #[test]
+    fn set_friend_udp_addr() {
+        crypto_init().unwrap();
+        let (udp_tx, _udp_rx) = mpsc::channel(2);
+        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
+        let (lossless_tx, _lossless_rx) = mpsc::unbounded();
+        let (lossy_tx, _lossy_rx) = mpsc::unbounded();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, real_sk) = gen_keypair();
+        let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
+        let net_crypto = NetCrypto::new(NetCryptoNewArgs {
+            udp_tx,
+            dht_pk_tx,
+            lossless_tx,
+            lossy_tx,
+            dht_pk,
+            dht_sk: dht_sk.clone(),
+            real_pk,
+            real_sk,
+            precomputed_keys,
+        });
+
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
+        net_crypto.add_connection(peer_real_pk, peer_dht_pk, None);
+
+        let addr = "127.0.0.1:12345".parse().unwrap();
+        net_crypto.set_friend_udp_addr(peer_real_pk, addr);
+
+        let connections = net_crypto.connections.read();
+        let connection = connections[&peer_real_pk].read();
+
+        assert_eq!(connection.udp_addr, Some(addr));
+        assert_eq!(net_crypto.keys_by_addr.read()[&(addr.ip(), addr.port())], peer_real_pk);
+    }
+
+    #[test]
+    fn set_friend_udp_addr_update() {
+        crypto_init().unwrap();
+        let (udp_tx, _udp_rx) = mpsc::channel(2);
+        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
+        let (lossless_tx, _lossless_rx) = mpsc::unbounded();
+        let (lossy_tx, _lossy_rx) = mpsc::unbounded();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, real_sk) = gen_keypair();
+        let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
+        let net_crypto = NetCrypto::new(NetCryptoNewArgs {
+            udp_tx,
+            dht_pk_tx,
+            lossless_tx,
+            lossy_tx,
+            dht_pk,
+            dht_sk: dht_sk.clone(),
+            real_pk,
+            real_sk,
+            precomputed_keys,
+        });
+
+        let addr = "127.0.0.1:12345".parse().unwrap();
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
+        net_crypto.add_connection(peer_real_pk, peer_dht_pk, Some(addr));
+
+        // setting the same address won't do anything
+        net_crypto.set_friend_udp_addr(peer_real_pk, addr);
+
+        let addr = "127.0.0.1:12346".parse().unwrap();
+        net_crypto.set_friend_udp_addr(peer_real_pk, addr);
+
+        let connections = net_crypto.connections.read();
+        let connection = connections[&peer_real_pk].read();
+
+        assert_eq!(connection.udp_addr, Some(addr));
+
+        let keys_by_addr = net_crypto.keys_by_addr.read();
+        assert_eq!(keys_by_addr[&(addr.ip(), addr.port())], peer_real_pk);
+        assert_eq!(keys_by_addr.len(), 1);
+    }
+
+    #[test]
+    fn set_friend_udp_addr_no_connection() {
+        crypto_init().unwrap();
+        let (udp_tx, _udp_rx) = mpsc::channel(2);
+        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
+        let (lossless_tx, _lossless_rx) = mpsc::unbounded();
+        let (lossy_tx, _lossy_rx) = mpsc::unbounded();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, real_sk) = gen_keypair();
+        let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
+        let net_crypto = NetCrypto::new(NetCryptoNewArgs {
+            udp_tx,
+            dht_pk_tx,
+            lossless_tx,
+            lossy_tx,
+            dht_pk,
+            dht_sk: dht_sk.clone(),
+            real_pk,
+            real_sk,
+            precomputed_keys,
+        });
+
+        let addr = "127.0.0.1:12345".parse().unwrap();
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+
+        // setting an address to nonexistent connection won't do anything
+        net_crypto.set_friend_udp_addr(peer_real_pk, addr);
+
+        assert!(net_crypto.keys_by_addr.read().is_empty());
     }
 }
