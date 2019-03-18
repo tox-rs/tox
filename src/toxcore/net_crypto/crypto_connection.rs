@@ -1,10 +1,12 @@
 //! Crypto connection implementation.
 
-use std::net::SocketAddr;
+use std::convert::Into;
+use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::time::{Duration, Instant};
 
 use super::packets_array::*;
 
+use crate::toxcore::dht::ip_port::IsGlobal;
 use crate::toxcore::crypto_core::*;
 use crate::toxcore::dht::packet::*;
 use crate::toxcore::time::*;
@@ -234,6 +236,35 @@ impl RecvPacket {
     }
 }
 
+/// UDP address of a connection with the time when last UDP packet was received
+#[derive(Clone, Debug, PartialEq)]
+pub struct ConnectionAddr<T: Into<SocketAddr> + Copy> {
+    /// Address to send UDP packets directly to the peer
+    pub addr: T,
+    /// Time when last UDP packet was received
+    pub last_received_time: Instant,
+}
+
+impl<T: Into<SocketAddr> + Copy> ConnectionAddr<T> {
+    /// Create new `ConnectionAddr`.
+    pub fn new(addr: T) -> Self {
+        ConnectionAddr {
+            addr,
+            last_received_time: clock_now(),
+        }
+    }
+
+    /// Check if we received the last UDP packet not later than 8 seconds ago.
+    pub fn is_alive(&self) -> bool {
+        clock_elapsed(self.last_received_time) < UDP_DIRECT_TIMEOUT
+    }
+
+    /// Get the stored UPD address.
+    pub fn addr(&self) -> SocketAddr {
+        self.addr.into()
+    }
+}
+
 /** Secure connection to send data between two friends that provides encryption,
 ordered delivery, and perfect forward secrecy.
 
@@ -253,10 +284,10 @@ pub struct CryptoConnection {
     pub session_pk: PublicKey,
     /// Current connection status
     pub status: ConnectionStatus,
-    /// Address to send UDP packets directly to the peer
-    pub udp_addr: Option<SocketAddr>, // TODO: separate v4 and v6?
-    /// Time when last UDP packet was received
-    pub udp_received_time: Option<Instant>,
+    /// IPv4 address to send UDP packets directly to the peer
+    pub udp_addr_v4: Option<ConnectionAddr<SocketAddrV4>>,
+    /// IPv6 address to send UDP packets directly to the peer
+    pub udp_addr_v6: Option<ConnectionAddr<SocketAddrV6>>,
     /// Time when we made an attempt to send UDP packet
     pub udp_send_attempt_time: Option<Instant>,
     /// Buffer of sent packets
@@ -321,8 +352,8 @@ impl CryptoConnection {
             session_sk,
             session_pk,
             status,
-            udp_addr: None,
-            udp_received_time: None,
+            udp_addr_v4: None,
+            udp_addr_v6: None,
             udp_send_attempt_time: None,
             send_array: PacketsArray::new(),
             recv_array: PacketsArray::new(),
@@ -381,8 +412,8 @@ impl CryptoConnection {
             session_sk,
             session_pk,
             status,
-            udp_addr: None,
-            udp_received_time: None,
+            udp_addr_v4: None,
+            udp_addr_v6: None,
             udp_send_attempt_time: None,
             send_array: PacketsArray::new(),
             recv_array: PacketsArray::new(),
@@ -433,9 +464,59 @@ impl CryptoConnection {
         }
     }
 
-    /// Set time when last UDP packet was received to now
-    pub fn update_udp_received_time(&mut self) {
-        self.udp_received_time = Some(clock_now())
+    /// Set UPD address for this connection
+    pub fn set_udp_addr(&mut self, addr: SocketAddr) {
+        match addr {
+            SocketAddr::V4(addr) => self.udp_addr_v4 = Some(ConnectionAddr::new(addr)),
+            SocketAddr::V6(addr) => self.udp_addr_v6 = Some(ConnectionAddr::new(addr)),
+        }
+    }
+
+    /// Get IPv4 UDP address of this connection
+    pub fn get_udp_addr_v4(&self) -> Option<SocketAddr> {
+        self.udp_addr_v4.as_ref().map(|addr| addr.addr())
+    }
+
+    /// Get IPv6 UDP address of this connection
+    pub fn get_udp_addr_v6(&self) -> Option<SocketAddr> {
+        self.udp_addr_v6.as_ref().map(|addr| addr.addr())
+    }
+
+    /// Get UDP address of this connection. Prefer:
+    /// - alive IPv6 LAN
+    /// - alive IPv4 LAN
+    /// - alive IPv6
+    /// - alive IPv4
+    /// - IPv6
+    /// - IPv4
+    pub fn get_udp_addr(&self) -> Option<SocketAddr> {
+        if let Some(ref addr) = self.udp_addr_v6 {
+            if addr.is_alive() && !IsGlobal::is_global(&addr.addr().ip()) {
+                return Some(addr.addr());
+            }
+        }
+        if let Some(ref addr) = self.udp_addr_v4 {
+            if addr.is_alive() && !IsGlobal::is_global(&addr.addr().ip()) {
+                return Some(addr.addr());
+            }
+        }
+        if let Some(ref addr) = self.udp_addr_v6 {
+            if addr.is_alive() {
+                return Some(addr.addr());
+            }
+        }
+        if let Some(ref addr) = self.udp_addr_v4 {
+            if addr.is_alive() {
+                return Some(addr.addr());
+            }
+        }
+        if let Some(ref addr) = self.udp_addr_v6 {
+            return Some(addr.addr());
+        }
+        if let Some(ref addr) = self.udp_addr_v4 {
+            return Some(addr.addr());
+        }
+        None
     }
 
     /// Set time when we made an attempt to send UDP packet
@@ -445,9 +526,8 @@ impl CryptoConnection {
 
     /// Check if we received the last UDP packet not later than 8 seconds ago
     pub fn is_udp_alive(&self) -> bool {
-        self.udp_received_time
-            .map(|time| clock_elapsed(time) < UDP_DIRECT_TIMEOUT)
-            .unwrap_or(false)
+        self.udp_addr_v4.as_ref().map_or(false, |addr| addr.is_alive()) ||
+            self.udp_addr_v6.as_ref().map_or(false, |addr| addr.is_alive())
     }
 
     /// Check if we should send UDP packet regardless of whether UDP is dead or
@@ -455,8 +535,7 @@ impl CryptoConnection {
     /// packet via TCP relay
     pub fn udp_attempt_should_be_made(&self) -> bool {
         self.udp_send_attempt_time
-            .map(|time| clock_elapsed(time) >= UDP_DIRECT_TIMEOUT / 2)
-            .unwrap_or(true)
+            .map_or(true, |time| clock_elapsed(time) >= UDP_DIRECT_TIMEOUT / 2)
     }
 
     /// Calculate packets receive rate.
@@ -837,5 +916,176 @@ mod tests {
 
         assert!(connection.is_not_confirmed());
         assert!(!connection.is_established());
+    }
+
+    #[test]
+    fn set_get_udp_addr_v4() {
+        crypto_init().unwrap();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, _real_sk) = gen_keypair();
+        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+
+        let addr = "127.0.0.1:12345".parse().unwrap();
+        connection.set_udp_addr(addr);
+        assert_eq!(connection.get_udp_addr_v4(), Some(addr));
+    }
+
+    #[test]
+    fn set_get_udp_addr_v6() {
+        crypto_init().unwrap();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, _real_sk) = gen_keypair();
+        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+
+        let addr = "[::]:12345".parse().unwrap();
+        connection.set_udp_addr(addr);
+        assert_eq!(connection.get_udp_addr_v6(), Some(addr));
+    }
+
+    #[test]
+    fn get_udp_addr_alive_ipv6_lan() {
+        crypto_init().unwrap();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, _real_sk) = gen_keypair();
+        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+
+        let addr_v4 = "192.168.0.1:12345".parse().unwrap();
+        let addr_v6 = "[FE80::1111]:12345".parse().unwrap();
+
+        connection.set_udp_addr(addr_v4);
+        connection.set_udp_addr(addr_v6);
+
+        assert_eq!(connection.get_udp_addr(), Some(addr_v6));
+    }
+
+    #[test]
+    fn get_udp_addr_alive_ipv4_lan() {
+        crypto_init().unwrap();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, _real_sk) = gen_keypair();
+        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+
+        let addr_v4 = "192.168.0.1:12345".parse().unwrap();
+        let addr_v6 = "[2606::1111]:12345".parse().unwrap();
+
+        connection.set_udp_addr(addr_v4);
+        connection.set_udp_addr(addr_v6);
+
+        assert_eq!(connection.get_udp_addr(), Some(addr_v4));
+    }
+
+    #[test]
+    fn get_udp_addr_alive_ipv6() {
+        crypto_init().unwrap();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, _real_sk) = gen_keypair();
+        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+
+        let addr_v4 = "1.2.3.4:12345".parse().unwrap();
+        let addr_v6 = "[2606::1111]:12345".parse().unwrap();
+
+        connection.set_udp_addr(addr_v4);
+        connection.set_udp_addr(addr_v6);
+
+        assert_eq!(connection.get_udp_addr(), Some(addr_v6));
+    }
+
+    #[test]
+    fn get_udp_addr_alive_ipv4() {
+        crypto_init().unwrap();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, _real_sk) = gen_keypair();
+        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+
+        let addr_v4 = "1.2.3.4:12345".parse().unwrap();
+        let addr_v6 = "[2606::1111]:12345".parse().unwrap();
+
+        connection.set_udp_addr(addr_v4);
+
+        let mut enter = tokio_executor::enter().unwrap();
+        let clock = Clock::new_with_now(ConstNow(Instant::now() + UDP_DIRECT_TIMEOUT + Duration::from_secs(1)));
+
+        with_default(&clock, &mut enter, |_| {
+            connection.set_udp_addr(addr_v6);
+
+            assert_eq!(connection.get_udp_addr(), Some(addr_v6));
+        });
+    }
+
+    #[test]
+    fn get_udp_addr_ipv6() {
+        crypto_init().unwrap();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, _real_sk) = gen_keypair();
+        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+
+        let addr_v4 = "1.2.3.4:12345".parse().unwrap();
+        let addr_v6 = "[2606::1111]:12345".parse().unwrap();
+
+        connection.set_udp_addr(addr_v4);
+        connection.set_udp_addr(addr_v6);
+
+        let mut enter = tokio_executor::enter().unwrap();
+        let clock = Clock::new_with_now(ConstNow(Instant::now() + UDP_DIRECT_TIMEOUT + Duration::from_secs(1)));
+
+        with_default(&clock, &mut enter, |_| {
+            assert_eq!(connection.get_udp_addr(), Some(addr_v6));
+        });
+    }
+
+    #[test]
+    fn get_udp_addr_ipv4() {
+        crypto_init().unwrap();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, _real_sk) = gen_keypair();
+        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+
+        let addr_v4 = "1.2.3.4:12345".parse().unwrap();
+
+        connection.set_udp_addr(addr_v4);
+
+        let mut enter = tokio_executor::enter().unwrap();
+        let clock = Clock::new_with_now(ConstNow(Instant::now() + UDP_DIRECT_TIMEOUT + Duration::from_secs(1)));
+
+        with_default(&clock, &mut enter, |_| {
+            assert_eq!(connection.get_udp_addr(), Some(addr_v4));
+        });
+    }
+
+    #[test]
+    fn get_udp_addr_none() {
+        crypto_init().unwrap();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, _real_sk) = gen_keypair();
+        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+
+        assert_eq!(connection.get_udp_addr(), None);
     }
 }
