@@ -5,6 +5,7 @@ use crate::toxcore::dht::packed_node::PackedNode;
 use crate::toxcore::onion::client::nodes_pool::*;
 use crate::toxcore::onion::client::onion_path::*;
 use crate::toxcore::time::*;
+use crate::toxcore::onion::client::TIME_TO_STABLE;
 
 /// Onion path is considered invalid after this number of unsuccessful attempts
 /// to use it.
@@ -76,6 +77,14 @@ impl StoredOnionPath {
 
         self.attempts >= ONION_PATH_MAX_NO_RESPONSE_USES && clock_elapsed(self.last_used) >= timeout ||
             clock_elapsed(self.creation_time) >= Duration::from_secs(ONION_PATH_MAX_LIFETIME)
+    }
+
+    /// Path is considered stable after `TIME_TO_STABLE` seconds since it was
+    /// added to a close list if we receive responses from it.
+    pub fn is_stable(&self) -> bool {
+        clock_elapsed(self.creation_time) >= Duration::from_secs(TIME_TO_STABLE) &&
+            (self.attempts == 0 ||
+                clock_elapsed(self.last_used) < Duration::from_secs(ONION_PATH_TIMEOUT))
     }
 
     /// Mark this path each time it was used to send request.
@@ -153,8 +162,9 @@ impl PathsPool {
         }
     }
 
-    /// Get `StoredOnionPath` by its `OnionPathId`.
-    pub fn get_path(&mut self, path_id: OnionPathId, friend: bool) -> Option<OnionPath> {
+    /// Get path by its `OnionPathId` and mark it as used. If there is no path
+    /// with such id a new path will be generated.
+    pub fn use_path(&mut self, path_id: OnionPathId, friend: bool) -> Option<OnionPath> {
         let paths = if friend {
             &mut self.friend_paths
         } else {
@@ -172,6 +182,20 @@ impl PathsPool {
         } else {
             self.random_path(friend)
         }
+    }
+
+    /// Get `StoredOnionPath` by its `OnionPathId`.
+    pub fn get_stored_path(&self, path_id: OnionPathId, friend: bool) -> Option<&StoredOnionPath> {
+        let paths = if friend {
+            &self.friend_paths
+        } else {
+            &self.self_paths
+        };
+
+        paths
+            .iter()
+            .find(|stored_path| stored_path.path.id() == path_id)
+            .filter(|stored_path| !stored_path.is_timed_out())
     }
 
     /// Update path's timers after receiving a response via it.
