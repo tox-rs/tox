@@ -25,12 +25,15 @@ hex = "0.3"
 itertools = "0.8"
 log = "0.4"
 regex = "1"
-tokio = "0.1"
-tokio-codec = "0.1"
 config = "0.9"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.8"
 tox = "0.0.9"
+
+[dependencies.tokio]
+version = "0.1"
+default-features = false
+features = ["tcp", "udp", "timer", "codec", "rt-full"]
 
 [target.'cfg(unix)'.dependencies]
 syslog = "4.0"
