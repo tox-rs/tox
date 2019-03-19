@@ -4,7 +4,7 @@ A server application to run tox bootstrap node.
 
 ## Building and running
 
-You'll need [Rust] >= 1.31.0.
+You'll need [Rust] >= 1.33.0.
 
 Build with:
 
