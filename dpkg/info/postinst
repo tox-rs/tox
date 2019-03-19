@@ -1,0 +1,4 @@
+#! /bin/sh
+
+useradd --home-dir /var/lib/tox-node --create-home --system --shell /sbin/nologin --comment "Account to run Tox's DHT bootstrap daemon" --user-group tox-node
+chmod 700 /var/lib/tox-node
