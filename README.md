@@ -100,5 +100,36 @@ tox-node --keys-file keys \
     --motd "{{start_date}} {{uptime}} Tcp: incoming {{tcp_packets_in}}, outgoing {{tcp_packets_out}}, Udp: incoming {{udp_packets_in}}, outgoing {{udp_packets_out}}"
 ```
 
+## Build Debian package
+
+Install [cargo-deb] - a Cargo helper command which automatically creates binary Debian packages (.deb) from Cargo projects:
+
+```sh
+cargo install cargo-deb
+```
+
+And build binary Debian package:
+
+```sh
+cargo deb
+```
+
+This command will create a Debian package in `target/debian` directory.
+The description of the package:
+
+* Binary in `/usr/bin/tox-node`
+* Default config in `/etc/tox-node/config.yml`
+* Systemd config in `/lib/systemd/system/tox-node.service`
+* postinstall creates user `tox-node` and its home in `/var/lib/tox-node/`
+* keys will be generated in `/var/lib/tox-node/keys` if missing during service startup
+
+bootstrap-nodes from config.yml can be generated with:
+
+```sh
+curl 'https://nodes.tox.chat/json' -s | jq -r '.nodes[] | .public_key + " " + .ipv4 + ":" + (.port | tostring)' | \
+while read pk addr; do echo "  - pk: $pk"; echo "    addr: $addr"; done
+```
+
 [libsodium]: https://github.com/jedisct1/libsodium
 [Rust]: https://www.rust-lang.org
+[cargo-deb]: https://crates.io/crates/cargo-deb
