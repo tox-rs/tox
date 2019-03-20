@@ -35,9 +35,21 @@ matrix:
   include:
     - os: linux
       rust: stable
-      env:
-        NAME: clippy
+      name: clippy
       install:
         - rustup component add clippy
       script:
         - cargo clippy --verbose --all --tests
+    - os: linux
+      rust: stable
+      name: deb
+      cache:
+        directories:
+          - /home/travis/.cargo
+      before_cache:
+        - rm -rf /home/travis/.cargo/registry
+      install:
+        - cargo install cargo-update --debug || echo "cargo-update has been already installed"
+        - cargo install-update -i cargo-deb
+      script:
+        - cargo deb

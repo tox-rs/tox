@@ -15,6 +15,24 @@ categories = ["multimedia"]
 license = "MIT"
 edition = "2018"
 
+
+[package.metadata.deb]
+maintainer = "Roman Proskuryakov <humbug@deeptown.org>"
+license-file = ["LICENSE"]
+depends = "$auto, systemd"
+extended-description = "A server application to run tox node written in pure Rust"
+section = "net"
+priority = "optional"
+assets = [
+    ["target/release/tox-node", "/usr/bin/", "755"],
+    ["README.md", "/usr/share/doc/tox-node/README", "644"],
+    ["dpkg/tox-node.service", "/lib/systemd/system/", "644"],
+    ["dpkg/config.yml", "/etc/tox-node/", "644"],
+]
+conf-files = ["/etc/tox-node/config.yml"]
+maintainer-scripts = "dpkg/info"
+
+
 [dependencies]
 chrono = "0.4"
 clap = "2.32"
@@ -25,12 +43,15 @@ hex = "0.3"
 itertools = "0.8"
 log = "0.4"
 regex = "1"
-tokio = "0.1"
-tokio-codec = "0.1"
 config = "0.9"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.8"
 tox = "0.0.9"
+
+[dependencies.tokio]
+version = "0.1"
+default-features = false
+features = ["tcp", "udp", "timer", "codec", "rt-full"]
 
 [target.'cfg(unix)'.dependencies]
 syslog = "4.0"
