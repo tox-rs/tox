@@ -352,7 +352,7 @@ where
     /// Create iterator over [`KbucketNode`](./struct.KbucketNode.html)s in
     /// `Ktree`. Nodes that this iterator produces are sorted by distance to a
     /// base `PublicKey` (in ascending order).
-    pub fn iter(&self) -> impl Iterator<Item = &Node> {
+    pub fn iter(&self) -> impl Iterator<Item = &Node> + Clone {
         self.nodes.iter()
     }
 
