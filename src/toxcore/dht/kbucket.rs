@@ -289,7 +289,12 @@ where
         self.nodes.binary_search_by(|n| base_pk.distance(&n.pk(), pk)).is_ok()
     }
 
-    /// Get the capacity of the Kbucket.
+    /// Number of nodes this `Kbucket` contains.
+    pub fn len(&self) -> usize {
+        self.nodes.len()
+    }
+
+    /// Get the capacity of the `Kbucket`.
     pub fn capacity(&self) -> usize {
         self.capacity as usize
     }
@@ -696,5 +701,24 @@ mod tests {
         assert_eq!(kbucket.find(&base_pk, &n1.pk), Some(0));
         assert_eq!(kbucket.find(&base_pk, &n2.pk), Some(1));
         assert_eq!(kbucket.find(&base_pk, &n3.pk), None);
+    }
+
+    // Kbucket::len()
+
+    #[test]
+    fn kbucket_len() {
+        let pk = PublicKey([0; PUBLICKEYBYTES]);
+        let mut kbucket = Kbucket::<DhtNode>::new(KBUCKET_DEFAULT_SIZE);
+
+        assert_eq!(kbucket.len(), 0);
+
+        let node = PackedNode::new(
+            "1.2.3.4:12345".parse().unwrap(),
+            &PublicKey([1; PUBLICKEYBYTES])
+        );
+
+        assert!(kbucket.try_add(&pk, node, /* evict */ true));
+
+        assert_eq!(kbucket.len(), 1);
     }
 }
