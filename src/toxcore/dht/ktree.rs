@@ -182,7 +182,7 @@ impl Ktree {
     /// Create iterator over [`DhtNode`](./struct.DhtNode.html)s in `Ktree`.
     /// Nodes that this iterator produces are sorted by distance to a base
     /// `PublicKey` (in ascending order).
-    pub fn iter(&self) -> impl Iterator<Item = &DhtNode> {
+    pub fn iter(&self) -> impl Iterator<Item = &DhtNode> + Clone {
         self.kbuckets.iter()
             .rev()
             .flat_map(|kbucket| kbucket.iter())

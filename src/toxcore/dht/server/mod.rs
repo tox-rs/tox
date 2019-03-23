@@ -128,6 +128,8 @@ pub struct Server {
     onion_symmetric_key: Arc<RwLock<secretbox::Key>>,
     /// Onion announce struct to handle `OnionAnnounce` and `OnionData` packets.
     onion_announce: Arc<RwLock<OnionAnnounce>>,
+
+    fake_friends_keys: Vec<PublicKey>,
     /// Friends list used to store friends related data like close nodes per
     /// friend, hole punching status, etc. First FAKE_FRIENDS_NUMBER friends
     /// are fake with random public key.
@@ -193,10 +195,12 @@ impl Server {
         // has to be rewritten in a cleaner and safer manner. Most likely onion
         // will be replaced by DHT announcements:
         // https://github.com/zugz/tox-DHTAnnouncements/blob/master/DHTAnnouncements.md
-        let friends = iter::repeat_with(|| {
-            let pk = gen_keypair().0;
-            (pk, DhtFriend::new(pk))
-        }).take(FAKE_FRIENDS_NUMBER).collect();
+        let fake_friends_keys = iter::repeat_with(|| gen_keypair().0)
+            .take(FAKE_FRIENDS_NUMBER)
+            .collect::<Vec<_>>();
+        let friends = fake_friends_keys.iter()
+            .map(|&pk| (pk, DhtFriend::new(pk)))
+            .collect();
 
         let precomputed_keys = PrecomputedCache::new(sk.clone(), PRECOMPUTED_LRU_CACHE_SIZE);
 
@@ -209,6 +213,7 @@ impl Server {
             close_nodes: Arc::new(RwLock::new(Ktree::new(&pk))),
             onion_symmetric_key: Arc::new(RwLock::new(secretbox::gen_key())),
             onion_announce: Arc::new(RwLock::new(OnionAnnounce::new(pk))),
+            fake_friends_keys,
             friends: Arc::new(RwLock::new(friends)),
             nodes_to_bootstrap: Arc::new(RwLock::new(Kbucket::new(MAX_TO_BOOTSTRAP))),
             random_requests_count: Arc::new(RwLock::new(0)),
@@ -1384,6 +1389,31 @@ impl Server {
             // Do not respond to BootstrapInfo packets if bootstrap_info not defined
             Either::A(future::ok(()))
         }
+    }
+
+    /// Get up to `count` random nodes stored in fake friends.
+    pub fn random_friend_nodes(&self, count: u8) -> Vec<PackedNode> {
+        let friends = self.friends.read();
+        // TODO: use shuffle instead
+        let mut nodes = Vec::new();
+        let skip = random_limit_usize(FAKE_FRIENDS_NUMBER as usize);
+        for pk in self.fake_friends_keys.iter().cycle().skip(skip).take(FAKE_FRIENDS_NUMBER) {
+            let friend = &friends[pk];
+            let skip = random_limit_usize(FRIEND_CLOSE_NODES_COUNT as usize);
+            let take = (count as usize - nodes.len()).min(friend.close_nodes.len());
+            nodes.extend(
+                friend.close_nodes
+                    .iter()
+                    .flat_map(|node| node.to_packed_node())
+                    .cycle()
+                    .skip(skip)
+                    .take(take)
+            );
+            if nodes.len() == count as usize {
+                break;
+            }
+        }
+        nodes
     }
 
     /// Set toxcore version and message of the day callback.
@@ -3646,5 +3676,34 @@ mod tests {
         let nodes_req_payload = nodes_req.get_payload(&precomp).unwrap();
 
         assert_eq!(nodes_req_payload.pk, alice.pk);
+    }
+
+    #[test]
+    fn random_friend_nodes() {
+        let (alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
+
+        // add one real friend to make sure that its node won't get to the result
+        let friend_pk = gen_keypair().0;
+        alice.add_friend(friend_pk);
+
+        let mut friends = alice.friends.write();
+
+        for pk in &alice.fake_friends_keys {
+            let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
+            assert!(friends.get_mut(pk).unwrap().close_nodes.try_add(pk, node, true));
+        }
+
+        let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
+        assert!(friends.get_mut(&friend_pk).unwrap().close_nodes.try_add(&friend_pk, node, true));
+
+        drop(friends);
+
+        let nodes = alice.random_friend_nodes(FAKE_FRIENDS_NUMBER as u8 + 1);
+        assert_eq!(nodes.len(), FAKE_FRIENDS_NUMBER);
+        assert!(!nodes.contains(&node));
+
+        let nodes = alice.random_friend_nodes(FAKE_FRIENDS_NUMBER as u8 - 1);
+        assert_eq!(nodes.len(), FAKE_FRIENDS_NUMBER - 1);
+        assert!(!nodes.contains(&node));
     }
 }
