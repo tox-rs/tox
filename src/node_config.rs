@@ -147,6 +147,30 @@ pub struct NodeConfig {
     pub unused: HashMap<String, Value>,
 }
 
+fn create_sk_arg() -> Arg<'static, 'static> {
+    Arg::with_name("secret-key")
+        .short("s")
+        .long("secret-key")
+        .help("DHT secret key. Note that you should not pass the key via \
+               arguments due to security reasons. Use this argument for \
+               test purposes only. In the real world use the environment \
+               variable instead")
+        .takes_value(true)
+        .conflicts_with("keys-file")
+        .env("TOX_SECRET_KEY")
+        .hidden(true)
+}
+
+fn create_keys_file_arg() -> Arg<'static, 'static> {
+    Arg::with_name("keys-file")
+        .short("k")
+        .long("keys-file")
+        .help("Path to the file where DHT keys are stored")
+        .takes_value(true)
+        .required_unless("secret-key")
+        .conflicts_with("secret-key")
+}
+
 fn app() -> App<'static, 'static> {
     App::new(crate_name!())
         .version(crate_version!())
@@ -160,6 +184,13 @@ fn app() -> App<'static, 'static> {
                 .help("Load settings from saved config file. \
                     Config file format is YAML")
                 .takes_value(true)))
+        .subcommand(SubCommand::with_name("derive-pk")
+            .about("Derive PK from either --keys-file or from env:TOX_SECRET_KEY")
+            .arg(create_sk_arg())
+            .arg(create_keys_file_arg()))
+        // here go args without subcommands
+        .arg(create_sk_arg())
+        .arg(create_keys_file_arg())
         .arg(Arg::with_name("udp-address")
             .short("u")
             .long("udp-address")
@@ -182,24 +213,6 @@ fn app() -> App<'static, 'static> {
             .requires("tcp-address")
             .takes_value(true)
             .default_value_if("tcp-address", None, "512"))
-        .arg(Arg::with_name("secret-key")
-            .short("s")
-            .long("secret-key")
-            .help("DHT secret key. Note that you should not pass the key via \
-                   arguments due to security reasons. Use this argument for \
-                   test purposes only. In the real world use the environment \
-                   variable instead")
-            .takes_value(true)
-            .conflicts_with("keys-file")
-            .env("TOX_SECRET_KEY")
-            .hidden(true))
-        .arg(Arg::with_name("keys-file")
-            .short("k")
-            .long("keys-file")
-            .help("Path to the file where DHT keys are stored")
-            .takes_value(true)
-            .required_unless("secret-key")
-            .conflicts_with("secret-key"))
         .arg(Arg::with_name("bootstrap-node")
             .short("b")
             .long("bootstrap-node")
@@ -251,6 +264,7 @@ pub fn cli_parse() -> NodeConfig {
     let matches = app().get_matches();
 
     match matches.subcommand() {
+        ("derive-pk", Some(m)) => run_derive_pk(m),
         ("config", Some(m)) => run_config(m),
         _ => run_args(&matches),
     }
@@ -281,6 +295,39 @@ fn parse_config(config_path: &str) -> NodeConfig {
     }
 
     config
+}
+
+fn run_derive_pk(matches: &ArgMatches) -> ! {
+    let sk_passed_as_arg = matches.occurrences_of("secret-key") > 0;
+    if sk_passed_as_arg {
+        panic!("You should not pass the secret key via arguments due to \
+               security reasons. Use the environment variable instead");
+    }
+
+    let pk_from_arg = matches.value_of("secret-key").map(|s| {
+        let sk_bytes: [u8; 32] = FromHex::from_hex(s).expect("Invalid DHT secret key");
+        let sk = SecretKey::from_slice(&sk_bytes).expect("Invalid DHT secret key");
+        sk.public_key()
+    });
+    let pk_from_file = matches.value_of("keys-file").map(|keys_file| {
+        let mut file = std::fs::File::open(keys_file).expect("Failed to read the keys file");
+
+        let mut buf = [0; PUBLICKEYBYTES + SECRETKEYBYTES];
+        use std::io::Read;
+        file.read_exact(&mut buf).expect("Failed to read keys from the keys file");
+        let pk = PublicKey::from_slice(&buf[..PUBLICKEYBYTES]).expect("Failed to read public key from the keys file");
+        let sk = SecretKey::from_slice(&buf[PUBLICKEYBYTES..]).expect("Failed to read secret key from the keys file");
+        assert!(pk == sk.public_key(), "The loaded public key does not correspond to the loaded secret key");
+        pk
+    });
+
+    let pk = pk_from_arg.or(pk_from_file).unwrap();
+
+    println!("{}", hex::encode(&pk).to_uppercase());
+
+    // FIXME: use ExitCode::SUCCESS when stabilized
+    // https://doc.rust-lang.org/std/process/struct.ExitCode.html
+    std::process::exit(0)
 }
 
 fn run_config(matches: &ArgMatches) -> NodeConfig {
@@ -606,5 +653,30 @@ mod tests {
         ]);
         let config = run_args(&matches);
         assert_eq!(config.threads, Threads::N(42));
+    }
+
+    #[test]
+    fn args_derive_pk_keys_file() {
+        let matches = app().get_matches_from(vec![
+            "tox-node",
+            "derive-pk",
+            "--keys-file",
+            "./keys",
+        ]);
+        let matches = matches.subcommand_matches("derive-pk").unwrap();
+        assert_eq!("./keys", matches.value_of("keys-file").unwrap());
+    }
+
+    #[test]
+    fn args_derive_pk_secret_key() {
+        let sk_str = "d7f04a6db2c12f1eae0229c72e6bc429ca894541acc5f292da0e4d9a47827774";
+        let matches = app().get_matches_from(vec![
+            "tox-node",
+            "derive-pk",
+            "--secret-key",
+            sk_str
+        ]);
+        let matches = matches.subcommand_matches("derive-pk").unwrap();
+        assert_eq!(sk_str, matches.value_of("secret-key").unwrap());
     }
 }
