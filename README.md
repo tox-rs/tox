@@ -74,7 +74,7 @@ od -vN 32 -An -tx1 /dev/random | tr -d " \n" ; echo
 
 ## Config or CLI
 
-In order to run with config, run with `--config <file>`.
+In order to run with config, run with `config` subcommand, e.g. `tox-node config <file>`.
 Example config.yml is below.
 ```yaml
 log-type: Stderr
