@@ -368,6 +368,20 @@ impl ToBytes for DhtPkAnnouncePayload {
     }
 }
 
+impl DhtPkAnnouncePayload {
+    /// Create new `DhtPkAnnouncePayload` with `no_reply` set to current time.
+    pub fn new(dht_pk: PublicKey, nodes: Vec<TcpUdpPackedNode>) -> Self {
+        use std::time::SystemTime;
+        use crate::toxcore::time::unix_time;
+
+        DhtPkAnnouncePayload {
+            no_reply: unix_time(SystemTime::now()),
+            dht_pk,
+            nodes,
+        }
+    }
+}
+
 /** Hardening nodes request of DHT Request packet.
 
 Length    | Content
@@ -604,10 +618,9 @@ mod tests {
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
-        let payload = DhtPkAnnouncePayload {
-            no_reply: 42,
-            dht_pk: gen_keypair().0,
-            nodes: vec![
+        let payload = DhtPkAnnouncePayload::new(
+            gen_keypair().0,
+            vec![
                 TcpUdpPackedNode {
                     ip_port: IpPort {
                         protocol: ProtocolType::UDP,
@@ -617,7 +630,7 @@ mod tests {
                     pk: gen_keypair().0,
                 },
             ],
-        };
+        );
         // encode payload with shared secret
         let packet = DhtPkAnnounce::new(&shared_secret, alice_pk, &payload);
         // decode payload with shared secret
@@ -634,10 +647,9 @@ mod tests {
         let (_eve_pk, eve_sk) = gen_keypair();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
         let shared_secret_invalid = encrypt_precompute(&bob_pk, &eve_sk);
-        let payload = DhtPkAnnouncePayload {
-            no_reply: 42,
-            dht_pk: gen_keypair().0,
-            nodes: vec![
+        let payload = DhtPkAnnouncePayload::new(
+            gen_keypair().0,
+            vec![
                 TcpUdpPackedNode {
                     ip_port: IpPort {
                         protocol: ProtocolType::UDP,
@@ -647,7 +659,7 @@ mod tests {
                     pk: gen_keypair().0,
                 },
             ],
-        };
+        );
         // encode payload with shared secret
         let packet = DhtPkAnnounce::new(&shared_secret, alice_pk, &payload);
         // try to decode payload with invalid shared secret
