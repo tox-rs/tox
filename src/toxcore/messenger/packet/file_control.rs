@@ -6,9 +6,8 @@ use nom::{le_u8, be_u64};
 
 use crate::toxcore::binary_io::*;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[repr(u8)]
 /// Whether I am a sender or receiver of file data packet
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TransferDirection {
     /// I am a sender
     Send = 0,
@@ -25,8 +24,8 @@ impl FromBytes for TransferDirection {
     );
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// Control types for transferring file data
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ControlType {
     /// Accept a request of transferring file from a peer
     Accept,
