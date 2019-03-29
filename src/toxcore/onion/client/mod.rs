@@ -1211,6 +1211,67 @@ mod tests {
     }
 
     #[test]
+    fn handle_announce_response_announced_pinged_recently() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, real_sk) = gen_keypair();
+        let (udp_tx, udp_rx) = mpsc::channel(1);
+        let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
+        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
+        let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
+        let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
+        let onion_client = OnionClient::new(dht, tcp_connections, dht_pk_tx, real_sk.clone(), real_pk);
+
+        let mut state = onion_client.state.lock();
+
+        let addr = "127.0.0.1".parse().unwrap();
+        for i in 0 .. 3 {
+            let saddr = SocketAddr::new(addr, 12346 + i);
+            let (pk, _sk) = gen_keypair();
+            let node = PackedNode::new(saddr, &pk);
+            state.paths_pool.path_nodes.put(node);
+        }
+        let path = state.paths_pool.random_path(false).unwrap();
+
+        let (sender_pk, sender_sk) = gen_keypair();
+        let saddr = "127.0.0.1:12345".parse().unwrap();
+
+        let request_data = AnnounceRequestData {
+            pk: sender_pk,
+            saddr,
+            path_id: path.id(),
+            friend_pk: None,
+        };
+        let request_id = state.announce_requests.new_ping_id(request_data);
+
+        // insert request to a node to announce_requests so that it won't be pinged again
+        let (node_pk, _node_sk) = gen_keypair();
+        let node = PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &node_pk);
+        let node_request_data = AnnounceRequestData {
+            pk: node_pk,
+            saddr: node.saddr,
+            path_id: path.id(),
+            friend_pk: None,
+        };
+        let _node_request_id = state.announce_requests.new_ping_id(node_request_data);
+
+        drop(state);
+
+        let payload = OnionAnnounceResponsePayload {
+            announce_status: AnnounceStatus::Announced,
+            ping_id_or_pk: sha256::hash(&[1, 2, 3]),
+            nodes: vec![node]
+        };
+        let packet = OnionAnnounceResponse::new(&precompute(&real_pk, &sender_sk), request_id, &payload);
+
+        onion_client.handle_announce_response(&packet, saddr).wait().unwrap();
+
+        // Necessary to drop tx so that rx.collect() can be finished
+        drop(onion_client);
+
+        assert!(udp_rx.collect().wait().unwrap().is_empty());
+    }
+
+    #[test]
     fn handle_announce_response_found() {
         let (dht_pk, dht_sk) = gen_keypair();
         let (real_pk, real_sk) = gen_keypair();
@@ -1417,6 +1478,74 @@ mod tests {
 
         let error = onion_client.handle_announce_response(&packet, saddr).wait().err().unwrap();
         assert_eq!(error.kind(), &HandleAnnounceResponseErrorKind::InvalidPayload);
+    }
+
+    #[test]
+    fn handle_announce_response_found_pinged_recently() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, real_sk) = gen_keypair();
+        let (udp_tx, udp_rx) = mpsc::channel(1);
+        let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
+        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
+        let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
+        let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
+        let onion_client = OnionClient::new(dht, tcp_connections, dht_pk_tx, real_sk.clone(), real_pk);
+
+        let mut state = onion_client.state.lock();
+
+        let (friend_pk, _friend_sk) = gen_keypair();
+        let friend = OnionFriend::new(friend_pk);
+        let friend_temporary_pk = friend.temporary_pk;
+        state.friends.insert(friend_pk, friend);
+
+        let addr = "127.0.0.1".parse().unwrap();
+        for i in 0 .. 3 {
+            let saddr = SocketAddr::new(addr, 12346 + i);
+            let (pk, _sk) = gen_keypair();
+            let node = PackedNode::new(saddr, &pk);
+            state.paths_pool.path_nodes.put(node);
+        }
+        let path = state.paths_pool.random_path(false).unwrap();
+
+        let (sender_pk, sender_sk) = gen_keypair();
+        let saddr = "127.0.0.1:12345".parse().unwrap();
+
+        let request_data = AnnounceRequestData {
+            pk: sender_pk,
+            saddr,
+            path_id: path.id(),
+            friend_pk: Some(friend_pk),
+        };
+        let request_id = state.announce_requests.new_ping_id(request_data);
+
+        // insert request to a node to announce_requests so that it won't be pinged again
+        let (node_pk, _node_sk) = gen_keypair();
+        let node = PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &node_pk);
+        let node_request_data = AnnounceRequestData {
+            pk: node_pk,
+            saddr: node.saddr,
+            path_id: path.id(),
+            friend_pk: Some(friend_pk),
+        };
+        let _node_request_id = state.announce_requests.new_ping_id(node_request_data);
+
+        drop(state);
+
+        let (friend_data_pk, _friend_data_sk) = gen_keypair();
+        let node = PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &node_pk);
+        let payload = OnionAnnounceResponsePayload {
+            announce_status: AnnounceStatus::Found,
+            ping_id_or_pk: pk_as_digest(friend_data_pk),
+            nodes: vec![node]
+        };
+        let packet = OnionAnnounceResponse::new(&precompute(&friend_temporary_pk, &sender_sk), request_id, &payload);
+
+        onion_client.handle_announce_response(&packet, saddr).wait().unwrap();
+
+        // Necessary to drop tx so that rx.collect() can be finished
+        drop(onion_client);
+
+        assert!(udp_rx.collect().wait().unwrap().is_empty());
     }
 
     #[test]
