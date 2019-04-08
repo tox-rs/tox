@@ -24,7 +24,7 @@ pub const MAX_ONION_CLIENT_DATA_SIZE: usize = MAX_DATA_REQUEST_SIZE - MIN_ONION_
 
 This packet is used to transmit sender's long term public key, npspam and a message.
 It is sent by onion data packet or net-crypto.
-If the friend is already directly connected with me and not in group chat, it is sent using net-crypto.
+If the friend is already directly connected with me and not in conference, it is sent using net-crypto.
 Otherwise it is sent using onion.
 Both onion and net-crypto packet itself have real public key of sender.
 This is why this packet does not contain long term public key.
