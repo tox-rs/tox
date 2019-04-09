@@ -6,12 +6,14 @@ mod invite_response;
 mod peer_online;
 mod peer_leave;
 mod query;
+mod query_response;
 
 pub use self::invite::*;
 pub use self::invite_response::*;
 pub use self::peer_online::*;
 pub use self::peer_leave::*;
 pub use self::query::*;
+pub use self::query_response::*;
 
 use nom::be_u8;
 use crate::toxcore::binary_io::*;
