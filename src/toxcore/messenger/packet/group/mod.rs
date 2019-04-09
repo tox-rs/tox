@@ -2,8 +2,10 @@
 */
 
 mod invite;
+mod invite_response;
 
 pub use self::invite::*;
+pub use self::invite_response::*;
 
 use nom::be_u8;
 use crate::toxcore::binary_io::*;
@@ -67,6 +69,32 @@ impl FromBytes for GroupType {
     );
 }
 
+/** Group chat packet enum that encapsulates all types of group chat packets.
+*/
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Packet {
+    /// [`Invite`](./struct.Invite.html) structure.
+    Invite(Invite),
+    /// [`InviteResponse`](./struct.InviteResponse.html) structure.
+    InviteResponse(InviteResponse),
+}
+
+impl ToBytes for Packet {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        match *self {
+            Packet::Invite(ref p) => p.to_bytes(buf),
+            Packet::InviteResponse(ref p) => p.to_bytes(buf),
+        }
+    }
+}
+
+impl FromBytes for Packet {
+    named!(from_bytes<Packet>, alt!(
+        map!(Invite::from_bytes, Packet::Invite) |
+        map!(InviteResponse::from_bytes, Packet::InviteResponse)
+    ));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -82,4 +110,14 @@ mod tests {
         let (_, group_type) = GroupType::from_bytes(&raw).unwrap();
         assert_eq!(GroupType::Text, group_type);
     }
+
+    encode_decode_test!(
+        packet_invite_encode_decode,
+        Packet::Invite(Invite::new(1, GroupType::Audio, GroupUID::new()))
+    );
+
+    encode_decode_test!(
+        packet_invite_response_encode_decode,
+        Packet::InviteResponse(InviteResponse::new(1, 2, GroupType::Text, GroupUID::new()))
+    );
 }
