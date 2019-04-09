@@ -4,10 +4,12 @@
 mod invite;
 mod invite_response;
 mod peer_online;
+mod peer_leave;
 
 pub use self::invite::*;
 pub use self::invite_response::*;
 pub use self::peer_online::*;
+pub use self::peer_leave::*;
 
 use nom::be_u8;
 use crate::toxcore::binary_io::*;
@@ -81,6 +83,8 @@ pub enum Packet {
     InviteResponse(InviteResponse),
     /// [`PeerOnline`](./struct.PeerOnline.html) structure.
     PeerOnline(PeerOnline),
+    /// [`PeerLeave`](./struct.PeerLeave.html) structure.
+    PeerLeave(PeerLeave),
 }
 
 impl ToBytes for Packet {
@@ -89,6 +93,7 @@ impl ToBytes for Packet {
             Packet::Invite(ref p) => p.to_bytes(buf),
             Packet::InviteResponse(ref p) => p.to_bytes(buf),
             Packet::PeerOnline(ref p) => p.to_bytes(buf),
+            Packet::PeerLeave(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -97,7 +102,8 @@ impl FromBytes for Packet {
     named!(from_bytes<Packet>, alt!(
         map!(Invite::from_bytes, Packet::Invite) |
         map!(InviteResponse::from_bytes, Packet::InviteResponse) |
-        map!(PeerOnline::from_bytes, Packet::PeerOnline)
+        map!(PeerOnline::from_bytes, Packet::PeerOnline) |
+        map!(PeerLeave::from_bytes, Packet::PeerLeave)
     ));
 }
 
@@ -130,5 +136,10 @@ mod tests {
     encode_decode_test!(
         packet_peer_noline_encode_decode,
         Packet::PeerOnline(PeerOnline::new(1, GroupType::Text, GroupUID::new()))
+    );
+
+    encode_decode_test!(
+        packet_peer_leave_encode_decode,
+        Packet::PeerLeave(PeerLeave::new(1))
     );
 }
