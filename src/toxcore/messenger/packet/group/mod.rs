@@ -8,6 +8,7 @@ mod peer_leave;
 mod query;
 mod query_response;
 mod title;
+mod ping;
 
 pub use self::invite::*;
 pub use self::invite_response::*;
@@ -16,6 +17,7 @@ pub use self::peer_leave::*;
 pub use self::query::*;
 pub use self::query_response::*;
 pub use self::title::*;
+pub use self::ping::*;
 
 use nom::be_u8;
 use crate::toxcore::binary_io::*;
@@ -98,6 +100,8 @@ pub enum Packet {
     Query(Query),
     /// [`Title`](./struct.Title.html) structure.
     Title(Title),
+    /// [`Ping`](./struct.Ping.html) structure.
+    Ping(Ping),
 }
 
 impl ToBytes for Packet {
@@ -109,6 +113,7 @@ impl ToBytes for Packet {
             Packet::PeerLeave(ref p) => p.to_bytes(buf),
             Packet::Query(ref p) => p.to_bytes(buf),
             Packet::Title(ref p) => p.to_bytes(buf),
+            Packet::Ping(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -120,7 +125,8 @@ impl FromBytes for Packet {
         map!(PeerOnline::from_bytes, Packet::PeerOnline) |
         map!(PeerLeave::from_bytes, Packet::PeerLeave) |
         map!(Query::from_bytes, Packet::Query) |
-        map!(Title::from_bytes, Packet::Title)
+        map!(Title::from_bytes, Packet::Title) |
+        map!(Ping::from_bytes, Packet::Ping)
     ));
 }
 
@@ -168,5 +174,10 @@ mod tests {
     encode_decode_test!(
         packet_title_encode_decode,
         Packet::Title(Title::new(1, "1234".to_owned()))
+    );
+
+    encode_decode_test!(
+        packet_ping_encode_decode,
+        Packet::Ping(Ping::new(1, 2, 3))
     );
 }
