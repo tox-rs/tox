@@ -6,7 +6,7 @@ use nom::{be_u16, be_u32};
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
 
-/** New peer is a struct that holds info to send new peer message to a group chat.
+/** NewPeer is a struct that holds info to send new peer message to a group chat.
 
 Tell everyone about a new peer in the chat.
 The peer who invited joining peer sends this packet to warn everyone that there is a new peer.

@@ -5,7 +5,7 @@ use nom::{be_u16, be_u32};
 
 use crate::toxcore::binary_io::*;
 
-/** Kill peer is a struct that holds info to send kill peer message to a group chat.
+/** KillPeer is a struct that holds info to send kill peer message to a group chat.
 
 When a peer quit a group chat, right before quit, it send this packet.
 
