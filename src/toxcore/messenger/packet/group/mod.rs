@@ -9,6 +9,7 @@ mod query;
 mod query_response;
 mod title;
 mod ping;
+mod new_peer;
 
 pub use self::invite::*;
 pub use self::invite_response::*;
@@ -18,6 +19,7 @@ pub use self::query::*;
 pub use self::query_response::*;
 pub use self::title::*;
 pub use self::ping::*;
+pub use self::new_peer::*;
 
 use nom::be_u8;
 use crate::toxcore::binary_io::*;
@@ -102,6 +104,8 @@ pub enum Packet {
     Title(Title),
     /// [`Ping`](./struct.Ping.html) structure.
     Ping(Ping),
+    /// [`NewPeer`](./struct.NewPeer.html) structure.
+    NewPeer(NewPeer),
 }
 
 impl ToBytes for Packet {
@@ -114,6 +118,7 @@ impl ToBytes for Packet {
             Packet::Query(ref p) => p.to_bytes(buf),
             Packet::Title(ref p) => p.to_bytes(buf),
             Packet::Ping(ref p) => p.to_bytes(buf),
+            Packet::NewPeer(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -126,7 +131,8 @@ impl FromBytes for Packet {
         map!(PeerLeave::from_bytes, Packet::PeerLeave) |
         map!(Query::from_bytes, Packet::Query) |
         map!(Title::from_bytes, Packet::Title) |
-        map!(Ping::from_bytes, Packet::Ping)
+        map!(Ping::from_bytes, Packet::Ping) |
+        map!(NewPeer::from_bytes, Packet::NewPeer)
     ));
 }
 
@@ -179,5 +185,10 @@ mod tests {
     encode_decode_test!(
         packet_ping_encode_decode,
         Packet::Ping(Ping::new(1, 2, 3))
+    );
+
+    encode_decode_test!(
+        packet_new_peer_encode_decode,
+        Packet::NewPeer(NewPeer::new(1, 2, 3, 4, gen_keypair().0, gen_keypair().0))
     );
 }
