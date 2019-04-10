@@ -1,4 +1,4 @@
-/*! Change name message struct.
+/*! Change title message struct.
 */
 
 use std::str;
@@ -7,9 +7,10 @@ use nom::{be_u16, be_u32, rest};
 use crate::toxcore::binary_io::*;
 use super::MAX_NAME_LENGTH_IN_GROUP;
 
-/** ChangeName is the struct that holds info to notify changing name of a peer to a group chat.
+/** ChangeTitle is the struct that holds info to change title of a group chat.
 
-Sent by a peer who wants to change its name or by a joining peer to notify its name to members of group chat.
+Sent by anyone who is member of group.
+This packet is used to change the title of group chat.
 
 Serialized form:
 
@@ -19,58 +20,58 @@ Length    | Content
 `2`       | `group number`
 `2`       | `peer number`
 `4`       | `message number`
-`1`       | `0x30`
-variable  | `name`(UTF-8 C String)
+`1`       | `0x31`
+variable  | `title`(UTF-8 C String)
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ChangeName {
+pub struct ChangeTitle {
     group_number: u16,
     peer_number: u16,
     message_number: u32,
-    name: String,
+    title: String,
 }
 
-impl FromBytes for ChangeName {
-    named!(from_bytes<ChangeName>, do_parse!(
+impl FromBytes for ChangeTitle {
+    named!(from_bytes<ChangeTitle>, do_parse!(
         tag!("\x63") >>
         group_number: be_u16 >>
         peer_number: be_u16 >>
         message_number: be_u32 >>
-        tag!("\x30") >>
-        name: map_res!(verify!(rest, |name: &[u8]| name.len() <= MAX_NAME_LENGTH_IN_GROUP),
+        tag!("\x31") >>
+        title: map_res!(verify!(rest, |title: &[u8]| title.len() <= MAX_NAME_LENGTH_IN_GROUP),
             str::from_utf8) >>
-        (ChangeName {
+        (ChangeTitle {
             group_number,
             peer_number,
             message_number,
-            name: name.to_string(),
+            title: title.to_string(),
         })
     ));
 }
 
-impl ToBytes for ChangeName {
+impl ToBytes for ChangeTitle {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x63) >>
             gen_be_u16!(self.group_number) >>
             gen_be_u16!(self.peer_number) >>
             gen_be_u32!(self.message_number) >>
-            gen_be_u8!(0x30) >>
-            gen_cond!(self.name.len() > MAX_NAME_LENGTH_IN_GROUP, |buf| gen_error(buf, 0)) >>
-            gen_slice!(self.name.as_bytes())
+            gen_be_u8!(0x31) >>
+            gen_cond!(self.title.len() > MAX_NAME_LENGTH_IN_GROUP, |buf| gen_error(buf, 0)) >>
+            gen_slice!(self.title.as_bytes())
         )
     }
 }
 
-impl ChangeName {
-    /// Create new ChangeName object.
-    pub fn new(group_number: u16, peer_number: u16, message_number: u32, name: String) -> Self {
-        ChangeName {
+impl ChangeTitle {
+    /// Create new ChangeTitle object.
+    pub fn new(group_number: u16, peer_number: u16, message_number: u32, title: String) -> Self {
+        ChangeTitle {
             group_number,
             peer_number,
             message_number,
-            name,
+            title,
         }
     }
 }
@@ -80,34 +81,34 @@ mod tests {
     use super::*;
 
     encode_decode_test!(
-        change_name_encode_decode,
-        ChangeName::new(1, 2, 3, "1234".to_owned())
+        change_title_encode_decode,
+        ChangeTitle::new(1, 2, 3, "1234".to_owned())
     );
 
     // Test for encoding error of from_bytes.
     #[test]
-    fn change_name_from_bytes_encoding_error() {
+    fn change_title_from_bytes_encoding_error() {
         let err_string = vec![0, 159, 146, 150]; // not UTF8 bytes.
-        let mut buf = vec![0x63, 0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x30];
+        let mut buf = vec![0x63, 0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x31];
         buf.extend_from_slice(&err_string);
-        assert!(ChangeName::from_bytes(&buf).is_err());
+        assert!(ChangeTitle::from_bytes(&buf).is_err());
     }
 
     // Test for overflow of from_bytes.
     #[test]
-    fn change_name_from_bytes_overflow() {
+    fn change_title_from_bytes_overflow() {
         let large_string = vec![32; MAX_NAME_LENGTH_IN_GROUP + 1];
-        let mut buf = vec![0x63, 0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x30];
+        let mut buf = vec![0x63, 0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x31];
         buf.extend_from_slice(&large_string);
-        assert!(ChangeName::from_bytes(&buf).is_err());
+        assert!(ChangeTitle::from_bytes(&buf).is_err());
     }
 
     // Test for overflow of to_bytes.
     #[test]
-    fn change_name_to_bytes_overflow() {
+    fn change_title_to_bytes_overflow() {
         let large_string = String::from_utf8(vec![32u8; MAX_NAME_LENGTH_IN_GROUP + 1]).unwrap();
-        let large_name = ChangeName::new(1,2, 3, large_string);
+        let large_title = ChangeTitle::new(1,2, 3, large_string);
         let mut buf = [0; MAX_NAME_LENGTH_IN_GROUP + 1 + 2 + 2 + 4 + 1]; // packet id + group number + peer number + message number + message kind.
-        assert!(large_name.to_bytes((&mut buf, 0)).is_err());
+        assert!(large_title.to_bytes((&mut buf, 0)).is_err());
     }
 }

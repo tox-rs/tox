@@ -81,7 +81,7 @@ mod tests {
 
     // Test for overflow of from_bytes.
     #[test]
-    fn nickname_from_bytes_overflow() {
+    fn title_from_bytes_overflow() {
         let large_string = vec![32; MAX_NAME_LENGTH_IN_GROUP + 1];
         let mut buf = vec![0x62, 0x01, 0x00, 0x0a];
         buf.extend_from_slice(&large_string);
@@ -90,7 +90,7 @@ mod tests {
 
     // Test for overflow of to_bytes.
     #[test]
-    fn nickname_to_bytes_overflow() {
+    fn title_to_bytes_overflow() {
         let large_string = String::from_utf8(vec![32u8; MAX_NAME_LENGTH_IN_GROUP + 1]).unwrap();
         let large_title = Title::new(1,large_string);
         let mut buf = [0; MAX_NAME_LENGTH_IN_GROUP + 1 + 2 + 1]; // packet id + group number + packet kind.

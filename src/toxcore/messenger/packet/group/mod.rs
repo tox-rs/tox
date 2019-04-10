@@ -13,6 +13,7 @@ mod new_peer;
 mod kill_peer;
 mod freeze_peer;
 mod chane_name;
+mod change_title;
 
 pub use self::invite::*;
 pub use self::invite_response::*;
@@ -26,6 +27,7 @@ pub use self::new_peer::*;
 pub use self::kill_peer::*;
 pub use self::freeze_peer::*;
 pub use self::chane_name::*;
+pub use self::change_title::*;
 
 use nom::be_u8;
 use crate::toxcore::binary_io::*;
@@ -118,6 +120,8 @@ pub enum Packet {
     FreezePeer(FreezePeer),
     /// [`ChangeName`](./struct.ChangeName.html) structure.
     ChangeName(ChangeName),
+    /// [`ChangeTitle`](./struct.ChangeTitle.html) structure.
+    ChangeTitle(ChangeTitle),
 }
 
 impl ToBytes for Packet {
@@ -134,6 +138,7 @@ impl ToBytes for Packet {
             Packet::KillPeer(ref p) => p.to_bytes(buf),
             Packet::FreezePeer(ref p) => p.to_bytes(buf),
             Packet::ChangeName(ref p) => p.to_bytes(buf),
+            Packet::ChangeTitle(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -150,7 +155,8 @@ impl FromBytes for Packet {
         map!(NewPeer::from_bytes, Packet::NewPeer) |
         map!(KillPeer::from_bytes, Packet::KillPeer) |
         map!(FreezePeer::from_bytes, Packet::FreezePeer) |
-        map!(ChangeName::from_bytes, Packet::ChangeName)
+        map!(ChangeName::from_bytes, Packet::ChangeName) |
+        map!(ChangeTitle::from_bytes, Packet::ChangeTitle)
     ));
 }
 
@@ -223,5 +229,10 @@ mod tests {
     encode_decode_test!(
         packet_hange_name_encode_decode,
         Packet::ChangeName(ChangeName::new(1, 2, 3, "1234".to_owned()))
+    );
+
+    encode_decode_test!(
+        packet_hange_title_encode_decode,
+        Packet::ChangeTitle(ChangeTitle::new(1, 2, 3, "1234".to_owned()))
     );
 }
