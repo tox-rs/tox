@@ -6,9 +6,9 @@ use nom::{be_u16, be_u32, rest};
 
 use crate::toxcore::binary_io::*;
 
-/** GrpMessage is the struct that holds info to change message of a group chat.
+/** GroupMessage is the struct that holds info to send chat message to a group chat.
 
-Sent to send chat message to all member of group chat.
+Sent to notify chat message to all member of group chat.
 
 Serialized form:
 
@@ -23,7 +23,7 @@ variable  | `message`(UTF-8 C String)
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct GrpMessage {
+pub struct GroupMessage {
     group_number: u16,
     peer_number: u16,
     message_number: u32,
@@ -32,15 +32,15 @@ pub struct GrpMessage {
     message: String,
 }
 
-impl FromBytes for GrpMessage {
-    named!(from_bytes<GrpMessage>, do_parse!(
+impl FromBytes for GroupMessage {
+    named!(from_bytes<GroupMessage>, do_parse!(
         tag!("\x63") >>
         group_number: be_u16 >>
         peer_number: be_u16 >>
         message_number: be_u32 >>
         tag!("\x40") >>
         message: map_res!(rest, str::from_utf8) >>
-        (GrpMessage {
+        (GroupMessage {
             group_number,
             peer_number,
             message_number,
@@ -49,7 +49,7 @@ impl FromBytes for GrpMessage {
     ));
 }
 
-impl ToBytes for GrpMessage {
+impl ToBytes for GroupMessage {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x63) >>
@@ -62,10 +62,10 @@ impl ToBytes for GrpMessage {
     }
 }
 
-impl GrpMessage {
-    /// Create new GrpMessage object.
+impl GroupMessage {
+    /// Create new GroupMessage object.
     pub fn new(group_number: u16, peer_number: u16, message_number: u32, message: String) -> Self {
-        GrpMessage {
+        GroupMessage {
             group_number,
             peer_number,
             message_number,
@@ -79,16 +79,15 @@ mod tests {
     use super::*;
 
     encode_decode_test!(
-        change_message_encode_decode,
-        GrpMessage::new(1, 2, 3, "1234".to_owned())
+        group_message_encode_decode,
+        GroupMessage::new(1, 2, 3, "1234".to_owned())
     );
 
-    // Test for encoding error of from_bytes.
     #[test]
-    fn change_message_from_bytes_encoding_error() {
+    fn group_message_from_bytes_encoding_error() {
         let err_string = vec![0, 159, 146, 150]; // not UTF8 bytes.
-        let mut buf = vec![0x63, 0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x31];
+        let mut buf = vec![0x63, 0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x40];
         buf.extend_from_slice(&err_string);
-        assert!(GrpMessage::from_bytes(&buf).is_err());
+        assert!(GroupMessage::from_bytes(&buf).is_err());
     }
 }

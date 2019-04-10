@@ -62,21 +62,18 @@ mod tests {
         Action::new("1234".to_string())
     );
 
-    // Test for encoding error of from_bytes.
     #[test]
     fn action_from_bytes_encoding_error() {
         let err_string = vec![0, 159, 146, 150]; // not UTF8 bytes.
         assert!(Action::from_bytes(&err_string).is_err());
     }
 
-    // Test for overflow of from_bytes.
     #[test]
     fn action_from_bytes_overflow() {
         let large_string = vec![32; MAX_ACTION_MESSAGE_DATA_SIZE + 1];
         assert!(Action::from_bytes(&large_string).is_err());
     }
 
-    // Test for overflow of to_bytes.
     #[test]
     fn action_to_bytes_overflow() {
         let large_string = String::from_utf8(vec![32u8; MAX_ACTION_MESSAGE_DATA_SIZE + 1]).unwrap();

@@ -85,7 +85,6 @@ mod tests {
         ChangeTitle::new(1, 2, 3, "1234".to_owned())
     );
 
-    // Test for encoding error of from_bytes.
     #[test]
     fn change_title_from_bytes_encoding_error() {
         let err_string = vec![0, 159, 146, 150]; // not UTF8 bytes.
@@ -94,7 +93,6 @@ mod tests {
         assert!(ChangeTitle::from_bytes(&buf).is_err());
     }
 
-    // Test for overflow of from_bytes.
     #[test]
     fn change_title_from_bytes_overflow() {
         let large_string = vec![32; MAX_NAME_LENGTH_IN_GROUP + 1];
@@ -103,7 +101,6 @@ mod tests {
         assert!(ChangeTitle::from_bytes(&buf).is_err());
     }
 
-    // Test for overflow of to_bytes.
     #[test]
     fn change_title_to_bytes_overflow() {
         let large_string = String::from_utf8(vec![32u8; MAX_NAME_LENGTH_IN_GROUP + 1]).unwrap();

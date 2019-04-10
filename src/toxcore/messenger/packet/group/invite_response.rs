@@ -76,6 +76,6 @@ mod tests {
 
     encode_decode_test!(
         invite_response_encode_decode,
-        InviteResponse::new(1, 2, GroupType::Audio, GroupUID::new())
+        InviteResponse::new(1, 2, GroupType::Audio, GroupUID::random())
     );
 }

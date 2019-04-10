@@ -140,7 +140,6 @@ mod tests {
         FileSendRequest::new(1, FileType::Data, 4, FileUID::new(), "data".to_string())
     );
 
-    // Test for encoding error of from_bytes.
     #[test]
     fn file_send_request_from_bytes_encoding_error() {
         let mut packet = vec![0x50, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff];
@@ -150,7 +149,6 @@ mod tests {
         assert!(FileSendRequest::from_bytes(&packet).is_err());
     }
 
-    // Test for overflow of from_bytes.
     #[test]
     fn file_send_request_from_bytes_overflow() {
         let mut packet = vec![0x50, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff];
@@ -160,7 +158,6 @@ mod tests {
         assert!(FileSendRequest::from_bytes(&packet).is_err());
     }
 
-    // Test for overflow of to_bytes.
     #[test]
     fn file_send_request_to_bytes_overflow() {
         let large_string = String::from_utf8(vec![32u8; MAX_FILESEND_FILENAME_LENGTH + 1]).unwrap();

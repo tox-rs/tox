@@ -68,6 +68,6 @@ mod tests {
 
     encode_decode_test!(
         peer_noline_encode_decode,
-        PeerOnline::new(1, GroupType::Text, GroupUID::new())
+        PeerOnline::new(1, GroupType::Text, GroupUID::random())
     );
 }

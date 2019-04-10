@@ -14,7 +14,8 @@ mod kill_peer;
 mod freeze_peer;
 mod chane_name;
 mod change_title;
-mod grp_message;
+mod group_message;
+mod group_action;
 
 pub use self::invite::*;
 pub use self::invite_response::*;
@@ -29,7 +30,8 @@ pub use self::kill_peer::*;
 pub use self::freeze_peer::*;
 pub use self::chane_name::*;
 pub use self::change_title::*;
-pub use self::grp_message::*;
+pub use self::group_message::*;
+pub use self::group_action::*;
 
 use nom::be_u8;
 use crate::toxcore::binary_io::*;
@@ -110,6 +112,8 @@ pub enum Packet {
     PeerLeave(PeerLeave),
     /// [`PeerLeave`](./struct.PeerLeave.html) structure.
     Query(Query),
+    /// [`QueryResponse`](./struct.QueryResponse.html) structure.
+    QueryResponse(QueryResponse),
     /// [`Title`](./struct.Title.html) structure.
     Title(Title),
     /// [`Ping`](./struct.Ping.html) structure.
@@ -124,8 +128,10 @@ pub enum Packet {
     ChangeName(ChangeName),
     /// [`ChangeTitle`](./struct.ChangeTitle.html) structure.
     ChangeTitle(ChangeTitle),
-    /// [`GrpMessage`](./struct.GrpMessage.html) structure.
-    GrpMessage(GrpMessage),
+    /// [`GroupMessage`](./struct.GroupMessage.html) structure.
+    GroupMessage(GroupMessage),
+    /// [`GroupAction`](./struct.GroupAction.html) structure.
+    GroupAction(GroupAction),
 }
 
 impl ToBytes for Packet {
@@ -136,6 +142,7 @@ impl ToBytes for Packet {
             Packet::PeerOnline(ref p) => p.to_bytes(buf),
             Packet::PeerLeave(ref p) => p.to_bytes(buf),
             Packet::Query(ref p) => p.to_bytes(buf),
+            Packet::QueryResponse(ref p) => p.to_bytes(buf),
             Packet::Title(ref p) => p.to_bytes(buf),
             Packet::Ping(ref p) => p.to_bytes(buf),
             Packet::NewPeer(ref p) => p.to_bytes(buf),
@@ -143,7 +150,8 @@ impl ToBytes for Packet {
             Packet::FreezePeer(ref p) => p.to_bytes(buf),
             Packet::ChangeName(ref p) => p.to_bytes(buf),
             Packet::ChangeTitle(ref p) => p.to_bytes(buf),
-            Packet::GrpMessage(ref p) => p.to_bytes(buf),
+            Packet::GroupMessage(ref p) => p.to_bytes(buf),
+            Packet::GroupAction(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -155,6 +163,7 @@ impl FromBytes for Packet {
         map!(PeerOnline::from_bytes, Packet::PeerOnline) |
         map!(PeerLeave::from_bytes, Packet::PeerLeave) |
         map!(Query::from_bytes, Packet::Query) |
+        map!(QueryResponse::from_bytes, Packet::QueryResponse) |
         map!(Title::from_bytes, Packet::Title) |
         map!(Ping::from_bytes, Packet::Ping) |
         map!(NewPeer::from_bytes, Packet::NewPeer) |
@@ -162,7 +171,8 @@ impl FromBytes for Packet {
         map!(FreezePeer::from_bytes, Packet::FreezePeer) |
         map!(ChangeName::from_bytes, Packet::ChangeName) |
         map!(ChangeTitle::from_bytes, Packet::ChangeTitle) |
-        map!(GrpMessage::from_bytes, Packet::GrpMessage)
+        map!(GroupMessage::from_bytes, Packet::GroupMessage) |
+        map!(GroupAction::from_bytes, Packet::GroupAction)
     ));
 }
 
@@ -184,17 +194,17 @@ mod tests {
 
     encode_decode_test!(
         packet_invite_encode_decode,
-        Packet::Invite(Invite::new(1, GroupType::Audio, GroupUID::new()))
+        Packet::Invite(Invite::new(1, GroupType::Audio, GroupUID::random()))
     );
 
     encode_decode_test!(
         packet_invite_response_encode_decode,
-        Packet::InviteResponse(InviteResponse::new(1, 2, GroupType::Text, GroupUID::new()))
+        Packet::InviteResponse(InviteResponse::new(1, 2, GroupType::Text, GroupUID::random()))
     );
 
     encode_decode_test!(
         packet_peer_noline_encode_decode,
-        Packet::PeerOnline(PeerOnline::new(1, GroupType::Text, GroupUID::new()))
+        Packet::PeerOnline(PeerOnline::new(1, GroupType::Text, GroupUID::random()))
     );
 
     encode_decode_test!(
@@ -205,6 +215,14 @@ mod tests {
     encode_decode_test!(
         packet_query_encode_decode,
         Packet::Query(Query::new(1))
+    );
+
+    encode_decode_test!(
+        packet_query_response_encode_decode,
+        Packet::QueryResponse(QueryResponse::new(1, vec![
+            PeerInfo::new(1, gen_keypair().0, gen_keypair().0, "1234".to_owned()),
+            PeerInfo::new(2, gen_keypair().0, gen_keypair().0, "56789".to_owned()),
+            ]))
     );
 
     encode_decode_test!(
@@ -244,6 +262,11 @@ mod tests {
 
     encode_decode_test!(
         packet_group_message_encode_decode,
-        Packet::GrpMessage(GrpMessage::new(1, 2, 3, "1234".to_owned()))
+        Packet::GroupMessage(GroupMessage::new(1, 2, 3, "1234".to_owned()))
+    );
+
+    encode_decode_test!(
+        packet_group_action_encode_decode,
+        Packet::GroupAction(GroupAction::new(1, 2, 3, "1234".to_owned()))
     );
 }
