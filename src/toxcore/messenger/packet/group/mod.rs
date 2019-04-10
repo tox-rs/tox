@@ -7,6 +7,7 @@ mod peer_online;
 mod peer_leave;
 mod query;
 mod query_response;
+mod title;
 
 pub use self::invite::*;
 pub use self::invite_response::*;
@@ -14,13 +15,17 @@ pub use self::peer_online::*;
 pub use self::peer_leave::*;
 pub use self::query::*;
 pub use self::query_response::*;
+pub use self::title::*;
 
 use nom::be_u8;
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
 
-/// Length of group chat unique bytes
+/// Length in bytes of group chat unique bytes
 pub const GROUP_UID_BYTES: usize = 32;
+
+/// Length in bytes of various names in group chat
+pub const MAX_NAME_LENGTH_IN_GROUP: usize = 128;
 
 /// Unique id used in group chat
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -91,6 +96,8 @@ pub enum Packet {
     PeerLeave(PeerLeave),
     /// [`PeerLeave`](./struct.PeerLeave.html) structure.
     Query(Query),
+    /// [`Title`](./struct.Title.html) structure.
+    Title(Title),
 }
 
 impl ToBytes for Packet {
@@ -101,6 +108,7 @@ impl ToBytes for Packet {
             Packet::PeerOnline(ref p) => p.to_bytes(buf),
             Packet::PeerLeave(ref p) => p.to_bytes(buf),
             Packet::Query(ref p) => p.to_bytes(buf),
+            Packet::Title(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -111,7 +119,8 @@ impl FromBytes for Packet {
         map!(InviteResponse::from_bytes, Packet::InviteResponse) |
         map!(PeerOnline::from_bytes, Packet::PeerOnline) |
         map!(PeerLeave::from_bytes, Packet::PeerLeave) |
-        map!(Query::from_bytes, Packet::Query)
+        map!(Query::from_bytes, Packet::Query) |
+        map!(Title::from_bytes, Packet::Title)
     ));
 }
 
@@ -154,5 +163,10 @@ mod tests {
     encode_decode_test!(
         packet_query_encode_decode,
         Packet::Query(Query::new(1))
+    );
+
+    encode_decode_test!(
+        packet_title_encode_decode,
+        Packet::Title(Title::new(1, "1234".to_owned()))
     );
 }
