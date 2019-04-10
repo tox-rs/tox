@@ -11,6 +11,7 @@ mod title;
 mod ping;
 mod new_peer;
 mod kill_peer;
+mod freeze_peer;
 
 pub use self::invite::*;
 pub use self::invite_response::*;
@@ -22,6 +23,7 @@ pub use self::title::*;
 pub use self::ping::*;
 pub use self::new_peer::*;
 pub use self::kill_peer::*;
+pub use self::freeze_peer::*;
 
 use nom::be_u8;
 use crate::toxcore::binary_io::*;
@@ -110,6 +112,8 @@ pub enum Packet {
     NewPeer(NewPeer),
     /// [`KillPeer`](./struct.KillPeer.html) structure.
     KillPeer(KillPeer),
+    /// [`FreezePeer`](./struct.FreezePeer.html) structure.
+    FreezePeer(FreezePeer),
 }
 
 impl ToBytes for Packet {
@@ -124,6 +128,7 @@ impl ToBytes for Packet {
             Packet::Ping(ref p) => p.to_bytes(buf),
             Packet::NewPeer(ref p) => p.to_bytes(buf),
             Packet::KillPeer(ref p) => p.to_bytes(buf),
+            Packet::FreezePeer(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -138,7 +143,8 @@ impl FromBytes for Packet {
         map!(Title::from_bytes, Packet::Title) |
         map!(Ping::from_bytes, Packet::Ping) |
         map!(NewPeer::from_bytes, Packet::NewPeer) |
-        map!(KillPeer::from_bytes, Packet::KillPeer)
+        map!(KillPeer::from_bytes, Packet::KillPeer) |
+        map!(FreezePeer::from_bytes, Packet::FreezePeer)
     ));
 }
 
@@ -201,5 +207,10 @@ mod tests {
     encode_decode_test!(
         packet_kill_peer_encode_decode,
         Packet::KillPeer(KillPeer::new(1, 2, 3, 4))
+    );
+
+    encode_decode_test!(
+        packet_freeze_peer_encode_decode,
+        Packet::FreezePeer(FreezePeer::new(1, 2, 3, 4))
     );
 }
