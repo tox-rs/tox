@@ -113,6 +113,7 @@ impl ToBytes for FileSendRequest {
             gen_be_u32!(self.file_type as u32) >>
             gen_be_u64!(self.file_size) >>
             gen_slice!(self.file_unique_id.0) >>
+            gen_cond!(self.file_name.len() > MAX_FILESEND_FILENAME_LENGTH, |buf| gen_error(buf, 0)) >>
             gen_slice!(self.file_name.as_bytes())
     )}
 }
