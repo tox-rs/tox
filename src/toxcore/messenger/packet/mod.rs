@@ -15,6 +15,7 @@ mod user_status;
 mod file_data;
 mod status_message;
 mod file_send_request;
+mod group_v2;
 
 pub use self::online::*;
 pub use self::action::*;
@@ -28,6 +29,7 @@ pub use self::user_status::*;
 pub use self::file_data::*;
 pub use self::status_message::*;
 pub use self::file_send_request::*;
+pub use self::group_v2::*;
 
 /** Messenger packet enum that encapsulates all types of Messenger packets.
 */
