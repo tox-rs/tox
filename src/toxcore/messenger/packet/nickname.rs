@@ -7,7 +7,7 @@ use nom::rest;
 use crate::toxcore::binary_io::*;
 
 /// Maximum size in bytes of nickname string of nickname packet
-const MAX_NICKNAME_DATA_SIZE: usize = 128;
+pub const MAX_NICKNAME_DATA_SIZE: usize = 128;
 
 /** Nickname is a struct that holds string of my nickname.
 

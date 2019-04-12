@@ -99,7 +99,7 @@ impl FromBytes for Packet {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{Packet, *};
 
     encode_decode_test!(
         packet_online_encode_decode,
