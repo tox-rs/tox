@@ -101,7 +101,7 @@ mod tests {
     use super::*;
 
     encode_decode_test!(
-        status_encode_decode,
+        nickname_v2_encode_decode,
         NicknameV2::new(1, gen_keypair().0, gen_nonce(), 2, 3, 4, "1234".to_owned())
     );
 
@@ -146,7 +146,6 @@ mod tests {
         good_buf.extend_from_slice(&good_string);
         assert!(NicknameV2::from_bytes(&good_buf).is_done());
     }
-
 
     // Test for overflow of to_bytes.
     #[test]
