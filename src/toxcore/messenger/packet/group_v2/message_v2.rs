@@ -6,9 +6,7 @@ use nom::{be_u32, be_u64, rest};
 
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
-
-/// Maximum size in bytes of message string of message v2 packet
-const MAX_MESSAGE_V2_DATA_SIZE: usize = 1289;
+use super::MAX_MESSAGE_V2_DATA_SIZE;
 
 /** MessageV2 is a struct that holds info to send plain message packet to a group chat.
 

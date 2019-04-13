@@ -7,11 +7,17 @@ mod status;
 mod nickname_v2;
 mod message_v2;
 mod action_v2;
+mod private_message;
 
 pub use self::status::*;
 pub use self::nickname_v2::*;
 pub use self::message_v2::*;
 pub use self::action_v2::*;
+pub use self::private_message::*;
+
+/// Maximum size in bytes of action string of message packet
+pub const MAX_MESSAGE_V2_DATA_SIZE: usize = 1289;
+
 
 /** Group chat version 2 packet enum that encapsulates all types of group chat v2 packets.
 */
@@ -25,6 +31,8 @@ pub enum Packet {
     MessageV2(MessageV2),
     /// [`ActionV2`](./struct.ActionV2.html) structure.
     ActionV2(ActionV2),
+    /// [`PrivateMessage`](./struct.PrivateMessage.html) structure.
+    PrivateMessage(PrivateMessage),
 }
 
 impl ToBytes for Packet {
@@ -34,6 +42,7 @@ impl ToBytes for Packet {
             Packet::NicknameV2(ref p) => p.to_bytes(buf),
             Packet::MessageV2(ref p) => p.to_bytes(buf),
             Packet::ActionV2(ref p) => p.to_bytes(buf),
+            Packet::PrivateMessage(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -43,7 +52,8 @@ impl FromBytes for Packet {
         map!(Status::from_bytes, Packet::Status) |
         map!(NicknameV2::from_bytes, Packet::NicknameV2) |
         map!(MessageV2::from_bytes, Packet::MessageV2) |
-        map!(ActionV2::from_bytes, Packet::ActionV2)
+        map!(ActionV2::from_bytes, Packet::ActionV2) |
+        map!(PrivateMessage::from_bytes, Packet::PrivateMessage)
     ));
 }
 
@@ -69,5 +79,10 @@ mod tests {
     encode_decode_test!(
         packet_action_v2_encode_decode,
         Packet::ActionV2(ActionV2::new(1, gen_keypair().0, gen_nonce(), 2, 3, 4, "1234".to_owned()))
+    );
+
+    encode_decode_test!(
+        packet_private_message_encode_decode,
+        Packet::PrivateMessage(PrivateMessage::new(1, gen_keypair().0, gen_nonce(), 2, 3, 4, "1234".to_owned()))
     );
 }

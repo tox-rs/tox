@@ -1,4 +1,4 @@
-/*! ActionV2 struct.
+/*! PrivateMessage struct.
 */
 
 use std::str;
@@ -8,7 +8,7 @@ use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
 use super::MAX_MESSAGE_V2_DATA_SIZE;
 
-/** ActionV2 is a struct that holds info to send plain action packet to a group chat.
+/** PrivateMessage is a struct that holds info to send private message packet to a group chat.
 
 Serialized form:
 
@@ -19,26 +19,26 @@ Length    | Content
 `32`      | `PK of sender`
 `24`      | `nonce`
 `1`       | `0xf3`(packet kind: broadcast)
-`8`       | `action id`
+`8`       | `message id`
 `4`       | `sender pk hash`
-`1`       | `0x03`(type: action)
+`1`       | `0x04`(type: private message)
 `8`       | `timestamp`
-variable  | `action`(UTF-8 C String)
+variable  | `message`(UTF-8 C String)
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ActionV2 {
+pub struct PrivateMessage {
     hash_id: u32,
     sender_pk: PublicKey,
     nonce: Nonce,
     message_id: u64,
     sender_pk_hash: u32,
     timestamp: u64,
-    action: String,
+    message: String,
 }
 
-impl FromBytes for ActionV2 {
-    named!(from_bytes<ActionV2>, do_parse!(
+impl FromBytes for PrivateMessage {
+    named!(from_bytes<PrivateMessage>, do_parse!(
         tag!("\x5b") >>
         hash_id: be_u32 >>
         sender_pk: call!(PublicKey::from_bytes) >>
@@ -46,23 +46,23 @@ impl FromBytes for ActionV2 {
         tag!(&[0xf3][..]) >>
         message_id: be_u64 >>
         sender_pk_hash: be_u32 >>
-        tag!("\x03") >>
+        tag!("\x04") >>
         timestamp: be_u64 >>
-        action: map_res!(verify!(rest, |action: &[u8]| action.len() <= MAX_MESSAGE_V2_DATA_SIZE),
+        message: map_res!(verify!(rest, |message: &[u8]| message.len() <= MAX_MESSAGE_V2_DATA_SIZE),
             str::from_utf8) >>
-        (ActionV2 {
+        (PrivateMessage {
             hash_id,
             sender_pk,
             nonce,
             message_id,
             sender_pk_hash,
             timestamp,
-            action: action.to_string(),
+            message: message.to_string(),
         })
     ));
 }
 
-impl ToBytes for ActionV2 {
+impl ToBytes for PrivateMessage {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x5b) >>
@@ -72,25 +72,25 @@ impl ToBytes for ActionV2 {
             gen_be_u8!(0xf3) >>
             gen_be_u64!(self.message_id) >>
             gen_be_u32!(self.sender_pk_hash) >>
-            gen_be_u8!(0x03) >>
+            gen_be_u8!(0x04) >>
             gen_be_u64!(self.timestamp) >>
-            gen_cond!(self.action.len() > MAX_MESSAGE_V2_DATA_SIZE, |buf| gen_error(buf, 0)) >>
-            gen_slice!(self.action.as_bytes())
+            gen_cond!(self.message.len() > MAX_MESSAGE_V2_DATA_SIZE, |buf| gen_error(buf, 0)) >>
+            gen_slice!(self.message.as_bytes())
         )
     }
 }
 
-impl ActionV2 {
-    /// Create new ActionV2 object.
-    pub fn new(hash_id: u32, sender_pk: PublicKey, nonce: Nonce, message_id: u64, sender_pk_hash: u32, timestamp: u64, action: String) -> Self {
-        ActionV2 {
+impl PrivateMessage {
+    /// Create new PrivateMessage object.
+    pub fn new(hash_id: u32, sender_pk: PublicKey, nonce: Nonce, message_id: u64, sender_pk_hash: u32, timestamp: u64, message: String) -> Self {
+        PrivateMessage {
             hash_id,
             sender_pk,
             nonce,
             message_id,
             sender_pk_hash,
             timestamp,
-            action,
+            message,
         }
     }
 }
@@ -100,13 +100,13 @@ mod tests {
     use super::*;
 
     encode_decode_test!(
-        action_v2_encode_decode,
-        ActionV2::new(1, gen_keypair().0, gen_nonce(), 2, 3, 4, "1234".to_owned())
+        private_message_v2_encode_decode,
+        PrivateMessage::new(1, gen_keypair().0, gen_nonce(), 2, 3, 4, "1234".to_owned())
     );
 
     // Test for encoding error of from_bytes.
     #[test]
-    fn message_from_bytes_encoding_error() {
+    fn private_message_from_bytes_encoding_error() {
         let mut buf = vec![0x5b, 0x01, 0x00, 0x00, 0x00];
         let sender_pk = gen_keypair().0;
         let nonce = gen_nonce();
@@ -115,42 +115,42 @@ mod tests {
 
         buf.extend_from_slice(sender_pk.as_ref());
         buf.extend_from_slice(nonce.as_ref());
-        buf.extend_from_slice(&[0xf3, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x03,
+        buf.extend_from_slice(&[0xf3, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x04,
             0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
         let mut good_buf = buf.clone();
         buf.extend_from_slice(&err_string);
-        assert!(ActionV2::from_bytes(&buf).is_err());
+        assert!(PrivateMessage::from_bytes(&buf).is_err());
 
         good_buf.extend_from_slice(good_string.as_bytes());
-        assert!(ActionV2::from_bytes(&good_buf).is_done());
+        assert!(PrivateMessage::from_bytes(&good_buf).is_done());
     }
 
     // Test for overflow of from_bytes.
     #[test]
-    fn message_from_bytes_overflow() {
+    fn private_message_from_bytes_overflow() {
         let mut buf = vec![0x5b, 0x01, 0x00, 0x00, 0x00];
         let sender_pk = gen_keypair().0;
         let nonce = gen_nonce();
 
         buf.extend_from_slice(sender_pk.as_ref());
         buf.extend_from_slice(nonce.as_ref());
-        buf.extend_from_slice(&[0xf3, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x03,
+        buf.extend_from_slice(&[0xf3, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x04,
             0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
         let large_string = vec![32; MAX_MESSAGE_V2_DATA_SIZE + 1];
         let good_string = vec![32; MAX_MESSAGE_V2_DATA_SIZE];
         let mut good_buf = buf.clone();
         buf.extend_from_slice(&large_string);
-        assert!(ActionV2::from_bytes(&buf).is_err());
+        assert!(PrivateMessage::from_bytes(&buf).is_err());
 
         good_buf.extend_from_slice(&good_string);
-        assert!(ActionV2::from_bytes(&good_buf).is_done());
+        assert!(PrivateMessage::from_bytes(&good_buf).is_done());
     }
-    
+
     // Test for overflow of to_bytes.
     #[test]
-    fn message_to_bytes_overflow() {
+    fn private_message_to_bytes_overflow() {
         let large_string = String::from_utf8(vec![32u8; MAX_MESSAGE_V2_DATA_SIZE + 1]).unwrap();
-        let large_msg = ActionV2::new(1,gen_keypair().0,gen_nonce(),2,3,4,large_string);
+        let large_msg = PrivateMessage::new(1,gen_keypair().0,gen_nonce(),2,3,4,large_string);
         let mut buf = [0; MAX_MESSAGE_V2_DATA_SIZE + 100]; // `100` is for enough space.
         assert!(large_msg.to_bytes((&mut buf, 0)).is_err());
     }
