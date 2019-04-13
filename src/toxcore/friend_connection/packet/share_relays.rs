@@ -53,6 +53,8 @@ impl ToBytes for ShareRelays {
 mod tests {
     use super::*;
 
+    use crate::toxcore::crypto_core::*;
+
     encode_decode_test!(
         share_relays_encode_decode,
         ShareRelays::new(vec![
