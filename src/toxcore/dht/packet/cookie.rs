@@ -197,7 +197,6 @@ mod tests {
 
     #[test]
     fn cookie_encrypt_decrypt() {
-        crypto_init().unwrap();
         let symmetric_key = secretbox::gen_key();
         let payload = Cookie::new(gen_keypair().0, gen_keypair().0);
         // encode payload with symmetric key
@@ -210,7 +209,6 @@ mod tests {
 
     #[test]
     fn cookie_encrypt_decrypt_invalid_key() {
-        crypto_init().unwrap();
         let symmetric_key = secretbox::gen_key();
         let eve_symmetric_key = secretbox::gen_key();
         let payload = Cookie::new(gen_keypair().0, gen_keypair().0);
@@ -224,7 +222,6 @@ mod tests {
 
     #[test]
     fn cookie_encrypt_decrypt_invalid() {
-        crypto_init().unwrap();
         let symmetric_key = secretbox::gen_key();
         let nonce = secretbox::gen_nonce();
         // Try long invalid array
@@ -251,7 +248,6 @@ mod tests {
 
     #[test]
     fn cookie_timed_out() {
-        crypto_init().unwrap();
         let mut cookie = Cookie::new(gen_keypair().0, gen_keypair().0);
         assert!(!cookie.is_timed_out());
         cookie.time -= COOKIE_TIMEOUT + 1;
@@ -260,7 +256,6 @@ mod tests {
 
     #[test]
     fn hash_depends_on_all_fields() {
-        crypto_init().unwrap();
         let nonce = secretbox::gen_nonce();
         let payload = vec![42; 88];
         let cookie = EncryptedCookie {

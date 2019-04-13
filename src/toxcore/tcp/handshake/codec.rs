@@ -95,7 +95,6 @@ mod tests {
 
     #[test]
     fn client_encode_decode() {
-        crypto_init().unwrap();
         let (pk, _) = gen_keypair();
         let nonce = gen_nonce();
         let mut buf = BytesMut::new();
@@ -107,14 +106,12 @@ mod tests {
     }
     #[test]
     fn client_decode_incomplete() {
-        crypto_init().unwrap();
         let mut buf = BytesMut::new();
         let mut codec = ClientHandshakeCodec { };
         assert!(codec.decode(&mut buf).unwrap().is_none());
     }
     #[test]
     fn client_encode_too_big() {
-        crypto_init().unwrap();
         let nonce = gen_nonce();
         let (pk, _) = gen_keypair();
         let handshake = ClientHandshake { pk, nonce, payload: vec![42; ENC_PAYLOAD_SIZE + 1] };
@@ -124,7 +121,6 @@ mod tests {
     }
     #[test]
     fn server_encode_decode() {
-        crypto_init().unwrap();
         let nonce = gen_nonce();
         let mut buf = BytesMut::new();
         let mut codec = ServerHandshakeCodec { };
@@ -135,14 +131,12 @@ mod tests {
     }
     #[test]
     fn server_decode_incomplete() {
-        crypto_init().unwrap();
         let mut buf = BytesMut::new();
         let mut codec = ServerHandshakeCodec { };
         assert!(codec.decode(&mut buf).unwrap().is_none());
     }
     #[test]
     fn server_encode_too_big() {
-        crypto_init().unwrap();
         let nonce = gen_nonce();
         let mut buf = BytesMut::new();
         let mut codec = ServerHandshakeCodec { };

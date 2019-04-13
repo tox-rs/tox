@@ -90,7 +90,6 @@ mod tests {
     use tokio_executor;
     use tokio_timer::clock::*;
 
-    use crate::toxcore::crypto_core::*;
     use crate::toxcore::time::ConstNow;
 
     #[test]
@@ -101,8 +100,6 @@ mod tests {
 
     #[test]
     fn insert_new_ping_id() {
-        crypto_init().unwrap();
-
         let mut queue = RequestQueue::new(Duration::from_secs(42));
 
         let ping_id = queue.new_ping_id(7);
@@ -112,8 +109,6 @@ mod tests {
 
     #[test]
     fn check_ping_id() {
-        crypto_init().unwrap();
-
         let mut queue = RequestQueue::new(Duration::from_secs(42));
 
         let ping_id = queue.new_ping_id(7);
@@ -131,8 +126,6 @@ mod tests {
 
     #[test]
     fn check_ping_id_nonexistent() {
-        crypto_init().unwrap();
-
         let mut queue = RequestQueue::new(Duration::from_secs(42));
 
         let ping_id = queue.new_ping_id(());
@@ -142,8 +135,6 @@ mod tests {
 
     #[test]
     fn check_ping_id_timed_out() {
-        crypto_init().unwrap();
-
         let mut queue = RequestQueue::new(Duration::from_secs(42));
 
         let ping_id = queue.new_ping_id(());
@@ -161,8 +152,6 @@ mod tests {
 
     #[test]
     fn clear_timed_out() {
-        crypto_init().unwrap();
-
         let mut queue = RequestQueue::new(Duration::from_secs(42));
 
         let ping_id_1 = queue.new_ping_id(());
@@ -191,8 +180,6 @@ mod tests {
 
     #[test]
     fn get_values() {
-        crypto_init().unwrap();
-
         let mut queue = RequestQueue::new(Duration::from_secs(42));
 
         let _ping_id_1 = queue.new_ping_id(1);

@@ -239,7 +239,6 @@ mod tests {
 
     #[test]
     fn send_ipv4() {
-        crypto_init().unwrap();
         // `+1` for 255.255.255.255
         let packets_count = (broadcast_addrs_count() + 1) * (PORTS_PER_DISCOVERY + 1) as usize;
 
@@ -265,7 +264,6 @@ mod tests {
 
     #[test]
     fn send_ipv6() {
-        crypto_init().unwrap();
         // `+2` for ::1 and ::ffff:255.255.255.255
         let packets_count = (broadcast_addrs_count() + 2) * (PORTS_PER_DISCOVERY + 1) as usize;
 
@@ -291,7 +289,6 @@ mod tests {
 
     #[test]
     fn cycle_around_ports() {
-        crypto_init().unwrap();
         // `+1` for 255.255.255.255
         let packets_count = (broadcast_addrs_count() + 1) * (PORTS_PER_DISCOVERY + 1) as usize;
 
