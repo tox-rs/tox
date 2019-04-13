@@ -5,9 +5,11 @@ use crate::toxcore::binary_io::*;
 
 mod status;
 mod nickname_v2;
+mod message_v2;
 
 pub use self::status::*;
 pub use self::nickname_v2::*;
+pub use self::message_v2::*;
 
 /** Group chat version 2 packet enum that encapsulates all types of group chat v2 packets.
 */
@@ -17,6 +19,8 @@ pub enum Packet {
     Status(Status),
     /// [`NicknameV2`](./struct.NicknameV2.html) structure.
     NicknameV2(NicknameV2),
+    /// [`MessageV2`](./struct.MessageV2.html) structure.
+    MessageV2(MessageV2),
 }
 
 impl ToBytes for Packet {
@@ -24,6 +28,7 @@ impl ToBytes for Packet {
         match *self {
             Packet::Status(ref p) => p.to_bytes(buf),
             Packet::NicknameV2(ref p) => p.to_bytes(buf),
+            Packet::MessageV2(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -31,7 +36,8 @@ impl ToBytes for Packet {
 impl FromBytes for Packet {
     named!(from_bytes<Packet>, alt!(
         map!(Status::from_bytes, Packet::Status) |
-        map!(NicknameV2::from_bytes, Packet::NicknameV2)
+        map!(NicknameV2::from_bytes, Packet::NicknameV2) |
+        map!(MessageV2::from_bytes, Packet::MessageV2)
     ));
 }
 
@@ -47,5 +53,10 @@ mod tests {
     encode_decode_test!(
         packet_nickname_v2_encode_decode,
         Packet::NicknameV2(NicknameV2::new(1, gen_keypair().0, gen_nonce(), 2, 3, 4, "1234".to_owned()))
+    );
+
+    encode_decode_test!(
+        packet_message_v2_encode_decode,
+        Packet::MessageV2(MessageV2::new(1, gen_keypair().0, gen_nonce(), 2, 3, 4, "1234".to_owned()))
     );
 }

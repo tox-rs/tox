@@ -7,7 +7,7 @@ use nom::rest;
 use crate::toxcore::binary_io::*;
 
 /// Maximum size in bytes of message string of message packet
-const MAX_MESSAGE_DATA_SIZE: usize = 1372;
+const MAX_MESSAGE_DATA_SIZE: usize = 1371;
 
 /** Message is a struct that holds string of my message.
 
