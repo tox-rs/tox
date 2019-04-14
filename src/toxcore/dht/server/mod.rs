@@ -325,41 +325,34 @@ impl Server {
         request_queue.clear_timed_out();
 
         // Send NodesRequest packets to nodes from the Server
-        let ping_nodes_to_bootstrap = self.ping_nodes_to_bootstrap(&mut request_queue, &mut nodes_to_bootstrap, self.pk)
-            .map_err(|e| RunError::from(e));
-        let ping_close_nodes = self.ping_close_nodes(&mut request_queue, close_nodes.iter_mut(), self.pk)
-            .map_err(|e| RunError::from(e));
+        let ping_nodes_to_bootstrap = self.ping_nodes_to_bootstrap(&mut request_queue, &mut nodes_to_bootstrap, self.pk);
+        let ping_close_nodes = self.ping_close_nodes(&mut request_queue, close_nodes.iter_mut(), self.pk);
         let send_nodes_req_random = if send_random_request(&mut self.last_nodes_req_time.write(), &mut self.random_requests_count.write()) {
-            Either::A(self.send_nodes_req_random(&mut request_queue, close_nodes.iter(), self.pk)
-                .map_err(|e| RunError::from(e)))
+            Either::A(self.send_nodes_req_random(&mut request_queue, close_nodes.iter(), self.pk))
         } else {
             Either::B(future::ok(()))
         };
 
         // Send NodesRequest packets to nodes from every DhtFriend
         let send_nodes_req_to_friends = friends.values_mut().map(|friend| {
-            let ping_nodes_to_bootstrap = self.ping_nodes_to_bootstrap(&mut request_queue, &mut friend.nodes_to_bootstrap, friend.pk)
-                .map_err(|e| RunError::from(e));
-            let ping_close_nodes = self.ping_close_nodes(&mut request_queue, friend.close_nodes.nodes.iter_mut(), friend.pk)
-                .map_err(|e| RunError::from(e));
+            let ping_nodes_to_bootstrap = self.ping_nodes_to_bootstrap(&mut request_queue, &mut friend.nodes_to_bootstrap, friend.pk);
+            let ping_close_nodes = self.ping_close_nodes(&mut request_queue, friend.close_nodes.nodes.iter_mut(), friend.pk);
             let send_nodes_req_random = if send_random_request(&mut friend.last_nodes_req_time, &mut friend.random_requests_count) {
-                Either::A(self.send_nodes_req_random(&mut request_queue, friend.close_nodes.nodes.iter(), friend.pk)
-                    .map_err(|e| RunError::from(e)))
+                Either::A(self.send_nodes_req_random(&mut request_queue, friend.close_nodes.nodes.iter(), friend.pk))
             } else {
                 Either::B(future::ok(()))
             };
             ping_nodes_to_bootstrap.join3(ping_close_nodes, send_nodes_req_random)
         }).collect::<Vec<_>>();
 
-        let send_nat_ping_req = self.send_nat_ping_req(&mut request_queue, &mut friends)
-            .map_err(|e| RunError::from(e));
+        let send_nat_ping_req = self.send_nat_ping_req(&mut request_queue, &mut friends);
 
         ping_nodes_to_bootstrap.join5(
             ping_close_nodes,
             send_nodes_req_random,
             future::join_all(send_nodes_req_to_friends),
             send_nat_ping_req
-        ).map(|_| ())
+        ).map(|_| ()).map_err(|e| e.context(RunErrorKind::SendTo).into())
     }
 
     /// Run DHT periodical tasks. Result future will never be completed
@@ -386,11 +379,11 @@ impl Server {
         let wakeups = Interval::new(Instant::now(), interval);
 
         wakeups
-            .map_err(|e| RunError::from(e))
+            .map_err(|e| e.context(RunErrorKind::Wakeup).into())
             .for_each(move |_instant| {
                 trace!("Bootstrap wake up");
                 self.send_bootstrap_requests()
-                    .map_err(|e| RunError::from(e))
+                    .map_err(|e| e.context(RunErrorKind::SendTo).into())
             })
     }
 
@@ -421,7 +414,7 @@ impl Server {
         let interval = Duration::from_secs(MAIN_LOOP_INTERVAL);
         let wakeups = Interval::new(Instant::now(), interval);
         wakeups
-            .map_err(|e| RunError::from(e))
+            .map_err(|e| e.context(RunErrorKind::Wakeup).into())
             .for_each(move |_instant| {
                 trace!("DHT server wake up");
                 self.dht_main_loop().then(|res| {
@@ -439,7 +432,7 @@ impl Server {
         let interval = Duration::from_secs(ONION_REFRESH_KEY_INTERVAL);
         let wakeups = Interval::new(Instant::now() + interval, interval);
         wakeups
-            .map_err(|e| RunError::from(e))
+            .map_err(|e| e.context(RunErrorKind::Wakeup).into())
             .for_each(move |_instant| {
                 trace!("Refreshing onion key");
                 self.refresh_onion_key();
@@ -453,11 +446,11 @@ impl Server {
         let interval = Duration::from_secs(TIME_TO_PING);
         let wakeups = Interval::new(Instant::now() + interval, interval);
         wakeups
-            .map_err(|e| RunError::from(e))
+            .map_err(|e| e.context(RunErrorKind::Wakeup).into())
             .for_each(move |_instant| {
                 trace!("Pings sending wake up");
                 self.send_pings()
-                    .map_err(|e| RunError::from(e))
+                    .map_err(|e| e.context(RunErrorKind::SendTo).into())
             })
     }
 

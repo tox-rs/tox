@@ -4,7 +4,6 @@
 use std::fmt;
 use std::net::SocketAddr;
 use futures::sync::mpsc;
-use tokio::timer::Error as TimerError;
 use tokio::timer::timeout::Error as TimeoutError;
 
 use failure::{Backtrace, Context, Fail};
@@ -73,71 +72,19 @@ error_kind! {
     }
 }
 
-/// Error that can happen when calling `run_*`.
-#[derive(Debug)]
-pub struct RunError {
-    ctx: Context<RunErrorKind>,
-}
-
-impl RunError {
-    /// Return the kind of this error.
-    pub fn kind(&self) -> &RunErrorKind {
-        self.ctx.get_context()
-    }
-}
-
-impl Fail for RunError {
-    fn cause(&self) -> Option<&Fail> {
-        self.ctx.cause()
-    }
-
-    fn backtrace(&self) -> Option<&Backtrace> {
-        self.ctx.backtrace()
-    }
-}
-
-impl fmt::Display for RunError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.ctx.fmt(f)
-    }
-}
-
-/// The specific kind of error that can occur.
-#[derive(Clone, Debug, Eq, PartialEq, Fail)]
-pub enum RunErrorKind {
-    /// Various loop wakeup timer error
-    #[fail(display = "Dht loop wakeup timer error")]
-    Wakeup,
-    /// Send packet(s) error
-    #[fail(display = "Send packet(s) error")]
-    SendTo,
-}
-
-impl From<RunErrorKind> for RunError {
-    fn from(kind: RunErrorKind) -> RunError {
-        RunError::from(Context::new(kind))
-    }
-}
-
-impl From<Context<RunErrorKind>> for RunError {
-    fn from(ctx: Context<RunErrorKind>) -> RunError {
-        RunError { ctx }
-    }
-}
-
-impl From<TimerError> for RunError {
-    fn from(error: TimerError) -> RunError {
-        RunError {
-            ctx: error.context(RunErrorKind::Wakeup)
-        }
-    }
-}
-
-impl From<TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> for RunError {
-    fn from(error: TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>) -> RunError {
-        RunError {
-            ctx: error.context(RunErrorKind::SendTo)
-        }
+error_kind! {
+    #[doc = "Error that can happen when calling `run_*`."]
+    #[derive(Debug)]
+    RunError,
+    #[doc = "The specific kind of error that can occur."]
+    #[derive(Clone, Debug, Eq, PartialEq, Fail)]
+    RunErrorKind {
+        #[doc = "Various loop wakeup timer error."]
+        #[fail(display = "Dht loop wakeup timer error")]
+        Wakeup,
+        #[doc = "Send packet(s) error."]
+        #[fail(display = "Send packet(s) error")]
+        SendTo,
     }
 }
 
@@ -201,23 +148,6 @@ impl From<TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> for PingError {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn run_error() {
-        let error = RunError::from(RunErrorKind::Wakeup);
-        assert!(error.cause().is_none());
-        assert!(error.backtrace().is_some());
-        assert_eq!(format!("{}", error), "Dht loop wakeup timer error".to_owned());
-    }
-
-    #[test]
-    fn run_error_kind() {
-        let wake_up = RunErrorKind::Wakeup;
-        assert_eq!(format!("{}", wake_up), "Dht loop wakeup timer error".to_owned());
-
-        let send_to = RunErrorKind::SendTo;
-        assert_eq!(format!("{}", send_to), "Send packet(s) error".to_owned());
-    }
 
     #[test]
     fn ping_error() {
