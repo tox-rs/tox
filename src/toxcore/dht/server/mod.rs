@@ -1249,7 +1249,7 @@ impl Server {
                 .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
             )
         } else {
-            Either::A(future::err(OnionResponseError::from(OnionResponseErrorKind::Next).context(HandlePacketErrorKind::OnionResponse).into()))
+            Either::A(future::err(HandlePacketErrorKind::OnionResponseNext.into()))
         }
     }
 
@@ -1278,7 +1278,7 @@ impl Server {
                 .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
             )
         } else {
-            Either::A(future::err(OnionResponseError::from(OnionResponseErrorKind::Next).context(HandlePacketErrorKind::OnionResponse).into()))
+            Either::A(future::err(HandlePacketErrorKind::OnionResponseNext.into()))
         }
     }
 
@@ -1315,17 +1315,15 @@ impl Server {
                         Box::new(tcp_onion_sink.clone() // clone sink for 1 send only
                             .send((packet.payload, ip_port.to_saddr()))
                             .map(|_sink| ()) // ignore sink because it was cloned
-                            .map_err(|e| e.context(HandlePacketErrorKind::OnionResponse).into())
+                            .map_err(|e| e.context(HandlePacketErrorKind::OnionResponseRedirect).into())
                         )
                     } else {
-                        Box::new( future::err(
-                            OnionResponseError::from(OnionResponseErrorKind::Redirect).context(HandlePacketErrorKind::OnionResponse).into()
-                        ))
+                        Box::new(future::err(HandlePacketErrorKind::OnionResponseRedirect.into()))
                     }
                 },
             }
         } else {
-            Box::new(future::err(OnionResponseError::from(OnionResponseErrorKind::Next).context(HandlePacketErrorKind::OnionResponse).into()))
+            Box::new(future::err(HandlePacketErrorKind::OnionResponseNext.into()))
         }
     }
 
@@ -2751,7 +2749,7 @@ mod tests {
 
         let res = alice.handle_packet(packet, addr).wait();
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::OnionResponse);
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::OnionResponseNext);
     }
 
     // handle_onion_response_2
@@ -2844,7 +2842,7 @@ mod tests {
 
         let res = alice.handle_packet(packet, addr).wait();
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::OnionResponse);
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::OnionResponseNext);
     }
 
     // handle_onion_response_1
@@ -2975,7 +2973,7 @@ mod tests {
 
         let res = alice.handle_packet(packet, addr).wait();
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::OnionResponse);
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::OnionResponseRedirect);
     }
 
     #[test]
@@ -3032,7 +3030,7 @@ mod tests {
 
         let res = alice.handle_packet(packet, addr).wait();
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::OnionResponse);
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::OnionResponseNext);
     }
 
     // send_nat_ping_req()

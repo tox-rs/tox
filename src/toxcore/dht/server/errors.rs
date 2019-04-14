@@ -13,9 +13,12 @@ error_kind! {
         #[doc = "Error indicates that getting payload of received packet error."]
         #[fail(display = "Get payload of received packet error")]
         GetPayload,
-        #[doc = "Error indicates that onion response error."]
-        #[fail(display = "Onion response error")]
-        OnionResponse,
+        #[doc = "Error indicates that next_onion_return is none."]
+        #[fail(display = "Next onion return is none")]
+        OnionResponseNext,
+        #[doc = "Error indicates that sending response packet faces redirecting failure."]
+        #[fail(display = "Sending response redirecting error")]
+        OnionResponseRedirect,
         #[doc = "Error indicates that BootstrapInfo error."]
         #[fail(display = "BootstrapInfo handling error")]
         BootstrapInfoLength,
@@ -47,22 +50,6 @@ error_kind! {
         #[doc = "Failed to send friend's IP address to the sink."]
         #[fail(display = "Failed to send friend's IP address to the sink")]
         FriendSaddr
-    }
-}
-
-error_kind! {
-    #[doc = "Error that can happen when calling `handle_onion_response_*` of packet."]
-    #[derive(Debug)]
-    OnionResponseError,
-    #[doc = "The specific kind of error that can occur."]
-    #[derive(Clone, Debug, Eq, PartialEq, Fail)]
-    OnionResponseErrorKind {
-        #[doc = "Error indicates that next_onion_return is none."]
-        #[fail(display = "Next onion return is none")]
-        Next,
-        #[doc = "Error indicates that sending response packet faces redirecting failure."]
-        #[fail(display = "Sending response redirecting error")]
-        Redirect,
     }
 }
 
