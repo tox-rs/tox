@@ -566,7 +566,8 @@ impl Server {
     /// Ping node with `NodesRequest` packet with self DHT `PublicKey`.
     pub fn ping_node(&self, node: &PackedNode) -> impl Future<Item = (), Error = PingError> + Send {
         let mut request_queue = self.request_queue.write();
-        self.send_nodes_req(node, &mut request_queue, self.pk).map_err(PingError::from)
+        self.send_nodes_req(node, &mut request_queue, self.pk)
+            .map_err(|e| e.context(PingErrorKind::SendTo).into())
     }
 
     /// Send `PingRequest` packet to the node.
