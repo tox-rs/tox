@@ -13,18 +13,44 @@ use tokio::timer::timeout::Error as TimeoutError;
 use crate::toxcore::dht::packet::*;
 use crate::toxcore::crypto_core::*;
 
-/// Error that can happen while processing packets array
-#[derive(Debug)]
-pub struct PacketsArrayError {
-    ctx: Context<PacketsArrayErrorKind>,
+error_kind! {
+    #[doc = "Error that can happen while processing packets array"]
+    #[derive(Debug)]
+    PacketsArrayError,
+    #[doc = "The specific kind of error that can occur."]
+    #[derive(Debug, Eq, PartialEq, Fail)]
+    PacketsArrayErrorKind {
+        #[doc = "Index is too big error."]
+        #[fail(display = "The index {:?} is too big and can't be hold", index)]
+        TooBig {
+            #[doc = "The index that can't be hold."]
+            index: u32,
+        },
+        #[doc = "Index already exists error."]
+        #[fail(display = "The packet with index {:?} already exists", index)]
+        AlreadyExist {
+            #[doc = "The index that already exists."]
+            index: u32,
+        },
+        #[doc = "Packets array is full."]
+        #[fail(display = "Packets array is full")]
+        ArrayFull,
+        #[doc = "Index is lower than the end index."]
+        #[fail(display = "Index {:?} is lower than the end index", index)]
+        LowerIndex {
+            #[doc = "The index that lower than end index."]
+            index: u32,
+        },
+        #[doc = "Index is outside of buffer bounds."]
+        #[fail(display = "Index {:?} is outside of buffer bounds", index)]
+        OutsideIndex {
+            #[doc = "The index that is outside of buffer bounds."]
+            index: u32,
+        },
+    }
 }
 
 impl PacketsArrayError {
-    /// Return the kind of this error.
-    pub fn kind(&self) -> &PacketsArrayErrorKind {
-        self.ctx.get_context()
-    }
-
     pub(crate) fn too_big(index: u32) -> PacketsArrayError {
         PacketsArrayError::from(PacketsArrayErrorKind::TooBig { index })
     }
@@ -39,66 +65,6 @@ impl PacketsArrayError {
 
     pub(crate) fn outside_index(index: u32) -> PacketsArrayError {
         PacketsArrayError::from(PacketsArrayErrorKind::OutsideIndex { index })
-    }
-}
-
-impl Fail for PacketsArrayError {
-    fn cause(&self) -> Option<&Fail> {
-        self.ctx.cause()
-    }
-
-    fn backtrace(&self) -> Option<&Backtrace> {
-        self.ctx.backtrace()
-    }
-}
-
-impl fmt::Display for PacketsArrayError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.ctx.fmt(f)
-    }
-}
-
-/// The specific kind of error that can occur.
-#[derive(Debug, Eq, PartialEq, Fail)]
-pub enum PacketsArrayErrorKind {
-    /// Index is too big error
-    #[fail(display = "The index {:?} is too big and can't be hold", index)]
-    TooBig {
-        /// The index that can't be hold
-        index: u32,
-    },
-    /// Index already exists error
-    #[fail(display = "The packet with index {:?} already exists", index)]
-    AlreadyExist {
-        /// The index that already exists
-        index: u32,
-    },
-    /// Packets array is full
-    #[fail(display = "Packets array is full")]
-    ArrayFull,
-    /// Index is lower than the end index
-    #[fail(display = "Index {:?} is lower than the end index", index)]
-    LowerIndex {
-        /// The index that lower than end index
-        index: u32,
-    },
-    /// Index is outside of buffer bounds
-    #[fail(display = "Index {:?} is outside of buffer bounds", index)]
-    OutsideIndex {
-        /// The index that is outside of buffer bounds
-        index: u32,
-    },
-}
-
-impl From<PacketsArrayErrorKind> for PacketsArrayError {
-    fn from(kind: PacketsArrayErrorKind) -> PacketsArrayError {
-        PacketsArrayError::from(Context::new(kind))
-    }
-}
-
-impl From<Context<PacketsArrayErrorKind>> for PacketsArrayError {
-    fn from(ctx: Context<PacketsArrayErrorKind>) -> PacketsArrayError {
-        PacketsArrayError { ctx }
     }
 }
 
@@ -512,41 +478,6 @@ mod tests {
 
     use std::time::Duration;
     use futures::future::Future;
-
-    #[test]
-    fn packets_array_error() {
-        let error = PacketsArrayError::from(PacketsArrayErrorKind::ArrayFull);
-        assert!(error.cause().is_none());
-        assert_eq!(format!("{}", error), "Packets array is full".to_owned());
-    }
-
-    #[test]
-    fn packets_array_too_big() {
-        let error = PacketsArrayError::too_big(1);
-        assert_eq!(*error.kind(), PacketsArrayErrorKind::TooBig { index: 1 });
-        assert_eq!(format!("{}", error), "The index 1 is too big and can't be hold".to_owned());
-    }
-
-    #[test]
-    fn packets_array_already_exist() {
-        let error = PacketsArrayError::already_exist(1);
-        assert_eq!(*error.kind(), PacketsArrayErrorKind::AlreadyExist { index: 1 });
-        assert_eq!(format!("{}", error), "The packet with index 1 already exists".to_owned());
-    }
-
-    #[test]
-    fn packets_array_lower_index() {
-        let error = PacketsArrayError::lower_index(1);
-        assert_eq!(*error.kind(), PacketsArrayErrorKind::LowerIndex { index: 1 });
-        assert_eq!(format!("{}", error), "Index 1 is lower than the end index".to_owned());
-    }
-
-    #[test]
-    fn packets_array_outside_index() {
-        let error = PacketsArrayError::outside_index(1);
-        assert_eq!(*error.kind(), PacketsArrayErrorKind::OutsideIndex { index: 1 });
-        assert_eq!(format!("{}", error), "Index 1 is outside of buffer bounds".to_owned());
-    }
 
     #[test]
     fn handle_packet_error() {
