@@ -9,7 +9,6 @@ use tokio::timer::timeout::Error as TimeoutError;
 
 use failure::{Backtrace, Context, Fail};
 use crate::toxcore::dht::packet::*;
-use crate::toxcore::onion::packet::*;
 
 error_kind! {
     #[doc = "Error that can happen when calling `handle_*` of packet."]
@@ -58,77 +57,19 @@ error_kind! {
     }
 }
 
-/// Error that can happen when calling `handle_onion_response_*` of packet.
-#[derive(Debug)]
-pub struct OnionResponseError {
-    ctx: Context<OnionResponseErrorKind>,
-}
-
-impl OnionResponseError {
-    /// Return the kind of this error.
-    pub fn kind(&self) -> &OnionResponseErrorKind {
-        self.ctx.get_context()
-    }
-}
-
-impl Fail for OnionResponseError {
-    fn cause(&self) -> Option<&Fail> {
-        self.ctx.cause()
-    }
-
-    fn backtrace(&self) -> Option<&Backtrace> {
-        self.ctx.backtrace()
-    }
-}
-
-impl fmt::Display for OnionResponseError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.ctx.fmt(f)
-    }
-}
-
-/// The specific kind of error that can occur.
-#[derive(Clone, Debug, Eq, PartialEq, Fail)]
-pub enum OnionResponseErrorKind {
-    /// Error indicates that next_onion_return is none"
-    #[fail(display = "Next onion return is none")]
-    Next,
-    /// Error indicates that sending response packet error.
-    #[fail(display = "Sending response error")]
-    SendTo,
-    /// Error indicates that sending response packet faces unexpected eof.
-    #[fail(display = "Sending response faces unexpected eof")]
-    Eof,
-    /// Error indicates that sending response packet faces redirecting failure.
-    #[fail(display = "Sending response redirecting error")]
-    Redirect,
-}
-
-impl From<mpsc::SendError<(Packet, SocketAddr)>> for OnionResponseError {
-    fn from(error: mpsc::SendError<(Packet, SocketAddr)>) -> OnionResponseError {
-        OnionResponseError {
-            ctx: error.context(OnionResponseErrorKind::SendTo)
-        }
-    }
-}
-
-impl From<OnionResponseErrorKind> for OnionResponseError {
-    fn from(kind: OnionResponseErrorKind) -> OnionResponseError {
-        OnionResponseError::from(Context::new(kind))
-    }
-}
-
-impl From<Context<OnionResponseErrorKind>> for OnionResponseError {
-    fn from(ctx: Context<OnionResponseErrorKind>) -> OnionResponseError {
-        OnionResponseError { ctx }
-    }
-}
-
-impl From<mpsc::SendError<(InnerOnionResponse, SocketAddr)>> for OnionResponseError {
-    fn from(error: mpsc::SendError<(InnerOnionResponse, SocketAddr)>) -> OnionResponseError {
-        OnionResponseError {
-            ctx: error.context(OnionResponseErrorKind::Eof)
-        }
+error_kind! {
+    #[doc = "Error that can happen when calling `handle_onion_response_*` of packet."]
+    #[derive(Debug)]
+    OnionResponseError,
+    #[doc = "The specific kind of error that can occur."]
+    #[derive(Clone, Debug, Eq, PartialEq, Fail)]
+    OnionResponseErrorKind {
+        #[doc = "Error indicates that next_onion_return is none."]
+        #[fail(display = "Next onion return is none")]
+        Next,
+        #[doc = "Error indicates that sending response packet faces redirecting failure."]
+        #[fail(display = "Sending response redirecting error")]
+        Redirect,
     }
 }
 
@@ -260,29 +201,6 @@ impl From<TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> for PingError {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn onion_response_error() {
-        let error = OnionResponseError::from(OnionResponseErrorKind::Next);
-        assert!(error.cause().is_none());
-        assert!(error.backtrace().is_some());
-        assert_eq!(format!("{}", error), "Next onion return is none".to_owned());
-    }
-
-    #[test]
-    fn onion_response_error_kind() {
-        let next = OnionResponseErrorKind::Next;
-        assert_eq!(format!("{}", next), "Next onion return is none".to_owned());
-
-        let send_to = OnionResponseErrorKind::SendTo;
-        assert_eq!(format!("{}", send_to), "Sending response error".to_owned());
-
-        let eof = OnionResponseErrorKind::Eof;
-        assert_eq!(format!("{}", eof), "Sending response faces unexpected eof".to_owned());
-
-        let redirect = OnionResponseErrorKind::Redirect;
-        assert_eq!(format!("{}", redirect), "Sending response redirecting error".to_owned());
-    }
 
     #[test]
     fn run_error() {
