@@ -187,61 +187,25 @@ error_kind! {
     }
 }
 
-/// Error that can happen during a lossless packet sending.
-#[derive(Debug)]
-pub struct SendLosslessPacketError {
-    ctx: Context<SendLosslessPacketErrorKind>,
-}
-
-impl SendLosslessPacketError {
-    /// Return the kind of this error.
-    pub fn kind(&self) -> &SendLosslessPacketErrorKind {
-        self.ctx.get_context()
-    }
-}
-
-impl Fail for SendLosslessPacketError {
-    fn cause(&self) -> Option<&Fail> {
-        self.ctx.cause()
-    }
-
-    fn backtrace(&self) -> Option<&Backtrace> {
-        self.ctx.backtrace()
-    }
-}
-
-impl fmt::Display for SendLosslessPacketError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.ctx.fmt(f)
-    }
-}
-
-/// The specific kind of error that can occur.
-#[derive(Debug, Eq, PartialEq, Fail)]
-pub enum SendLosslessPacketErrorKind {
-    /// Packet ID is outside lossless packets range.
-    #[fail(display = "Packet ID is outside lossless packets range")]
-    InvalidPacketId,
-    /// Connection to a friend is not established.
-    #[fail(display = "Connection to a friend is not established")]
-    NoConnection,
-    /// Packets send array is full.
-    #[fail(display = "Packets send array is full")]
-    FullSendArray,
-    /// Failed to send packet.
-    #[fail(display = "Failed to send packet")]
-    SendTo,
-}
-
-impl From<SendLosslessPacketErrorKind> for SendLosslessPacketError {
-    fn from(kind: SendLosslessPacketErrorKind) -> SendLosslessPacketError {
-        SendLosslessPacketError::from(Context::new(kind))
-    }
-}
-
-impl From<Context<SendLosslessPacketErrorKind>> for SendLosslessPacketError {
-    fn from(ctx: Context<SendLosslessPacketErrorKind>) -> SendLosslessPacketError {
-        SendLosslessPacketError { ctx }
+error_kind! {
+    #[doc = "Error that can happen during a lossless packet sending."]
+    #[derive(Debug)]
+    SendLosslessPacketError,
+    #[doc = "The specific kind of error that can occur."]
+    #[derive(Debug, Eq, PartialEq, Fail)]
+    SendLosslessPacketErrorKind {
+        #[doc = "Packet ID is outside lossless packets range."]
+        #[fail(display = "Packet ID is outside lossless packets range")]
+        InvalidPacketId,
+        #[doc = "Connection to a friend is not established."]
+        #[fail(display = "Connection to a friend is not established")]
+        NoConnection,
+        #[doc = "Packets send array is full."]
+        #[fail(display = "Packets send array is full")]
+        FullSendArray,
+        #[doc = "Failed to send packet."]
+        #[fail(display = "Failed to send packet")]
+        SendTo,
     }
 }
 
@@ -300,40 +264,6 @@ impl From<Context<KillConnectionErrorKind>> for KillConnectionError {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn send_lossless_packet_error() {
-        let error = SendLosslessPacketError::from(SendLosslessPacketErrorKind::InvalidPacketId);
-        assert!(error.cause().is_none());
-    }
-
-    #[test]
-    fn send_lossless_packet_invalid_packet_id() {
-        let error = SendLosslessPacketError::from(SendLosslessPacketErrorKind::InvalidPacketId);
-        assert_eq!(*error.kind(), SendLosslessPacketErrorKind::InvalidPacketId);
-        assert_eq!(format!("{}", error), "Packet ID is outside lossless packets range".to_owned());
-    }
-
-    #[test]
-    fn send_lossless_packet_no_connection() {
-        let error = SendLosslessPacketError::from(SendLosslessPacketErrorKind::NoConnection);
-        assert_eq!(*error.kind(), SendLosslessPacketErrorKind::NoConnection);
-        assert_eq!(format!("{}", error), "Connection to a friend is not established".to_owned());
-    }
-
-    #[test]
-    fn send_lossless_packet_full_send_array() {
-        let error = SendLosslessPacketError::from(SendLosslessPacketErrorKind::FullSendArray);
-        assert_eq!(*error.kind(), SendLosslessPacketErrorKind::FullSendArray);
-        assert_eq!(format!("{}", error), "Packets send array is full".to_owned());
-    }
-
-    #[test]
-    fn send_lossless_packet_send_to() {
-        let error = SendLosslessPacketError::from(SendLosslessPacketErrorKind::SendTo);
-        assert_eq!(*error.kind(), SendLosslessPacketErrorKind::SendTo);
-        assert_eq!(format!("{}", error), "Failed to send packet".to_owned());
-    }
 
     #[test]
     fn kill_connection_error() {
