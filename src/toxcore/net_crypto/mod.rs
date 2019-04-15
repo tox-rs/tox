@@ -899,9 +899,9 @@ impl NetCrypto {
         let wakeups = Interval::new(Instant::now(), PACKET_COUNTER_AVERAGE_INTERVAL);
 
         wakeups
-            .map_err(|e| RunError::from(e))
+            .map_err(|e| e.context(RunErrorKind::Wakeup).into())
             .for_each(move |_instant| self.main_loop()
-                .map_err(|e| RunError::from(e))
+                .map_err(|e| e.context(RunErrorKind::SendData).into())
             )
     }
 }

@@ -6,7 +6,6 @@ use std::fmt;
 use std::net::SocketAddr;
 
 use failure::{Backtrace, Context, Fail};
-use tokio::timer::Error as TimerError;
 
 error_kind! {
     #[doc = "Error that can happen while processing packets array"]
@@ -172,71 +171,19 @@ error_kind! {
     }
 }
 
-/// Error that can happen when calling `run`.
-#[derive(Debug)]
-pub struct RunError {
-    ctx: Context<RunErrorKind>,
-}
-
-impl RunError {
-    /// Return the kind of this error.
-    pub fn kind(&self) -> &RunErrorKind {
-        self.ctx.get_context()
-    }
-}
-
-impl Fail for RunError {
-    fn cause(&self) -> Option<&Fail> {
-        self.ctx.cause()
-    }
-
-    fn backtrace(&self) -> Option<&Backtrace> {
-        self.ctx.backtrace()
-    }
-}
-
-impl fmt::Display for RunError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.ctx.fmt(f)
-    }
-}
-
-/// The specific kind of error that can occur.
-#[derive(Clone, Debug, Eq, PartialEq, Fail)]
-pub enum RunErrorKind {
-    /// Sending pings error
-    #[fail(display = "Sending crypto data packet error")]
-    SendData,
-    /// NetCrypto periodical wakeup timer error
-    #[fail(display = "Netcrypto periodical wakeup timer error")]
-    Wakeup,
-}
-
-impl From<RunErrorKind> for RunError {
-    fn from(kind: RunErrorKind) -> RunError {
-        RunError::from(Context::new(kind))
-    }
-}
-
-impl From<Context<RunErrorKind>> for RunError {
-    fn from(ctx: Context<RunErrorKind>) -> RunError {
-        RunError { ctx }
-    }
-}
-
-impl From<TimerError> for RunError {
-    fn from(error: TimerError) -> RunError {
-        RunError {
-            ctx: error.context(RunErrorKind::Wakeup)
-        }
-    }
-}
-
-impl From<SendDataError> for RunError {
-    fn from(error: SendDataError) -> RunError {
-        RunError {
-            ctx: error.context(RunErrorKind::SendData)
-        }
+error_kind! {
+    #[doc = "Error that can happen when calling `run`."]
+    #[derive(Debug)]
+    RunError,
+    #[doc = "The specific kind of error that can occur."]
+    #[derive(Clone, Debug, Eq, PartialEq, Fail)]
+    RunErrorKind {
+        #[doc = "Sending pings error."]
+        #[fail(display = "Sending crypto data packet error")]
+        SendData,
+        #[doc = "NetCrypto periodical wakeup timer error."]
+        #[fail(display = "Netcrypto periodical wakeup timer error")]
+        Wakeup,
     }
 }
 
@@ -353,27 +300,6 @@ impl From<Context<KillConnectionErrorKind>> for KillConnectionError {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn run_error() {
-        let error = RunError::from(RunErrorKind::Wakeup);
-        assert!(error.cause().is_none());
-    }
-
-    #[test]
-    fn run_send_data() {
-        let error = SendDataError::from(SendDataErrorKind::NoConnection);
-        let error = RunError::from(error);
-        assert_eq!(*error.kind(), RunErrorKind::SendData);
-        assert_eq!(format!("{}", error), "Sending crypto data packet error".to_owned());
-    }
-
-    #[test]
-    fn run_wakeup() {
-        let error = RunError::from(RunErrorKind::Wakeup);
-        assert_eq!(*error.kind(), RunErrorKind::Wakeup);
-        assert_eq!(format!("{}", error), "Netcrypto periodical wakeup timer error".to_owned());
-    }
 
     #[test]
     fn send_lossless_packet_error() {
