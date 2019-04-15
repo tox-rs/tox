@@ -2,10 +2,9 @@
 Module for errors of NetCrypto.
 */
 
-use std::fmt;
 use std::net::SocketAddr;
 
-use failure::{Backtrace, Context, Fail};
+use failure::Fail;
 
 error_kind! {
     #[doc = "Error that can happen while processing packets array"]
@@ -209,79 +208,18 @@ error_kind! {
     }
 }
 
-/// Error that can happen during a lossless packet sending.
-#[derive(Debug)]
-pub struct KillConnectionError {
-    ctx: Context<KillConnectionErrorKind>,
-}
-
-impl KillConnectionError {
-    /// Return the kind of this error.
-    pub fn kind(&self) -> &KillConnectionErrorKind {
-        self.ctx.get_context()
-    }
-}
-
-impl Fail for KillConnectionError {
-    fn cause(&self) -> Option<&Fail> {
-        self.ctx.cause()
-    }
-
-    fn backtrace(&self) -> Option<&Backtrace> {
-        self.ctx.backtrace()
-    }
-}
-
-impl fmt::Display for KillConnectionError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.ctx.fmt(f)
-    }
-}
-
-/// The specific kind of error that can occur.
-#[derive(Debug, Eq, PartialEq, Fail)]
-pub enum KillConnectionErrorKind {
-    /// Connection to a friend is not established.
-    #[fail(display = "Connection to a friend is not established")]
-    NoConnection,
-    /// Failed to send kill packet.
-    #[fail(display = "Failed to send kill packet")]
-    SendTo,
-}
-
-impl From<KillConnectionErrorKind> for KillConnectionError {
-    fn from(kind: KillConnectionErrorKind) -> KillConnectionError {
-        KillConnectionError::from(Context::new(kind))
-    }
-}
-
-impl From<Context<KillConnectionErrorKind>> for KillConnectionError {
-    fn from(ctx: Context<KillConnectionErrorKind>) -> KillConnectionError {
-        KillConnectionError { ctx }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn kill_connection_error() {
-        let error = KillConnectionError::from(KillConnectionErrorKind::NoConnection);
-        assert!(error.cause().is_none());
-    }
-
-    #[test]
-    fn kill_connection_no_connection() {
-        let error = KillConnectionError::from(KillConnectionErrorKind::NoConnection);
-        assert_eq!(*error.kind(), KillConnectionErrorKind::NoConnection);
-        assert_eq!(format!("{}", error), "Connection to a friend is not established".to_owned());
-    }
-
-    #[test]
-    fn kill_connection_send_to() {
-        let error = KillConnectionError::from(KillConnectionErrorKind::SendTo);
-        assert_eq!(*error.kind(), KillConnectionErrorKind::SendTo);
-        assert_eq!(format!("{}", error), "Failed to send kill packet".to_owned());
+error_kind! {
+    #[doc = "Error that can happen during a lossless packet sending."]
+    #[derive(Debug)]
+    KillConnectionError,
+    #[doc = "The specific kind of error that can occur."]
+    #[derive(Debug, Eq, PartialEq, Fail)]
+    KillConnectionErrorKind {
+        #[doc = "Connection to a friend is not established."]
+        #[fail(display = "Connection to a friend is not established")]
+        NoConnection,
+        #[doc = "Failed to send kill packet."]
+        #[fail(display = "Failed to send kill packet")]
+        SendTo,
     }
 }
