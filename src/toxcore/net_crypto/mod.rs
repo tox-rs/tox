@@ -803,7 +803,7 @@ impl NetCrypto {
             _ => return Either::A(future::err(SendDataError::from(SendDataErrorKind::NoConnection))),
         };
         Either::B(self.send_packet(Packet::CryptoData(packet), connection)
-            .map_err(|e| SendDataError::from(e)))
+            .map_err(|e| e.context(SendDataErrorKind::SendTo).into()))
     }
 
     /// Send request packet with indices of not received packets.
@@ -858,7 +858,7 @@ impl NetCrypto {
             }
 
             let send_future = self.send_status_packet(&mut connection)
-                .map_err(|e| SendDataError::from(e));
+                .map_err(|e| e.context(SendDataErrorKind::SendTo).into());
             futures.push(Box::new(send_future));
 
             if connection.is_not_confirmed() || connection.is_established() {

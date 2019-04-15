@@ -5,12 +5,8 @@ Module for errors of NetCrypto.
 use std::fmt;
 use std::net::SocketAddr;
 
-use futures::sync::mpsc;
 use failure::{Backtrace, Context, Fail};
 use tokio::timer::Error as TimerError;
-use tokio::timer::timeout::Error as TimeoutError;
-
-use crate::toxcore::dht::packet::*;
 
 error_kind! {
     #[doc = "Error that can happen while processing packets array"]
@@ -160,63 +156,19 @@ impl HandlePacketError {
     }
 }
 
-/// Error that can happen while processing packets array
-#[derive(Debug)]
-pub struct SendDataError {
-    ctx: Context<SendDataErrorKind>,
-}
-
-impl SendDataError {
-    /// Return the kind of this error.
-    pub fn kind(&self) -> &SendDataErrorKind {
-        self.ctx.get_context()
-    }
-}
-
-impl Fail for SendDataError {
-    fn cause(&self) -> Option<&Fail> {
-        self.ctx.cause()
-    }
-
-    fn backtrace(&self) -> Option<&Backtrace> {
-        self.ctx.backtrace()
-    }
-}
-
-impl fmt::Display for SendDataError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.ctx.fmt(f)
-    }
-}
-
-/// The specific kind of error that can occur.
-#[derive(Debug, Eq, PartialEq, Fail)]
-pub enum SendDataErrorKind {
-    /// Connection is not established.
-    #[fail(display = "Connection is not established")]
-    NoConnection,
-    /// Error indicates that sending response packet error.
-    #[fail(display = "Sending response error")]
-    SendTo,
-}
-
-impl From<SendDataErrorKind> for SendDataError {
-    fn from(kind: SendDataErrorKind) -> SendDataError {
-        SendDataError::from(Context::new(kind))
-    }
-}
-
-impl From<Context<SendDataErrorKind>> for SendDataError {
-    fn from(ctx: Context<SendDataErrorKind>) -> SendDataError {
-        SendDataError { ctx }
-    }
-}
-
-impl From<TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> for SendDataError {
-    fn from(error: TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>) -> SendDataError {
-        SendDataError {
-            ctx: error.context(SendDataErrorKind::SendTo)
-        }
+error_kind! {
+    #[doc = "Error that can happen while processing packets array."]
+    #[derive(Debug)]
+    SendDataError,
+    #[doc = "The specific kind of error that can occur."]
+    #[derive(Debug, Eq, PartialEq, Fail)]
+    SendDataErrorKind {
+        #[doc = "Connection is not established."]
+        #[fail(display = "Connection is not established")]
+        NoConnection,
+        #[doc = "Error indicates that sending response packet error."]
+        #[fail(display = "Sending response error")]
+        SendTo,
     }
 }
 
@@ -401,42 +353,6 @@ impl From<Context<KillConnectionErrorKind>> for KillConnectionError {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use crate::toxcore::io_tokio::*;
-
-    use std::time::Duration;
-    use futures::future::Future;
-
-    #[test]
-    fn send_data_error() {
-        let error = SendDataError::from(SendDataErrorKind::NoConnection);
-        assert!(error.cause().is_none());
-    }
-
-    #[test]
-    fn send_data_no_connection() {
-        let error = SendDataError::from(SendDataErrorKind::NoConnection);
-        assert_eq!(*error.kind(), SendDataErrorKind::NoConnection);
-        assert_eq!(format!("{}", error), "Connection is not established".to_owned());
-    }
-
-    #[test]
-    fn send_data_send_to() {
-        let (tx, rx) = mpsc::channel(32);
-
-        let packet = Packet::BootstrapInfo(BootstrapInfo {
-            version: 1717,
-            motd: vec![1, 2, 3, 4],
-        });
-        let sock: SocketAddr = "127.0.0.1:33445".parse().unwrap();
-
-        drop(rx);
-        let res = send_to_bounded(&tx, (packet, sock), Duration::from_secs(1)).wait();
-        assert!(res.is_err());
-        let error = SendDataError::from(res.err().unwrap());
-        assert_eq!(*error.kind(), SendDataErrorKind::SendTo);
-        assert_eq!(format!("{}", error), "Sending response error".to_owned());
-    }
 
     #[test]
     fn run_error() {
