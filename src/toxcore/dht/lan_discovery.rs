@@ -4,86 +4,31 @@ use std::iter;
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
 
-use std::fmt;
-
-use failure::{Backtrace, Context, Fail};
+use failure::Fail;
 use futures::{future, stream, Future, Stream};
 use futures::sync::mpsc;
 use get_if_addrs;
 use get_if_addrs::IfAddr;
 use tokio::timer::Interval;
-use tokio::timer::Error as TimerError;
 use tokio::timer::timeout::Error as TimeoutError;
 
 use crate::toxcore::crypto_core::*;
 use crate::toxcore::io_tokio::*;
 use crate::toxcore::dht::packet::*;
 
-/// Error that can happen during lan discovery
-#[derive(Debug)]
-pub struct LanDiscoveryError {
-    ctx: Context<LanDiscoveryErrorKind>,
-}
-
-impl LanDiscoveryError {
-    /// Return the kind of this error.
-    pub fn kind(&self) -> &LanDiscoveryErrorKind {
-        self.ctx.get_context()
-    }
-}
-
-impl Fail for LanDiscoveryError {
-    fn cause(&self) -> Option<&Fail> {
-        self.ctx.cause()
-    }
-
-    fn backtrace(&self) -> Option<&Backtrace> {
-        self.ctx.backtrace()
-    }
-}
-
-impl fmt::Display for LanDiscoveryError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.ctx.fmt(f)
-    }
-}
-
-/// The specific kind of error that can occur.
-#[derive(Debug, Eq, PartialEq, Fail)]
-pub enum LanDiscoveryErrorKind {
-    /// Ping wakeup timer error
-    #[fail(display = "Lan discovery wakeup timer error")]
-    Wakeup,
-    /// Send packet(s) error
-    #[fail(display = "Send packet(s) error")]
-    SendTo,
-}
-
-impl From<LanDiscoveryErrorKind> for LanDiscoveryError {
-    fn from(kind: LanDiscoveryErrorKind) -> LanDiscoveryError {
-        LanDiscoveryError::from(Context::new(kind))
-    }
-}
-
-impl From<Context<LanDiscoveryErrorKind>> for LanDiscoveryError {
-    fn from(ctx: Context<LanDiscoveryErrorKind>) -> LanDiscoveryError {
-        LanDiscoveryError { ctx }
-    }
-}
-
-impl From<TimerError> for LanDiscoveryError {
-    fn from(error: TimerError) -> LanDiscoveryError {
-        LanDiscoveryError {
-            ctx: error.context(LanDiscoveryErrorKind::Wakeup)
-        }
-    }
-}
-
-impl From<mpsc::SendError<(Packet, SocketAddr)>> for LanDiscoveryError {
-    fn from(error: mpsc::SendError<(Packet, SocketAddr)>) -> LanDiscoveryError {
-        LanDiscoveryError {
-            ctx: error.context(LanDiscoveryErrorKind::SendTo)
-        }
+error_kind! {
+    #[doc = "Error that can happen during lan discovery."]
+    #[derive(Debug)]
+    LanDiscoveryError,
+    #[doc = "The specific kind of error that can occur."]
+    #[derive(Debug, Eq, PartialEq, Fail)]
+    LanDiscoveryErrorKind {
+        #[doc = "Ping wakeup timer error"]
+        #[fail(display = "Lan discovery wakeup timer error.")]
+        Wakeup,
+        #[doc = "Send packet(s) error."]
+        #[fail(display = "Send packet(s) error")]
+        SendTo,
     }
 }
 
@@ -204,14 +149,14 @@ impl LanDiscoverySender {
         let interval = Duration::from_secs(LAN_DISCOVERY_INTERVAL);
         let wakeups = Interval::new(Instant::now(), interval);
         wakeups
-            .map_err(|e| LanDiscoveryError::from(e))
+            .map_err(|e| e.context(LanDiscoveryErrorKind::Wakeup).into())
             .for_each(move |_instant| {
                 trace!("LAN discovery sender wake up");
                 self.send().then(|r| {
                     if let Err(e) = r {
                         warn!("Failed to send LAN discovery packets: {}", e);
                         if let Some(e) = e.into_inner() {
-                            return future::err(LanDiscoveryError::from(e))
+                            return future::err(e.context(LanDiscoveryErrorKind::SendTo).into())
                         }
                     }
                     future::ok(())
