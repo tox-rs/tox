@@ -28,6 +28,29 @@ RUST_LOG=tox=trace cargo run --release
 
 Also it's possible to use syslog via `--log-type` parameter.
 
+### Running tox-node on NixOS
+
+If you are using NixOS (unstable channel), you can install and run tox-node by adding `services.tox-node.enable = true;` to your `configuration.nix`.
+
+Configuration options are also available. An example of configuration:
+
+```nix
+{
+  services.tox-node = {
+    enable = true;
+
+    logType = "Syslog";
+    keysFile = "/var/lib/tox-node/keys";
+    udpAddress = "0.0.0.0:33445";
+    tcpAddresses = [ "0.0.0.0:33445" ];
+    tcpConnectionLimit = 8192;
+    lanDiscovery = true;
+    threads = 1;
+    motd = "Hi from tox-rs! I'm up {{uptime}}. TCP: incoming {{tcp_packets_in}}, outgoing {{tcp_packets_out}}, UDP: incoming {{udp_packets_in}}, outgoing {{udp_packets_out}}";
+  };
+}
+```
+
 ## MOTD
 
 MOTD is an abbreviation for The Message of The Day. Tox bootstrap nodes have a
