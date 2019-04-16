@@ -10,6 +10,7 @@ mod action_v2;
 mod private_message;
 mod peer_exit;
 mod remove_peer;
+mod remove_ban;
 
 pub use self::status::*;
 pub use self::nickname_v2::*;
@@ -18,6 +19,7 @@ pub use self::action_v2::*;
 pub use self::private_message::*;
 pub use self::peer_exit::*;
 pub use self::remove_peer::*;
+pub use self::remove_ban::*;
 
 /// Maximum size in bytes of action string of message packet
 pub const MAX_MESSAGE_V2_DATA_SIZE: usize = 1289;
@@ -41,6 +43,8 @@ pub enum Packet {
     PeerExit(PeerExit),
     /// [`RemovePeer`](./struct.RemovePeer.html) structure.
     RemovePeer(RemovePeer),
+    /// [`RemoveBan`](./struct.RemoveBan.html) structure.
+    RemoveBan(RemoveBan),
 }
 
 impl ToBytes for Packet {
@@ -53,6 +57,7 @@ impl ToBytes for Packet {
             Packet::PrivateMessage(ref p) => p.to_bytes(buf),
             Packet::PeerExit(ref p) => p.to_bytes(buf),
             Packet::RemovePeer(ref p) => p.to_bytes(buf),
+            Packet::RemoveBan(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -65,7 +70,8 @@ impl FromBytes for Packet {
         map!(ActionV2::from_bytes, Packet::ActionV2) |
         map!(PrivateMessage::from_bytes, Packet::PrivateMessage) |
         map!(PeerExit::from_bytes, Packet::PeerExit) |
-        map!(RemovePeer::from_bytes, Packet::RemovePeer)
+        map!(RemovePeer::from_bytes, Packet::RemovePeer) |
+        map!(RemoveBan::from_bytes, Packet::RemoveBan)
     ));
 }
 
@@ -126,5 +132,18 @@ mod tests {
                 )
             ))
         ]))
+    );
+
+    encode_decode_test!(
+        packet_remove_ban_encode_decode,
+        Packet::RemoveBan(RemoveBan::new(1, gen_keypair().0, gen_nonce(), 2, 3, 4, 5,
+            vec![
+                Sanction(SanctionType::BanIpPort(
+                    BanIpPort::new(
+                        gen_keypair().0, 1, 2, IpPort::from_udp_saddr("127.0.0.1:33445".parse().unwrap())
+                    )
+                ))]
+            )
+        )
     );
 }

@@ -353,7 +353,7 @@ impl ToBytes for RemovePeer {
             gen_be_u64!(self.timestamp) >>
             gen_be_u8!(self.event as u8) >>
             gen_slice!(self.target_pk.as_ref()) >>
-            gen_many_ref!(self.sanctions.clone(), |buf, sanction| Sanction::to_bytes(sanction, buf))
+            gen_many_ref!(&self.sanctions, |buf, sanction| Sanction::to_bytes(sanction, buf))
         )
     }
 }
