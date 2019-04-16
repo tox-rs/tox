@@ -23,6 +23,8 @@ extern crate cookie_factory;
 #[warn(missing_docs)]
 pub mod toxcore {
     #[macro_use]
+    mod error;
+    #[macro_use]
     pub mod binary_io;
     pub mod io_tokio;
     pub mod ip_port;

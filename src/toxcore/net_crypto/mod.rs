@@ -309,7 +309,7 @@ impl NetCrypto {
     /// Create `CookieResponse` packet with `Cookie` requested by `CookieRequest` packet
     fn handle_cookie_request(&self, packet: &CookieRequest) -> Result<CookieResponse, HandlePacketError> {
         let payload = packet.get_payload(&self.precomputed_keys.get(packet.pk))
-            .map_err(|e| HandlePacketError::from(e))?;
+            .map_err(|e| e.context(HandlePacketErrorKind::GetPayload))?;
 
         let cookie = Cookie::new(payload.pk, packet.pk);
         let encrypted_cookie = EncryptedCookie::new(&self.symmetric_key, &cookie);
@@ -328,7 +328,7 @@ impl NetCrypto {
     pub fn handle_udp_cookie_request(&self, packet: &CookieRequest, addr: SocketAddr) -> impl Future<Item = (), Error = HandlePacketError> + Send {
         match self.handle_cookie_request(packet) {
             Ok(response) => Either::A(self.send_to_udp(addr, Packet::CookieResponse(response))
-                .map_err(|e| HandlePacketError::from(e))),
+                .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())),
             Err(e) => Either::B(future::err(e))
         }
     }
@@ -344,7 +344,7 @@ impl NetCrypto {
 
         let payload = match packet.get_payload(&self.precomputed_keys.get(connection.peer_dht_pk)) {
             Ok(payload) => payload,
-            Err(e) => return Either::A(future::err(HandlePacketError::from(e))),
+            Err(e) => return Either::A(future::err(e.context(HandlePacketErrorKind::GetPayload).into())),
         };
 
         if payload.id != cookie_request_id {
@@ -368,7 +368,7 @@ impl NetCrypto {
         };
 
         Either::B(self.send_status_packet(connection)
-                      .map_err(|e| HandlePacketError::from(e))
+                      .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
         )
     }
 
@@ -393,7 +393,7 @@ impl NetCrypto {
         -> Result<(Cookie, CryptoHandshakePayload, PrecomputedKey), HandlePacketError> {
         let cookie = match packet.cookie.get_payload(&self.symmetric_key) {
             Ok(cookie) => cookie,
-            Err(e) => return Err(e.into()),
+            Err(e) => return Err(e.context(HandlePacketErrorKind::GetPayload).into()),
         };
 
         if cookie.is_timed_out() {
@@ -404,7 +404,7 @@ impl NetCrypto {
 
         let payload = match packet.get_payload(&real_precomputed_key) {
             Ok(payload) => payload,
-            Err(e) => return Err(HandlePacketError::from(e)),
+            Err(e) => return Err(e.context(HandlePacketErrorKind::GetPayload).into()),
         };
 
         if packet.cookie.hash() != payload.cookie_hash {
@@ -433,8 +433,7 @@ impl NetCrypto {
         if cookie.dht_pk != connection.peer_dht_pk {
             return Box::new(
                 send_to(&self.dht_pk_tx, (connection.peer_real_pk, cookie.dht_pk))
-                    .map_err(|e|
-                        HandlePacketError::from(e))
+                    .map_err(|e| e.context(HandlePacketErrorKind::SendToDhtpk).into())
                     .and_then(|()| future::err(HandlePacketError::from(HandlePacketErrorKind::InvalidDhtPk)))
             )
         }
@@ -471,7 +470,7 @@ impl NetCrypto {
         };
 
         Box::new(self.send_status_packet(connection)
-            .map_err(|e| HandlePacketError::from(e))
+            .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
         )
     }
 
@@ -505,7 +504,7 @@ impl NetCrypto {
         self.connections.write().insert(cookie.real_pk, connection);
 
         Either::B(send_to(&self.dht_pk_tx, (cookie.real_pk, cookie.dht_pk))
-            .map_err(|e| HandlePacketError::from(e)))
+            .map_err(|e| e.context(HandlePacketErrorKind::SendToDhtpk).into()))
     }
 
     /// Handle `CryptoHandshake` packet received from UDP socket
@@ -658,7 +657,7 @@ impl NetCrypto {
 
         let payload = match packet.get_payload(&session_precomputed_key, &packet_nonce) {
             Ok(payload) => payload,
-            Err(e) => return Box::new(future::err(HandlePacketError::from(e)))
+            Err(e) => return Box::new(future::err(e.context(HandlePacketErrorKind::GetPayload).into()))
         };
 
         // Find the time when the last acknowledged packet was sent
@@ -666,7 +665,7 @@ impl NetCrypto {
 
         // Remove all acknowledged packets and set new start index to the send buffer
         if let Err(e) = connection.send_array.set_buffer_start(payload.buffer_start) {
-            return Box::new(future::err(HandlePacketError::from(e)))
+            return Box::new(future::err(e.context(HandlePacketErrorKind::PacketsArrayError).into()))
         }
 
         // And get the ID of the packet
@@ -706,17 +705,18 @@ impl NetCrypto {
             Box::new(future::ok(())) as Box<dyn Future<Item = _, Error = _> + Send>
         } else if packet_id > PACKET_ID_CRYPTO_RANGE_END && packet_id < PACKET_ID_LOSSY_RANGE_START {
             if let Err(e) = connection.recv_array.insert(payload.packet_number, RecvPacket::new(payload.data)) {
-                return Box::new(future::err(HandlePacketError::from(e)))
+                return Box::new(future::err(e.context(HandlePacketErrorKind::PacketsArrayError).into()))
             }
             connection.packets_received += 1;
             Box::new(self.process_ready_lossless_packets(&mut connection.recv_array, connection.peer_real_pk)
-                .map_err(|e| HandlePacketError::from(e)))
+                .map_err(|e| e.context(HandlePacketErrorKind::SendToLossless).into()))
         } else if packet_id >= PACKET_ID_LOSSY_RANGE_START && packet_id <= PACKET_ID_LOSSY_RANGE_END {
             // Update end index of received buffer ignoring the error - we still
             // want to handle this packet even if connection is too slow
             connection.recv_array.set_buffer_end(payload.packet_number).ok();
-            Box::new(send_to(&self.lossy_tx, (connection.peer_real_pk, payload.data)).map_err(|e| HandlePacketError::from(e)))
-                as Box<dyn Future<Item = _, Error = _> + Send>
+            Box::new(send_to(&self.lossy_tx, (connection.peer_real_pk, payload.data))
+                .map_err(|e| e.context(HandlePacketErrorKind::SendToLossy).into()))
+                    as Box<dyn Future<Item = _, Error = _> + Send>
         } else {
             return Box::new(future::err(HandlePacketError::packet_id(packet_id)))
         };
@@ -803,7 +803,7 @@ impl NetCrypto {
             _ => return Either::A(future::err(SendDataError::from(SendDataErrorKind::NoConnection))),
         };
         Either::B(self.send_packet(Packet::CryptoData(packet), connection)
-            .map_err(|e| SendDataError::from(e)))
+            .map_err(|e| e.context(SendDataErrorKind::SendTo).into()))
     }
 
     /// Send request packet with indices of not received packets.
@@ -858,7 +858,7 @@ impl NetCrypto {
             }
 
             let send_future = self.send_status_packet(&mut connection)
-                .map_err(|e| SendDataError::from(e));
+                .map_err(|e| e.context(SendDataErrorKind::SendTo).into());
             futures.push(Box::new(send_future));
 
             if connection.is_not_confirmed() || connection.is_established() {
@@ -899,9 +899,9 @@ impl NetCrypto {
         let wakeups = Interval::new(Instant::now(), PACKET_COUNTER_AVERAGE_INTERVAL);
 
         wakeups
-            .map_err(|e| RunError::from(e))
+            .map_err(|e| e.context(RunErrorKind::Wakeup).into())
             .for_each(move |_instant| self.main_loop()
-                .map_err(|e| RunError::from(e))
+                .map_err(|e| e.context(RunErrorKind::SendData).into())
             )
     }
 }
