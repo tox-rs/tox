@@ -13,6 +13,7 @@ mod remove_peer;
 mod remove_ban;
 mod set_moderator;
 mod set_observer;
+mod announce_peer;
 
 pub use self::status::*;
 pub use self::nickname_v2::*;
@@ -24,6 +25,7 @@ pub use self::remove_peer::*;
 pub use self::remove_ban::*;
 pub use self::set_moderator::*;
 pub use self::set_observer::*;
+pub use self::announce_peer::*;
 
 /// Maximum size in bytes of action string of message packet
 pub const MAX_MESSAGE_V2_DATA_SIZE: usize = 1289;
@@ -53,6 +55,8 @@ pub enum Packet {
     SetModerator(SetModerator),
     /// [`SetObserver`](./struct.SetObserver.html) structure.
     SetObserver(SetObserver),
+    /// [`AnnouncePeer`](./struct.AnnouncePeer.html) structure.
+    AnnouncePeer(AnnouncePeer),
 }
 
 impl ToBytes for Packet {
@@ -68,6 +72,7 @@ impl ToBytes for Packet {
             Packet::RemoveBan(ref p) => p.to_bytes(buf),
             Packet::SetModerator(ref p) => p.to_bytes(buf),
             Packet::SetObserver(ref p) => p.to_bytes(buf),
+            Packet::AnnouncePeer(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -83,7 +88,8 @@ impl FromBytes for Packet {
         map!(RemovePeer::from_bytes, Packet::RemovePeer) |
         map!(RemoveBan::from_bytes, Packet::RemoveBan) |
         map!(SetModerator::from_bytes, Packet::SetModerator) |
-        map!(SetObserver::from_bytes, Packet::SetObserver)
+        map!(SetObserver::from_bytes, Packet::SetObserver) |
+        map!(AnnouncePeer::from_bytes, Packet::AnnouncePeer)
     ));
 }
 
@@ -92,6 +98,7 @@ mod tests {
     use super::*;
     use crate::toxcore::crypto_core::*;
     use crate::toxcore::ip_port::*;
+    use crate::toxcore::packed_node::TcpUdpPackedNode;
 
     encode_decode_test!(
         packet_status_encode_decode,
@@ -175,5 +182,25 @@ mod tests {
                 )
             )])
         )
+    );
+
+    encode_decode_test!(
+        packet_announce_peer_encode_decode,
+        Packet::AnnouncePeer(AnnouncePeer::new(1, gen_keypair().0, gen_nonce(), 2, 3, gen_keypair().0, None,
+            vec![
+                TcpUdpPackedNode {
+                    ip_port: IpPort::from_tcp_saddr("127.0.0.1:33447".parse().unwrap()),
+                    pk: gen_keypair().0,
+                },
+                TcpUdpPackedNode {
+                    ip_port: IpPort::from_tcp_saddr("127.0.0.1:33448".parse().unwrap()),
+                    pk: gen_keypair().0,
+                },
+                TcpUdpPackedNode {
+                    ip_port: IpPort::from_tcp_saddr("127.0.0.1:33449".parse().unwrap()),
+                    pk: gen_keypair().0,
+                },
+            ]
+        ))
     );
 }
