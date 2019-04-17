@@ -11,6 +11,7 @@ mod private_message;
 mod peer_exit;
 mod remove_peer;
 mod remove_ban;
+mod set_moderator;
 
 pub use self::status::*;
 pub use self::nickname_v2::*;
@@ -20,6 +21,7 @@ pub use self::private_message::*;
 pub use self::peer_exit::*;
 pub use self::remove_peer::*;
 pub use self::remove_ban::*;
+pub use self::set_moderator::*;
 
 /// Maximum size in bytes of action string of message packet
 pub const MAX_MESSAGE_V2_DATA_SIZE: usize = 1289;
@@ -45,6 +47,8 @@ pub enum Packet {
     RemovePeer(RemovePeer),
     /// [`RemoveBan`](./struct.RemoveBan.html) structure.
     RemoveBan(RemoveBan),
+    /// [`SetModerator`](./struct.SetModerator.html) structure.
+    SetModerator(SetModerator),
 }
 
 impl ToBytes for Packet {
@@ -58,6 +62,7 @@ impl ToBytes for Packet {
             Packet::PeerExit(ref p) => p.to_bytes(buf),
             Packet::RemovePeer(ref p) => p.to_bytes(buf),
             Packet::RemoveBan(ref p) => p.to_bytes(buf),
+            Packet::SetModerator(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -71,7 +76,8 @@ impl FromBytes for Packet {
         map!(PrivateMessage::from_bytes, Packet::PrivateMessage) |
         map!(PeerExit::from_bytes, Packet::PeerExit) |
         map!(RemovePeer::from_bytes, Packet::RemovePeer) |
-        map!(RemoveBan::from_bytes, Packet::RemoveBan)
+        map!(RemoveBan::from_bytes, Packet::RemoveBan) |
+        map!(SetModerator::from_bytes, Packet::SetModerator)
     ));
 }
 
@@ -145,5 +151,10 @@ mod tests {
                 ))]
             )
         )
+    );
+
+    encode_decode_test!(
+        packet_set_moderator_encode_decode,
+        Packet::SetModerator(SetModerator::new(1, gen_keypair().0, gen_nonce(), 2, 3, 4, SetRole::ToUser(ToUser::new(gen_keypair().0))))
     );
 }
