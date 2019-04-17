@@ -12,6 +12,7 @@ mod peer_exit;
 mod remove_peer;
 mod remove_ban;
 mod set_moderator;
+mod set_observer;
 
 pub use self::status::*;
 pub use self::nickname_v2::*;
@@ -22,6 +23,7 @@ pub use self::peer_exit::*;
 pub use self::remove_peer::*;
 pub use self::remove_ban::*;
 pub use self::set_moderator::*;
+pub use self::set_observer::*;
 
 /// Maximum size in bytes of action string of message packet
 pub const MAX_MESSAGE_V2_DATA_SIZE: usize = 1289;
@@ -49,6 +51,8 @@ pub enum Packet {
     RemoveBan(RemoveBan),
     /// [`SetModerator`](./struct.SetModerator.html) structure.
     SetModerator(SetModerator),
+    /// [`SetObserver`](./struct.SetObserver.html) structure.
+    SetObserver(SetObserver),
 }
 
 impl ToBytes for Packet {
@@ -63,6 +67,7 @@ impl ToBytes for Packet {
             Packet::RemovePeer(ref p) => p.to_bytes(buf),
             Packet::RemoveBan(ref p) => p.to_bytes(buf),
             Packet::SetModerator(ref p) => p.to_bytes(buf),
+            Packet::SetObserver(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -77,7 +82,8 @@ impl FromBytes for Packet {
         map!(PeerExit::from_bytes, Packet::PeerExit) |
         map!(RemovePeer::from_bytes, Packet::RemovePeer) |
         map!(RemoveBan::from_bytes, Packet::RemoveBan) |
-        map!(SetModerator::from_bytes, Packet::SetModerator)
+        map!(SetModerator::from_bytes, Packet::SetModerator) |
+        map!(SetObserver::from_bytes, Packet::SetObserver)
     ));
 }
 
@@ -156,5 +162,18 @@ mod tests {
     encode_decode_test!(
         packet_set_moderator_encode_decode,
         Packet::SetModerator(SetModerator::new(1, gen_keypair().0, gen_nonce(), 2, 3, 4, SetRole::ToUser(ToUser::new(gen_keypair().0))))
+    );
+
+    encode_decode_test!(
+        packet_set_observer_encode_decode,
+        Packet::SetObserver(SetObserver::new(1, gen_keypair().0, gen_nonce(), 2, 3, 4, SetOrUnset::Unset, gen_keypair().0,
+            vec![
+                Sanction(SanctionType::BanIpPort(
+                    BanIpPort::new(
+                        gen_keypair().0, 1, 2, IpPort::from_udp_saddr("127.0.0.1:33445".parse().unwrap())
+                    )
+                )
+            )])
+        )
     );
 }
