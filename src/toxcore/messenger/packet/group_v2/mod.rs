@@ -14,6 +14,7 @@ mod remove_ban;
 mod set_moderator;
 mod set_observer;
 mod announce_peer;
+mod peer_info_request;
 
 pub use self::status::*;
 pub use self::nickname_v2::*;
@@ -26,6 +27,7 @@ pub use self::remove_ban::*;
 pub use self::set_moderator::*;
 pub use self::set_observer::*;
 pub use self::announce_peer::*;
+pub use self::peer_info_request::*;
 
 /// Maximum size in bytes of action string of message packet
 pub const MAX_MESSAGE_V2_DATA_SIZE: usize = 1289;
@@ -57,6 +59,8 @@ pub enum Packet {
     SetObserver(SetObserver),
     /// [`AnnouncePeer`](./struct.AnnouncePeer.html) structure.
     AnnouncePeer(AnnouncePeer),
+    /// [`PeerInfoRequest`](./struct.PeerInfoRequest.html) structure.
+    PeerInfoRequest(PeerInfoRequest),
 }
 
 impl ToBytes for Packet {
@@ -73,6 +77,7 @@ impl ToBytes for Packet {
             Packet::SetModerator(ref p) => p.to_bytes(buf),
             Packet::SetObserver(ref p) => p.to_bytes(buf),
             Packet::AnnouncePeer(ref p) => p.to_bytes(buf),
+            Packet::PeerInfoRequest(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -89,7 +94,8 @@ impl FromBytes for Packet {
         map!(RemoveBan::from_bytes, Packet::RemoveBan) |
         map!(SetModerator::from_bytes, Packet::SetModerator) |
         map!(SetObserver::from_bytes, Packet::SetObserver) |
-        map!(AnnouncePeer::from_bytes, Packet::AnnouncePeer)
+        map!(AnnouncePeer::from_bytes, Packet::AnnouncePeer) |
+        map!(PeerInfoRequest::from_bytes, Packet::PeerInfoRequest)
     ));
 }
 
@@ -202,5 +208,10 @@ mod tests {
                 },
             ]
         ))
+    );
+
+    encode_decode_test!(
+        packet_peer_info_request_encode_decode,
+        Packet::PeerInfoRequest(PeerInfoRequest::new(1, gen_keypair().0, gen_nonce(), 2, 3))
     );
 }
