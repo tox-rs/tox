@@ -66,7 +66,7 @@ pub const GROUP_PASSWORD_BYTES: usize = 32;
 
 /// Password used in group chat
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct GroupPassword([u8; GROUP_PASSWORD_BYTES]);
+pub struct GroupPassword(pub [u8; GROUP_PASSWORD_BYTES]);
 
 impl GroupPassword {
     /// Custom from_slice function of GroupPassword
