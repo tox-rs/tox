@@ -15,6 +15,7 @@ mod set_moderator;
 mod set_observer;
 mod announce_peer;
 mod peer_info_request;
+mod peer_info_response;
 
 pub use self::status::*;
 pub use self::nickname_v2::*;
@@ -28,6 +29,7 @@ pub use self::set_moderator::*;
 pub use self::set_observer::*;
 pub use self::announce_peer::*;
 pub use self::peer_info_request::*;
+pub use self::peer_info_response::*;
 
 /// Maximum size in bytes of action string of message packet
 pub const MAX_MESSAGE_V2_DATA_SIZE: usize = 1289;
@@ -61,6 +63,8 @@ pub enum Packet {
     AnnouncePeer(AnnouncePeer),
     /// [`PeerInfoRequest`](./struct.PeerInfoRequest.html) structure.
     PeerInfoRequest(PeerInfoRequest),
+    /// [`PeerInfoResponse`](./struct.PeerInfoResponse.html) structure.
+    PeerInfoResponse(PeerInfoResponse),
 }
 
 impl ToBytes for Packet {
@@ -78,6 +82,9 @@ impl ToBytes for Packet {
             Packet::SetObserver(ref p) => p.to_bytes(buf),
             Packet::AnnouncePeer(ref p) => p.to_bytes(buf),
             Packet::PeerInfoRequest(ref p) => p.to_bytes(buf),
+            // `UsePassword::Use` is for temporary use, it will be replaced with checked value from chatting room info.
+            // Or the packet structure should be changed to carry the flag of existence of password.
+            Packet::PeerInfoResponse(ref p) => p.to_custom_bytes(buf, UsePassword::Use),
         }
     }
 }
@@ -95,7 +102,8 @@ impl FromBytes for Packet {
         map!(SetModerator::from_bytes, Packet::SetModerator) |
         map!(SetObserver::from_bytes, Packet::SetObserver) |
         map!(AnnouncePeer::from_bytes, Packet::AnnouncePeer) |
-        map!(PeerInfoRequest::from_bytes, Packet::PeerInfoRequest)
+        map!(PeerInfoRequest::from_bytes, Packet::PeerInfoRequest) |
+        map!(call!(PeerInfoResponse::from_custom_bytes, UsePassword::Use), Packet::PeerInfoResponse)
     ));
 }
 
