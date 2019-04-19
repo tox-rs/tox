@@ -175,7 +175,7 @@ mod tests {
                         pk: gen_keypair().0,
                     },
                 ]),
-            Announce::new(gen_keypair().0, Some(IpPort::from_tcp_saddr("127.0.0.1:33445".parse().unwrap())),
+            Announce::new(gen_keypair().0, Some(IpPort::from_tcp_saddr("127.0.0.1:43445".parse().unwrap())),
                 vec![
                     TcpUdpPackedNode {
                         ip_port: IpPort::from_tcp_saddr("127.0.0.1:33410".parse().unwrap()),
@@ -190,7 +190,7 @@ mod tests {
                         pk: gen_keypair().0,
                     },
                 ]),
-            Announce::new(gen_keypair().0, Some(IpPort::from_tcp_saddr("127.0.0.1:33445".parse().unwrap())),
+            Announce::new(gen_keypair().0, Some(IpPort::from_tcp_saddr("127.0.0.1:53445".parse().unwrap())),
                 vec![
                     TcpUdpPackedNode {
                         ip_port: IpPort::from_tcp_saddr("127.0.0.1:33413".parse().unwrap()),

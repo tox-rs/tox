@@ -19,6 +19,7 @@ mod peer_info_response;
 mod sync_request;
 mod sync_response;
 mod invite_request;
+mod invite_response;
 
 pub use self::status::*;
 pub use self::nickname_v2::*;
@@ -36,6 +37,7 @@ pub use self::peer_info_response::*;
 pub use self::sync_request::*;
 pub use self::sync_response::*;
 pub use self::invite_request::*;
+pub use self::invite_response::*;
 
 /// Maximum size in bytes of action string of message packet
 pub const MAX_MESSAGE_V2_DATA_SIZE: usize = 1289;
@@ -77,6 +79,8 @@ pub enum Packet {
     SyncResponse(SyncResponse),
     /// [`InviteRequest`](./struct.InviteRequest.html) structure.
     InviteRequest(InviteRequest),
+    /// [`InviteResponse`](./struct.InviteResponse.html) structure.
+    InviteResponse(InviteResponse),
 }
 
 impl ToBytes for Packet {
@@ -104,6 +108,7 @@ impl ToBytes for Packet {
             // `UsePassword::Use` is for temporary use, it will be replaced with checked value from chatting room info.
             // Or the packet structure should be changed to carry the flag of existence of password.
             Packet::InviteRequest(ref p) => p.to_custom_bytes(buf, UsePassword::Use),
+            Packet::InviteResponse(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -125,7 +130,8 @@ impl FromBytes for Packet {
         map!(call!(PeerInfoResponse::from_custom_bytes, UsePassword::Use), Packet::PeerInfoResponse) |
         map!(call!(SyncRequest::from_custom_bytes, UsePassword::Use), Packet::SyncRequest) |
         map!(SyncResponse::from_bytes, Packet::SyncResponse) |
-        map!(call!(InviteRequest::from_custom_bytes, UsePassword::Use), Packet::InviteRequest)
+        map!(call!(InviteRequest::from_custom_bytes, UsePassword::Use), Packet::InviteRequest) |
+        map!(InviteResponse::from_bytes, Packet::InviteResponse)
     ));
 }
 
@@ -245,7 +251,6 @@ mod tests {
         Packet::PeerInfoRequest(PeerInfoRequest::new(1, gen_keypair().0, gen_nonce(), 2, 3))
     );
 
-
     encode_decode_test!(
         packet_sync_response_encode_decode,
         Packet::SyncResponse(SyncResponse::new(1, gen_keypair().0, gen_nonce(), 2, 3, vec![
@@ -257,5 +262,10 @@ mod tests {
                 },
             ]),
         ]))
+    );
+
+    encode_decode_test!(
+        packet_invite_response_encode_decode,
+        Packet::InviteResponse(InviteResponse::new(1, gen_keypair().0, gen_nonce(), 2, 3))
     );
 }
