@@ -20,6 +20,7 @@ mod sync_request;
 mod sync_response;
 mod invite_request;
 mod invite_response;
+mod topic;
 
 pub use self::status::*;
 pub use self::nickname_v2::*;
@@ -38,6 +39,7 @@ pub use self::sync_request::*;
 pub use self::sync_response::*;
 pub use self::invite_request::*;
 pub use self::invite_response::*;
+pub use self::topic::*;
 
 /// Maximum size in bytes of action string of message packet
 pub const MAX_MESSAGE_V2_DATA_SIZE: usize = 1289;
@@ -81,6 +83,8 @@ pub enum Packet {
     InviteRequest(InviteRequest),
     /// [`InviteResponse`](./struct.InviteResponse.html) structure.
     InviteResponse(InviteResponse),
+    /// [`Topic`](./struct.Topic.html) structure.
+    Topic(Topic),
 }
 
 impl ToBytes for Packet {
@@ -109,6 +113,7 @@ impl ToBytes for Packet {
             // Or the packet structure should be changed to carry the flag of existence of password.
             Packet::InviteRequest(ref p) => p.to_custom_bytes(buf, UsePassword::Use),
             Packet::InviteResponse(ref p) => p.to_bytes(buf),
+            Packet::Topic(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -131,7 +136,8 @@ impl FromBytes for Packet {
         map!(call!(SyncRequest::from_custom_bytes, UsePassword::Use), Packet::SyncRequest) |
         map!(SyncResponse::from_bytes, Packet::SyncResponse) |
         map!(call!(InviteRequest::from_custom_bytes, UsePassword::Use), Packet::InviteRequest) |
-        map!(InviteResponse::from_bytes, Packet::InviteResponse)
+        map!(InviteResponse::from_bytes, Packet::InviteResponse) |
+        map!(Topic::from_bytes, Packet::Topic)
     ));
 }
 
@@ -267,5 +273,10 @@ mod tests {
     encode_decode_test!(
         packet_invite_response_encode_decode,
         Packet::InviteResponse(InviteResponse::new(1, gen_keypair().0, gen_nonce(), 2, 3))
+    );
+
+    encode_decode_test!(
+        packet_topic_encode_decode,
+        Packet::Topic(Topic::new(1, gen_keypair().0, gen_nonce(), 2, 3, vec![32; SIGNATURE_DATA_SIZE], "1234".to_owned(), gen_keypair().0, 4))
     );
 }
