@@ -17,6 +17,7 @@ mod announce_peer;
 mod peer_info_request;
 mod peer_info_response;
 mod sync_request;
+mod sync_response;
 
 pub use self::status::*;
 pub use self::nickname_v2::*;
@@ -32,6 +33,7 @@ pub use self::announce_peer::*;
 pub use self::peer_info_request::*;
 pub use self::peer_info_response::*;
 pub use self::sync_request::*;
+pub use self::sync_response::*;
 
 /// Maximum size in bytes of action string of message packet
 pub const MAX_MESSAGE_V2_DATA_SIZE: usize = 1289;
@@ -69,6 +71,8 @@ pub enum Packet {
     PeerInfoResponse(PeerInfoResponse),
     /// [`SyncRequest`](./struct.SyncRequest.html) structure.
     SyncRequest(SyncRequest),
+    /// [`SyncResponse`](./struct.SyncResponse.html) structure.
+    SyncResponse(SyncResponse),
 }
 
 impl ToBytes for Packet {
@@ -92,6 +96,7 @@ impl ToBytes for Packet {
             // `UsePassword::Use` is for temporary use, it will be replaced with checked value from chatting room info.
             // Or the packet structure should be changed to carry the flag of existence of password.
             Packet::SyncRequest(ref p) => p.to_custom_bytes(buf, UsePassword::Use),
+            Packet::SyncResponse(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -111,7 +116,8 @@ impl FromBytes for Packet {
         map!(AnnouncePeer::from_bytes, Packet::AnnouncePeer) |
         map!(PeerInfoRequest::from_bytes, Packet::PeerInfoRequest) |
         map!(call!(PeerInfoResponse::from_custom_bytes, UsePassword::Use), Packet::PeerInfoResponse) |
-        map!(call!(SyncRequest::from_custom_bytes, UsePassword::Use), Packet::SyncRequest)
+        map!(call!(SyncRequest::from_custom_bytes, UsePassword::Use), Packet::SyncRequest) |
+        map!(SyncResponse::from_bytes, Packet::SyncResponse)
     ));
 }
 
@@ -229,5 +235,19 @@ mod tests {
     encode_decode_test!(
         packet_peer_info_request_encode_decode,
         Packet::PeerInfoRequest(PeerInfoRequest::new(1, gen_keypair().0, gen_nonce(), 2, 3))
+    );
+
+
+    encode_decode_test!(
+        packet_sync_response_encode_decode,
+        Packet::SyncResponse(SyncResponse::new(1, gen_keypair().0, gen_nonce(), 2, 3, vec![
+            Announce::new(gen_keypair().0, Some(IpPort::from_tcp_saddr("127.0.0.1:33445".parse().unwrap())),
+                vec![
+                    TcpUdpPackedNode {
+                    ip_port: IpPort::from_tcp_saddr("127.0.0.1:33447".parse().unwrap()),
+                    pk: gen_keypair().0,
+                },
+            ]),
+        ]))
     );
 }
