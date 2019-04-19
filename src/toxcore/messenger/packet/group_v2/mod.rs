@@ -21,6 +21,7 @@ mod sync_response;
 mod invite_request;
 mod invite_response;
 mod topic;
+mod shared_state;
 
 pub use self::status::*;
 pub use self::nickname_v2::*;
@@ -40,6 +41,7 @@ pub use self::sync_response::*;
 pub use self::invite_request::*;
 pub use self::invite_response::*;
 pub use self::topic::*;
+pub use self::shared_state::*;
 
 /// Maximum size in bytes of action string of message packet
 pub const MAX_MESSAGE_V2_DATA_SIZE: usize = 1289;
@@ -85,6 +87,8 @@ pub enum Packet {
     InviteResponse(InviteResponse),
     /// [`Topic`](./struct.Topic.html) structure.
     Topic(Topic),
+    /// [`SharedState`](./struct.SharedState.html) structure.
+    SharedState(SharedState),
 }
 
 impl ToBytes for Packet {
@@ -114,6 +118,7 @@ impl ToBytes for Packet {
             Packet::InviteRequest(ref p) => p.to_custom_bytes(buf, UsePassword::Use),
             Packet::InviteResponse(ref p) => p.to_bytes(buf),
             Packet::Topic(ref p) => p.to_bytes(buf),
+            Packet::SharedState(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -137,7 +142,8 @@ impl FromBytes for Packet {
         map!(SyncResponse::from_bytes, Packet::SyncResponse) |
         map!(call!(InviteRequest::from_custom_bytes, UsePassword::Use), Packet::InviteRequest) |
         map!(InviteResponse::from_bytes, Packet::InviteResponse) |
-        map!(Topic::from_bytes, Packet::Topic)
+        map!(Topic::from_bytes, Packet::Topic) |
+        map!(SharedState::from_bytes, Packet::SharedState)
     ));
 }
 
@@ -278,5 +284,13 @@ mod tests {
     encode_decode_test!(
         packet_topic_encode_decode,
         Packet::Topic(Topic::new(1, gen_keypair().0, gen_nonce(), 2, 3, vec![32; SIGNATURE_DATA_SIZE], "1234".to_owned(), gen_keypair().0, 4))
+    );
+
+    encode_decode_test!(
+        packet_shared_state_encode_decode,
+        Packet::SharedState(SharedState::new(1, gen_keypair().0, gen_nonce(), 2, 3, vec![32u8; SIGNATURE_DATA_SIZE], gen_keypair().0,
+            String::from_utf8(vec![32u8; GROUP_NAME_DATA_SIZE]).unwrap(),
+            PrivacyState::Private, GroupPassword([32u8; GROUP_PASSWORD_BYTES]),
+            ModerationHash([32u8; MODERATION_HASH_DATA_SIZE]), 4))
     );
 }
