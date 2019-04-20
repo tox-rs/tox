@@ -27,6 +27,7 @@ mod sanction_list;
 mod handshake_response_ack;
 mod custom;
 mod message_ack;
+mod ping;
 
 pub use self::status::*;
 pub use self::nickname_v2::*;
@@ -52,6 +53,7 @@ pub use self::sanction_list::*;
 pub use self::handshake_response_ack::*;
 pub use self::custom::*;
 pub use self::message_ack::*;
+pub use self::ping::*;
 
 /// Maximum size in bytes of action string of message packet
 pub const MAX_MESSAGE_V2_DATA_SIZE: usize = 1289;
@@ -109,6 +111,8 @@ pub enum Packet {
     Custom(Custom),
     /// [`MessageAck`](./struct.MessageAck.html) structure.
     MessageAck(MessageAck),
+    /// [`Ping`](./struct.Ping.html) structure.
+    Ping(Ping),
 }
 
 impl ToBytes for Packet {
@@ -144,6 +148,7 @@ impl ToBytes for Packet {
             Packet::HandshakeResponseAck(ref p) => p.to_bytes(buf),
             Packet::Custom(ref p) => p.to_bytes(buf),
             Packet::MessageAck(ref p) => p.to_bytes(buf),
+            Packet::Ping(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -173,7 +178,8 @@ impl FromBytes for Packet {
         map!(SanctionList::from_bytes, Packet::SanctionList) |
         map!(HandshakeResponseAck::from_bytes, Packet::HandshakeResponseAck) |
         map!(Custom::from_bytes, Packet::Custom) |
-        map!(MessageAck::from_bytes, Packet::MessageAck)
+        map!(MessageAck::from_bytes, Packet::MessageAck) |
+        map!(Ping::from_bytes, Packet::Ping)
     ));
 }
 
@@ -365,5 +371,10 @@ mod tests {
     encode_decode_test!(
         packet_message_ack_encode_decode,
         Packet::MessageAck(MessageAck::new(1, gen_keypair().0, gen_nonce(), 2, 3, 4, 5))
+    );
+
+    encode_decode_test!(
+        packet_ping_encode_decode,
+        Packet::Ping(Ping::new(1, gen_keypair().0, gen_nonce(), 2, 3, 4, 5, 6, 7))
     );
 }
