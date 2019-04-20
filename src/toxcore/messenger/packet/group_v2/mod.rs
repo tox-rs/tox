@@ -23,6 +23,7 @@ mod invite_response;
 mod topic;
 mod shared_state;
 mod mod_list;
+mod sanction_list;
 
 pub use self::status::*;
 pub use self::nickname_v2::*;
@@ -44,6 +45,7 @@ pub use self::invite_response::*;
 pub use self::topic::*;
 pub use self::shared_state::*;
 pub use self::mod_list::*;
+pub use self::sanction_list::*;
 
 /// Maximum size in bytes of action string of message packet
 pub const MAX_MESSAGE_V2_DATA_SIZE: usize = 1289;
@@ -93,6 +95,8 @@ pub enum Packet {
     SharedState(SharedState),
     /// [`ModList`](./struct.ModList.html) structure.
     ModList(ModList),
+    /// [`SanctionList`](./struct.SanctionList.html) structure.
+    SanctionList(SanctionList),
 }
 
 impl ToBytes for Packet {
@@ -124,6 +128,7 @@ impl ToBytes for Packet {
             Packet::Topic(ref p) => p.to_bytes(buf),
             Packet::SharedState(ref p) => p.to_bytes(buf),
             Packet::ModList(ref p) => p.to_bytes(buf),
+            Packet::SanctionList(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -149,7 +154,8 @@ impl FromBytes for Packet {
         map!(InviteResponse::from_bytes, Packet::InviteResponse) |
         map!(Topic::from_bytes, Packet::Topic) |
         map!(SharedState::from_bytes, Packet::SharedState) |
-        map!(ModList::from_bytes, Packet::ModList)
+        map!(ModList::from_bytes, Packet::ModList) |
+        map!(SanctionList::from_bytes, Packet::SanctionList)
     ));
 }
 
@@ -303,5 +309,28 @@ mod tests {
     encode_decode_test!(
         packet_mod_list_encode_decode,
         Packet::ModList(ModList::new(1, gen_keypair().0, gen_nonce(), 2, 3, vec![gen_keypair().0, gen_keypair().0, gen_keypair().0]))
+    );
+
+    encode_decode_test!(
+        packet_sanction_list_encode_decode,
+        Packet::SanctionList(SanctionList::new(1, gen_keypair().0, gen_nonce(), 2, 3, vec![
+            Sanction(SanctionType::BanIpPort(
+                BanIpPort::new(
+                    gen_keypair().0, 1, 2, IpPort::from_udp_saddr("127.0.0.1:33445".parse().unwrap())
+                )
+            )),
+            Sanction(SanctionType::BanPublicKey(
+                BanPublicKey::new(gen_keypair().0, 3, 4, gen_keypair().0
+                )
+            )),
+            Sanction(SanctionType::BanNickname(
+                BanNickname::new(gen_keypair().0, 5, 6, String::from_utf8([32; 128].to_vec()).unwrap()
+                )
+            )),
+            Sanction(SanctionType::Observer(
+                Observer::new(gen_keypair().0, 7, gen_keypair().0
+                )
+            ))
+        ]))
     );
 }
