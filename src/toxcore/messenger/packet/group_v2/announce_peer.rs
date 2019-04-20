@@ -123,15 +123,15 @@ mod tests {
         AnnouncePeer::new(1, gen_keypair().0, gen_nonce(), 2, 3, gen_keypair().0, Some(IpPort::from_tcp_saddr("127.0.0.1:33445".parse().unwrap())),
             vec![
                 TcpUdpPackedNode {
-                    ip_port: IpPort::from_tcp_saddr("127.0.0.1:33447".parse().unwrap()),
+                    ip_port: IpPort::from_tcp_saddr("127.0.0.1:33147".parse().unwrap()),
                     pk: gen_keypair().0,
                 },
                 TcpUdpPackedNode {
-                    ip_port: IpPort::from_tcp_saddr("127.0.0.1:33448".parse().unwrap()),
+                    ip_port: IpPort::from_tcp_saddr("127.0.0.1:33418".parse().unwrap()),
                     pk: gen_keypair().0,
                 },
                 TcpUdpPackedNode {
-                    ip_port: IpPort::from_tcp_saddr("127.0.0.1:33449".parse().unwrap()),
+                    ip_port: IpPort::from_tcp_saddr("127.0.0.1:33469".parse().unwrap()),
                     pk: gen_keypair().0,
                 },
             ]
