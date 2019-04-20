@@ -24,6 +24,7 @@ mod topic;
 mod shared_state;
 mod mod_list;
 mod sanction_list;
+mod handshake_response_ack;
 
 pub use self::status::*;
 pub use self::nickname_v2::*;
@@ -46,6 +47,7 @@ pub use self::topic::*;
 pub use self::shared_state::*;
 pub use self::mod_list::*;
 pub use self::sanction_list::*;
+pub use self::handshake_response_ack::*;
 
 /// Maximum size in bytes of action string of message packet
 pub const MAX_MESSAGE_V2_DATA_SIZE: usize = 1289;
@@ -97,6 +99,8 @@ pub enum Packet {
     ModList(ModList),
     /// [`SanctionList`](./struct.SanctionList.html) structure.
     SanctionList(SanctionList),
+    /// [`HandshakeResponseAck`](./struct.HandshakeResponseAck.html) structure.
+    HandshakeResponseAck(HandshakeResponseAck),
 }
 
 impl ToBytes for Packet {
@@ -129,6 +133,7 @@ impl ToBytes for Packet {
             Packet::SharedState(ref p) => p.to_bytes(buf),
             Packet::ModList(ref p) => p.to_bytes(buf),
             Packet::SanctionList(ref p) => p.to_bytes(buf),
+            Packet::HandshakeResponseAck(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -155,7 +160,8 @@ impl FromBytes for Packet {
         map!(Topic::from_bytes, Packet::Topic) |
         map!(SharedState::from_bytes, Packet::SharedState) |
         map!(ModList::from_bytes, Packet::ModList) |
-        map!(SanctionList::from_bytes, Packet::SanctionList)
+        map!(SanctionList::from_bytes, Packet::SanctionList) |
+        map!(HandshakeResponseAck::from_bytes, Packet::HandshakeResponseAck)
     ));
 }
 
@@ -332,5 +338,10 @@ mod tests {
                 )
             ))
         ]))
+    );
+
+    encode_decode_test!(
+        packet_handshake_response_ack_encode_decode,
+        Packet::HandshakeResponseAck(HandshakeResponseAck::new(1, gen_keypair().0, gen_nonce(), 2, 3))
     );
 }
