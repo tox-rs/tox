@@ -4,9 +4,9 @@ This is used by both Udp codec and Tcp codec.
 */
 
 use std::sync::Arc;
-#[cfg(target_pointer_width = "64")]
+#[cfg(target_has_atomic = "64")]
 use std::sync::atomic::*;
-#[cfg(not(target_pointer_width = "64"))]
+#[cfg(not(target_has_atomic = "64"))]
 use std::sync::Mutex;
 
 /// Struct for various counters
@@ -23,17 +23,17 @@ impl Stats {
     }
 }
 
-#[cfg(target_pointer_width = "64")]
+#[cfg(target_has_atomic = "64")]
 #[derive(Default)]
 /// Struct for counting packets on x64 CPU.
 pub struct Counters {
     /// Incoming packets count for Udp/Tcp
-    incoming: AtomicUsize,
+    incoming: AtomicU64,
     /// Outgoing packets count for Udp/Tcp
-    outgoing: AtomicUsize,
+    outgoing: AtomicU64,
 }
 
-#[cfg(not(target_pointer_width = "64"))]
+#[cfg(not(target_has_atomic = "64"))]
 #[derive(Default)]
 /// Struct for counting packets on non-x64 CPU.
 pub struct Counters {
@@ -45,49 +45,49 @@ pub struct Counters {
 
 impl Counters {
     /// Add 1 to incoming counter
-    #[cfg(target_pointer_width = "64")]
+    #[cfg(target_has_atomic = "64")]
     pub fn increase_incoming(&self) {
         self.incoming.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Add 1 to incoming counter
-    #[cfg(not(target_pointer_width = "64"))]
+    #[cfg(not(target_has_atomic = "64"))]
     pub fn increase_incoming(&self) {
         *self.incoming.lock().expect("Can't lock mutex") += 1;
     }
 
     /// Add 1 to outgoing counter
-    #[cfg(target_pointer_width = "64")]
+    #[cfg(target_has_atomic = "64")]
     pub fn increase_outgoing(&self) {
         self.outgoing.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Add 1 to outgoing counter
-    #[cfg(not(target_pointer_width = "64"))]
+    #[cfg(not(target_has_atomic = "64"))]
     pub fn increase_outgoing(&self) {
         *self.outgoing.lock().expect("Can't lock mutex") += 1;
     }
 
     /// Get incoming counter
-    #[cfg(target_pointer_width = "64")]
+    #[cfg(target_has_atomic = "64")]
     pub fn incoming(&self) -> u64 {
         self.incoming.load(Ordering::Relaxed) as u64
     }
 
     /// Get incoming counter
-    #[cfg(not(target_pointer_width = "64"))]
+    #[cfg(not(target_has_atomic = "64"))]
     pub fn incoming(&self) -> u64 {
         *self.incoming.lock().expect("Can't lock mutex")
     }
 
     /// Get outgoing counter
-    #[cfg(target_pointer_width = "64")]
+    #[cfg(target_has_atomic = "64")]
     pub fn outgoing(&self) -> u64 {
         self.outgoing.load(Ordering::Relaxed) as u64
     }
 
     /// Get outgoing counter
-    #[cfg(not(target_pointer_width = "64"))]
+    #[cfg(not(target_has_atomic = "64"))]
     pub fn outgoing(&self) -> u64 {
         *self.outgoing.lock().expect("Can't lock mutex")
     }
