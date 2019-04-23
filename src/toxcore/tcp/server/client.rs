@@ -16,6 +16,7 @@ use std::time::{Instant, Duration};
 
 use futures::Future;
 use futures::sync::mpsc;
+use tokio::util::FutureExt;
 
 /// Interval in seconds for sending TCP PingRequest
 pub const TCP_PING_FREQUENCY: u64 = 30;
@@ -128,7 +129,7 @@ impl Client {
     /** Send a packet. This method does not ignore IO error
     */
     fn send(&self, packet: Packet) -> impl Future<Item = (), Error = Error> + Send {
-        send_to_bounded(&self.tx, packet, Duration::from_secs(TCP_SEND_TIMEOUT)).map_err(|e|
+        send_to(&self.tx, packet).timeout(Duration::from_secs(TCP_SEND_TIMEOUT)).map_err(|e|
             Error::new(ErrorKind::Other,
                 format!("Failed to send packet: {:?}", e)
         ))
