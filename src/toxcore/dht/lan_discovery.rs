@@ -10,7 +10,7 @@ use futures::sync::mpsc;
 use get_if_addrs;
 use get_if_addrs::IfAddr;
 use tokio::timer::Interval;
-use tokio::timer::timeout::Error as TimeoutError;
+use tokio::util::FutureExt;
 
 use crate::toxcore::crypto_core::*;
 use crate::toxcore::io_tokio::*;
@@ -47,9 +47,6 @@ pub const END_PORT: u16 = 33546;
 
 /// Interval in seconds between `LanDiscovery` packet sending.
 pub const LAN_DISCOVERY_INTERVAL: u64 = 10;
-
-/// Timeout in seconds for packet sending
-pub const LAN_DISCOVERY_SEND_TIMEOUT: u64 = 1;
 
 /// Shorthand for the transmit half of the message channel.
 type Tx = mpsc::Sender<(Packet, SocketAddr)>;
@@ -130,7 +127,7 @@ impl LanDiscoverySender {
     }
 
     /// Send `LanDiscovery` packets.
-    fn send(&mut self) -> impl Future<Item=(), Error=TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send {
+    fn send(&mut self) -> impl Future<Item=(), Error=mpsc::SendError<(Packet, SocketAddr)>> + Send {
         let addrs = self.get_broadcast_socket_addrs();
         let lan_packet = Packet::LanDiscovery(LanDiscovery {
             pk: self.dht_pk,
@@ -140,7 +137,7 @@ impl LanDiscoverySender {
             addrs.into_iter().map(move |addr| (lan_packet.clone(), addr))
         );
 
-        send_all_to_bounded(&self.tx, stream, Duration::from_secs(LAN_DISCOVERY_SEND_TIMEOUT))
+        send_all_to(&self.tx, stream)
     }
 
     /// Run LAN discovery periodically. Result future will never be completed
@@ -152,7 +149,7 @@ impl LanDiscoverySender {
             .map_err(|e| e.context(LanDiscoveryErrorKind::Wakeup).into())
             .for_each(move |_instant| {
                 trace!("LAN discovery sender wake up");
-                self.send().then(|r| {
+                self.send().timeout(interval).then(|r| {
                     if let Err(e) = r {
                         warn!("Failed to send LAN discovery packets: {}", e);
                         if let Some(e) = e.into_inner() {
