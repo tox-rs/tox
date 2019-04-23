@@ -579,23 +579,23 @@ impl CryptoConnection {
         let mut total_resent = 0;
         for i in 0 .. CONGESTION_QUEUE_ARRAY_SIZE {
             let i = (n_p_pos + (CONGESTION_MAX_DELAY - delay) + i) % CONGESTION_LAST_SENT_ARRAY_SIZE;
-            total_sent += self.last_num_packets_sent[i];
-            total_resent += self.last_num_packets_resent[i];
+            total_sent += self.last_num_packets_sent[i] as i32;
+            total_resent += self.last_num_packets_resent[i] as i32;
         }
 
         if sum > 0 {
             // send_array increased i.e. we sent more packets that was delivered
             // decrease total_sent packets by this number so that it includes only delivered packets
-            total_sent -= sum as u32;
-        } else if total_resent > -sum as u32 {
+            total_sent -= sum;
+        } else if total_resent > -sum {
             // send_array decreased and not all resent packets were delivered
             // use this number to count only delivered packets
-            total_resent = -sum as u32;
+            total_resent = -sum;
         }
 
         // Average number of successfully delivered packets per second
         let coeff = 1000.0 / (CONGESTION_QUEUE_ARRAY_SIZE as f64 * PACKET_COUNTER_AVERAGE_INTERVAL_MS as f64);
-        let min_speed = f64::from(total_sent) * coeff;
+        let min_speed = (f64::from(total_sent) * coeff).max(CRYPTO_PACKET_MIN_RATE);
         let min_speed_request = f64::from(total_sent + total_resent) * coeff;
 
         // Time necessary to send all packets from send queue
