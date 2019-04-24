@@ -25,9 +25,6 @@ error_kind! {
         #[doc = "Error indicates that sending response packet error."]
         #[fail(display = "Sending response error")]
         SendTo,
-        #[doc = "Error indicates that received packet is not handled here."]
-        #[fail(display = "This packet kind is not handled here error")]
-        NotHandled,
         #[doc = "Error indicates that received packet's ping_id is zero."]
         #[fail(display = "Zero ping id error")]
         ZeroPingId,
@@ -40,9 +37,15 @@ error_kind! {
         #[doc = "Error indicates that NetCrypto is not initialized."]
         #[fail(display = "NetCrypto is not initialized error")]
         NetCrypto,
+        #[doc = "Error indicates that OnionClient is not initialized."]
+        #[fail(display = "OnionClient is not initialized error")]
+        OnionClient,
         #[doc = "Error indicates that handling NetCrypto packet made an error."]
         #[fail(display = "Handling NetCrypto packet failed")]
         HandleNetCrypto,
+        #[doc = "Error indicates that handling OnionClient packet made an error."]
+        #[fail(display = "Handling OnionClient packet failed")]
+        HandleOnionClient,
         #[doc = "Error indicates that onion or net crypto processing fails."]
         #[doc = "## This enum entry is temporary for onion or net crypto module's transition to failure"]
         #[fail(display = "Onion or NetCrypto related error")]

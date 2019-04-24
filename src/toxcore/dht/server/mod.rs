@@ -27,6 +27,7 @@ use crate::toxcore::dht::packed_node::*;
 use crate::toxcore::dht::kbucket::*;
 use crate::toxcore::dht::ktree::*;
 use crate::toxcore::dht::precomputed_cache::*;
+use crate::toxcore::onion::client::*;
 use crate::toxcore::onion::packet::*;
 use crate::toxcore::onion::onion_announce::*;
 use crate::toxcore::dht::request_queue::*;
@@ -163,6 +164,10 @@ pub struct Server {
     /// pure bootstrap server when we don't have friends and therefore don't
     /// have to handle related packets.
     net_crypto: Option<NetCrypto>,
+    /// Onion client that handles `OnionDataResponse` and
+    /// `OnionAnnounceResponse` packets. It can be `None` in case of pure
+    /// bootstrap server.
+    onion_client: Option<Box<OnionClient>>,
     /// If LAN discovery is enabled `Server` will handle `LanDiscovery` packets
     /// and send `NodesRequest` packets in reply.
     lan_discovery_enabled: bool,
@@ -220,6 +225,7 @@ impl Server {
             bootstrap_info: None,
             tcp_onion_sink: None,
             net_crypto: None,
+            onion_client: None,
             lan_discovery_enabled: true,
             is_ipv6_enabled: false,
             initial_bootstrap: Vec::new(),
@@ -708,14 +714,8 @@ impl Server {
             Packet::OnionResponse1(packet) => Box::new(self.handle_onion_response_1(packet)),
             Packet::BootstrapInfo(packet) => Box::new(self.handle_bootstrap_info(&packet, addr)),
             Packet::CryptoData(packet) => Box::new(self.handle_crypto_data(&packet, addr)),
-            // This packet should be handled in client only
-            Packet::OnionDataResponse(_packet) => Box::new(future::err(
-                HandlePacketError::from(HandlePacketErrorKind::NotHandled)
-            )),
-            // This packet should be handled in client only
-            Packet::OnionAnnounceResponse(_packet) => Box::new(future::err(
-                HandlePacketError::from(HandlePacketErrorKind::NotHandled)
-            )),
+            Packet::OnionDataResponse(packet) => Box::new(self.handle_onion_data_response(&packet)),
+            Packet::OnionAnnounceResponse(packet) => Box::new(self.handle_onion_announce_response(&packet, addr)),
         }
     }
 
@@ -947,6 +947,32 @@ impl Server {
         } else {
             Either::B( future::err(
                 HandlePacketError::from(HandlePacketErrorKind::NetCrypto)
+            ))
+        }
+    }
+
+    /// Handle received `OnionDataResponse` packet and pass it to `onion_client` module.
+    fn handle_onion_data_response(&self, packet: &OnionDataResponse)
+        -> impl Future<Item = (), Error = HandlePacketError> + Send {
+        if let Some(ref onion_client) = self.onion_client {
+            Either::A(onion_client.handle_data_response(packet)
+                .map_err(|e| e.context(HandlePacketErrorKind::HandleOnionClient).into()))
+        } else {
+            Either::B( future::err(
+                HandlePacketError::from(HandlePacketErrorKind::OnionClient)
+            ))
+        }
+    }
+
+    /// Handle received `OnionAnnounceResponse` packet and pass it to `onion_client` module.
+    fn handle_onion_announce_response(&self, packet: &OnionAnnounceResponse, addr: SocketAddr)
+        -> impl Future<Item = (), Error = HandlePacketError> + Send {
+        if let Some(ref onion_client) = self.onion_client {
+            Either::A(onion_client.handle_announce_response(packet, addr)
+                .map_err(|e| e.context(HandlePacketErrorKind::HandleOnionClient).into()))
+        } else {
+            Either::B( future::err(
+                HandlePacketError::from(HandlePacketErrorKind::OnionClient)
             ))
         }
     }
@@ -1432,6 +1458,11 @@ impl Server {
     /// Set `net_crypto` module.
     pub fn set_net_crypto(&mut self, net_crypto: NetCrypto) {
         self.net_crypto = Some(net_crypto);
+    }
+
+    /// Set `onion_client` module.
+    pub fn set_onion_client(&mut self, onion_client: OnionClient) {
+        self.onion_client = Some(Box::new(onion_client));
     }
 
     /// Set sink to send friend's `SocketAddr` when it gets known.
@@ -3626,7 +3657,7 @@ mod tests {
     }
 
     #[test]
-    fn handle_onion_data_response() {
+    fn handle_onion_data_response_uninitialized() {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let data = Packet::OnionDataResponse(OnionDataResponse {
@@ -3637,11 +3668,11 @@ mod tests {
 
         let res = alice.handle_packet(data, addr).wait();
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::NotHandled);
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::OnionClient);
     }
 
     #[test]
-    fn handle_onion_announce_response() {
+    fn handle_onion_announce_response_uninitialized() {
         let (alice, precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let payload = OnionAnnounceResponsePayload {
@@ -3656,7 +3687,7 @@ mod tests {
 
         let res = alice.handle_packet(data, addr).wait();
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::NotHandled);
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::OnionClient);
     }
 
     #[test]
