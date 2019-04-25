@@ -2091,7 +2091,6 @@ mod tests {
         let (dht_pk, dht_sk) = gen_keypair();
         let mut alice = Server::new(udp_tx.clone(), dht_pk, dht_sk.clone());
 
-        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
         let (real_pk, real_sk) = gen_keypair();
@@ -2100,7 +2099,6 @@ mod tests {
         let precomp = precompute(&alice.pk, &bob_sk);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
-            dht_pk_tx,
             lossless_tx,
             lossy_tx,
             dht_pk,
