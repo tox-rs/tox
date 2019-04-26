@@ -12,7 +12,7 @@ use futures::future::{Either, join_all};
 use futures::sync::mpsc;
 use parking_lot::RwLock;
 use tokio::timer::Interval;
-use tokio::timer::timeout::Error as TimeoutError;
+use tokio::util::FutureExt;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -70,8 +70,6 @@ pub const FAKE_FRIENDS_NUMBER: usize = 2;
 /// Maximum number of entry in Lru cache for precomputed keys.
 pub const PRECOMPUTED_LRU_CACHE_SIZE: usize = KBUCKET_DEFAULT_SIZE as usize * KBUCKET_MAX_ENTRIES as usize + // For KTree.
     KBUCKET_DEFAULT_SIZE as usize * (2 + 10); // For friend's close_nodes of 2 fake friends + 10 friends reserved
-/// Timeout in seconds for packet sending
-pub const DHT_SEND_TIMEOUT: u64 = 1;
 /// How often DHT main loop should be called.
 const MAIN_LOOP_INTERVAL: u64 = 1;
 
@@ -382,15 +380,22 @@ impl Server {
             .map_err(|e| e.context(RunErrorKind::Wakeup).into())
             .for_each(move |_instant| {
                 trace!("Bootstrap wake up");
-                self.send_bootstrap_requests()
-                    .map_err(|e| e.context(RunErrorKind::SendTo).into())
+                self.send_bootstrap_requests().timeout(interval).then(|r| {
+                    if let Err(e) = r {
+                        warn!("Failed to send initial bootstrap packets: {}", e);
+                        if let Some(e) = e.into_inner() {
+                            return future::err(e.context(RunErrorKind::SendTo).into())
+                        }
+                    }
+                    future::ok(())
+                })
             })
     }
 
     /// Check if all nodes in Ktree are discarded (including the case when
     /// it's empty) and if so then send `NodesRequest` packet to nodes from
     /// initial bootstrap list and from Ktree.
-    fn send_bootstrap_requests(&self) -> impl Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send {
+    fn send_bootstrap_requests(&self) -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
         let mut request_queue = self.request_queue.write();
         let close_nodes = self.close_nodes.read();
 
@@ -417,9 +422,12 @@ impl Server {
             .map_err(|e| e.context(RunErrorKind::Wakeup).into())
             .for_each(move |_instant| {
                 trace!("DHT server wake up");
-                self.dht_main_loop().then(|res| {
+                self.dht_main_loop().timeout(interval).then(|res| {
                     if let Err(e) = res {
                         warn!("Failed to send DHT periodical packets: {}", e);
+                        if let Some(e) = e.into_inner() {
+                            return future::err(e.context(RunErrorKind::SendTo).into())
+                        }
                     }
                     future::ok(())
                 })
@@ -455,7 +463,7 @@ impl Server {
     }
 
     /// Send `PingRequest` packets to nodes from `nodes_to_ping` list.
-    fn send_pings(&self) -> impl Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send {
+    fn send_pings(&self) -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
         let nodes_to_ping = mem::replace(
             &mut *self.nodes_to_ping.write(),
             Kbucket::<PackedNode>::new(MAX_TO_PING)
@@ -478,7 +486,7 @@ impl Server {
     /// a friend and we don't know it's address then this method will send
     /// `PingRequest` immediately instead of adding to a `nodes_to_ping`
     /// list.
-    fn ping_add(&self, node: &PackedNode) -> impl Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send {
+    fn ping_add(&self, node: &PackedNode) -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
         let close_nodes = self.close_nodes.read();
 
         if !close_nodes.can_add(&node) {
@@ -502,7 +510,7 @@ impl Server {
     /// necessary to check whether node is alive before adding it to close
     /// nodes lists.
     fn ping_nodes_to_bootstrap(&self, request_queue: &mut RequestQueue<PublicKey>, nodes_to_bootstrap: &mut Kbucket<PackedNode>, pk: PublicKey)
-        -> impl Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send {
+        -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
         let capacity = nodes_to_bootstrap.capacity() as u8;
         let nodes_to_bootstrap = mem::replace(nodes_to_bootstrap, Kbucket::new(capacity));
 
@@ -516,7 +524,7 @@ impl Server {
     /// Iterate over nodes from close nodes list and send `NodesRequest` packets
     /// to them if necessary.
     fn ping_close_nodes<'a, T>(&self, request_queue: &mut RequestQueue<PublicKey>, nodes: T, pk: PublicKey)
-        -> Box<dyn Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send>
+        -> Box<dyn Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send>
         where T: Iterator<Item = &'a mut DhtNode> // if change to impl Future the result will be dependent on nodes lifetime
     {
         let futures = nodes
@@ -539,7 +547,7 @@ impl Server {
     /// it was sent less than `NODES_REQ_INTERVAL`. This function should be
     /// called every second.
     fn send_nodes_req_random<'a, T>(&self, request_queue: &mut RequestQueue<PublicKey>, nodes: T, pk: PublicKey)
-        -> Box<dyn Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send>
+        -> Box<dyn Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send>
         where T: Iterator<Item = &'a DhtNode> // if change to impl Future the result will be dependent on nodes lifetime
     {
         let good_nodes = nodes
@@ -572,7 +580,7 @@ impl Server {
 
     /// Send `PingRequest` packet to the node.
     fn send_ping_req(&self, node: &PackedNode, request_queue: &mut RequestQueue<PublicKey>)
-        -> impl Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send {
+        -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
         let payload = PingRequestPayload {
             id: request_queue.new_ping_id(node.pk),
         };
@@ -586,7 +594,7 @@ impl Server {
 
     /// Send `NodesRequest` packet to the node.
     fn send_nodes_req(&self, node: &PackedNode, request_queue: &mut RequestQueue<PublicKey>, search_pk: PublicKey)
-        -> impl Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send {
+        -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
         // Check if packet is going to be sent to ourselves.
         if self.pk == node.pk {
             trace!("Attempt to send NodesRequest to ourselves.");
@@ -607,7 +615,7 @@ impl Server {
 
     /// Send `NatPingRequest` packet to all friends and try to punch holes.
     fn send_nat_ping_req(&self, request_queue: &mut RequestQueue<PublicKey>, friends: &mut HashMap<PublicKey, DhtFriend>)
-        -> impl Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send {
+        -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
         let futures = friends.values_mut()
             .filter(|friend| !friend.is_addr_known())
             .map(|friend| {
@@ -645,7 +653,7 @@ impl Server {
 
     /// Try to punch holes to specified friend.
     fn punch_holes(&self, request_queue: &mut RequestQueue<PublicKey>, friend: &mut DhtFriend, returned_addrs: &[SocketAddr])
-        -> impl Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send {
+        -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
         let punch_addrs = friend.hole_punch.next_punch_addrs(returned_addrs);
 
         let packets = punch_addrs.into_iter().map(|addr| {
@@ -661,13 +669,13 @@ impl Server {
             (packet, addr)
         }).collect::<Vec<_>>();
 
-        send_all_to_bounded(&self.tx, stream::iter_ok(packets), Duration::from_secs(DHT_SEND_TIMEOUT))
+        send_all_to(&self.tx, stream::iter_ok(packets))
     }
 
     /// Send `NatPingRequest` packet to all close nodes of friend in the hope
     /// that they will redirect it to this friend.
     fn send_nat_ping_req_inner(&self, friend: &DhtFriend, nat_ping_req_packet: DhtRequest)
-        -> impl Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send {
+        -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
         let packet = Packet::DhtRequest(nat_ping_req_packet);
         let futures = friend.close_nodes.nodes
             .iter()
@@ -713,8 +721,8 @@ impl Server {
 
     /// Send UDP packet to specified address.
     fn send_to(&self, addr: SocketAddr, packet: Packet)
-        -> impl Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send {
-        send_to_bounded(&self.tx, (packet, addr), Duration::from_secs(DHT_SEND_TIMEOUT))
+        -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
+        send_to(&self.tx, (packet, addr))
     }
 
     /// Handle received `PingRequest` packet and response with `PingResponse`
@@ -1335,7 +1343,7 @@ impl Server {
     /// Handle `OnionRequest` from TCP relay and send `OnionRequest1` packet
     /// to the next node in the onion path.
     pub fn handle_tcp_onion_request(&self, packet: OnionRequest, addr: SocketAddr)
-        -> impl Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send {
+        -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
         let onion_symmetric_key = self.onion_symmetric_key.read();
 
         let onion_return = OnionReturn::new(

@@ -31,7 +31,7 @@ use futures::future::Either;
 use futures::sync::mpsc;
 use parking_lot::RwLock;
 use tokio::timer::Interval;
-use tokio::timer::timeout::Error as TimeoutError;
+use tokio::util::FutureExt;
 
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
@@ -67,9 +67,6 @@ const PACKET_ID_LOSSY_RANGE_START: u8 = 192;
 /// Packets with ID from `PACKET_ID_LOSSY_RANGE_START` to
 /// `PACKET_ID_LOSSY_RANGE_END` are considered lossy packets.
 const PACKET_ID_LOSSY_RANGE_END: u8 = 254;
-
-/// Timeout for packet sending
-const NET_CRYPTO_SEND_TIMEOUT: Duration = Duration::from_millis(50);
 
 /// Shorthand for the transmit half of the message channel for sending DHT
 /// packets.
@@ -292,8 +289,8 @@ impl NetCrypto {
     }
 
     /// Send `Packet` packet to UDP socket
-    fn send_to_udp(&self, addr: SocketAddr, packet: Packet) -> impl Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send {
-        send_to_bounded(&self.udp_tx, (packet, addr), NET_CRYPTO_SEND_TIMEOUT)
+    fn send_to_udp(&self, addr: SocketAddr, packet: Packet) -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
+        send_to(&self.udp_tx, (packet, addr))
     }
 
     /// Get long term `PublicKey` of the peer by its UDP address
@@ -747,7 +744,7 @@ impl NetCrypto {
 
     /// Send packet to crypto connection choosing TCP or UDP protocol
     fn send_packet(&self, packet: Packet, connection: &mut CryptoConnection)
-        -> impl Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send {
+        -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
         // TODO: can backpressure be used instead of congestion control? It
         // seems it's possible to implement wrapper for bounded sender with
         // priority queue and just send packets there
@@ -778,7 +775,7 @@ impl NetCrypto {
     /// Send `CookieRequest` or `CryptoHandshake` packet if needed depending on
     /// connection status and update sent counter
     fn send_status_packet(&self, connection: &mut CryptoConnection)
-        -> impl Future<Item = (), Error = TimeoutError<mpsc::SendError<(Packet, SocketAddr)>>> + Send {
+        -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
         match connection.packet_to_send() {
             Some(packet) => Either::A(self.send_packet(packet, connection)),
             None => Either::B(future::ok(())),
@@ -900,8 +897,15 @@ impl NetCrypto {
 
         wakeups
             .map_err(|e| e.context(RunErrorKind::Wakeup).into())
-            .for_each(move |_instant| self.main_loop()
-                .map_err(|e| e.context(RunErrorKind::SendData).into())
+            .for_each(move |_instant| self.main_loop().timeout(PACKET_COUNTER_AVERAGE_INTERVAL).then(|r| {
+                    if let Err(e) = r {
+                        warn!("Failed to send net crypto packets: {}", e);
+                        if let Some(e) = e.into_inner() {
+                            return future::err(e.context(RunErrorKind::SendData).into())
+                        }
+                    }
+                    future::ok(())
+                })
             )
     }
 }
