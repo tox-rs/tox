@@ -76,7 +76,9 @@ fn main() {
 
     let dht_server = Server::new(tx.clone(), dht_pk, dht_sk.clone());
     let tcp_connections = Connections::new(dht_pk, dht_sk, tcp_incoming_tx);
-    let onion_client = OnionClient::new(dht_server, tcp_connections, dht_pk_tx, real_sk, real_pk);
+    let onion_client = OnionClient::new(dht_server, tcp_connections, real_sk, real_pk);
+
+    onion_client.set_dht_pk_sink(dht_pk_tx);
 
     for &(pk, saddr) in &BOOTSTRAP_NODES {
         // get PK bytes of the bootstrap node
