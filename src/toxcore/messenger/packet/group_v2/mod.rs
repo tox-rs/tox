@@ -29,6 +29,7 @@ mod custom;
 mod message_ack;
 mod ping;
 mod invite_response_reject;
+mod tcp_relays;
 
 pub use self::status::*;
 pub use self::nickname_v2::*;
@@ -56,6 +57,7 @@ pub use self::custom::*;
 pub use self::message_ack::*;
 pub use self::ping::*;
 pub use self::invite_response_reject::*;
+pub use self::tcp_relays::*;
 
 /// Maximum size in bytes of action string of message packet
 pub const MAX_MESSAGE_V2_DATA_SIZE: usize = 1289;
@@ -117,6 +119,8 @@ pub enum Packet {
     Ping(Ping),
     /// [`InviteResponseReject`](./struct.InviteResponseReject.html) structure.
     InviteResponseReject(InviteResponseReject),
+    /// [`TcpRelays`](./struct.TcpRelays.html) structure.
+    TcpRelays(TcpRelays),
 }
 
 impl ToBytes for Packet {
@@ -154,6 +158,7 @@ impl ToBytes for Packet {
             Packet::MessageAck(ref p) => p.to_bytes(buf),
             Packet::Ping(ref p) => p.to_bytes(buf),
             Packet::InviteResponseReject(ref p) => p.to_bytes(buf),
+            Packet::TcpRelays(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -185,7 +190,8 @@ impl FromBytes for Packet {
         map!(Custom::from_bytes, Packet::Custom) |
         map!(MessageAck::from_bytes, Packet::MessageAck) |
         map!(Ping::from_bytes, Packet::Ping) |
-        map!(InviteResponseReject::from_bytes, Packet::InviteResponseReject)
+        map!(InviteResponseReject::from_bytes, Packet::InviteResponseReject) |
+        map!(TcpRelays::from_bytes, Packet::TcpRelays)
     ));
 }
 
@@ -387,5 +393,23 @@ mod tests {
     encode_decode_test!(
         packet_invite_response_reject_encode_decode,
         Packet::InviteResponseReject(InviteResponseReject::new(1, gen_keypair().0, gen_nonce(), 2, 3, InviteRejectType::NicknameTaken))
+    );
+
+    encode_decode_test!(
+        packet_tcp_relays_reject_encode_decode,
+        Packet::TcpRelays(TcpRelays::new(1, gen_keypair().0, gen_nonce(), 2, 3, vec![
+            TcpUdpPackedNode {
+                ip_port: IpPort::from_tcp_saddr("127.0.0.1:36447".parse().unwrap()),
+                pk: gen_keypair().0,
+            },
+            TcpUdpPackedNode {
+                ip_port: IpPort::from_tcp_saddr("127.0.0.1:36448".parse().unwrap()),
+                pk: gen_keypair().0,
+            },
+            TcpUdpPackedNode {
+                ip_port: IpPort::from_tcp_saddr("127.0.0.1:36449".parse().unwrap()),
+                pk: gen_keypair().0,
+            },
+        ]))
     );
 }

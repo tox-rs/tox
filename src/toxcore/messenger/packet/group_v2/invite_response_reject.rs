@@ -33,7 +33,7 @@ impl FromBytes for InviteRejectType {
     );
 }
 
-/** InviteResponseReject is a struct that holds info to send invite response reject packet to a group chat.
+/** InviteResponseReject is a struct that holds info to send invite response reject packet to a peer.
 
 Serialized form:
 
