@@ -30,6 +30,7 @@ mod message_ack;
 mod ping;
 mod invite_response_reject;
 mod tcp_relays;
+mod lossy_custom;
 
 pub use self::status::*;
 pub use self::nickname_v2::*;
@@ -58,6 +59,7 @@ pub use self::message_ack::*;
 pub use self::ping::*;
 pub use self::invite_response_reject::*;
 pub use self::tcp_relays::*;
+pub use self::lossy_custom::*;
 
 /// Maximum size in bytes of action string of message packet
 pub const MAX_MESSAGE_V2_DATA_SIZE: usize = 1289;
@@ -121,6 +123,8 @@ pub enum Packet {
     InviteResponseReject(InviteResponseReject),
     /// [`TcpRelays`](./struct.TcpRelays.html) structure.
     TcpRelays(TcpRelays),
+    /// [`LossyCustom`](./struct.LossyCustom.html) structure.
+    LossyCustom(LossyCustom),
 }
 
 impl ToBytes for Packet {
@@ -159,6 +163,7 @@ impl ToBytes for Packet {
             Packet::Ping(ref p) => p.to_bytes(buf),
             Packet::InviteResponseReject(ref p) => p.to_bytes(buf),
             Packet::TcpRelays(ref p) => p.to_bytes(buf),
+            Packet::LossyCustom(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -191,7 +196,8 @@ impl FromBytes for Packet {
         map!(MessageAck::from_bytes, Packet::MessageAck) |
         map!(Ping::from_bytes, Packet::Ping) |
         map!(InviteResponseReject::from_bytes, Packet::InviteResponseReject) |
-        map!(TcpRelays::from_bytes, Packet::TcpRelays)
+        map!(TcpRelays::from_bytes, Packet::TcpRelays) |
+        map!(LossyCustom::from_bytes, Packet::LossyCustom)
     ));
 }
 
@@ -411,5 +417,10 @@ mod tests {
                 pk: gen_keypair().0,
             },
         ]))
+    );
+
+    encode_decode_test!(
+        packet_lossy_custom_encode_decode,
+        Packet::LossyCustom(LossyCustom::new(1, gen_keypair().0, gen_nonce(), 2, 3, [32u8; 32].to_vec()))
     );
 }

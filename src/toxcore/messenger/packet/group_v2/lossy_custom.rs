@@ -1,22 +1,19 @@
-/*! Custom struct.
+/*! LossyCustom struct.
 */
 
 use nom::{be_u32, be_u64, rest};
 
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
-use super::MAX_MESSAGE_V2_DATA_SIZE;
+use crate::toxcore::messenger::packet::group_v2::custom::MAX_CUSTOM_DATA_SIZE;
 
-/// Maximum length in bytes of data size of custom packet.
-pub const MAX_CUSTOM_DATA_SIZE: usize = MAX_MESSAGE_V2_DATA_SIZE + 9;
-
-/** Custom is a struct that holds info to send custom packet to a group chat.
+/** LossyCustom is a struct that holds info to send lossy custom packet to a peer.
 
 Serialized form:
 
 Length    | Content
 --------- | ------
-`1`       | `0x5b`
+`1`       | `0x5c`
 `4`       | `hash id`
 `32`      | `PK of sender`
 `24`      | `nonce`
@@ -27,7 +24,7 @@ variable  | `user data`
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Custom {
+pub struct LossyCustom {
     hash_id: u32,
     sender_pk: PublicKey,
     nonce: Nonce,
@@ -36,9 +33,9 @@ pub struct Custom {
     data: Vec<u8>,
 }
 
-impl FromBytes for Custom {
-    named!(from_bytes<Custom>, do_parse!(
-        tag!("\x5b") >>
+impl FromBytes for LossyCustom {
+    named!(from_bytes<LossyCustom>, do_parse!(
+        tag!("\x5c") >>
         hash_id: be_u32 >>
         sender_pk: call!(PublicKey::from_bytes) >>
         nonce: call!(Nonce::from_bytes) >>
@@ -47,7 +44,7 @@ impl FromBytes for Custom {
         sender_pk_hash: be_u32 >>
         verify!(rest_len, |len| len <= MAX_CUSTOM_DATA_SIZE) >>
         data: rest >>
-        (Custom {
+        (LossyCustom {
             hash_id,
             sender_pk,
             nonce,
@@ -58,10 +55,10 @@ impl FromBytes for Custom {
     ));
 }
 
-impl ToBytes for Custom {
+impl ToBytes for LossyCustom {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
-            gen_be_u8!(0x5b) >>
+            gen_be_u8!(0x5c) >>
             gen_be_u32!(self.hash_id) >>
             gen_slice!(self.sender_pk.as_ref()) >>
             gen_slice!(self.nonce.as_ref()) >>
@@ -74,10 +71,10 @@ impl ToBytes for Custom {
     }
 }
 
-impl Custom {
-    /// Create new Custom object.
+impl LossyCustom {
+    /// Create new LossyCustom object.
     pub fn new(hash_id: u32, sender_pk: PublicKey, nonce: Nonce, message_id: u64, sender_pk_hash: u32, data: Vec<u8>) -> Self {
-        Custom {
+        LossyCustom {
             hash_id,
             sender_pk,
             nonce,
@@ -93,7 +90,7 @@ mod tests {
     use super::*;
 
     encode_decode_test!(
-        custom_encode_decode,
-        Custom::new(1, gen_keypair().0, gen_nonce(), 2, 3, [32u8; 32].to_vec())
+        lossy_custom_encode_decode,
+        LossyCustom::new(1, gen_keypair().0, gen_nonce(), 2, 3, [32u8; 32].to_vec())
     );
 }
