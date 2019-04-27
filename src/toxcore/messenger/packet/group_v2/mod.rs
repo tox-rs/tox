@@ -31,6 +31,7 @@ mod ping;
 mod invite_response_reject;
 mod tcp_relays;
 mod lossy_custom;
+mod handshake_request;
 
 pub use self::status::*;
 pub use self::nickname_v2::*;
@@ -60,6 +61,7 @@ pub use self::ping::*;
 pub use self::invite_response_reject::*;
 pub use self::tcp_relays::*;
 pub use self::lossy_custom::*;
+pub use self::handshake_request::*;
 
 /// Maximum size in bytes of action string of message packet
 pub const MAX_MESSAGE_V2_DATA_SIZE: usize = 1289;
@@ -125,6 +127,8 @@ pub enum Packet {
     TcpRelays(TcpRelays),
     /// [`LossyCustom`](./struct.LossyCustom.html) structure.
     LossyCustom(LossyCustom),
+    /// [`HandshakeRequest`](./struct.HandshakeRequest.html) structure.
+    HandshakeRequest(HandshakeRequest),
 }
 
 impl ToBytes for Packet {
@@ -164,6 +168,7 @@ impl ToBytes for Packet {
             Packet::InviteResponseReject(ref p) => p.to_bytes(buf),
             Packet::TcpRelays(ref p) => p.to_bytes(buf),
             Packet::LossyCustom(ref p) => p.to_bytes(buf),
+            Packet::HandshakeRequest(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -197,7 +202,8 @@ impl FromBytes for Packet {
         map!(Ping::from_bytes, Packet::Ping) |
         map!(InviteResponseReject::from_bytes, Packet::InviteResponseReject) |
         map!(TcpRelays::from_bytes, Packet::TcpRelays) |
-        map!(LossyCustom::from_bytes, Packet::LossyCustom)
+        map!(LossyCustom::from_bytes, Packet::LossyCustom) |
+        map!(HandshakeRequest::from_bytes, Packet::HandshakeRequest)
     ));
 }
 
@@ -422,5 +428,16 @@ mod tests {
     encode_decode_test!(
         packet_lossy_custom_encode_decode,
         Packet::LossyCustom(LossyCustom::new(1, gen_keypair().0, gen_nonce(), 2, 3, [32u8; 32].to_vec()))
+    );
+
+    encode_decode_test!(
+        packet_handshake_request_encode_decode,
+        Packet::HandshakeRequest(HandshakeRequest::new(1, gen_keypair().0, gen_nonce(), 2, 3, gen_keypair().0, gen_keypair().0,
+            HandshakeRequestType::InviteRequest, HandshakeJoinType::Public, 4,
+            TcpUdpPackedNode {
+                ip_port: IpPort::from_tcp_saddr("127.0.0.1:35647".parse().unwrap()),
+                pk: gen_keypair().0,
+            }
+        ))
     );
 }

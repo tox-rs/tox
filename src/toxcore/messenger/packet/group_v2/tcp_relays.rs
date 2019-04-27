@@ -7,6 +7,9 @@ use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
 use crate::toxcore::packed_node::TcpUdpPackedNode;
 
+/// Maximum number of entries of tcp relay in this packet.
+const MAX_TCP_SHARED_RELAYS: usize = 3;
+
 /** TcpRelays is a struct that holds info to send tcp relays packet to a peer.
 
 Serialized form:
@@ -50,7 +53,7 @@ impl FromBytes for TcpRelays {
         tag!("\x04") >>
         message_id: be_u64 >>
         sender_pk_hash: be_u32 >>
-        relays: many0!(TcpUdpPackedNode::from_bytes) >>
+        relays: many_m_n!(0, MAX_TCP_SHARED_RELAYS, TcpUdpPackedNode::from_bytes) >>
         (TcpRelays {
             hash_id,
             sender_pk,
@@ -72,6 +75,7 @@ impl ToBytes for TcpRelays {
             gen_be_u8!(0x04) >>
             gen_be_u64!(self.message_id) >>
             gen_be_u32!(self.sender_pk_hash) >>
+            gen_cond!(self.relays.len() > MAX_TCP_SHARED_RELAYS, |buf| gen_error(buf, 0)) >>
             gen_many_ref!(&self.relays, |buf, relay| TcpUdpPackedNode::to_bytes(relay, buf))
         )
     }
