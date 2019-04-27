@@ -32,6 +32,7 @@ mod invite_response_reject;
 mod tcp_relays;
 mod lossy_custom;
 mod handshake_request;
+mod handshake_invite_response;
 
 pub use self::status::*;
 pub use self::nickname_v2::*;
@@ -62,6 +63,7 @@ pub use self::invite_response_reject::*;
 pub use self::tcp_relays::*;
 pub use self::lossy_custom::*;
 pub use self::handshake_request::*;
+pub use self::handshake_invite_response::*;
 
 /// Maximum size in bytes of action string of message packet
 pub const MAX_MESSAGE_V2_DATA_SIZE: usize = 1289;
@@ -129,6 +131,8 @@ pub enum Packet {
     LossyCustom(LossyCustom),
     /// [`HandshakeRequest`](./struct.HandshakeRequest.html) structure.
     HandshakeRequest(HandshakeRequest),
+    /// [`HandshakeInviteResponse`](./struct.HandshakeInviteResponse.html) structure.
+    HandshakeInviteResponse(HandshakeInviteResponse),
 }
 
 impl ToBytes for Packet {
@@ -169,6 +173,7 @@ impl ToBytes for Packet {
             Packet::TcpRelays(ref p) => p.to_bytes(buf),
             Packet::LossyCustom(ref p) => p.to_bytes(buf),
             Packet::HandshakeRequest(ref p) => p.to_bytes(buf),
+            Packet::HandshakeInviteResponse(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -203,7 +208,8 @@ impl FromBytes for Packet {
         map!(InviteResponseReject::from_bytes, Packet::InviteResponseReject) |
         map!(TcpRelays::from_bytes, Packet::TcpRelays) |
         map!(LossyCustom::from_bytes, Packet::LossyCustom) |
-        map!(HandshakeRequest::from_bytes, Packet::HandshakeRequest)
+        map!(HandshakeRequest::from_bytes, Packet::HandshakeRequest) |
+        map!(HandshakeInviteResponse::from_bytes, Packet::HandshakeInviteResponse)
     ));
 }
 
@@ -439,5 +445,10 @@ mod tests {
                 pk: gen_keypair().0,
             }
         ))
+    );
+
+    encode_decode_test!(
+        packet_handshake_invite_response_encode_decode,
+        Packet::HandshakeInviteResponse(HandshakeInviteResponse::new(1, gen_keypair().0, gen_nonce(), 2, 3, gen_keypair().0, gen_keypair().0, 4))
     );
 }
