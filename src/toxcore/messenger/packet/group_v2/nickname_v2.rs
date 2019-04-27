@@ -6,7 +6,7 @@ use nom::{be_u32, be_u64, rest};
 
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
-use crate::toxcore::messenger::packet::nickname::MAX_NICKNAME_DATA_SIZE;
+use crate::toxcore::messenger::packet::MAX_NICKNAME_DATA_SIZE;
 
 /** NicknameV2 is a struct that holds info to send nickname packet to a group chat.
 Sent to notify changing of nickname to all member of group chat.

@@ -33,6 +33,7 @@ mod tcp_relays;
 mod lossy_custom;
 mod handshake_request;
 mod handshake_invite_response;
+mod handshake_peer_info_exchange;
 
 pub use self::status::*;
 pub use self::nickname_v2::*;
@@ -64,6 +65,7 @@ pub use self::tcp_relays::*;
 pub use self::lossy_custom::*;
 pub use self::handshake_request::*;
 pub use self::handshake_invite_response::*;
+pub use self::handshake_peer_info_exchange::*;
 
 /// Maximum size in bytes of action string of message packet
 pub const MAX_MESSAGE_V2_DATA_SIZE: usize = 1289;
@@ -133,6 +135,8 @@ pub enum Packet {
     HandshakeRequest(HandshakeRequest),
     /// [`HandshakeInviteResponse`](./struct.HandshakeInviteResponse.html) structure.
     HandshakeInviteResponse(HandshakeInviteResponse),
+    /// [`HandshakePeerInfoExchange`](./struct.HandshakePeerInfoExchange.html) structure.
+    HandshakePeerInfoExchange(HandshakePeerInfoExchange),
 }
 
 impl ToBytes for Packet {
@@ -174,6 +178,7 @@ impl ToBytes for Packet {
             Packet::LossyCustom(ref p) => p.to_bytes(buf),
             Packet::HandshakeRequest(ref p) => p.to_bytes(buf),
             Packet::HandshakeInviteResponse(ref p) => p.to_bytes(buf),
+            Packet::HandshakePeerInfoExchange(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -209,7 +214,8 @@ impl FromBytes for Packet {
         map!(TcpRelays::from_bytes, Packet::TcpRelays) |
         map!(LossyCustom::from_bytes, Packet::LossyCustom) |
         map!(HandshakeRequest::from_bytes, Packet::HandshakeRequest) |
-        map!(HandshakeInviteResponse::from_bytes, Packet::HandshakeInviteResponse)
+        map!(HandshakeInviteResponse::from_bytes, Packet::HandshakeInviteResponse) |
+        map!(HandshakePeerInfoExchange::from_bytes, Packet::HandshakePeerInfoExchange)
     ));
 }
 
@@ -450,5 +456,10 @@ mod tests {
     encode_decode_test!(
         packet_handshake_invite_response_encode_decode,
         Packet::HandshakeInviteResponse(HandshakeInviteResponse::new(1, gen_keypair().0, gen_nonce(), 2, 3, gen_keypair().0, gen_keypair().0, 4))
+    );
+
+    encode_decode_test!(
+        packet_handshake_peer_info_exchange_encode_decode,
+        Packet::HandshakePeerInfoExchange(HandshakePeerInfoExchange::new(1, gen_keypair().0, gen_nonce(), 2, 3, gen_keypair().0, gen_keypair().0))
     );
 }

@@ -1,4 +1,6 @@
 /*! The implementation of Messenger
 */
 
-pub mod packet;
+mod packet;
+
+pub use self::packet::*;

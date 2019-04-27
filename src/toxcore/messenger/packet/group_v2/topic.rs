@@ -6,7 +6,7 @@ use nom::{be_u16, be_u32, be_u64};
 
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
-use crate::toxcore::messenger::packet::nickname::MAX_NICKNAME_DATA_SIZE;
+use crate::toxcore::messenger::packet::MAX_NICKNAME_DATA_SIZE;
 
 /// Size in bytes of signature
 pub const SIGNATURE_DATA_SIZE: usize = 64;
