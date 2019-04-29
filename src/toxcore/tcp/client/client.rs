@@ -335,7 +335,8 @@ impl Client {
                         ref mut status => *status = ClientStatus::Disconnected,
                     }
                     if res.is_err() {
-                        self_c.connection_attempts.write().saturating_add(1);
+                        let mut connection_attempts = self_c.connection_attempts.write();
+                        *connection_attempts = connection_attempts.saturating_add(1);
                     }
                     *self_c.connected_time.write() = None;
                     self_c.links.write().clear();
@@ -1228,5 +1229,41 @@ pub mod tests {
             .map_err(|_| ());
 
         tokio::run(future);
+    }
+
+    #[test]
+    fn spawn_unsuccessful() {
+        // run server
+        let (_server_pk, server_sk) = gen_keypair();
+
+        let addr = "127.0.0.1:0".parse().unwrap();
+        let listener = TcpListener::bind(&addr).unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = Server::new();
+        let stats = Stats::new();
+        let server_future = server.run(listener, server_sk, stats, 2)
+            .map_err(|e| Error::new(ErrorKind::Other, e.compat()));
+
+        // run a client with invalid server's pk
+        let (client_pk_1, client_sk_1) = gen_keypair();
+        let (invalid_server_pk, _invalid_server_sk) = gen_keypair();
+        let (incoming_tx_1, _incoming_rx_1) = mpsc::unbounded();
+        let client = Client::new(invalid_server_pk, addr, incoming_tx_1);
+        let client_future = client.clone().spawn(client_sk_1, client_pk_1);
+
+        let future = server_future
+            .select(client_future)
+            .then(|r| {
+                assert!(r.is_ok());
+                r
+            })
+            .map(|_| ())
+            .map_err(|_| ());
+
+        tokio::run(future);
+
+        // connection_attempts should be increased
+        assert_eq!(*client.connection_attempts.read(), 1);
     }
 }
