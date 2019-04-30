@@ -556,6 +556,15 @@ impl OnionClient {
         state.friends.insert(real_pk, OnionFriend::new(real_pk));
     }
 
+    /// Set friend's DHT `PublicKey` when it gets known somewhere else.
+    pub fn set_friend_dht_pk(&self, real_pk: PublicKey, dht_pk: PublicKey) {
+        let mut state = self.state.lock();
+
+        if let Some(friend) = state.friends.get_mut(&real_pk) {
+            friend.dht_pk = Some(dht_pk);
+        }
+    }
+
     /// Generic function for sending search and announce requests to close nodes.
     fn ping_close_nodes(
         close_nodes: &mut Kbucket<OnionNode>,
@@ -1085,6 +1094,26 @@ mod tests {
 
         let state = onion_client.state.lock();
         assert_eq!(state.friends[&friend_pk].real_pk, friend_pk);
+    }
+
+    #[test]
+    fn set_friend_dht_pk() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, real_sk) = gen_keypair();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
+        let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
+        let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
+        let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk, real_pk);
+
+        let (friend_pk, _friend_sk) = gen_keypair();
+        onion_client.add_friend(friend_pk);
+
+        let (friend_dht_pk, _friend_dht_sk) = gen_keypair();
+        onion_client.set_friend_dht_pk(friend_pk, friend_dht_pk);
+
+        let state = onion_client.state.lock();
+        assert_eq!(state.friends[&friend_pk].dht_pk, Some(friend_dht_pk));
     }
 
     #[test]
