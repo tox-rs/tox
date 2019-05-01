@@ -29,7 +29,7 @@ pub use self::file_data::*;
 pub use self::status_message::*;
 pub use self::file_send_request::*;
 
-pub use crate::toxcore::messenger::conference::packet::{Packet as ConferencePacket, *};
+pub use crate::toxcore::messenger::conference::packet::Packet as ConferencePacket;
 
 /** Messenger packet enum that encapsulates all types of Messenger packets.
 */
@@ -104,6 +104,7 @@ impl FromBytes for Packet {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::toxcore::messenger::conference::packet::{ConferenceType, ConferenceUID, Invite};
 
     encode_decode_test!(
         packet_online_encode_decode,

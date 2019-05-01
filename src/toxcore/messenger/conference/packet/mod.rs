@@ -12,10 +12,10 @@ mod ping;
 mod new_peer;
 mod kill_peer;
 mod freeze_peer;
-mod chane_name;
+mod change_name;
 mod change_title;
-mod conference_message;
-mod conference_action;
+mod message;
+mod action;
 
 pub use self::invite::*;
 pub use self::invite_response::*;
@@ -28,19 +28,19 @@ pub use self::ping::*;
 pub use self::new_peer::*;
 pub use self::kill_peer::*;
 pub use self::freeze_peer::*;
-pub use self::chane_name::*;
+pub use self::change_name::*;
 pub use self::change_title::*;
-pub use self::conference_message::*;
-pub use self::conference_action::*;
+pub use self::message::*;
+pub use self::action::*;
 
 use nom::be_u8;
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
 
-/// Length in bytes of conference unique bytes
+/// Length in bytes of conference unique bytes.
 pub const CONFERENCE_UID_BYTES: usize = 32;
 
-/// Length in bytes of various names in conference
+/// Length in bytes of various names in conference.
 pub const MAX_NAME_LENGTH_IN_CONFERENCE: usize = 128;
 
 /// Unique id used in conference
@@ -83,9 +83,9 @@ impl ToBytes for ConferenceUID {
 /// Type of conference
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConferenceType {
-    /// Text conference conference.
+    /// Text conference.
     Text = 0x00,
-    /// Audio conference conference.
+    /// Audio conference.
     Audio,
 }
 
@@ -128,10 +128,10 @@ pub enum Packet {
     ChangeName(ChangeName),
     /// [`ChangeTitle`](./struct.ChangeTitle.html) structure.
     ChangeTitle(ChangeTitle),
-    /// [`ConferenceMessage`](./struct.ConferenceMessage.html) structure.
-    ConferenceMessage(ConferenceMessage),
-    /// [`ConferenceAction`](./struct.ConferenceAction.html) structure.
-    ConferenceAction(ConferenceAction),
+    /// [`Message`](./struct.Message.html) structure.
+    Message(Message),
+    /// [`Action`](./struct.Action.html) structure.
+    Action(Action),
 }
 
 impl ToBytes for Packet {
@@ -150,8 +150,8 @@ impl ToBytes for Packet {
             Packet::FreezePeer(ref p) => p.to_bytes(buf),
             Packet::ChangeName(ref p) => p.to_bytes(buf),
             Packet::ChangeTitle(ref p) => p.to_bytes(buf),
-            Packet::ConferenceMessage(ref p) => p.to_bytes(buf),
-            Packet::ConferenceAction(ref p) => p.to_bytes(buf),
+            Packet::Message(ref p) => p.to_bytes(buf),
+            Packet::Action(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -171,8 +171,8 @@ impl FromBytes for Packet {
         map!(FreezePeer::from_bytes, Packet::FreezePeer) |
         map!(ChangeName::from_bytes, Packet::ChangeName) |
         map!(ChangeTitle::from_bytes, Packet::ChangeTitle) |
-        map!(ConferenceMessage::from_bytes, Packet::ConferenceMessage) |
-        map!(ConferenceAction::from_bytes, Packet::ConferenceAction)
+        map!(Message::from_bytes, Packet::Message) |
+        map!(Action::from_bytes, Packet::Action)
     ));
 }
 
@@ -262,11 +262,11 @@ mod tests {
 
     encode_decode_test!(
         packet_conference_message_encode_decode,
-        Packet::ConferenceMessage(ConferenceMessage::new(1, 2, 3, "1234".to_owned()))
+        Packet::Message(Message::new(1, 2, 3, "1234".to_owned()))
     );
 
     encode_decode_test!(
         packet_conference_action_encode_decode,
-        Packet::ConferenceAction(ConferenceAction::new(1, 2, 3, "1234".to_owned()))
+        Packet::Action(Action::new(1, 2, 3, "1234".to_owned()))
     );
 }

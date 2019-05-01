@@ -6,7 +6,7 @@ use nom::{be_u16, be_u32, rest};
 
 use crate::toxcore::binary_io::*;
 
-/** ConferenceMessage is the struct that holds info to send chat message to a conference.
+/** Message is the struct that holds info to send chat message to a conference.
 
 Sent to notify chat message to all member of conference.
 
@@ -23,7 +23,7 @@ variable  | `message`(UTF-8 C String)
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ConferenceMessage {
+pub struct Message {
     conference_number: u16,
     peer_number: u16,
     message_number: u32,
@@ -32,15 +32,15 @@ pub struct ConferenceMessage {
     message: String,
 }
 
-impl FromBytes for ConferenceMessage {
-    named!(from_bytes<ConferenceMessage>, do_parse!(
+impl FromBytes for Message {
+    named!(from_bytes<Message>, do_parse!(
         tag!("\x63") >>
         conference_number: be_u16 >>
         peer_number: be_u16 >>
         message_number: be_u32 >>
         tag!("\x40") >>
         message: map_res!(rest, str::from_utf8) >>
-        (ConferenceMessage {
+        (Message {
             conference_number,
             peer_number,
             message_number,
@@ -49,7 +49,7 @@ impl FromBytes for ConferenceMessage {
     ));
 }
 
-impl ToBytes for ConferenceMessage {
+impl ToBytes for Message {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x63) >>
@@ -62,10 +62,10 @@ impl ToBytes for ConferenceMessage {
     }
 }
 
-impl ConferenceMessage {
-    /// Create new ConferenceMessage object.
+impl Message {
+    /// Create new Message object.
     pub fn new(conference_number: u16, peer_number: u16, message_number: u32, message: String) -> Self {
-        ConferenceMessage {
+        Message {
             conference_number,
             peer_number,
             message_number,
@@ -80,7 +80,7 @@ mod tests {
 
     encode_decode_test!(
         conference_message_encode_decode,
-        ConferenceMessage::new(1, 2, 3, "1234".to_owned())
+        Message::new(1, 2, 3, "1234".to_owned())
     );
 
     #[test]
@@ -88,6 +88,6 @@ mod tests {
         let err_string = vec![0, 159, 146, 150]; // not UTF8 bytes.
         let mut buf = vec![0x63, 0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x40];
         buf.extend_from_slice(&err_string);
-        assert!(ConferenceMessage::from_bytes(&buf).is_err());
+        assert!(Message::from_bytes(&buf).is_err());
     }
 }
