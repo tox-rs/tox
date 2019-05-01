@@ -6,7 +6,7 @@ use crate::toxcore::binary_io::*;
 /** Offline is a struct that holds nothing.
 
 This packet is used to notify that a friend is being deleted.
-Though the friend is deleted, because of group chat, Tox client
+Though the friend is deleted, because of conference, Tox client
 may try to connect to the friend, this message prevent this friend to
 be shown as Online.
 
