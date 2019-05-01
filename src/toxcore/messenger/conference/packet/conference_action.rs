@@ -1,4 +1,4 @@
-/*! Group action action struct.
+/*! Conference action action struct.
 */
 
 use std::str;
@@ -6,16 +6,16 @@ use nom::{be_u16, be_u32, rest};
 
 use crate::toxcore::binary_io::*;
 
-/** GroupAction is the struct that holds info to send action to a group chat.
+/** ConferenceAction is the struct that holds info to send action to a conference.
 
-Sent to notify action to all member of group chat.
+Sent to notify action to all member of conference.
 
 Serialized form:
 
 Length    | Content
 --------- | ------
 `1`       | `0x63`
-`2`       | `group number`
+`2`       | `conference number`
 `2`       | `peer number`
 `4`       | `action number`
 `1`       | `0x41`
@@ -23,8 +23,8 @@ variable  | `action`(UTF-8 C String)
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct GroupAction {
-    group_number: u16,
+pub struct ConferenceAction {
+    conference_number: u16,
     peer_number: u16,
     message_number: u32,
     /// Maximum length of action is the limit of NetCrypto packet.
@@ -32,16 +32,16 @@ pub struct GroupAction {
     action: String,
 }
 
-impl FromBytes for GroupAction {
-    named!(from_bytes<GroupAction>, do_parse!(
+impl FromBytes for ConferenceAction {
+    named!(from_bytes<ConferenceAction>, do_parse!(
         tag!("\x63") >>
-        group_number: be_u16 >>
+        conference_number: be_u16 >>
         peer_number: be_u16 >>
         message_number: be_u32 >>
         tag!("\x41") >>
         action: map_res!(rest, str::from_utf8) >>
-        (GroupAction {
-            group_number,
+        (ConferenceAction {
+            conference_number,
             peer_number,
             message_number,
             action: action.to_string(),
@@ -49,11 +49,11 @@ impl FromBytes for GroupAction {
     ));
 }
 
-impl ToBytes for GroupAction {
+impl ToBytes for ConferenceAction {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x63) >>
-            gen_be_u16!(self.group_number) >>
+            gen_be_u16!(self.conference_number) >>
             gen_be_u16!(self.peer_number) >>
             gen_be_u32!(self.message_number) >>
             gen_be_u8!(0x41) >>
@@ -62,11 +62,11 @@ impl ToBytes for GroupAction {
     }
 }
 
-impl GroupAction {
-    /// Create new GroupAction object.
-    pub fn new(group_number: u16, peer_number: u16, message_number: u32, action: String) -> Self {
-        GroupAction {
-            group_number,
+impl ConferenceAction {
+    /// Create new ConferenceAction object.
+    pub fn new(conference_number: u16, peer_number: u16, message_number: u32, action: String) -> Self {
+        ConferenceAction {
+            conference_number,
             peer_number,
             message_number,
             action,
@@ -79,15 +79,15 @@ mod tests {
     use super::*;
 
     encode_decode_test!(
-        group_action_encode_decode,
-        GroupAction::new(1, 2, 3, "1234".to_owned())
+        conference_action_encode_decode,
+        ConferenceAction::new(1, 2, 3, "1234".to_owned())
     );
 
     #[test]
-    fn group_action_from_bytes_encoding_error() {
+    fn conference_action_from_bytes_encoding_error() {
         let err_string = vec![0, 159, 146, 150]; // not UTF8 bytes.
         let mut buf = vec![0x63, 0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x41];
         buf.extend_from_slice(&err_string);
-        assert!(GroupAction::from_bytes(&buf).is_err());
+        assert!(ConferenceAction::from_bytes(&buf).is_err());
     }
 }

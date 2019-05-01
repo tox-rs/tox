@@ -5,14 +5,14 @@ use nom::be_u16;
 
 use crate::toxcore::binary_io::*;
 
-/** Query is a struct that holds info to query a peer in a group chat.
+/** Query is a struct that holds info to query a peer in a conference.
 
 Serialized form:
 
 Length    | Content
 --------- | ------
 `1`       | `0x62`
-`2`       | `group number`
+`2`       | `conference number`
 `1`       | `0x08`
 
 */
@@ -22,9 +22,9 @@ pub struct Query(u16);
 impl FromBytes for Query {
     named!(from_bytes<Query>, do_parse!(
         tag!("\x62") >>
-        group_number: be_u16 >>
+        conference_number: be_u16 >>
         tag!("\x08") >>
-        (Query(group_number))
+        (Query(conference_number))
     ));
 }
 
@@ -40,8 +40,8 @@ impl ToBytes for Query {
 
 impl Query {
     /// Create new Query object.
-    pub fn new(group_number: u16) -> Self {
-        Query(group_number)
+    pub fn new(conference_number: u16) -> Self {
+        Query(conference_number)
     }
 }
 

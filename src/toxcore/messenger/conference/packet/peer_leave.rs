@@ -5,14 +5,14 @@ use nom::be_u16;
 
 use crate::toxcore::binary_io::*;
 
-/** PeerLeave is a struct that holds info to notify a peer quit a group chat.
+/** PeerLeave is a struct that holds info to notify a peer quit a conference.
 
 Serialized form:
 
 Length    | Content
 --------- | ------
 `1`       | `0x62`
-`2`       | `group number`
+`2`       | `conference number`
 `1`       | `0x01`
 
 */
@@ -22,9 +22,9 @@ pub struct PeerLeave(u16);
 impl FromBytes for PeerLeave {
     named!(from_bytes<PeerLeave>, do_parse!(
         tag!("\x62") >>
-        group_number: be_u16 >>
+        conference_number: be_u16 >>
         tag!("\x01") >>
-        (PeerLeave(group_number))
+        (PeerLeave(conference_number))
     ));
 }
 
@@ -40,8 +40,8 @@ impl ToBytes for PeerLeave {
 
 impl PeerLeave {
     /// Create new PeerLeave object.
-    pub fn new(group_number: u16) -> Self {
-        PeerLeave(group_number)
+    pub fn new(conference_number: u16) -> Self {
+        PeerLeave(conference_number)
     }
 }
 

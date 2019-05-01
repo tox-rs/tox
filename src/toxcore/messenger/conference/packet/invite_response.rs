@@ -3,7 +3,7 @@
 
 use nom::be_u16;
 
-use super::{GroupUID, GroupType};
+use super::{ConferenceUID, ConferenceType};
 use crate::toxcore::binary_io::*;
 
 /** InviteResponse is a struct that holds info to response to invite message from a peer.
@@ -14,32 +14,32 @@ Length    | Content
 --------- | ------
 `1`       | `0x60`
 `1`       | `0x01`
-`2`       | `group number(local)`
-`2`       | `group number to join`
-`1`       | `group type`(0: text, 1: audio)
+`2`       | `conference number(local)`
+`2`       | `conference number to join`
+`1`       | `conference type`(0: text, 1: audio)
 `32`      | `unique id`
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct InviteResponse {
-    group_number_local: u16,
-    group_number_join: u16,
-    group_type: GroupType,
-    unique_id: GroupUID,
+    conference_number_local: u16,
+    conference_number_join: u16,
+    conference_type: ConferenceType,
+    unique_id: ConferenceUID,
 }
 
 impl FromBytes for InviteResponse {
     named!(from_bytes<InviteResponse>, do_parse!(
         tag!("\x60") >>
         tag!("\x01") >>
-        group_number_local: be_u16 >>
-        group_number_join: be_u16 >>
-        group_type: call!(GroupType::from_bytes) >>
-        unique_id: call!(GroupUID::from_bytes) >>
+        conference_number_local: be_u16 >>
+        conference_number_join: be_u16 >>
+        conference_type: call!(ConferenceType::from_bytes) >>
+        unique_id: call!(ConferenceUID::from_bytes) >>
         (InviteResponse {
-            group_number_local,
-            group_number_join,
-            group_type,
+            conference_number_local,
+            conference_number_join,
+            conference_type,
             unique_id,
         })
     ));
@@ -50,9 +50,9 @@ impl ToBytes for InviteResponse {
         do_gen!(buf,
             gen_be_u8!(0x60) >>
             gen_be_u8!(0x01) >>
-            gen_be_u16!(self.group_number_local) >>
-            gen_be_u16!(self.group_number_join) >>
-            gen_be_u8!(self.group_type as u8) >>
+            gen_be_u16!(self.conference_number_local) >>
+            gen_be_u16!(self.conference_number_join) >>
+            gen_be_u8!(self.conference_type as u8) >>
             gen_slice!(self.unique_id.0)
         )
     }
@@ -60,11 +60,11 @@ impl ToBytes for InviteResponse {
 
 impl InviteResponse {
     /// Create new InviteResponse object.
-    pub fn new(group_number_local: u16, group_number_join: u16, group_type: GroupType, unique_id: GroupUID) -> Self {
+    pub fn new(conference_number_local: u16, conference_number_join: u16, conference_type: ConferenceType, unique_id: ConferenceUID) -> Self {
         InviteResponse {
-            group_number_local,
-            group_number_join,
-            group_type,
+            conference_number_local,
+            conference_number_join,
+            conference_type,
             unique_id,
         }
     }
@@ -76,6 +76,6 @@ mod tests {
 
     encode_decode_test!(
         invite_response_encode_decode,
-        InviteResponse::new(1, 2, GroupType::Audio, GroupUID::random())
+        InviteResponse::new(1, 2, ConferenceType::Audio, ConferenceUID::random())
     );
 }

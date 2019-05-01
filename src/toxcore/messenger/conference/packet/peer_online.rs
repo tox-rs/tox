@@ -3,10 +3,10 @@
 
 use nom::be_u16;
 
-use super::{GroupUID, GroupType};
+use super::{ConferenceUID, ConferenceType};
 use crate::toxcore::binary_io::*;
 
-/** PeerOnline is a struct that holds info to notify adding new peer to a group chat.
+/** PeerOnline is a struct that holds info to notify adding new peer to a conference.
 
 Serialized form:
 
@@ -14,27 +14,27 @@ Length    | Content
 --------- | ------
 `1`       | `0x60`
 `1`       | `0x00`
-`2`       | `group number`
-`1`       | `group type`(0: text, 1: audio)
+`2`       | `conference number`
+`1`       | `conference type`(0: text, 1: audio)
 `32`      | `unique id`
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PeerOnline {
-    group_number: u16,
-    group_type: GroupType,
-    unique_id: GroupUID,
+    conference_number: u16,
+    conference_type: ConferenceType,
+    unique_id: ConferenceUID,
 }
 
 impl FromBytes for PeerOnline {
     named!(from_bytes<PeerOnline>, do_parse!(
         tag!("\x61") >>
-        group_number: be_u16 >>
-        group_type: call!(GroupType::from_bytes) >>
-        unique_id: call!(GroupUID::from_bytes) >>
+        conference_number: be_u16 >>
+        conference_type: call!(ConferenceType::from_bytes) >>
+        unique_id: call!(ConferenceUID::from_bytes) >>
         (PeerOnline {
-            group_number,
-            group_type,
+            conference_number,
+            conference_type,
             unique_id,
         })
     ));
@@ -44,8 +44,8 @@ impl ToBytes for PeerOnline {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x61) >>
-            gen_be_u16!(self.group_number) >>
-            gen_be_u8!(self.group_type as u8) >>
+            gen_be_u16!(self.conference_number) >>
+            gen_be_u8!(self.conference_type as u8) >>
             gen_slice!(self.unique_id.0)
         )
     }
@@ -53,10 +53,10 @@ impl ToBytes for PeerOnline {
 
 impl PeerOnline {
     /// Create new PeerOnline object.
-    pub fn new(group_number: u16, group_type: GroupType, unique_id: GroupUID) -> Self {
+    pub fn new(conference_number: u16, conference_type: ConferenceType, unique_id: ConferenceUID) -> Self {
         PeerOnline {
-            group_number,
-            group_type,
+            conference_number,
+            conference_type,
             unique_id,
         }
     }
@@ -68,6 +68,6 @@ mod tests {
 
     encode_decode_test!(
         peer_noline_encode_decode,
-        PeerOnline::new(1, GroupType::Text, GroupUID::random())
+        PeerOnline::new(1, ConferenceType::Text, ConferenceUID::random())
     );
 }

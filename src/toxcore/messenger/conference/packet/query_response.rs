@@ -8,7 +8,7 @@ use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
 
 /// Length in bytes of nickname in PeerInfo.
-const MAX_NAME_LENGTH_IN_GROUP: usize = 128;
+const MAX_NAME_LENGTH_IN_CONFERENCE: usize = 128;
 
 /** QueryResponse is a struct that holds info to response to query message from a peer.
 
@@ -17,25 +17,25 @@ Serialized form:
 Length    | Content
 --------- | ------
 `1`       | `0x62`
-`2`       | `group number`
+`2`       | `conference number`
 `1`       | `0x09`
 variable  | `peer info list`
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct QueryResponse {
-    group_number: u16,
+    conference_number: u16,
     peer_infos: Vec<PeerInfo>,
 }
 
 impl FromBytes for QueryResponse {
     named!(from_bytes<QueryResponse>, do_parse!(
         tag!("\x62") >>
-        group_number: be_u16 >>
+        conference_number: be_u16 >>
         tag!("\x09") >>
         peer_infos: many0!(PeerInfo::from_bytes) >>
         (QueryResponse {
-            group_number,
+            conference_number,
             peer_infos: peer_infos.to_vec()
         })
     ));
@@ -45,7 +45,7 @@ impl ToBytes for QueryResponse {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x62) >>
-            gen_be_u16!(self.group_number) >>
+            gen_be_u16!(self.conference_number) >>
             gen_be_u8!(0x09) >>
             gen_many_ref!(self.peer_infos.clone(), |buf, info| PeerInfo::to_bytes(info, buf))
         )
@@ -54,9 +54,9 @@ impl ToBytes for QueryResponse {
 
 impl QueryResponse {
     /// Create new QueryResponse object.
-    pub fn new(group_number: u16, peer_infos: Vec<PeerInfo>) -> Self {
+    pub fn new(conference_number: u16, peer_infos: Vec<PeerInfo>) -> Self {
         QueryResponse {
-            group_number,
+            conference_number,
             peer_infos,
         }
     }
@@ -105,7 +105,7 @@ impl ToBytes for PeerInfo {
             gen_be_u16!(self.peer_number) >>
             gen_slice!(self.real_pk.as_ref()) >>
             gen_slice!(self.temp_pk.as_ref()) >>
-            gen_cond!(self.nickname.len() > MAX_NAME_LENGTH_IN_GROUP, |buf| gen_error(buf, 0)) >>
+            gen_cond!(self.nickname.len() > MAX_NAME_LENGTH_IN_CONFERENCE, |buf| gen_error(buf, 0)) >>
             gen_be_u8!(self.nickname.len() as u8) >>
             gen_slice!(self.nickname.as_bytes())
         )
@@ -168,7 +168,7 @@ mod tests {
             temp_pk: gen_keypair().0,
             nickname: large_string,
         };
-        let mut buf = [0; MAX_NAME_LENGTH_IN_GROUP + 2 + 32 + 32+ 1]; // peer_number(2) + real_pk(32) + temp_pk(32) + length(1)
+        let mut buf = [0; MAX_NAME_LENGTH_IN_CONFERENCE + 2 + 32 + 32+ 1]; // peer_number(2) + real_pk(32) + temp_pk(32) + length(1)
         assert!(peer_info.to_bytes((&mut buf, 0)).is_err());
     }
 }
