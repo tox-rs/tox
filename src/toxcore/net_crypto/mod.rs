@@ -77,6 +77,11 @@ type UdpTx = mpsc::Sender<(Packet, SocketAddr)>;
 /// key is a DHT key.
 type DhtPkTx = mpsc::UnboundedSender<(PublicKey, PublicKey)>;
 
+/// Shorthand for the transmit half of the message channel for sending a
+/// connection status when it becomes connected or disconnected. The key is a
+/// long term key of the connection.
+type ConnectionStatusTx = mpsc::UnboundedSender<(PublicKey, bool)>;
+
 /// Shorthand for the transmit half of the message channel for sending lossless
 /// packets. The key is a long term public key of the peer that sent this
 /// packet.
@@ -124,6 +129,9 @@ pub struct NetCrypto {
     /// `CryptoConnection` then `NetCrypto` module will send message to this
     /// sink.
     dht_pk_tx: Arc<RwLock<Option<DhtPkTx>>>,
+    /// Sink to send a connection status when it becomes connected or
+    /// disconnected. The key is a long term key of the connection.
+    connection_status_tx: Arc<RwLock<Option<ConnectionStatusTx>>>,
     /// Sink to send lossless packets. The key is a long term public key of the
     /// peer that sent this packet.
     lossless_tx: LosslessTx,
@@ -159,6 +167,7 @@ impl NetCrypto {
         NetCrypto {
             udp_tx: args.udp_tx,
             dht_pk_tx: Default::default(),
+            connection_status_tx: Default::default(),
             lossless_tx: args.lossless_tx,
             lossy_tx: args.lossy_tx,
             dht_pk: args.dht_pk,
@@ -216,19 +225,36 @@ impl NetCrypto {
         }
     }
 
+    /// Send connection status to the appropriate sink when it becomes connected
+    /// or disconnected.
+    fn send_connection_status(&self, connection: &CryptoConnection, status: bool) -> impl Future<Item = (), Error = mpsc::SendError<(PublicKey, bool)>> {
+        if connection.is_established() != status {
+            if let Some(ref connection_status_tx) = *self.connection_status_tx.read() {
+                Either::A(send_to(connection_status_tx, (connection.peer_real_pk, status)))
+            } else {
+                Either::B(future::ok(()))
+            }
+        } else {
+            Either::B(future::ok(()))
+        }
+    }
+
     /// Kill a connection sending `PACKET_ID_KILL` packet and removing it from
     /// the connections list.
     pub fn kill_connection(&self, real_pk: PublicKey) -> impl Future<Item = (), Error = KillConnectionError> {
         if let Some(connection) = self.connections.write().remove(&real_pk) {
             let mut connection = connection.write();
             self.clear_keys_by_addr(&connection);
-            if connection.is_established() || connection.is_not_confirmed() {
+            let status_future = self.send_connection_status(&connection, false)
+                .map_err(|e| e.context(KillConnectionErrorKind::SendToConnectionStatus).into());
+            let kill_future = if connection.is_established() || connection.is_not_confirmed() {
                 let packet_number = connection.send_array.buffer_end;
                 Either::A(self.send_data_packet(&mut connection, vec![PACKET_ID_KILL], packet_number)
                     .map_err(|e| e.context(KillConnectionErrorKind::SendTo).into()))
             } else {
                 Either::B(future::ok(()))
-            }
+            };
+            Either::A(kill_future.join(status_future).map(|_| ()))
         } else {
             Either::B(future::err(KillConnectionErrorKind::NoConnection.into()))
         }
@@ -672,9 +698,12 @@ impl NetCrypto {
 
         if packet_id == PACKET_ID_KILL {
             // Kill the connection
+            let status_future = Box::new(self.send_connection_status(&connection, false)
+                .map_err(|e| e.context(HandlePacketErrorKind::SendToConnectionStatus).into()))
+                as Box<dyn Future<Item = _, Error = _> + Send>;
             self.connections.write().remove(&connection.peer_real_pk);
             self.clear_keys_by_addr(&connection);
-            return Box::new(future::ok(()));
+            return status_future;
         }
 
         // Update nonce if diff is big enough
@@ -682,7 +711,8 @@ impl NetCrypto {
             increment_nonce_number(&mut received_nonce, u64::from(NONCE_DIFF_THRESHOLD));
         }
 
-        // TODO: connection status notification
+        let status_future = self.send_connection_status(&connection, true)
+            .map_err(|e| e.context(HandlePacketErrorKind::SendToConnectionStatus).into());
 
         connection.status = ConnectionStatus::Established {
             sent_nonce,
@@ -725,7 +755,7 @@ impl NetCrypto {
             }
         }
 
-        result
+        Box::new(result.join(status_future).map(|_| ()))
     }
 
     /// Handle `CryptoData` packet received from UDP socket
@@ -844,6 +874,12 @@ impl NetCrypto {
                     keys_by_addr.remove(&(addr.ip(), addr.port()));
                 }
 
+                if connection.is_established() {
+                    let status_future = self.send_connection_status(&connection, false)
+                        .map_err(|e| e.context(SendDataErrorKind::SendToConnectionStatus).into());
+                    futures.push(Box::new(status_future));
+                }
+
                 if connection.is_established() || connection.is_not_confirmed() {
                     let packet_number = connection.send_array.buffer_end;
                     futures.push(Box::new(self.send_data_packet(&mut connection, vec![PACKET_ID_KILL], packet_number)));
@@ -910,6 +946,12 @@ impl NetCrypto {
     /// Set sink to send DHT `PublicKey` when it gets known.
     pub fn set_dht_pk_sink(&self, dht_pk_tx: DhtPkTx) {
         *self.dht_pk_tx.write() = Some(dht_pk_tx);
+    }
+
+    /// Set sink to send a connection status when it becomes connected or
+    /// disconnected.
+    pub fn set_connection_status_sink(&self, connection_status_tx: ConnectionStatusTx) {
+        *self.connection_status_tx.write() = Some(connection_status_tx);
     }
 }
 

@@ -83,6 +83,9 @@ error_kind! {
         #[doc = "Error indicates that sending dhtpk packet error."]
         #[fail(display = "Sending dhtpk packet error")]
         SendToDhtpk,
+        #[doc = "Error indicates that sending connection status error."]
+        #[fail(display = "Sending connection status error")]
+        SendToConnectionStatus,
         #[doc = "Error indicates that NetCrypto can't handle packet in current connection state."]
         #[fail(display = "Can't handle CookieResponse in current connection state")]
         InvalidState,
@@ -167,6 +170,9 @@ error_kind! {
         #[doc = "Error indicates that sending response packet error."]
         #[fail(display = "Sending response error")]
         SendTo,
+        #[doc = "Error indicates that sending connection status error."]
+        #[fail(display = "Sending connection status error")]
+        SendToConnectionStatus,
     }
 }
 
@@ -221,5 +227,8 @@ error_kind! {
         #[doc = "Failed to send kill packet."]
         #[fail(display = "Failed to send kill packet")]
         SendTo,
+        #[doc = "Error indicates that sending connection status error."]
+        #[fail(display = "Sending connection status error")]
+        SendToConnectionStatus,
     }
 }
