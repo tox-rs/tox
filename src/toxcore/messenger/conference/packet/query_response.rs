@@ -17,25 +17,27 @@ Serialized form:
 Length    | Content
 --------- | ------
 `1`       | `0x62`
-`2`       | `conference number`
+`2`       | `conference id`
 `1`       | `0x09`
 variable  | `peer info list`
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct QueryResponse {
-    conference_number: u16,
-    peer_infos: Vec<PeerInfo>,
+    /// Id of conference
+    pub conference_id: u16,
+    /// Infos of peer
+    pub peer_infos: Vec<PeerInfo>,
 }
 
 impl FromBytes for QueryResponse {
     named!(from_bytes<QueryResponse>, do_parse!(
         tag!("\x62") >>
-        conference_number: be_u16 >>
+        conference_id: be_u16 >>
         tag!("\x09") >>
         peer_infos: many0!(PeerInfo::from_bytes) >>
         (QueryResponse {
-            conference_number,
+            conference_id,
             peer_infos: peer_infos.to_vec()
         })
     ));
@@ -45,7 +47,7 @@ impl ToBytes for QueryResponse {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x62) >>
-            gen_be_u16!(self.conference_number) >>
+            gen_be_u16!(self.conference_id) >>
             gen_be_u8!(0x09) >>
             gen_many_ref!(self.peer_infos.clone(), |buf, info| PeerInfo::to_bytes(info, buf))
         )
@@ -54,9 +56,9 @@ impl ToBytes for QueryResponse {
 
 impl QueryResponse {
     /// Create new QueryResponse object.
-    pub fn new(conference_number: u16, peer_infos: Vec<PeerInfo>) -> Self {
+    pub fn new(conference_id: u16, peer_infos: Vec<PeerInfo>) -> Self {
         QueryResponse {
-            conference_number,
+            conference_id,
             peer_infos,
         }
     }
@@ -68,7 +70,7 @@ An entry of `peer info list` is
 
 Length    | Content
 --------- | --------------------
-`2`       | `peer number`
+`2`       | `peer id`
 `32`      | real PK
 `32`      | temp PK
 `1`       | `length` of nickname
@@ -77,7 +79,7 @@ variable  | nickname(UTF-8 String)
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PeerInfo {
-    peer_number: u16,
+    peer_id: u16,
     real_pk: PublicKey,
     temp_pk: PublicKey,
     nickname: String,
@@ -85,13 +87,13 @@ pub struct PeerInfo {
 
 impl FromBytes for PeerInfo {
     named!(from_bytes<PeerInfo>, do_parse!(
-        peer_number: be_u16 >>
+        peer_id: be_u16 >>
         real_pk: call!(PublicKey::from_bytes) >>
         temp_pk: call!(PublicKey::from_bytes) >>
         length: be_u8 >>
         nickname: map_res!(take!(length), str::from_utf8) >>
         (PeerInfo {
-            peer_number,
+            peer_id,
             real_pk,
             temp_pk,
             nickname: nickname.to_string(),
@@ -102,7 +104,7 @@ impl FromBytes for PeerInfo {
 impl ToBytes for PeerInfo {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
-            gen_be_u16!(self.peer_number) >>
+            gen_be_u16!(self.peer_id) >>
             gen_slice!(self.real_pk.as_ref()) >>
             gen_slice!(self.temp_pk.as_ref()) >>
             gen_cond!(self.nickname.len() > MAX_NAME_LENGTH_IN_CONFERENCE, |buf| gen_error(buf, 0)) >>
@@ -114,9 +116,9 @@ impl ToBytes for PeerInfo {
 
 impl PeerInfo {
     /// Create new PeerInfo object.
-    pub fn new(peer_number: u16, real_pk: PublicKey, temp_pk: PublicKey, nickname: String) -> Self {
+    pub fn new(peer_id: u16, real_pk: PublicKey, temp_pk: PublicKey, nickname: String) -> Self {
         PeerInfo {
-            peer_number,
+            peer_id,
             real_pk,
             temp_pk,
             nickname,
@@ -132,13 +134,13 @@ mod tests {
         query_response_encode_decode,
         QueryResponse::new(1, vec![
             PeerInfo {
-                peer_number: 1,
+                peer_id: 1,
                 real_pk: gen_keypair().0,
                 temp_pk: gen_keypair().0,
                 nickname: "1234".to_owned(),
             },
             PeerInfo {
-                peer_number: 2,
+                peer_id: 2,
                 real_pk: gen_keypair().0,
                 temp_pk: gen_keypair().0,
                 nickname: "56789".to_owned(),
@@ -163,12 +165,12 @@ mod tests {
     fn peer_info_to_bytes_overflow() {
         let large_string = String::from_utf8(vec![32u8; 300]).unwrap();
         let peer_info = PeerInfo {
-            peer_number: 1,
+            peer_id: 1,
             real_pk: gen_keypair().0,
             temp_pk: gen_keypair().0,
             nickname: large_string,
         };
-        let mut buf = [0; MAX_NAME_LENGTH_IN_CONFERENCE + 2 + 32 + 32+ 1]; // peer_number(2) + real_pk(32) + temp_pk(32) + length(1)
+        let mut buf = [0; MAX_NAME_LENGTH_IN_CONFERENCE + 2 + 32 + 32+ 1]; // peer_id(2) + real_pk(32) + temp_pk(32) + length(1)
         assert!(peer_info.to_bytes((&mut buf, 0)).is_err());
     }
 }

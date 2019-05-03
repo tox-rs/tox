@@ -12,19 +12,19 @@ Serialized form:
 Length    | Content
 --------- | ------
 `1`       | `0x62`
-`2`       | `conference number`
+`2`       | `conference id`
 `1`       | `0x01`
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PeerLeave(u16);
+pub struct PeerLeave(pub u16);
 
 impl FromBytes for PeerLeave {
     named!(from_bytes<PeerLeave>, do_parse!(
         tag!("\x62") >>
-        conference_number: be_u16 >>
+        conference_id: be_u16 >>
         tag!("\x01") >>
-        (PeerLeave(conference_number))
+        (PeerLeave(conference_id))
     ));
 }
 
@@ -40,8 +40,8 @@ impl ToBytes for PeerLeave {
 
 impl PeerLeave {
     /// Create new PeerLeave object.
-    pub fn new(conference_number: u16) -> Self {
-        PeerLeave(conference_number)
+    pub fn new(conference_id: u16) -> Self {
+        PeerLeave(conference_id)
     }
 }
 

@@ -12,19 +12,19 @@ Serialized form:
 Length    | Content
 --------- | ------
 `1`       | `0x62`
-`2`       | `conference number`
+`2`       | `conference id`
 `1`       | `0x08`
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Query(u16);
+pub struct Query(pub u16);
 
 impl FromBytes for Query {
     named!(from_bytes<Query>, do_parse!(
         tag!("\x62") >>
-        conference_number: be_u16 >>
+        conference_id: be_u16 >>
         tag!("\x08") >>
-        (Query(conference_number))
+        (Query(conference_id))
     ));
 }
 
@@ -40,8 +40,8 @@ impl ToBytes for Query {
 
 impl Query {
     /// Create new Query object.
-    pub fn new(conference_number: u16) -> Self {
-        Query(conference_number)
+    pub fn new(conference_id: u16) -> Self {
+        Query(conference_id)
     }
 }
 

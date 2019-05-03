@@ -37,7 +37,7 @@ use nom::be_u8;
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
 
-/// Length in bytes of conference unique bytes.
+/// Length in bytes of conference unique identifier.
 pub const CONFERENCE_UID_BYTES: usize = 32;
 
 /// Length in bytes of various names in conference.

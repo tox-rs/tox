@@ -14,27 +14,30 @@ Length    | Content
 --------- | ------
 `1`       | `0x60`
 `1`       | `0x00`
-`2`       | `conference number`
+`2`       | `conference id`
 `1`       | `conference type`(0: text, 1: audio)
 `32`      | `unique id`
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Invite {
-    conference_number: u16,
-    conference_type: ConferenceType,
-    unique_id: ConferenceUID,
+    /// Id of conference
+    pub conference_id: u16,
+    /// Type of conference
+    pub conference_type: ConferenceType,
+    /// Unique id of conference
+    pub unique_id: ConferenceUID,
 }
 
 impl FromBytes for Invite {
     named!(from_bytes<Invite>, do_parse!(
         tag!("\x60") >>
         tag!("\x00") >>
-        conference_number: be_u16 >>
+        conference_id: be_u16 >>
         conference_type: call!(ConferenceType::from_bytes) >>
         unique_id: call!(ConferenceUID::from_bytes) >>
         (Invite {
-            conference_number,
+            conference_id,
             conference_type,
             unique_id,
         })
@@ -46,7 +49,7 @@ impl ToBytes for Invite {
         do_gen!(buf,
             gen_be_u8!(0x60) >>
             gen_be_u8!(0x00) >>
-            gen_be_u16!(self.conference_number) >>
+            gen_be_u16!(self.conference_id) >>
             gen_be_u8!(self.conference_type as u8) >>
             gen_slice!(self.unique_id.0)
         )
@@ -55,9 +58,9 @@ impl ToBytes for Invite {
 
 impl Invite {
     /// Create new Invite object.
-    pub fn new(conference_number: u16, conference_type: ConferenceType, unique_id: ConferenceUID) -> Self {
+    pub fn new(conference_id: u16, conference_type: ConferenceType, unique_id: ConferenceUID) -> Self {
         Invite {
-            conference_number,
+            conference_id,
             conference_type,
             unique_id,
         }

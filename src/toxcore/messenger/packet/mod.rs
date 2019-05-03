@@ -9,9 +9,12 @@ mod offline;
 mod message;
 mod nickname;
 mod msi;
+mod file_control;
 mod typing;
 mod user_status;
+mod file_data;
 mod status_message;
+mod file_send_request;
 
 pub use self::online::*;
 pub use self::action::*;
@@ -19,9 +22,12 @@ pub use self::offline::*;
 pub use self::message::*;
 pub use self::nickname::*;
 pub use self::msi::*;
+pub use self::file_control::*;
 pub use self::typing::*;
 pub use self::user_status::*;
+pub use self::file_data::*;
 pub use self::status_message::*;
+pub use self::file_send_request::*;
 
 pub use crate::toxcore::messenger::conference::packet::Packet as ConferencePacket;
 
@@ -41,16 +47,20 @@ pub enum Packet {
     Nickname(Nickname),
     /// [`UserStatus`](./struct.UserStatus.html) structure.
     UserStatus(UserStatus),
+    /// [`FileControl`](./struct.FileControl.html) structure.
+    FileControl(FileControl),
     /// [`Typing`](./struct.Typing.html) structure.
     Typing(Typing),
+    /// [`FileData`](./struct.FileData.html) structure.
+    FileData(FileData),
+    /// [`FileSendRequest`](./struct.FileSendRequest.html) structure.
+    FileSendRequest(FileSendRequest),
     /// [`StatusMessage`](./struct.StatusMessage.html) structure.
     StatusMessage(StatusMessage),
     /// [`Msi`](./struct.Msi.html) structure.
     Msi(Msi),
     /// Packets of conference.
     Conference(ConferencePacket),
-    /// Packets of file transfer.
-    FileTransfer(FileTransferPacket),
 }
 
 impl ToBytes for Packet {
@@ -62,8 +72,11 @@ impl ToBytes for Packet {
             Packet::Message(ref p) => p.to_bytes(buf),
             Packet::Nickname(ref p) => p.to_bytes(buf),
             Packet::UserStatus(ref p) => p.to_bytes(buf),
+            Packet::FileControl(ref p) => p.to_bytes(buf),
             Packet::Typing(ref p) => p.to_bytes(buf),
+            Packet::FileData(ref p) => p.to_bytes(buf),
             Packet::Msi(ref p) => p.to_bytes(buf),
+            Packet::FileSendRequest(ref p) => p.to_bytes(buf),
             Packet::StatusMessage(ref p) => p.to_bytes(buf),
             Packet::Conference(ref p) => p.to_bytes(buf),
         }
@@ -78,6 +91,9 @@ impl FromBytes for Packet {
         map!(Nickname::from_bytes, Packet::Nickname) |
         map!(Message::from_bytes, Packet::Message) |
         map!(UserStatus::from_bytes, Packet::UserStatus) |
+        map!(FileControl::from_bytes, Packet::FileControl) |
+        map!(FileData::from_bytes, Packet::FileData) |
+        map!(FileSendRequest::from_bytes, Packet::FileSendRequest) |
         map!(Msi::from_bytes, Packet::Msi) |
         map!(StatusMessage::from_bytes, Packet::StatusMessage) |
         map!(Typing::from_bytes, Packet::Typing) |
@@ -121,8 +137,18 @@ mod tests {
     );
 
     encode_decode_test!(
+        packet_file_control_encode_decode,
+        Packet::FileControl(FileControl::new(TransferDirection::Send, 1, ControlType::Seek(100)))
+    );
+
+    encode_decode_test!(
         packet_typing_encode_decode,
         Packet::Typing(Typing::new(TypingStatus::NotTyping))
+    );
+
+    encode_decode_test!(
+        packet_file_data_encode_decode,
+        Packet::FileData(FileData::new(1, vec![1,2,3,4]))
     );
 
     encode_decode_test!(
@@ -136,7 +162,12 @@ mod tests {
     );
 
     encode_decode_test!(
-        packet_conference_request_encode_decode,
+        packet_file_send_request_encode_decode,
+        Packet::FileSendRequest(FileSendRequest::new(1, FileType::Avatar, 4, FileUID::new(), "data".to_string()))
+    );
+
+    encode_decode_test!(
+        packet_conference_encode_decode,
         Packet::Conference(ConferencePacket::Invite(Invite::new(1, ConferenceType::Text, ConferenceUID::random())))
     );
 }

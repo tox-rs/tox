@@ -14,31 +14,35 @@ Length    | Content
 --------- | ------
 `1`       | `0x60`
 `1`       | `0x01`
-`2`       | `conference number(local)`
-`2`       | `conference number to join`
+`2`       | `conference id(local)`
+`2`       | `conference id to join`
 `1`       | `conference type`(0: text, 1: audio)
 `32`      | `unique id`
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct InviteResponse {
-    conference_number_local: u16,
-    conference_number_join: u16,
-    conference_type: ConferenceType,
-    unique_id: ConferenceUID,
+    /// Local conference id
+    pub conference_id_local: u16,
+    /// Conference id to join
+    pub conference_id_join: u16,
+    /// Type of conference
+    pub conference_type: ConferenceType,
+    /// Unique id of conference
+    pub unique_id: ConferenceUID,
 }
 
 impl FromBytes for InviteResponse {
     named!(from_bytes<InviteResponse>, do_parse!(
         tag!("\x60") >>
         tag!("\x01") >>
-        conference_number_local: be_u16 >>
-        conference_number_join: be_u16 >>
+        conference_id_local: be_u16 >>
+        conference_id_join: be_u16 >>
         conference_type: call!(ConferenceType::from_bytes) >>
         unique_id: call!(ConferenceUID::from_bytes) >>
         (InviteResponse {
-            conference_number_local,
-            conference_number_join,
+            conference_id_local,
+            conference_id_join,
             conference_type,
             unique_id,
         })
@@ -50,8 +54,8 @@ impl ToBytes for InviteResponse {
         do_gen!(buf,
             gen_be_u8!(0x60) >>
             gen_be_u8!(0x01) >>
-            gen_be_u16!(self.conference_number_local) >>
-            gen_be_u16!(self.conference_number_join) >>
+            gen_be_u16!(self.conference_id_local) >>
+            gen_be_u16!(self.conference_id_join) >>
             gen_be_u8!(self.conference_type as u8) >>
             gen_slice!(self.unique_id.0)
         )
@@ -60,10 +64,10 @@ impl ToBytes for InviteResponse {
 
 impl InviteResponse {
     /// Create new InviteResponse object.
-    pub fn new(conference_number_local: u16, conference_number_join: u16, conference_type: ConferenceType, unique_id: ConferenceUID) -> Self {
+    pub fn new(conference_id_local: u16, conference_id_join: u16, conference_type: ConferenceType, unique_id: ConferenceUID) -> Self {
         InviteResponse {
-            conference_number_local,
-            conference_number_join,
+            conference_id_local,
+            conference_id_join,
             conference_type,
             unique_id,
         }
