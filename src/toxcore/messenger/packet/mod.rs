@@ -29,6 +29,8 @@ pub use self::file_data::*;
 pub use self::status_message::*;
 pub use self::file_send_request::*;
 
+pub use crate::toxcore::messenger::conference::packet::Packet as ConferencePacket;
+
 /** Messenger packet enum that encapsulates all types of Messenger packets.
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -57,6 +59,8 @@ pub enum Packet {
     StatusMessage(StatusMessage),
     /// [`Msi`](./struct.Msi.html) structure.
     Msi(Msi),
+    /// Packets of conference.
+    Conference(ConferencePacket),
 }
 
 impl ToBytes for Packet {
@@ -74,6 +78,7 @@ impl ToBytes for Packet {
             Packet::Msi(ref p) => p.to_bytes(buf),
             Packet::FileSendRequest(ref p) => p.to_bytes(buf),
             Packet::StatusMessage(ref p) => p.to_bytes(buf),
+            Packet::Conference(ref p) => p.to_bytes(buf),
         }
     }
 }
@@ -91,13 +96,15 @@ impl FromBytes for Packet {
         map!(FileSendRequest::from_bytes, Packet::FileSendRequest) |
         map!(Msi::from_bytes, Packet::Msi) |
         map!(StatusMessage::from_bytes, Packet::StatusMessage) |
-        map!(Typing::from_bytes, Packet::Typing)
+        map!(Typing::from_bytes, Packet::Typing) |
+        map!(ConferencePacket::from_bytes, Packet::Conference)
     ));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::toxcore::messenger::conference::packet::{ConferenceType, ConferenceUID, Invite};
 
     encode_decode_test!(
         packet_online_encode_decode,
@@ -157,5 +164,10 @@ mod tests {
     encode_decode_test!(
         packet_file_send_request_encode_decode,
         Packet::FileSendRequest(FileSendRequest::new(1, FileType::Avatar, 4, FileUID::new(), "data".to_string()))
+    );
+
+    encode_decode_test!(
+        packet_conference_encode_decode,
+        Packet::Conference(ConferencePacket::Invite(Invite::new(1, ConferenceType::Text, ConferenceUID::random())))
     );
 }

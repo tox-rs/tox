@@ -69,7 +69,6 @@ mod tests {
         }
     );
 
-    // Test for encoding error of from_bytes.
     #[test]
     fn friend_request_from_bytes_encoding_error() {
         let err_string = vec![0, 159, 146, 150]; // not UTF8 bytes.
@@ -81,7 +80,6 @@ mod tests {
         assert!(FriendRequest::from_bytes(&friend_req).is_err());
     }
 
-    // Test for overflow of from_bytes.
     #[test]
     fn friend_request_from_bytes_overflow() {
         let large_string = vec![32; MAX_FRIEND_REQUEST_MSG_SIZE + 1];
@@ -93,7 +91,6 @@ mod tests {
         assert!(FriendRequest::from_bytes(&friend_req).is_err());
     }
 
-    // Test for overflow of to_bytes.
     #[test]
     fn friend_request_to_bytes_overflow() {
         let large_string = String::from_utf8(vec![32u8; MAX_FRIEND_REQUEST_MSG_SIZE + 1]).unwrap();

@@ -1,4 +1,4 @@
-/*! Invite message struct.
+/*! Peer online message struct.
 */
 
 use nom::be_u16;
@@ -6,7 +6,7 @@ use nom::be_u16;
 use super::{ConferenceUID, ConferenceType};
 use crate::toxcore::binary_io::*;
 
-/** Invite is a struct that holds info to invite a peer to a conference.
+/** PeerOnline is a struct that holds info to notify adding new peer to a conference.
 
 Serialized form:
 
@@ -20,7 +20,7 @@ Length    | Content
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Invite {
+pub struct PeerOnline {
     /// Id of conference
     pub conference_id: u16,
     /// Type of conference
@@ -29,14 +29,13 @@ pub struct Invite {
     pub unique_id: ConferenceUID,
 }
 
-impl FromBytes for Invite {
-    named!(from_bytes<Invite>, do_parse!(
-        tag!("\x60") >>
-        tag!("\x00") >>
+impl FromBytes for PeerOnline {
+    named!(from_bytes<PeerOnline>, do_parse!(
+        tag!("\x61") >>
         conference_id: be_u16 >>
         conference_type: call!(ConferenceType::from_bytes) >>
         unique_id: call!(ConferenceUID::from_bytes) >>
-        (Invite {
+        (PeerOnline {
             conference_id,
             conference_type,
             unique_id,
@@ -44,11 +43,10 @@ impl FromBytes for Invite {
     ));
 }
 
-impl ToBytes for Invite {
+impl ToBytes for PeerOnline {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
-            gen_be_u8!(0x60) >>
-            gen_be_u8!(0x00) >>
+            gen_be_u8!(0x61) >>
             gen_be_u16!(self.conference_id) >>
             gen_be_u8!(self.conference_type as u8) >>
             gen_slice!(self.unique_id.0)
@@ -56,10 +54,10 @@ impl ToBytes for Invite {
     }
 }
 
-impl Invite {
-    /// Create new Invite object.
+impl PeerOnline {
+    /// Create new PeerOnline object.
     pub fn new(conference_id: u16, conference_type: ConferenceType, unique_id: ConferenceUID) -> Self {
-        Invite {
+        PeerOnline {
             conference_id,
             conference_type,
             unique_id,
@@ -72,7 +70,7 @@ mod tests {
     use super::*;
 
     encode_decode_test!(
-        invite_encode_decode,
-        Invite::new(1, ConferenceType::Text, ConferenceUID::random())
+        peer_noline_encode_decode,
+        PeerOnline::new(1, ConferenceType::Text, ConferenceUID::random())
     );
 }

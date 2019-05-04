@@ -1,4 +1,4 @@
-/*! Conference Packets
+/*! The implementation of conference
 */
 
 pub mod packet;
