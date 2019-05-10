@@ -2,66 +2,7 @@
 It is used to control transferring file to a friend.
 */
 
-use nom::{le_u8, be_u64};
-
-use crate::toxcore::binary_io::*;
-
-/// Whether I am a sender or receiver of file data packet
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum TransferDirection {
-    /// I am a sender
-    Send = 0,
-    /// I am a receiver
-    Receive
-}
-
-impl FromBytes for TransferDirection {
-    named!(from_bytes<TransferDirection>,
-        switch!(le_u8,
-            0 => value!(TransferDirection::Send) |
-            1 => value!(TransferDirection::Receive)
-        )
-    );
-}
-
-/// Control types for transferring file data
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ControlType {
-    /// Accept a request of transferring file from a peer
-    Accept,
-    /// Pause transferring
-    Pause ,
-    /// Stop transferring and quit session
-    Kill,
-    /// Seek to position of file stream and holds seek parameter
-    Seek(u64)
-}
-
-impl ToBytes for ControlType {
-    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        match self {
-            ControlType::Accept => do_gen!(buf, gen_be_u8!(0x00)),
-            ControlType::Pause => do_gen!(buf, gen_be_u8!(0x01)),
-            ControlType::Kill => do_gen!(buf, gen_be_u8!(0x02)),
-            ControlType::Seek(seek_param) => do_gen!(buf,
-                gen_be_u8!(0x03) >>
-                gen_be_u64!(*seek_param))
-        }
-    }
-}
-
-impl FromBytes for ControlType {
-    named!(from_bytes<ControlType>,
-        switch!(le_u8,
-            0 => value!(ControlType::Accept) |
-            1 => value!(ControlType::Pause) |
-            2 => value!(ControlType::Kill) |
-            3 => do_parse!(
-                seek_param: be_u64 >>
-                (ControlType::Seek(seek_param)))
-        )
-    );
-}
+use super::*;
 
 /** FileControl is a struct that holds info to handle transferring file to a friend.
 

@@ -2,12 +2,9 @@
 It is used to transfer chunk of file data to a friend.
 */
 
-use nom::{le_u8, rest, AsBytes};
+use nom::{rest, AsBytes};
 
-use crate::toxcore::binary_io::*;
-
-/// Maximum size in bytes of chunk of file data
-const MAX_FILE_DATA_SIZE: usize = 1371;
+use super::*;
 
 /** FileData is a struct that holds chunk of data of a file to transfer to a friend.
 
