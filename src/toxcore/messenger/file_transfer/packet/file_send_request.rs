@@ -2,63 +2,11 @@
 It is used to start transferring file to a friend.
 */
 
-use nom::{rest, le_u8, be_u32, be_u64};
+use nom::rest;
 
 use std::str;
 
-use crate::toxcore::binary_io::*;
-use crate::toxcore::crypto_core::*;
-
-/// Type of file to transfer
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum FileType {
-    /// Normal data file.
-    Data = 0,
-    /// Avatar image file.
-    Avatar,
-}
-
-/// Maximum file name size in bytes
-const MAX_FILESEND_FILENAME_LENGTH: usize = 255;
-
-impl FromBytes for FileType {
-    named!(from_bytes<FileType>,
-        switch!(be_u32,
-            0 => value!(FileType::Data) |
-            1 => value!(FileType::Avatar)
-        )
-    );
-}
-
-const FILE_UID_BYTES: usize = 32;
-
-/// A type for random 32 bytes which is used as file unique id.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct FileUID([u8; FILE_UID_BYTES]);
-
-impl FileUID {
-    /// Create new object
-    pub fn new() -> FileUID {
-        let mut array = [0; FILE_UID_BYTES];
-        randombytes_into(&mut array);
-        FileUID(array)
-    }
-
-    fn from_slice(bs: &[u8]) -> Option<FileUID> {
-        if bs.len() != FILE_UID_BYTES {
-            return None
-        }
-        let mut n = FileUID([0; FILE_UID_BYTES]);
-        for (ni, &bsi) in n.0.iter_mut().zip(bs.iter()) {
-            *ni = bsi
-        }
-        Some(n)
-    }
-}
-
-impl FromBytes for FileUID {
-    named!(from_bytes<FileUID>, map_opt!(take!(FILE_UID_BYTES), FileUID::from_slice));
-}
+use super::*;
 
 /** FileSendRequest is a struct that holds info to start transferring file to a friend.
 
