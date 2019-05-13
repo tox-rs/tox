@@ -174,8 +174,6 @@ pub enum ConnectionStatus {
         sent_nonce: Nonce,
         /// Nonce that should be used to decrypt incoming packets
         received_nonce: Nonce,
-        /// `PublicKey` of the other side for this session
-        peer_session_pk: PublicKey,
         /// `PrecomputedKey` for this session that is used to encrypt and
         /// decrypt data packets
         session_precomputed_key: PrecomputedKey,
@@ -189,8 +187,6 @@ pub enum ConnectionStatus {
         sent_nonce: Nonce,
         /// Nonce that should be used to decrypt incoming packets
         received_nonce: Nonce,
-        /// `PublicKey` of the other side for this session
-        peer_session_pk: PublicKey,
         /// `PrecomputedKey` for this session that is used to encrypt and
         /// decrypt data packets
         session_precomputed_key: PrecomputedKey,
@@ -401,7 +397,6 @@ impl CryptoConnection {
         let status = ConnectionStatus::NotConfirmed {
             sent_nonce,
             received_nonce,
-            peer_session_pk,
             session_precomputed_key: precompute(&peer_session_pk, &session_sk),
             packet: StatusPacket::new_crypto_handshake(handshake)
         };
@@ -771,28 +766,20 @@ mod tests {
         let connection_c = connection.clone();
         assert_eq!(connection_c, connection);
 
-        let (peer_session_pk, _peer_session_sk) = gen_keypair();
-        let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::NotConfirmed {
             sent_nonce: gen_nonce(),
             received_nonce: gen_nonce(),
-            peer_session_pk,
-            session_precomputed_key,
+            session_precomputed_key: precompute(&gen_keypair().0, &gen_keypair().1),
             packet: StatusPacket::new_crypto_handshake(crypto_handshake),
         };
 
         let connection_c = connection.clone();
         assert_eq!(connection_c, connection);
 
-        let (peer_session_pk, _peer_session_sk) = gen_keypair();
-        let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce: gen_nonce(),
-            peer_session_pk,
-            session_precomputed_key,
+            session_precomputed_key: precompute(&gen_keypair().0, &gen_keypair().1),
         };
 
         let connection_c = connection.clone();
@@ -871,7 +858,6 @@ mod tests {
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce: gen_nonce(),
-            peer_session_pk: gen_keypair().0,
             session_precomputed_key: precompute(&gen_keypair().0, &gen_keypair().1),
         };
 
@@ -900,7 +886,6 @@ mod tests {
         connection.status = ConnectionStatus::NotConfirmed {
             sent_nonce: gen_nonce(),
             received_nonce: gen_nonce(),
-            peer_session_pk: gen_keypair().0,
             session_precomputed_key: precompute(&gen_keypair().0, &gen_keypair().1),
             packet: StatusPacket::new_crypto_handshake(crypto_handshake),
         };

@@ -450,7 +450,6 @@ impl NetCrypto {
                 ConnectionStatus::NotConfirmed {
                     sent_nonce,
                     received_nonce: payload.base_nonce,
-                    peer_session_pk: payload.session_pk,
                     session_precomputed_key: precompute(&payload.session_pk, &connection.session_sk),
                     packet: StatusPacket::new_crypto_handshake(handshake)
                 }
@@ -459,7 +458,6 @@ impl NetCrypto {
             | ConnectionStatus::NotConfirmed { sent_nonce, ref packet, .. } => ConnectionStatus::NotConfirmed {
                 sent_nonce,
                 received_nonce: payload.base_nonce,
-                peer_session_pk: payload.session_pk,
                 session_precomputed_key: precompute(&payload.session_pk, &connection.session_sk),
                 packet: packet.clone()
             },
@@ -636,10 +634,10 @@ impl NetCrypto {
     */
     fn handle_crypto_data(&self, connection: &mut CryptoConnection, packet: &CryptoData, udp: bool)
         -> impl Future<Item = (), Error = HandlePacketError> + Send {
-        let (sent_nonce, mut received_nonce, peer_session_pk, session_precomputed_key) = match connection.status {
-            ConnectionStatus::NotConfirmed { sent_nonce, received_nonce, peer_session_pk, ref session_precomputed_key, .. }
-            | ConnectionStatus::Established { sent_nonce, received_nonce, peer_session_pk, ref session_precomputed_key } => {
-                (sent_nonce, received_nonce, peer_session_pk, session_precomputed_key.clone())
+        let (sent_nonce, mut received_nonce, session_precomputed_key) = match connection.status {
+            ConnectionStatus::NotConfirmed { sent_nonce, received_nonce, ref session_precomputed_key, .. }
+            | ConnectionStatus::Established { sent_nonce, received_nonce, ref session_precomputed_key } => {
+                (sent_nonce, received_nonce, session_precomputed_key.clone())
             },
             _ => {
                 return Box::new(future::err(HandlePacketError::from(HandlePacketErrorKind::CannotHandleCryptoData)))
@@ -688,7 +686,6 @@ impl NetCrypto {
         connection.status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
-            peer_session_pk,
             session_precomputed_key
         };
 
@@ -1417,10 +1414,7 @@ mod tests {
         net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).wait().unwrap();
 
         let received_nonce = unpack!(connection.status, ConnectionStatus::NotConfirmed, received_nonce);
-        let peer_session_pk = unpack!(connection.status, ConnectionStatus::NotConfirmed, peer_session_pk);
-
         assert_eq!(received_nonce, base_nonce);
-        assert_eq!(peer_session_pk, session_pk);
 
         let packet = unpack!(connection.status, ConnectionStatus::NotConfirmed, packet);
         let packet = unpack!(packet.dht_packet(), Packet::CryptoHandshake);
@@ -1486,12 +1480,9 @@ mod tests {
 
         net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).wait().unwrap();
 
-        // Nonce and session pk should be taken from the packet
+        // Nonce should be taken from the packet
         let received_nonce = unpack!(connection.status, ConnectionStatus::NotConfirmed, received_nonce);
-        let peer_session_pk = unpack!(connection.status, ConnectionStatus::NotConfirmed, peer_session_pk);
-
         assert_eq!(received_nonce, base_nonce);
-        assert_eq!(peer_session_pk, session_pk);
 
         // cookie should not be updated
         let packet = unpack!(connection.status, ConnectionStatus::NotConfirmed, packet);
@@ -1534,7 +1525,6 @@ mod tests {
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce: gen_nonce(),
-            peer_session_pk,
             session_precomputed_key,
         };
 
@@ -1816,10 +1806,7 @@ mod tests {
         let connection = connections.get(&peer_real_pk).unwrap().read().clone();
 
         let received_nonce = unpack!(connection.status, ConnectionStatus::NotConfirmed, received_nonce);
-        let peer_session_pk = unpack!(connection.status, ConnectionStatus::NotConfirmed, peer_session_pk);
-
         assert_eq!(received_nonce, base_nonce);
-        assert_eq!(peer_session_pk, session_pk);
 
         let packet = unpack!(connection.status, ConnectionStatus::NotConfirmed, packet);
         let packet = unpack!(packet.dht_packet(), Packet::CryptoHandshake);
@@ -1882,10 +1869,7 @@ mod tests {
         assert_eq!(connection.get_udp_addr_v4(), Some(addr));
 
         let received_nonce = unpack!(connection.status, ConnectionStatus::NotConfirmed, received_nonce);
-        let peer_session_pk = unpack!(connection.status, ConnectionStatus::NotConfirmed, peer_session_pk);
-
         assert_eq!(received_nonce, base_nonce);
-        assert_eq!(peer_session_pk, session_pk);
 
         let packet = unpack!(connection.status, ConnectionStatus::NotConfirmed, packet);
         let packet = unpack!(packet.dht_packet(), Packet::CryptoHandshake);
@@ -1976,7 +1960,6 @@ mod tests {
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce,
-            peer_session_pk,
             session_precomputed_key: session_precomputed_key.clone(),
         };
 
@@ -2037,7 +2020,6 @@ mod tests {
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce,
-            peer_session_pk,
             session_precomputed_key: session_precomputed_key.clone(),
         };
 
@@ -2115,7 +2097,6 @@ mod tests {
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce,
-            peer_session_pk,
             session_precomputed_key: session_precomputed_key.clone(),
         };
 
@@ -2187,7 +2168,6 @@ mod tests {
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce,
-            peer_session_pk,
             session_precomputed_key: session_precomputed_key.clone(),
         };
 
@@ -2243,7 +2223,6 @@ mod tests {
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce,
-            peer_session_pk,
             session_precomputed_key: session_precomputed_key.clone(),
         };
 
@@ -2333,7 +2312,6 @@ mod tests {
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce,
-            peer_session_pk,
             session_precomputed_key: session_precomputed_key.clone(),
         };
 
@@ -2392,7 +2370,6 @@ mod tests {
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce,
-            peer_session_pk,
             session_precomputed_key: session_precomputed_key.clone(),
         };
 
@@ -2469,7 +2446,6 @@ mod tests {
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce,
-            peer_session_pk,
             session_precomputed_key: session_precomputed_key.clone(),
         };
 
@@ -2539,7 +2515,6 @@ mod tests {
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce,
-            peer_session_pk,
             session_precomputed_key: session_precomputed_key.clone(),
         };
 
@@ -2592,7 +2567,6 @@ mod tests {
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce,
-            peer_session_pk,
             session_precomputed_key: session_precomputed_key.clone(),
         };
 
@@ -2648,7 +2622,6 @@ mod tests {
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce,
-            peer_session_pk,
             session_precomputed_key: session_precomputed_key.clone(),
         };
 
@@ -2746,7 +2719,6 @@ mod tests {
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce,
-            peer_session_pk,
             session_precomputed_key: session_precomputed_key.clone(),
         };
 
@@ -3128,7 +3100,6 @@ mod tests {
         connection.status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
-            peer_session_pk,
             session_precomputed_key: session_precomputed_key.clone(),
         };
 
@@ -3186,7 +3157,6 @@ mod tests {
         connection.status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
-            peer_session_pk,
             session_precomputed_key: session_precomputed_key.clone(),
         };
 
@@ -3253,7 +3223,6 @@ mod tests {
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce,
-            peer_session_pk,
             session_precomputed_key,
         };
 
@@ -3303,7 +3272,6 @@ mod tests {
         connection.status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
-            peer_session_pk,
             session_precomputed_key: session_precomputed_key.clone(),
         };
 
@@ -3366,7 +3334,6 @@ mod tests {
         connection.status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
-            peer_session_pk,
             session_precomputed_key: session_precomputed_key.clone(),
         };
 
@@ -3439,7 +3406,6 @@ mod tests {
         connection.status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
-            peer_session_pk,
             session_precomputed_key: session_precomputed_key.clone(),
         };
 
@@ -3496,7 +3462,6 @@ mod tests {
         connection.status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
-            peer_session_pk,
             session_precomputed_key,
         };
 
@@ -3576,7 +3541,6 @@ mod tests {
         connection.status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
-            peer_session_pk,
             session_precomputed_key: session_precomputed_key.clone(),
         };
 
@@ -3884,7 +3848,6 @@ mod tests {
         connection.status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
-            peer_session_pk,
             session_precomputed_key: session_precomputed_key.clone(),
         };
 
