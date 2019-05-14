@@ -35,6 +35,7 @@ futures = "0.1"
 log = "0.4"
 sodiumoxide = { git = "https://github.com/sodiumoxide/sodiumoxide.git", rev = "baf88e5" }
 nom = "3.2"
+nom5 = { package = "nom", git =  "https://github.com/Geal/nom.git" }
 cookie-factory = "0.2"
 get_if_addrs = "0.5"
 parking_lot = "0.7"

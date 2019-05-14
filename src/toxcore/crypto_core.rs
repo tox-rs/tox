@@ -5,6 +5,12 @@ pub use sodiumoxide::crypto::box_::*;
 pub use sodiumoxide::crypto::hash::{sha256, sha512};
 pub use sodiumoxide::crypto::secretbox;
 
+use nom5::{
+    combinator::map_opt,
+    bytes::complete::take,
+    error::ParseError
+};
+
 use byteorder::{ByteOrder, LittleEndian, NativeEndian};
 
 use crate::toxcore::binary_io::*;
@@ -190,6 +196,12 @@ impl FromBytes for PublicKey {
     named!(from_bytes<PublicKey>, map_opt!(take!(PUBLICKEYBYTES), PublicKey::from_slice));
 }
 
+impl FromBytes5 for PublicKey {
+    fn from_bytes5<'a, E: ParseError<&'a [u8]>>(i: &'a [u8]) ->IResult5<&'a [u8], PublicKey, E> {
+        map_opt(take(PUBLICKEYBYTES), PublicKey::from_slice)(i)
+    }
+}
+
 /* TODO
 Use the following implementation when https://github.com/TokTok/c-toxcore/issues/1169 is fixed.
 And when most of tox network will send valid PK for fake friends.
@@ -209,6 +221,13 @@ impl FromBytes for SecretKey {
 impl FromBytes for Nonce {
     named!(from_bytes<Nonce>, map_opt!(take!(NONCEBYTES), Nonce::from_slice));
 }
+
+impl FromBytes5 for Nonce {
+    fn from_bytes5<'a, E: ParseError<&'a [u8]>>(i: &'a [u8]) ->IResult5<&'a [u8], Nonce, E> {
+        map_opt(take(NONCEBYTES), Nonce::from_slice)(i)
+    }
+}
+
 
 impl FromBytes for secretbox::Nonce {
     named!(from_bytes<secretbox::Nonce>, map_opt!(take!(secretbox::NONCEBYTES), secretbox::Nonce::from_slice));

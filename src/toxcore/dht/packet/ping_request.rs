@@ -3,6 +3,14 @@
 
 use nom::{be_u64, rest};
 
+use nom5::{IResult, Needed, Err,
+    bytes::complete::tag,
+    number::complete::be_u64 as be_u64_5,
+    sequence::{delimited, tuple},
+    combinator::{map, rest as rest_5},
+    error::ParseError
+};
+
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
 use crate::toxcore::dht::codec::*;
@@ -37,6 +45,16 @@ pub struct PingRequest {
     pub payload: Vec<u8>,
 }
 
+impl FromBytes for PingRequest {
+    named!(from_bytes<PingRequest>, do_parse!(
+        tag!("\x00") >>
+        pk: call!(PublicKey::from_bytes) >>
+        nonce: call!(Nonce::from_bytes) >>
+        payload: map!(rest, |bytes| bytes.to_vec() ) >>
+        (PingRequest { pk, nonce, payload })
+    ));
+}
+
 impl ToBytes for PingRequest {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
@@ -48,14 +66,15 @@ impl ToBytes for PingRequest {
     }
 }
 
-impl FromBytes for PingRequest {
-    named!(from_bytes<PingRequest>, do_parse!(
-        tag!("\x00") >>
-        pk: call!(PublicKey::from_bytes) >>
-        nonce: call!(Nonce::from_bytes) >>
-        payload: map!(rest, |bytes| bytes.to_vec() ) >>
-        (PingRequest { pk, nonce, payload })
-    ));
+impl FromBytes5 for PingRequest {
+    fn from_bytes5<'a, E: ParseError<&'a [u8]>>(i: &'a [u8]) ->IResult<&'a [u8], PingRequest, E> {
+        map(tuple((
+            tag("\x00"),
+            PublicKey::from_bytes5,
+            Nonce::from_bytes5,
+            map(rest_5, |bytes: &[u8]| bytes.to_vec()),
+        )), |(_, pk, nonce, payload)| PingRequest { pk, nonce, payload })(i)
+    }
 }
 
 impl PingRequest {
@@ -72,6 +91,7 @@ impl PingRequest {
             payload,
         }
     }
+
     /** Decrypt payload and try to parse it as `PingRequestPayload`.
 
     Returns `Error` in case of failure:
@@ -88,16 +108,22 @@ impl PingRequest {
                 GetPayloadError::decrypt()
             })?;
 
-        match PingRequestPayload::from_bytes(&decrypted) {
-            IResult::Incomplete(needed) => {
+        match PingRequestPayload::from_bytes5(&decrypted) {
+            Err(Err::Incomplete(Needed::Size(needed))) => {
                 debug!(target: "PingRequest", "PingRequestPayload deserialize error: {:?}", needed);
-                Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
+                Err(GetPayloadError::incomplete(nom::Needed::Size(needed), self.payload.to_vec()))
             },
-            IResult::Error(error) => {
+            Err(Err::Incomplete(needed)) => {
+                debug!(target: "PingRequest", "PingRequestPayload deserialize error: {:?}", needed);
+                Err(GetPayloadError::incomplete(nom::Needed::Unknown, self.payload.to_vec()))
+            },
+            Err(Err::Error(error)) => {
+                let (_, kind) = error;
                 debug!(target: "PingRequest", "PingRequestPayload deserialize error: {:?}", error);
-                Err(GetPayloadError::deserialize(error, self.payload.to_vec()))
+                Err(GetPayloadError::deserialize5(kind, self.payload.to_vec()))
             },
-            IResult::Done(_, payload) => {
+            Err(Err::Failure(e)) => panic!("PingRequestPayload deserialize failed with unrecoverable error: {:?}", e),
+            Ok((_, payload)) => {
                 Ok(payload)
             }
         }
@@ -141,6 +167,12 @@ impl FromBytes for PingRequestPayload {
     ));
 }
 
+impl FromBytes5 for PingRequestPayload {
+    fn from_bytes5<'a, E: ParseError<&'a [u8]>>(i: &'a [u8]) ->IResult<&'a [u8], PingRequestPayload, E> {
+        PingRequestPayload::parse(i)
+    }
+}
+
 impl ToBytes for PingRequestPayload {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
@@ -150,12 +182,31 @@ impl ToBytes for PingRequestPayload {
     }
 }
 
+impl PingRequestPayload {
+    // Root parser for PingRequest object
+    fn parse<'a, E: ParseError<&'a [u8]>>(i: &'a [u8]) ->IResult<&'a [u8], PingRequestPayload, E> {
+        let ping_request_payload =
+            map(be_u64_5,
+                |id| PingRequestPayload {
+                    id,
+                });
+        let root =
+            delimited(
+                tag("\x00"),
+                ping_request_payload,
+                tag(b"")
+            );
+
+        root(i)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::toxcore::dht::packet::ping_request::*;
     use crate::toxcore::dht::packet::Packet;
 
-    encode_decode_test!(
+    encode_decode_test5!(
         ping_request_payload_encode_decode,
         PingRequestPayload { id: 42 }
     );

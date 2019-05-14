@@ -2,6 +2,10 @@
 */
 
 pub use nom::IResult;
+pub use nom5::{
+    IResult as IResult5,
+    error::ParseError
+};
 pub use cookie_factory::GenError;
 
 use nom::{le_u8, le_u16};
@@ -21,6 +25,12 @@ pub trait FromBytes : Sized {
 pub trait ToBytes : Sized {
     /// Serialize struct into raw bytes using `cookie_factory`
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError>;
+}
+
+/// The trait provides method to deserialize struct from raw bytes
+pub trait FromBytes5 : Sized {
+    /// Deserialize struct using `nom` from raw bytes
+    fn from_bytes5<'a, E: ParseError<&'a [u8]>>(i: &'a [u8]) -> IResult5<&'a [u8], Self, E>;
 }
 
 impl ToBytes for IpAddr {
@@ -106,6 +116,26 @@ macro_rules! encode_decode_test (
             let (_, size) = value.to_bytes((&mut buf, 0)).unwrap();
             assert!(size <= 1024 * 1024);
             let (rest, decoded_value) = FromBytes::from_bytes(&buf[..size]).unwrap();
+            // this helps compiler to infer type of decoded_value
+            // i.e. it means that decoded_value has the same type as value
+            fn infer<T>(_: &T, _: &T) { }
+            infer(&decoded_value, &value);
+            assert!(rest.is_empty());
+            assert_eq!(decoded_value, value);
+        }
+    )
+);
+
+#[cfg(test)]
+macro_rules! encode_decode_test5 (
+    ($test:ident, $value:expr) => (
+        #[test]
+        fn $test() {
+            let value = $value;
+            let mut buf = [0; 1024 * 1024];
+            let (_, size) = value.to_bytes((&mut buf, 0)).unwrap();
+            assert!(size <= 1024 * 1024);
+            let (rest, decoded_value) = FromBytes5::from_bytes5::<(&[u8], nom5::error::ErrorKind)>(&buf[..size]).unwrap();
             // this helps compiler to infer type of decoded_value
             // i.e. it means that decoded_value has the same type as value
             fn infer<T>(_: &T, _: &T) { }

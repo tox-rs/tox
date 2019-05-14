@@ -33,6 +33,10 @@ impl GetPayloadError {
     pub(crate) fn deserialize(error: NomErrorKind, payload: Vec<u8>) -> GetPayloadError {
         GetPayloadError::from(GetPayloadErrorKind::Deserialize { error, payload })
     }
+
+    pub(crate) fn deserialize5(error: nom5::error::ErrorKind, payload: Vec<u8>) -> GetPayloadError {
+        GetPayloadError::from(GetPayloadErrorKind::Deserialize5 { error, payload })
+    }
 }
 
 impl Fail for GetPayloadError {
@@ -70,6 +74,14 @@ pub enum GetPayloadErrorKind {
     Deserialize {
         /// Parsing error
         error: NomErrorKind,
+        /// Received payload of packet
+        payload: Vec<u8>,
+    },
+    /// Error indicates that decrypted payload of packet can't be parsed, it is for nom 5.
+    #[fail(display = "Deserialize payload error: {:?}, data: {:?}", error, payload)]
+    Deserialize5 {
+        /// Parsing error
+        error: nom5::error::ErrorKind,
         /// Received payload of packet
         payload: Vec<u8>,
     }
