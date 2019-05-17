@@ -549,11 +549,18 @@ impl OnionClient {
         state.paths_pool.path_nodes.put(node);
     }
 
-    /// Add new node to random nodes pool to use them to build random paths.
+    /// Add a friend to start looking for its DHT `PublicKey`.
     pub fn add_friend(&self, real_pk: PublicKey) {
         let mut state = self.state.lock();
 
         state.friends.insert(real_pk, OnionFriend::new(real_pk));
+    }
+
+    /// Remove a friend and stop looking for him.
+    pub fn remove_friend(&self, real_pk: PublicKey) {
+        let mut state = self.state.lock();
+
+        state.friends.remove(&real_pk);
     }
 
     /// Set friend's DHT `PublicKey` when it gets known somewhere else.
@@ -1080,7 +1087,7 @@ mod tests {
     }
 
     #[test]
-    fn add_friend() {
+    fn add_remove_friend() {
         let (dht_pk, dht_sk) = gen_keypair();
         let (real_pk, real_sk) = gen_keypair();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
@@ -1092,8 +1099,11 @@ mod tests {
         let (friend_pk, _friend_sk) = gen_keypair();
         onion_client.add_friend(friend_pk);
 
-        let state = onion_client.state.lock();
-        assert_eq!(state.friends[&friend_pk].real_pk, friend_pk);
+        assert_eq!(onion_client.state.lock().friends[&friend_pk].real_pk, friend_pk);
+
+        onion_client.remove_friend(friend_pk);
+
+        assert!(!onion_client.state.lock().friends.contains_key(&friend_pk));
     }
 
     #[test]
