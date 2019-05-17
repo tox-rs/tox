@@ -862,6 +862,16 @@ mod tests {
 
     use crate::toxcore::time::ConstNow;
 
+    impl OnionClient {
+        pub fn has_friend(&self, pk: &PublicKey) -> bool {
+            self.state.lock().friends.contains_key(pk)
+        }
+
+        pub fn friend_dht_pk(&self, pk: &PublicKey) -> Option<PublicKey> {
+            self.state.lock().friends.get(pk).and_then(|friend| friend.dht_pk)
+        }
+    }
+
     fn unpack_onion_packet(packet: OnionRequest0, saddr: SocketAddr, key_by_addr: &HashMap<SocketAddr, SecretKey>) -> OnionRequest2Payload {
         let payload = packet.get_payload(&precompute(&packet.temporary_pk, &key_by_addr[&saddr])).unwrap();
         let packet = OnionRequest1 {

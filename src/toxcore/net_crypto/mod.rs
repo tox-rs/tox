@@ -965,6 +965,47 @@ mod tests {
 
     use crate::toxcore::time::ConstNow;
 
+    impl NetCrypto {
+        pub fn has_friend(&self, pk: &PublicKey) -> bool {
+            self.friends.read().contains(pk)
+        }
+
+        pub fn connection_dht_pk(&self, pk: &PublicKey) -> Option<PublicKey> {
+            self.connections.read().get(pk).map(|connection| connection.read().peer_dht_pk)
+        }
+
+        pub fn connection_saddr(&self, pk: &PublicKey) -> Option<SocketAddr> {
+            self.connections.read().get(pk).and_then(|connection| connection.read().get_udp_addr())
+        }
+
+        pub fn add_established_connection(
+            &self,
+            peer_dht_pk: PublicKey,
+            peer_real_pk: PublicKey,
+            sent_nonce: Nonce,
+            received_nonce: Nonce,
+            session_precomputed_key: PrecomputedKey
+        ) {
+            let dht_precomputed_key = precompute(&peer_dht_pk, &self.dht_sk);
+            let mut connection = CryptoConnection::new(&dht_precomputed_key, self.dht_pk, self.real_pk, peer_real_pk, peer_dht_pk);
+            connection.status = ConnectionStatus::Established {
+                sent_nonce,
+                received_nonce,
+                session_precomputed_key: session_precomputed_key.clone(),
+            };
+            self.connections.write().insert(peer_real_pk, Arc::new(RwLock::new(connection)));
+        }
+
+        pub fn get_cookie(&self, real_pk: PublicKey, dht_pk: PublicKey) -> EncryptedCookie {
+            let cookie = Cookie::new(real_pk, dht_pk);
+            EncryptedCookie::new(&self.symmetric_key, &cookie)
+        }
+
+        pub fn get_session_pk(&self, friend_pk: &PublicKey) -> Option<PublicKey> {
+            self.connections.read().get(friend_pk).map(|connection| connection.read().session_pk)
+        }
+    }
+
     #[test]
     fn net_crypto_clone() {
         crypto_init().unwrap();

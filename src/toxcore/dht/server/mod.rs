@@ -1492,6 +1492,12 @@ mod tests {
     const ONION_RETURN_2_PAYLOAD_SIZE: usize = ONION_RETURN_2_SIZE - secretbox::NONCEBYTES;
     const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - secretbox::NONCEBYTES;
 
+    impl Server {
+        pub fn has_friend(&self, pk: &PublicKey) -> bool {
+            self.friends.read().contains_key(pk)
+        }
+    }
+
     fn create_node() -> (Server, PrecomputedKey, PublicKey, SecretKey,
             mpsc::Receiver<(Packet, SocketAddr)>, SocketAddr) {
         crypto_init().unwrap();
