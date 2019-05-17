@@ -1,7 +1,9 @@
 /*! PingRequest packet
 */
 
-use nom::{be_u64, rest};
+use nom::{number::complete::be_u64,
+          combinator::rest,
+};
 
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
@@ -89,15 +91,10 @@ impl PingRequest {
             })?;
 
         match PingRequestPayload::from_bytes(&decrypted) {
-            IResult::Incomplete(needed) => {
-                debug!(target: "PingRequest", "PingRequestPayload deserialize error: {:?}", needed);
-                Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
+            Err(error) => {
+                Err(GetPayloadError::deserialize(error, decrypted.clone()))
             },
-            IResult::Error(error) => {
-                debug!(target: "PingRequest", "PingRequestPayload deserialize error: {:?}", error);
-                Err(GetPayloadError::deserialize(error, self.payload.to_vec()))
-            },
-            IResult::Done(_, payload) => {
+            Ok((_, payload)) => {
                 Ok(payload)
             }
         }

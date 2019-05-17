@@ -4,7 +4,7 @@
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
 
-use nom::rest;
+use nom::combinator::rest;
 
 /** Sent by client to server.
 If a peer with private key equal to the key they announced themselves with is

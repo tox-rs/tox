@@ -1,7 +1,9 @@
 /*! DhtRequest packet
 */
 
-use nom::{be_u64, rest};
+use nom::{number::complete::be_u64,
+          combinator::rest,
+};
 
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
@@ -88,8 +90,7 @@ impl DhtRequest {
     - fails to decrypt
     - fails to parse as given packet type
     */
-    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<DhtRequestPayload, GetPayloadError>
-    {
+    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<DhtRequestPayload, GetPayloadError> {
         debug!(target: "DhtRequest", "Getting packet data from DhtRequest.");
         trace!(target: "DhtRequest", "With DhtRequest: {:?}", self);
         let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
@@ -99,16 +100,11 @@ impl DhtRequest {
             })?;
 
         match DhtRequestPayload::from_bytes(&decrypted) {
-            IResult::Incomplete(needed) => {
-                debug!(target: "DhtRequest", "DhtRequest deserialize error: {:?}", needed);
-                Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
+            Err(error) => {
+                Err(GetPayloadError::deserialize(error, decrypted.clone()))
             },
-            IResult::Error(error) => {
-                debug!(target: "DhtRequest", "DhtRequest deserialize error: {:?}", error);
-                Err(GetPayloadError::deserialize(error, self.payload.to_vec()))
-            },
-            IResult::Done(_, packet) => {
-                Ok(packet)
+            Ok((_, payload)) => {
+                Ok(payload)
             }
         }
     }
@@ -299,16 +295,11 @@ impl DhtPkAnnounce {
                 GetPayloadError::decrypt()
             })?;
         match DhtPkAnnouncePayload::from_bytes(&decrypted) {
-            IResult::Incomplete(needed) => {
-                debug!(target: "DhtRequest", "DhtPkAnnouncePayload deserialize error: {:?}", needed);
-                Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
+            Err(error) => {
+                Err(GetPayloadError::deserialize(error, decrypted.clone()))
             },
-            IResult::Error(e) => {
-                debug!(target: "DhtRequest", "DhtPkAnnouncePayload deserialize error: {:?}", e);
-                Err(GetPayloadError::deserialize(e, self.payload.to_vec()))
-            },
-            IResult::Done(_, inner) => {
-                Ok(inner)
+            Ok((_, payload)) => {
+                Ok(payload)
             }
         }
     }
@@ -345,7 +336,7 @@ impl FromBytes for DhtPkAnnouncePayload {
         no_reply: be_u64 >>
         dht_pk: call!(PublicKey::from_bytes) >>
         nodes: many0!(TcpUdpPackedNode::from_bytes) >>
-        cond_reduce!(nodes.len() <= 4, eof!()) >>
+        cond!(nodes.len() <= 4, eof!()) >>
         (DhtPkAnnouncePayload {
             no_reply,
             dht_pk,
@@ -451,7 +442,9 @@ impl ToBytes for HardeningResponse {
 mod tests {
     use super::*;
 
-    use nom::{Needed, ErrorKind};
+    use nom::{Needed, Err,
+        error::ErrorKind
+    };
 
     use crate::toxcore::ip_port::*;
 
@@ -571,8 +564,8 @@ mod tests {
             // try to decode payload with eve's secret key & sender's public key
             let precomputed_key = precompute(&dht_request.spk, &eve_sk);
             let decoded_payload = dht_request.get_payload(&precomputed_key);
-            assert!(decoded_payload.is_err());
-            assert_eq!(*decoded_payload.err().unwrap().kind(), GetPayloadErrorKind::Decrypt);
+            let error = decoded_payload.err().unwrap();
+            assert_eq!(*error.kind(), GetPayloadErrorKind::Decrypt);
         }
     }
 
@@ -596,8 +589,11 @@ mod tests {
         let precomputed_key = precompute(&alice_pk, &bob_sk);
 
         let decoded_payload = invalid_packet.get_payload(&precomputed_key);
-        assert!(decoded_payload.is_err());
-        assert_eq!(*decoded_payload.err().unwrap().kind(), GetPayloadErrorKind::Deserialize { error: ErrorKind::Alt, payload: invalid_packet.payload });
+        let error = decoded_payload.err().unwrap();
+        assert_eq!(*error.kind(), GetPayloadErrorKind::Deserialize {
+            error: Err::Error((invalid_payload.to_vec(), ErrorKind::Alt)),
+            payload: invalid_payload.to_vec()
+        });
         // Try short incomplete
         let invalid_payload = [0xfe];
         let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
@@ -608,8 +604,11 @@ mod tests {
             payload: invalid_payload_encoded
         };
         let decoded_payload = invalid_packet.get_payload(&precomputed_key);
-        assert!(decoded_payload.is_err());
-        assert_eq!(*decoded_payload.err().unwrap().kind(), GetPayloadErrorKind::IncompletePayload { needed: Needed::Size(2), payload: invalid_packet.payload });
+        let error = decoded_payload.err().unwrap();
+        assert_eq!(*error.kind(), GetPayloadErrorKind::Deserialize {
+            error: Err::Incomplete(Needed::Size(1)),
+            payload: invalid_payload.to_vec()
+        });
     }
 
     #[test]

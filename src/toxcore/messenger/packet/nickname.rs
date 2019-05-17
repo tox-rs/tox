@@ -2,7 +2,7 @@
 */
 
 use std::str;
-use nom::rest;
+use nom::combinator::rest;
 
 use crate::toxcore::binary_io::*;
 

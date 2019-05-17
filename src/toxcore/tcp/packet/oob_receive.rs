@@ -4,7 +4,7 @@
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
 
-use nom::rest;
+use nom::combinator::rest;
 
 /** Sent by server to client.
 OOB recv are sent with the announced public key of the peer that sent the

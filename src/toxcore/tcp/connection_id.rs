@@ -5,7 +5,7 @@ use std::num::NonZeroU8;
 use crate::toxcore::binary_io::*;
 use crate::toxcore::tcp::links::MAX_LINKS_N;
 
-use nom::be_u8;
+use nom::number::complete::be_u8;
 
 /// Connection ID is either a number between [16, 255] or 0. Zero can be
 /// included in a response and means that the previous request was invalid.
@@ -34,7 +34,7 @@ impl ConnectionId {
 }
 
 impl FromBytes for ConnectionId {
-    named!(from_bytes<ConnectionId>, map!(verify!(be_u8, |id| id == 0 || id >= 0x10), |id| ConnectionId(NonZeroU8::new(id))));
+    named!(from_bytes<ConnectionId>, map!(verify!(be_u8, |id| *id == 0 || *id >= 0x10), |id| ConnectionId(NonZeroU8::new(id))));
 }
 
 impl ToBytes for ConnectionId {

@@ -1,10 +1,11 @@
 /*! Errors enum for DHT packets.
 */
 
-use std::fmt;
+use std::{str, fmt};
 
 use failure::{Backtrace, Context, Fail};
-use nom::{Needed, ErrorKind as NomErrorKind};
+use nom::error::ErrorKind;
+use nom::Err;
 
 use std::convert::From;
 use std::io::Error as IoError;
@@ -26,11 +27,13 @@ impl GetPayloadError {
         GetPayloadError::from(GetPayloadErrorKind::Decrypt)
     }
 
-    pub(crate) fn incomplete(needed: Needed, payload: Vec<u8>) -> GetPayloadError {
-        GetPayloadError::from(GetPayloadErrorKind::IncompletePayload { needed, payload })
-    }
+    pub(crate) fn deserialize(e: Err<(&[u8], ErrorKind)>, payload: Vec<u8>) -> GetPayloadError {
+        let error = match e {
+            Err::Error(e) => Err::Error((e.0.to_vec(), e.1)),
+            Err::Failure(e) => Err::Failure((e.0.to_vec(), e.1)),
+            Err::Incomplete(needed) => Err::Incomplete(needed),
+        };
 
-    pub(crate) fn deserialize(error: NomErrorKind, payload: Vec<u8>) -> GetPayloadError {
         GetPayloadError::from(GetPayloadErrorKind::Deserialize { error, payload })
     }
 }
@@ -52,24 +55,16 @@ impl fmt::Display for GetPayloadError {
 }
 
 /// The specific kind of error that can occur.
-#[derive(Clone, Debug, Eq, PartialEq, Fail)]
+#[derive(Clone, Debug, PartialEq, Fail)]
 pub enum GetPayloadErrorKind {
     /// Error indicates that received payload of encrypted packet can't be decrypted
     #[fail(display = "Decrypt payload error")]
     Decrypt,
-    /// Error indicates that more data is needed to parse decrypted payload of packet
-    #[fail(display = "Bytes of payload should not be incomplete: {:?}, data: {:?}", needed, payload)]
-    IncompletePayload {
-        /// Required data size to be parsed
-        needed: Needed,
-        /// Received payload of packet
-        payload: Vec<u8>,
-    },
     /// Error indicates that decrypted payload of packet can't be parsed
     #[fail(display = "Deserialize payload error: {:?}, data: {:?}", error, payload)]
     Deserialize {
         /// Parsing error
-        error: NomErrorKind,
+        error: nom::Err<(Vec<u8>, ErrorKind)>,
         /// Received payload of packet
         payload: Vec<u8>,
     }
@@ -97,13 +92,14 @@ impl From<GetPayloadError> for IoError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nom::Needed;
 
     #[test]
     fn get_payload_error() {
-        let error = GetPayloadError::deserialize(NomErrorKind::Eof, vec![1, 2, 3, 4]);
+        let error = GetPayloadError::deserialize(Err::Error((&[], ErrorKind::Eof)), vec![1, 2, 3, 4]);
         assert!(error.cause().is_none());
         assert!(error.backtrace().is_some());
-        assert_eq!(format!("{}", error), "Deserialize payload error: Eof, data: [1, 2, 3, 4]".to_owned());
+        assert_eq!(format!("{}", error), "Deserialize payload error: Error(([], Eof)), data: [1, 2, 3, 4]".to_owned());
     }
 
     #[test]
@@ -111,10 +107,10 @@ mod tests {
         let decrypt = GetPayloadErrorKind::Decrypt;
         assert_eq!(format!("{}", decrypt), "Decrypt payload error".to_owned());
 
-        let incomplete = GetPayloadErrorKind::IncompletePayload { needed: Needed::Size(5), payload: vec![1, 2, 3, 4] };
-        assert_eq!(format!("{}", incomplete), "Bytes of payload should not be incomplete: Size(5), data: [1, 2, 3, 4]".to_owned());
+        let incomplete = GetPayloadErrorKind::Deserialize { error: Err::Incomplete(Needed::Size(5)), payload: vec![1, 2, 3, 4] };
+        assert_eq!(format!("{}", incomplete), "Deserialize payload error: Incomplete(Size(5)), data: [1, 2, 3, 4]".to_owned());
 
-        let deserialize = GetPayloadErrorKind::Deserialize { error: NomErrorKind::Eof, payload: vec![1, 2, 3, 4] };
-        assert_eq!(format!("{}", deserialize), "Deserialize payload error: Eof, data: [1, 2, 3, 4]".to_owned());
+        let deserialize = GetPayloadErrorKind::Deserialize { error: Err::Error((vec![], ErrorKind::Eof)), payload: vec![1, 2, 3, 4] };
+        assert_eq!(format!("{}", deserialize), "Deserialize payload error: Error(([], Eof)), data: [1, 2, 3, 4]".to_owned());
     }
 }

@@ -1,7 +1,7 @@
 /*! A pair of SocketAddr & PublicKey.
 */
 
-use nom::{le_u8, be_u16};
+use nom::number::complete::{le_u8, be_u16};
 
 use std::net::{
     IpAddr,

@@ -28,7 +28,9 @@ pub use self::data::{Data, DataPayload};
 
 use crate::toxcore::binary_io::*;
 
-use nom::be_u16;
+use nom::{number::complete::be_u16,
+          bytes::complete::take,
+};
 
 /** Top-level TCP packet.
 
@@ -119,9 +121,9 @@ pub const MAX_TCP_ENC_PACKET_SIZE: usize = 2050;
 impl FromBytes for EncryptedPacket {
     named!(from_bytes<EncryptedPacket>, do_parse!(
         length: be_u16 >>
-        verify!(value!(length), |len| len > 0 /* TODO len < 2048... ? */ ) >>
-        payload: take!(length) >>
-        (EncryptedPacket { payload: payload.to_vec() })
+        verify!(value!(length), |len| *len > 0 /* TODO len < 2048... ? */ ) >>
+        payload: map!(take(length), |bytes: &[u8]| bytes.to_vec()) >>
+        (EncryptedPacket { payload })
     ));
 }
 

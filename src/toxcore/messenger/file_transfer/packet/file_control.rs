@@ -3,6 +3,7 @@ It is used to control transferring file to a friend.
 */
 
 use super::*;
+use nom::number::complete::le_u8;
 
 /** FileControl is a struct that holds info to handle transferring file to a friend.
 
