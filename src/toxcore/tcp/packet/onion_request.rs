@@ -9,7 +9,7 @@ use crate::toxcore::onion::packet::{
     ONION_RETURN_1_SIZE,
 };
 
-use nom::rest;
+use nom::combinator::rest;
 
 /// Encrypted payload should contain `IpPort`, `PublicKey` and inner encrypted
 /// payload that should contain at least `IpPort` struct.

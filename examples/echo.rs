@@ -140,7 +140,7 @@ fn main() {
                 },
                 PACKET_ID_SHARE_RELAYS => {
                     match ShareRelays::from_bytes(&packet) {
-                        IResult::Done(_, share_relays) =>
+                        Ok((_, share_relays)) =>
                             Box::new(friend_connections_c.handle_share_relays(pk, share_relays)
                                 .map_err(Error::from))
                                     as Box<dyn Future<Item = _, Error = _> + Send>,

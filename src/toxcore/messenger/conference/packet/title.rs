@@ -2,7 +2,9 @@
 */
 
 use std::str;
-use nom::{rest, be_u16};
+use nom::{number::complete::be_u16,
+          combinator::rest,
+};
 
 use crate::toxcore::binary_io::*;
 use super::MAX_NAME_LENGTH_IN_CONFERENCE;

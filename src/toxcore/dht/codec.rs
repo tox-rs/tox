@@ -10,7 +10,7 @@ use crate::toxcore::stats::*;
 use bytes::BytesMut;
 use cookie_factory::GenError;
 use failure::Fail;
-use nom::{ErrorKind, Needed};
+use nom::{error::ErrorKind, Err};
 use tokio::codec::{Decoder, Encoder};
 
 /// A serialized `Packet` should be not longer than 2048 bytes.
@@ -21,7 +21,7 @@ error_kind! {
     #[derive(Debug)]
     DecodeError,
     #[doc = "Error that can happen when decoding `Packet` from bytes."]
-    #[derive(Clone, Debug, Eq, PartialEq, Fail)]
+    #[derive(Clone, Debug, PartialEq, Fail)]
     DecodeErrorKind {
         #[doc = "Error indicates that we received too big packet."]
         #[fail(display = "Packet should not be longer than 2048 bytes: {} bytes", len)]
@@ -29,19 +29,11 @@ error_kind! {
             #[doc = "Length of received packet."]
             len: usize
         },
-        #[doc = "Error indicates that more data is needed to parse received packet."]
-        #[fail(display = "Packet should not be incomplete: {:?}, packet: {:?}", needed, packet)]
-        IncompletePacket {
-            #[doc = "Required data size to be parsed."]
-            needed: Needed,
-            #[doc = "Received packet."]
-            packet: Vec<u8>,
-        },
         #[doc = "Error indicates that received packet can't be parsed."]
         #[fail(display = "Deserialize Packet error: {:?}, packet: {:?}", error, packet)]
         Deserialize {
             #[doc = "Parsing error."]
-            error: ErrorKind,
+            error: nom::Err<(Vec<u8>, ErrorKind)>,
             #[doc = "Received packet."]
             packet: Vec<u8>,
         },
@@ -56,11 +48,13 @@ impl DecodeError {
         DecodeError::from(DecodeErrorKind::TooBigPacket { len })
     }
 
-    pub(crate) fn incomplete_packet(needed: Needed, packet: Vec<u8>) -> DecodeError {
-        DecodeError::from(DecodeErrorKind::IncompletePacket { needed, packet })
-    }
+    pub(crate) fn deserialize(e: Err<(&[u8], ErrorKind)>, packet: Vec<u8>) -> DecodeError {
+        let error = match e {
+            Err::Error(e) => Err::Error((e.0.to_vec(), e.1)),
+            Err::Failure(e) => Err::Failure((e.0.to_vec(), e.1)),
+            Err::Incomplete(needed) => Err::Incomplete(needed),
+        };
 
-    pub(crate) fn deserialize(error: ErrorKind, packet: Vec<u8>) -> DecodeError {
         DecodeError::from(DecodeErrorKind::Deserialize { error, packet })
     }
 }
@@ -132,9 +126,10 @@ impl Decoder for DhtCodec {
         }
 
         match Packet::from_bytes(buf) {
-            IResult::Incomplete(needed) => Err(DecodeError::incomplete_packet(needed, buf.to_vec())),
-            IResult::Error(error) => Err(DecodeError::deserialize(error, buf.to_vec())),
-            IResult::Done(_, packet) => {
+            Err(error) => {
+                Err(DecodeError::deserialize(error, buf.to_vec()))
+            },
+            Ok((_, packet)) => {
                 // Add 1 to incoming counter
                 self.stats.counters.increase_incoming();
 
@@ -166,6 +161,7 @@ impl Encoder for DhtCodec {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nom::Needed;
     use crate::toxcore::onion::packet::*;
     use crate::toxcore::crypto_core::*;
 
@@ -347,8 +343,8 @@ mod tests {
 
         let res = codec.decode(&mut buf);
         // not enought bytes to decode EncryptedPacket
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), DecodeErrorKind::Deserialize { error: ErrorKind::Alt, packet: vec![0xff] });
+        let error = res.err().unwrap();
+        assert_eq!(*error.kind(), DecodeErrorKind::Deserialize { error: Err::Error((vec![255], ErrorKind::Alt)) , packet: vec![0xff] });
     }
 
     #[test]
@@ -360,8 +356,8 @@ mod tests {
 
         // not enought bytes to decode EncryptedPacket
         let res = codec.decode(&mut buf);
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), DecodeErrorKind::IncompletePacket { needed: Needed::Size(1), packet: Vec::new() });
+        let error = res.err().unwrap();
+        assert_eq!(*error.kind(), DecodeErrorKind::Deserialize { error: Err::Incomplete(Needed::Size(1)), packet: Vec::new() });
     }
 
     #[test]
@@ -388,6 +384,7 @@ mod tests {
     #[test]
     fn codec_is_clonable() {
         crypto_init().unwrap();
+
         let stats = Stats::new();
         let codec = DhtCodec::new(stats);
         let _codec_c = codec.clone();

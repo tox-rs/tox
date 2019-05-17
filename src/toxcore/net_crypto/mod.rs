@@ -3025,7 +3025,7 @@ mod tests {
 
         let res = net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).wait();
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::DataEmpty);
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
 
         assert_eq!(unpack!(connection.status, ConnectionStatus::Established, received_nonce), received_nonce);
 
