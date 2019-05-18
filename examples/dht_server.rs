@@ -54,6 +54,10 @@ fn bind_socket(addr: SocketAddr) -> UdpSocket {
 fn main() {
     env_logger::init();
 
+    if crypto_init().is_err() {
+        panic!("Crypto initialization failed.");
+    }
+
     let (server_pk, server_sk) = gen_keypair();
 
     // Create a channel for server to communicate with network

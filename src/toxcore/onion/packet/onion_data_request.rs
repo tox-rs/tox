@@ -199,6 +199,7 @@ mod tests {
 
     #[test]
     fn inner_onion_data_request_encrypt_decrypt() {
+        crypto_init().unwrap();
         let (real_pk, _real_sk) = gen_keypair();
         let (data_pk, _data_sk) = gen_keypair();
         let (temporary_pk, temporary_sk) = gen_keypair();
@@ -218,6 +219,7 @@ mod tests {
 
     #[test]
     fn inner_onion_data_request_encrypt_decrypt_invalid_key() {
+        crypto_init().unwrap();
         let (real_pk, _real_sk) = gen_keypair();
         let (data_pk, _data_sk) = gen_keypair();
         let (temporary_pk, temporary_sk) = gen_keypair();
@@ -238,6 +240,7 @@ mod tests {
 
     #[test]
     fn inner_onion_data_request_encrypt_decrypt_invalid() {
+        crypto_init().unwrap();
         let (real_pk, _real_sk) = gen_keypair();
         let (data_pk, _data_sk) = gen_keypair();
         let (temporary_pk, temporary_sk) = gen_keypair();
