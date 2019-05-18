@@ -18,6 +18,7 @@ macro_rules! dht_packet_encrypt_decrypt (
     ($test:ident, $packet:ident, $payload:expr) => (
         #[test]
         fn $test() {
+            crypto_init().unwrap();
             let (alice_pk, alice_sk) = gen_keypair();
             let (bob_pk, _bob_sk) = gen_keypair();
             let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
@@ -36,6 +37,7 @@ macro_rules! dht_packet_encrypt_decrypt_invalid_key (
     ($test:ident, $packet:ident, $payload:expr) => (
         #[test]
         fn $test() {
+            crypto_init().unwrap();
             let (alice_pk, alice_sk) = gen_keypair();
             let (bob_pk, _bob_sk) = gen_keypair();
             let (_eve_pk, eve_sk) = gen_keypair();
@@ -55,6 +57,7 @@ macro_rules! dht_packet_decode_invalid (
     ($test:ident, $packet:ident) => (
         #[test]
         fn $test() {
+            crypto_init().unwrap();
             let (alice_pk, alice_sk) = gen_keypair();
             let (bob_pk, _bob_sk) = gen_keypair();
             let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);

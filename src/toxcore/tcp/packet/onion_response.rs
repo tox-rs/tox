@@ -44,7 +44,6 @@ mod test {
     use super::*;
 
     use crate::toxcore::onion::packet::{OnionAnnounceResponse, OnionDataResponse};
-    use crate::toxcore::crypto_core::*;
 
     encode_decode_test!(
         onion_response_with_announce_encode_decode,

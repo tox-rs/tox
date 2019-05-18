@@ -140,6 +140,7 @@ mod tests {
     use crate::toxcore::tcp::secure::*;
 
     fn create_channels() -> (Channel, Channel) {
+        crypto_init().unwrap();
         let alice_session = Session::random();
         let bob_session = Session::random();
 
@@ -159,6 +160,7 @@ mod tests {
     }
     #[test]
     fn test_secure_communication() {
+        crypto_init().unwrap();
         let (alice_channel, bob_channel) = create_channels();
 
         // And now they may communicate sending encrypted data to each other

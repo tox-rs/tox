@@ -562,6 +562,7 @@ mod tests {
 
     #[test]
     fn kbucket_get_node() {
+        crypto_init().unwrap();
         let (pk, _) = gen_keypair();
         let mut kbucket = Kbucket::<DhtNode>::new(KBUCKET_DEFAULT_SIZE);
 
@@ -580,6 +581,7 @@ mod tests {
 
     #[test]
     fn kbucket_get_node_mut() {
+        crypto_init().unwrap();
         let (pk, _) = gen_keypair();
         let mut kbucket = Kbucket::<DhtNode>::new(KBUCKET_DEFAULT_SIZE);
 

@@ -46,7 +46,6 @@ mod tests {
     use super::*;
     use crate::toxcore::toxid::NoSpam;
     use crate::toxcore::dht::packed_node::*;
-    use crate::toxcore::crypto_core::*;
 
     encode_decode_test!(
         packet_alive_encode_decode,

@@ -33,7 +33,7 @@ bytes = "0.4"
 byteorder = "1"
 futures = "0.1"
 log = "0.4"
-sodiumoxide = { git = "https://github.com/sodiumoxide/sodiumoxide.git", rev = "baf88e5" }
+sodiumoxide = "0.2.2"
 nom = "3.2"
 cookie-factory = "0.2"
 get_if_addrs = "0.5"
