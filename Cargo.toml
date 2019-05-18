@@ -1,6 +1,6 @@
 [package]
 name = "tox"
-version = "0.0.9"
+version = "0.0.10"
 authors = [
   "Zetok Zalbavar <zetok@openmailbox.org>",
   "Roman Proskuryakov <humbug@deeptown.org>",
@@ -37,7 +37,7 @@ sodiumoxide = "0.2.2"
 nom = "3.2"
 cookie-factory = "0.2"
 get_if_addrs = "0.5"
-parking_lot = "0.7"
+parking_lot = "0.8"
 failure = "0.1"
 lru = "0.1"
 bitflags = "1.0"
