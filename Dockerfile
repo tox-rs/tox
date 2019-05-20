@@ -23,9 +23,8 @@ FROM archlinux/base
 
 COPY --from=builder /tox-node/target/release/tox-node /user/local/
 
-# tox-node uses port of 33445 as default
-EXPOSE 33445/tcp
-EXPOSE 33445/udp
+# expose ports that are default for a bootstrap node
+EXPOSE 443/tcp 3389/tcp 33445/tcp 33445/udp
 
 # add user
 RUN useradd tox_node
