@@ -131,6 +131,8 @@ struct OnionFriend {
     search_count: u32,
     /// Time when this friend was seen online last time
     last_seen: Option<Instant>,
+    /// Whether we connected to this friend.
+    connected: bool,
 }
 
 impl OnionFriend {
@@ -148,6 +150,7 @@ impl OnionFriend {
             last_dht_pk_dht_sent: None,
             search_count: 0,
             last_seen: None,
+            connected: false,
         }
     }
 }
@@ -563,6 +566,23 @@ impl OnionClient {
         state.friends.remove(&real_pk);
     }
 
+    /// Set connection status of a friend. If he's connected we can stop looking
+    /// for his DHT `PublicKey`.
+    pub fn set_friend_connected(&self, real_pk: PublicKey, connected: bool) {
+        let mut state = self.state.lock();
+
+        if let Some(friend) = state.friends.get_mut(&real_pk) {
+            if friend.connected && !connected {
+                friend.last_seen = Some(clock_now());
+                friend.search_count = 0;
+                // reset no_reply for the case when a friend will try to connect
+                // from a different device with different clock
+                friend.last_no_reply = 0;
+            }
+            friend.connected = connected;
+        }
+    }
+
     /// Set friend's DHT `PublicKey` when it gets known somewhere else.
     pub fn set_friend_dht_pk(&self, real_pk: PublicKey, dht_pk: PublicKey) {
         let mut state = self.state.lock();
@@ -780,7 +800,9 @@ impl OnionClient {
         let mut packets = Vec::new();
 
         for friend in state.friends.values_mut() {
-            // TODO: if is_online
+            if friend.connected {
+                continue;
+            }
 
             let announce_packet_data = AnnouncePacketData {
                 packet_sk: &friend.temporary_sk,
@@ -869,6 +891,10 @@ mod tests {
 
         pub fn friend_dht_pk(&self, pk: &PublicKey) -> Option<PublicKey> {
             self.state.lock().friends.get(pk).and_then(|friend| friend.dht_pk)
+        }
+
+        pub fn is_friend_connected(&self, pk: &PublicKey) -> bool {
+            self.state.lock().friends.get(pk).map_or(false, |friend| friend.connected)
         }
     }
 
@@ -1114,6 +1140,39 @@ mod tests {
         onion_client.remove_friend(friend_pk);
 
         assert!(!onion_client.state.lock().friends.contains_key(&friend_pk));
+    }
+
+    #[test]
+    fn set_friend_connected() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, real_sk) = gen_keypair();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
+        let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
+        let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
+        let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk, real_pk);
+
+        let (friend_pk, _friend_sk) = gen_keypair();
+        onion_client.add_friend(friend_pk);
+
+        onion_client.set_friend_connected(friend_pk, true);
+
+        let state = onion_client.state.lock();
+        assert!(state.friends[&friend_pk].connected);
+        drop(state);
+
+        let now = Instant::now();
+        let mut enter = tokio_executor::enter().unwrap();
+        let clock = Clock::new_with_now(ConstNow(now));
+
+        with_default(&clock, &mut enter, |_| {
+            onion_client.set_friend_connected(friend_pk, false);
+        });
+
+        let state = onion_client.state.lock();
+        let friend = &state.friends[&friend_pk];
+        assert!(!friend.connected);
+        assert_eq!(friend.last_seen, Some(now));
     }
 
     #[test]
@@ -1961,7 +2020,7 @@ mod tests {
         state.friends.insert(friend_pk, friend);
 
         let mut enter = tokio_executor::enter().unwrap();
-        // time when entry is timed out
+        // time when announce packet should be sent
         let clock = Clock::new_with_now(ConstNow(
             now + Duration::from_secs(ANNOUNCE_INTERVAL_NOT_ANNOUNCED + 1)
         ));
@@ -1987,6 +2046,70 @@ mod tests {
             assert_eq!(payload.search_pk, friend_pk);
             assert_eq!(payload.data_pk, PublicKey([0; 32]));
         }
+    }
+
+    #[test]
+    fn friends_loop_ignore_online() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, real_sk) = gen_keypair();
+        let (udp_tx, udp_rx) = mpsc::channel(MAX_ONION_FRIEND_NODES as usize);
+        let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
+        let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
+        let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk.clone(), real_pk);
+
+        let mut state = onion_client.state.lock();
+
+        let (friend_pk, _friend_sk) = gen_keypair();
+        let mut friend = OnionFriend::new(friend_pk);
+        friend.connected = true;
+
+        let addr = "127.0.0.1".parse().unwrap();
+        for i in 0 .. 3 {
+            let saddr = SocketAddr::new(addr, 12346 + i);
+            let (pk, _sk) = gen_keypair();
+            let node = PackedNode::new(saddr, &pk);
+            state.paths_pool.path_nodes.put(node);
+        }
+
+        let now = Instant::now();
+
+        for i in 0 .. MAX_ONION_FRIEND_NODES {
+            let saddr = SocketAddr::new(addr, 23456 + u16::from(i));
+            let path = state.paths_pool.random_path(false).unwrap();
+            let (node_pk, _node_sk) = gen_keypair();
+            let node = OnionNode {
+                pk: node_pk,
+                saddr,
+                path_id: path.id(),
+                ping_id: None,
+                data_pk: None,
+                unsuccessful_pings: 0,
+                added_time: now,
+                ping_time: now,
+                response_time: now,
+                announce_status: AnnounceStatus::Failed,
+            };
+            assert!(friend.close_nodes.try_add(&real_pk, node, true));
+        }
+
+        state.friends.insert(friend_pk, friend);
+
+        let mut enter = tokio_executor::enter().unwrap();
+        // time when announce packet should be sent
+        let clock = Clock::new_with_now(ConstNow(
+            now + Duration::from_secs(ANNOUNCE_INTERVAL_NOT_ANNOUNCED + 1)
+        ));
+
+        with_default(&clock, &mut enter, |_| {
+            onion_client.friends_loop(&mut state).wait().unwrap();
+        });
+
+        // Necessary to drop tx so that rx.collect() can be finished
+        drop(state);
+        drop(onion_client);
+
+        assert!(udp_rx.collect().wait().unwrap().is_empty());
     }
 
     #[test]

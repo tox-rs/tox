@@ -274,6 +274,7 @@ impl FriendConnections {
 
     /// Handle the stream of connection statuses.
     fn handle_connection_status(&self, connnection_status_rx: mpsc::UnboundedReceiver<(PublicKey, bool)>) -> impl Future<Item = (), Error = RunError> + Send {
+        let onion_client = self.onion_client.clone();
         let friends = self.friends.clone();
         let connection_status_tx = self.connection_status_tx.clone();
         connnection_status_rx
@@ -293,6 +294,7 @@ impl FriendConnections {
 
                     if status != friend.connected {
                         friend.connected = status;
+                        onion_client.set_friend_connected(real_pk, status);
                         if let Some(ref connection_status_tx) = *connection_status_tx.read() {
                             return Either::A(send_to(connection_status_tx, (real_pk, status))
                                 .map_err(|e| e.context(RunErrorKind::SendToConnectionStatus).into()));
@@ -668,6 +670,7 @@ mod tests {
         friend.ping_sent_time = Some(now);
         friend.share_relays_time = Some(now);
         friend_connections.friends.write().insert(friend_pk, friend);
+        friend_connections.onion_client.add_friend(friend_pk);
 
         let (connnection_status_tx, connnection_status_rx) = mpsc::unbounded();
         send_to(&connnection_status_tx, (friend_pk, true)).wait().unwrap();
@@ -685,6 +688,8 @@ mod tests {
         assert_eq!(friend.ping_received_time, Some(now));
         assert!(friend.ping_sent_time.is_none());
         assert!(friend.share_relays_time.is_none());
+
+        assert!(friend_connections.onion_client.is_friend_connected(&friend_pk));
     }
 
     #[test]
@@ -699,6 +704,8 @@ mod tests {
         friend.dht_pk_time = Some(now);
         friend.connected = true;
         friend_connections.friends.write().insert(friend_pk, friend);
+        friend_connections.onion_client.add_friend(friend_pk);
+        friend_connections.onion_client.set_friend_connected(friend_pk, true);
 
         let (connnection_status_tx, connnection_status_rx) = mpsc::unbounded();
         send_to(&connnection_status_tx, (friend_pk, false)).wait().unwrap();
@@ -714,6 +721,8 @@ mod tests {
         let friend = &friend_connections.friends.read()[&friend_pk];
         assert!(!friend.connected);
         assert_eq!(friend.dht_pk_time, Some(now));
+
+        assert!(!friend_connections.onion_client.is_friend_connected(&friend_pk));
     }
 
     #[test]
