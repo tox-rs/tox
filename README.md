@@ -153,6 +153,37 @@ curl 'https://nodes.tox.chat/json' -s | jq -r '.nodes[] | .public_key + " " + .i
 while read pk addr; do echo "  - pk: $pk"; echo "    addr: $addr"; done
 ```
 
+## Using docker
+
+There is a docker image of tox-node with exposed 443/tcp 3389/tcp 33445/tcp 33445/udp ports. You can run tox-node using docker like this:
+
+```sh
+TOX_SECRET_KEY=<secret key> docker run -e TOX_SECRET_KEY toxrust/tox-node <ARGS>
+```
+
+or
+
+```sh
+docker run --mount type=bind,source=<path/to/config.yml>,target=<path/to/target/config.yml> \
+    --mount type=bind,source=<path/to/keys>,target=/var/lib/tox-node/keys toxrust/tox-node config <path/to/config.yml>
+```
+
+Example commands:
+
+```sh
+TOX_SECRET_KEY="4a2d4098e9d6ae6addb8035085cf1467fd7611edd2e22df2f1b60a71763b4ce4" \
+    docker run -e TOX_SECRET_KEY toxrust/tox-node \
+    --bootstrap-node 1D5A5F2F5D6233058BF0259B09622FB40B482E4FA0931EB8FD3AB8E7BF7DAF6F 198.98.51.198:33445 \
+    --udp-address '0.0.0.0:33445' --tcp-address '0.0.0.0:33445' \
+    --motd "{{start_date}} {{uptime}} Tcp: incoming {{tcp_packets_in}}, outgoing {{tcp_packets_out}}, Udp: incoming {{udp_packets_in}}, outgoing {{udp_packets_out}}"
+```
+
+or
+
+```sh
+docker run --mount type=bind,source=$PWD/dpkg/config.yml,target=/config.yml \
+    --mount type=bind,source=$PWD/keys,target=/var/lib/tox-node/keys toxrust/tox-node config /config.yml
+```
 [libsodium]: https://github.com/jedisct1/libsodium
 [Rust]: https://www.rust-lang.org
 [cargo-deb]: https://crates.io/crates/cargo-deb
