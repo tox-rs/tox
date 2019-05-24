@@ -64,6 +64,9 @@ error_kind! {
         #[doc = "Failed to handle DHT `PublicKey` announce."]
         #[fail(display = "Failed to handle DHT PublicKey announce")]
         DhtPkAnnounce,
+        #[doc = "Failed to send a friend request."]
+        #[fail(display = "Failed to send a friend request")]
+        FriendRequest,
     }
 }
 
