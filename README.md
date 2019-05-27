@@ -51,6 +51,11 @@ Configuration options are also available. An example of configuration:
 }
 ```
 
+### Running tox-node on Arch Linux
+
+Install [tox-node-rs] or [tox-node-rs-git] from AUR in any convenient way. See
+[ArchWiki] for more information.
+
 ## MOTD
 
 MOTD is an abbreviation for The Message of The Day. Tox bootstrap nodes have a
@@ -187,3 +192,6 @@ docker run --mount type=bind,source=$PWD/dpkg/config.yml,target=/config.yml \
 [libsodium]: https://github.com/jedisct1/libsodium
 [Rust]: https://www.rust-lang.org
 [cargo-deb]: https://crates.io/crates/cargo-deb
+[tox-node-rs]: https://aur.archlinux.org/packages/tox-node-rs
+[tox-node-rs-git]: https://aur.archlinux.org/packages/tox-node-rs-git
+[ArchWiki]: https://wiki.archlinux.org/index.php/Arch_User_Repository#Installing_packages
