@@ -1,3 +1,10 @@
+# 0.0.8 (May 27, 2019)
+
+* Add Dockerfile (#57, #62, #63)
+* We are in nixpkgs (#55)
+* Add subcommand derive-pk (#51)
+* Build Debian package (#50)
+
 # 0.0.7 (January 27, 2019)
 
 * Update dependencies (#47)
