@@ -391,6 +391,23 @@ mod tests {
     use crate::toxcore::tcp::connection_id::ConnectionId;
     use crate::toxcore::time::ConstNow;
 
+    impl Connections {
+        pub fn add_client(&self) -> (mpsc::UnboundedReceiver<(PublicKey, IncomingPacket)>, mpsc::Receiver<Packet>, PublicKey) {
+            let (incoming_rx, outgoing_rx, client) = create_client();
+            let relay_pk = client.pk;
+            self.clients.write().insert(client.pk, client);
+            (incoming_rx, outgoing_rx, relay_pk)
+        }
+
+        pub fn has_relay(&self, relay_pk: &PublicKey) -> bool {
+            self.clients.read().contains_key(relay_pk)
+        }
+
+        pub fn has_connection(&self, node_pk: &PublicKey) -> bool {
+            self.connections.read().contains_key(node_pk)
+        }
+    }
+
     #[test]
     fn add_relay_global() {
         crypto_init().unwrap();

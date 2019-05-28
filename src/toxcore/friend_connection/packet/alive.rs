@@ -3,6 +3,9 @@
 
 use crate::toxcore::binary_io::*;
 
+/// Id of the ping packet.
+pub const PACKET_ID_ALIVE: u8 = 0x10;
+
 /** Alive is a struct that holds nothing.
 
 This packet is used to check if the friend is online by sending this packet
@@ -16,16 +19,14 @@ pub struct Alive;
 
 impl FromBytes for Alive {
     named!(from_bytes<Alive>, do_parse!(
-        tag!("\x10") >>
+        tag!(&[PACKET_ID_ALIVE][..]) >>
         (Alive)
     ));
 }
 
 impl ToBytes for Alive {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        do_gen!(buf,
-            gen_be_u8!(0x10)
-        )
+        gen_be_u8!(buf, PACKET_ID_ALIVE)
     }
 }
 

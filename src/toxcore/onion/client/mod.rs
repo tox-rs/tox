@@ -131,6 +131,8 @@ struct OnionFriend {
     search_count: u32,
     /// Time when this friend was seen online last time
     last_seen: Option<Instant>,
+    /// Whether we connected to this friend.
+    connected: bool,
 }
 
 impl OnionFriend {
@@ -148,6 +150,7 @@ impl OnionFriend {
             last_dht_pk_dht_sent: None,
             search_count: 0,
             last_seen: None,
+            connected: false,
         }
     }
 }
@@ -288,6 +291,9 @@ struct OnionClientState {
     announce_requests: RequestQueue<AnnounceRequestData>,
     /// List of friends we are looking for.
     friends: HashMap<PublicKey, OnionFriend>,
+    /// Sink to send DHT `PublicKey` when it gets known. The first key is a long
+    /// term key, the second key is a DHT key.
+    dht_pk_tx: Option<DhtPkTx>,
 }
 
 impl OnionClientState {
@@ -297,6 +303,7 @@ impl OnionClientState {
             announce_list: Kbucket::new(MAX_ONION_ANNOUNCE_NODES),
             announce_requests: RequestQueue::new(ANNOUNCE_TIMEOUT),
             friends: HashMap::new(),
+            dht_pk_tx: None,
         }
     }
 }
@@ -309,9 +316,6 @@ pub struct OnionClient {
     dht: DhtServer,
     /// TCP connections instance.
     tcp_connections: TcpConnections,
-    /// Sink to send DHT `PublicKey` when it gets known. The first key is a long
-    /// term key, the second key is a DHT key.
-    dht_pk_tx: DhtPkTx,
     /// Our long term `SecretKey`.
     real_sk: SecretKey,
     /// Our long term `PublicKey`.
@@ -330,7 +334,6 @@ impl OnionClient {
     pub fn new(
         dht: DhtServer,
         tcp_connections: TcpConnections,
-        dht_pk_tx: DhtPkTx,
         real_sk: SecretKey,
         real_pk: PublicKey
     ) -> Self {
@@ -338,13 +341,17 @@ impl OnionClient {
         OnionClient {
             dht,
             tcp_connections,
-            dht_pk_tx,
             real_sk,
             real_pk,
             data_sk,
             data_pk,
             state: Arc::new(Mutex::new(OnionClientState::new())),
         }
+    }
+
+    /// Set sink to send DHT `PublicKey` when it gets known.
+    pub fn set_dht_pk_sink(&self, dht_pk_tx: DhtPkTx) {
+        self.state.lock().dht_pk_tx = Some(dht_pk_tx);
     }
 
     /// Check if a node was pinged recently.
@@ -495,7 +502,11 @@ impl OnionClient {
         friend.dht_pk = Some(dht_pk_announce.dht_pk);
         friend.last_seen = Some(clock_now());
 
-        let dht_pk_future = send_to(&self.dht_pk_tx, (friend_pk, dht_pk_announce.dht_pk));
+        let dht_pk_future = if let Some(ref dht_pk_tx) = state.dht_pk_tx {
+            Either::A(send_to(dht_pk_tx, (friend_pk, dht_pk_announce.dht_pk)))
+        } else {
+            Either::B(future::ok(()))
+        };
 
         let futures = dht_pk_announce.nodes.into_iter().map(|node| match node.ip_port.protocol {
             ProtocolType::UDP => {
@@ -541,11 +552,44 @@ impl OnionClient {
         state.paths_pool.path_nodes.put(node);
     }
 
-    /// Add new node to random nodes pool to use them to build random paths.
+    /// Add a friend to start looking for its DHT `PublicKey`.
     pub fn add_friend(&self, real_pk: PublicKey) {
         let mut state = self.state.lock();
 
         state.friends.insert(real_pk, OnionFriend::new(real_pk));
+    }
+
+    /// Remove a friend and stop looking for him.
+    pub fn remove_friend(&self, real_pk: PublicKey) {
+        let mut state = self.state.lock();
+
+        state.friends.remove(&real_pk);
+    }
+
+    /// Set connection status of a friend. If he's connected we can stop looking
+    /// for his DHT `PublicKey`.
+    pub fn set_friend_connected(&self, real_pk: PublicKey, connected: bool) {
+        let mut state = self.state.lock();
+
+        if let Some(friend) = state.friends.get_mut(&real_pk) {
+            if friend.connected && !connected {
+                friend.last_seen = Some(clock_now());
+                friend.search_count = 0;
+                // reset no_reply for the case when a friend will try to connect
+                // from a different device with different clock
+                friend.last_no_reply = 0;
+            }
+            friend.connected = connected;
+        }
+    }
+
+    /// Set friend's DHT `PublicKey` when it gets known somewhere else.
+    pub fn set_friend_dht_pk(&self, real_pk: PublicKey, dht_pk: PublicKey) {
+        let mut state = self.state.lock();
+
+        if let Some(friend) = state.friends.get_mut(&real_pk) {
+            friend.dht_pk = Some(dht_pk);
+        }
     }
 
     /// Generic function for sending search and announce requests to close nodes.
@@ -756,7 +800,9 @@ impl OnionClient {
         let mut packets = Vec::new();
 
         for friend in state.friends.values_mut() {
-            // TODO: if is_online
+            if friend.connected {
+                continue;
+            }
 
             let announce_packet_data = AnnouncePacketData {
                 packet_sk: &friend.temporary_sk,
@@ -837,6 +883,20 @@ mod tests {
     use tokio_timer::clock::*;
 
     use crate::toxcore::time::ConstNow;
+
+    impl OnionClient {
+        pub fn has_friend(&self, pk: &PublicKey) -> bool {
+            self.state.lock().friends.contains_key(pk)
+        }
+
+        pub fn friend_dht_pk(&self, pk: &PublicKey) -> Option<PublicKey> {
+            self.state.lock().friends.get(pk).and_then(|friend| friend.dht_pk)
+        }
+
+        pub fn is_friend_connected(&self, pk: &PublicKey) -> bool {
+            self.state.lock().friends.get(pk).map_or(false, |friend| friend.connected)
+        }
+    }
 
     fn unpack_onion_packet(packet: OnionRequest0, saddr: SocketAddr, key_by_addr: &HashMap<SocketAddr, SecretKey>) -> OnionRequest2Payload {
         let payload = packet.get_payload(&precompute(&packet.temporary_pk, &key_by_addr[&saddr])).unwrap();
@@ -919,6 +979,7 @@ mod tests {
             announce_list: Kbucket::new(8),
             announce_requests: RequestQueue::new(Duration::from_secs(42)),
             friends: HashMap::new(),
+            dht_pk_tx: None,
         };
 
         let _onion_client_state_c = onion_client_state.clone();
@@ -930,10 +991,9 @@ mod tests {
         let (real_pk, real_sk) = gen_keypair();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
-        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
         let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
-        let onion_client = OnionClient::new(dht, tcp_connections, dht_pk_tx, real_sk, real_pk);
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk, real_pk);
 
         let _onion_client_c = onion_client.clone();
     }
@@ -1051,10 +1111,9 @@ mod tests {
         let (real_pk, real_sk) = gen_keypair();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
-        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
         let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
-        let onion_client = OnionClient::new(dht, tcp_connections, dht_pk_tx, real_sk, real_pk);
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk, real_pk);
 
         let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
         onion_client.add_path_node(node);
@@ -1064,21 +1123,76 @@ mod tests {
     }
 
     #[test]
-    fn add_friend() {
+    fn add_remove_friend() {
         let (dht_pk, dht_sk) = gen_keypair();
         let (real_pk, real_sk) = gen_keypair();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
-        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
         let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
-        let onion_client = OnionClient::new(dht, tcp_connections, dht_pk_tx, real_sk, real_pk);
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk, real_pk);
 
         let (friend_pk, _friend_sk) = gen_keypair();
         onion_client.add_friend(friend_pk);
 
+        assert_eq!(onion_client.state.lock().friends[&friend_pk].real_pk, friend_pk);
+
+        onion_client.remove_friend(friend_pk);
+
+        assert!(!onion_client.state.lock().friends.contains_key(&friend_pk));
+    }
+
+    #[test]
+    fn set_friend_connected() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, real_sk) = gen_keypair();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
+        let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
+        let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
+        let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk, real_pk);
+
+        let (friend_pk, _friend_sk) = gen_keypair();
+        onion_client.add_friend(friend_pk);
+
+        onion_client.set_friend_connected(friend_pk, true);
+
         let state = onion_client.state.lock();
-        assert_eq!(state.friends[&friend_pk].real_pk, friend_pk);
+        assert!(state.friends[&friend_pk].connected);
+        drop(state);
+
+        let now = Instant::now();
+        let mut enter = tokio_executor::enter().unwrap();
+        let clock = Clock::new_with_now(ConstNow(now));
+
+        with_default(&clock, &mut enter, |_| {
+            onion_client.set_friend_connected(friend_pk, false);
+        });
+
+        let state = onion_client.state.lock();
+        let friend = &state.friends[&friend_pk];
+        assert!(!friend.connected);
+        assert_eq!(friend.last_seen, Some(now));
+    }
+
+    #[test]
+    fn set_friend_dht_pk() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, real_sk) = gen_keypair();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
+        let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
+        let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
+        let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk, real_pk);
+
+        let (friend_pk, _friend_sk) = gen_keypair();
+        onion_client.add_friend(friend_pk);
+
+        let (friend_dht_pk, _friend_dht_sk) = gen_keypair();
+        onion_client.set_friend_dht_pk(friend_pk, friend_dht_pk);
+
+        let state = onion_client.state.lock();
+        assert_eq!(state.friends[&friend_pk].dht_pk, Some(friend_dht_pk));
     }
 
     #[test]
@@ -1087,10 +1201,9 @@ mod tests {
         let (real_pk, real_sk) = gen_keypair();
         let (udp_tx, udp_rx) = mpsc::channel(1);
         let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
-        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
         let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
-        let onion_client = OnionClient::new(dht, tcp_connections, dht_pk_tx, real_sk, real_pk);
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk, real_pk);
 
         let mut state = onion_client.state.lock();
 
@@ -1162,10 +1275,9 @@ mod tests {
         let (real_pk, real_sk) = gen_keypair();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
-        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
         let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
-        let onion_client = OnionClient::new(dht, tcp_connections, dht_pk_tx, real_sk, real_pk);
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk, real_pk);
 
         let mut state = onion_client.state.lock();
 
@@ -1216,10 +1328,9 @@ mod tests {
         let (real_pk, real_sk) = gen_keypair();
         let (udp_tx, udp_rx) = mpsc::channel(1);
         let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
-        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
         let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
-        let onion_client = OnionClient::new(dht, tcp_connections, dht_pk_tx, real_sk.clone(), real_pk);
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk.clone(), real_pk);
 
         let mut state = onion_client.state.lock();
 
@@ -1277,10 +1388,9 @@ mod tests {
         let (real_pk, real_sk) = gen_keypair();
         let (udp_tx, udp_rx) = mpsc::channel(1);
         let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
-        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
         let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
-        let onion_client = OnionClient::new(dht, tcp_connections, dht_pk_tx, real_sk.clone(), real_pk);
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk.clone(), real_pk);
 
         let mut state = onion_client.state.lock();
 
@@ -1357,10 +1467,9 @@ mod tests {
         let (real_pk, real_sk) = gen_keypair();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
-        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
         let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
-        let onion_client = OnionClient::new(dht, tcp_connections, dht_pk_tx, real_sk.clone(), real_pk);
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk.clone(), real_pk);
 
         let mut state = onion_client.state.lock();
 
@@ -1406,10 +1515,9 @@ mod tests {
         let (real_pk, real_sk) = gen_keypair();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
-        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
         let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
-        let onion_client = OnionClient::new(dht, tcp_connections, dht_pk_tx, real_sk.clone(), real_pk);
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk.clone(), real_pk);
 
         let mut state = onion_client.state.lock();
 
@@ -1446,10 +1554,9 @@ mod tests {
         let (real_pk, real_sk) = gen_keypair();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
-        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
         let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
-        let onion_client = OnionClient::new(dht, tcp_connections, dht_pk_tx, real_sk.clone(), real_pk);
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk.clone(), real_pk);
 
         let mut state = onion_client.state.lock();
 
@@ -1486,10 +1593,9 @@ mod tests {
         let (real_pk, real_sk) = gen_keypair();
         let (udp_tx, udp_rx) = mpsc::channel(1);
         let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
-        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
         let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
-        let onion_client = OnionClient::new(dht, tcp_connections, dht_pk_tx, real_sk.clone(), real_pk);
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk.clone(), real_pk);
 
         let mut state = onion_client.state.lock();
 
@@ -1557,7 +1663,9 @@ mod tests {
         let (dht_pk_tx, dht_pk_rx) = mpsc::unbounded();
         let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
         let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
-        let onion_client = OnionClient::new(dht, tcp_connections, dht_pk_tx, real_sk.clone(), real_pk);
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk.clone(), real_pk);
+
+        onion_client.set_dht_pk_sink(dht_pk_tx);
 
         let (friend_dht_pk, _friend_dht_sk) = gen_keypair();
         let (friend_real_pk, friend_real_sk) = gen_keypair();
@@ -1594,10 +1702,9 @@ mod tests {
         let (real_pk, real_sk) = gen_keypair();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
-        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
         let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
-        let onion_client = OnionClient::new(dht, tcp_connections, dht_pk_tx, real_sk.clone(), real_pk);
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk.clone(), real_pk);
 
         let (friend_dht_pk, _friend_dht_sk) = gen_keypair();
         let (friend_real_pk, friend_real_sk) = gen_keypair();
@@ -1621,10 +1728,9 @@ mod tests {
         let (real_pk, real_sk) = gen_keypair();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
-        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
         let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
-        let onion_client = OnionClient::new(dht, tcp_connections, dht_pk_tx, real_sk.clone(), real_pk);
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk.clone(), real_pk);
 
         let (friend_dht_pk, _friend_dht_sk) = gen_keypair();
         let (friend_real_pk, friend_real_sk) = gen_keypair();
@@ -1653,10 +1759,9 @@ mod tests {
         let (real_pk, real_sk) = gen_keypair();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
-        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
         let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
-        let onion_client = OnionClient::new(dht, tcp_connections, dht_pk_tx, real_sk.clone(), real_pk);
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk.clone(), real_pk);
 
         let onion_data_response = OnionDataResponse {
             nonce: gen_nonce(),
@@ -1674,10 +1779,9 @@ mod tests {
         let (real_pk, real_sk) = gen_keypair();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
-        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
         let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
-        let onion_client = OnionClient::new(dht, tcp_connections, dht_pk_tx, real_sk.clone(), real_pk);
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk.clone(), real_pk);
 
         let onion_data_response_payload = OnionDataResponsePayload {
             real_pk: gen_keypair().0,
@@ -1696,10 +1800,9 @@ mod tests {
         let (real_pk, real_sk) = gen_keypair();
         let (udp_tx, udp_rx) = mpsc::channel(MAX_ONION_ANNOUNCE_NODES as usize / 2);
         let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
-        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
         let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
-        let onion_client = OnionClient::new(dht, tcp_connections, dht_pk_tx, real_sk.clone(), real_pk);
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk.clone(), real_pk);
 
         let mut state = onion_client.state.lock();
 
@@ -1743,10 +1846,9 @@ mod tests {
         let (real_pk, real_sk) = gen_keypair();
         let (udp_tx, udp_rx) = mpsc::channel(MAX_ONION_ANNOUNCE_NODES as usize);
         let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
-        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
         let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
-        let onion_client = OnionClient::new(dht, tcp_connections, dht_pk_tx, real_sk.clone(), real_pk);
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk.clone(), real_pk);
 
         let mut state = onion_client.state.lock();
 
@@ -1822,10 +1924,9 @@ mod tests {
         let (real_pk, real_sk) = gen_keypair();
         let (udp_tx, udp_rx) = mpsc::channel(MAX_ONION_ANNOUNCE_NODES as usize / 2);
         let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
-        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
         let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
-        let onion_client = OnionClient::new(dht, tcp_connections, dht_pk_tx, real_sk.clone(), real_pk);
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk.clone(), real_pk);
 
         let mut state = onion_client.state.lock();
 
@@ -1872,10 +1973,9 @@ mod tests {
         let (real_pk, real_sk) = gen_keypair();
         let (udp_tx, udp_rx) = mpsc::channel(MAX_ONION_FRIEND_NODES as usize);
         let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
-        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
         let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
-        let onion_client = OnionClient::new(dht, tcp_connections, dht_pk_tx, real_sk.clone(), real_pk);
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk.clone(), real_pk);
 
         let mut state = onion_client.state.lock();
 
@@ -1920,7 +2020,7 @@ mod tests {
         state.friends.insert(friend_pk, friend);
 
         let mut enter = tokio_executor::enter().unwrap();
-        // time when entry is timed out
+        // time when announce packet should be sent
         let clock = Clock::new_with_now(ConstNow(
             now + Duration::from_secs(ANNOUNCE_INTERVAL_NOT_ANNOUNCED + 1)
         ));
@@ -1949,15 +2049,78 @@ mod tests {
     }
 
     #[test]
+    fn friends_loop_ignore_online() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, real_sk) = gen_keypair();
+        let (udp_tx, udp_rx) = mpsc::channel(MAX_ONION_FRIEND_NODES as usize);
+        let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
+        let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
+        let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk.clone(), real_pk);
+
+        let mut state = onion_client.state.lock();
+
+        let (friend_pk, _friend_sk) = gen_keypair();
+        let mut friend = OnionFriend::new(friend_pk);
+        friend.connected = true;
+
+        let addr = "127.0.0.1".parse().unwrap();
+        for i in 0 .. 3 {
+            let saddr = SocketAddr::new(addr, 12346 + i);
+            let (pk, _sk) = gen_keypair();
+            let node = PackedNode::new(saddr, &pk);
+            state.paths_pool.path_nodes.put(node);
+        }
+
+        let now = Instant::now();
+
+        for i in 0 .. MAX_ONION_FRIEND_NODES {
+            let saddr = SocketAddr::new(addr, 23456 + u16::from(i));
+            let path = state.paths_pool.random_path(false).unwrap();
+            let (node_pk, _node_sk) = gen_keypair();
+            let node = OnionNode {
+                pk: node_pk,
+                saddr,
+                path_id: path.id(),
+                ping_id: None,
+                data_pk: None,
+                unsuccessful_pings: 0,
+                added_time: now,
+                ping_time: now,
+                response_time: now,
+                announce_status: AnnounceStatus::Failed,
+            };
+            assert!(friend.close_nodes.try_add(&real_pk, node, true));
+        }
+
+        state.friends.insert(friend_pk, friend);
+
+        let mut enter = tokio_executor::enter().unwrap();
+        // time when announce packet should be sent
+        let clock = Clock::new_with_now(ConstNow(
+            now + Duration::from_secs(ANNOUNCE_INTERVAL_NOT_ANNOUNCED + 1)
+        ));
+
+        with_default(&clock, &mut enter, |_| {
+            onion_client.friends_loop(&mut state).wait().unwrap();
+        });
+
+        // Necessary to drop tx so that rx.collect() can be finished
+        drop(state);
+        drop(onion_client);
+
+        assert!(udp_rx.collect().wait().unwrap().is_empty());
+    }
+
+    #[test]
     fn send_dht_pk_onion() {
         let (dht_pk, dht_sk) = gen_keypair();
         let (real_pk, real_sk) = gen_keypair();
         let (udp_tx, udp_rx) = mpsc::channel(MAX_ONION_FRIEND_NODES as usize);
         let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
-        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
         let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
-        let onion_client = OnionClient::new(dht, tcp_connections, dht_pk_tx, real_sk.clone(), real_pk);
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk.clone(), real_pk);
 
         let mut state = onion_client.state.lock();
 
@@ -2040,10 +2203,9 @@ mod tests {
         let (real_pk, real_sk) = gen_keypair();
         let (udp_tx, udp_rx) = mpsc::channel(MAX_ONION_FRIEND_NODES as usize);
         let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
-        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
         let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
-        let onion_client = OnionClient::new(dht, tcp_connections, dht_pk_tx, real_sk.clone(), real_pk);
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk.clone(), real_pk);
 
         let mut state = onion_client.state.lock();
 
@@ -2091,10 +2253,9 @@ mod tests {
         let (real_pk, real_sk) = gen_keypair();
         let (udp_tx, udp_rx) = mpsc::channel(1);
         let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
-        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
         let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
         let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
-        let onion_client = OnionClient::new(dht, tcp_connections, dht_pk_tx, real_sk, real_pk);
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk, real_pk);
 
         let (node_pk, node_sk) = gen_keypair();
         let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &node_pk);
