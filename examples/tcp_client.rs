@@ -2,6 +2,7 @@
 extern crate log;
 
 use tox::toxcore::crypto_core::*;
+use tox::toxcore::dht::packet::CryptoData;
 use tox::toxcore::tcp::connection_id::ConnectionId;
 use tox::toxcore::tcp::packet::*;
 use tox::toxcore::tcp::handshake::make_client_handshake;
@@ -196,9 +197,15 @@ fn main() {
                                 185, 111, 33, 146, 221, 31, 77, 118]);
 
         let request = if i == 1 {
-            tx.send(Packet::RouteRequest(RouteRequest {pk: friend_pk } ))
+            tx.send(Packet::RouteRequest(RouteRequest { pk: friend_pk } ))
         } else {
-            tx.send(Packet::Data(Data { connection_id: ConnectionId::from_index(0), data: vec![42; 42] } ))
+            tx.send(Packet::Data(Data {
+                connection_id: ConnectionId::from_index(0),
+                data: DataPayload::CryptoData(CryptoData {
+                    nonce_last_bytes: 42,
+                    payload: vec![42; 123],
+                }),
+            }))
         };
 
         request

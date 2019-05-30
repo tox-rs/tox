@@ -184,7 +184,7 @@ impl Client {
     }
     /** Construct Data and send it to Client
     */
-    pub fn send_data(&self, connection_id: ConnectionId, data: Vec<u8>) -> impl Future<Item = (), Error = Error> + Send {
+    pub fn send_data(&self, connection_id: ConnectionId, data: DataPayload) -> impl Future<Item = (), Error = Error> + Send {
         self.send(
             Packet::Data(Data { connection_id, data })
         )

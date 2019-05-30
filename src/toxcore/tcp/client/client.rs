@@ -35,7 +35,7 @@ const CLIENT_CHANNEL_SIZE: usize = 2;
 #[derive(Debug, PartialEq, Clone)]
 pub enum IncomingPacket {
     /// Data packet with sender's `PublicKey`.
-    Data(PublicKey, Vec<u8>),
+    Data(PublicKey, DataPayload),
     /// Oob packet with sender's `PublicKey`.
     Oob(PublicKey, Vec<u8>),
     /// Onion response packet.
@@ -370,7 +370,7 @@ impl Client {
     }
 
     /// Send `Data` packet to a node via relay.
-    pub fn send_data(&self, destination_pk: PublicKey, data: Vec<u8>) -> impl Future<Item = (), Error = Error> + Send {
+    pub fn send_data(&self, destination_pk: PublicKey, data: DataPayload) -> impl Future<Item = (), Error = Error> + Send {
         // it is important that the result future succeeds only if packet is
         // sent since we take only one successful future from several relays
         // when send data packet
@@ -529,6 +529,7 @@ pub mod tests {
     use tokio::net::TcpListener;
     use tokio::timer::Interval;
 
+    use crate::toxcore::dht::packet::CryptoData;
     use crate::toxcore::ip_port::*;
     use crate::toxcore::onion::packet::*;
     use crate::toxcore::tcp::server::{Server, ServerExt};
@@ -797,7 +798,10 @@ pub mod tests {
         client.links.write().insert_by_id(&sender_pk, index);
         client.links.write().upgrade(index);
 
-        let data = vec![42; 123];
+        let data = DataPayload::CryptoData(CryptoData {
+            nonce_last_bytes: 42,
+            payload: vec![42; 123],
+        });
         let data_packet = Packet::Data(Data {
             connection_id: ConnectionId::from_index(index),
             data: data.clone(),
@@ -819,7 +823,10 @@ pub mod tests {
 
         let data_packet = Packet::Data(Data {
             connection_id: ConnectionId::from_index(42),
-            data: vec![42; 123],
+            data: DataPayload::CryptoData(CryptoData {
+                nonce_last_bytes: 42,
+                payload: vec![42; 123],
+            }),
         });
 
         assert!(client.handle_packet(data_packet).wait().is_err());
@@ -836,7 +843,10 @@ pub mod tests {
 
         let data_packet = Packet::Data(Data {
             connection_id: ConnectionId::zero(),
-            data: vec![42; 123],
+            data: DataPayload::CryptoData(CryptoData {
+                nonce_last_bytes: 42,
+                payload: vec![42; 123],
+            }),
         });
 
         assert!(client.handle_packet(data_packet).wait().is_err());
@@ -892,7 +902,10 @@ pub mod tests {
         let (_incoming_rx, outgoing_rx, client) = create_client();
 
         let (destination_pk, _destination_sk) = gen_keypair();
-        let data = vec![42; 123];
+        let data = DataPayload::CryptoData(CryptoData {
+            nonce_last_bytes: 42,
+            payload: vec![42; 123],
+        });
 
         let index = 42;
         client.links.write().insert_by_id(&destination_pk, index);
@@ -911,7 +924,10 @@ pub mod tests {
         let (_incoming_rx, outgoing_rx, client) = create_client();
 
         let (destination_pk, _destination_sk) = gen_keypair();
-        let data = vec![42; 123];
+        let data = DataPayload::CryptoData(CryptoData {
+            nonce_last_bytes: 42,
+            payload: vec![42; 123],
+        });
 
         assert!(client.send_data(destination_pk, data.clone()).wait().is_err());
 
@@ -926,7 +942,10 @@ pub mod tests {
         let (_incoming_rx, outgoing_rx, client) = create_client();
 
         let (destination_pk, _destination_sk) = gen_keypair();
-        let data = vec![42; 123];
+        let data = DataPayload::CryptoData(CryptoData {
+            nonce_last_bytes: 42,
+            payload: vec![42; 123],
+        });
 
         let connection_id = 42;
         client.links.write().insert_by_id(&destination_pk, connection_id - 16);
@@ -1185,8 +1204,14 @@ pub mod tests {
             client_1_c.add_connection(client_pk_2)
         });
 
-        let data_1 = vec![42; 123];
-        let data_2 = vec![43; 123];
+        let data_1 = DataPayload::CryptoData(CryptoData {
+            nonce_last_bytes: 42,
+            payload: vec![42; 123],
+        });
+        let data_2 = DataPayload::CryptoData(CryptoData {
+            nonce_last_bytes: 42,
+            payload: vec![43; 123],
+        });
 
         // wait until links become online
         let client_1_c = client_1.clone();
