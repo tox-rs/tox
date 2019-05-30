@@ -24,7 +24,7 @@ pub use self::oob_send::OobSend;
 pub use self::oob_receive::OobReceive;
 pub use self::onion_request::OnionRequest;
 pub use self::onion_response::OnionResponse;
-pub use self::data::Data;
+pub use self::data::{Data, DataPayload};
 
 use crate::toxcore::binary_io::*;
 

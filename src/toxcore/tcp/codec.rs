@@ -176,6 +176,7 @@ impl Encoder for Codec {
 #[cfg(test)]
 mod tests {
     use crate::toxcore::crypto_core::*;
+    use crate::toxcore::dht::packet::CryptoData;
     use crate::toxcore::onion::packet::*;
     use crate::toxcore::ip_port::*;
     use crate::toxcore::tcp::codec::*;
@@ -304,7 +305,13 @@ mod tests {
                     payload: vec![42; 123]
                 })
             } ),
-            Packet::Data( Data { connection_id: ConnectionId::from_index(42), data: vec![13; 2031] } )
+            Packet::Data( Data {
+                connection_id: ConnectionId::from_index(42),
+                data: DataPayload::CryptoData(CryptoData {
+                    nonce_last_bytes: 42,
+                    payload: vec![42; 123],
+                }),
+            } )
         ];
         for packet in test_packets {
             alice_codec.encode(packet.clone(), &mut buf).expect("Alice should encode");
@@ -408,7 +415,13 @@ mod tests {
         let mut buf = BytesMut::new();
         let stats = Stats::new();
         let mut alice_codec = Codec::new(alice_channel, stats);
-        let packet = Packet::Data( Data { connection_id: ConnectionId::from_index(42), data: vec![13; 2032] } );
+        let packet = Packet::Data( Data {
+            connection_id: ConnectionId::from_index(42),
+            data: DataPayload::CryptoData(CryptoData {
+                nonce_last_bytes: 42,
+                payload: vec![42; 2030],
+            })
+        } );
 
         // Alice cannot serialize Packet because it is too long
         assert!(alice_codec.encode(packet, &mut buf).is_err());

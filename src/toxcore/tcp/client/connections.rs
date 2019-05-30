@@ -207,7 +207,7 @@ impl Connections {
     }
 
     /// Send `Data` packet to a node via one of the relays.
-    pub fn send_data(&self, node_pk: PublicKey, data: Vec<u8>) -> impl Future<Item = (), Error = Error> + Send {
+    pub fn send_data(&self, node_pk: PublicKey, data: DataPayload) -> impl Future<Item = (), Error = Error> + Send {
         let connections = self.connections.read();
         if let Some(connection) = connections.get(&node_pk) {
             let clients = self.clients.read();
@@ -386,6 +386,7 @@ mod tests {
     use tokio_executor;
     use tokio_timer::clock::*;
 
+    use crate::toxcore::dht::packet::CryptoData;
     use crate::toxcore::ip_port::*;
     use crate::toxcore::tcp::client::client::tests::*;
     use crate::toxcore::tcp::connection_id::ConnectionId;
@@ -625,7 +626,10 @@ mod tests {
         connections.clients.write().insert(relay_1.pk, relay_1);
         connections.clients.write().insert(relay_2.pk, relay_2);
 
-        let data = vec![42; 123];
+        let data = DataPayload::CryptoData(CryptoData {
+            nonce_last_bytes: 42,
+            payload: vec![42; 123],
+        });
 
         connections.send_data(destination_pk, data.clone()).wait().unwrap();
 
@@ -649,7 +653,11 @@ mod tests {
 
         let (destination_pk, _destination_sk) = gen_keypair();
 
-        connections.send_data(destination_pk, vec![42; 123]).wait().unwrap();
+        let data = DataPayload::CryptoData(CryptoData {
+            nonce_last_bytes: 42,
+            payload: vec![42; 123],
+        });
+        connections.send_data(destination_pk, data).wait().unwrap();
     }
 
     #[test]

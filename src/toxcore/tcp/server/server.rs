@@ -516,6 +516,7 @@ impl Server {
 mod tests {
     use super::*;
 
+    use crate::toxcore::dht::packet::CryptoData;
     use crate::toxcore::ip_port::*;
     use crate::toxcore::onion::packet::*;
     use crate::toxcore::tcp::server::{Client, Server};
@@ -650,13 +651,25 @@ mod tests {
 
         // emulate send Data from client_1
         server.handle_packet(&client_pk_1, Packet::Data(
-            Data { connection_id: ConnectionId::from_index(0), data: vec![13, 42] }
+            Data {
+                connection_id: ConnectionId::from_index(0),
+                data: DataPayload::CryptoData(CryptoData {
+                    nonce_last_bytes: 42,
+                    payload: vec![42; 123],
+                }),
+            }
         )).wait().unwrap();
 
         // the server should put Data into rx_2
         let (packet, rx_2) = rx_2.into_future().wait().unwrap();
         assert_eq!(packet.unwrap(), Packet::Data(
-            Data { connection_id: ConnectionId::from_index(0), data: vec![13, 42] }
+            Data {
+                connection_id: ConnectionId::from_index(0),
+                data: DataPayload::CryptoData(CryptoData {
+                    nonce_last_bytes: 42,
+                    payload: vec![42; 123],
+                }),
+            }
         ));
 
         // emulate client_1 disconnected
@@ -1120,7 +1133,13 @@ mod tests {
 
         // emulate send Data from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::Data(
-            Data { connection_id: ConnectionId::from_index(0), data: vec![13, 42] }
+            Data {
+                connection_id: ConnectionId::from_index(0),
+                data: DataPayload::CryptoData(CryptoData {
+                    nonce_last_bytes: 42,
+                    payload: vec![42; 123],
+                }),
+            }
         )).wait();
         assert!(handle_res.is_ok());
     }
@@ -1132,7 +1151,13 @@ mod tests {
         let (client_pk, _) = gen_keypair();
 
         let handle_res = server.handle_packet(&client_pk, Packet::Data(
-            Data { connection_id: ConnectionId::zero(), data: vec![13, 42] }
+            Data {
+                connection_id: ConnectionId::zero(),
+                data: DataPayload::CryptoData(CryptoData {
+                    nonce_last_bytes: 42,
+                    payload: vec![42; 123],
+                }),
+            }
         )).wait();
         assert!(handle_res.is_err());
     }
@@ -1228,7 +1253,13 @@ mod tests {
 
         // emulate send Data from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::Data(
-            Data { connection_id: ConnectionId::from_index(0), data: vec![13, 42] }
+            Data {
+                connection_id: ConnectionId::from_index(0),
+                data: DataPayload::CryptoData(CryptoData {
+                    nonce_last_bytes: 42,
+                    payload: vec![42; 123],
+                }),
+            }
         )).wait();
         assert!(handle_res.is_ok());
 
@@ -1435,7 +1466,13 @@ mod tests {
 
         // emulate send Data from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::Data(
-            Data { connection_id: ConnectionId::from_index(0), data: vec![13, 42] }
+            Data {
+                connection_id: ConnectionId::from_index(0),
+                data: DataPayload::CryptoData(CryptoData {
+                    nonce_last_bytes: 42,
+                    payload: vec![42; 123],
+                }),
+            }
         )).wait();
         assert!(handle_res.is_err());
     }
@@ -1462,7 +1499,13 @@ mod tests {
 
         // emulate send Data from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::Data(
-            Data { connection_id: ConnectionId::from_index(0), data: vec![13, 42] }
+            Data {
+                connection_id: ConnectionId::from_index(0),
+                data: DataPayload::CryptoData(CryptoData {
+                    nonce_last_bytes: 42,
+                    payload: vec![42; 123],
+                }),
+            }
         )).wait();
         assert!(handle_res.is_ok());
     }
