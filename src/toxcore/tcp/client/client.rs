@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::io::{Error, ErrorKind};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
@@ -23,6 +22,7 @@ use crate::toxcore::tcp::handshake::make_client_handshake;
 use crate::toxcore::tcp::links::*;
 use crate::toxcore::tcp::packet::*;
 use crate::toxcore::time::*;
+use crate::toxcore::tcp::client::errors::*;
 
 /// Buffer size (in packets) for outgoing packets. This number shouldn't be high
 /// to minimize latency. If some relay can't take more packets we can use
@@ -102,7 +102,7 @@ impl Client {
     }
 
     /// Handle packet received from TCP relay.
-    pub fn handle_packet(&self, packet: Packet) -> impl Future<Item = (), Error = Error> + Send {
+    pub fn handle_packet(&self, packet: Packet) -> impl Future<Item = (), Error = HandlePacketError> + Send {
         // TODO: use anonymous sum types when rust has them
         // https://github.com/rust-lang/rfcs/issues/294
         match packet {
@@ -122,39 +122,35 @@ impl Client {
 
     /// Send packet to this relay. If we are not connected to the relay an error
     /// will be returned.
-    fn send_packet(&self, packet: Packet) -> impl Future<Item = (), Error = Error> + Send {
+    fn send_packet(&self, packet: Packet) -> impl Future<Item = (), Error = SendPacketError> + Send {
         if let ClientStatus::Connected(ref tx) = *self.status.read() {
             Either::A(send_to(tx, packet).map_err(|e|
-                Error::new(ErrorKind::Other,
-                    format!("Failed to send packet: {:?}", e)
-            )))
+                e.context(SendPacketErrorKind::SendTo).into()
+            ))
         } else {
             // Attempt to send packet to TCP relay with wrong status. For
             // instance it can happen when we received ping request from the
             // relay and right after that relay became sleeping so we are not
             // able to respond anymore.
             Either::B( future::err(
-                Error::new(ErrorKind::Other,
-                    format!("Attempt to send packet to TCP relay with wrong status: {:?}", packet)
-            )))
+                SendPacketErrorKind::WrongStatus.into()
+            ))
         }
     }
 
-    fn handle_route_request(&self, _packet: &RouteRequest) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_route_request(&self, _packet: &RouteRequest) -> impl Future<Item = (), Error = HandlePacketError> + Send {
         future::err(
-            Error::new(ErrorKind::Other,
-                "Server must not send RouteRequest to client"
-        ))
+            HandlePacketErrorKind::MustNotSend.into()
+        )
     }
 
-    fn handle_route_response(&self, packet: &RouteResponse) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_route_response(&self, packet: &RouteResponse) -> impl Future<Item = (), Error = HandlePacketError> + Send {
         let index = if let Some(index) = packet.connection_id.index() {
             index
         } else {
             return future::err(
-                Error::new(ErrorKind::Other,
-                    "RouteResponse: connection id is zero"
-            ))
+                HandlePacketErrorKind::InvalidConnectionId.into()
+            )
         };
 
         if self.connections.read().contains(&packet.pk) {
@@ -162,128 +158,115 @@ impl Client {
                 future::ok(())
             } else {
                 future::err(
-                    Error::new(ErrorKind::Other,
-                        "handle_route_response: connection_id is already linked"
-                ))
+                    HandlePacketErrorKind::AlreadyLinked.into()
+                )
             }
         } else {
             // in theory this can happen if we added connection and right
             // after that removed it
             // TODO: should it be handled better?
             future::err(
-                Error::new(ErrorKind::Other,
-                    "handle_route_response: unexpected route response"
-            ))
+                HandlePacketErrorKind::UnexpectedRouteResponse.into()
+            )
         }
     }
 
-    fn handle_connect_notification(&self, packet: &ConnectNotification) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_connect_notification(&self, packet: &ConnectNotification) -> impl Future<Item = (), Error = HandlePacketError> + Send {
         let index = if let Some(index) = packet.connection_id.index() {
             index
         } else {
             return future::err(
-                Error::new(ErrorKind::Other,
-                    "ConnectNotification: connection id is zero"
-            ))
+                HandlePacketErrorKind::InvalidConnectionId.into()
+            )
         };
 
         if self.links.write().upgrade(index) {
             future::ok(())
         } else {
             future::err(
-                Error::new(ErrorKind::Other,
-                    "handle_connect_notification: connection_id is not linked"
-            ))
+                HandlePacketErrorKind::AlreadyLinked.into()
+            )
         }
     }
 
-    fn handle_disconnect_notification(&self, packet: &DisconnectNotification) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_disconnect_notification(&self, packet: &DisconnectNotification) -> impl Future<Item = (), Error = HandlePacketError> + Send {
         let index = if let Some(index) = packet.connection_id.index() {
             index
         } else {
             return future::err(
-                Error::new(ErrorKind::Other,
-                    "DisconnectNotification: connection id is zero"
-            ))
+                HandlePacketErrorKind::InvalidConnectionId.into()
+            )
         };
 
         if self.links.write().downgrade(index) {
             future::ok(())
         } else {
             future::err(
-                Error::new(ErrorKind::Other,
-                    "handle_disconnect_notification: connection_id is not linked"
-            ))
+                HandlePacketErrorKind::AlreadyLinked.into()
+            )
         }
     }
 
-    fn handle_ping_request(&self, packet: &PingRequest) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_ping_request(&self, packet: &PingRequest) -> impl Future<Item = (), Error = HandlePacketError> + Send {
         self.send_packet(Packet::PongResponse(
             PongResponse { ping_id: packet.ping_id }
-        ))
+        )).map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
     }
 
-    fn handle_pong_response(&self, _packet: &PongResponse) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_pong_response(&self, _packet: &PongResponse) -> impl Future<Item = (), Error = HandlePacketError> + Send {
         // TODO check ping_id
         future::ok(())
     }
 
-    fn handle_oob_send(&self, _packet: &OobSend) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_oob_send(&self, _packet: &OobSend) -> impl Future<Item = (), Error = HandlePacketError> + Send {
         future::err(
-            Error::new(ErrorKind::Other,
-                "Server must not send OobSend to client"
-        ))
+            HandlePacketErrorKind::MustNotSend.into()
+        )
     }
 
-    fn handle_oob_receive(&self, packet: OobReceive) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_oob_receive(&self, packet: OobReceive) -> impl Future<Item = (), Error = HandlePacketError> + Send {
         send_to(&self.incoming_tx, (self.pk, IncomingPacket::Oob(packet.sender_pk, packet.data))).map_err(|e|
-            Error::new(ErrorKind::Other,
-                format!("Failed to send packet: {:?}", e)
-        ))
+            e.context(HandlePacketErrorKind::SendTo).into()
+        )
     }
 
-    fn handle_data(&self, packet: Data) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_data(&self, packet: Data) -> impl Future<Item = (), Error = HandlePacketError> + Send {
         let index = if let Some(index) = packet.connection_id.index() {
             index
         } else {
             return Either::A( future::err(
-                Error::new(ErrorKind::Other,
-                    "Data: connection id is zero"
-            )))
+                HandlePacketErrorKind::InvalidConnectionId.into()
+            ))
         };
 
         let links = self.links.read();
         if let Some(link) = links.by_id(index) {
             Either::B(send_to(&self.incoming_tx, (self.pk, IncomingPacket::Data(link.pk, packet.data))).map_err(|e|
-                Error::new(ErrorKind::Other,
-                    format!("Failed to send packet: {:?}", e)
-            )))
+                e.context(HandlePacketErrorKind::SendTo).into()
+            ))
         } else {
             Either::A( future::err(
-                Error::new(ErrorKind::Other,
-                    "Data.connection_id is not linked"
-            )))
+                HandlePacketErrorKind::AlreadyLinked.into()
+            ))
         }
     }
 
-    fn handle_onion_request(&self, _packet: &OnionRequest) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_onion_request(&self, _packet: &OnionRequest) -> impl Future<Item = (), Error = HandlePacketError> + Send {
         future::err(
-            Error::new(ErrorKind::Other,
-                "Server must not send OnionRequest to client"
-        ))
+            HandlePacketErrorKind::MustNotSend.into()
+        )
     }
 
-    fn handle_onion_response(&self, packet: OnionResponse) -> impl Future<Item = (), Error = Error> + Send {
+    fn handle_onion_response(&self, packet: OnionResponse) -> impl Future<Item = (), Error = HandlePacketError> + Send {
         send_to(&self.incoming_tx, (self.pk, IncomingPacket::Onion(packet.payload))).map_err(|e|
-            Error::new(ErrorKind::Other,
-                format!("Failed to send packet: {:?}", e)
-        ))
+            e.context(HandlePacketErrorKind::SendTo).into()
+        )
     }
 
     /// Spawn a connection to this TCP relay if it is not connected already. The
     /// connection is spawned via `tokio::spawn` so the result future will be
     /// completed after first poll.
-    pub fn spawn(self, dht_sk: SecretKey, dht_pk: PublicKey) -> impl Future<Item = (), Error = Error> + Send { // TODO: send pings periodically
+    pub fn spawn(self, dht_sk: SecretKey, dht_pk: PublicKey) -> impl Future<Item = (), Error = SpawnError> + Send { // TODO: send pings periodically
         future::lazy(move || {
             let relay_pk = self.pk;
             let self_c = self.clone();
@@ -294,8 +277,9 @@ impl Client {
                 _ => return future::ok(()),
             }
 
-            let future = TcpStream::connect(&self.addr)
-                .and_then(move |socket| make_client_handshake(socket, &dht_pk, &dht_sk, &relay_pk)) // TODO: timeout
+            let future = TcpStream::connect(&self.addr).map_err(|e| e.context(SpawnErrorKind::Io).into())
+                .and_then(move |socket| make_client_handshake(socket, &dht_pk, &dht_sk, &relay_pk)
+                    .map_err(|e| e.context(SpawnErrorKind::Io).into())) // TODO: timeout
                 .and_then(move |(socket, channel)| {
                     let stats = Stats::new();
                     let secure_socket = Framed::new(socket, Codec::new(channel, stats));
@@ -311,21 +295,23 @@ impl Client {
 
                     *self.connected_time.write() = Some(clock_now());
 
-                    let route_requests = self.send_route_requests();
+                    let route_requests = self.send_route_requests()
+                        .map_err(|e| e.context(SpawnErrorKind::SendTo).into());
 
                     let writer = to_server_rx
                         .map_err(|()| -> EncodeError { unreachable!("rx can't fail") })
                         .forward(to_server)
-                        .map_err(|e| Error::new(ErrorKind::Other, e.compat()))
+                        .map_err(|e| e.context(SpawnErrorKind::Encode).into())
                         .map(|_| ());
 
                     let reader = from_server
-                        .map_err(|e| Error::new(ErrorKind::Other, e.compat()))
-                        .for_each(move |packet| self.handle_packet(packet));
+                        .map_err(|e| e.context(SpawnErrorKind::ReadSocket).into())
+                        .for_each(move |packet| self.handle_packet(packet)
+                            .map_err(|e| e.context(SpawnErrorKind::HandlePacket).into()));
 
                     Either::B(writer
                         .select(reader)
-                        .map_err(|(e, _)| e)
+                        .map_err(|(e, _): (SpawnError, _)| e)
                         .join(route_requests)
                         .map(|_| ()))
                 })
@@ -353,7 +339,7 @@ impl Client {
     }
 
     /// Send `RouteRequest` packet with specified `PublicKey`.
-    fn send_route_request(&self, pk: PublicKey) -> impl Future<Item = (), Error = Error> + Send {
+    fn send_route_request(&self, pk: PublicKey) -> impl Future<Item = (), Error = SendPacketError> + Send {
         self.send_packet(Packet::RouteRequest(RouteRequest {
             pk
         }))
@@ -361,7 +347,7 @@ impl Client {
 
     /// Send `RouteRequest` packets for all nodes we should be connected to via
     /// the relay. It should be done for every fresh connection to the relay.
-    fn send_route_requests(&self) -> impl Future<Item = (), Error = Error> + Send {
+    fn send_route_requests(&self) -> impl Future<Item = (), Error = SendPacketError> + Send {
         let connections = self.connections.read();
         let futures = connections.iter()
             .map(|&pk| self.send_route_request(pk))
@@ -370,7 +356,7 @@ impl Client {
     }
 
     /// Send `Data` packet to a node via relay.
-    pub fn send_data(&self, destination_pk: PublicKey, data: DataPayload) -> impl Future<Item = (), Error = Error> + Send {
+    pub fn send_data(&self, destination_pk: PublicKey, data: DataPayload) -> impl Future<Item = (), Error = SendPacketError> + Send {
         // it is important that the result future succeeds only if packet is
         // sent since we take only one successful future from several relays
         // when send data packet
@@ -383,20 +369,18 @@ impl Client {
                 })))
             } else {
                 Either::B( future::err(
-                    Error::new(ErrorKind::Other,
-                        "send_data: destination_pk is not online"
-                )))
+                    SendPacketErrorKind::NotOnline.into()
+                ))
             }
         } else {
             Either::B( future::err(
-                Error::new(ErrorKind::Other,
-                    "send_data: destination_pk is not linked"
-            )))
+                SendPacketErrorKind::NotLinked.into()
+            ))
         }
     }
 
     /// Send `OobSend` packet to a node via relay.
-    pub fn send_oob(&self, destination_pk: PublicKey, data: Vec<u8>) -> impl Future<Item = (), Error = Error> + Send {
+    pub fn send_oob(&self, destination_pk: PublicKey, data: Vec<u8>) -> impl Future<Item = (), Error = SendPacketError> + Send {
         self.send_packet(Packet::OobSend(OobSend {
             destination_pk,
             data,
@@ -404,14 +388,14 @@ impl Client {
     }
 
     /// Send `OnionRequest` packet to the relay.
-    pub fn send_onion(&self, onion_request: OnionRequest) -> impl Future<Item = (), Error = Error> + Send {
+    pub fn send_onion(&self, onion_request: OnionRequest) -> impl Future<Item = (), Error = SendPacketError> + Send {
         self.send_packet(Packet::OnionRequest(onion_request))
     }
 
     /// Add connection to a friend via this relay. If we are connected to the
     /// relay `RouteRequest` packet will be sent. Also this packet will be sent
     /// when fresh connection is established.
-    pub fn add_connection(&self, pk: PublicKey) -> impl Future<Item = (), Error = Error> + Send {
+    pub fn add_connection(&self, pk: PublicKey) -> impl Future<Item = (), Error = SendPacketError> + Send {
         if self.connections.write().insert(pk) {
             // ignore sending errors if we are not connected to the relay
             // in this case RouteRequest will be sent after connection
@@ -424,7 +408,7 @@ impl Client {
     /// Remove connection to a friend via this relay. If we are connected to the
     /// relay and linked to the friend `DisconnectNotification` packet will be
     /// sent.
-    pub fn remove_connection(&self, pk: PublicKey) -> impl Future<Item = (), Error = Error> + Send {
+    pub fn remove_connection(&self, pk: PublicKey) -> impl Future<Item = (), Error = SendPacketError> + Send {
         if self.connections.write().remove(&pk) {
             let mut links = self.links.write();
             if let Some(index) = links.id_by_pk(&pk) {
@@ -440,9 +424,8 @@ impl Client {
             }
         } else {
             Either::B( future::err(
-                Error::new(ErrorKind::Other,
-                    "remove_connection: no such connection"
-            )))
+                SendPacketErrorKind::NoSuchConnection.into()
+            ))
         }
     }
 
@@ -525,6 +508,7 @@ pub mod tests {
     use super::*;
 
     use std::time::{Duration, Instant};
+    use std::io::{Error, ErrorKind};
 
     use tokio::net::TcpListener;
     use tokio::timer::Interval;
@@ -558,7 +542,9 @@ pub mod tests {
             pk: gen_keypair().0,
         });
 
-        assert!(client.handle_packet(route_request).wait().is_err());
+        let res = client.handle_packet(route_request).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::MustNotSend);
     }
 
     #[test]
@@ -617,7 +603,9 @@ pub mod tests {
             pk: gen_keypair().0,
         });
 
-        assert!(client.handle_packet(route_response).wait().is_err());
+        let res = client.handle_packet(route_response).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::UnexpectedRouteResponse);
 
         assert!(client.links.read().by_id(index).is_none());
     }
@@ -631,7 +619,9 @@ pub mod tests {
             pk: gen_keypair().0,
         });
 
-        assert!(client.handle_packet(route_response).wait().is_err());
+        let res = client.handle_packet(route_response).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::InvalidConnectionId);
     }
 
     #[test]
@@ -664,7 +654,9 @@ pub mod tests {
             connection_id: ConnectionId::from_index(index),
         });
 
-        assert!(client.handle_packet(connect_notification).wait().is_err());
+        let res = client.handle_packet(connect_notification).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::AlreadyLinked);
 
         assert!(client.links.read().by_id(index).is_none());
     }
@@ -677,7 +669,9 @@ pub mod tests {
             connection_id: ConnectionId::zero(),
         });
 
-        assert!(client.handle_packet(connect_notification).wait().is_err());
+        let res = client.handle_packet(connect_notification).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::InvalidConnectionId);
     }
 
     #[test]
@@ -711,7 +705,9 @@ pub mod tests {
             connection_id: ConnectionId::from_index(index),
         });
 
-        assert!(client.handle_packet(disconnect_notification).wait().is_err());
+        let res = client.handle_packet(disconnect_notification).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::AlreadyLinked);
 
         assert!(client.links.read().by_id(index).is_none());
     }
@@ -724,7 +720,9 @@ pub mod tests {
             connection_id: ConnectionId::zero(),
         });
 
-        assert!(client.handle_packet(disconnect_notification).wait().is_err());
+        let res = client.handle_packet(disconnect_notification).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::InvalidConnectionId);
     }
 
     #[test]
@@ -764,7 +762,9 @@ pub mod tests {
             data: vec![42; 123],
         });
 
-        assert!(client.handle_packet(oob_send).wait().is_err());
+        let res = client.handle_packet(oob_send).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::MustNotSend);
     }
 
     #[test]
@@ -829,7 +829,9 @@ pub mod tests {
             }),
         });
 
-        assert!(client.handle_packet(data_packet).wait().is_err());
+        let res = client.handle_packet(data_packet).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::AlreadyLinked);
 
         // Necessary to drop tx so that rx.collect() can be finished
         drop(client);
@@ -849,7 +851,9 @@ pub mod tests {
             }),
         });
 
-        assert!(client.handle_packet(data_packet).wait().is_err());
+        let res = client.handle_packet(data_packet).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::InvalidConnectionId);
 
         // Necessary to drop tx so that rx.collect() can be finished
         drop(client);
@@ -872,7 +876,9 @@ pub mod tests {
             payload: vec![42; 123],
         });
 
-        assert!(client.handle_packet(onion_request).wait().is_err());
+        let res = client.handle_packet(onion_request).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::MustNotSend);
     }
 
     #[test]
@@ -929,7 +935,9 @@ pub mod tests {
             payload: vec![42; 123],
         });
 
-        assert!(client.send_data(destination_pk, data.clone()).wait().is_err());
+        let res = client.send_data(destination_pk, data.clone()).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), SendPacketErrorKind::NotLinked);
 
         // Necessary to drop tx so that rx.collect() can be finished
         drop(client);
@@ -950,7 +958,9 @@ pub mod tests {
         let connection_id = 42;
         client.links.write().insert_by_id(&destination_pk, connection_id - 16);
 
-        assert!(client.send_data(destination_pk, data.clone()).wait().is_err());
+        let res = client.send_data(destination_pk, data.clone()).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), SendPacketErrorKind::NotOnline);
 
         // Necessary to drop tx so that rx.collect() can be finished
         drop(client);
@@ -1040,7 +1050,9 @@ pub mod tests {
 
         let (connection_pk, _connection_sk) = gen_keypair();
 
-        assert!(client.remove_connection(connection_pk).wait().is_err());
+        let res = client.remove_connection(connection_pk).wait();
+        assert!(res.is_err());
+        assert_eq!(*res.err().unwrap().kind(), SendPacketErrorKind::NoSuchConnection);
     }
 
     #[test]
@@ -1179,7 +1191,8 @@ pub mod tests {
         let client_1 = Client::new(server_pk, addr, incoming_tx_1);
         // connection attempts should be set to 0 after successful connection
         set_connection_attempts(&client_1, 3);
-        let client_future_1 = client_1.clone().spawn(client_sk_1, client_pk_1);
+        let client_future_1 = client_1.clone().spawn(client_sk_1, client_pk_1)
+            .map_err(|e| Error::new(ErrorKind::Other, e.compat()));
 
         // run second client
         let (client_pk_2, client_sk_2) = gen_keypair();
@@ -1187,10 +1200,12 @@ pub mod tests {
         let client_2 = Client::new(server_pk, addr, incoming_tx_2);
         // connection attempts should be set to 0 after successful connection
         set_connection_attempts(&client_2, 3);
-        let client_future_2 = client_2.clone().spawn(client_sk_2, client_pk_2);
+        let client_future_2 = client_2.clone().spawn(client_sk_2, client_pk_2)
+            .map_err(|e| Error::new(ErrorKind::Other, e.compat()));
 
         // add connection immediately
-        let connection_future = client_2.add_connection(client_pk_1);
+        let connection_future = client_2.add_connection(client_pk_1)
+            .map_err(|e| Error::new(ErrorKind::Other, e.compat()));
 
         // wait until connections are established
         let client_1_c = client_1.clone();
@@ -1202,6 +1217,7 @@ pub mod tests {
             assert_eq!(client_2_c.connection_attempts(), 0);
             // add connection when relay is connected
             client_1_c.add_connection(client_pk_2)
+                .map_err(|e| Error::new(ErrorKind::Other, e.compat()))
         });
 
         let data_1 = DataPayload::CryptoData(CryptoData {
@@ -1220,8 +1236,10 @@ pub mod tests {
         let data_2_c = data_2.clone();
         let on_online_future = on_online(client_1.clone(), client_pk_2).join(on_online(client_2.clone(), client_pk_1))
             // and then send data packets to each other
-            .and_then(move |_| client_1_c.send_data(client_pk_2, data_1_c))
-            .and_then(move |_| client_2_c.send_data(client_pk_1, data_2_c))
+            .and_then(move |_| client_1_c.send_data(client_pk_2, data_1_c)
+                .map_err(|e| Error::new(ErrorKind::Other, e.compat())))
+            .and_then(move |_| client_2_c.send_data(client_pk_1, data_2_c)
+                .map_err(|e| Error::new(ErrorKind::Other, e.compat())))
             // and then get them
             .and_then(move |_| incoming_rx_1.map_err(|()| unreachable!("rx can't fail")).into_future().map(move |(packet, _)| {
                 let (relay_pk, packet) = packet.unwrap();
@@ -1277,7 +1295,8 @@ pub mod tests {
         let (invalid_server_pk, _invalid_server_sk) = gen_keypair();
         let (incoming_tx_1, _incoming_rx_1) = mpsc::unbounded();
         let client = Client::new(invalid_server_pk, addr, incoming_tx_1);
-        let client_future = client.clone().spawn(client_sk_1, client_pk_1);
+        let client_future = client.clone().spawn(client_sk_1, client_pk_1)
+            .map_err(|e| Error::new(ErrorKind::Other, e.compat()));
 
         let future = server_future
             .select(client_future)
