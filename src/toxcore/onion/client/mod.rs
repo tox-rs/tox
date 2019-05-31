@@ -264,8 +264,9 @@ struct AnnouncePacketData<'a> {
 }
 
 impl<'a> AnnouncePacketData<'a> {
-    /// Create `InnerOnionAnnounceRequest`.
-    pub fn request(&self, node_pk: &PublicKey, ping_id: Option<sha256::Digest>, request_id: u64) -> InnerOnionAnnounceRequest {
+    /// Create `InnerOnionAnnounceRequest`. The request is a search request if
+    /// pind_id is 0 and an announce request otherwise.
+    fn request(&self, node_pk: &PublicKey, ping_id: Option<sha256::Digest>, request_id: u64) -> InnerOnionAnnounceRequest {
         let payload = OnionAnnounceRequestPayload {
             ping_id: ping_id.unwrap_or_else(initial_ping_id),
             search_pk: self.search_pk,
@@ -277,6 +278,14 @@ impl<'a> AnnouncePacketData<'a> {
             &self.packet_pk,
             &payload
         )
+    }
+    /// Create `InnerOnionAnnounceRequest` for a search request.
+    pub fn search_request(&self, node_pk: &PublicKey, request_id: u64) -> InnerOnionAnnounceRequest {
+        self.request(node_pk, None, request_id)
+    }
+    /// Create `InnerOnionAnnounceRequest` for an announce request.
+    pub fn announce_request(&self, node_pk: &PublicKey, ping_id: sha256::Digest, request_id: u64) -> InnerOnionAnnounceRequest {
+        self.request(node_pk, Some(ping_id), request_id)
     }
 }
 
@@ -474,7 +483,7 @@ impl OnionClient {
                 friend_pk: announce_data.friend_pk,
             });
 
-            let inner_announce_request = announce_packet_data.request(&node.pk, None, request_id);
+            let inner_announce_request = announce_packet_data.search_request(&node.pk, request_id);
             let onion_request = path.create_onion_request(node.saddr, InnerOnionRequest::InnerOnionAnnounceRequest(inner_announce_request));
 
             futures.push(send_to(&self.dht.tx, (Packet::OnionRequest0(onion_request), path.nodes[0].saddr)));
@@ -658,7 +667,10 @@ impl OnionClient {
                     friend_pk,
                 });
 
-                let inner_announce_request = announce_packet_data.request(&node.pk, node.ping_id, request_id);
+                let inner_announce_request = match node.ping_id {
+                    Some(ping_id) if friend_pk.is_none() => announce_packet_data.announce_request(&node.pk, ping_id, request_id),
+                    _ => announce_packet_data.search_request(&node.pk, request_id)
+                };
                 let onion_request = path.create_onion_request(node.saddr, InnerOnionRequest::InnerOnionAnnounceRequest(inner_announce_request));
 
                 packets.push((Packet::OnionRequest0(onion_request), path.nodes[0].saddr));
@@ -2006,7 +2018,8 @@ mod tests {
                 pk: node_pk,
                 saddr,
                 path_id: path.id(),
-                ping_id: None,
+                // regardless of this ping_id search requests should contain 0
+                ping_id: Some(sha256::hash(&[1, 2, 3])),
                 data_pk: None,
                 unsuccessful_pings: 0,
                 added_time: now,
