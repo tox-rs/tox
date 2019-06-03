@@ -232,3 +232,19 @@ error_kind! {
         SendToConnectionStatus,
     }
 }
+
+error_kind! {
+    #[doc = "Error that can happen during a packet sending."]
+    #[derive(Debug)]
+    SendPacketError,
+    #[doc = "The specific kind of error that can occur."]
+    #[derive(Debug, Eq, PartialEq, Fail)]
+    SendPacketErrorKind {
+        #[doc = "Failed to send TCP packet."]
+        #[fail(display = "Failed to send TCP packet")]
+        Tcp,
+        #[doc = "Failed to send UDP packet."]
+        #[fail(display = "Failed to send UDP packet")]
+        Udp,
+    }
+}

@@ -65,7 +65,7 @@ pub const REQUEST_PACKETS_COMPARE_CONSTANT: f64 = 0.125 * 100.0;
 /// Packet that should be sent every second. Depending on `ConnectionStatus` it
 /// can be `CookieRequest` or `CryptoHandshake`
 #[derive(Clone, Debug, Eq, PartialEq)]
-enum StatusPacketEnum {
+pub enum StatusPacketEnum {
     /// `CookieRequest` packet
     CookieRequest(CookieRequest),
     /// `CryptoHandshake` packet
@@ -78,7 +78,7 @@ enum StatusPacketEnum {
 pub struct StatusPacket {
     /// Packet that should be sent every second. Depending on `ConnectionStatus`
     /// it can be `CookieRequest` or `CryptoHandshake`
-    packet: StatusPacketEnum,
+    pub packet: StatusPacketEnum,
     /// When packet was sent last time
     pub sent_time: Instant,
     /// How many times packet was sent
@@ -101,14 +101,6 @@ impl StatusPacket {
             packet: StatusPacketEnum::CryptoHandshake(packet),
             sent_time: clock_now(),
             num_sent: 0
-        }
-    }
-
-    /// Get `Packet` that should be sent every second
-    pub fn dht_packet(&self) -> Packet {
-        match self.packet {
-            StatusPacketEnum::CookieRequest(ref packet) => Packet::CookieRequest(packet.clone()),
-            StatusPacketEnum::CryptoHandshake(ref packet) => Packet::CryptoHandshake(packet.clone()),
         }
     }
 
@@ -431,7 +423,7 @@ impl CryptoConnection {
 
     /// Get `CookieRequest` or `CryptoHandshake` if it should be sent depending
     /// on connection status and update sent counter
-    pub fn packet_to_send(&mut self) -> Option<Packet> {
+    pub fn packet_to_send(&mut self) -> Option<StatusPacketEnum> {
         match self.status {
             ConnectionStatus::CookieRequesting { ref mut packet, .. }
             | ConnectionStatus::HandshakeSending { ref mut packet, .. }
@@ -439,7 +431,7 @@ impl CryptoConnection {
                 if packet.should_be_sent() {
                     packet.num_sent += 1;
                     packet.sent_time = clock_now();
-                    Some(packet.dht_packet())
+                    Some(packet.packet.clone())
                 } else {
                     None
                 }
