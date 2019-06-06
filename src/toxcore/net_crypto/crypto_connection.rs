@@ -65,7 +65,7 @@ pub const REQUEST_PACKETS_COMPARE_CONSTANT: f64 = 0.125 * 100.0;
 /// Packet that should be sent every second. Depending on `ConnectionStatus` it
 /// can be `CookieRequest` or `CryptoHandshake`
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum StatusPacketEnum {
+pub enum StatusPacket {
     /// `CookieRequest` packet
     CookieRequest(CookieRequest),
     /// `CryptoHandshake` packet
@@ -75,30 +75,30 @@ pub enum StatusPacketEnum {
 /// Packet that should be sent to the peer every second together with info how
 /// many times it was sent and when it was sent last time
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct StatusPacket {
+pub struct StatusPacketWithTime {
     /// Packet that should be sent every second. Depending on `ConnectionStatus`
     /// it can be `CookieRequest` or `CryptoHandshake`
-    pub packet: StatusPacketEnum,
+    pub packet: StatusPacket,
     /// When packet was sent last time
     pub sent_time: Instant,
     /// How many times packet was sent
     pub num_sent: u8
 }
 
-impl StatusPacket {
+impl StatusPacketWithTime {
     /// Create new `StatusPacket` with `CookieRequest` packet
-    pub fn new_cookie_request(packet: CookieRequest) -> StatusPacket {
-        StatusPacket {
-            packet: StatusPacketEnum::CookieRequest(packet),
+    pub fn new_cookie_request(packet: CookieRequest) -> StatusPacketWithTime {
+        StatusPacketWithTime {
+            packet: StatusPacket::CookieRequest(packet),
             sent_time: clock_now(),
             num_sent: 0
         }
     }
 
     /// Create new `StatusPacket` with `CryptoHandshake` packet
-    pub fn new_crypto_handshake(packet: CryptoHandshake) -> StatusPacket {
-        StatusPacket {
-            packet: StatusPacketEnum::CryptoHandshake(packet),
+    pub fn new_crypto_handshake(packet: CryptoHandshake) -> StatusPacketWithTime {
+        StatusPacketWithTime {
+            packet: StatusPacket::CryptoHandshake(packet),
             sent_time: clock_now(),
             num_sent: 0
         }
@@ -148,7 +148,7 @@ pub enum ConnectionStatus {
         /// ID used in the cookie request packets for this connection
         cookie_request_id: u64,
         /// Packet that should be sent every second
-        packet: StatusPacket,
+        packet: StatusPacketWithTime,
     },
     /// We are sending handshake packets and haven't received handshake from the
     /// other side yet.
@@ -156,7 +156,7 @@ pub enum ConnectionStatus {
         /// Nonce that should be used to encrypt outgoing packets
         sent_nonce: Nonce,
         /// Packet that should be sent every second
-        packet: StatusPacket,
+        packet: StatusPacketWithTime,
     },
     /// A handshake packet has been received from the other side but no
     /// encrypted packets. Continue sending handshake packets because we can't
@@ -170,7 +170,7 @@ pub enum ConnectionStatus {
         /// decrypt data packets
         session_precomputed_key: PrecomputedKey,
         /// Packet that should be sent every second
-        packet: StatusPacket,
+        packet: StatusPacketWithTime,
     },
     /// A valid encrypted packet has been received from the other side.
     /// Connection is fully established.
@@ -331,7 +331,7 @@ impl CryptoConnection {
         let cookie_request = CookieRequest::new(dht_precomputed_key, &dht_pk, &cookie_request_payload);
         let status = ConnectionStatus::CookieRequesting {
             cookie_request_id,
-            packet: StatusPacket::new_cookie_request(cookie_request)
+            packet: StatusPacketWithTime::new_cookie_request(cookie_request)
         };
 
         CryptoConnection {
@@ -390,7 +390,7 @@ impl CryptoConnection {
             sent_nonce,
             received_nonce,
             session_precomputed_key: precompute(&peer_session_pk, &session_sk),
-            packet: StatusPacket::new_crypto_handshake(handshake)
+            packet: StatusPacketWithTime::new_crypto_handshake(handshake)
         };
 
         CryptoConnection {
@@ -423,7 +423,7 @@ impl CryptoConnection {
 
     /// Get `CookieRequest` or `CryptoHandshake` if it should be sent depending
     /// on connection status and update sent counter
-    pub fn packet_to_send(&mut self) -> Option<StatusPacketEnum> {
+    pub fn packet_to_send(&mut self) -> Option<StatusPacket> {
         match self.status {
             ConnectionStatus::CookieRequesting { ref mut packet, .. }
             | ConnectionStatus::HandshakeSending { ref mut packet, .. }
@@ -666,7 +666,7 @@ mod tests {
     fn status_packet_should_be_sent() {
         crypto_init().unwrap();
         // just created packet should be sent
-        let mut packet = StatusPacket::new_cookie_request(CookieRequest {
+        let mut packet = StatusPacketWithTime::new_cookie_request(CookieRequest {
             pk: gen_keypair().0,
             nonce: gen_nonce(),
             payload: vec![42; 88]
@@ -696,7 +696,7 @@ mod tests {
     fn status_packet_is_timed_out() {
         crypto_init().unwrap();
         // just created packet isn't timed out
-        let mut packet = StatusPacket::new_cookie_request(CookieRequest {
+        let mut packet = StatusPacketWithTime::new_cookie_request(CookieRequest {
             pk: gen_keypair().0,
             nonce: gen_nonce(),
             payload: vec![42; 88]
@@ -757,7 +757,7 @@ mod tests {
 
         connection.status = ConnectionStatus::HandshakeSending {
             sent_nonce: gen_nonce(),
-            packet: StatusPacket::new_crypto_handshake(crypto_handshake.clone())
+            packet: StatusPacketWithTime::new_crypto_handshake(crypto_handshake.clone())
         };
 
         let connection_c = connection.clone();
@@ -767,7 +767,7 @@ mod tests {
             sent_nonce: gen_nonce(),
             received_nonce: gen_nonce(),
             session_precomputed_key: precompute(&gen_keypair().0, &gen_keypair().1),
-            packet: StatusPacket::new_crypto_handshake(crypto_handshake),
+            packet: StatusPacketWithTime::new_crypto_handshake(crypto_handshake),
         };
 
         let connection_c = connection.clone();
@@ -888,7 +888,7 @@ mod tests {
             sent_nonce: gen_nonce(),
             received_nonce: gen_nonce(),
             session_precomputed_key: precompute(&gen_keypair().0, &gen_keypair().1),
-            packet: StatusPacket::new_crypto_handshake(crypto_handshake),
+            packet: StatusPacketWithTime::new_crypto_handshake(crypto_handshake),
         };
 
         assert!(connection.is_not_confirmed());

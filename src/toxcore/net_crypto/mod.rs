@@ -111,11 +111,11 @@ enum Packet {
     CryptoData(CryptoData),
 }
 
-impl From<StatusPacketEnum> for Packet {
-    fn from(packet: StatusPacketEnum) -> Self {
+impl From<StatusPacket> for Packet {
+    fn from(packet: StatusPacket) -> Self {
         match packet {
-            StatusPacketEnum::CookieRequest(packet) => Packet::CookieRequest(packet),
-            StatusPacketEnum::CryptoHandshake(packet) => Packet::CryptoHandshake(packet),
+            StatusPacket::CookieRequest(packet) => Packet::CookieRequest(packet),
+            StatusPacket::CryptoHandshake(packet) => Packet::CryptoHandshake(packet),
         }
     }
 }
@@ -432,7 +432,7 @@ impl NetCrypto {
 
         connection.status = ConnectionStatus::HandshakeSending {
             sent_nonce,
-            packet: StatusPacket::new_crypto_handshake(handshake)
+            packet: StatusPacketWithTime::new_crypto_handshake(handshake)
         };
 
         Either::B(self.send_status_packet(connection)
@@ -522,7 +522,7 @@ impl NetCrypto {
                     sent_nonce,
                     received_nonce: payload.base_nonce,
                     session_precomputed_key: precompute(&payload.session_pk, &connection.session_sk),
-                    packet: StatusPacket::new_crypto_handshake(handshake)
+                    packet: StatusPacketWithTime::new_crypto_handshake(handshake)
                 }
             },
             ConnectionStatus::HandshakeSending { sent_nonce, ref packet, .. }
@@ -1343,7 +1343,7 @@ mod tests {
         net_crypto.handle_cookie_response(&mut connection, &cookie_response).wait().unwrap();
 
         let packet = unpack!(connection.status, ConnectionStatus::HandshakeSending, packet);
-        let packet = unpack!(packet.packet, StatusPacketEnum::CryptoHandshake);
+        let packet = unpack!(packet.packet, StatusPacket::CryptoHandshake);
         assert_eq!(packet.cookie, cookie);
 
         let payload = packet.get_payload(&precompute(&real_pk, &peer_real_sk)).unwrap();
@@ -1490,7 +1490,7 @@ mod tests {
         let connection = connections.get(&peer_real_pk).unwrap().read().clone();
 
         let packet = unpack!(connection.status, ConnectionStatus::HandshakeSending, packet);
-        let packet = unpack!(packet.packet, StatusPacketEnum::CryptoHandshake);
+        let packet = unpack!(packet.packet, StatusPacket::CryptoHandshake);
         assert_eq!(packet.cookie, cookie);
 
         let payload = packet.get_payload(&precompute(&real_pk, &peer_real_sk)).unwrap();
@@ -1585,7 +1585,7 @@ mod tests {
         assert_eq!(received_nonce, base_nonce);
 
         let packet = unpack!(connection.status, ConnectionStatus::NotConfirmed, packet);
-        let packet = unpack!(packet.packet, StatusPacketEnum::CryptoHandshake);
+        let packet = unpack!(packet.packet, StatusPacket::CryptoHandshake);
         assert_eq!(packet.cookie, cookie);
 
         let payload = packet.get_payload(&real_precomputed_key).unwrap();
@@ -1653,7 +1653,7 @@ mod tests {
 
         // cookie should not be updated
         let packet = unpack!(connection.status, ConnectionStatus::NotConfirmed, packet);
-        let packet = unpack!(packet.packet, StatusPacketEnum::CryptoHandshake);
+        let packet = unpack!(packet.packet, StatusPacket::CryptoHandshake);
         assert_eq!(packet.cookie, cookie);
 
         let payload = packet.get_payload(&real_precomputed_key).unwrap();
@@ -1973,7 +1973,7 @@ mod tests {
         assert_eq!(received_nonce, base_nonce);
 
         let packet = unpack!(connection.status, ConnectionStatus::NotConfirmed, packet);
-        let packet = unpack!(packet.packet, StatusPacketEnum::CryptoHandshake);
+        let packet = unpack!(packet.packet, StatusPacket::CryptoHandshake);
         assert_eq!(packet.cookie, cookie);
 
         let payload = packet.get_payload(&real_precomputed_key).unwrap();
@@ -2035,7 +2035,7 @@ mod tests {
         assert_eq!(received_nonce, base_nonce);
 
         let packet = unpack!(connection.status, ConnectionStatus::NotConfirmed, packet);
-        let packet = unpack!(packet.packet, StatusPacketEnum::CryptoHandshake);
+        let packet = unpack!(packet.packet, StatusPacket::CryptoHandshake);
         assert_eq!(packet.cookie, cookie);
 
         let payload = packet.get_payload(&real_precomputed_key).unwrap();
@@ -2119,7 +2119,7 @@ mod tests {
         assert_eq!(received_nonce, base_nonce);
 
         let packet = unpack!(connection.status, ConnectionStatus::NotConfirmed, packet);
-        let packet = unpack!(packet.packet, StatusPacketEnum::CryptoHandshake);
+        let packet = unpack!(packet.packet, StatusPacket::CryptoHandshake);
         assert_eq!(packet.cookie, cookie);
 
         let payload = packet.get_payload(&real_precomputed_key).unwrap();
@@ -2206,7 +2206,7 @@ mod tests {
         assert_eq!(received_nonce, base_nonce);
 
         let packet = unpack!(connection.status, ConnectionStatus::NotConfirmed, packet);
-        let packet = unpack!(packet.packet, StatusPacketEnum::CryptoHandshake);
+        let packet = unpack!(packet.packet, StatusPacket::CryptoHandshake);
         assert_eq!(packet.cookie, cookie);
 
         let payload = packet.get_payload(&real_precomputed_key).unwrap();
@@ -3183,7 +3183,7 @@ mod tests {
 
         assert_eq!(
             unpack!(received, DhtPacket::CookieRequest),
-            unpack!(packet.packet.clone(), StatusPacketEnum::CookieRequest)
+            unpack!(packet.packet.clone(), StatusPacket::CookieRequest)
         );
         assert_eq!(addr_to_send, addr);
 
@@ -3417,7 +3417,7 @@ mod tests {
         assert_eq!(addr_to_send, addr);
         assert_eq!(
             unpack!(received, DhtPacket::CookieRequest),
-            unpack!(packet.packet, StatusPacketEnum::CookieRequest)
+            unpack!(packet.packet, StatusPacket::CookieRequest)
         );
     }
 
@@ -4056,7 +4056,7 @@ mod tests {
         assert_eq!(connection.peer_dht_pk, peer_dht_pk);
 
         let status_packet = unpack!(connection.status.clone(), ConnectionStatus::CookieRequesting, packet);
-        let cookie_request = unpack!(status_packet.packet, StatusPacketEnum::CookieRequest);
+        let cookie_request = unpack!(status_packet.packet, StatusPacket::CookieRequest);
         let cookie_request_payload = cookie_request.get_payload(&precompute(&dht_pk, &peer_dht_sk)).unwrap();
 
         assert_eq!(cookie_request_payload.pk, real_pk);
