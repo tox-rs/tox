@@ -118,7 +118,7 @@ pub struct Server {
     /// Tx split of a channel to send packets to this peer via UDP socket.
     pub tx: Tx,
     /// Sink to send friend's `SocketAddr` when it gets known.
-    friend_saddr_sink: Arc<RwLock<Option<mpsc::UnboundedSender<PackedNode>>>>,
+    friend_saddr_sink: Arc<RwLock<OptionalSink<mpsc::UnboundedSender<PackedNode>>>>,
     /// Struct that stores and manages requests IDs and timeouts.
     request_queue: Arc<RwLock<RequestQueue<PublicKey>>>,
     /// Close nodes list which contains nodes close to own DHT `PublicKey`.
@@ -759,13 +759,9 @@ impl Server {
         for friend in friends.values_mut() {
             friend.try_add_to_close(node);
         }
-        if let Some(ref friend_saddr_sink) = *self.friend_saddr_sink.read() {
-            if friends.contains_key(&node.pk) {
-                Either::A(send_to(friend_saddr_sink, node)
-                    .map_err(|e| e.context(HandlePacketErrorKind::FriendSaddr).into()))
-            } else {
-                Either::B(future::ok(()))
-            }
+        if friends.contains_key(&node.pk) {
+            Either::A(send_to(&*self.friend_saddr_sink.read(), node)
+                .map_err(|e| e.context(HandlePacketErrorKind::FriendSaddr).into()))
         } else {
             Either::B(future::ok(()))
         }
@@ -1467,7 +1463,7 @@ impl Server {
 
     /// Set sink to send friend's `SocketAddr` when it gets known.
     pub fn set_friend_saddr_sink(&self, friend_saddr_sink: mpsc::UnboundedSender<PackedNode>) {
-        *self.friend_saddr_sink.write() = Some(friend_saddr_sink);
+        self.friend_saddr_sink.write().set(friend_saddr_sink);
     }
 
     /// Get `PrecomputedKey`s cache.

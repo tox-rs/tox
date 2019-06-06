@@ -40,6 +40,10 @@ use crate::toxcore::time::*;
 /// key is a DHT key.
 type DhtPkTx = mpsc::UnboundedSender<(PublicKey, PublicKey)>;
 
+/// Shorthand for the transmit half of the message channel for sending friend
+/// requests when we get them. The key is a long term key.
+type FriendRequestTx = mpsc::UnboundedSender<(PublicKey, FriendRequest)>;
+
 /// Number of friend's close nodes to store.
 const MAX_ONION_FRIEND_NODES: u8 = 8;
 
@@ -302,7 +306,10 @@ struct OnionClientState {
     friends: HashMap<PublicKey, OnionFriend>,
     /// Sink to send DHT `PublicKey` when it gets known. The first key is a long
     /// term key, the second key is a DHT key.
-    dht_pk_tx: Option<DhtPkTx>,
+    dht_pk_tx: OptionalSink<DhtPkTx>,
+    /// Sink to send friend requests when we get them. The key is a long term
+    /// key.
+    friend_request_tx: OptionalSink<FriendRequestTx>,
 }
 
 impl OnionClientState {
@@ -312,7 +319,8 @@ impl OnionClientState {
             announce_list: Kbucket::new(MAX_ONION_ANNOUNCE_NODES),
             announce_requests: RequestQueue::new(ANNOUNCE_TIMEOUT),
             friends: HashMap::new(),
-            dht_pk_tx: None,
+            dht_pk_tx: OptionalSink::new(),
+            friend_request_tx: OptionalSink::new(),
         }
     }
 }
@@ -360,7 +368,7 @@ impl OnionClient {
 
     /// Set sink to send DHT `PublicKey` when it gets known.
     pub fn set_dht_pk_sink(&self, dht_pk_tx: DhtPkTx) {
-        self.state.lock().dht_pk_tx = Some(dht_pk_tx);
+        self.state.lock().dht_pk_tx.set(dht_pk_tx);
     }
 
     /// Check if a node was pinged recently.
@@ -511,11 +519,7 @@ impl OnionClient {
         friend.dht_pk = Some(dht_pk_announce.dht_pk);
         friend.last_seen = Some(clock_now());
 
-        let dht_pk_future = if let Some(ref dht_pk_tx) = state.dht_pk_tx {
-            Either::A(send_to(dht_pk_tx, (friend_pk, dht_pk_announce.dht_pk)))
-        } else {
-            Either::B(future::ok(()))
-        };
+        let dht_pk_future = send_to(&state.dht_pk_tx, (friend_pk, dht_pk_announce.dht_pk));
 
         let futures = dht_pk_announce.nodes.into_iter().map(|node| match node.ip_port.protocol {
             ProtocolType::UDP => {
@@ -545,13 +549,15 @@ impl OnionClient {
             Ok(payload) => payload,
             Err(e) => return Either::A(future::err(e.context(HandleDataResponseErrorKind::InvalidInnerPayload).into()))
         };
-        match iner_payload {
+        let future = match iner_payload {
             OnionDataResponseInnerPayload::DhtPkAnnounce(dht_pk_announce) =>
-                Either::B(self.handle_dht_pk_announce(payload.real_pk, dht_pk_announce)
+                Either::A(self.handle_dht_pk_announce(payload.real_pk, dht_pk_announce)
                     .map_err(|e| e.context(HandleDataResponseErrorKind::DhtPkAnnounce).into())),
-            OnionDataResponseInnerPayload::FriendRequest(_) =>
-                Either::A(future::ok(()))
-        }
+            OnionDataResponseInnerPayload::FriendRequest(friend_request) =>
+                Either::B(send_to(&self.state.lock().friend_request_tx, (payload.real_pk, friend_request))
+                    .map_err(|e| e.context(HandleDataResponseErrorKind::FriendRequest).into()))
+        };
+        Either::B(future)
     }
 
     /// Add new node to random nodes pool to use them to build random paths.
@@ -991,7 +997,8 @@ mod tests {
             announce_list: Kbucket::new(8),
             announce_requests: RequestQueue::new(Duration::from_secs(42)),
             friends: HashMap::new(),
-            dht_pk_tx: None,
+            dht_pk_tx: OptionalSink::new(),
+            friend_request_tx: OptionalSink::new(),
         };
 
         let _onion_client_state_c = onion_client_state.clone();

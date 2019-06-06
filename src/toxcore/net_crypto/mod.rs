@@ -128,10 +128,10 @@ pub struct NetCrypto {
     /// packet. If key from `Cookie` is not equal to saved key inside
     /// `CryptoConnection` then `NetCrypto` module will send message to this
     /// sink.
-    dht_pk_tx: Arc<RwLock<Option<DhtPkTx>>>,
+    dht_pk_tx: Arc<RwLock<OptionalSink<DhtPkTx>>>,
     /// Sink to send a connection status when it becomes connected or
     /// disconnected. The key is a long term key of the connection.
-    connection_status_tx: Arc<RwLock<Option<ConnectionStatusTx>>>,
+    connection_status_tx: Arc<RwLock<OptionalSink<ConnectionStatusTx>>>,
     /// Sink to send lossless packets. The key is a long term public key of the
     /// peer that sent this packet.
     lossless_tx: LosslessTx,
@@ -229,11 +229,7 @@ impl NetCrypto {
     /// or disconnected.
     fn send_connection_status(&self, connection: &CryptoConnection, status: bool) -> impl Future<Item = (), Error = mpsc::SendError<(PublicKey, bool)>> {
         if connection.is_established() != status {
-            if let Some(ref connection_status_tx) = *self.connection_status_tx.read() {
-                Either::A(send_to(connection_status_tx, (connection.peer_real_pk, status)))
-            } else {
-                Either::B(future::ok(()))
-            }
+            Either::A(send_to(&*self.connection_status_tx.read(), (connection.peer_real_pk, status)))
         } else {
             Either::B(future::ok(()))
         }
@@ -452,12 +448,8 @@ impl NetCrypto {
             return Box::new(future::err(HandlePacketError::from(HandlePacketErrorKind::InvalidRealPk)))
         }
         if cookie.dht_pk != connection.peer_dht_pk {
-            let dht_pk_future = if let Some(ref dht_pk_tx) = *self.dht_pk_tx.read() {
-                Either::A(send_to(dht_pk_tx, (connection.peer_real_pk, cookie.dht_pk))
-                    .map_err(|e| e.context(HandlePacketErrorKind::SendToDhtpk).into()))
-            } else {
-                Either::B(future::ok(()))
-            };
+            let dht_pk_future = send_to(&*self.dht_pk_tx.read(), (connection.peer_real_pk, cookie.dht_pk))
+                .map_err(|e| e.context(HandlePacketErrorKind::SendToDhtpk).into());
             return Box::new(dht_pk_future
                 .and_then(|()| future::err(HandlePacketError::from(HandlePacketErrorKind::InvalidDhtPk)))
             )
@@ -561,12 +553,8 @@ impl NetCrypto {
         let connection = Arc::new(RwLock::new(connection));
         connections.insert(cookie.real_pk, connection);
 
-        let dht_pk_future = if let Some(ref dht_pk_tx) = *self.dht_pk_tx.read() {
-            Either::A(send_to(dht_pk_tx, (cookie.real_pk, cookie.dht_pk))
-                .map_err(|e| e.context(HandlePacketErrorKind::SendToDhtpk).into()))
-        } else {
-            Either::B(future::ok(()))
-        };
+        let dht_pk_future = send_to(&*self.dht_pk_tx.read(), (cookie.real_pk, cookie.dht_pk))
+            .map_err(|e| e.context(HandlePacketErrorKind::SendToDhtpk).into());
 
         Either::B(kill_future.join(dht_pk_future).map(|_| ()))
     }
@@ -986,13 +974,13 @@ impl NetCrypto {
 
     /// Set sink to send DHT `PublicKey` when it gets known.
     pub fn set_dht_pk_sink(&self, dht_pk_tx: DhtPkTx) {
-        *self.dht_pk_tx.write() = Some(dht_pk_tx);
+        self.dht_pk_tx.write().set(dht_pk_tx);
     }
 
     /// Set sink to send a connection status when it becomes connected or
     /// disconnected.
     pub fn set_connection_status_sink(&self, connection_status_tx: ConnectionStatusTx) {
-        *self.connection_status_tx.write() = Some(connection_status_tx);
+        self.connection_status_tx.write().set(connection_status_tx);
     }
 }
 
