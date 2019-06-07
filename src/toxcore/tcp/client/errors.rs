@@ -85,7 +85,7 @@ error_kind! {
         Spawn,
         #[doc = "Search relay by relay's PK, but no such relay."]
         #[fail(display = "Search relay by relay's PK, but no such relay")]
-        NOSuchRelay,
+        NoSuchRelay,
         #[doc = "Send packet(s) error."]
         #[fail(display = "Send packet(s) error")]
         SendTo,

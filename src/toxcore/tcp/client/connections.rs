@@ -172,7 +172,7 @@ impl Connections {
             Either::A(self.add_connection_inner(client, node_pk))
         } else {
             Either::B( future::err(
-                ConnectionErrorKind::NOSuchRelay.into()
+                ConnectionErrorKind::NoSuchRelay.into()
             ))
         }
     }
@@ -279,7 +279,7 @@ impl Connections {
             future
         } else {
             Either::B( future::err(
-                ConnectionErrorKind::NOSuchRelay.into()
+                ConnectionErrorKind::NoSuchRelay.into()
             ))
         }
     }
@@ -541,9 +541,8 @@ mod tests {
         let (relay_pk, _relay_sk) = gen_keypair();
         let (node_pk, _node_sk) = gen_keypair();
 
-        let res = connections.add_connection(relay_pk, node_pk).wait();
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), ConnectionErrorKind::NOSuchRelay);
+        let error = connections.add_connection(relay_pk, node_pk).wait().err().unwrap();
+        assert_eq!(*error.kind(), ConnectionErrorKind::NoSuchRelay);
     }
 
     #[test]
@@ -585,9 +584,8 @@ mod tests {
 
         let (node_pk, _node_sk) = gen_keypair();
 
-        let res = connections.remove_connection(node_pk).wait();
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), ConnectionErrorKind::NoConnection);
+        let error = connections.remove_connection(node_pk).wait().err().unwrap();
+        assert_eq!(*error.kind(), ConnectionErrorKind::NoConnection);
     }
 
     #[test]
@@ -702,9 +700,8 @@ mod tests {
         let (destination_pk, _destination_sk) = gen_keypair();
         let (relay_pk, _relay_sk) = gen_keypair();
 
-        let res = connections.send_oob(relay_pk, destination_pk, vec![42; 123]).wait();
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), ConnectionErrorKind::NotConnected);
+        let error = connections.send_oob(relay_pk, destination_pk, vec![42; 123]).wait().err().unwrap();
+        assert_eq!(*error.kind(), ConnectionErrorKind::NotConnected);
     }
 
     #[test]
@@ -757,9 +754,8 @@ mod tests {
             payload: vec![42; 123],
         };
 
-        let res = connections.send_onion(relay_pk, onion_request.clone()).wait();
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), ConnectionErrorKind::NotConnected);
+        let error = connections.send_onion(relay_pk, onion_request.clone()).wait().err().unwrap();
+        assert_eq!(*error.kind(), ConnectionErrorKind::NotConnected);
     }
 
     #[test]
@@ -790,9 +786,8 @@ mod tests {
 
         let (node_pk, _node_sk) = gen_keypair();
 
-        let res = connections.set_connection_status(node_pk, NodeConnectionStatus::UDP).wait();
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), ConnectionErrorKind::NOSuchRelay);
+        let error = connections.set_connection_status(node_pk, NodeConnectionStatus::UDP).wait().err().unwrap();
+        assert_eq!(*error.kind(), ConnectionErrorKind::NoSuchRelay);
     }
 
     #[test]

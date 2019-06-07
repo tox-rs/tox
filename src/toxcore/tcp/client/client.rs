@@ -508,7 +508,8 @@ pub mod tests {
     use super::*;
 
     use std::time::{Duration, Instant};
-    use std::io::{Error, ErrorKind};
+    use failure::Error;
+    use std::io::{Error as IoError, ErrorKind as IoErrorKind};
 
     use tokio::net::TcpListener;
     use tokio::timer::Interval;
@@ -542,9 +543,8 @@ pub mod tests {
             pk: gen_keypair().0,
         });
 
-        let res = client.handle_packet(route_request).wait();
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::MustNotSend);
+        let error = client.handle_packet(route_request).wait().err().unwrap();
+        assert_eq!(*error.kind(), HandlePacketErrorKind::MustNotSend);
     }
 
     #[test]
@@ -603,9 +603,8 @@ pub mod tests {
             pk: gen_keypair().0,
         });
 
-        let res = client.handle_packet(route_response).wait();
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::UnexpectedRouteResponse);
+        let error = client.handle_packet(route_response).wait().err().unwrap();
+        assert_eq!(*error.kind(), HandlePacketErrorKind::UnexpectedRouteResponse);
 
         assert!(client.links.read().by_id(index).is_none());
     }
@@ -619,9 +618,8 @@ pub mod tests {
             pk: gen_keypair().0,
         });
 
-        let res = client.handle_packet(route_response).wait();
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::InvalidConnectionId);
+        let error = client.handle_packet(route_response).wait().err().unwrap();
+        assert_eq!(*error.kind(), HandlePacketErrorKind::InvalidConnectionId);
     }
 
     #[test]
@@ -654,9 +652,8 @@ pub mod tests {
             connection_id: ConnectionId::from_index(index),
         });
 
-        let res = client.handle_packet(connect_notification).wait();
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::AlreadyLinked);
+        let error = client.handle_packet(connect_notification).wait().err().unwrap();
+        assert_eq!(*error.kind(), HandlePacketErrorKind::AlreadyLinked);
 
         assert!(client.links.read().by_id(index).is_none());
     }
@@ -669,9 +666,8 @@ pub mod tests {
             connection_id: ConnectionId::zero(),
         });
 
-        let res = client.handle_packet(connect_notification).wait();
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::InvalidConnectionId);
+        let error = client.handle_packet(connect_notification).wait().err().unwrap();
+        assert_eq!(*error.kind(), HandlePacketErrorKind::InvalidConnectionId);
     }
 
     #[test]
@@ -705,9 +701,8 @@ pub mod tests {
             connection_id: ConnectionId::from_index(index),
         });
 
-        let res = client.handle_packet(disconnect_notification).wait();
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::AlreadyLinked);
+        let error = client.handle_packet(disconnect_notification).wait().err().unwrap();
+        assert_eq!(*error.kind(), HandlePacketErrorKind::AlreadyLinked);
 
         assert!(client.links.read().by_id(index).is_none());
     }
@@ -720,9 +715,8 @@ pub mod tests {
             connection_id: ConnectionId::zero(),
         });
 
-        let res = client.handle_packet(disconnect_notification).wait();
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::InvalidConnectionId);
+        let error = client.handle_packet(disconnect_notification).wait().err().unwrap();
+        assert_eq!(*error.kind(), HandlePacketErrorKind::InvalidConnectionId);
     }
 
     #[test]
@@ -762,9 +756,8 @@ pub mod tests {
             data: vec![42; 123],
         });
 
-        let res = client.handle_packet(oob_send).wait();
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::MustNotSend);
+        let error = client.handle_packet(oob_send).wait().err().unwrap();
+        assert_eq!(*error.kind(), HandlePacketErrorKind::MustNotSend);
     }
 
     #[test]
@@ -829,9 +822,8 @@ pub mod tests {
             }),
         });
 
-        let res = client.handle_packet(data_packet).wait();
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::AlreadyLinked);
+        let error = client.handle_packet(data_packet).wait().err().unwrap();
+        assert_eq!(*error.kind(), HandlePacketErrorKind::AlreadyLinked);
 
         // Necessary to drop tx so that rx.collect() can be finished
         drop(client);
@@ -851,9 +843,8 @@ pub mod tests {
             }),
         });
 
-        let res = client.handle_packet(data_packet).wait();
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::InvalidConnectionId);
+        let error = client.handle_packet(data_packet).wait().err().unwrap();
+        assert_eq!(*error.kind(), HandlePacketErrorKind::InvalidConnectionId);
 
         // Necessary to drop tx so that rx.collect() can be finished
         drop(client);
@@ -876,9 +867,8 @@ pub mod tests {
             payload: vec![42; 123],
         });
 
-        let res = client.handle_packet(onion_request).wait();
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::MustNotSend);
+        let error = client.handle_packet(onion_request).wait().err().unwrap();
+        assert_eq!(*error.kind(), HandlePacketErrorKind::MustNotSend);
     }
 
     #[test]
@@ -935,9 +925,8 @@ pub mod tests {
             payload: vec![42; 123],
         });
 
-        let res = client.send_data(destination_pk, data.clone()).wait();
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), SendPacketErrorKind::NotLinked);
+        let error = client.send_data(destination_pk, data.clone()).wait().err().unwrap();
+        assert_eq!(*error.kind(), SendPacketErrorKind::NotLinked);
 
         // Necessary to drop tx so that rx.collect() can be finished
         drop(client);
@@ -958,9 +947,8 @@ pub mod tests {
         let connection_id = 42;
         client.links.write().insert_by_id(&destination_pk, connection_id - 16);
 
-        let res = client.send_data(destination_pk, data.clone()).wait();
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), SendPacketErrorKind::NotOnline);
+        let error = client.send_data(destination_pk, data.clone()).wait().err().unwrap();
+        assert_eq!(*error.kind(), SendPacketErrorKind::NotOnline);
 
         // Necessary to drop tx so that rx.collect() can be finished
         drop(client);
@@ -1050,9 +1038,8 @@ pub mod tests {
 
         let (connection_pk, _connection_sk) = gen_keypair();
 
-        let res = client.remove_connection(connection_pk).wait();
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), SendPacketErrorKind::NoSuchConnection);
+        let error = client.remove_connection(connection_pk).wait().err().unwrap();
+        assert_eq!(*error.kind(), SendPacketErrorKind::NoSuchConnection);
     }
 
     #[test]
@@ -1144,11 +1131,11 @@ pub mod tests {
         // waits until the relay becomes connected
         fn on_connected(client: Client) -> impl Future<Item = (), Error = Error> + Send {
             Interval::new(Instant::now(), Duration::from_millis(10))
-                .map_err(|e| Error::new(ErrorKind::Other, e))
+                .map_err(Error::from)
                 .skip_while(move |_| match *client.status.read() {
                     ClientStatus::Connecting => future::ok(true),
                     ClientStatus::Connected(_) => future::ok(false),
-                    ref other => future::err(Error::new(ErrorKind::Other, format!("Invalid status: {:?}", other))),
+                    ref other => future::err(Error::from(IoError::new(IoErrorKind::Other, format!("Invalid status: {:?}", other)))),
                 })
                 .into_future()
                 .map(|_| ())
@@ -1158,7 +1145,7 @@ pub mod tests {
         // waits until link with PublicKey becomes online
         fn on_online(client: Client, pk: PublicKey) -> impl Future<Item = (), Error = Error> + Send {
             Interval::new(Instant::now(), Duration::from_millis(10))
-                .map_err(|e| Error::new(ErrorKind::Other, e))
+                .map_err(Error::from)
                 .skip_while(move |_| {
                     let links = client.links.read();
                     if let Some(index) = links.id_by_pk(&pk) {
@@ -1183,7 +1170,7 @@ pub mod tests {
         let server = Server::new();
         let stats = Stats::new();
         let server_future = server.run(listener, server_sk, stats, 2)
-            .map_err(|e| Error::new(ErrorKind::Other, e.compat()));
+            .map_err(Error::from);
 
         // run first client
         let (client_pk_1, client_sk_1) = gen_keypair();
@@ -1192,7 +1179,7 @@ pub mod tests {
         // connection attempts should be set to 0 after successful connection
         set_connection_attempts(&client_1, 3);
         let client_future_1 = client_1.clone().spawn(client_sk_1, client_pk_1)
-            .map_err(|e| Error::new(ErrorKind::Other, e.compat()));
+            .map_err(Error::from);
 
         // run second client
         let (client_pk_2, client_sk_2) = gen_keypair();
@@ -1201,11 +1188,11 @@ pub mod tests {
         // connection attempts should be set to 0 after successful connection
         set_connection_attempts(&client_2, 3);
         let client_future_2 = client_2.clone().spawn(client_sk_2, client_pk_2)
-            .map_err(|e| Error::new(ErrorKind::Other, e.compat()));
+            .map_err(Error::from);
 
         // add connection immediately
         let connection_future = client_2.add_connection(client_pk_1)
-            .map_err(|e| Error::new(ErrorKind::Other, e.compat()));
+            .map_err(Error::from);
 
         // wait until connections are established
         let client_1_c = client_1.clone();
@@ -1217,7 +1204,7 @@ pub mod tests {
             assert_eq!(client_2_c.connection_attempts(), 0);
             // add connection when relay is connected
             client_1_c.add_connection(client_pk_2)
-                .map_err(|e| Error::new(ErrorKind::Other, e.compat()))
+                .map_err(Error::from)
         });
 
         let data_1 = DataPayload::CryptoData(CryptoData {
@@ -1237,9 +1224,9 @@ pub mod tests {
         let on_online_future = on_online(client_1.clone(), client_pk_2).join(on_online(client_2.clone(), client_pk_1))
             // and then send data packets to each other
             .and_then(move |_| client_1_c.send_data(client_pk_2, data_1_c)
-                .map_err(|e| Error::new(ErrorKind::Other, e.compat())))
+                .map_err(Error::from))
             .and_then(move |_| client_2_c.send_data(client_pk_1, data_2_c)
-                .map_err(|e| Error::new(ErrorKind::Other, e.compat())))
+                .map_err(Error::from))
             // and then get them
             .and_then(move |_| incoming_rx_1.map_err(|()| unreachable!("rx can't fail")).into_future().map(move |(packet, _)| {
                 let (relay_pk, packet) = packet.unwrap();
@@ -1288,7 +1275,7 @@ pub mod tests {
         let server = Server::new();
         let stats = Stats::new();
         let server_future = server.run(listener, server_sk, stats, 2)
-            .map_err(|e| Error::new(ErrorKind::Other, e.compat()));
+            .map_err(Error::from);
 
         // run a client with invalid server's pk
         let (client_pk_1, client_sk_1) = gen_keypair();
@@ -1296,7 +1283,7 @@ pub mod tests {
         let (incoming_tx_1, _incoming_rx_1) = mpsc::unbounded();
         let client = Client::new(invalid_server_pk, addr, incoming_tx_1);
         let client_future = client.clone().spawn(client_sk_1, client_pk_1)
-            .map_err(|e| Error::new(ErrorKind::Other, e.compat()));
+            .map_err(Error::from);
 
         let future = server_future
             .select(client_future)
