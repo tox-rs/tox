@@ -15,7 +15,6 @@ use parking_lot::RwLock;
 
 use std::collections::{hash_map, HashMap, HashSet};
 use std::net::SocketAddr;
-use std::io::{Error, ErrorKind};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -29,6 +28,8 @@ use crate::toxcore::dht::packed_node::PackedNode;
 use crate::toxcore::tcp::client::client::*;
 use crate::toxcore::tcp::packet::*;
 use crate::toxcore::time::*;
+use crate::toxcore::tcp::client::errors::*;
+use failure::Fail;
 
 /// The amount of maximum connections for each friend.
 const MAX_FRIEND_TCP_CONNECTIONS: usize =  6;
@@ -118,11 +119,12 @@ impl Connections {
     /// for initial connection so that we are able to find friends and to send
     /// them our relays. Later when more relays are received from our friends
     /// they should be added via `add_relay_connection` method.
-    pub fn add_relay_global(&self, relay_addr: SocketAddr, relay_pk: PublicKey) -> impl Future<Item = (), Error = Error> + Send {
+    pub fn add_relay_global(&self, relay_addr: SocketAddr, relay_pk: PublicKey) -> impl Future<Item = (), Error = ConnectionError> + Send {
         if let hash_map::Entry::Vacant(vacant) = self.clients.write().entry(relay_pk) {
             let client = Client::new(relay_pk, relay_addr, self.incoming_tx.clone());
             vacant.insert(client.clone());
-            Either::A(client.spawn(self.dht_sk.clone(), self.dht_pk))
+            Either::A(client.spawn(self.dht_sk.clone(), self.dht_pk)
+                .map_err(|e| e.context(ConnectionErrorKind::Spawn).into()))
         } else {
             trace!("Attempt to add relay that already exists: {}", relay_addr);
             Either::B(future::ok(()))
@@ -133,7 +135,7 @@ impl Connections {
     /// we already connected to this friend via at least
     /// `RECOMMENDED_FRIEND_TCP_CONNECTIONS` relays. Connection to our friend
     /// via this relay will be added as well.
-    pub fn add_relay_connection(&self, relay_addr: SocketAddr, relay_pk: PublicKey, node_pk: PublicKey) -> impl Future<Item = (), Error = Error> + Send {
+    pub fn add_relay_connection(&self, relay_addr: SocketAddr, relay_pk: PublicKey, node_pk: PublicKey) -> impl Future<Item = (), Error = ConnectionError> + Send {
         let mut clients = self.clients.write();
         if let Some(client) = clients.get(&relay_pk) {
             Box::new(self.add_connection_inner(client, node_pk))
@@ -151,7 +153,9 @@ impl Connections {
                 clients.insert(relay_pk, client.clone());
                 connection.connections.insert(relay_pk);
                 let future = client.add_connection(node_pk)
-                    .join(client.spawn(self.dht_sk.clone(), self.dht_pk))
+                    .map_err(|e| e.context(ConnectionErrorKind::AddConnection).into())
+                    .join(client.spawn(self.dht_sk.clone(), self.dht_pk)
+                        .map_err(|e| e.context(ConnectionErrorKind::Spawn).into()))
                     .map(|_| ());
                 Box::new(future) as Box<dyn Future<Item = _, Error = _> + Send>
             } else {
@@ -163,19 +167,18 @@ impl Connections {
     /// Add a connection to our friend via relay. It means that we will send
     /// `RouteRequest` packet to this relay and wait for the friend to become
     /// connected.
-    pub fn add_connection(&self, relay_pk: PublicKey, node_pk: PublicKey) -> impl Future<Item = (), Error = Error> + Send {
+    pub fn add_connection(&self, relay_pk: PublicKey, node_pk: PublicKey) -> impl Future<Item = (), Error = ConnectionError> + Send {
         if let Some(client) = self.clients.read().get(&relay_pk) {
             Either::A(self.add_connection_inner(client, node_pk))
         } else {
             Either::B( future::err(
-                Error::new(ErrorKind::Other,
-                    "add_connection: no such relay"
-            )))
+                ConnectionErrorKind::NoSuchRelay.into()
+            ))
         }
     }
 
     /// Remove connection to a friend via relays.
-    pub fn remove_connection(&self, node_pk: PublicKey) -> impl Future<Item = (), Error = Error> + Send {
+    pub fn remove_connection(&self, node_pk: PublicKey) -> impl Future<Item = (), Error = ConnectionError> + Send {
         if let Some(connection) = self.connections.write().remove(&node_pk) {
             let clients = self.clients.read();
             let futures = connection.clients(&clients)
@@ -185,41 +188,42 @@ impl Connections {
         } else {
             // TODO: what if we didn't receive relays from friend and delete him?
             Either::B( future::err(
-                Error::new(ErrorKind::Other,
-                    "remove_connection: no connection to the node"
-            )))
+                ConnectionErrorKind::NoConnection.into()
+            ))
         }
     }
 
     /// Inner function to add a connection to our friend via relay.
-    fn add_connection_inner(&self, client: &Client, node_pk: PublicKey) -> impl Future<Item = (), Error = Error> + Send {
+    fn add_connection_inner(&self, client: &Client, node_pk: PublicKey) -> impl Future<Item = (), Error = ConnectionError> + Send {
         // TODO: check MAX_FRIEND_TCP_CONNECTIONS?
         let mut connections = self.connections.write();
         let connection = connections.entry(node_pk).or_insert_with(NodeConnection::new);
         connection.connections.insert(client.pk);
         let future = if connection.status == NodeConnectionStatus::TCP && client.is_sleeping() {
             // unsleep relay
-            Either::A(client.clone().spawn(self.dht_sk.clone(), self.dht_pk))
+            Either::A(client.clone().spawn(self.dht_sk.clone(), self.dht_pk)
+                .map_err(|e| e.context(ConnectionErrorKind::Spawn).into()))
         } else {
             Either::B(future::ok(()))
         };
-        future.join(client.add_connection(node_pk)).map(|_| ())
+        future.join(client.add_connection(node_pk).map_err(|e| e.context(ConnectionErrorKind::AddConnection).into())).map(|_| ())
     }
 
     /// Send `Data` packet to a node via one of the relays.
-    pub fn send_data(&self, node_pk: PublicKey, data: DataPayload) -> impl Future<Item = (), Error = Error> + Send {
+    pub fn send_data(&self, node_pk: PublicKey, data: DataPayload) -> impl Future<Item = (), Error = ConnectionError> + Send {
         let connections = self.connections.read();
         if let Some(connection) = connections.get(&node_pk) {
             let clients = self.clients.read();
             // TODO: shuffle?
             let futures = connection.clients(&clients)
-                .map(move |client| client.send_data(node_pk, data.clone()));
+                .map(move |client| client.send_data(node_pk, data.clone())
+                    .map_err(|e| e.context(ConnectionErrorKind::SendTo).into()));
             // send packet to the first relay only that can accept it
             // errors are ignored
             // TODO: return error if stream is exhausted?
             Either::A(stream::futures_unordered(futures)
                 .then(Ok)
-                .skip_while(|res| future::ok(res.is_err()))
+                .skip_while(|res: &Result<(), ConnectionError>| future::ok(res.is_err()))
                 .into_future()
                 .map(|_| ())
                 .map_err(|(e, _)| e))
@@ -231,40 +235,41 @@ impl Connections {
     }
 
     /// Send `OobSend` packet to a node via relay with specified `PublicKey`.
-    pub fn send_oob(&self, relay_pk: PublicKey, node_pk: PublicKey, data: Vec<u8>) -> impl Future<Item = (), Error = Error> + Send {
+    pub fn send_oob(&self, relay_pk: PublicKey, node_pk: PublicKey, data: Vec<u8>) -> impl Future<Item = (), Error = ConnectionError> + Send {
         let clients = self.clients.read();
         if let Some(client) = clients.get(&relay_pk) {
-            Either::A(client.send_oob(node_pk, data))
+            Either::A(client.send_oob(node_pk, data)
+                .map_err(|e| e.context(ConnectionErrorKind::SendTo).into()))
         } else {
             Either::B( future::err(
-                Error::new(ErrorKind::Other,
-                    "send_oob: relay is not connected"
-            )))
+                ConnectionErrorKind::NotConnected.into()
+            ))
         }
     }
 
     /// Send `OnionRequest` packet to relay with specified `PublicKey`.
-    pub fn send_onion(&self, relay_pk: PublicKey, onion_request: OnionRequest) -> impl Future<Item = (), Error = Error> + Send {
+    pub fn send_onion(&self, relay_pk: PublicKey, onion_request: OnionRequest) -> impl Future<Item = (), Error = ConnectionError> + Send {
         let clients = self.clients.read();
         if let Some(client) = clients.get(&relay_pk) {
-            Either::A(client.send_onion(onion_request))
+            Either::A(client.send_onion(onion_request)
+                .map_err(|e| e.context(ConnectionErrorKind::SendTo).into()))
         } else {
             Either::B( future::err(
-                Error::new(ErrorKind::Other,
-                    "send_onion: relay is not connected"
-            )))
+                ConnectionErrorKind::NotConnected.into()
+            ))
         }
     }
 
     /// Change status of connection to the node. Connections module need to know
     /// whether connection is used to be able to put to sleep relay connections.
-    pub fn set_connection_status(&self, node_pk: PublicKey, status: NodeConnectionStatus) -> impl Future<Item = (), Error = Error> + Send {
+    pub fn set_connection_status(&self, node_pk: PublicKey, status: NodeConnectionStatus) -> impl Future<Item = (), Error = ConnectionError> + Send {
         if let Some(connection) = self.connections.write().get_mut(&node_pk) {
             let future = if status == NodeConnectionStatus::TCP && connection.status == NodeConnectionStatus::UDP {
                 // unsleep clients
                 let clients = self.clients.read();
                 let futures = connection.clients(&clients)
-                    .map(|client| client.clone().spawn(self.dht_sk.clone(), self.dht_pk))
+                    .map(|client| client.clone().spawn(self.dht_sk.clone(), self.dht_pk)
+                        .map_err(|e| e.context(ConnectionErrorKind::Spawn).into()))
                     .collect::<Vec<_>>();
                 Either::A(future::join_all(futures).map(|_| ()))
             } else {
@@ -274,9 +279,8 @@ impl Connections {
             future
         } else {
             Either::B( future::err(
-                Error::new(ErrorKind::Other,
-                    "set_connection_status: no such connection"
-            )))
+                ConnectionErrorKind::NoSuchRelay.into()
+            ))
         }
     }
 
@@ -302,7 +306,7 @@ impl Connections {
     /// Main loop that should be run periodically. It removes unreachable and
     /// redundant relays, reconnects to relays if a connection was lost, puts
     /// relays to sleep if they are not used right now.
-    fn main_loop(&self) -> impl Future<Item = (), Error = Error> + Send {
+    fn main_loop(&self) -> impl Future<Item = (), Error = ConnectionError> + Send {
         let mut clients = self.clients.write();
         let mut connections = self.connections.write();
 
@@ -319,7 +323,8 @@ impl Connections {
                 if connected && client.connection_attempts() > MAX_RECONNECTION_ATTEMPTS {
                     false
                 } else {
-                    let future = client.clone().spawn(self.dht_sk.clone(), self.dht_pk);
+                    let future = client.clone().spawn(self.dht_sk.clone(), self.dht_pk)
+                        .map_err(|e| e.context(ConnectionErrorKind::Spawn).into());
                     futures.push(future);
                     true
                 }
@@ -369,12 +374,12 @@ impl Connections {
 
     /// Run TCP periodical tasks. Result future will never be completed
     /// successfully.
-    pub fn run(self) -> impl Future<Item = (), Error = Error> + Send {
+    pub fn run(self) -> impl Future<Item = (), Error = ConnectionError> + Send {
         let interval = Duration::from_secs(CONNECTIONS_INTERVAL);
         let wakeups = Interval::new(Instant::now(), interval);
 
         wakeups
-            .map_err(|e| Error::new(ErrorKind::Other, format!("TCP connections timer error: {:?}", e)))
+            .map_err(|e| e.context(ConnectionErrorKind::Wakeup).into())
             .for_each(move |_instant| self.main_loop())
     }
 }
@@ -536,7 +541,8 @@ mod tests {
         let (relay_pk, _relay_sk) = gen_keypair();
         let (node_pk, _node_sk) = gen_keypair();
 
-        assert!(connections.add_connection(relay_pk, node_pk).wait().is_err());
+        let error = connections.add_connection(relay_pk, node_pk).wait().err().unwrap();
+        assert_eq!(*error.kind(), ConnectionErrorKind::NoSuchRelay);
     }
 
     #[test]
@@ -578,7 +584,8 @@ mod tests {
 
         let (node_pk, _node_sk) = gen_keypair();
 
-        assert!(connections.remove_connection(node_pk).wait().is_err());
+        let error = connections.remove_connection(node_pk).wait().err().unwrap();
+        assert_eq!(*error.kind(), ConnectionErrorKind::NoConnection);
     }
 
     #[test]
@@ -693,7 +700,8 @@ mod tests {
         let (destination_pk, _destination_sk) = gen_keypair();
         let (relay_pk, _relay_sk) = gen_keypair();
 
-        assert!(connections.send_oob(relay_pk, destination_pk, vec![42; 123]).wait().is_err());
+        let error = connections.send_oob(relay_pk, destination_pk, vec![42; 123]).wait().err().unwrap();
+        assert_eq!(*error.kind(), ConnectionErrorKind::NotConnected);
     }
 
     #[test]
@@ -746,7 +754,8 @@ mod tests {
             payload: vec![42; 123],
         };
 
-        assert!(connections.send_onion(relay_pk, onion_request.clone()).wait().is_err());
+        let error = connections.send_onion(relay_pk, onion_request.clone()).wait().err().unwrap();
+        assert_eq!(*error.kind(), ConnectionErrorKind::NotConnected);
     }
 
     #[test]
@@ -777,7 +786,8 @@ mod tests {
 
         let (node_pk, _node_sk) = gen_keypair();
 
-        assert!(connections.set_connection_status(node_pk, NodeConnectionStatus::UDP).wait().is_err());
+        let error = connections.set_connection_status(node_pk, NodeConnectionStatus::UDP).wait().err().unwrap();
+        assert_eq!(*error.kind(), ConnectionErrorKind::NoSuchRelay);
     }
 
     #[test]
