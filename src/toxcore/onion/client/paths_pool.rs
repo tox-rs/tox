@@ -2,17 +2,19 @@ use std::time::{Duration, Instant};
 
 use crate::toxcore::crypto_core::*;
 use crate::toxcore::dht::packed_node::PackedNode;
+use crate::toxcore::dht::server::{Server as DhtServer};
 use crate::toxcore::onion::client::nodes_pool::*;
 use crate::toxcore::onion::client::onion_path::*;
 use crate::toxcore::time::*;
 use crate::toxcore::onion::client::TIME_TO_STABLE;
+use crate::toxcore::tcp::client::{Connections as TcpConnections};
 
 /// Onion path is considered invalid after this number of unsuccessful attempts
 /// to use it.
 const ONION_PATH_MAX_NO_RESPONSE_USES: u32 = 4;
 
 /// Maximum number of onion path that can be used at the same time.
-const NUMBER_ONION_PATHS: usize = 6;
+pub const NUMBER_ONION_PATHS: usize = 6;
 
 /// Timeout for path we haven't received any response from.
 const ONION_PATH_FIRST_TIMEOUT: u64 = 4;
@@ -22,9 +24,6 @@ const ONION_PATH_TIMEOUT: u64 = 10;
 
 /// Maximum time for path being used.
 const ONION_PATH_MAX_LIFETIME: u64 = 1200;
-
-/// Minimum size of nodes pool to generate random path.
-const MIN_NODES_POOL_SIZE: usize = 3;
 
 /// Onion path that is stored for later usage.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -115,8 +114,10 @@ impl PathsPool {
         }
     }
 
-    /// Get random path. Can be either one of existent paths or newly generated.
-    pub fn random_path(&mut self, friend: bool) -> Option<OnionPath> {
+    /// Get a random onion path. Can be either one of existent paths or newly
+    /// generated. If we are not connected to DHT the first node from this path
+    /// will be a TCP node.
+    pub fn random_path(&mut self, dht: &DhtServer, tcp_connections: &TcpConnections, friend: bool) -> Option<OnionPath> {
         let paths = if friend {
             &mut self.friend_paths
         } else {
@@ -126,45 +127,36 @@ impl PathsPool {
         paths.retain(|stored_path| !stored_path.is_timed_out());
 
         let path_number = random_limit_usize(NUMBER_ONION_PATHS);
-        if path_number >= paths.len() {
-            if self.path_nodes.len() < MIN_NODES_POOL_SIZE {
-                return None;
-            }
-            // non-empty nodes pool will always return some node
-            let node_1 = self.path_nodes.rand().unwrap();
-            let mut node_2;
-            loop {
-                node_2 = self.path_nodes.rand().unwrap();
-                if node_2 != node_1 {
-                    break;
-                }
-            }
-            let mut node_3;
-            loop {
-                node_3 = self.path_nodes.rand().unwrap();
-                if node_3 != node_1 && node_3 != node_2 {
-                    break;
-                }
-            }
-            let path_id = [node_1.pk, node_2.pk, node_3.pk];
+        if let Some(stored_path) = paths.get_mut(path_number) {
+            stored_path.use_path();
+            return Some(stored_path.path.clone());
+        }
+
+        let path = if dht.is_connected() {
+            self.path_nodes.udp_path()
+        } else if let Some(relay) = tcp_connections.get_random_relay() {
+            self.path_nodes.tcp_path(relay)
+        } else {
+            None
+        };
+
+        if let Some(path) = path {
+            let path_id = path.id();
             if let Some(stored_path) = paths.iter_mut().find(|stored_path| stored_path.path.id() == path_id) {
                 stored_path.use_path();
-                Some(stored_path.path.clone())
             } else {
-                let path = OnionPath::new([node_1, node_2, node_3]);
                 let stored_path = StoredOnionPath::new(path.clone());
                 paths.push(stored_path);
-                Some(path)
             }
+            Some(path)
         } else {
-            paths[path_number].use_path();
-            Some(paths[path_number].path.clone())
+            None
         }
     }
 
-    /// Get path by its `OnionPathId` and mark it as used. If there is no path
-    /// with such id a new path will be generated.
-    pub fn use_path(&mut self, path_id: OnionPathId, friend: bool) -> Option<OnionPath> {
+    /// Get path by its `OnionPathId`. If there is no path with such id a new
+    /// path will be generated.
+    pub fn get_or_random_path(&mut self, dht: &DhtServer, tcp_connections: &TcpConnections, path_id: OnionPathId, friend: bool) -> Option<OnionPath> {
         let paths = if friend {
             &mut self.friend_paths
         } else {
@@ -180,7 +172,7 @@ impl PathsPool {
             stored_path.use_path();
             Some(stored_path.path.clone())
         } else {
-            self.random_path(friend)
+            self.random_path(dht, tcp_connections, friend)
         }
     }
 
@@ -226,18 +218,11 @@ impl Default for PathsPool {
 mod tests {
     use super::*;
 
-    #[test]
-    fn new() {
-        let mut paths_pool = PathsPool::new();
-        assert_eq!(paths_pool.random_path(false), None);
-        assert_eq!(paths_pool.random_path(true), None);
-    }
+    use futures::sync::mpsc;
 
     #[test]
     fn default() {
-        let mut paths_pool = PathsPool::default();
-        assert_eq!(paths_pool.random_path(false), None);
-        assert_eq!(paths_pool.random_path(true), None);
+        let _paths_pool = PathsPool::default();
     }
 
     #[test]
@@ -246,155 +231,164 @@ mod tests {
         let _paths_pool_c = paths_pool.clone();
     }
 
-    #[test]
-    fn self_random_path_stored() {
-        let mut paths_pool = PathsPool::new();
-        for _ in 0 .. NUMBER_ONION_PATHS {
-            let node_1 = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
-            let node_2 = PackedNode::new("127.0.0.1:12346".parse().unwrap(), &gen_keypair().0);
-            let node_3 = PackedNode::new("127.0.0.1:12347".parse().unwrap(), &gen_keypair().0);
-            let path = OnionPath::new([node_1, node_2, node_3]);
-            paths_pool.path_nodes.put(node_1);
-            paths_pool.path_nodes.put(node_2);
-            paths_pool.path_nodes.put(node_3);
-            paths_pool.self_paths.push(StoredOnionPath::new(path));
+    macro_rules! paths_pool_tests {
+        ($mod:ident, $friends:expr, $paths:ident) => {
+            mod $mod {
+                use super::*;
+
+                #[test]
+                fn random_path_stored() {
+                    let (dht_pk, dht_sk) = gen_keypair();
+                    let (udp_tx, _udp_rx) = mpsc::channel(1);
+                    let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
+                    let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
+                    let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
+                    let mut paths_pool = PathsPool::new();
+                    for _ in 0 .. NUMBER_ONION_PATHS {
+                        let node_1 = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
+                        let node_2 = PackedNode::new("127.0.0.1:12346".parse().unwrap(), &gen_keypair().0);
+                        let node_3 = PackedNode::new("127.0.0.1:12347".parse().unwrap(), &gen_keypair().0);
+                        let path = OnionPath::new([node_1, node_2, node_3], /* TCP */ false);
+                        paths_pool.path_nodes.put(node_1);
+                        paths_pool.path_nodes.put(node_2);
+                        paths_pool.path_nodes.put(node_3);
+                        paths_pool.$paths.push(StoredOnionPath::new(path));
+                    }
+
+                    assert_eq!(paths_pool.$paths.len(), NUMBER_ONION_PATHS);
+                    let path = paths_pool.random_path(&dht, &tcp_connections, $friends).unwrap();
+                    assert_eq!(paths_pool.$paths.len(), NUMBER_ONION_PATHS);
+                    assert!(paths_pool.$paths.iter().any(|stored_path| stored_path.path.id() == path.id()));
+                }
+
+                #[test]
+                fn random_path_new_udp_random() {
+                    let (dht_pk, dht_sk) = gen_keypair();
+                    let (udp_tx, _udp_rx) = mpsc::channel(1);
+                    let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
+                    let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
+                    // make DHT connected so that we will build UDP onion paths
+                    dht.add_node(PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0));
+                    let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
+                    let mut paths_pool = PathsPool::new();
+                    for _ in 0 .. MIN_NODES_POOL_SIZE {
+                        let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
+                        paths_pool.path_nodes.put(node);
+                    }
+
+                    let path = paths_pool.random_path(&dht, &tcp_connections, $friends).unwrap();
+                    assert_eq!(path, paths_pool.$paths[0].path);
+                    assert!(!path.tcp);
+                }
+
+                #[test]
+                fn random_path_new_tcp_random() {
+                    let (dht_pk, dht_sk) = gen_keypair();
+                    let (udp_tx, _udp_rx) = mpsc::channel(1);
+                    let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
+                    let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
+                    let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
+                    // add a relay that will be used as first node for onion path
+                    let (_relay_incoming_rx, _relay_outgoing_rx, relay_pk) = tcp_connections.add_client();
+                    let mut paths_pool = PathsPool::new();
+                    for _ in 0 .. MIN_NODES_POOL_SIZE {
+                        let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
+                        paths_pool.path_nodes.put(node);
+                    }
+
+                    let path = paths_pool.random_path(&dht, &tcp_connections, $friends).unwrap();
+                    assert_eq!(path, paths_pool.$paths[0].path);
+                    assert_eq!(path.nodes[0].public_key, relay_pk);
+                    assert!(path.tcp);
+                }
+
+                #[test]
+                fn get_or_random_path_stored() {
+                    let (dht_pk, dht_sk) = gen_keypair();
+                    let (udp_tx, _udp_rx) = mpsc::channel(1);
+                    let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
+                    let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
+                    let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
+                    let mut paths_pool = PathsPool::new();
+                    let node_1 = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
+                    let node_2 = PackedNode::new("127.0.0.1:12346".parse().unwrap(), &gen_keypair().0);
+                    let node_3 = PackedNode::new("127.0.0.1:12347".parse().unwrap(), &gen_keypair().0);
+                    let path = OnionPath::new([node_1, node_2, node_3], /* TCP */ false);
+                    paths_pool.$paths.push(StoredOnionPath::new(path.clone()));
+
+                    assert_eq!(paths_pool.get_or_random_path(&dht, &tcp_connections, path.id(), $friends).unwrap(), path);
+                    assert_eq!(paths_pool.$paths[0].attempts, ONION_PATH_MAX_NO_RESPONSE_USES / 2 + 1);
+                }
+
+                #[test]
+                fn get_or_random_path_new_udp_random() {
+                    let (dht_pk, dht_sk) = gen_keypair();
+                    let (udp_tx, _udp_rx) = mpsc::channel(1);
+                    let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
+                    let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
+                    // make DHT connected so that we will build UDP onion paths
+                    dht.add_node(PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0));
+                    let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
+                    let mut paths_pool = PathsPool::new();
+                    for _ in 0 .. MIN_NODES_POOL_SIZE {
+                        let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
+                        paths_pool.path_nodes.put(node);
+                    }
+
+                    let path_id = [
+                        gen_keypair().0,
+                        gen_keypair().0,
+                        gen_keypair().0,
+                    ];
+                    let path = paths_pool.get_or_random_path(&dht, &tcp_connections, path_id, $friends).unwrap();
+                    assert_ne!(path.id(), path_id);
+                    assert_eq!(path, paths_pool.$paths[0].path);
+                    assert!(!path.tcp);
+                }
+
+                #[test]
+                fn get_or_random_path_new_tcp_random() {
+                    let (dht_pk, dht_sk) = gen_keypair();
+                    let (udp_tx, _udp_rx) = mpsc::channel(1);
+                    let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
+                    let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
+                    let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
+                    // add a relay that will be used as first node for onion path
+                    let (_relay_incoming_rx, _relay_outgoing_rx, relay_pk) = tcp_connections.add_client();
+                    let mut paths_pool = PathsPool::new();
+                    for _ in 0 .. MIN_NODES_POOL_SIZE {
+                        let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
+                        paths_pool.path_nodes.put(node);
+                    }
+
+                    let path_id = [
+                        gen_keypair().0,
+                        gen_keypair().0,
+                        gen_keypair().0,
+                    ];
+                    let path = paths_pool.get_or_random_path(&dht, &tcp_connections, path_id, $friends).unwrap();
+                    assert_ne!(path.id(), path_id);
+                    assert_eq!(path, paths_pool.$paths[0].path);
+                    assert_eq!(path.nodes[0].public_key, relay_pk);
+                    assert!(path.tcp);
+                }
+
+                #[test]
+                fn get_stored_path() {
+                    let mut paths_pool = PathsPool::new();
+                    let node_1 = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
+                    let node_2 = PackedNode::new("127.0.0.1:12346".parse().unwrap(), &gen_keypair().0);
+                    let node_3 = PackedNode::new("127.0.0.1:12347".parse().unwrap(), &gen_keypair().0);
+                    let path = OnionPath::new([node_1, node_2, node_3], /* TCP */ false);
+                    let path_id = path.id();
+                    let stored_path = StoredOnionPath::new(path);
+                    paths_pool.$paths.push(stored_path.clone());
+                    assert_eq!(paths_pool.get_stored_path(path_id, $friends), Some(&stored_path));
+                }
+            }
         }
-
-        assert_eq!(paths_pool.self_paths.len(), NUMBER_ONION_PATHS);
-        let path = paths_pool.random_path(false).unwrap();
-        assert_eq!(paths_pool.self_paths.len(), NUMBER_ONION_PATHS);
-        assert!(paths_pool.self_paths.iter().any(|stored_path| stored_path.path.id() == path.id()));
     }
 
-    #[test]
-    fn self_random_path_new_random() {
-        let mut paths_pool = PathsPool::new();
-        for _ in 0 .. MIN_NODES_POOL_SIZE {
-            let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
-            paths_pool.path_nodes.put(node);
-        }
-
-        let path = paths_pool.random_path(false).unwrap();
-        assert_eq!(path, paths_pool.self_paths[0].path);
-    }
-
-    #[test]
-    fn self_use_path_stored() {
-        let mut paths_pool = PathsPool::new();
-        let node_1 = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
-        let node_2 = PackedNode::new("127.0.0.1:12346".parse().unwrap(), &gen_keypair().0);
-        let node_3 = PackedNode::new("127.0.0.1:12347".parse().unwrap(), &gen_keypair().0);
-        let path = OnionPath::new([node_1, node_2, node_3]);
-        paths_pool.self_paths.push(StoredOnionPath::new(path.clone()));
-
-        assert_eq!(paths_pool.use_path(path.id(), false).unwrap(), path);
-        assert_eq!(paths_pool.self_paths[0].attempts, ONION_PATH_MAX_NO_RESPONSE_USES / 2 + 1);
-    }
-
-    #[test]
-    fn self_use_path_new_random() {
-        let mut paths_pool = PathsPool::new();
-        for _ in 0 .. MIN_NODES_POOL_SIZE {
-            let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
-            paths_pool.path_nodes.put(node);
-        }
-
-        let path_id = [
-            gen_keypair().0,
-            gen_keypair().0,
-            gen_keypair().0,
-        ];
-        let path = paths_pool.use_path(path_id, false).unwrap();
-        assert_ne!(path.id(), path_id);
-        assert_eq!(path, paths_pool.self_paths[0].path);
-    }
-
-    #[test]
-    fn self_get_stored_path() {
-        let mut paths_pool = PathsPool::new();
-        let node_1 = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
-        let node_2 = PackedNode::new("127.0.0.1:12346".parse().unwrap(), &gen_keypair().0);
-        let node_3 = PackedNode::new("127.0.0.1:12347".parse().unwrap(), &gen_keypair().0);
-        let path = OnionPath::new([node_1, node_2, node_3]);
-        let path_id = path.id();
-        let stored_path = StoredOnionPath::new(path);
-        paths_pool.self_paths.push(stored_path.clone());
-        assert_eq!(paths_pool.get_stored_path(path_id, false), Some(&stored_path));
-    }
-
-    #[test]
-    fn friends_random_path_stored() {
-        let mut paths_pool = PathsPool::new();
-        for _ in 0 .. NUMBER_ONION_PATHS {
-            let node_1 = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
-            let node_2 = PackedNode::new("127.0.0.1:12346".parse().unwrap(), &gen_keypair().0);
-            let node_3 = PackedNode::new("127.0.0.1:12347".parse().unwrap(), &gen_keypair().0);
-            let path = OnionPath::new([node_1, node_2, node_3]);
-            paths_pool.path_nodes.put(node_1);
-            paths_pool.path_nodes.put(node_2);
-            paths_pool.path_nodes.put(node_3);
-            paths_pool.friend_paths.push(StoredOnionPath::new(path));
-        }
-
-        assert_eq!(paths_pool.friend_paths.len(), NUMBER_ONION_PATHS);
-        let path = paths_pool.random_path(true).unwrap();
-        assert_eq!(paths_pool.friend_paths.len(), NUMBER_ONION_PATHS);
-        assert!(paths_pool.friend_paths.iter().any(|stored_path| stored_path.path.id() == path.id()));
-    }
-
-    #[test]
-    fn friends_random_path_new_random() {
-        let mut paths_pool = PathsPool::new();
-        for _ in 0 .. MIN_NODES_POOL_SIZE {
-            let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
-            paths_pool.path_nodes.put(node);
-        }
-
-        let path = paths_pool.random_path(true).unwrap();
-        assert_eq!(path, paths_pool.friend_paths[0].path);
-    }
-
-    #[test]
-    fn friends_use_path_stored() {
-        let mut paths_pool = PathsPool::new();
-        let node_1 = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
-        let node_2 = PackedNode::new("127.0.0.1:12346".parse().unwrap(), &gen_keypair().0);
-        let node_3 = PackedNode::new("127.0.0.1:12347".parse().unwrap(), &gen_keypair().0);
-        let path = OnionPath::new([node_1, node_2, node_3]);
-        paths_pool.friend_paths.push(StoredOnionPath::new(path.clone()));
-
-        assert_eq!(paths_pool.use_path(path.id(), true).unwrap(), path);
-        assert_eq!(paths_pool.friend_paths[0].attempts, ONION_PATH_MAX_NO_RESPONSE_USES / 2 + 1);
-    }
-
-    #[test]
-    fn friends_use_path_new_random() {
-        let mut paths_pool = PathsPool::new();
-        for _ in 0 .. MIN_NODES_POOL_SIZE {
-            let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
-            paths_pool.path_nodes.put(node);
-        }
-
-        let path_id = [
-            gen_keypair().0,
-            gen_keypair().0,
-            gen_keypair().0,
-        ];
-        let path = paths_pool.use_path(path_id, true).unwrap();
-        assert_ne!(path.id(), path_id);
-        assert_eq!(path, paths_pool.friend_paths[0].path);
-    }
-
-    #[test]
-    fn friends_get_stored_path() {
-        let mut paths_pool = PathsPool::new();
-        let node_1 = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
-        let node_2 = PackedNode::new("127.0.0.1:12346".parse().unwrap(), &gen_keypair().0);
-        let node_3 = PackedNode::new("127.0.0.1:12347".parse().unwrap(), &gen_keypair().0);
-        let path = OnionPath::new([node_1, node_2, node_3]);
-        let path_id = path.id();
-        let stored_path = StoredOnionPath::new(path);
-        paths_pool.friend_paths.push(stored_path.clone());
-        assert_eq!(paths_pool.get_stored_path(path_id, true), Some(&stored_path));
-    }
+    paths_pool_tests!(self_tests, false, self_paths);
+    paths_pool_tests!(friends_tests, true, friend_paths);
 }

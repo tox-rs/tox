@@ -248,6 +248,13 @@ impl Server {
         self.lan_discovery_enabled = enable;
     }
 
+    /// Check if we have at least one node in good state.
+    pub fn is_connected(&self) -> bool {
+        self.close_nodes.read()
+            .iter()
+            .any(|node| !node.is_bad())
+    }
+
     /// Get closest nodes from both close_nodes and friend's close_nodes
     fn get_closest_inner(
         close_nodes: &Ktree,
@@ -1491,6 +1498,10 @@ mod tests {
     impl Server {
         pub fn has_friend(&self, pk: &PublicKey) -> bool {
             self.friends.read().contains_key(pk)
+        }
+
+        pub fn add_node(&self, node: PackedNode) {
+            assert!(self.close_nodes.write().try_add(node));
         }
     }
 
@@ -3736,5 +3747,14 @@ mod tests {
         let nodes = alice.random_friend_nodes(FAKE_FRIENDS_NUMBER as u8 - 1);
         assert_eq!(nodes.len(), FAKE_FRIENDS_NUMBER - 1);
         assert!(!nodes.contains(&node));
+    }
+
+    #[test]
+    fn is_connected() {
+        let (alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
+
+        assert!(!alice.is_connected());
+        alice.add_node(PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0));
+        assert!(alice.is_connected());
     }
 }

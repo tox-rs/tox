@@ -391,6 +391,21 @@ impl OnionClient {
                 clock_elapsed(ping_time) < Duration::from_secs(MIN_NODE_PING_TIME))
     }
 
+    /// Send onion request via TCP or UDP depending on path.
+    fn send_onion_request(&self, path: OnionPath, inner_onion_request: InnerOnionRequest, saddr: SocketAddr)
+        -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
+        if path.tcp {
+            let onion_request = path.create_tcp_onion_request(saddr, inner_onion_request);
+            // TODO: can we handle errors better? Right now we can try send a
+            // request to a non-existent or suspended node which returns an error
+            Either::A(self.tcp_connections.send_onion(path.nodes[0].public_key, onion_request)
+                .then(Ok).map(|_| ()))
+        } else {
+            let onion_request = path.create_udp_onion_request(saddr, inner_onion_request);
+            Either::B(send_to(&self.dht.tx, (Packet::OnionRequest0(onion_request), path.nodes[0].saddr)))
+        }
+    }
+
     /// Handle `OnionAnnounceResponse` packet.
     pub fn handle_announce_response(&self, packet: &OnionAnnounceResponse, addr: SocketAddr) -> impl Future<Item = (), Error = HandleAnnounceResponseError> + Send {
         let state = &mut *self.state.lock();
@@ -483,7 +498,7 @@ impl OnionClient {
                 continue;
             }
 
-            let path = if let Some(path) = state.paths_pool.random_path(announce_data.friend_pk.is_some()) {
+            let path = if let Some(path) = state.paths_pool.random_path(&self.dht, &self.tcp_connections, announce_data.friend_pk.is_some()) {
                 path
             } else {
                 continue
@@ -497,9 +512,7 @@ impl OnionClient {
             });
 
             let inner_announce_request = announce_packet_data.search_request(&node.pk, request_id);
-            let onion_request = path.create_onion_request(node.saddr, InnerOnionRequest::InnerOnionAnnounceRequest(inner_announce_request));
-
-            futures.push(send_to(&self.dht.tx, (Packet::OnionRequest0(onion_request), path.nodes[0].saddr)));
+            futures.push(self.send_onion_request(path, InnerOnionRequest::InnerOnionAnnounceRequest(inner_announce_request), node.saddr));
         }
 
         Either::B(future::join_all(futures)
@@ -615,20 +628,21 @@ impl OnionClient {
 
     /// Generic function for sending search and announce requests to close nodes.
     fn ping_close_nodes(
+        &self,
         close_nodes: &mut Kbucket<OnionNode>,
         paths_pool: &mut PathsPool,
         announce_requests: &mut RequestQueue<AnnounceRequestData>,
         announce_packet_data: AnnouncePacketData,
         friend_pk: Option<PublicKey>,
         interval: Option<Duration>
-    ) -> Vec<(Packet, SocketAddr)> {
+    ) -> (impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send, bool) {
         let capacity = close_nodes.capacity();
         let ping_random = close_nodes.iter().all(|node|
             clock_elapsed(node.ping_time) >= Duration::from_secs(ONION_NODE_PING_INTERVAL) &&
                 // ensure we get a response from some node roughly once per interval / capacity
                 interval.map_or(true, |interval| clock_elapsed(node.response_time) >= interval / capacity as u32)
         );
-        let mut packets = Vec::new();
+        let mut futures = Vec::new();
         let mut good_nodes_count = 0;
         for node in close_nodes.iter_mut() {
             if !node.is_timed_out() {
@@ -658,9 +672,9 @@ impl OnionClient {
             if clock_elapsed(node.ping_time) >= interval || ping_random && random_limit_usize(capacity) == 0 {
                 // Last chance for a long-lived node
                 let path = if node.is_last_ping_attempt() && node.is_stable() {
-                    paths_pool.random_path(friend_pk.is_some())
+                    paths_pool.random_path(&self.dht, &self.tcp_connections, friend_pk.is_some())
                 } else {
-                    paths_pool.use_path(node.path_id, friend_pk.is_some())
+                    paths_pool.get_or_random_path(&self.dht, &self.tcp_connections, node.path_id, friend_pk.is_some())
                 };
 
                 let path = if let Some(path) = path {
@@ -683,9 +697,7 @@ impl OnionClient {
                     Some(ping_id) if friend_pk.is_none() => announce_packet_data.announce_request(&node.pk, ping_id, request_id),
                     _ => announce_packet_data.search_request(&node.pk, request_id)
                 };
-                let onion_request = path.create_onion_request(node.saddr, InnerOnionRequest::InnerOnionAnnounceRequest(inner_announce_request));
-
-                packets.push((Packet::OnionRequest0(onion_request), path.nodes[0].saddr));
+                futures.push(self.send_onion_request(path, InnerOnionRequest::InnerOnionAnnounceRequest(inner_announce_request), node.saddr));
             }
         }
 
@@ -697,7 +709,7 @@ impl OnionClient {
                     break
                 };
 
-                let path = if let Some(path) = paths_pool.random_path(friend_pk.is_some()) {
+                let path = if let Some(path) = paths_pool.random_path(&self.dht, &self.tcp_connections, friend_pk.is_some()) {
                     path
                 } else {
                     break
@@ -711,13 +723,12 @@ impl OnionClient {
                 });
 
                 let inner_announce_request = announce_packet_data.request(&node.pk, None, request_id);
-                let onion_request = path.create_onion_request(node.saddr, InnerOnionRequest::InnerOnionAnnounceRequest(inner_announce_request));
-
-                packets.push((Packet::OnionRequest0(onion_request), path.nodes[0].saddr));
+                futures.push(self.send_onion_request(path, InnerOnionRequest::InnerOnionAnnounceRequest(inner_announce_request), node.saddr));
             }
         }
 
-        packets
+        let packets_sent = !futures.is_empty();
+        (future::join_all(futures).map(|_| ()), packets_sent)
     }
 
     /// Announce ourselves periodically.
@@ -729,17 +740,14 @@ impl OnionClient {
             data_pk: Some(self.data_pk),
         };
 
-        let packets = OnionClient::ping_close_nodes(
+        self.ping_close_nodes(
             &mut state.announce_list,
             &mut state.paths_pool,
             &mut state.announce_requests,
             announce_packet_data,
             None,
             None,
-        );
-
-        send_all_to(&self.dht.tx, stream::iter_ok(packets))
-            .map_err(|e| e.context(RunErrorKind::SendTo).into())
+        ).0.map_err(|e| e.context(RunErrorKind::SendTo).into())
     }
 
     /// Get nodes to include to DHT `PublicKey` announcement packet.
@@ -756,13 +764,13 @@ impl OnionClient {
     }
 
     /// Announce our DHT `PublicKey` to a friend via onion.
-    fn send_dht_pk_onion(&self, friend: &mut OnionFriend, paths_pool: &mut PathsPool) -> Vec<(Packet, SocketAddr)> {
+    fn send_dht_pk_onion(&self, friend: &mut OnionFriend, paths_pool: &mut PathsPool) -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
         let dht_pk_announce = DhtPkAnnouncePayload::new(self.dht.pk, self.dht_pk_nodes());
         let inner_payload = OnionDataResponseInnerPayload::DhtPkAnnounce(dht_pk_announce);
         let nonce = gen_nonce();
         let payload = OnionDataResponsePayload::new(&precompute(&friend.real_pk, &self.real_sk), self.real_pk, &nonce, &inner_payload);
 
-        let mut packets = Vec::new();
+        let mut futures = Vec::new();
 
         for node in friend.close_nodes.iter() {
             if node.is_timed_out() {
@@ -775,7 +783,7 @@ impl OnionClient {
                 continue
             };
 
-            let path = if let Some(path) = paths_pool.use_path(node.path_id, true) {
+            let path = if let Some(path) = paths_pool.get_or_random_path(&self.dht, &self.tcp_connections, node.path_id, true) {
                 path
             } else {
                 continue
@@ -784,24 +792,22 @@ impl OnionClient {
             let (temporary_pk, temporary_sk) = gen_keypair();
             let inner_data_request = InnerOnionDataRequest::new(&precompute(&data_pk, &temporary_sk), friend.real_pk, temporary_pk, nonce, &payload);
 
-            let onion_request = path.create_onion_request(node.saddr, InnerOnionRequest::InnerOnionDataRequest(inner_data_request));
-
-            packets.push((Packet::OnionRequest0(onion_request), path.nodes[0].saddr));
+            futures.push(self.send_onion_request(path, InnerOnionRequest::InnerOnionDataRequest(inner_data_request), node.saddr));
         }
 
-        if !packets.is_empty() {
+        if !futures.is_empty() {
             friend.last_dht_pk_onion_sent = Some(clock_now());
         }
 
-        packets
+        future::join_all(futures).map(|_| ())
     }
 
     /// Announce our DHT `PublicKey` to a friend via `DhtRequest`.
-    fn send_dht_pk_dht_request(&self, friend: &mut OnionFriend) -> Vec<(Packet, SocketAddr)> {
+    fn send_dht_pk_dht_request(&self, friend: &mut OnionFriend) -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
         let friend_dht_pk = if let Some(friend_dht_pk) = friend.dht_pk {
             friend_dht_pk
         } else {
-            return Vec::new()
+            return Either::A(future::ok(()))
         };
 
         let dht_pk_announce_payload = DhtPkAnnouncePayload::new(self.dht.pk, self.dht_pk_nodes());
@@ -816,12 +822,16 @@ impl OnionClient {
             friend.last_dht_pk_dht_sent = Some(clock_now());
         }
 
-        nodes.iter().map(|node| (packet.clone(), node.saddr)).collect()
+        let packets = nodes.iter()
+            .map(|node| (packet.clone(), node.saddr))
+            .collect::<Vec<_>>();
+
+        Either::B(send_all_to(&self.dht.tx, stream::iter_ok(packets)))
     }
 
     /// Search friends periodically.
     fn friends_loop(&self, state: &mut OnionClientState) -> impl Future<Item = (), Error = RunError> + Send {
-        let mut packets = Vec::new();
+        let mut futures = Vec::<Box<dyn Future<Item = _, Error = _> + Send>>::new();
 
         for friend in state.friends.values_mut() {
             if friend.connected {
@@ -847,7 +857,7 @@ impl OnionClient {
                     .max(Duration::from_secs(ANNOUNCE_FRIEND))
             };
 
-            let friend_packets = OnionClient::ping_close_nodes(
+            let (friend_future, packets_sent) = self.ping_close_nodes(
                 &mut friend.close_nodes,
                 &mut state.paths_pool,
                 &mut state.announce_requests,
@@ -856,22 +866,23 @@ impl OnionClient {
                 Some(interval),
             );
 
-            if !friend_packets.is_empty() {
+            if packets_sent {
                 friend.search_count = friend.search_count.saturating_add(1);
             }
 
-            packets.extend(friend_packets);
+            futures.push(Box::new(friend_future));
 
             if friend.last_dht_pk_onion_sent.map_or(true, |time| clock_elapsed(time) > Duration::from_secs(ONION_DHTPK_SEND_INTERVAL)) {
-                packets.extend(self.send_dht_pk_onion(friend, &mut state.paths_pool));
+                futures.push(Box::new(self.send_dht_pk_onion(friend, &mut state.paths_pool)));
             }
 
             if friend.last_dht_pk_dht_sent.map_or(true, |time| clock_elapsed(time) > Duration::from_secs(DHT_DHTPK_SEND_INTERVAL)) {
-                packets.extend(self.send_dht_pk_dht_request(friend));
+                futures.push(Box::new(self.send_dht_pk_dht_request(friend)));
             }
         }
 
-        send_all_to(&self.dht.tx, stream::iter_ok(packets))
+        future::join_all(futures)
+            .map(|_| ())
             .map_err(|e| e.context(RunErrorKind::SendTo).into())
     }
 
@@ -1227,6 +1238,8 @@ mod tests {
         let (udp_tx, udp_rx) = mpsc::channel(1);
         let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
         let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
+        // make DHT connected so that we will build UDP onion paths
+        dht.add_node(PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0));
         let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
         let onion_client = OnionClient::new(dht, tcp_connections, real_sk, real_pk);
 
@@ -1242,7 +1255,7 @@ mod tests {
             let node = PackedNode::new(saddr, &pk);
             state.paths_pool.path_nodes.put(node);
         }
-        let path = state.paths_pool.random_path(false).unwrap();
+        let path = state.paths_pool.path_nodes.udp_path().unwrap();
 
         let (sender_pk, sender_sk) = gen_keypair();
         let saddr = "127.0.0.1:12345".parse().unwrap();
@@ -1318,7 +1331,7 @@ mod tests {
             let node = PackedNode::new(saddr, &pk);
             state.paths_pool.path_nodes.put(node);
         }
-        let path = state.paths_pool.random_path(false).unwrap();
+        let path = state.paths_pool.path_nodes.udp_path().unwrap();
 
         let (sender_pk, sender_sk) = gen_keypair();
         let saddr = "127.0.0.1:12345".parse().unwrap();
@@ -1366,7 +1379,7 @@ mod tests {
             let node = PackedNode::new(saddr, &pk);
             state.paths_pool.path_nodes.put(node);
         }
-        let path = state.paths_pool.random_path(false).unwrap();
+        let path = state.paths_pool.path_nodes.udp_path().unwrap();
 
         let (sender_pk, sender_sk) = gen_keypair();
         let saddr = "127.0.0.1:12345".parse().unwrap();
@@ -1414,6 +1427,8 @@ mod tests {
         let (udp_tx, udp_rx) = mpsc::channel(1);
         let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
         let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
+        // make DHT connected so that we will build UDP onion paths
+        dht.add_node(PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0));
         let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
         let onion_client = OnionClient::new(dht, tcp_connections, real_sk.clone(), real_pk);
 
@@ -1434,7 +1449,7 @@ mod tests {
             let node = PackedNode::new(saddr, &pk);
             state.paths_pool.path_nodes.put(node);
         }
-        let path = state.paths_pool.random_path(false).unwrap();
+        let path = state.paths_pool.path_nodes.udp_path().unwrap();
 
         let (sender_pk, sender_sk) = gen_keypair();
         let saddr = "127.0.0.1:12345".parse().unwrap();
@@ -1505,7 +1520,7 @@ mod tests {
             let node = PackedNode::new(saddr, &pk);
             state.paths_pool.path_nodes.put(node);
         }
-        let path = state.paths_pool.random_path(false).unwrap();
+        let path = state.paths_pool.path_nodes.udp_path().unwrap();
 
         let (sender_pk, sender_sk) = gen_keypair();
         let saddr = "127.0.0.1:12345".parse().unwrap();
@@ -1636,7 +1651,7 @@ mod tests {
             let node = PackedNode::new(saddr, &pk);
             state.paths_pool.path_nodes.put(node);
         }
-        let path = state.paths_pool.random_path(false).unwrap();
+        let path = state.paths_pool.path_nodes.udp_path().unwrap();
 
         let (sender_pk, sender_sk) = gen_keypair();
         let saddr = "127.0.0.1:12345".parse().unwrap();
@@ -1898,6 +1913,8 @@ mod tests {
         let (udp_tx, udp_rx) = mpsc::channel(MAX_ONION_ANNOUNCE_NODES as usize / 2);
         let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
         let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
+        // make DHT connected so that we will build UDP onion paths
+        dht.add_node(PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0));
         let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
         let onion_client = OnionClient::new(dht, tcp_connections, real_sk.clone(), real_pk);
 
@@ -1944,6 +1961,8 @@ mod tests {
         let (udp_tx, udp_rx) = mpsc::channel(MAX_ONION_ANNOUNCE_NODES as usize);
         let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
         let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
+        // make DHT connected so that we will build UDP onion paths
+        dht.add_node(PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0));
         let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
         let onion_client = OnionClient::new(dht, tcp_connections, real_sk.clone(), real_pk);
 
@@ -1966,7 +1985,7 @@ mod tests {
         let mut nodes_key_by_addr = HashMap::new();
         for i in 0 .. MAX_ONION_ANNOUNCE_NODES {
             let saddr = SocketAddr::new(addr, 23456 + u16::from(i));
-            let path = state.paths_pool.random_path(false).unwrap();
+            let path = state.paths_pool.path_nodes.udp_path().unwrap();
             let (node_pk, node_sk) = gen_keypair();
             nodes_key_by_addr.insert(saddr, node_sk);
             let node = OnionNode {
@@ -2022,6 +2041,8 @@ mod tests {
         let (udp_tx, udp_rx) = mpsc::channel(MAX_ONION_ANNOUNCE_NODES as usize / 2);
         let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
         let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
+        // make DHT connected so that we will build UDP onion paths
+        dht.add_node(PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0));
         let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
         let onion_client = OnionClient::new(dht, tcp_connections, real_sk.clone(), real_pk);
 
@@ -2071,6 +2092,8 @@ mod tests {
         let (udp_tx, udp_rx) = mpsc::channel(MAX_ONION_FRIEND_NODES as usize);
         let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
         let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
+        // make DHT connected so that we will build UDP onion paths
+        dht.add_node(PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0));
         let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
         let onion_client = OnionClient::new(dht, tcp_connections, real_sk.clone(), real_pk);
 
@@ -2096,7 +2119,7 @@ mod tests {
         let mut nodes_key_by_addr = HashMap::new();
         for i in 0 .. MAX_ONION_FRIEND_NODES {
             let saddr = SocketAddr::new(addr, 23456 + u16::from(i));
-            let path = state.paths_pool.random_path(false).unwrap();
+            let path = state.paths_pool.path_nodes.udp_path().unwrap();
             let (node_pk, node_sk) = gen_keypair();
             nodes_key_by_addr.insert(saddr, node_sk);
             let node = OnionNode {
@@ -2174,7 +2197,7 @@ mod tests {
 
         for i in 0 .. MAX_ONION_FRIEND_NODES {
             let saddr = SocketAddr::new(addr, 23456 + u16::from(i));
-            let path = state.paths_pool.random_path(false).unwrap();
+            let path = state.paths_pool.path_nodes.udp_path().unwrap();
             let (node_pk, _node_sk) = gen_keypair();
             let node = OnionNode {
                 pk: node_pk,
@@ -2242,7 +2265,7 @@ mod tests {
         let mut nodes_key_by_addr = HashMap::new();
         for i in 0 .. MAX_ONION_FRIEND_NODES {
             let saddr = SocketAddr::new(addr, 23456 + u16::from(i));
-            let path = state.paths_pool.random_path(false).unwrap();
+            let path = state.paths_pool.path_nodes.udp_path().unwrap();
             let (node_pk, node_sk) = gen_keypair();
             nodes_key_by_addr.insert(saddr, node_sk);
             let node = OnionNode {
@@ -2378,5 +2401,65 @@ mod tests {
         onion_client.populate_path_nodes(&mut state);
 
         assert!(state.paths_pool.path_nodes.rand().is_some());
+    }
+
+    #[test]
+    fn send_onion_request_udp() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, real_sk) = gen_keypair();
+        let (udp_tx, udp_rx) = mpsc::channel(1);
+        let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
+        let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
+        let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk, real_pk);
+
+        let inner_onion_request = InnerOnionRequest::InnerOnionAnnounceRequest(InnerOnionAnnounceRequest {
+            nonce: gen_nonce(),
+            pk: gen_keypair().0,
+            payload: vec![42; 123],
+        });
+
+        let path = OnionPath::new([
+            PackedNode::new("127.0.0.1:12346".parse().unwrap(), &gen_keypair().0),
+            PackedNode::new("127.0.0.1:12347".parse().unwrap(), &gen_keypair().0),
+            PackedNode::new("127.0.0.1:12348".parse().unwrap(), &gen_keypair().0),
+        ], /* TCP */ false);
+        let saddr = "127.0.0.1:12345".parse().unwrap();
+        onion_client.send_onion_request(path, inner_onion_request, saddr).wait().unwrap();
+
+        let (_received, _udp_rx) = udp_rx.into_future().wait().unwrap();
+    }
+
+    #[test]
+    fn send_onion_request_tcp() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, real_sk) = gen_keypair();
+        let (udp_tx, udp_rx) = mpsc::channel(1);
+        let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
+        let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
+        let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
+        let (_relay_incoming_rx, relay_outgoing_rx, relay_pk) = tcp_connections.add_client();
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk, real_pk);
+
+        let inner_onion_request = InnerOnionRequest::InnerOnionAnnounceRequest(InnerOnionAnnounceRequest {
+            nonce: gen_nonce(),
+            pk: gen_keypair().0,
+            payload: vec![42; 123],
+        });
+
+        let path = OnionPath::new([
+            PackedNode::new("127.0.0.1:12346".parse().unwrap(), &relay_pk),
+            PackedNode::new("127.0.0.1:12347".parse().unwrap(), &gen_keypair().0),
+            PackedNode::new("127.0.0.1:12348".parse().unwrap(), &gen_keypair().0),
+        ], /* TCP */ true);
+        let saddr = "127.0.0.1:12345".parse().unwrap();
+        onion_client.send_onion_request(path, inner_onion_request, saddr).wait().unwrap();
+
+        let (_received, _relay_outgoing_rx) = relay_outgoing_rx.into_future().wait().unwrap();
+
+        // Necessary to drop tx so that rx.collect() can be finished
+        drop(onion_client);
+
+        assert!(udp_rx.collect().wait().unwrap().is_empty());
     }
 }

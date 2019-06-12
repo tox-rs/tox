@@ -284,6 +284,22 @@ impl Connections {
         }
     }
 
+    /// Get a random TCP relay we are connected to.
+    pub fn get_random_relay(&self) -> Option<PackedNode> {
+        let relays = self.clients
+            .read()
+            .values()
+            .filter(|client| client.is_connected())
+            .map(|client| PackedNode::new(client.addr, &client.pk))
+            .collect::<Vec<_>>();
+
+        if relays.is_empty() {
+            None
+        } else {
+            Some(relays[random_limit_usize(relays.len())])
+        }
+    }
+
     /// Get up to `count` random TCP relays we are connected to.
     pub fn get_random_relays(&self, count: u8) -> Vec<PackedNode> {
         let relays = self.clients
@@ -788,6 +804,30 @@ mod tests {
 
         let error = connections.set_connection_status(node_pk, NodeConnectionStatus::UDP).wait().err().unwrap();
         assert_eq!(*error.kind(), ConnectionErrorKind::NoSuchRelay);
+    }
+
+    #[test]
+    fn get_random_relay() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (incoming_tx, _incoming_rx) = mpsc::unbounded();
+        let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
+
+        let (_incoming_rx_1, _outgoing_rx_1, relay_1) = create_client();
+        let relay_pk_1 = relay_1.pk;
+
+        connections.clients.write().insert(relay_pk_1, relay_1);
+
+        // add one more disconnected relay to make sure that it won't be
+        // included to `get_random_relays` result
+        let relay_pk_2 = gen_keypair().0;
+        let relay_addr_2 = "127.0.0.1:33445".parse().unwrap();
+        let (incoming_tx_2, _incoming_rx_2) = mpsc::unbounded();
+        let relay_2 = Client::new(relay_pk_2, relay_addr_2, incoming_tx_2);
+
+        connections.clients.write().insert(relay_pk_2, relay_2);
+
+        let relay = connections.get_random_relay().unwrap();
+        assert_eq!(relay.pk, relay_pk_1);
     }
 
     #[test]
