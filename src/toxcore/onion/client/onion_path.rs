@@ -10,7 +10,13 @@ use crate::toxcore::onion::packet::*;
 use crate::toxcore::tcp::packet::OnionRequest;
 
 /// Onion path is identified by 3 public keys of nodes it consists of.
-pub type OnionPathId = [PublicKey; 3];
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OnionPathId {
+    /// Public keys of nodes the path consists of.
+    pub keys: [PublicKey; 3],
+    /// Whether first node is a TCP relay.
+    pub tcp: bool,
+}
 
 /// Node for onion path.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -65,11 +71,15 @@ impl OnionPath {
 
     /// Array of 3 public keys of nodes the path consists of.
     pub fn id(&self) -> OnionPathId {
-        [
+        let keys = [
             self.nodes[0].public_key,
             self.nodes[1].public_key,
             self.nodes[2].public_key,
-        ]
+        ];
+        OnionPathId {
+            keys,
+            tcp: self.tcp,
+        }
     }
 
     /// Create `OnionRequest0` packet from `InnerOnionRequest` that should be
@@ -166,7 +176,10 @@ mod tests {
             PackedNode::new(saddr_2, &pk_2),
             PackedNode::new(saddr_3, &pk_3),
         ], /* TCP */ false);
-        assert_eq!(path.id(), [pk_1, pk_2, pk_3]);
+        assert_eq!(path.id(), OnionPathId {
+            keys: [pk_1, pk_2, pk_3],
+            tcp: false,
+        });
     }
 
     #[test]

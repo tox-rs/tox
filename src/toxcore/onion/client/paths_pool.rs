@@ -335,11 +335,10 @@ mod tests {
                         paths_pool.path_nodes.put(node);
                     }
 
-                    let path_id = [
-                        gen_keypair().0,
-                        gen_keypair().0,
-                        gen_keypair().0,
-                    ];
+                    let path_id = OnionPathId {
+                        keys: [gen_keypair().0, gen_keypair().0, gen_keypair().0],
+                        tcp: false,
+                    };
                     let path = paths_pool.get_or_random_path(&dht, &tcp_connections, path_id, $friends).unwrap();
                     assert_ne!(path.id(), path_id);
                     assert_eq!(path, paths_pool.$paths[0].path);
@@ -361,11 +360,10 @@ mod tests {
                         paths_pool.path_nodes.put(node);
                     }
 
-                    let path_id = [
-                        gen_keypair().0,
-                        gen_keypair().0,
-                        gen_keypair().0,
-                    ];
+                    let path_id = OnionPathId {
+                        keys: [gen_keypair().0, gen_keypair().0, gen_keypair().0],
+                        tcp: true,
+                    };
                     let path = paths_pool.get_or_random_path(&dht, &tcp_connections, path_id, $friends).unwrap();
                     assert_ne!(path.id(), path_id);
                     assert_eq!(path, paths_pool.$paths[0].path);
