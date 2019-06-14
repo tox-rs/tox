@@ -371,6 +371,11 @@ impl OnionClient {
         self.state.lock().dht_pk_tx.set(dht_pk_tx);
     }
 
+    /// Set sink to receive `FriendRequest`s.
+    pub fn set_friend_request_sink(&self, friend_request_sink: FriendRequestTx) {
+        self.state.lock().friend_request_tx.set(friend_request_sink)
+    }
+
     /// Check if a node was pinged recently.
     fn is_pinged_recently(&self, pk: PublicKey, search_pk: PublicKey, request_queue: &RequestQueue<AnnounceRequestData>) -> bool {
         let check_pks = |data: &AnnounceRequestData| -> bool {
