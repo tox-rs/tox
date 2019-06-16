@@ -23,6 +23,7 @@ use tox::toxcore::net_crypto::{NetCrypto, NetCryptoNewArgs};
 use tox::toxcore::onion::client::OnionClient;
 use tox::toxcore::tcp::client::Connections;
 use tox::toxcore::stats::Stats;
+use tox::toxcore::toxid::ToxId;
 
 const BOOTSTRAP_NODES: [(&str, &str); 9] = [
     // Impyy
@@ -45,10 +46,6 @@ const BOOTSTRAP_NODES: [(&str, &str); 9] = [
     ("2B2137E094F743AC8BD44652C55F41DFACC502F125E99E4FE24D40537489E32F", "5.189.176.217:5190"),
 ];
 
-const SELF_SK: &str = "1A5EC1D6C3F1FA720A313C01F432B6AE0D4649A5121964C9992DDF32871E8DFD";
-
-const FRIEND_PK: &str = "3E6A06DA48D1AB98549AD76890770B704AE9116D8654FBCD35C9BF2DB9233E21";
-
 /// Bind a UDP listener to the socket address.
 fn bind_socket(addr: SocketAddr) -> UdpSocket {
     let socket = UdpSocket::bind(&addr).expect("Failed to bind UDP socket");
@@ -64,9 +61,10 @@ fn main() {
 
     let (dht_pk, dht_sk) = gen_keypair();
 
-    let real_sk_bytes: [u8; 32] = FromHex::from_hex(SELF_SK).unwrap();
-    let real_sk = SecretKey::from_slice(&real_sk_bytes).unwrap();
-    let real_pk = real_sk.public_key();
+    // create random tox id and print it
+    let (real_pk, real_sk) = gen_keypair();
+    let id = ToxId::new(real_pk.clone());
+    println!("your tox id is: {:X}",id);
 
     // Create a channel for server to communicate with network
     let (tx, rx) = mpsc::channel(32);
@@ -91,6 +89,9 @@ fn main() {
     let (lossless_tx, lossless_rx) = mpsc::unbounded();
     let (lossy_tx, lossy_rx) = mpsc::unbounded();
 
+    let (friend_request_tx, friend_request_sink_rx) = mpsc::unbounded();
+    onion_client.set_friend_request_sink(friend_request_tx);
+
     let net_crypto = NetCrypto::new(NetCryptoNewArgs {
         udp_tx: tx,
         lossless_tx,
@@ -113,11 +114,6 @@ fn main() {
         onion_client.clone(),
         net_crypto.clone(),
     );
-
-    let friend_pk_bytes: [u8; 32] = FromHex::from_hex(FRIEND_PK).unwrap();
-    let friend_pk = PublicKey::from_slice(&friend_pk_bytes).unwrap();
-
-    friend_connections.add_friend(friend_pk);
 
     // Bootstrap from nodes
     for &(pk, saddr) in &BOOTSTRAP_NODES {
@@ -163,6 +159,15 @@ fn main() {
             }
         });
 
+    // handle incoming friend connections by just accepting all of them
+    let friend_connection_c = friend_connections.clone();
+    let friend_future = friend_request_sink_rx
+        .map_err(|()| unreachable!("rx can't fail"))
+        .for_each(move |(pk, _)| {
+            friend_connection_c.add_friend(pk);
+            future::ok(())
+        });
+
     let lossy_future = lossy_rx
         .map_err(|()| unreachable!("rx can't fail"))
         .for_each(|_| future::ok(()));
@@ -176,6 +181,7 @@ fn main() {
         Box::new(friend_connections.run().map_err(Error::from)),
         Box::new(lossless_future),
         Box::new(lossy_future),
+        Box::new(friend_future),
     ];
 
     let future = future::select_all(futures)
