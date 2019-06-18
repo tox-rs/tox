@@ -526,6 +526,7 @@ impl OnionClient {
 
         let dht_pk_future = send_to(&state.dht_pk_tx, (friend_pk, dht_pk_announce.dht_pk));
 
+        let friend_dht_pk = dht_pk_announce.dht_pk;
         let futures = dht_pk_announce.nodes.into_iter().map(|node| match node.ip_port.protocol {
             ProtocolType::UDP => {
                 let packed_node = PackedNode::new(node.ip_port.to_saddr(), &node.pk);
@@ -533,7 +534,7 @@ impl OnionClient {
                     .map_err(|e| e.context(HandleDhtPkAnnounceErrorKind::PingNode).into()))
             },
             ProtocolType::TCP => {
-                Either::B(self.tcp_connections.add_relay_connection(node.ip_port.to_saddr(), node.pk, friend_pk)
+                Either::B(self.tcp_connections.add_relay_connection(node.ip_port.to_saddr(), node.pk, friend_dht_pk)
                     .map_err(|e| e.context(HandleDhtPkAnnounceErrorKind::AddRelay).into()))
             }
         }).collect::<Vec<_>>();
@@ -1679,10 +1680,10 @@ mod tests {
     }
 
     #[test]
-    fn handle_data_response_dht_pk_announce() {
+    fn handle_data_response_dht_pk_announce_udp_node() {
         let (dht_pk, dht_sk) = gen_keypair();
         let (real_pk, real_sk) = gen_keypair();
-        let (udp_tx, _udp_rx) = mpsc::channel(1);
+        let (udp_tx, udp_rx) = mpsc::channel(1);
         let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
         let (dht_pk_tx, dht_pk_rx) = mpsc::unbounded();
         let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
@@ -1696,7 +1697,18 @@ mod tests {
 
         onion_client.add_friend(friend_real_pk);
 
-        let dht_pk_announce_payload = DhtPkAnnouncePayload::new(friend_dht_pk, vec![]);
+        let saddr: SocketAddr = "127.0.0.1:12345".parse().unwrap();
+        let (node_pk, node_sk) = gen_keypair();
+        let dht_pk_announce_payload = DhtPkAnnouncePayload::new(friend_dht_pk, vec![
+            TcpUdpPackedNode {
+                ip_port: IpPort {
+                    protocol: ProtocolType::UDP,
+                    ip_addr: saddr.ip(),
+                    port: saddr.port(),
+                },
+                pk: node_pk,
+            },
+        ]);
         let no_reply = dht_pk_announce_payload.no_reply;
         let onion_data_response_inner_payload = OnionDataResponseInnerPayload::DhtPkAnnounce(dht_pk_announce_payload);
         let nonce = gen_nonce();
@@ -1718,6 +1730,67 @@ mod tests {
         let (received_real_pk, received_dht_pk) = received.unwrap();
         assert_eq!(received_real_pk, friend_real_pk);
         assert_eq!(received_dht_pk, friend_dht_pk);
+
+        // the node from announce packet should be pinged
+        let (received, _udp_rx) = udp_rx.into_future().wait().unwrap();
+        let (packet, addr_to_send) = received.unwrap();
+
+        assert_eq!(addr_to_send, saddr);
+        let packet = unpack!(packet, Packet::NodesRequest);
+        let payload = packet.get_payload(&precompute(&dht_pk, &node_sk)).unwrap();
+
+        assert_eq!(payload.pk, dht_pk);
+    }
+
+    #[test]
+    fn handle_data_response_dht_pk_announce_tcp_node() {
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, real_sk) = gen_keypair();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
+        let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
+        let (dht_pk_tx, _dht_pk_rx) = mpsc::unbounded();
+        let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
+        let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
+        let onion_client = OnionClient::new(dht, tcp_connections, real_sk.clone(), real_pk);
+
+        onion_client.set_dht_pk_sink(dht_pk_tx);
+
+        let (friend_dht_pk, _friend_dht_sk) = gen_keypair();
+        let (friend_real_pk, friend_real_sk) = gen_keypair();
+
+        onion_client.add_friend(friend_real_pk);
+
+        let (node_pk, _node_sk) = gen_keypair();
+        let dht_pk_announce_payload = DhtPkAnnouncePayload::new(friend_dht_pk, vec![
+            TcpUdpPackedNode {
+                ip_port: IpPort {
+                    protocol: ProtocolType::TCP,
+                    ip_addr: "127.0.0.2".parse().unwrap(),
+                    port: 12346,
+                },
+                pk: node_pk,
+            },
+        ]);
+        let no_reply = dht_pk_announce_payload.no_reply;
+        let onion_data_response_inner_payload = OnionDataResponseInnerPayload::DhtPkAnnounce(dht_pk_announce_payload);
+        let nonce = gen_nonce();
+        let onion_data_response_payload = OnionDataResponsePayload::new(&precompute(&real_pk, &friend_real_sk), friend_real_pk, &nonce, &onion_data_response_inner_payload);
+        let (temporary_pk, temporary_sk) = gen_keypair();
+        let onion_data_response = OnionDataResponse::new(&precompute(&onion_client.data_pk, &temporary_sk), temporary_pk, nonce, &onion_data_response_payload);
+
+        // ignore result future since it spawns the connection which should be
+        // executed inside tokio context
+        let _ = onion_client.handle_data_response(&onion_data_response);
+
+        let state = onion_client.state.lock();
+
+        // friend should have updated data
+        let friend = &state.friends[&friend_real_pk];
+        assert_eq!(friend.last_no_reply, no_reply);
+        assert_eq!(friend.dht_pk, Some(friend_dht_pk));
+
+        assert!(onion_client.tcp_connections.has_relay(&node_pk));
+        assert!(onion_client.tcp_connections.has_connection(&friend_dht_pk));
     }
 
     #[test]
