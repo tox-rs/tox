@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 
 use crate::toxcore::crypto_core::*;
 use crate::toxcore::dht::packed_node::PackedNode;
-use crate::toxcore::onion::client::onion_path::OnionPath;
+use crate::toxcore::onion::client::onion_path::{OnionPath, OnionPathType};
 
 /// Maximum number of nodes that onion can store for building random paths.
 const MAX_PATH_NODES: usize = 32;
@@ -78,7 +78,7 @@ impl NodesPool {
                 break;
             }
         }
-        Some(OnionPath::new([node_1, node_2, node_3], /* TCP */ false))
+        Some(OnionPath::new([node_1, node_2, node_3], OnionPathType::UDP))
     }
 
     /// Build new random onion path with first TCP node.
@@ -95,7 +95,7 @@ impl NodesPool {
                 break;
             }
         }
-        Some(OnionPath::new([node_1, node_2, node_3], /* TCP */ true))
+        Some(OnionPath::new([node_1, node_2, node_3], OnionPathType::TCP))
     }
 }
 

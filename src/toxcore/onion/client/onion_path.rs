@@ -9,13 +9,22 @@ use crate::toxcore::ip_port::*;
 use crate::toxcore::onion::packet::*;
 use crate::toxcore::tcp::packet::OnionRequest;
 
+/// Whether the first node of onion path is a TCP relay or DHT node.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OnionPathType {
+    /// The first node of onion path is a TCP relay.
+    TCP,
+    /// The first node of onion path is a DHT node.
+    UDP
+}
+
 /// Onion path is identified by 3 public keys of nodes it consists of.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct OnionPathId {
     /// Public keys of nodes the path consists of.
     pub keys: [PublicKey; 3],
-    /// Whether first node is a TCP relay.
-    pub tcp: bool,
+    /// Whether the first node is a TCP relay or DHT node.
+    pub path_type: OnionPathType,
 }
 
 /// Node for onion path.
@@ -51,21 +60,21 @@ impl OnionPathNode {
 pub struct OnionPath {
     /// Random path nodes.
     pub nodes: [OnionPathNode; 3],
-    /// Whether first node is a TCP relay.
-    pub tcp: bool,
+    /// Whether the first node is a TCP relay or DHT node.
+    pub path_type: OnionPathType,
 }
 
 impl OnionPath {
     /// Create new `OnionPath` from 3 `PackedNode`s generating random key pair
     /// for each node.
-    pub fn new(nodes: [PackedNode; 3], tcp: bool) -> Self {
+    pub fn new(nodes: [PackedNode; 3], path_type: OnionPathType) -> Self {
         OnionPath {
             nodes: [
                 OnionPathNode::new(nodes[0]),
                 OnionPathNode::new(nodes[1]),
                 OnionPathNode::new(nodes[2]),
             ],
-            tcp,
+            path_type,
         }
     }
 
@@ -78,7 +87,7 @@ impl OnionPath {
         ];
         OnionPathId {
             keys,
-            tcp: self.tcp,
+            path_type: self.path_type,
         }
     }
 
@@ -175,10 +184,10 @@ mod tests {
             PackedNode::new(saddr_1, &pk_1),
             PackedNode::new(saddr_2, &pk_2),
             PackedNode::new(saddr_3, &pk_3),
-        ], /* TCP */ false);
+        ], OnionPathType::UDP);
         assert_eq!(path.id(), OnionPathId {
             keys: [pk_1, pk_2, pk_3],
-            tcp: false,
+            path_type: OnionPathType::UDP,
         });
     }
 
@@ -194,7 +203,7 @@ mod tests {
             PackedNode::new(saddr_1, &pk_1),
             PackedNode::new(saddr_2, &pk_2),
             PackedNode::new(saddr_3, &pk_3),
-        ], /* TCP */ false);
+        ], OnionPathType::UDP);
         let inner_onion_request = InnerOnionRequest::InnerOnionAnnounceRequest(InnerOnionAnnounceRequest {
             nonce: gen_nonce(),
             pk: gen_keypair().0,
@@ -229,7 +238,7 @@ mod tests {
             PackedNode::new(saddr_1, &pk_1),
             PackedNode::new(saddr_2, &pk_2),
             PackedNode::new(saddr_3, &pk_3),
-        ], /* TCP */ false);
+        ], OnionPathType::UDP);
         let inner_onion_request = InnerOnionRequest::InnerOnionAnnounceRequest(InnerOnionAnnounceRequest {
             nonce: gen_nonce(),
             pk: gen_keypair().0,
