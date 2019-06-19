@@ -23,9 +23,12 @@ Length    | Content
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FileControl {
-    transfer_direction: TransferDirection,
-    file_id: u8,
-    control_type: ControlType,
+    /// Send or receive.
+    pub transfer_direction: TransferDirection,
+    /// temporary file id.
+    pub file_id: u8,
+    /// Type of cocontrol command.
+    pub control_type: ControlType,
 }
 
 impl FromBytes for FileControl {

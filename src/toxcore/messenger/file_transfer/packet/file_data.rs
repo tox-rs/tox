@@ -24,8 +24,10 @@ Length    | Content
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FileData {
-    file_id: u8,
-    data: Vec<u8>,
+    /// Send or receive.
+    pub file_id: u8,
+    /// Payload of this packet.
+    pub data: Vec<u8>,
 }
 
 impl FromBytes for FileData {

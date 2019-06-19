@@ -10,6 +10,11 @@ use tokio::net::UdpSocket;
 use failure::{err_msg, Error};
 
 use std::net::SocketAddr;
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::Path;
+use std::sync::Arc;
+use parking_lot::RwLock;
 
 use tox::toxcore::binary_io::*;
 use tox::toxcore::dht::server::Server;
@@ -24,6 +29,8 @@ use tox::toxcore::onion::client::OnionClient;
 use tox::toxcore::tcp::client::Connections;
 use tox::toxcore::stats::Stats;
 use tox::toxcore::toxid::ToxId;
+use tox::toxcore::messenger::file_transfer::packet::{Packet as FtPacket, *};
+use tox::toxcore::messenger::file_transfer::file_transfer::*;
 
 const BOOTSTRAP_NODES: [(&str, &str); 9] = [
     // Impyy
@@ -45,6 +52,15 @@ const BOOTSTRAP_NODES: [(&str, &str); 9] = [
     // tastytea
     ("2B2137E094F743AC8BD44652C55F41DFACC502F125E99E4FE24D40537489E32F", "5.189.176.217:5190"),
 ];
+
+#[derive(Clone)]
+struct FileName(Arc<RwLock<String>>);
+
+impl FileName {
+    fn new(name: String) -> Self {
+        FileName(Arc::new(RwLock::new(name)))
+    }
+}
 
 /// Bind a UDP listener to the socket address.
 fn bind_socket(addr: SocketAddr) -> UdpSocket {
@@ -128,22 +144,76 @@ fn main() {
         onion_client.add_path_node(node);
     }
 
+    let (file_control_tx, file_control_rx) = mpsc::unbounded();
+    let (file_data_tx, file_data_rx) = mpsc::channel(32);
+    let net_crypto_fs = net_crypto.clone();
+    let fs = FileSending::new(friend_connections.clone(), net_crypto_fs, file_control_tx, file_data_tx);
+
+    let fs_c = fs.clone();
+
+    let file_name = FileName::new("".to_owned());
+
+    let file_name_c = file_name.clone();
+    let file_control_future = file_control_rx
+        .map_err(|()| -> Error { unreachable!("rx can't fail") })
+        .for_each(move |(pk, packet)| {
+            if let FtPacket::FileControl(packet) = packet {
+                println!("FileControl = {:?}", packet);
+                Box::new(future::ok(())) as Box<Future<Item = (), Error = Error> + Send>
+            } else if let FtPacket::FileSendRequest(packet) = packet {
+                println!("FileSendRequest = {:?}", packet);
+                if packet.file_type == FileType::Avatar {
+                    return Box::new(future::ok(())) as Box<Future<Item = (), Error = Error> + Send>
+                }
+                *file_name_c.0.write() = packet.file_name;
+                Box::new(fs_c.send_file_control(pk, packet.file_id, TransferDirection::Receive, ControlType::Accept)
+                    .map_err(Error::from)) as Box<Future<Item=_, Error=_> + Send>
+            } else {
+                Box::new(future::ok(())) as Box<Future<Item = (), Error = Error> + Send>
+            }
+        });
+
+    let mut file = if *file_name.0.read() == "" {
+        None
+    } else {
+        Some(OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(Path::new(&(*file_name.0.read())))
+            .unwrap())
+    };
+
+    let file_data_future = file_data_rx
+        .map_err(|()| -> Error { unreachable!("rx can't fail") })
+        .for_each(move |(_pk, packet, _position)| {
+            if let FtPacket::FileData(packet) = packet {
+//                println!("FileData = {:?}, position = {}", packet, position);
+                if let Some(ref mut file) = file {
+                    file.write(&packet.data).unwrap();
+                }
+                future::ok(())
+            } else {
+                future::ok(())
+            }
+        });
+    
     let net_crypto_c = net_crypto.clone();
     let friend_connections_c = friend_connections.clone();
+    let fs_c = fs.clone();
     let lossless_future = lossless_rx
         .map_err(|()| unreachable!("rx can't fail"))
         .for_each(move |(pk, packet)| {
             match packet[0] {
                 PACKET_ID_ALIVE => {
                     friend_connections_c.handle_ping(pk);
-                    Box::new(future::ok(())) as Box<Future<Item = _, Error = _> + Send>
+                    Box::new(future::ok(())) as Box<Future<Item=_, Error=_> + Send>
                 },
                 PACKET_ID_SHARE_RELAYS => {
                     match ShareRelays::from_bytes(&packet) {
                         IResult::Done(_, share_relays) =>
                             Box::new(friend_connections_c.handle_share_relays(pk, share_relays)
                                 .map_err(Error::from))
-                                    as Box<Future<Item = _, Error = _> + Send>,
+                                as Box<Future<Item=_, Error=_> + Send>,
                         _ => Box::new(future::err(err_msg("Failed to parse ShareRelays")))
                     }
                 },
@@ -155,16 +225,30 @@ fn main() {
                 0x40 => { // PACKET_ID_CHAT_MESSAGE
                     Box::new(net_crypto_c.send_lossless(pk, packet).map_err(Error::from))
                 },
+                0x50 => { // File Send Request
+                    let (_, packet) = FileSendRequest::from_bytes(&packet).unwrap();
+                    Box::new(fs_c.handle_file_send_request(pk, packet).map_err(Error::from))
+                },
+                0x51 => { // File Control
+                    let (_, packet) = FileControl::from_bytes(&packet).unwrap();
+                    Box::new(fs_c.handle_file_control(pk, packet).map_err(Error::from))
+                },
+                0x52 => { // File Data
+                    let (_, packet) = FileData::from_bytes(&packet).unwrap();
+                    Box::new(fs_c.handle_file_data(pk, packet).map_err(Error::from))
+                },
                 _ => Box::new(future::ok(())),
             }
         });
 
     // handle incoming friend connections by just accepting all of them
     let friend_connection_c = friend_connections.clone();
+    let fs_c = fs.clone();
     let friend_future = friend_request_sink_rx
         .map_err(|()| unreachable!("rx can't fail"))
         .for_each(move |(pk, _)| {
             friend_connection_c.add_friend(pk);
+            fs_c.add_friend(pk);
             future::ok(())
         });
 
@@ -182,6 +266,8 @@ fn main() {
         Box::new(lossless_future),
         Box::new(lossy_future),
         Box::new(friend_future),
+        Box::new(file_control_future),
+        Box::new(file_data_future),
     ];
 
     let future = future::select_all(futures)

@@ -140,6 +140,17 @@ impl FriendConnections {
         }
     }
 
+    /// Get the connection status of a friend
+    pub fn get_connection_status(&self, friend_pk: PublicKey) -> Result<bool, GetConnectionStatusError> {
+        let friends = self.friends.read();
+        let friend = friends.get(&friend_pk);
+        if let Some(friend) = friend {
+            Ok(friend.connected)
+        } else {
+            Err(GetConnectionStatusErrorKind::GetConnectionStatus.into())
+        }
+    }
+
     /// Add a friend we want to be connected to.
     pub fn add_friend(&self, friend_pk: PublicKey) {
         let mut friends = self.friends.write();

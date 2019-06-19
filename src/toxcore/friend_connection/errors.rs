@@ -55,3 +55,16 @@ error_kind! {
         AddTcpConnection
     }
 }
+
+error_kind! {
+    #[doc = "Error that can happen while getting friend's status of connection."]
+    #[derive(Debug)]
+    GetConnectionStatusError,
+    #[doc = "The specific kind of error that can occur."]
+    #[derive(Debug, Eq, PartialEq, Fail)]
+    GetConnectionStatusErrorKind {
+        #[doc = "Failed to get friend's status of connection."]
+        #[fail(display = "Failed to get friend's status of connection")]
+        GetConnectionStatus
+    }
+}
