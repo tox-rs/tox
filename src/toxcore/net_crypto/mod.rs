@@ -374,6 +374,12 @@ impl NetCrypto {
         self.connections.read().get(&pk).cloned()
     }
 
+    /// Get crypto connection by long term `PublicKey`
+    fn connection_by_dht_key(&self, pk: PublicKey) -> Option<Arc<RwLock<CryptoConnection>>> {
+        // TODO: should it be optimized?
+        self.connections.read().values().find(|connection| connection.read().peer_dht_pk == pk).cloned()
+    }
+
     /// Create `CookieResponse` packet with `Cookie` requested by `CookieRequest` packet
     fn handle_cookie_request(&self, packet: &CookieRequest) -> Result<CookieResponse, HandlePacketError> {
         let payload = packet.get_payload(&self.precomputed_keys.get(packet.pk))
@@ -396,6 +402,15 @@ impl NetCrypto {
     pub fn handle_udp_cookie_request(&self, packet: &CookieRequest, addr: SocketAddr) -> impl Future<Item = (), Error = HandlePacketError> + Send {
         match self.handle_cookie_request(packet) {
             Ok(response) => Either::A(self.send_to_udp(addr, DhtPacket::CookieResponse(response))
+                .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())),
+            Err(e) => Either::B(future::err(e))
+        }
+    }
+
+    /// Handle `CookieRequest` packet received from TCP socket
+    pub fn handle_tcp_cookie_request(&self, packet: &CookieRequest, sender_pk: PublicKey) -> impl Future<Item = (), Error = HandlePacketError> + Send {
+        match self.handle_cookie_request(packet) {
+            Ok(response) => Either::A(send_to(&*self.tcp_tx.read(), (TcpDataPayload::CookieResponse(response), sender_pk))
                 .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())),
             Err(e) => Either::B(future::err(e))
         }
@@ -450,7 +465,20 @@ impl NetCrypto {
             Either::A(self.handle_cookie_response(&mut connection, packet))
         } else {
             Either::B(future::err(
-                HandlePacketError::no_connection(addr)))
+                HandlePacketError::no_udp_connection(addr)))
+        }
+    }
+
+    /// Handle `CookieResponse` packet received from TCP socket
+    pub fn handle_tcp_cookie_response(&self, packet: &CookieResponse, sender_pk: PublicKey)
+        -> impl Future<Item = (), Error = HandlePacketError> + Send {
+        let connection = self.connection_by_dht_key(sender_pk);
+        if let Some(connection) = connection {
+            let mut connection = connection.write();
+            Either::A(self.handle_cookie_response(&mut connection, packet))
+        } else {
+            Either::B(future::err(
+                HandlePacketError::no_tcp_connection(sender_pk)))
         }
     }
 
@@ -620,6 +648,18 @@ impl NetCrypto {
             Either::A(self.handle_crypto_handshake(&mut connection, packet))
         } else {
             Either::B(self.handle_crypto_handshake_new_connection(packet, Some(addr)))
+        }
+    }
+
+    /// Handle `CryptoHandshake` packet received from TCP socket
+    pub fn handle_tcp_crypto_handshake(&self, packet: &CryptoHandshake, sender_pk: PublicKey)
+        -> impl Future<Item = (), Error = HandlePacketError> + Send {
+        let connection = self.connection_by_dht_key(sender_pk);
+        if let Some(connection) = connection {
+            let mut connection = connection.write();
+            Either::A(self.handle_crypto_handshake(&mut connection, packet))
+        } else {
+            Either::B(self.handle_crypto_handshake_new_connection(packet, None))
         }
     }
 
@@ -847,7 +887,18 @@ impl NetCrypto {
             connection.set_udp_addr(addr);
             Either::A(self.handle_crypto_data(&mut connection, packet, /* udp */ true))
         } else {
-            Either::B(future::err(HandlePacketError::no_connection(addr)))
+            Either::B(future::err(HandlePacketError::no_udp_connection(addr)))
+        }
+    }
+
+    /// Handle `CryptoData` packet received from TCP socket
+    pub fn handle_tcp_crypto_data(&self, packet: &CryptoData, sender_pk: PublicKey) -> impl Future<Item = (), Error = HandlePacketError> + Send {
+        let connection = self.connection_by_dht_key(sender_pk);
+        if let Some(connection) = connection {
+            let mut connection = connection.write();
+            Either::A(self.handle_crypto_data(&mut connection, packet, /* udp */ false))
+        } else {
+            Either::B(future::err(HandlePacketError::no_tcp_connection(sender_pk)))
         }
     }
 
@@ -1271,6 +1322,57 @@ mod tests {
     }
 
     #[test]
+    fn handle_tcp_cookie_request() {
+        crypto_init().unwrap();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
+        let (lossless_tx, _lossless_rx) = mpsc::unbounded();
+        let (lossy_tx, _lossy_rx) = mpsc::unbounded();
+        let (dht_pk, dht_sk) = gen_keypair();
+        let (real_pk, real_sk) = gen_keypair();
+        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
+        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
+        let net_crypto = NetCrypto::new(NetCryptoNewArgs {
+            udp_tx,
+            lossless_tx,
+            lossy_tx,
+            dht_pk,
+            dht_sk,
+            real_pk,
+            real_sk,
+            precomputed_keys,
+        });
+
+        let (net_crypto_tcp_tx, net_crypto_tcp_rx) = mpsc::channel(1);
+        net_crypto.set_tcp_sink(net_crypto_tcp_tx);
+
+        let cookie_request_id = 12345;
+
+        let cookie_request_payload = CookieRequestPayload {
+            pk: peer_real_pk,
+            id: cookie_request_id,
+        };
+        let cookie_request = CookieRequest::new(&precomputed_key, &peer_dht_pk, &cookie_request_payload);
+
+        net_crypto.handle_tcp_cookie_request(&cookie_request, peer_dht_pk).wait().unwrap();
+
+        let (received, _net_crypto_tcp_rx) = net_crypto_tcp_rx.into_future().wait().unwrap();
+        let (packet, pk_to_send) = received.unwrap();
+        let cookie_response = unpack!(packet, TcpDataPayload::CookieResponse);
+
+        assert_eq!(pk_to_send, peer_dht_pk);
+
+        let cookie_response_payload = cookie_response.get_payload(&precomputed_key).unwrap();
+
+        assert_eq!(cookie_response_payload.id, cookie_request_id);
+
+        let cookie = cookie_response_payload.cookie.get_payload(&net_crypto.symmetric_key).unwrap();
+        assert_eq!(cookie.dht_pk, peer_dht_pk);
+        assert_eq!(cookie.real_pk, peer_real_pk);
+    }
+
+    #[test]
     fn handle_udp_cookie_request_invalid() {
         crypto_init().unwrap();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
@@ -1440,9 +1542,7 @@ mod tests {
         assert!(net_crypto.handle_cookie_response(&mut connection, &cookie_response).wait().is_err());
     }
 
-
-    #[test]
-    fn handle_udp_cookie_response() {
+    fn handle_cookie_response_test<F: Fn(&NetCrypto, CookieResponse, SocketAddr, PublicKey)>(handle_function: F) {
         crypto_init().unwrap();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
@@ -1484,7 +1584,7 @@ mod tests {
         };
         let cookie_response = CookieResponse::new(&dht_precomputed_key, &cookie_response_payload);
 
-        net_crypto.handle_udp_cookie_response(&cookie_response, addr).wait().unwrap();
+        handle_function(&net_crypto, cookie_response, addr, peer_dht_pk);
 
         let connections = net_crypto.connections.read();
         let connection = connections.get(&peer_real_pk).unwrap().read().clone();
@@ -1495,6 +1595,16 @@ mod tests {
 
         let payload = packet.get_payload(&precompute(&real_pk, &peer_real_sk)).unwrap();
         assert_eq!(payload.cookie_hash, cookie.hash());
+    }
+
+    #[test]
+    fn handle_udp_cookie_response() {
+        handle_cookie_response_test(|net_crypto, packet, saddr, _pk| net_crypto.handle_udp_cookie_response(&packet, saddr).wait().unwrap());
+    }
+
+    #[test]
+    fn handle_tcp_cookie_response() {
+        handle_cookie_response_test(|net_crypto, packet, _saddr, pk| net_crypto.handle_tcp_cookie_response(&packet, pk).wait().unwrap());
     }
 
     #[test]
@@ -1534,7 +1644,7 @@ mod tests {
 
         let res = net_crypto.handle_udp_cookie_response(&cookie_response, addr).wait();
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::NoConnection { addr: "127.0.0.1:12345".parse().unwrap() });
+        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::NoUdpConnection { addr: "127.0.0.1:12345".parse().unwrap() });
     }
 
     #[test]
@@ -1916,8 +2026,7 @@ mod tests {
         assert_eq!(received_dht_pk, new_dht_pk);
     }
 
-    #[test]
-    fn handle_udp_crypto_handshake() {
+    fn handle_crypto_handshake_test<F: Fn(&NetCrypto, CryptoHandshake, SocketAddr, PublicKey)>(handle_function: F) {
         crypto_init().unwrap();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
@@ -1964,7 +2073,7 @@ mod tests {
         };
         let crypto_handshake = CryptoHandshake::new(&real_precomputed_key, &crypto_handshake_payload, our_encrypted_cookie);
 
-        net_crypto.handle_udp_crypto_handshake(&crypto_handshake, addr).wait().unwrap();
+        handle_function(&net_crypto, crypto_handshake, addr, peer_dht_pk);
 
         let connections = net_crypto.connections.read();
         let connection = connections.get(&peer_real_pk).unwrap().read().clone();
@@ -1978,6 +2087,16 @@ mod tests {
 
         let payload = packet.get_payload(&real_precomputed_key).unwrap();
         assert_eq!(payload.cookie_hash, cookie.hash());
+    }
+
+    #[test]
+    fn handle_udp_crypto_handshake() {
+        handle_crypto_handshake_test(|net_crypto, packet, saddr, _pk| net_crypto.handle_udp_crypto_handshake(&packet, saddr).wait().unwrap());
+    }
+
+    #[test]
+    fn handle_tcp_crypto_handshake() {
+        handle_crypto_handshake_test(|net_crypto, packet, _saddr, pk| net_crypto.handle_tcp_crypto_handshake(&packet, pk).wait().unwrap());
     }
 
     #[test]
@@ -3076,8 +3195,7 @@ mod tests {
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::CannotHandleCryptoData);
     }
 
-    #[test]
-    fn handle_udp_crypto_data_lossy() {
+    fn handle_crypto_data_lossy_test<F: Fn(&NetCrypto, CryptoData, SocketAddr, PublicKey)>(handle_function: F) {
         crypto_init().unwrap();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
@@ -3124,7 +3242,7 @@ mod tests {
         };
         let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, &crypto_data_payload);
 
-        net_crypto.handle_udp_crypto_data(&crypto_data, addr).wait().unwrap();
+        handle_function(&net_crypto, crypto_data, addr, peer_dht_pk);
 
         let connections = net_crypto.connections.read();
         let connection = connections.get(&peer_real_pk).unwrap().read().clone();
@@ -3142,6 +3260,16 @@ mod tests {
         let (received_peer_real_pk, received_data) = received.unwrap();
         assert_eq!(received_peer_real_pk, peer_real_pk);
         assert_eq!(received_data, vec![PACKET_ID_LOSSY_RANGE_START, 1, 2, 3]);
+    }
+
+    #[test]
+    fn handle_udp_crypto_data_lossy() {
+        handle_crypto_data_lossy_test(|net_crypto, packet, saddr, _pk| net_crypto.handle_udp_crypto_data(&packet, saddr).wait().unwrap());
+    }
+
+    #[test]
+    fn handle_tcp_crypto_data_lossy() {
+        handle_crypto_data_lossy_test(|net_crypto, packet, _saddr, pk| net_crypto.handle_tcp_crypto_data(&packet, pk).wait().unwrap());
     }
 
     #[test]
