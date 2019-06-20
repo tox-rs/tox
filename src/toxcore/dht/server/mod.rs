@@ -971,7 +971,7 @@ impl Server {
     fn handle_onion_announce_response(&self, packet: &OnionAnnounceResponse, addr: SocketAddr)
         -> impl Future<Item = (), Error = HandlePacketError> + Send {
         if let Some(ref onion_client) = self.onion_client {
-            Either::A(onion_client.handle_announce_response(packet, addr)
+            Either::A(onion_client.handle_announce_response(packet, IsGlobal::is_global(&addr.ip()))
                 .map_err(|e| e.context(HandlePacketErrorKind::HandleOnionClient).into()))
         } else {
             Either::B( future::err(

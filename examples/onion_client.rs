@@ -10,6 +10,7 @@ use hex::FromHex;
 use tokio::net::{UdpSocket, UdpFramed};
 
 use tox::toxcore::dht::codec::*;
+use tox::toxcore::dht::ip_port::IsGlobal;
 use tox::toxcore::dht::packed_node::*;
 use tox::toxcore::dht::packet::*;
 use tox::toxcore::dht::server::Server;
@@ -115,7 +116,7 @@ fn main() {
         trace!("Received packet {:?}", packet);
         match packet {
             Packet::OnionAnnounceResponse(packet) => {
-                Box::new(onion_client_c.handle_announce_response(&packet, addr).map_err(Error::from))
+                Box::new(onion_client_c.handle_announce_response(&packet, IsGlobal::is_global(&addr.ip())).map_err(Error::from))
                     as Box<dyn Future<Item = _, Error = _> + Send>
             },
             Packet::OnionDataResponse(packet) => {
