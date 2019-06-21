@@ -36,8 +36,7 @@ matrix:
   include:
     - os: linux
       rust: stable
-      env:
-        NAME: clippy
+      name: clippy
       install:
         - rustup component add clippy
       script:
@@ -46,8 +45,7 @@ matrix:
     - os: linux
       rust: stable
       sudo: required
-      env:
-        NAME: coverage
+      name: coverage
       addons: # needed for `cargo install cargo-travis`
         apt:
           packages:
