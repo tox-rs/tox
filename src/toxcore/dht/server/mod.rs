@@ -81,7 +81,7 @@ struct ServerBootstrapInfo {
     version: u32,
     /// Callback to get the message of the day which will be sent with
     /// `BootstrapInfo` packet.
-    motd_cb: Arc<Fn(&Server) -> Vec<u8> + Send + Sync>,
+    motd_cb: Arc<dyn Fn(&Server) -> Vec<u8> + Send + Sync>,
 }
 
 /**
@@ -1446,7 +1446,7 @@ impl Server {
     }
 
     /// Set toxcore version and message of the day callback.
-    pub fn set_bootstrap_info(&mut self, version: u32, motd_cb: Box<Fn(&Server) -> Vec<u8> + Send + Sync>) {
+    pub fn set_bootstrap_info(&mut self, version: u32, motd_cb: Box<dyn Fn(&Server) -> Vec<u8> + Send + Sync>) {
         self.bootstrap_info = Some(ServerBootstrapInfo {
             version,
             motd_cb: motd_cb.into(),
