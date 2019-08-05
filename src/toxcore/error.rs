@@ -18,7 +18,7 @@ macro_rules! error_kind {
         }
 
         impl failure::Fail for $error {
-            fn cause(&self) -> Option<&failure::Fail> {
+            fn cause(&self) -> Option<&dyn failure::Fail> {
                 self.ctx.cause()
             }
 

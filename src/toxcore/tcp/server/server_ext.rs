@@ -110,13 +110,13 @@ pub trait ServerExt {
     /// Running TCP ping sender and incoming `TcpStream`. This function uses
     /// `tokio::spawn` inside so it should be executed via tokio to be able to
     /// get tokio default executor.
-    fn run(self: Self, listner: TcpListener, dht_sk: SecretKey, stats: Stats, connections_limit: usize) -> Box<Future<Item = (), Error = ServerRunError> + Send>;
+    fn run(self: Self, listner: TcpListener, dht_sk: SecretKey, stats: Stats, connections_limit: usize) -> Box<dyn Future<Item = (), Error = ServerRunError> + Send>;
     /// Running TCP server on incoming `TcpStream`
-    fn run_connection(self: Self, stream: TcpStream, dht_sk: SecretKey, stats: Stats) -> Box<Future<Item = (), Error = ConnectionError> + Send>;
+    fn run_connection(self: Self, stream: TcpStream, dht_sk: SecretKey, stats: Stats) -> Box<dyn Future<Item = (), Error = ConnectionError> + Send>;
 }
 
 impl ServerExt for Server {
-    fn run(self: Self, listner: TcpListener, dht_sk: SecretKey, stats: Stats, connections_limit: usize) -> Box<Future<Item = (), Error = ServerRunError> + Send> {
+    fn run(self: Self, listner: TcpListener, dht_sk: SecretKey, stats: Stats, connections_limit: usize) -> Box<dyn Future<Item = (), Error = ServerRunError> + Send> {
         let connections_count = Arc::new(AtomicUsize::new(0));
 
         let self_c = self.clone();
@@ -161,7 +161,7 @@ impl ServerExt for Server {
         Box::new(future)
     }
 
-    fn run_connection(self: Self, stream: TcpStream, dht_sk: SecretKey, stats: Stats) -> Box<Future<Item = (), Error = ConnectionError> + Send> {
+    fn run_connection(self: Self, stream: TcpStream, dht_sk: SecretKey, stats: Stats) -> Box<dyn Future<Item = (), Error = ConnectionError> + Send> {
         let addr = match stream.peer_addr() {
             Ok(addr) => addr,
             Err(error) => return Box::new(future::err(ConnectionError::PeerAddrError {

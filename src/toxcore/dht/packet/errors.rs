@@ -36,7 +36,7 @@ impl GetPayloadError {
 }
 
 impl Fail for GetPayloadError {
-    fn cause(&self) -> Option<&Fail> {
+    fn cause(&self) -> Option<&dyn Fail> {
         self.ctx.cause()
     }
 

@@ -16,11 +16,11 @@ use crate::toxcore::stats::Stats;
 /// Extension trait for running DHT server on `UdpSocket`.
 pub trait ServerExt {
     /// Run DHT server on `UdpSocket`.
-    fn run_socket(self, socket: UdpSocket, rx: Receiver<(Packet, SocketAddr)>, stats: Stats) -> Box<Future<Item = (), Error = Error> + Send>;
+    fn run_socket(self, socket: UdpSocket, rx: Receiver<(Packet, SocketAddr)>, stats: Stats) -> Box<dyn Future<Item = (), Error = Error> + Send>;
 }
 
 impl ServerExt for Server {
-    fn run_socket(self, socket: UdpSocket, rx: Receiver<(Packet, SocketAddr)>, stats: Stats) -> Box<Future<Item = (), Error = Error> + Send> {
+    fn run_socket(self, socket: UdpSocket, rx: Receiver<(Packet, SocketAddr)>, stats: Stats) -> Box<dyn Future<Item = (), Error = Error> + Send> {
         let udp_addr = socket.local_addr()
             .expect("Failed to get socket address");
 

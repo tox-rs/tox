@@ -6,10 +6,10 @@ use std::io::{Error as IoError};
 use futures::{Async, AsyncSink, Future, Poll, Sink, StartSend, Stream};
 
 /// A convenience typedef around a `Future` whose error component is `io::Error`
-pub type IoFuture<T> = Box<Future<Item = T, Error = IoError> + Send>;
+pub type IoFuture<T> = Box<dyn Future<Item = T, Error = IoError> + Send>;
 
 /// A convenience typedef around a `Stream` whose error component is `io::Error`
-pub type IoStream<T> = Box<Stream<Item = T, Error = IoError> + Send>;
+pub type IoStream<T> = Box<dyn Stream<Item = T, Error = IoError> + Send>;
 
 /// Send item to a sink using reference
 pub fn send_to<T: Send + 'static, Tx, E: Debug>(tx: &Tx, v: T) -> impl Future<Item=(), Error=E> + Send
