@@ -2,7 +2,7 @@
 
 [![Travis Build Status][travis-badge]][travis-url] [![Appveyor Build Status][appveyor-badge]][appveyor-url] [![Coverage Status][cov-badge]][cov-url] [![Docs][doc-badge]][doc-url] [![Current Crates.io Version][crates-badge]][crates-url] [![Join Gitter][gitter-badge]][gitter-url]
 
-[travis-badge]: https://travis-ci.org/tox-rs/tox.svg?branch=master
+[travis-badge]: https://api.travis-ci.com/tox-rs/tox.svg?branch=master
 [travis-url]: https://travis-ci.com/tox-rs/tox
 [appveyor-badge]: https://ci.appveyor.com/api/projects/status/m47ke5odayd6enbn/branch/master?svg=true
 [appveyor-url]: https://ci.appveyor.com/project/tox-rs/tox/branch/master
