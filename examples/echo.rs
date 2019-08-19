@@ -136,14 +136,14 @@ fn main() {
             match packet[0] {
                 PACKET_ID_ALIVE => {
                     friend_connections_c.handle_ping(pk);
-                    Box::new(future::ok(())) as Box<Future<Item = _, Error = _> + Send>
+                    Box::new(future::ok(())) as Box<dyn Future<Item = _, Error = _> + Send>
                 },
                 PACKET_ID_SHARE_RELAYS => {
                     match ShareRelays::from_bytes(&packet) {
                         IResult::Done(_, share_relays) =>
                             Box::new(friend_connections_c.handle_share_relays(pk, share_relays)
                                 .map_err(Error::from))
-                                    as Box<Future<Item = _, Error = _> + Send>,
+                                    as Box<dyn Future<Item = _, Error = _> + Send>,
                         _ => Box::new(future::err(err_msg("Failed to parse ShareRelays")))
                     }
                 },
@@ -173,7 +173,7 @@ fn main() {
         .for_each(|_| future::ok(()));
 
     let futures = vec![
-        Box::new(dht_server.run_socket(socket, rx, stats).map_err(Error::from)) as Box<Future<Item = _, Error = _> + Send>,
+        Box::new(dht_server.run_socket(socket, rx, stats).map_err(Error::from)) as Box<dyn Future<Item = _, Error = _> + Send>,
         Box::new(lan_discovery_sender.run().map_err(Error::from)),
         Box::new(tcp_connections.run().map_err(Error::from)),
         Box::new(onion_client.run().map_err(Error::from)),

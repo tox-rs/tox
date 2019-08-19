@@ -306,9 +306,9 @@ mod tests {
 
     fn test_is_hexdump_uppercase(s: &str) -> bool {
         fn test_is_hexdump_uppercase_b(b: u8) -> bool {
-            if let b'A' ... b'F' = b {
+            if let b'A' ..= b'F' = b {
                 true
-            } else if let b'0' ... b'9' = b {
+            } else if let b'0' ..= b'9' = b {
                 true
             } else {
                 false
