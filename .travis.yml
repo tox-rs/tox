@@ -3,10 +3,8 @@ os:
   - linux
   - osx
 rust:
-  - 1.32.0
+  - 1.36.0
   - stable
-  - beta
-  - nightly
 
 sudo: false
 env:
@@ -17,35 +15,31 @@ branches:
   except:
     - /test.*/
 
-before_install:
-  - |
-    if [[ "$TRAVIS_OS_NAME" == "linux" ]]
-    then
-        ./scripts/verify-commit-messages.sh "$TRAVIS_COMMIT_RANGE" || exit 1;
-    fi
-
 script:
-  - cargo build --verbose
-  - cargo test --verbose
+  - cargo build
+  - cargo test
   - cargo doc
 
 matrix:
-  allow_failures:
-    - rust: beta
-    - rust: nightly
   include:
-    - os: linux
+    - name: check_commit_msg
+      os: linux
+      language: minimal
+      script:
+        - ./scripts/verify-commit-messages.sh "$TRAVIS_COMMIT_RANGE"
+
+    - name: clippy
+      os: linux
       rust: stable
-      name: clippy
       install:
         - rustup component add clippy
       script:
         - cargo clippy --verbose --all --tests
 
-    - os: linux
+    - name: coverage
+      os: linux
       rust: stable
       sudo: required
-      name: coverage
       addons: # needed for `cargo install cargo-travis`
         apt:
           packages:
