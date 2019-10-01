@@ -5,8 +5,6 @@ pub use sodiumoxide::crypto::box_::*;
 pub use sodiumoxide::crypto::hash::{sha256, sha512};
 pub use sodiumoxide::crypto::secretbox;
 
-use byteorder::{ByteOrder, LittleEndian, NativeEndian};
-
 use crate::toxcore::binary_io::*;
 
 // TODO: check if `#[inline]` is actually useful
@@ -37,7 +35,8 @@ pub fn random_u32() -> u32 {
     trace!("Generating random u32");
     let mut array = [0; 4];
     randombytes_into(&mut array);
-    NativeEndian::read_u32(&array)
+    // The order we use here doesn't matter, we just want random bytes.
+    u32::from_be_bytes(array)
 }
 
 /// Return a random number.
@@ -45,7 +44,8 @@ pub fn random_u64() -> u64 {
     trace!("Generating random u64");
     let mut array = [0; 8];
     randombytes_into(&mut array);
-    NativeEndian::read_u64(&array)
+    // The order we use here doesn't matter, we just want random bytes.
+    u64::from_be_bytes(array)
 }
 
 /// Return a random number.
@@ -178,7 +178,7 @@ pub fn increment_nonce_number(nonce: &mut Nonce, num: u64) {
     let Nonce(ref mut bytes) = *nonce;
     bytes.reverse(); // treat nonce as LE number
     let mut num_bytes = [0; NONCEBYTES];
-    LittleEndian::write_u64(&mut num_bytes, num);
+    num_bytes[..8].copy_from_slice(&u64::to_le_bytes(num));
     ::sodiumoxide::utils::add_le(bytes, &num_bytes).unwrap(); // sizes are equal
     bytes.reverse(); // treat nonce as BE number again
 }
