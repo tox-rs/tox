@@ -2,7 +2,6 @@
 //! better will become available.*
 
 use std::default::Default;
-use byteorder::{ByteOrder, LittleEndian};
 use nom::{le_u16, be_u16, le_u8, le_u32, le_u64, rest};
 
 use crate::toxcore::binary_io::*;
@@ -158,8 +157,7 @@ impl ToBytes for DhtState {
         )?;
 
         let len = (idx - start_idx - 16) as u32;
-        LittleEndian::write_u32(&mut buf[start_idx + 8..], len);
-
+        buf[start_idx + 8..start_idx + 12].copy_from_slice(&u32::to_le_bytes(len));
         Ok((buf, idx))
     }
 }
@@ -571,8 +569,7 @@ impl ToBytes for Section {
         }?;
 
         let len = (idx - start_idx - 8) as u32;
-        LittleEndian::write_u32(&mut buf[start_idx..], len);
-
+        buf[start_idx..start_idx + 4].copy_from_slice(&u32::to_le_bytes(len));
         Ok((buf, idx))
     }
 }

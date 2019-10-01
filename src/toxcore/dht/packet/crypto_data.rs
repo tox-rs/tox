@@ -1,8 +1,8 @@
 /*! CryptoData packet
 */
 
-use byteorder::{ByteOrder, BigEndian};
 use nom::{be_u16, be_u32, rest};
+use std::convert::TryInto;
 
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
@@ -62,7 +62,7 @@ impl ToBytes for CryptoData {
 impl CryptoData {
     /// Get last two bytes of `Nonce` considering it as BigEndian number.
     pub fn nonce_last_bytes(nonce: Nonce) -> u16 {
-        BigEndian::read_u16(&nonce.as_ref()[NONCEBYTES - 2..])
+        u16::from_be_bytes(nonce.as_ref()[NONCEBYTES - 2..].try_into().unwrap())
     }
     /// Create `CryptoData` from `CryptoDataPayload` encrypting it with
     /// `shared_key`.

@@ -30,7 +30,6 @@ maintenance = { status = "actively-developed" }
 
 [dependencies]
 bytes = "0.4"
-byteorder = "1"
 futures = "0.1"
 log = "0.4"
 sodiumoxide = "0.2.3"
