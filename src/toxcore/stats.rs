@@ -4,10 +4,7 @@ This is used by both Udp codec and Tcp codec.
 */
 
 use std::sync::Arc;
-#[cfg(target_pointer_width = "64")]
-use std::sync::atomic::*;
-#[cfg(not(target_pointer_width = "64"))]
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Struct for various counters
 #[derive(Clone, Default)]
@@ -24,7 +21,6 @@ impl Stats {
 }
 
 #[derive(Default)]
-/// Struct for counting packets on non-x64 CPU.
 pub struct Counters {
     /// Incoming packets count for Udp/Tcp
     incoming: AtomicU64,
