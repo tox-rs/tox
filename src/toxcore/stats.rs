@@ -21,6 +21,7 @@ impl Stats {
 }
 
 #[derive(Default)]
+/// A struct for counting incoming and outgoing packets.
 pub struct Counters {
     /// Incoming packets count for Udp/Tcp
     incoming: AtomicU64,
