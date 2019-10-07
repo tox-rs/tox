@@ -53,19 +53,19 @@ type TcpOnionTx = mpsc::Sender<(InnerOnionResponse, SocketAddr)>;
 /// used.
 pub const MAX_BOOTSTRAP_TIMES: u32 = 5;
 /// How often onion key should be refreshed.
-pub const ONION_REFRESH_KEY_INTERVAL: u64 = 7200;
+pub const ONION_REFRESH_KEY_INTERVAL: Duration = Duration::from_secs(7200);
 /// Interval in seconds for random `NodesRequest`.
 pub const NODES_REQ_INTERVAL: u64 = 20;
 /// Ping timeout in seconds.
-pub const PING_TIMEOUT: u64 = 5;
-/// Maximum newly announced nodes to ping per `TIME_TO_PING` seconds.
+pub const PING_TIMEOUT: Duration = Duration::from_secs(5);
+/// Maximum newly announced nodes to ping per `TIME_TO_PING`.
 pub const MAX_TO_PING: u8 = 32;
 /// Maximum nodes to send `NodesRequest` packet.
 pub const MAX_TO_BOOTSTRAP: u8 = 8;
-/// How often in seconds to ping newly announced nodes.
-pub const TIME_TO_PING: u64 = 2;
-/// How often in seconds to ping initial bootstrap nodes.
-pub const BOOTSTRAP_INTERVAL: u64 = 1;
+/// How often to ping newly announced nodes.
+pub const TIME_TO_PING: Duration = Duration::from_secs(2);
+/// How often to ping initial bootstrap nodes.
+pub const BOOTSTRAP_INTERVAL: Duration = Duration::from_secs(1);
 /// Number of fake friends that server has.
 pub const FAKE_FRIENDS_NUMBER: usize = 2;
 /// Maximum number of entry in Lru cache for precomputed keys.
@@ -150,7 +150,7 @@ pub struct Server {
     /// `NodesRequest` packet from a new node we should send `PingRequest` to
     /// this node to check if it's capable of handling our requests. But instead
     /// of instant sending `PingRequest` we will add the node to this list which
-    /// is processed every `TIME_TO_PING` seconds. The purpose of this is to
+    /// is processed every `TIME_TO_PING`. The purpose of this is to
     /// prevent amplification attacks.
     nodes_to_ping: Arc<RwLock<Kbucket<PackedNode>>>,
     /// Info used to respond to `BootstrapInfo` packets.
@@ -212,7 +212,7 @@ impl Server {
             pk,
             tx,
             friend_saddr_sink: Default::default(),
-            request_queue: Arc::new(RwLock::new(RequestQueue::new(Duration::from_secs(PING_TIMEOUT)))),
+            request_queue: Arc::new(RwLock::new(RequestQueue::new(PING_TIMEOUT))),
             close_nodes: Arc::new(RwLock::new(Ktree::new(&pk))),
             onion_symmetric_key: Arc::new(RwLock::new(secretbox::gen_key())),
             onion_announce: Arc::new(RwLock::new(OnionAnnounce::new(pk))),
@@ -386,7 +386,7 @@ impl Server {
     /// case when it's empty). It has to be an endless loop because we might
     /// loose the network connection and thereby loose all nodes in Ktree.
     fn run_bootstrap_requests_sending(self) -> impl Future<Item = (), Error = RunError> + Send {
-        let interval = Duration::from_secs(BOOTSTRAP_INTERVAL);
+        let interval = BOOTSTRAP_INTERVAL;
         let wakeups = Interval::new(Instant::now(), interval);
 
         wakeups
@@ -450,7 +450,7 @@ impl Server {
     /// Refresh onion symmetric key periodically. Result future will never be
     /// completed successfully.
     fn run_onion_key_refreshing(self) -> impl Future<Item = (), Error = RunError> + Send {
-        let interval = Duration::from_secs(ONION_REFRESH_KEY_INTERVAL);
+        let interval = ONION_REFRESH_KEY_INTERVAL;
         let wakeups = Interval::new(Instant::now() + interval, interval);
         wakeups
             .map_err(|e| e.context(RunErrorKind::Wakeup).into())
@@ -464,7 +464,7 @@ impl Server {
     /// Run ping sending periodically. Result future will never be completed
     /// successfully.
     fn run_pings_sending(self) -> impl Future<Item = (), Error = RunError> + Send {
-        let interval = Duration::from_secs(TIME_TO_PING);
+        let interval = TIME_TO_PING;
         let wakeups = Interval::new(Instant::now() + interval, interval);
         wakeups
             .map_err(|e| e.context(RunErrorKind::Wakeup).into())
@@ -641,7 +641,7 @@ impl Server {
             .map(|(friend, addrs)| {
                 let punch_future = self.punch_holes(request_queue, friend, &addrs);
 
-                if friend.hole_punch.last_send_ping_time.map_or(true, |time| clock_elapsed(time) >= Duration::from_secs(PUNCH_INTERVAL)) {
+                if friend.hole_punch.last_send_ping_time.map_or(true, |time| clock_elapsed(time) >= PUNCH_INTERVAL) {
                     friend.hole_punch.last_send_ping_time = Some(clock_now());
                     let payload = DhtRequestPayload::NatPingRequest(NatPingRequest {
                         id: friend.hole_punch.ping_id,
@@ -1904,7 +1904,7 @@ mod tests {
         let req_payload = NodesRequestPayload { pk: bob_pk, id: 42 };
         let nodes_req = Packet::NodesRequest(NodesRequest::new(&precomp, &bob_pk, &req_payload));
 
-        let time = Instant::now() + Duration::from_secs(BAD_NODE_TIMEOUT + 1);
+        let time = Instant::now() + BAD_NODE_TIMEOUT + Duration::from_secs(1);
 
         let mut enter = tokio_executor::enter().unwrap();
         let clock = Clock::new_with_now(ConstNow(time));
@@ -3625,7 +3625,7 @@ mod tests {
         // test with ipv6 mode
         alice.enable_ipv6_mode(true);
 
-        let time = Instant::now() + Duration::from_secs(KILL_NODE_TIMEOUT + 1);
+        let time = Instant::now() + KILL_NODE_TIMEOUT + Duration::from_secs(1);
 
         let mut enter = tokio_executor::enter().unwrap();
         let clock = Clock::new_with_now(ConstNow(time));

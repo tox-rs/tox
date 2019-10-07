@@ -17,13 +17,13 @@ const ONION_PATH_MAX_NO_RESPONSE_USES: u32 = 4;
 pub const NUMBER_ONION_PATHS: usize = 6;
 
 /// Timeout for path we haven't received any response from.
-const ONION_PATH_FIRST_TIMEOUT: u64 = 4;
+const ONION_PATH_FIRST_TIMEOUT: Duration = Duration::from_secs(4);
 
 /// Timeout for path we received at least one response from.
-const ONION_PATH_TIMEOUT: u64 = 10;
+const ONION_PATH_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Maximum time for path being used.
-const ONION_PATH_MAX_LIFETIME: u64 = 1200;
+const ONION_PATH_MAX_LIFETIME: Duration = Duration::from_secs(1200);
 
 /// Onion path that is stored for later usage.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -69,21 +69,21 @@ impl StoredOnionPath {
     /// Check if this path is timed out.
     pub fn is_timed_out(&self) -> bool {
         let timeout = if self.is_new() {
-            Duration::from_secs(ONION_PATH_FIRST_TIMEOUT)
+            ONION_PATH_FIRST_TIMEOUT
         } else {
-            Duration::from_secs(ONION_PATH_TIMEOUT)
+            ONION_PATH_TIMEOUT
         };
 
         self.attempts >= ONION_PATH_MAX_NO_RESPONSE_USES && clock_elapsed(self.last_used) >= timeout ||
-            clock_elapsed(self.creation_time) >= Duration::from_secs(ONION_PATH_MAX_LIFETIME)
+            clock_elapsed(self.creation_time) >= ONION_PATH_MAX_LIFETIME
     }
 
-    /// Path is considered stable after `TIME_TO_STABLE` seconds since it was
+    /// Path is considered stable after `TIME_TO_STABLE` since it was
     /// added to a close list if we receive responses from it.
     pub fn is_stable(&self) -> bool {
-        clock_elapsed(self.creation_time) >= Duration::from_secs(TIME_TO_STABLE) &&
+        clock_elapsed(self.creation_time) >= TIME_TO_STABLE &&
             (self.attempts == 0 ||
-                clock_elapsed(self.last_used) < Duration::from_secs(ONION_PATH_TIMEOUT))
+                clock_elapsed(self.last_used) < ONION_PATH_TIMEOUT)
     }
 
     /// Mark this path each time it was used to send request.

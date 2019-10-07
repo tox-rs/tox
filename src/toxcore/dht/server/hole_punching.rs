@@ -12,11 +12,11 @@ use crate::toxcore::dht::dht_friend::*;
 use crate::toxcore::dht::server::*;
 use crate::toxcore::utils::*;
 
-/// Interval in seconds for sending `NatPingRequest` packet and doing hole
+/// Interval of time for sending `NatPingRequest` packet and doing hole
 /// punching.
-pub const PUNCH_INTERVAL: u64 = 3;
-/// Interval in seconds to reset counter of hole punching attempts.
-pub const RESET_PUNCH_INTERVAL: u64 = 40;
+pub const PUNCH_INTERVAL: Duration = Duration::from_secs(3);
+/// Interval in seconds of time to reset counter of hole punching attempts.
+pub const RESET_PUNCH_INTERVAL: Duration = Duration::from_secs(40);
 /// Maximum number of ports to use for every round of hole punching. Note that
 /// we have 2 different guessing algorithms so each one of them will use this
 /// number of ports.
@@ -37,7 +37,7 @@ pub struct HolePunching {
     pub is_punching_done: bool,
     /// Number of hole punching attempts. If this value exceeds
     /// `MAX_NORMAL_PUNCHING_TRIES` we will try advanced port guessing
-    /// algorithm. We reset this value every `RESET_PUNCH_INTERVAL` seconds.
+    /// algorithm. We reset this value every `RESET_PUNCH_INTERVAL`.
     pub num_punch_tries: u32,
     /// Time when the last `NatPingRequest` packet was received from a friend.
     pub last_recv_ping_time: Instant,
@@ -78,7 +78,7 @@ impl HolePunching {
 
     /// Run next round of hole punching if necessary, i.e. if:
     /// - hole punching is not done
-    /// - `PUNCH_INTERVAL` seconds elapsed since last hole punching round
+    /// - `PUNCH_INTERVAL` elapsed since last hole punching round
     /// - friend successfully responded to `NatPingRequest` (defined by `is_punching_done`)
     /// - friend successfully send `NatPingRequest` to us
     ///
@@ -86,8 +86,8 @@ impl HolePunching {
     ///`PingRequest` packet.
     pub fn next_punch_addrs(&mut self, addrs: &[SocketAddr]) -> Vec<SocketAddr> {
         if !self.is_punching_done &&
-            self.last_punching_time.map_or(true, |time| time.elapsed() >= Duration::from_secs(PUNCH_INTERVAL)) &&
-            self.last_recv_ping_time.elapsed() <= Duration::from_secs(PUNCH_INTERVAL) * 2 {
+            self.last_punching_time.map_or(true, |time| time.elapsed() >= PUNCH_INTERVAL) &&
+            self.last_recv_ping_time.elapsed() <= PUNCH_INTERVAL * 2 {
                 let ip = match HolePunching::get_common_ip(addrs, u32::from(FRIEND_CLOSE_NODES_COUNT) / 2) {
                     // A friend can have maximum 8 close node. If 4 or more close nodes returned
                     // the same friend's IP address but with different port we consider that friend
@@ -96,7 +96,7 @@ impl HolePunching {
                     Some(ip) => ip,
                 };
 
-                if self.last_punching_time.map_or(true, |time| time.elapsed() > Duration::from_secs(RESET_PUNCH_INTERVAL)) {
+                if self.last_punching_time.map_or(true, |time| time.elapsed() > RESET_PUNCH_INTERVAL) {
                     self.num_punch_tries = 0;
                     self.first_punching_index = 0;
                     self.last_punching_index = 0;
