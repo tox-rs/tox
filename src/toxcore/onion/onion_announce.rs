@@ -23,9 +23,9 @@ pub const ONION_ANNOUNCE_MAX_ENTRIES: usize = 160;
 /// 2 * `PING_ID_TIMEOUT` seconds.
 pub const PING_ID_TIMEOUT: u64 = 300;
 
-/// Number of seconds that announce entry can be stored in onion announce list
+/// Diration of time thatfor which announce entry can be stored in onion announce list
 /// without re-announcing.
-pub const ONION_ANNOUNCE_TIMEOUT: u64 = 300;
+pub const ONION_ANNOUNCE_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Create onion ping id filled with zeros.
 pub fn initial_ping_id() -> sha256::Digest {
@@ -36,7 +36,7 @@ pub fn initial_ping_id() -> sha256::Digest {
 /** Entry that corresponds to announced onion node.
 
 When node successfully announce itself this entry is added to announced nodes
-list. It's considered expired after `ONION_ANNOUNCE_TIMEOUT` seconds.
+list. It's considered expired after `ONION_ANNOUNCE_TIMEOUT`.
 
 */
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -70,12 +70,12 @@ impl OnionAnnounceEntry {
 
     /** Check if this entry is timed out.
 
-    Entry considered timed out after `ONION_ANNOUNCE_TIMEOUT` seconds since it
+    Entry considered timed out after `ONION_ANNOUNCE_TIMEOUT` since it
     was created.
 
     */
     pub fn is_timed_out(&self) -> bool {
-        clock_elapsed(self.time) >= Duration::from_secs(ONION_ANNOUNCE_TIMEOUT)
+        clock_elapsed(self.time) >= ONION_ANNOUNCE_TIMEOUT
     }
 }
 
@@ -378,7 +378,7 @@ mod tests {
         let mut enter = tokio_executor::enter().unwrap();
         // time when entry is timed out
         let clock = Clock::new_with_now(ConstNow(
-            entry.time + Duration::from_secs(ONION_ANNOUNCE_TIMEOUT + 1)
+            entry.time + ONION_ANNOUNCE_TIMEOUT + Duration::from_secs(1)
         ));
 
         with_default(&clock, &mut enter, |_| {
@@ -476,7 +476,7 @@ mod tests {
         let mut enter = tokio_executor::enter().unwrap();
         // time when entry is timed out
         let clock = Clock::new_with_now(ConstNow(
-            entry_time + Duration::from_secs(ONION_ANNOUNCE_TIMEOUT + 1)
+            entry_time + ONION_ANNOUNCE_TIMEOUT + Duration::from_secs(1)
         ));
 
         with_default(&clock, &mut enter, |_| {
@@ -563,11 +563,11 @@ mod tests {
         let mut enter = tokio_executor::enter().unwrap();
         // time when all entries except one will be created
         let clock_1 = Clock::new_with_now(ConstNow(
-            now + Duration::from_secs(ONION_ANNOUNCE_TIMEOUT)
+            now + ONION_ANNOUNCE_TIMEOUT
         ));
         // time when one entry will be timed out
         let clock_2 = Clock::new_with_now(ConstNow(
-            now + Duration::from_secs(ONION_ANNOUNCE_TIMEOUT + 1)
+            now + ONION_ANNOUNCE_TIMEOUT + Duration::from_secs(1)
         ));
 
         with_default(&clock_1, &mut enter, |_| {

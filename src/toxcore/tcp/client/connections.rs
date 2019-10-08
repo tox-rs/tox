@@ -42,10 +42,10 @@ const RECOMMENDED_FRIEND_TCP_CONNECTIONS: usize =  MAX_FRIEND_TCP_CONNECTIONS / 
 /// consider this relay unreachable and drop it.
 const MAX_RECONNECTION_ATTEMPTS: u32 = 1;
 
-const TCP_CONNECTION_ANNOUNCE_TIMEOUT: u64 = 10;
+const TCP_CONNECTION_ANNOUNCE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// How often `main_loop` should be run.
-const CONNECTIONS_INTERVAL: u64 = 1;
+const CONNECTIONS_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Connection status shows whether a connection used or not.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -361,7 +361,7 @@ impl Connections {
                 // only connected relays have connected_time
                 client.connected_time().map_or(
                     false,
-                    |connected_time| clock_elapsed(connected_time) > Duration::from_secs(TCP_CONNECTION_ANNOUNCE_TIMEOUT)
+                    |connected_time| clock_elapsed(connected_time) > TCP_CONNECTION_ANNOUNCE_TIMEOUT
                 ) && !used_relays.contains(&client.pk)
             )
             .for_each(|client| client.sleep());
@@ -391,8 +391,7 @@ impl Connections {
     /// Run TCP periodical tasks. Result future will never be completed
     /// successfully.
     pub fn run(self) -> impl Future<Item = (), Error = ConnectionError> + Send {
-        let interval = Duration::from_secs(CONNECTIONS_INTERVAL);
-        let wakeups = Interval::new(Instant::now(), interval);
+        let wakeups = Interval::new(Instant::now(), CONNECTIONS_INTERVAL);
 
         wakeups
             .map_err(|e| e.context(ConnectionErrorKind::Wakeup).into())
@@ -899,7 +898,7 @@ mod tests {
         let mut enter = tokio_executor::enter().unwrap();
         // time when we don't wait for connections to appear
         let clock = Clock::new_with_now(ConstNow(
-            Instant::now() + Duration::from_secs(TCP_CONNECTION_ANNOUNCE_TIMEOUT + 1)
+            Instant::now() + TCP_CONNECTION_ANNOUNCE_TIMEOUT + Duration::from_secs(1)
         ));
 
         with_default(&clock, &mut enter, |_| {

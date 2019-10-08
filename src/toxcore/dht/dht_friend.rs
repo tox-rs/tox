@@ -188,7 +188,7 @@ mod tests {
 
         let mut enter = tokio_executor::enter().unwrap();
         let clock = Clock::new_with_now(ConstNow(
-            Instant::now() + Duration::from_secs(BAD_NODE_TIMEOUT + 1)
+            Instant::now() + BAD_NODE_TIMEOUT + Duration::from_secs(1)
         ));
 
         with_default(&clock, &mut enter, |_| {

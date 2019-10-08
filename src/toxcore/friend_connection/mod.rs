@@ -55,7 +55,7 @@ const MAIN_LOOP_INTERVAL: Duration = Duration::from_secs(1);
 
 /// After this amount of time with no connection friend's DHT `PublicKey` and IP
 /// address will be considered timed out.
-const FRIEND_DHT_TIMEOUT: Duration = Duration::from_secs(BAD_NODE_TIMEOUT);
+const FRIEND_DHT_TIMEOUT: Duration = BAD_NODE_TIMEOUT;
 
 /// Friend related data stored in the friend connections module.
 #[derive(Clone, Debug)]

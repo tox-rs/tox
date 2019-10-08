@@ -18,12 +18,12 @@ use futures::Future;
 use futures::sync::mpsc;
 use tokio::util::FutureExt;
 
-/// Interval in seconds for sending TCP PingRequest
-pub const TCP_PING_FREQUENCY: u64 = 30;
-/// Timeout in seconds for waiting response of PingRequest sent
-pub const TCP_PING_TIMEOUT: u64 = 10;
-/// Timeout in seconds for packet sending
-pub const TCP_SEND_TIMEOUT: u64 = 1;
+/// Interval of time for sending TCP PingRequest
+pub const TCP_PING_FREQUENCY: Duration = Duration::from_secs(30);
+/// Interval of time for waiting response of PingRequest sent
+pub const TCP_PING_TIMEOUT: Duration = Duration::from_secs(10);
+/// Interval of time for packet sending
+pub const TCP_SEND_TIMEOUT: Duration = Duration::from_secs(1);
 
 /** Structure that represents how Server keeps connected clients. A write-only socket with
 human interface. A client cannot send a message directly to another client, whereas server can.
@@ -105,13 +105,13 @@ impl Client {
     /** Check if PongResponse timed out
     */
     pub fn is_pong_timedout(&self) -> bool {
-        clock_elapsed(self.last_pong_resp) > Duration::from_secs(TCP_PING_TIMEOUT + TCP_PING_FREQUENCY)
+        clock_elapsed(self.last_pong_resp) > TCP_PING_TIMEOUT + TCP_PING_FREQUENCY
     }
 
     /** Check if Ping interval is elapsed
     */
     pub fn is_ping_interval_passed(&self) -> bool {
-        clock_elapsed(self.last_pinged) >= Duration::from_secs(TCP_PING_FREQUENCY)
+        clock_elapsed(self.last_pinged) >= TCP_PING_FREQUENCY
     }
 
     /** Get the Links of the Client
@@ -129,7 +129,7 @@ impl Client {
     /** Send a packet. This method does not ignore IO error
     */
     fn send(&self, packet: Packet) -> impl Future<Item = (), Error = Error> + Send {
-        send_to(&self.tx, packet).timeout(Duration::from_secs(TCP_SEND_TIMEOUT)).map_err(|e|
+        send_to(&self.tx, packet).timeout(TCP_SEND_TIMEOUT).map_err(|e|
             Error::new(ErrorKind::Other,
                 format!("Failed to send packet: {:?}", e)
         ))

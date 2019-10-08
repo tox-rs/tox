@@ -46,7 +46,7 @@ pub const START_PORT: u16 = 33446;
 pub const END_PORT: u16 = 33546;
 
 /// Interval in seconds between `LanDiscovery` packet sending.
-pub const LAN_DISCOVERY_INTERVAL: u64 = 10;
+pub const LAN_DISCOVERY_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Shorthand for the transmit half of the message channel.
 type Tx = mpsc::Sender<(Packet, SocketAddr)>;
@@ -143,7 +143,7 @@ impl LanDiscoverySender {
     /// Run LAN discovery periodically. Result future will never be completed
     /// successfully.
     pub fn run(mut self) -> impl Future<Item=(), Error=LanDiscoveryError> + Send {
-        let interval = Duration::from_secs(LAN_DISCOVERY_INTERVAL);
+        let interval = LAN_DISCOVERY_INTERVAL;
         let wakeups = Interval::new(Instant::now(), interval);
         wakeups
             .map_err(|e| e.context(LanDiscoveryErrorKind::Wakeup).into())

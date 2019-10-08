@@ -1649,7 +1649,7 @@ mod tests {
         let mut enter = tokio_executor::enter().unwrap();
         // time when all entries is needed to send PingRequest
         let clock_1 = Clock::new_with_now(ConstNow(
-            now + Duration::from_secs(TCP_PING_FREQUENCY + 1)
+            now + TCP_PING_FREQUENCY + Duration::from_secs(1)
         ));
 
         with_default(&clock_1, &mut enter, |_| {
@@ -1693,7 +1693,7 @@ mod tests {
         let mut enter = tokio_executor::enter().unwrap();
         // time when all entries is timedout and should be removed
         let clock_1 = Clock::new_with_now(ConstNow(
-            now + Duration::from_secs(TCP_PING_FREQUENCY + TCP_PING_TIMEOUT + 1)
+            now + TCP_PING_FREQUENCY + TCP_PING_TIMEOUT + Duration::from_secs(1)
         ));
 
         with_default(&clock_1, &mut enter, |_| {

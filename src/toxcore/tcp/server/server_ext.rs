@@ -22,11 +22,11 @@ use crate::toxcore::tcp::handshake::make_server_handshake;
 use crate::toxcore::tcp::server::{Client, Server};
 use crate::toxcore::stats::*;
 
-/// Interval in seconds for Tcp Ping sender
-const TCP_PING_INTERVAL: u64 = 1;
+/// Interval of time for Tcp Ping sender
+const TCP_PING_INTERVAL: Duration = Duration::from_secs(1);
 
-/// Timeout in seconds for the TCP handshake.
-const TCP_HANDSHAKE_TIMEOUT: u64 = 10;
+/// Interval of time for the TCP handshake.
+const TCP_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
 const SERVER_CHANNEL_SIZE: usize = 64;
 
@@ -144,8 +144,7 @@ impl ServerExt for Server {
                 Ok(())
             });
 
-        let interval = Duration::from_secs(TCP_PING_INTERVAL);
-        let wakeups = Interval::new(Instant::now(), interval);
+        let wakeups = Interval::new(Instant::now(), TCP_PING_INTERVAL);
         let ping_future = wakeups
             .map_err(|error| ServerRunError::PingWakeupsError { error })
             .for_each(move |_instant| {
@@ -172,7 +171,7 @@ impl ServerExt for Server {
         debug!("A new TCP client connected from {}", addr);
 
         let register_client = (make_server_handshake(stream, dht_sk.clone()))
-            .timeout(Duration::from_secs(TCP_HANDSHAKE_TIMEOUT))
+            .timeout(TCP_HANDSHAKE_TIMEOUT)
             .map_err(|error| ConnectionError::ServerHandshakeError { error })
             .map(|(stream, channel, client_pk)| {
                 debug!("Handshake for TCP client {:?} is completed", client_pk);
@@ -385,7 +384,7 @@ mod tests {
                             ping_id: 42
                         }));
                         // Set time when the client should be pinged
-                        mut_now_c.set(now + Duration::from_secs(TCP_PING_FREQUENCY + 1));
+                        mut_now_c.set(now + TCP_PING_FREQUENCY + Duration::from_secs(1));
                         from_server_c
                     })
                     .map_err(|(e, _)| Error::from(e))

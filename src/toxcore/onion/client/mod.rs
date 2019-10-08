@@ -57,24 +57,24 @@ const ANNOUNCE_TIMEOUT: Duration = Duration::from_secs(10);
 const ONION_NODE_MAX_PINGS: u32 = 3;
 
 /// How often to ping a node (announce or friend searching).
-const ONION_NODE_PING_INTERVAL: u64 = 15;
+const ONION_NODE_PING_INTERVAL: Duration = Duration::from_secs(15);
 
 /// How often we should announce ourselves to a node we are not announced to.
 const ANNOUNCE_INTERVAL_NOT_ANNOUNCED: u64 = 3;
 
 /// How often we should announce ourselves to a node we are announced to.
-const ANNOUNCE_INTERVAL_ANNOUNCED: u64 = ONION_NODE_PING_INTERVAL;
+const ANNOUNCE_INTERVAL_ANNOUNCED: Duration = ONION_NODE_PING_INTERVAL;
 
 /// How often we should announce ourselves to a node we are announced to when
 /// it's considered stable.
-const ANNOUNCE_INTERVAL_STABLE: u64 = ONION_NODE_PING_INTERVAL * 8;
+const ANNOUNCE_INTERVAL_STABLE: Duration = Duration::from_secs(ONION_NODE_PING_INTERVAL.as_secs() * 8);
 
 /// How often we should search a friend.
-const ANNOUNCE_FRIEND: u64 = ONION_NODE_PING_INTERVAL * 6;
+const ANNOUNCE_FRIEND: Duration = Duration::from_secs(ONION_NODE_PING_INTERVAL.as_secs() * 6);
 
 /// How often we should search a friend right after it was added to the friends
 /// list.
-const ANNOUNCE_FRIEND_BEGINNING: u64 = 3;
+const ANNOUNCE_FRIEND_BEGINNING: Duration = Duration::from_secs(3);
 
 /// After this amount of searches we switch from `ANNOUNCE_FRIEND_BEGINNING`
 /// to `ANNOUNCE_FRIEND` interval.
@@ -86,26 +86,27 @@ const SEARCH_COUNT_FRIEND_ANNOUNCE_BEGINNING: u32 = 17;
 const ONION_FRIEND_BACKOFF_FACTOR: u32 = 4;
 
 /// Maximum interval for friends searching.
-const ONION_FRIEND_MAX_PING_INTERVAL: u64 = MAX_ONION_FRIEND_NODES as u64 * 60 * 5;
+const ONION_FRIEND_MAX_PING_INTERVAL: Duration = 
+    Duration::from_secs(MAX_ONION_FRIEND_NODES as u64 * 60 * 5);
 
 /// After this time since last unsuccessful ping (and when ping attempts are
 /// exhausted) node is considered timed out.
-const ONION_NODE_TIMEOUT: u64 = ONION_NODE_PING_INTERVAL;
+const ONION_NODE_TIMEOUT: Duration = ONION_NODE_PING_INTERVAL;
 
 /// After this interval since creation node is considered stable.
-pub(crate) const TIME_TO_STABLE: u64 = ONION_NODE_PING_INTERVAL * 6;
+pub(crate) const TIME_TO_STABLE: Duration = Duration::from_secs(ONION_NODE_PING_INTERVAL.as_secs() * 6);
 
-/// The interval in seconds at which to tell our friends our DHT `PublicKey`
+/// The interval of time at which to tell our friends our DHT `PublicKey`
 /// via onion.
-const ONION_DHTPK_SEND_INTERVAL: u64 = 30;
+const ONION_DHTPK_SEND_INTERVAL: Duration = Duration::from_secs(30);
 
-/// The interval in seconds at which to tell our friends our DHT `PublicKey`
+/// The interval of time at which to tell our friends our DHT `PublicKey`
 /// via DHT request.
-const DHT_DHTPK_SEND_INTERVAL: u64 = 20;
+const DHT_DHTPK_SEND_INTERVAL: Duration = Duration::from_secs(20);
 
 /// Minimum interval for sending requests to received in `OnionAnnounceResponse`
 /// packet nodes.
-const MIN_NODE_PING_TIME: u64 = 10;
+const MIN_NODE_PING_TIME: Duration = Duration::from_secs(10);
 
 /// Friend related data stored in the onion client.
 #[derive(Clone, Debug)]
@@ -228,16 +229,14 @@ impl OnionNode {
 
     /// Check if this node is timed out.
     pub fn is_timed_out(&self) -> bool {
-        self.is_ping_attempts_exhausted() &&
-            clock_elapsed(self.ping_time) >= Duration::from_secs(ONION_NODE_TIMEOUT)
+        self.is_ping_attempts_exhausted() && clock_elapsed(self.ping_time) >= ONION_NODE_TIMEOUT
     }
 
-    /// Node is considered stable after `TIME_TO_STABLE` seconds since it was
+    /// Node is considered stable after `TIME_TO_STABLE` since it was
     /// added to a close list if it responses to our requests.
     pub fn is_stable(&self) -> bool {
-        clock_elapsed(self.added_time) >= Duration::from_secs(TIME_TO_STABLE) &&
-            (self.unsuccessful_pings == 0 ||
-                 clock_elapsed(self.ping_time) < Duration::from_secs(ONION_NODE_TIMEOUT))
+        clock_elapsed(self.added_time) >= TIME_TO_STABLE &&
+            (self.unsuccessful_pings == 0 || clock_elapsed(self.ping_time) < ONION_NODE_TIMEOUT)
     }
 }
 
@@ -388,7 +387,7 @@ impl OnionClient {
         };
         request_queue.get_values()
             .any(|(ping_time, request_data)| check_pks(request_data) &&
-                clock_elapsed(ping_time) < Duration::from_secs(MIN_NODE_PING_TIME))
+                clock_elapsed(ping_time) < MIN_NODE_PING_TIME)
     }
 
     /// Send onion request via TCP or UDP depending on path.
@@ -641,7 +640,7 @@ impl OnionClient {
     ) -> (impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send, bool) {
         let capacity = close_nodes.capacity();
         let ping_random = close_nodes.iter().all(|node|
-            clock_elapsed(node.ping_time) >= Duration::from_secs(ONION_NODE_PING_INTERVAL) &&
+            clock_elapsed(node.ping_time) >= ONION_NODE_PING_INTERVAL &&
                 // ensure we get a response from some node roughly once per interval / capacity
                 interval.map_or(true, |interval| clock_elapsed(node.response_time) >= interval / capacity as u32)
         );
@@ -661,9 +660,9 @@ impl OnionClient {
             } else if node.announce_status == AnnounceStatus::Announced {
                 if let Some(stored_path) = paths_pool.get_stored_path(node.path_id, friend_pk.is_some()) {
                     if node.is_stable() && stored_path.is_stable() {
-                        Duration::from_secs(ANNOUNCE_INTERVAL_STABLE)
+                        ANNOUNCE_INTERVAL_STABLE
                     } else {
-                        Duration::from_secs(ANNOUNCE_INTERVAL_ANNOUNCED)
+                        ANNOUNCE_INTERVAL_ANNOUNCED
                     }
                 } else {
                     Duration::from_secs(ANNOUNCE_INTERVAL_NOT_ANNOUNCED)
@@ -849,15 +848,15 @@ impl OnionClient {
             };
 
             let interval = if friend.search_count < SEARCH_COUNT_FRIEND_ANNOUNCE_BEGINNING {
-                Duration::from_secs(ANNOUNCE_FRIEND_BEGINNING)
+                ANNOUNCE_FRIEND_BEGINNING
             } else {
                 let backoff_interval = friend.last_seen.map_or_else(
-                    || Duration::from_secs(ONION_FRIEND_MAX_PING_INTERVAL),
+                    || ONION_FRIEND_MAX_PING_INTERVAL,
                     |last_seen| clock_elapsed(last_seen) / ONION_FRIEND_BACKOFF_FACTOR
                 );
                 backoff_interval
-                    .min(Duration::from_secs(ONION_FRIEND_MAX_PING_INTERVAL))
-                    .max(Duration::from_secs(ANNOUNCE_FRIEND))
+                    .min(ONION_FRIEND_MAX_PING_INTERVAL)
+                    .max(ANNOUNCE_FRIEND)
             };
 
             let (friend_future, packets_sent) = self.ping_close_nodes(
@@ -875,11 +874,11 @@ impl OnionClient {
 
             futures.push(Box::new(friend_future));
 
-            if friend.last_dht_pk_onion_sent.map_or(true, |time| clock_elapsed(time) > Duration::from_secs(ONION_DHTPK_SEND_INTERVAL)) {
+            if friend.last_dht_pk_onion_sent.map_or(true, |time| clock_elapsed(time) > ONION_DHTPK_SEND_INTERVAL) {
                 futures.push(Box::new(self.send_dht_pk_onion(friend, &mut state.paths_pool)));
             }
 
-            if friend.last_dht_pk_dht_sent.map_or(true, |time| clock_elapsed(time) > Duration::from_secs(DHT_DHTPK_SEND_INTERVAL)) {
+            if friend.last_dht_pk_dht_sent.map_or(true, |time| clock_elapsed(time) > DHT_DHTPK_SEND_INTERVAL) {
                 futures.push(Box::new(self.send_dht_pk_dht_request(friend)));
             }
         }
@@ -1154,7 +1153,7 @@ mod tests {
         let mut enter = tokio_executor::enter().unwrap();
         // time when node is timed out
         let clock = Clock::new_with_now(ConstNow(
-            now + Duration::from_secs(ONION_NODE_TIMEOUT + 1)
+            now + ONION_NODE_TIMEOUT + Duration::from_secs(1)
         ));
 
         with_default(&clock, &mut enter, |_| {

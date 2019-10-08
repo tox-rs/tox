@@ -437,7 +437,7 @@ mod tests {
 
         assert!(!ktree.is_all_discarded());
 
-        let time = Instant::now() + Duration::from_secs(KILL_NODE_TIMEOUT + 1);
+        let time = Instant::now() + KILL_NODE_TIMEOUT + Duration::from_secs(1);
 
         let mut enter = tokio_executor::enter().unwrap();
         let clock = Clock::new_with_now(ConstNow(time));
