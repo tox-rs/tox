@@ -60,7 +60,7 @@ const ONION_NODE_MAX_PINGS: u32 = 3;
 const ONION_NODE_PING_INTERVAL: Duration = Duration::from_secs(15);
 
 /// How often we should announce ourselves to a node we are not announced to.
-const ANNOUNCE_INTERVAL_NOT_ANNOUNCED: u64 = 3;
+const ANNOUNCE_INTERVAL_NOT_ANNOUNCED: Duration = Duration::from_secs(3);
 
 /// How often we should announce ourselves to a node we are announced to.
 const ANNOUNCE_INTERVAL_ANNOUNCED: Duration = ONION_NODE_PING_INTERVAL;
@@ -665,10 +665,10 @@ impl OnionClient {
                         ANNOUNCE_INTERVAL_ANNOUNCED
                     }
                 } else {
-                    Duration::from_secs(ANNOUNCE_INTERVAL_NOT_ANNOUNCED)
+                    ANNOUNCE_INTERVAL_NOT_ANNOUNCED
                 }
             } else {
-                Duration::from_secs(ANNOUNCE_INTERVAL_NOT_ANNOUNCED)
+                ANNOUNCE_INTERVAL_NOT_ANNOUNCED
             };
 
             if clock_elapsed(node.ping_time) >= interval || ping_random && random_limit_usize(capacity) == 0 {
@@ -2032,7 +2032,7 @@ mod tests {
         let mut enter = tokio_executor::enter().unwrap();
         // time when entry is timed out
         let clock = Clock::new_with_now(ConstNow(
-            now + Duration::from_secs(ANNOUNCE_INTERVAL_NOT_ANNOUNCED + 1)
+            now + ANNOUNCE_INTERVAL_NOT_ANNOUNCED + Duration::from_secs(1)
         ));
 
         with_default(&clock, &mut enter, |_| {
@@ -2169,7 +2169,7 @@ mod tests {
         let mut enter = tokio_executor::enter().unwrap();
         // time when announce packet should be sent
         let clock = Clock::new_with_now(ConstNow(
-            now + Duration::from_secs(ANNOUNCE_INTERVAL_NOT_ANNOUNCED + 1)
+            now + ANNOUNCE_INTERVAL_NOT_ANNOUNCED + Duration::from_secs(1)
         ));
 
         with_default(&clock, &mut enter, |_| {
@@ -2245,7 +2245,7 @@ mod tests {
         let mut enter = tokio_executor::enter().unwrap();
         // time when announce packet should be sent
         let clock = Clock::new_with_now(ConstNow(
-            now + Duration::from_secs(ANNOUNCE_INTERVAL_NOT_ANNOUNCED + 1)
+            now + ANNOUNCE_INTERVAL_NOT_ANNOUNCED + Duration::from_secs(1)
         ));
 
         with_default(&clock, &mut enter, |_| {

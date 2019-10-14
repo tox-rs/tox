@@ -54,8 +54,8 @@ type TcpOnionTx = mpsc::Sender<(InnerOnionResponse, SocketAddr)>;
 pub const MAX_BOOTSTRAP_TIMES: u32 = 5;
 /// How often onion key should be refreshed.
 pub const ONION_REFRESH_KEY_INTERVAL: Duration = Duration::from_secs(7200);
-/// Interval in seconds for random `NodesRequest`.
-pub const NODES_REQ_INTERVAL: u64 = 20;
+/// Interval for random `NodesRequest`.
+pub const NODES_REQ_INTERVAL: Duration = Duration::from_secs(20);
 /// Ping timeout in seconds.
 pub const PING_TIMEOUT: Duration = Duration::from_secs(5);
 /// Maximum newly announced nodes to ping per `TIME_TO_PING`.
@@ -319,7 +319,7 @@ impl Server {
         // Check if we should send `NodesRequest` packet to a random node. This
         // request is sent every second 5 times and then every 20 seconds.
         fn send_random_request(last_nodes_req_time: &mut Instant, random_requests_count: &mut u32) -> bool {
-            if clock_elapsed(*last_nodes_req_time) > Duration::from_secs(NODES_REQ_INTERVAL) || *random_requests_count < MAX_BOOTSTRAP_TIMES {
+            if clock_elapsed(*last_nodes_req_time) > NODES_REQ_INTERVAL || *random_requests_count < MAX_BOOTSTRAP_TIMES {
                 *random_requests_count = random_requests_count.saturating_add(1);
                 *last_nodes_req_time = clock_now();
                 true

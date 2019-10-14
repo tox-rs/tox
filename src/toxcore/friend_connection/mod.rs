@@ -38,14 +38,11 @@ use crate::toxcore::time::*;
 type ConnectionStatusTx = mpsc::UnboundedSender<(PublicKey, bool)>;
 
 /// How often we should send ping packets to a friend.
-const FRIEND_PING_INTERVAL_S: u64 = 8;
-
-/// How often we should send ping packets to a friend.
-const FRIEND_PING_INTERVAL: Duration = Duration::from_secs(FRIEND_PING_INTERVAL_S);
+const FRIEND_PING_INTERVAL: Duration = Duration::from_secs(8);
 
 /// Connection to a friend is considered timed out if we haven't been receiving
 /// ping packets for this amount of time.
-const FRIEND_CONNECTION_TIMEOUT: Duration = Duration::from_secs(FRIEND_PING_INTERVAL_S * 4);
+const FRIEND_CONNECTION_TIMEOUT: Duration = Duration::from_secs(FRIEND_PING_INTERVAL.as_secs() * 4);
 
 /// How often we should send `ShareRelays` packet to a friend.
 const SHARE_RELAYS_INTERVAL: Duration = Duration::from_secs(300);
