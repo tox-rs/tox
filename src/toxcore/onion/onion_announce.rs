@@ -18,10 +18,10 @@ pub const SECRET_BYTES_SIZE: usize = 32;
 /// exceeds this value farthest nodes are dropped using DHT distance function.
 pub const ONION_ANNOUNCE_MAX_ENTRIES: usize = 160;
 
-/// Number of seconds when onion ping id is valid after it was generated.
-/// To be precise ping id will be valid `PING_ID_TIMEOUT` to
-/// 2 * `PING_ID_TIMEOUT` seconds.
-pub const PING_ID_TIMEOUT: u64 = 300;
+/// Interval of time when onion ping id is valid after it was generated.
+/// To be precise ping id will be valid for from `PING_ID_TIMEOUT` to
+/// 2 * `PING_ID_TIMEOUT`.
+pub const PING_ID_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Diration of time thatfor which announce entry can be stored in onion announce list
 /// without re-announcing.
@@ -99,7 +99,7 @@ Serialized form:
 Length   | Content
 -------- | ------
 `32`     | Secret bytes of onion node
-`8`      | Unix time in seconds divided by PING_ID_TIMEOUT
+`8`      | Unix time in seconds divided by number of seconds in PING_ID_TIMEOUT
 `32`     | `PublicKey` of sender
 `1`      | IP type of sender
 `16`     | `IpAddr` of sender
@@ -124,7 +124,7 @@ impl ToBytes for OnionPingData {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_slice!(&self.secret_bytes) >>
-            gen_be_u64!(unix_time(self.time) / PING_ID_TIMEOUT) >>
+            gen_be_u64!(unix_time(self.time) / PING_ID_TIMEOUT.as_secs()) >>
             gen_slice!(self.pk.as_ref()) >>
             gen_be_u8!(self.ip_addr.is_ipv4() as u8) >>
             gen_call!(|buf, ip_addr| IpAddr::to_bytes(ip_addr, buf), &self.ip_addr) >>
@@ -136,8 +136,8 @@ impl ToBytes for OnionPingData {
 impl OnionPingData {
     /** Calculate onion ping id using sha256 hash of stored data.
 
-    Time is divided by `PING_ID_TIMEOUT` so this hash remains unchanged for
-    `PING_ID_TIMEOUT` seconds.
+    Time is divided by number of seconds in `PING_ID_TIMEOUT` 
+    so this hash remains unchanged for `PING_ID_TIMEOUT`.
 
     */
     pub fn ping_id(&self) -> sha256::Digest {
@@ -175,8 +175,8 @@ impl OnionAnnounce {
     /** Calculate onion ping id using sha256 hash of arguments together with
     secret bytes stored in this struct.
 
-    Time is divided by `PING_ID_TIMEOUT` so this hash remains unchanged for
-    `PING_ID_TIMEOUT` seconds.
+    Time is divided by number of seconds in `PING_ID_TIMEOUT` 
+    so this hash remains unchanged for `PING_ID_TIMEOUT`.
 
     */
     fn ping_id(&self, time: SystemTime, pk: PublicKey, ip_addr: IpAddr, port: u16) -> sha256::Digest {
@@ -271,7 +271,7 @@ impl OnionAnnounce {
             addr.port()
         );
         let ping_id_2 = self.ping_id(
-            time + Duration::from_secs(PING_ID_TIMEOUT),
+            time + PING_ID_TIMEOUT,
             request_pk,
             addr.ip(),
             addr.port()
@@ -392,8 +392,8 @@ mod tests {
         let onion_announce = OnionAnnounce::new(gen_keypair().0);
 
         let time = SystemTime::now();
-        let time_1 = time - Duration::from_secs(unix_time(time) % PING_ID_TIMEOUT);
-        let time_2 = time_1 + Duration::from_secs(PING_ID_TIMEOUT - 1);
+        let time_1 = time - Duration::from_secs(unix_time(time) % PING_ID_TIMEOUT.as_secs());
+        let time_2 = time_1 + Duration::from_secs(PING_ID_TIMEOUT.as_secs() - 1);
         let pk = gen_keypair().0;
         let ip_addr = "1.2.3.4".parse().unwrap();
         let port = 12345;
@@ -410,7 +410,7 @@ mod tests {
         let onion_announce = OnionAnnounce::new(gen_keypair().0);
 
         let time_1 = SystemTime::now();
-        let time_2 = time_1 + Duration::from_secs(PING_ID_TIMEOUT);
+        let time_2 = time_1 + PING_ID_TIMEOUT;
 
         let pk_1 = gen_keypair().0;
         let pk_2 = gen_keypair().0;
