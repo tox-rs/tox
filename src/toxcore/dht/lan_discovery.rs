@@ -45,7 +45,7 @@ pub const START_PORT: u16 = 33446;
 /// End port for sending `LanDiscovery` packets.
 pub const END_PORT: u16 = 33546;
 
-/// Interval in seconds between `LanDiscovery` packet sending.
+/// Interval of time between `LanDiscovery` packet sending.
 pub const LAN_DISCOVERY_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Shorthand for the transmit half of the message channel.

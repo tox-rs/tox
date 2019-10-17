@@ -15,7 +15,7 @@ use crate::toxcore::utils::*;
 /// Interval of time for sending `NatPingRequest` packet and doing hole
 /// punching.
 pub const PUNCH_INTERVAL: Duration = Duration::from_secs(3);
-/// Interval in seconds of time to reset counter of hole punching attempts.
+/// Interval of time to reset counter of hole punching attempts.
 pub const RESET_PUNCH_INTERVAL: Duration = Duration::from_secs(40);
 /// Maximum number of ports to use for every round of hole punching. Note that
 /// we have 2 different guessing algorithms so each one of them will use this
