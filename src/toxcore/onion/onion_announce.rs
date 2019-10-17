@@ -23,7 +23,7 @@ pub const ONION_ANNOUNCE_MAX_ENTRIES: usize = 160;
 /// 2 * `PING_ID_TIMEOUT`.
 pub const PING_ID_TIMEOUT: Duration = Duration::from_secs(300);
 
-/// Diration of time thatfor which announce entry can be stored in onion announce list
+/// Diration of time for which announce entry can be stored in onion announce list
 /// without re-announcing.
 pub const ONION_ANNOUNCE_TIMEOUT: Duration = Duration::from_secs(300);
 
