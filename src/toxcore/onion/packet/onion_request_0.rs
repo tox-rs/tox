@@ -96,6 +96,7 @@ impl OnionRequest0 {
             })?;
         match OnionRequest0Payload::from_bytes(&decrypted) {
             Err(error) => {
+                debug!(target: "Onion", "OnionRequest0Payload deserialize error: {:?}", error);
                 Err(GetPayloadError::deserialize(error, decrypted.clone()))
             },
             Ok((_, inner)) => {

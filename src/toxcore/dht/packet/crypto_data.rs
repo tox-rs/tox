@@ -94,6 +94,7 @@ impl CryptoData {
             })?;
         match CryptoDataPayload::from_bytes(&decrypted) {
             Err(error) => {
+                debug!(target: "Dht", "CryptoDataPayload return deserialize error: {:?}", error);
                 Err(GetPayloadError::deserialize(error, decrypted.clone()))
             },
             Ok((_, payload)) => {

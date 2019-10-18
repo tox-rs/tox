@@ -91,6 +91,7 @@ impl CryptoHandshake {
             })?;
         match CryptoHandshakePayload::from_bytes(&decrypted) {
             Err(error) => {
+                debug!(target: "Dht", "CryptoHandshakePayload return deserialize error: {:?}", error);
                 Err(GetPayloadError::deserialize(error, decrypted.clone()))
             },
             Ok((_, payload)) => {

@@ -92,6 +92,7 @@ impl OnionAnnounceResponse {
             })?;
         match OnionAnnounceResponsePayload::from_bytes(&decrypted) {
             Err(error) => {
+                debug!(target: "Onion", "OnionAnnounceResponsePayload deserialize error: {:?}", error);
                 Err(GetPayloadError::deserialize(error, decrypted.clone()))
             },
             Ok((_, inner)) => {
