@@ -239,7 +239,7 @@ mod tests {
             payload: invalid_payload.to_vec()
         });
         // Try short incomplete array
-        let invalid_payload = [42, 42];
+        let invalid_payload = [];
         let invalid_payload_encoded = secretbox::seal(&invalid_payload, &nonce, &symmetric_key);
         let invalid_encrypted_cookie = EncryptedCookie {
             nonce,
@@ -248,7 +248,7 @@ mod tests {
         let decoded_payload = invalid_encrypted_cookie.get_payload(&symmetric_key);
         let error = decoded_payload.err().unwrap();
         assert_eq!(*error.kind(), GetPayloadErrorKind::Deserialize {
-            error: Err::Error((vec![42, 42], ErrorKind::Eof)),
+            error: Err::Error((vec![], ErrorKind::Eof)),
             payload: invalid_payload.to_vec()
         });
     }
