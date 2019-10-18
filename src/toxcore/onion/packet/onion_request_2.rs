@@ -95,6 +95,7 @@ impl OnionRequest2 {
             })?;
         match OnionRequest2Payload::from_bytes(&decrypted) {
             Err(error) => {
+                debug!(target: "Onion", "OnionRequest2Payload deserialize error: {:?}", error);
                 Err(GetPayloadError::deserialize(error, decrypted.clone()))
             },
             Ok((_, inner)) => {

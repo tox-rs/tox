@@ -89,6 +89,7 @@ impl NodesRequest {
 
         match NodesRequestPayload::from_bytes(&decrypted) {
             Err(error) => {
+                debug!(target: "NodesRequest", "PingRequestPayload deserialize error: {:?}", error);
                 Err(GetPayloadError::deserialize(error, decrypted.clone()))
             },
             Ok((_, payload)) => {

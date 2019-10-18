@@ -93,6 +93,7 @@ impl CookieRequest {
             })?;
         match CookieRequestPayload::from_bytes(&decrypted) {
             Err(error) => {
+                debug!(target: "Dht", "CookieRequestPayload return deserialize error: {:?}", error);
                 Err(GetPayloadError::deserialize(error, decrypted.clone()))
             },
             Ok((_, payload)) => {

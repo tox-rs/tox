@@ -89,6 +89,7 @@ impl PingResponse {
 
         match PingResponsePayload::from_bytes(&decrypted) {
             Err(error) => {
+                debug!(target: "PingResponse", "PingRequestPayload deserialize error: {:?}", error);
                 Err(GetPayloadError::deserialize(error, decrypted.clone()))
             },
             Ok((_, payload)) => {

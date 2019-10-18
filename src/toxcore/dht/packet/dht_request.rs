@@ -101,6 +101,7 @@ impl DhtRequest {
 
         match DhtRequestPayload::from_bytes(&decrypted) {
             Err(error) => {
+                debug!(target: "DhtRequest", "DhtRequest deserialize error: {:?}", error);
                 Err(GetPayloadError::deserialize(error, decrypted.clone()))
             },
             Ok((_, payload)) => {
@@ -296,6 +297,7 @@ impl DhtPkAnnounce {
             })?;
         match DhtPkAnnouncePayload::from_bytes(&decrypted) {
             Err(error) => {
+                debug!(target: "DhtRequest", "DhtPkAnnouncePayload deserialize error: {:?}", error);
                 Err(GetPayloadError::deserialize(error, decrypted.clone()))
             },
             Ok((_, payload)) => {
