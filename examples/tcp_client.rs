@@ -117,7 +117,7 @@ fn create_client(rx: mpsc::Receiver<Packet>, tx: mpsc::Sender<Packet>) -> impl F
                 .map_err(|err| {
                     error!("Writer err: {}", err);
                     err
-                });;
+                });
 
             reader.select(writer).map(|_| ()).map_err(|(err, _select_next)| err)
         })
