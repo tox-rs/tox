@@ -7,7 +7,7 @@ use crate::toxcore::crypto_core::*;
 #[test]
 fn is_encrypted_test() {
     crypto_init().unwrap();
-    assert!(!is_encrypted(b"Hello world.\n"));;
+    assert!(!is_encrypted(b"Hello world.\n"));
     assert!(is_encrypted(MAGIC_NUMBER));
     assert!(is_encrypted(include_bytes!("ciphertext")));
 }
