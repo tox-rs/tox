@@ -172,9 +172,7 @@ impl EncryptedCookie {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nom::{Err,
-        error::ErrorKind
-    };
+    use nom::{Err, error::ErrorKind};
 
     encode_decode_test!(
         cookie_encode_decode,

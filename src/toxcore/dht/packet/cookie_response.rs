@@ -130,9 +130,7 @@ impl ToBytes for CookieResponsePayload {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nom::{Needed, Err,
-        error::ErrorKind
-    };
+    use nom::{Needed, Err, error::ErrorKind};
 
     encode_decode_test!(
         cookie_response_encode_decode,

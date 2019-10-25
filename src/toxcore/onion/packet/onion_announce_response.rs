@@ -7,8 +7,9 @@ use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
 use crate::toxcore::dht::packet::*;
 
-use nom::{number::complete::le_u64,
-          combinator::{rest, rest_len},
+use nom::{
+    number::complete::le_u64,
+    combinator::{rest, rest_len},
 };
 
 /** It's used to respond to `OnionAnnounceRequest` packet.

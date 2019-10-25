@@ -2,9 +2,10 @@
 It is used to transfer chunk of file data to a friend.
 */
 
-use nom::{AsBytes,
-          combinator::{rest, rest_len},
-          number::complete::le_u8,
+use nom::{
+    AsBytes,
+    number::complete::le_u8,
+    combinator::{rest, rest_len},
 };
 
 use super::*;

@@ -1,8 +1,9 @@
 /*! NodesResponse packet
 */
 
-use nom::{number::complete::{le_u8, be_u64},
-          combinator::rest,
+use nom::{
+    number::complete::{le_u8, be_u64},
+    combinator::rest,
 };
 
 use crate::toxcore::binary_io::*;

@@ -2,9 +2,10 @@
 //! better will become available.*
 
 use std::default::Default;
-use nom::{number::complete::{le_u16, be_u16, le_u8, le_u32, le_u64},
-          combinator::rest,
-          bytes::complete::take,
+use nom::{
+    number::complete::{le_u16, be_u16, le_u8, le_u32, le_u64},
+    combinator::rest,
+    bytes::complete::take,
 };
 
 use crate::toxcore::binary_io::*;

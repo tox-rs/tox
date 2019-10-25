@@ -1,8 +1,9 @@
 /*! CryptoData packet
 */
 
-use nom::{number::complete::{be_u16, be_u32},
-          combinator::{rest, rest_len},
+use nom::{
+    number::complete::{be_u16, be_u32},
+    combinator::{rest, rest_len},
 };
 use std::convert::TryInto;
 

@@ -34,9 +34,10 @@ use crate::toxcore::crypto_core::*;
 use crate::toxcore::dht::packed_node::PackedNode;
 use crate::toxcore::ip_port::*;
 
-use nom::{Err,
-          number::complete::le_u8,
-          combinator::{rest, rest_len},
+use nom::{
+    Err,
+    number::complete::le_u8,
+    combinator::{rest, rest_len},
 };
 use std::io::{Error, ErrorKind};
 

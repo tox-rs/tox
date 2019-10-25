@@ -1,9 +1,10 @@
 /*! Msi struct. Used by tox-av
 */
 
-use nom::{Err, error::ErrorKind,
-          number::complete::le_u8,
-          combinator::rest_len
+use nom::{
+    Err, error::ErrorKind,
+    number::complete::le_u8,
+    combinator::rest_len
 };
 use bitflags::*;
 

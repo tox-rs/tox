@@ -7,8 +7,9 @@ use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
 use crate::toxcore::dht::packet::*;
 
-use nom::{combinator::{rest, rest_len},
-          bytes::complete::take
+use nom::{
+    combinator::{rest, rest_len},
+    bytes::complete::take
 };
 
 /// Encrypted payload should contain at least `IpPort` struct.
