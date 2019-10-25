@@ -28,8 +28,9 @@ pub use self::data::{Data, DataPayload};
 
 use crate::toxcore::binary_io::*;
 
-use nom::{number::complete::be_u16,
-          bytes::complete::take,
+use nom::{
+    number::complete::be_u16,
+    bytes::complete::take,
 };
 
 /** Top-level TCP packet.

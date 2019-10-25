@@ -9,9 +9,7 @@ use crate::toxcore::tcp::secure::*;
 use crate::toxcore::stats::*;
 
 use failure::Fail;
-use nom::{Needed, Offset, Err,
-          error::ErrorKind,
-};
+use nom::{Needed, Offset, Err, error::ErrorKind};
 use bytes::BytesMut;
 use tokio::codec::{Decoder, Encoder};
 

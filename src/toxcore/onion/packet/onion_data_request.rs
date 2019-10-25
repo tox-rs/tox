@@ -8,8 +8,9 @@ use crate::toxcore::crypto_core::*;
 use crate::toxcore::dht::packet::*;
 use crate::toxcore::onion::packet::MAX_ONION_RESPONSE_PAYLOAD_SIZE;
 
-use nom::{combinator::{rest, rest_len},
-          bytes::complete::take
+use nom::{
+    combinator::{rest, rest_len},
+    bytes::complete::take,
 };
 
 /** It's used to send data requests to dht node using onion paths.

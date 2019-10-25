@@ -7,9 +7,10 @@ use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
 use crate::toxcore::dht::packet::*;
 
-use nom::{number::complete::le_u64,
-          combinator::{rest, rest_len},
-          bytes::complete::take
+use nom::{
+    number::complete::le_u64,
+    combinator::{rest, rest_len},
+    bytes::complete::take
 };
 
 /** It's used for announcing ourselves to onion node and for looking for other

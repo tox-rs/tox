@@ -1,8 +1,9 @@
 /*! DhtRequest packet
 */
 
-use nom::{number::complete::be_u64,
-          combinator::rest,
+use nom::{
+    number::complete::be_u64,
+    combinator::rest,
 };
 
 use crate::toxcore::binary_io::*;
@@ -444,9 +445,7 @@ impl ToBytes for HardeningResponse {
 mod tests {
     use super::*;
 
-    use nom::{Needed, Err,
-        error::ErrorKind
-    };
+    use nom::{Needed, Err, error::ErrorKind};
 
     use crate::toxcore::ip_port::*;
 

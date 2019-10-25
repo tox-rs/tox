@@ -2,8 +2,9 @@
 */
 
 use std::str;
-use nom::{number::complete::be_u16,
-          combinator::rest,
+use nom::{
+    number::complete::be_u16,
+    combinator::rest,
 };
 
 use crate::toxcore::binary_io::*;
