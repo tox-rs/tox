@@ -78,7 +78,7 @@ impl ToBytes for OnionRequest {
             gen_slice!(self.nonce.as_ref()) >>
             gen_call!(|buf, ip_port| IpPort::to_bytes(ip_port, buf, IpPortPadding::WithPadding), &self.ip_port) >>
             gen_slice!(self.temporary_pk.as_ref()) >>
-            gen_slice!(self.payload)
+            gen_slice!(self.payload.as_slice())
         )
     }
 }

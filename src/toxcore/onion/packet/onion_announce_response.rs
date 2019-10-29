@@ -58,7 +58,7 @@ impl ToBytes for OnionAnnounceResponse {
             gen_be_u8!(0x84) >>
             gen_le_u64!(self.sendback_data) >>
             gen_slice!(self.nonce.as_ref()) >>
-            gen_slice!(self.payload) >>
+            gen_slice!(self.payload.as_slice()) >>
             gen_len_limit(ONION_MAX_PACKET_SIZE)
         )
     }

@@ -66,7 +66,7 @@ impl ToBytes for InnerOnionAnnounceRequest {
             gen_be_u8!(0x83) >>
             gen_slice!(self.nonce.as_ref()) >>
             gen_slice!(self.pk.as_ref()) >>
-            gen_slice!(self.payload)
+            gen_slice!(self.payload.as_slice())
         )
     }
 }

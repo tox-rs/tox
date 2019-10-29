@@ -104,7 +104,7 @@ Serialized form:
 Length     | Content
 ---------- | ------
 `2`        | Length of encrypted payload in BigEndian
-variable   | Encrypted payload
+variable   | Encrypted payload (max 2048)
 
 */
 #[derive(Debug, PartialEq, Clone)]
@@ -116,10 +116,13 @@ pub struct EncryptedPacket {
 /// A serialized EncryptedPacket should be not longer than 2050 bytes
 pub const MAX_TCP_ENC_PACKET_SIZE: usize = 2050;
 
+/// A serialized EncryptedPacket payload should be not longer than 2048 bytes
+pub const MAX_TCP_ENC_PACKET_PAYLOAD_SIZE: usize = 2048;
+
 impl FromBytes for EncryptedPacket {
     named!(from_bytes<EncryptedPacket>, do_parse!(
         length: be_u16 >>
-        verify!(value!(length), |len| len > 0 /* TODO len < 2048... ? */ ) >>
+        verify!(value!(length), |len| len > 0 && len as usize <= MAX_TCP_ENC_PACKET_PAYLOAD_SIZE) >>
         payload: take!(length) >>
         (EncryptedPacket { payload: payload.to_vec() })
     ));
@@ -128,7 +131,8 @@ impl FromBytes for EncryptedPacket {
 impl ToBytes for EncryptedPacket {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
-            gen_be_u16!(self.payload.len()) >>
+            gen_cond!(self.payload.len() > MAX_TCP_ENC_PACKET_PAYLOAD_SIZE, |buf| gen_error(buf, 0)) >>
+            gen_be_u16!(self.payload.len() as u16) >>
             gen_slice!(self.payload.as_slice())
         )
     }

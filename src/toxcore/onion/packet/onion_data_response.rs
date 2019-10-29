@@ -60,7 +60,7 @@ impl ToBytes for OnionDataResponse {
             gen_be_u8!(0x86) >>
             gen_slice!(self.nonce.as_ref()) >>
             gen_slice!(self.temporary_pk.as_ref()) >>
-            gen_slice!(self.payload) >>
+            gen_slice!(self.payload.as_slice()) >>
             gen_len_limit(ONION_MAX_PACKET_SIZE)
         )
     }
@@ -148,7 +148,7 @@ impl ToBytes for OnionDataResponsePayload {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_slice!(self.real_pk.as_ref()) >>
-            gen_slice!(self.payload)
+            gen_slice!(self.payload.as_slice())
         )
     }
 }

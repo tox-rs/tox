@@ -87,7 +87,7 @@ impl ToBytes for OnionReturn {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_slice!(self.nonce.as_ref()) >>
-            gen_slice!(self.payload)
+            gen_slice!(self.payload.as_slice())
         )
     }
 }

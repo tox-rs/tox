@@ -420,12 +420,12 @@ impl ToBytes for FriendState {
             gen_slice!(self.pk.as_ref()) >>
             gen_slice!(fr_msg_pad.as_slice()) >>
             gen_le_u8!(0) >>
-            gen_be_u16!(self.fr_msg.len()) >>
+            gen_be_u16!(self.fr_msg.len() as u16) >>
             gen_slice!(name_pad.as_slice()) >>
-            gen_be_u16!(self.name.0.len()) >>
+            gen_be_u16!(self.name.0.len() as u16) >>
             gen_slice!(status_msg_pad.as_slice()) >>
             gen_le_u8!(0) >>
-            gen_be_u16!(self.status_msg.0.len()) >>
+            gen_be_u16!(self.status_msg.0.len() as u16) >>
             gen_le_u8!(self.user_status as u8) >>
             gen_le_u8!(0) >>
             gen_le_u16!(0) >>

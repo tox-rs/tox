@@ -51,7 +51,7 @@ impl ToBytes for OobSend {
         do_gen!(buf,
             gen_be_u8!(0x06) >>
             gen_slice!(self.destination_pk.as_ref()) >>
-            gen_slice!(self.data)
+            gen_slice!(self.data.as_slice())
         )
     }
 }
