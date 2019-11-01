@@ -41,7 +41,7 @@ impl ToBytes for OobReceive {
         do_gen!(buf,
             gen_be_u8!(0x07) >>
             gen_slice!(self.sender_pk.as_ref()) >>
-            gen_slice!(self.data)
+            gen_slice!(self.data.as_slice())
         )
     }
 }

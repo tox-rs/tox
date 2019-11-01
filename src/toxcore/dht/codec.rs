@@ -70,7 +70,7 @@ error_kind! {
     #[derive(Debug)]
     EncodeError,
     #[doc = "Error that can happen when encoding `Packet` to bytes."]
-    #[derive(Debug, PartialEq, Fail)]
+    #[derive(Debug, Fail)]
     EncodeErrorKind {
         #[doc = "Error indicates that `Packet` is invalid and can't be serialized."]
         #[fail(display = "Serialize Packet error: {:?}", error)]
@@ -378,7 +378,11 @@ mod tests {
         // Codec cannot serialize Packet because it is too long
         let res = codec.encode(packet, &mut buf);
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), EncodeErrorKind::Serialize { error: GenError::BufferTooSmall(2106) });
+        let error = res.err().unwrap();
+        let error_kind = error.kind();
+        let error_serialize = unpack!(error_kind, EncodeErrorKind::Serialize, error);
+        let too_small = unpack!(error_serialize, GenError::BufferTooSmall);
+        assert_eq!(*too_small, 2106 - MAX_DHT_PACKET_SIZE);
     }
 
     #[test]

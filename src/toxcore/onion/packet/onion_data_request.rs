@@ -64,7 +64,7 @@ impl ToBytes for InnerOnionDataRequest {
             gen_slice!(self.destination_pk.as_ref()) >>
             gen_slice!(self.nonce.as_ref()) >>
             gen_slice!(self.temporary_pk.as_ref()) >>
-            gen_slice!(self.payload)
+            gen_slice!(self.payload.as_slice())
         )
     }
 }
