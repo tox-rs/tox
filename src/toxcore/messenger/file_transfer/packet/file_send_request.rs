@@ -2,7 +2,7 @@
 It is used to start transferring file to a friend.
 */
 
-use nom::rest;
+use nom::combinator::rest;
 
 use std::str;
 

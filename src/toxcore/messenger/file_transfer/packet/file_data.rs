@@ -2,7 +2,7 @@
 It is used to transfer chunk of file data to a friend.
 */
 
-use nom::{rest, AsBytes};
+use nom::{combinator::rest, AsBytes};
 
 use super::*;
 
@@ -32,7 +32,7 @@ impl FromBytes for FileData {
     named!(from_bytes<FileData>, do_parse!(
         tag!("\x52") >>
         file_id: le_u8 >>
-        verify!(rest_len, |len| len <= MAX_FILE_DATA_SIZE) >>
+        verify!(rest_len, |&len| len <= MAX_FILE_DATA_SIZE) >>
         data : rest >>
         (FileData { file_id, data: data.to_vec() })
     ));

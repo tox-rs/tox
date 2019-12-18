@@ -7,7 +7,7 @@ use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
 use crate::toxcore::dht::packet::*;
 
-use nom::rest;
+use nom::combinator::rest;
 
 /// Encrypted payload should contain at least `IpPort` struct.
 const ONION_REQUEST_1_MIN_PAYLOAD_SIZE: usize = SIZE_IPPORT + MACBYTES;
@@ -43,15 +43,12 @@ pub struct OnionRequest1 {
 
 impl FromBytes for OnionRequest1 {
     named!(from_bytes<OnionRequest1>, do_parse!(
-        verify!(rest_len, |len| len <= ONION_MAX_PACKET_SIZE) >>
+        verify!(rest_len, |&len| len <= ONION_MAX_PACKET_SIZE) >>
         tag!(&[0x81][..]) >>
         nonce: call!(Nonce::from_bytes) >>
         temporary_pk: call!(PublicKey::from_bytes) >>
-        rest_len: rest_len >>
-        payload: cond_reduce!(
-            rest_len >= ONION_REQUEST_1_MIN_PAYLOAD_SIZE + ONION_RETURN_1_SIZE,
-            take!(rest_len - ONION_RETURN_1_SIZE)
-        ) >>
+        rest_len: verify!(rest_len, |&len| len >= ONION_REQUEST_1_MIN_PAYLOAD_SIZE + ONION_RETURN_1_SIZE) >>
+        payload: take!(rest_len - ONION_RETURN_1_SIZE) >>
         onion_return: call!(OnionReturn::from_bytes) >>
         (OnionRequest1 {
             nonce,
@@ -104,17 +101,11 @@ impl OnionRequest1 {
                 GetPayloadError::decrypt()
             })?;
         match OnionRequest1Payload::from_bytes(&decrypted) {
-            IResult::Incomplete(needed) => {
-                debug!(target: "Onion", "OnionRequest1Payload deserialize error: {:?}", needed);
-                Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
-            },
-            IResult::Error(e) => {
+            Err(e) => {
                 debug!(target: "Onion", "OnionRequest1Payload deserialize error: {:?}", e);
                 Err(GetPayloadError::deserialize(e, self.payload.to_vec()))
             },
-            IResult::Done(_, inner) => {
-                Ok(inner)
-            }
+            Ok((_, payload)) => Ok(payload)
         }
     }
 }

@@ -4,7 +4,7 @@
 use std::fmt;
 
 use failure::{Backtrace, Context, Fail};
-use nom::{Needed, ErrorKind as NomErrorKind};
+use nom::{Err, Needed, error::ErrorKind};
 
 use std::convert::From;
 use std::io::Error as IoError;
@@ -26,12 +26,17 @@ impl GetPayloadError {
         GetPayloadError::from(GetPayloadErrorKind::Decrypt)
     }
 
-    pub(crate) fn incomplete(needed: Needed, payload: Vec<u8>) -> GetPayloadError {
-        GetPayloadError::from(GetPayloadErrorKind::IncompletePayload { needed, payload })
-    }
+    pub(crate) fn deserialize(error: Err<(&[u8], ErrorKind)>, payload: Vec<u8>) -> GetPayloadError {
+        use GetPayloadErrorKind::*;
 
-    pub(crate) fn deserialize(error: NomErrorKind, payload: Vec<u8>) -> GetPayloadError {
-        GetPayloadError::from(GetPayloadErrorKind::Deserialize { error, payload })
+        let error = match error {
+            Err::Error(e) | Err::Failure(e) =>
+                Deserialize { error: e.1, payload },
+            Err::Incomplete(needed) =>
+                IncompletePayload { needed, payload },
+        };
+
+        GetPayloadError::from(error)
     }
 }
 
@@ -52,7 +57,7 @@ impl fmt::Display for GetPayloadError {
 }
 
 /// The specific kind of error that can occur.
-#[derive(Clone, Debug, Eq, PartialEq, Fail)]
+#[derive(Clone, Debug, PartialEq, Fail)]
 pub enum GetPayloadErrorKind {
     /// Error indicates that received payload of encrypted packet can't be decrypted
     #[fail(display = "Decrypt payload error")]
@@ -69,7 +74,7 @@ pub enum GetPayloadErrorKind {
     #[fail(display = "Deserialize payload error: {:?}, data: {:?}", error, payload)]
     Deserialize {
         /// Parsing error
-        error: NomErrorKind,
+        error: ErrorKind,
         /// Received payload of packet
         payload: Vec<u8>,
     }
@@ -100,7 +105,7 @@ mod tests {
 
     #[test]
     fn get_payload_error() {
-        let error = GetPayloadError::deserialize(NomErrorKind::Eof, vec![1, 2, 3, 4]);
+        let error = GetPayloadError::deserialize(nom::Err::Error((&[], ErrorKind::Eof)), vec![1, 2, 3, 4]);
         assert!(error.cause().is_none());
         assert!(error.backtrace().is_some());
         assert_eq!(format!("{}", error), "Deserialize payload error: Eof, data: [1, 2, 3, 4]".to_owned());
@@ -114,7 +119,10 @@ mod tests {
         let incomplete = GetPayloadErrorKind::IncompletePayload { needed: Needed::Size(5), payload: vec![1, 2, 3, 4] };
         assert_eq!(format!("{}", incomplete), "Bytes of payload should not be incomplete: Size(5), data: [1, 2, 3, 4]".to_owned());
 
-        let deserialize = GetPayloadErrorKind::Deserialize { error: NomErrorKind::Eof, payload: vec![1, 2, 3, 4] };
+        let deserialize = GetPayloadErrorKind::Deserialize {
+            error: ErrorKind::Eof,
+            payload: vec![1, 2, 3, 4]
+        };
         assert_eq!(format!("{}", deserialize), "Deserialize payload error: Eof, data: [1, 2, 3, 4]".to_owned());
     }
 }

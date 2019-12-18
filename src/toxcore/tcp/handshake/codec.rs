@@ -17,14 +17,12 @@ impl Decoder for ClientHandshakeCodec {
     type Error = Error;
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        use nom::Err::*;
+
         let (consumed, handshake) = match ClientHandshake::from_bytes(buf) {
-            IResult::Incomplete(_) => {
-                return Ok(None)
-            },
-            IResult::Error(_) => unreachable!("ClientHandshake cannot be deserialized with error"),
-            IResult::Done(i, handshake) => {
-                (buf.offset(i), handshake)
-            }
+            Err(Incomplete(_)) => return Ok(None),
+            Err(_) => unreachable!("ClientHandshake cannot be deserialized with error"),
+            Ok((i, handshake)) => (buf.offset(i), handshake),
         };
         buf.split_to(consumed);
         Ok(Some(handshake))
@@ -56,14 +54,12 @@ impl Decoder for ServerHandshakeCodec {
     type Error = Error;
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        use nom::Err::*;
+
         let (consumed, handshake) = match ServerHandshake::from_bytes(buf) {
-            IResult::Incomplete(_) => {
-                return Ok(None)
-            },
-            IResult::Error(_) => unreachable!("ServerHandshake cannot be deserialized with error"),
-            IResult::Done(i, handshake) => {
-                (buf.offset(i), handshake)
-            }
+            Err(Incomplete(_)) => return Ok(None),
+            Err(_) => unreachable!("ServerHandshake cannot be deserialized with error"),
+            Ok((i, handshake)) => (buf.offset(i), handshake)
         };
         buf.split_to(consumed);
         Ok(Some(handshake))

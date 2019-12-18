@@ -10,7 +10,7 @@ use crate::toxcore::stats::*;
 use bytes::BytesMut;
 use cookie_factory::GenError;
 use failure::Fail;
-use nom::{ErrorKind, Needed};
+use nom::{error::ErrorKind, Needed, Err as NomErr};
 use tokio::codec::{Decoder, Encoder};
 
 /// A serialized `Packet` should be not longer than 2048 bytes.
@@ -21,7 +21,7 @@ error_kind! {
     #[derive(Debug)]
     DecodeError,
     #[doc = "Error that can happen when decoding `Packet` from bytes."]
-    #[derive(Clone, Debug, Eq, PartialEq, Fail)]
+    #[derive(Clone, Debug, PartialEq, Fail)]
     DecodeErrorKind {
         #[doc = "Error indicates that we received too big packet."]
         #[fail(display = "Packet should not be longer than 2048 bytes: {} bytes", len)]
@@ -41,7 +41,7 @@ error_kind! {
         #[fail(display = "Deserialize Packet error: {:?}, packet: {:?}", error, packet)]
         Deserialize {
             #[doc = "Parsing error."]
-            error: ErrorKind,
+            error: nom::Err<(Vec<u8>, ErrorKind)>,
             #[doc = "Received packet."]
             packet: Vec<u8>,
         },
@@ -56,11 +56,15 @@ impl DecodeError {
         DecodeError::from(DecodeErrorKind::TooBigPacket { len })
     }
 
-    pub(crate) fn incomplete_packet(needed: Needed, packet: Vec<u8>) -> DecodeError {
-        DecodeError::from(DecodeErrorKind::IncompletePacket { needed, packet })
-    }
+    pub(crate) fn deserialize(e: NomErr<(&[u8], ErrorKind)>, packet: Vec<u8>) -> DecodeError {
+        use NomErr::*;
 
-    pub(crate) fn deserialize(error: ErrorKind, packet: Vec<u8>) -> DecodeError {
+        let error = match e {
+            Error(e) => Error((e.0.to_vec(), e.1)),
+            Failure(e) => Failure((e.0.to_vec(), e.1)),
+            Incomplete(needed) => Incomplete(needed),
+        };
+
         DecodeError::from(DecodeErrorKind::Deserialize { error, packet })
     }
 }
@@ -132,9 +136,8 @@ impl Decoder for DhtCodec {
         }
 
         match Packet::from_bytes(buf) {
-            IResult::Incomplete(needed) => Err(DecodeError::incomplete_packet(needed, buf.to_vec())),
-            IResult::Error(error) => Err(DecodeError::deserialize(error, buf.to_vec())),
-            IResult::Done(_, packet) => {
+            Err(error) => Err(DecodeError::deserialize(error, buf.to_vec())),
+            Ok((_, packet)) => {
                 // Add 1 to incoming counter
                 self.stats.counters.increase_incoming();
 
@@ -348,7 +351,13 @@ mod tests {
         let res = codec.decode(&mut buf);
         // not enought bytes to decode EncryptedPacket
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), DecodeErrorKind::Deserialize { error: ErrorKind::Alt, packet: vec![0xff] });
+        assert_eq!(
+            *res.err().unwrap().kind(),
+            DecodeErrorKind::Deserialize {
+                error: nom::Err::Error((vec![0xff], ErrorKind::Alt)),
+                packet: vec![0xff]
+            }
+        );
     }
 
     #[test]
@@ -361,7 +370,13 @@ mod tests {
         // not enought bytes to decode EncryptedPacket
         let res = codec.decode(&mut buf);
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), DecodeErrorKind::IncompletePacket { needed: Needed::Size(1), packet: Vec::new() });
+        assert_eq!(
+            *res.err().unwrap().kind(),
+            DecodeErrorKind::Deserialize {
+                error: nom::Err::Incomplete(Needed::Size(1)),
+                packet: vec![]
+            }
+        );
     }
 
     #[test]

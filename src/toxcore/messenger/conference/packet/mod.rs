@@ -33,7 +33,7 @@ pub use self::change_title::*;
 pub use self::message::*;
 pub use self::action::*;
 
-use nom::be_u8;
+use nom::number::complete::be_u8;
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
 

@@ -7,7 +7,7 @@ use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
 use crate::toxcore::dht::packet::*;
 
-use nom::{le_u64, rest};
+use nom::{number::complete::le_u64, combinator::rest};
 
 /** It's used for announcing ourselves to onion node and for looking for other
 announced nodes.
@@ -96,17 +96,11 @@ impl InnerOnionAnnounceRequest {
                 GetPayloadError::decrypt()
             })?;
         match OnionAnnounceRequestPayload::from_bytes(&decrypted) {
-            IResult::Incomplete(needed) => {
-                debug!(target: "Onion", "OnionAnnounceRequestPayload deserialize error: {:?}", needed);
-                Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
+            Err(error) => {
+                debug!(target: "Onion", "OnionAnnounceRequestPayload deserialize error: {:?}", error);
+                Err(GetPayloadError::deserialize(error, self.payload.to_vec()))
             },
-            IResult::Error(e) => {
-                debug!(target: "Onion", "OnionAnnounceRequestPayload deserialize error: {:?}", e);
-                Err(GetPayloadError::deserialize(e, self.payload.to_vec()))
-            },
-            IResult::Done(_, inner) => {
-                Ok(inner)
-            }
+            Ok((_, payload)) => Ok(payload)
         }
     }
 }
@@ -139,11 +133,9 @@ pub struct OnionAnnounceRequest {
 
 impl FromBytes for OnionAnnounceRequest {
     named!(from_bytes<OnionAnnounceRequest>, do_parse!(
-        rest_len: verify!(rest_len, |len| len <= ONION_MAX_PACKET_SIZE) >>
-        inner: cond_reduce!(
-            rest_len >= ONION_RETURN_3_SIZE,
-            flat_map!(take!(rest_len - ONION_RETURN_3_SIZE), InnerOnionAnnounceRequest::from_bytes)
-        ) >>
+        rest_len: verify!(rest_len, |&len| len <= ONION_MAX_PACKET_SIZE) >>
+        verify!(value!(rest_len), |&len| len >= ONION_RETURN_3_SIZE) >>
+        inner: flat_map!(take!(rest_len - ONION_RETURN_3_SIZE), InnerOnionAnnounceRequest::from_bytes) >>
         onion_return: call!(OnionReturn::from_bytes) >>
         (OnionAnnounceRequest { inner, onion_return })
     ));

@@ -9,7 +9,7 @@ use crate::toxcore::tcp::secure::*;
 use crate::toxcore::stats::*;
 
 use failure::Fail;
-use nom::{ErrorKind, Needed, Offset};
+use nom::{error::ErrorKind, Needed, Offset};
 use bytes::BytesMut;
 use tokio::codec::{Decoder, Encoder};
 
@@ -107,17 +107,14 @@ impl Decoder for Codec {
     type Error = DecodeError;
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        use nom::Err::*;
+
         // deserialize EncryptedPacket
         let (consumed, encrypted_packet) = match EncryptedPacket::from_bytes(buf) {
-            IResult::Incomplete(_) => {
-                return Ok(None)
-            },
-            IResult::Error(error) => {
-                return Err(DecodeError::DeserializeEncryptedError { error, buf: buf.to_vec() })
-            },
-            IResult::Done(i, encrypted_packet) => {
-                (buf.offset(i), encrypted_packet)
-            }
+            Err(Incomplete(_)) => return Ok(None),
+            Err(Error((_, error))) | Err(Failure((_, error))) =>
+                return Err(DecodeError::DeserializeEncryptedError { error, buf: buf.to_vec() }),
+            Ok((i, encrypted_packet)) => (buf.offset(i), encrypted_packet)
         };
 
         // decrypt payload
@@ -126,13 +123,13 @@ impl Decoder for Codec {
 
         // deserialize Packet
         match Packet::from_bytes(&decrypted_data) {
-            IResult::Incomplete(needed) => {
+            Err(Incomplete(needed)) => {
                 Err(DecodeError::IncompleteDecryptedPacket { needed, packet: decrypted_data })
             },
-            IResult::Error(error) => {
+            Err(Error((_, error))) | Err(Failure((_, error))) => {
                 Err(DecodeError::DeserializeDecryptedError { error, packet: decrypted_data })
             },
-            IResult::Done(_, packet) => {
+            Ok((_, packet)) => {
                 // Add 1 to incoming counter
                 self.stats.counters.increase_incoming();
 

@@ -2,7 +2,8 @@
 */
 
 use std::str;
-use nom::{be_u16, be_u32, rest};
+use nom::number::complete::{be_u16, be_u32};
+use nom::combinator::rest;
 
 use crate::toxcore::binary_io::*;
 use super::MAX_NAME_LENGTH_IN_CONFERENCE;

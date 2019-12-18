@@ -1,7 +1,8 @@
 /*! CryptoData packet
 */
 
-use nom::{be_u16, be_u32, rest};
+use nom::number::complete::{be_u16, be_u32};
+use nom::combinator::rest;
 use std::convert::TryInto;
 
 use crate::toxcore::binary_io::*;
@@ -40,7 +41,7 @@ pub struct CryptoData {
 
 impl FromBytes for CryptoData {
     named!(from_bytes<CryptoData>, do_parse!(
-        verify!(rest_len, |len| len <= MAX_CRYPTO_PACKET_SIZE) >>
+        verify!(rest_len, |&len| len <= MAX_CRYPTO_PACKET_SIZE) >>
         tag!("\x1b") >>
         nonce_last_bytes: be_u16 >>
         payload: rest >>
@@ -91,17 +92,11 @@ impl CryptoData {
                 GetPayloadError::decrypt()
             })?;
         match CryptoDataPayload::from_bytes(&decrypted) {
-            IResult::Incomplete(needed) => {
-                debug!(target: "Dht", "CryptoDataPayload return deserialize error: {:?}", needed);
-                Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
-            },
-            IResult::Error(error) => {
+            Err(error) => {
                 debug!(target: "Dht", "CryptoDataPayload return deserialize error: {:?}", error);
                 Err(GetPayloadError::deserialize(error, self.payload.to_vec()))
             },
-            IResult::Done(_, payload) => {
-                Ok(payload)
-            }
+            Ok((_, payload)) => Ok(payload),
         }
     }
 }

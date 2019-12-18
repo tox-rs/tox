@@ -49,7 +49,8 @@ pub fn handle_client_handshake(server_sk: &SecretKey,
             |_| Error::new(ErrorKind::Other, "Failed to decrypt ClientHandshake payload")
         )?;
 
-    let payload = HandshakePayload::from_bytes(&payload_bytes).to_full_result()
+    let payload = HandshakePayload::from_bytes(&payload_bytes)
+        .map(|(_, payload)| payload)
         .map_err(
             |_| Error::new(ErrorKind::Other, "Failed to deserialize ClientHandshake payload")
         )?;
@@ -81,7 +82,8 @@ pub fn handle_server_handshake(common_key: &PrecomputedKey,
         .map_err(
             |_| Error::new(ErrorKind::Other, "Failed to decrypt ServerHandshake payload")
         )?;
-    let payload = HandshakePayload::from_bytes(&payload_bytes).to_full_result()
+    let payload = HandshakePayload::from_bytes(&payload_bytes)
+        .map(|(_, payload)| payload)
         .map_err(
             |_| Error::new(ErrorKind::Other, "Failed to deserialize ServerHandshake payload")
         )?;

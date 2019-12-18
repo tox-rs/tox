@@ -34,7 +34,7 @@ use crate::toxcore::crypto_core::*;
 use crate::toxcore::dht::packed_node::PackedNode;
 use crate::toxcore::ip_port::*;
 
-use nom::{le_u8, rest};
+use nom::{number::complete::le_u8, combinator::rest};
 use std::io::{Error, ErrorKind};
 
 /// Size of first `OnionReturn` struct with no inner `OnionReturn`s.
@@ -135,19 +135,12 @@ impl OnionReturn {
                 Error::new(ErrorKind::Other, "OnionReturn decrypt error.")
             })?;
         match OnionReturn::inner_from_bytes(&decrypted) {
-            IResult::Incomplete(e) => {
-                debug!(target: "Onion", "Inner onion return deserialize error: {:?}", e);
+            Err(error) => {
+                debug!(target: "Onion", "Inner onion return deserialize error: {:?}", error);
                 Err(Error::new(ErrorKind::Other,
-                    format!("Inner onion return deserialize error: {:?}", e)))
+                    format!("Inner onion return deserialize error: {:?}", error)))
             },
-            IResult::Error(e) => {
-                debug!(target: "Onion", "Inner onion return deserialize error: {:?}", e);
-                Err(Error::new(ErrorKind::Other,
-                    format!("Inner onion return deserialize error: {:?}", e)))
-            },
-            IResult::Done(_, inner) => {
-                Ok(inner)
-            }
+            Ok((_, inner)) => Ok(inner),
         }
     }
 }

@@ -1,7 +1,7 @@
 /*! Msi struct. Used by tox-av
 */
 
-use nom::{ErrorKind, le_u8};
+use nom::{error::ErrorKind, number::complete::le_u8};
 use bitflags::*;
 
 use crate::toxcore::binary_io::*;
@@ -219,7 +219,10 @@ impl Msi {
         }
     }
 
+    // FIXME: use custom ErrorKind
     fn remove_redundant(input: &[u8], sub_packets: Vec<MsiSubPacket>) -> IResult<&[u8], Msi> {
+        use nom::Err as NomErr;
+
         let mut request = None;
         let mut error = None;
         let mut capabilities = None;
@@ -233,12 +236,12 @@ impl Msi {
         let request = if let Some(request) = request {
             request
         } else {
-            return IResult::Error(ErrorKind::Custom(NOM_CUSTOM_ERR_REQUEST_SUBPACKET_OMITTED));
+            return Err(NomErr::Failure((input, ErrorKind::NoneOf)));
         };
         let capabilities = if let Some(capabilities) = capabilities {
             capabilities
         } else {
-            return IResult::Error(ErrorKind::Custom(NOM_CUSTOM_ERR_CAPABILITIES_SUBPACKET_OMITTED));
+            return Err(NomErr::Failure((input, ErrorKind::NoneOf)));
         };
 
         let msi = Msi {
@@ -246,14 +249,14 @@ impl Msi {
             error,
             capabilities,
         };
-        IResult::Done(input, msi)
+        Ok((input, msi))
     }
 }
 
 impl FromBytes for Msi {
     named!(from_bytes<Msi>, do_parse!(
         tag!("\x45") >>
-        verify!(rest_len, |len| len < MAX_MSI_PAYLOAD_SIZE) >>
+        verify!(rest_len, |&len| len < MAX_MSI_PAYLOAD_SIZE) >>
         sub_pack: many_till!(call!(MsiSubPacket::from_bytes), tag!("\x00")) >>
         msi: call!(Msi::remove_redundant, sub_pack.0) >>
         (msi)

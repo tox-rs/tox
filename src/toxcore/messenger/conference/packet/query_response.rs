@@ -1,7 +1,7 @@
 /*! QueryResponse response message struct.
 */
 
-use nom::{be_u8, be_u16};
+use nom::number::complete::{be_u8, be_u16};
 use std::str;
 
 use crate::toxcore::binary_io::*;

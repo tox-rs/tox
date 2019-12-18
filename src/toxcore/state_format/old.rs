@@ -2,7 +2,8 @@
 //! better will become available.*
 
 use std::default::Default;
-use nom::{le_u16, be_u16, le_u8, le_u32, le_u64, rest};
+use nom::number::complete::{le_u16, be_u16, le_u8, le_u32, le_u64};
+use nom::combinator::rest;
 
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
@@ -133,10 +134,10 @@ impl FromBytes for DhtState {
     named!(from_bytes<DhtState>, do_parse!(
         tag!([0x02,0x00]) >>
         tag!(SECTION_MAGIC) >>
-        verify!(le_u32, |value| value == DHT_MAGICAL) >> // check whether beginning of the section matches DHT magic bytes
+        verify!(le_u32, |&value| value == DHT_MAGICAL) >> // check whether beginning of the section matches DHT magic bytes
         num_of_bytes: le_u32 >>
-        verify!(le_u16, |value| value == DHT_SECTION_TYPE) >> // check DHT section type
-        verify!(le_u16, |value| value == DHT_2ND_MAGICAL) >> // check whether yet another magic number matches
+        verify!(le_u16, |&value| value == DHT_SECTION_TYPE) >> // check DHT section type
+        verify!(le_u16, |&value| value == DHT_2ND_MAGICAL) >> // check whether yet another magic number matches
         nodes: flat_map!(take!(num_of_bytes), many0!(PackedNode::from_bytes)) >>
         (DhtState(nodes))
     ));
@@ -377,16 +378,16 @@ impl FromBytes for FriendState {
         fr_msg_bytes: take!(REQUEST_MSG_LEN) >>
         padding1: take!(1) >>
         fr_msg_len: be_u16 >>
-        verify!(value!(fr_msg_len), |len| len <= REQUEST_MSG_LEN as u16) >>
+        verify!(value!(fr_msg_len), |&len| len <= REQUEST_MSG_LEN as u16) >>
         fr_msg: value!(fr_msg_bytes[..fr_msg_len as usize].to_vec()) >>
         name_bytes: take!(NAME_LEN) >>
         name_len: be_u16 >>
-        verify!(value!(name_len), |len| len <= NAME_LEN as u16) >>
+        verify!(value!(name_len), |&len| len <= NAME_LEN as u16) >>
         name: value!(Name(name_bytes[..name_len as usize].to_vec())) >>
         status_msg_bytes: take!(STATUS_MSG_LEN) >>
         padding2: take!(1) >>
         status_msg_len: be_u16 >>
-        verify!(value!(status_msg_len), |len| len <= STATUS_MSG_LEN as u16) >>
+        verify!(value!(status_msg_len), |&len| len <= STATUS_MSG_LEN as u16) >>
         status_msg: value!(StatusMsg(status_msg_bytes[..status_msg_len as usize].to_vec())) >>
         user_status: call!(UserWorkingStatus::from_bytes) >>
         padding3: take!(3) >>

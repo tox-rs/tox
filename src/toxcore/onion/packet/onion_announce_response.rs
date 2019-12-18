@@ -7,7 +7,7 @@ use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
 use crate::toxcore::dht::packet::*;
 
-use nom::{le_u64, rest};
+use nom::{number::complete::le_u64, combinator::rest};
 
 /** It's used to respond to `OnionAnnounceRequest` packet.
 
@@ -39,7 +39,7 @@ pub struct OnionAnnounceResponse {
 
 impl FromBytes for OnionAnnounceResponse {
     named!(from_bytes<OnionAnnounceResponse>, do_parse!(
-        verify!(rest_len, |len| len <= ONION_MAX_PACKET_SIZE) >>
+        verify!(rest_len, |&len| len <= ONION_MAX_PACKET_SIZE) >>
         tag!(&[0x84][..]) >>
         sendback_data: le_u64 >>
         nonce: call!(Nonce::from_bytes) >>
@@ -89,17 +89,11 @@ impl OnionAnnounceResponse {
                 GetPayloadError::decrypt()
             })?;
         match OnionAnnounceResponsePayload::from_bytes(&decrypted) {
-            IResult::Incomplete(needed) => {
-                debug!(target: "Onion", "OnionAnnounceResponsePayload deserialize error: {:?}", needed);
-                Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
-            },
-            IResult::Error(e) => {
+            Err(e) => {
                 debug!(target: "Onion", "OnionAnnounceResponsePayload deserialize error: {:?}", e);
                 Err(GetPayloadError::deserialize(e, self.payload.to_vec()))
             },
-            IResult::Done(_, inner) => {
-                Ok(inner)
-            }
+            Ok((_, payload)) => Ok(payload),
         }
     }
 }
@@ -142,7 +136,8 @@ impl FromBytes for OnionAnnounceResponsePayload {
         announce_status: call!(AnnounceStatus::from_bytes) >>
         ping_id_or_pk: call!(sha256::Digest::from_bytes) >>
         nodes: many0!(PackedNode::from_bytes) >>
-        cond_reduce!(nodes.len() <= 4, eof!()) >>
+        verify!(value!(nodes.len()), |&len| len <= 4) >>
+        eof!() >>
         (OnionAnnounceResponsePayload {
             announce_status,
             ping_id_or_pk,

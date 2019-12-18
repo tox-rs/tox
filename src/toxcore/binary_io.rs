@@ -4,7 +4,7 @@
 pub use nom::IResult;
 pub use cookie_factory::GenError;
 
-use nom::{le_u8, le_u16};
+use nom::number::complete::{le_u8, le_u16};
 use std::net::{
     IpAddr,
     Ipv4Addr,
@@ -33,7 +33,7 @@ impl ToBytes for IpAddr {
 }
 
 impl FromBytes for Ipv4Addr {
-    named!(from_bytes<Ipv4Addr>, map!(count_fixed!(u8, le_u8, 4),
+    named!(from_bytes<Ipv4Addr>, map!(count!(le_u8, 4),
         |v| Ipv4Addr::new(v[0], v[1], v[2], v[3])
     ));
 }
@@ -51,7 +51,7 @@ impl ToBytes for Ipv4Addr {
 }
 
 impl FromBytes for Ipv6Addr {
-    named!(from_bytes<Ipv6Addr>, map!(count_fixed!(u16, le_u16, 8),
+    named!(from_bytes<Ipv6Addr>, map!(count!(le_u16, 8),
         |v| Ipv6Addr::new(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7])
     ));
 }
@@ -74,7 +74,7 @@ impl ToBytes for Ipv6Addr {
 
 /// Parser that returns the length of the remaining input.
 pub fn rest_len(input: &[u8]) -> IResult<&[u8], usize> {
-    IResult::Done(input, input.len())
+    Ok((input, input.len()))
 }
 
 /// Generator that ensures that length of serialized data does not exceed specified limit.

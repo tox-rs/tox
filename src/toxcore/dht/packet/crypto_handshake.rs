@@ -90,17 +90,11 @@ impl CryptoHandshake {
                 GetPayloadError::decrypt()
             })?;
         match CryptoHandshakePayload::from_bytes(&decrypted) {
-            IResult::Incomplete(needed) => {
-                debug!(target: "Dht", "CryptoHandshakePayload return deserialize error: {:?}", needed);
-                Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
-            },
-            IResult::Error(error) => {
+            Err(error) => {
                 debug!(target: "Dht", "CryptoHandshakePayload return deserialize error: {:?}", error);
                 Err(GetPayloadError::deserialize(error, self.payload.to_vec()))
             },
-            IResult::Done(_, payload) => {
-                Ok(payload)
-            }
+            Ok((_, payload)) => Ok(payload),
         }
     }
 }

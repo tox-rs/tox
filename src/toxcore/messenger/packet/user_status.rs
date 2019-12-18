@@ -1,7 +1,7 @@
 /*! UserStatus struct.
 */
 
-use nom::le_u8;
+use nom::number::complete::le_u8;
 
 use crate::toxcore::binary_io::*;
 
