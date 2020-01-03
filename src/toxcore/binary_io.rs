@@ -4,7 +4,7 @@
 pub use nom::IResult;
 pub use cookie_factory::GenError;
 
-use nom::number::complete::{le_u8, le_u16};
+use nom::number::streaming::{le_u8, le_u16};
 use std::net::{
     IpAddr,
     Ipv4Addr,

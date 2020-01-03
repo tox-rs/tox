@@ -5,7 +5,7 @@ use std::num::NonZeroU8;
 use crate::toxcore::binary_io::*;
 use crate::toxcore::tcp::links::MAX_LINKS_N;
 
-use nom::number::complete::be_u8;
+use nom::number::streaming::be_u8;
 
 /// Connection ID is either a number between [16, 255] or 0. Zero can be
 /// included in a response and means that the previous request was invalid.

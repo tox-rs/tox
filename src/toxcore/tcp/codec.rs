@@ -109,9 +109,17 @@ impl Decoder for Codec {
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         // deserialize EncryptedPacket
         let (consumed, encrypted_packet) = match EncryptedPacket::from_bytes(buf) {
-            Err(Err::Incomplete(_)) => return Ok(None),
-            Err(Err::Error(_)) => return Ok(None),
-            Err(Err::Failure(e)) => return Err(DecodeError::DeserializeEncryptedError { error: e.1, buf: buf.to_vec() }.into()),
+            Err(Err::Incomplete(_)) => {
+                return Ok(None)
+            },
+            Err(Err::Error(error)) => {
+                let (_, kind) = error;
+                return Err(DecodeError::DeserializeEncryptedError { error: kind, buf: buf.to_vec() })
+            },
+            Err(Err::Failure(error)) => {
+                let (_, kind) = error;
+                return Err(DecodeError::DeserializeEncryptedError { error: kind, buf: buf.to_vec() })
+            },
             Ok((i, encrypted_packet)) => {
                 (buf.offset(i), encrypted_packet)
             }
@@ -344,8 +352,8 @@ mod tests {
         let stats = Stats::new();
         let mut alice_codec = Codec::new(alice_channel, stats);
 
-        // not enought bytes to decode EncryptedPacket
-        assert_eq!(alice_codec.decode(&mut buf).unwrap(), None);
+        // 0-length payload is invalid
+        assert!(alice_codec.decode(&mut buf).is_err());
     }
     #[test]
     fn decode_encrypted_packet_wrong_key() {

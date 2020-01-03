@@ -3,7 +3,7 @@
 
 use crate::toxcore::binary_io::*;
 
-use nom::number::complete::be_u64;
+use nom::number::streaming::be_u64;
 
 /** Sent by both client and server, both will respond.
 The server should respond to ping packets with pong packets with the same `ping_id`

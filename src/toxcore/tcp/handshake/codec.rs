@@ -18,9 +18,10 @@ impl Decoder for ClientHandshakeCodec {
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         let (consumed, handshake) = match ClientHandshake::from_bytes(buf) {
-            Err(Err::Incomplete(_)) => return Ok(None),
-            Err(Err::Error(_)) => unreachable!("ClientHandshake cannot be deserialized with error"),
-            Err(Err::Failure(_)) => unreachable!("ClientHandshake cannot be deserialized with error"),
+            Err(Err::Incomplete(_)) => {
+                return Ok(None)
+            },
+            Err(_) => unreachable!("ClientHandshake cannot be deserialized with error"),
             Ok((i, handshake)) => {
                 (buf.offset(i), handshake)
             }
@@ -56,9 +57,10 @@ impl Decoder for ServerHandshakeCodec {
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         let (consumed, handshake) = match ServerHandshake::from_bytes(buf) {
-            Err(Err::Incomplete(_)) => return Ok(None),
-            Err(Err::Error(_)) => unreachable!("ClientHandshake cannot be deserialized with error"),
-            Err(Err::Failure(_)) => unreachable!("ClientHandshake cannot be deserialized with error"),
+            Err(Err::Incomplete(_)) => {
+                return Ok(None)
+            },
+            Err(_) => unreachable!("ServerHandshake cannot be deserialized with error"),
             Ok((i, handshake)) => {
                 (buf.offset(i), handshake)
             }
