@@ -169,6 +169,15 @@ mod tests {
         }
     );
 
+    encode_decode_test!(
+        crypto_data_payload_encode_decode_empty,
+        CryptoDataPayload {
+            buffer_start: 0,
+            packet_number: 0,
+            data: vec![],
+        }
+    );
+
     #[test]
     fn crypto_data_encrypt_decrypt() {
         crypto_init().unwrap();
