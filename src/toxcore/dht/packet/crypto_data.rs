@@ -2,6 +2,7 @@
 */
 
 use nom::{
+    bytes::complete::take_while,
     number::complete::{be_u16, be_u32},
     combinator::{rest, rest_len},
 };
@@ -130,7 +131,7 @@ impl FromBytes for CryptoDataPayload {
     named!(from_bytes<CryptoDataPayload>, do_parse!(
         buffer_start: be_u32 >>
         packet_number: be_u32 >>
-        take_while!(|b| b == 0) >>
+        call!(take_while(|b| b == 0)) >>
         data: rest >>
         (CryptoDataPayload { buffer_start, packet_number, data: data.to_vec() })
     ));
