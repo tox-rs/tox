@@ -22,7 +22,7 @@ error_kind! {
     #[derive(Debug)]
     DeserializeError,
     #[doc = "The specific kind of error that can occur."]
-    #[derive(Clone, Debug, PartialEq, Fail)]
+    #[derive(Clone, Debug, Eq, PartialEq, Fail)]
     DeserializeErrorKind {
         #[doc = "Error indicates that object can't be parsed."]
         #[fail(display = "Deserialize object error: {:?}, data: {:?}", error, data)]
@@ -37,13 +37,7 @@ error_kind! {
 
 impl DeserializeError {
     pub(crate) fn deserialize(e: Err<(&[u8], NomErrorKind)>, data: Vec<u8>) -> DeserializeError {
-        let error = match e {
-            Err::Error(e) => Err::Error((e.0.to_vec(), e.1)),
-            Err::Failure(e) => Err::Failure((e.0.to_vec(), e.1)),
-            Err::Incomplete(needed) => Err::Incomplete(needed),
-        };
-
-        DeserializeError::from(DeserializeErrorKind::Deserialize { error, data })
+        DeserializeError::from(DeserializeErrorKind::Deserialize { error: e.to_owned(), data })
     }
 }
 

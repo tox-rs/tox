@@ -21,7 +21,7 @@ error_kind! {
     #[derive(Debug)]
     DecodeError,
     #[doc = "Error that can happen when decoding `Packet` from bytes."]
-    #[derive(Clone, Debug, PartialEq, Fail)]
+    #[derive(Clone, Debug, Eq, PartialEq, Fail)]
     DecodeErrorKind {
         #[doc = "Error indicates that we received too big packet."]
         #[fail(display = "Packet should not be longer than 2048 bytes: {} bytes", len)]
@@ -49,13 +49,7 @@ impl DecodeError {
     }
 
     pub(crate) fn deserialize(e: Err<(&[u8], ErrorKind)>, packet: Vec<u8>) -> DecodeError {
-        let error = match e {
-            Err::Error(e) => Err::Error((e.0.to_vec(), e.1)),
-            Err::Failure(e) => Err::Failure((e.0.to_vec(), e.1)),
-            Err::Incomplete(needed) => Err::Incomplete(needed),
-        };
-
-        DecodeError::from(DecodeErrorKind::Deserialize { error, packet })
+        DecodeError::from(DecodeErrorKind::Deserialize { error: e.to_owned(), packet })
     }
 }
 

@@ -27,13 +27,7 @@ impl GetPayloadError {
     }
 
     pub(crate) fn deserialize(e: Err<(&[u8], ErrorKind)>, payload: Vec<u8>) -> GetPayloadError {
-        let error = match e {
-            Err::Error(e) => Err::Error((e.0.to_vec(), e.1)),
-            Err::Failure(e) => Err::Failure((e.0.to_vec(), e.1)),
-            Err::Incomplete(needed) => Err::Incomplete(needed),
-        };
-
-        GetPayloadError::from(GetPayloadErrorKind::Deserialize { error, payload })
+        GetPayloadError::from(GetPayloadErrorKind::Deserialize { error: e.to_owned(), payload })
     }
 }
 
@@ -54,7 +48,7 @@ impl fmt::Display for GetPayloadError {
 }
 
 /// The specific kind of error that can occur.
-#[derive(Clone, Debug, PartialEq, Fail)]
+#[derive(Clone, Debug, Eq, PartialEq, Fail)]
 pub enum GetPayloadErrorKind {
     /// Error indicates that received payload of encrypted packet can't be decrypted
     #[fail(display = "Decrypt payload error")]
