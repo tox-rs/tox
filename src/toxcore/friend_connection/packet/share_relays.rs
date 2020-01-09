@@ -32,7 +32,7 @@ impl FromBytes for ShareRelays {
     named!(from_bytes<ShareRelays>, do_parse!(
         tag!(&[PACKET_ID_SHARE_RELAYS][..]) >>
         relays: many0!(PackedNode::from_tcp_bytes) >>
-        cond_reduce!(relays.len() <= MAX_SHARED_RELAYS, eof!()) >>
+        verify!(value!(relays.len()), |len| *len <= MAX_SHARED_RELAYS) >>
         (ShareRelays {
             relays,
         })

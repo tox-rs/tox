@@ -1,7 +1,7 @@
 /*! File transfer packets
 */
 
-use nom::{le_u8, be_u32, be_u64};
+use nom::number::complete::{le_u8, be_u32, be_u64};
 
 use crate::toxcore::crypto_core::*;
 use crate::toxcore::binary_io::*;

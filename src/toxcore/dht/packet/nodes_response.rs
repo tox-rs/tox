@@ -1,7 +1,10 @@
 /*! NodesResponse packet
 */
 
-use nom::{le_u8, be_u64, rest};
+use nom::{
+    number::complete::{le_u8, be_u64},
+    combinator::rest,
+};
 
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
@@ -88,15 +91,11 @@ impl NodesResponse {
             })?;
 
         match NodesResponsePayload::from_bytes(&decrypted) {
-            IResult::Incomplete(needed) => {
-                debug!(target: "NodesResponse", "NodesResponsePayload deserialize error: {:?}", needed);
-                Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
-            },
-            IResult::Error(error) => {
+            Err(error) => {
                 debug!(target: "NodesResponse", "PingRequestPayload deserialize error: {:?}", error);
-                Err(GetPayloadError::deserialize(error, self.payload.to_vec()))
+                Err(GetPayloadError::deserialize(error, decrypted.clone()))
             },
-            IResult::Done(_, payload) => {
+            Ok((_, payload)) => {
                 Ok(payload)
             }
         }
@@ -144,11 +143,8 @@ impl ToBytes for NodesResponsePayload {
 
 impl FromBytes for NodesResponsePayload {
     named!(from_bytes<NodesResponsePayload>, do_parse!(
-        nodes_number: le_u8 >>
-        nodes: cond_reduce!(
-            nodes_number <= 4,
-            count!(PackedNode::from_bytes, nodes_number as usize)
-        ) >>
+        nodes_number: verify!(le_u8, |len| *len <= 4) >>
+        nodes: count!(PackedNode::from_bytes, nodes_number as usize) >>
         id: be_u64 >>
         eof!() >>
         (NodesResponsePayload { nodes, id })

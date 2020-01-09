@@ -3,6 +3,8 @@
 
 use super::*;
 
+use nom::combinator::rest_len;
+
 use crate::toxcore::binary_io::*;
 
 /** Third onion response packet. It's sent back from the destination node to the
@@ -30,7 +32,7 @@ pub struct OnionResponse3 {
 
 impl FromBytes for OnionResponse3 {
     named!(from_bytes<OnionResponse3>, do_parse!(
-        verify!(rest_len, |len| len <= ONION_MAX_PACKET_SIZE) >>
+        verify!(rest_len, |len| *len <= ONION_MAX_PACKET_SIZE) >>
         tag!(&[0x8c][..]) >>
         onion_return: flat_map!(take!(ONION_RETURN_3_SIZE), OnionReturn::from_bytes) >>
         payload: call!(InnerOnionResponse::from_bytes) >>

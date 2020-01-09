@@ -1,7 +1,7 @@
 /*! Cookie struct
 */
 
-use nom::be_u64;
+use nom::number::complete::be_u64;
 
 use std::time::SystemTime;
 
@@ -152,15 +152,11 @@ impl EncryptedCookie {
                 GetPayloadError::decrypt()
             })?;
         match Cookie::from_bytes(&decrypted) {
-            IResult::Incomplete(needed) => {
-                debug!(target: "Dht", "Cookie return deserialize error: {:?}", needed);
-                Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
-            },
-            IResult::Error(error) => {
+            Err(error) => {
                 debug!(target: "Dht", "Cookie return deserialize error: {:?}", error);
-                Err(GetPayloadError::deserialize(error, self.payload.to_vec()))
+                Err(GetPayloadError::deserialize(error, decrypted.clone()))
             },
-            IResult::Done(_, payload) => {
+            Ok((_, payload)) => {
                 Ok(payload)
             }
         }
@@ -176,7 +172,7 @@ impl EncryptedCookie {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nom::{Needed, ErrorKind};
+    use nom::{Err, error::ErrorKind};
 
     encode_decode_test!(
         cookie_encode_decode,
@@ -235,8 +231,11 @@ mod tests {
             payload: invalid_payload_encoded
         };
         let decoded_payload = invalid_encrypted_cookie.get_payload(&symmetric_key);
-        assert!(decoded_payload.is_err());
-        assert_eq!(*decoded_payload.err().unwrap().kind(), GetPayloadErrorKind::Deserialize { error: ErrorKind::Eof, payload: invalid_encrypted_cookie.payload });
+        let error = decoded_payload.err().unwrap();
+        assert_eq!(*error.kind(), GetPayloadErrorKind::Deserialize {
+            error: Err::Error((vec![42; 51], ErrorKind::Eof)),
+            payload: invalid_payload.to_vec()
+        });
         // Try short incomplete array
         let invalid_payload = [];
         let invalid_payload_encoded = secretbox::seal(&invalid_payload, &nonce, &symmetric_key);
@@ -245,8 +244,11 @@ mod tests {
             payload: invalid_payload_encoded
         };
         let decoded_payload = invalid_encrypted_cookie.get_payload(&symmetric_key);
-        assert!(decoded_payload.is_err());
-        assert_eq!(*decoded_payload.err().unwrap().kind(), GetPayloadErrorKind::IncompletePayload { needed: Needed::Size(8), payload: invalid_encrypted_cookie.payload });
+        let error = decoded_payload.err().unwrap();
+        assert_eq!(*error.kind(), GetPayloadErrorKind::Deserialize {
+            error: Err::Error((vec![], ErrorKind::Eof)),
+            payload: invalid_payload.to_vec()
+        });
     }
 
     #[test]

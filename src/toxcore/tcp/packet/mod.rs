@@ -28,7 +28,7 @@ pub use self::data::{Data, DataPayload};
 
 use crate::toxcore::binary_io::*;
 
-use nom::be_u16;
+use nom::number::streaming::be_u16;
 
 /** Top-level TCP packet.
 
@@ -122,7 +122,7 @@ pub const MAX_TCP_ENC_PACKET_PAYLOAD_SIZE: usize = 2048;
 impl FromBytes for EncryptedPacket {
     named!(from_bytes<EncryptedPacket>, do_parse!(
         length: be_u16 >>
-        verify!(value!(length), |len| len > 0 && len as usize <= MAX_TCP_ENC_PACKET_PAYLOAD_SIZE) >>
+        verify!(value!(length), |len| *len > 0 && *len as usize <= MAX_TCP_ENC_PACKET_PAYLOAD_SIZE) >>
         payload: take!(length) >>
         (EncryptedPacket { payload: payload.to_vec() })
     ));

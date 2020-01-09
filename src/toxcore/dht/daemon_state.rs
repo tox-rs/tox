@@ -15,7 +15,7 @@ use crate::toxcore::dht::kbucket::*;
 use crate::toxcore::dht::ktree::*;
 
 use failure::Fail;
-use nom::{Needed, ErrorKind as NomErrorKind};
+use nom::{Err, error::ErrorKind as NomErrorKind};
 
 error_kind! {
     #[doc = "An error that can occur while serializing/deserializing object."]
@@ -28,15 +28,7 @@ error_kind! {
         #[fail(display = "Deserialize object error: {:?}, data: {:?}", error, data)]
         Deserialize {
             #[doc = "Parsing error."]
-            error: NomErrorKind,
-            #[doc = "Object serialized data."]
-            data: Vec<u8>,
-        },
-        #[doc = "Error indicates that more data is needed to parse serialized object."]
-        #[fail(display = "Bytes of object should not be incomplete: {:?}, data: {:?}", needed, data)]
-        IncompleteData {
-            #[doc = "Required data size to be parsed."]
-            needed: Needed,
+            error: nom::Err<(Vec<u8>, NomErrorKind)>,
             #[doc = "Object serialized data."]
             data: Vec<u8>,
         },
@@ -44,12 +36,8 @@ error_kind! {
 }
 
 impl DeserializeError {
-    pub(crate) fn incomplete(needed: Needed, data: Vec<u8>) -> DeserializeError {
-        DeserializeError::from(DeserializeErrorKind::IncompleteData { needed, data })
-    }
-
-    pub(crate) fn deserialize(error: NomErrorKind, data: Vec<u8>) -> DeserializeError {
-        DeserializeError::from(DeserializeErrorKind::Deserialize { error, data })
+    pub(crate) fn deserialize(e: Err<(&[u8], NomErrorKind)>, data: Vec<u8>) -> DeserializeError {
+        DeserializeError::from(DeserializeErrorKind::Deserialize { error: e.to_owned(), data })
     }
 }
 
@@ -86,11 +74,12 @@ impl DaemonState {
     /// Deserialize DHT close list and then re-setup close list, old means that the format of deserialization is old version
     pub fn deserialize_old(server: &Server, serialized_data: &[u8]) -> impl Future<Item=(), Error=DeserializeError> + Send {
         let nodes = match DhtState::from_bytes(serialized_data) {
-            IResult::Done(_, DhtState(nodes)) => nodes,
-            IResult::Incomplete(needed) =>
-                return Either::A(future::err(DeserializeError::incomplete(needed, serialized_data.to_vec()))),
-            IResult::Error(error) =>
-                return Either::A(future::err(DeserializeError::deserialize(error, serialized_data.to_vec()))),
+            Err(error) => {
+                return Either::A(future::err(DeserializeError::deserialize(error, serialized_data.to_vec())))
+            },
+            Ok((_, DhtState(nodes))) => {
+                nodes
+            }
         };
 
         let nodes_sender = nodes.iter()
@@ -147,14 +136,18 @@ mod tests {
         let serialized_vec = DaemonState::serialize_old(&alice);
         let serialized_len = serialized_vec.len();
         let res = DaemonState::deserialize_old(&alice, &serialized_vec[..serialized_len - 1]).wait();
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), DeserializeErrorKind::IncompleteData { needed: Needed::Size(55), data: serialized_vec[..serialized_len - 1].to_vec() });
+        let error = res.err().unwrap();
+        let mut input = vec![2, 1, 2, 3, 4, 4, 210];
+        input.extend_from_slice(&pk_org.0[..PUBLICKEYBYTES - 1]);
+        assert_eq!(*error.kind(), DeserializeErrorKind::Deserialize { error: Err::Error((
+            input, NomErrorKind::Eof)), data: serialized_vec[..serialized_len - 1].to_vec() });
 
         // test with serialized data corrupted
         let serialized_vec = [42; 10];
         let res = DaemonState::deserialize_old(&alice, &serialized_vec).wait();
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), DeserializeErrorKind::Deserialize { error: NomErrorKind::Tag, data: serialized_vec.to_vec() });
+        let error = res.err().unwrap();
+        assert_eq!(*error.kind(), DeserializeErrorKind::Deserialize { error: Err::Error((
+            vec![42; 10], NomErrorKind::Tag)), data: serialized_vec.to_vec() });
 
         // test with empty close list
         alice.close_nodes.write().remove(&pk_org);

@@ -1,7 +1,7 @@
 /*! CookieResponse packet
 */
 
-use nom::be_u64;
+use nom::number::complete::be_u64;
 
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
@@ -77,15 +77,11 @@ impl CookieResponse {
                 GetPayloadError::decrypt()
             })?;
         match CookieResponsePayload::from_bytes(&decrypted) {
-            IResult::Incomplete(needed) => {
-                debug!(target: "Dht", "CookieResponsePayload return deserialize error: {:?}", needed);
-                Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
-            },
-            IResult::Error(error) => {
+            Err(error) => {
                 debug!(target: "Dht", "CookieResponsePayload return deserialize error: {:?}", error);
-                Err(GetPayloadError::deserialize(error, self.payload.to_vec()))
+                Err(GetPayloadError::deserialize(error, decrypted.clone()))
             },
-            IResult::Done(_, payload) => {
+            Ok((_, payload)) => {
                 Ok(payload)
             }
         }
@@ -134,7 +130,7 @@ impl ToBytes for CookieResponsePayload {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nom::{Needed, ErrorKind};
+    use nom::{Needed, Err, error::ErrorKind};
 
     encode_decode_test!(
         cookie_response_encode_decode,
@@ -214,8 +210,11 @@ mod tests {
             payload: invalid_payload_encoded
         };
         let decoded_payload = invalid_packet.get_payload(&shared_secret);
-        assert!(decoded_payload.is_err());
-        assert_eq!(*decoded_payload.err().unwrap().kind(), GetPayloadErrorKind::Deserialize { error: ErrorKind::Eof, payload: invalid_packet.payload });
+        let error = decoded_payload.err().unwrap();
+        assert_eq!(*error.kind(), GetPayloadErrorKind::Deserialize {
+            error: Err::Error((vec![42; 3], ErrorKind::Eof)),
+            payload: invalid_payload.to_vec()
+        });
         // Try short incomplete array
         let invalid_payload = [];
         let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
@@ -224,7 +223,10 @@ mod tests {
             payload: invalid_payload_encoded
         };
         let decoded_payload = invalid_packet.get_payload(&shared_secret);
-        assert!(decoded_payload.is_err());
-        assert_eq!(*decoded_payload.err().unwrap().kind(), GetPayloadErrorKind::IncompletePayload { needed: Needed::Size(24), payload: invalid_packet.payload });
+        let error = decoded_payload.err().unwrap();
+        assert_eq!(*error.kind(), GetPayloadErrorKind::Deserialize {
+            error: Err::Incomplete(Needed::Size(24)),
+            payload: invalid_payload.to_vec()
+        });
     }
 }

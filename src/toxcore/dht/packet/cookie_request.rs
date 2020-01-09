@@ -1,7 +1,7 @@
 /*! CookieRequest packet
 */
 
-use nom::be_u64;
+use nom::number::complete::be_u64;
 
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
@@ -92,15 +92,11 @@ impl CookieRequest {
                 GetPayloadError::decrypt()
             })?;
         match CookieRequestPayload::from_bytes(&decrypted) {
-            IResult::Incomplete(needed) => {
-                debug!(target: "Dht", "CookieRequestPayload return deserialize error: {:?}", needed);
-                Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
-            },
-            IResult::Error(error) => {
+            Err(error) => {
                 debug!(target: "Dht", "CookieRequestPayload return deserialize error: {:?}", error);
-                Err(GetPayloadError::deserialize(error, self.payload.to_vec()))
+                Err(GetPayloadError::deserialize(error, decrypted.clone()))
             },
-            IResult::Done(_, payload) => {
+            Ok((_, payload)) => {
                 Ok(payload)
             }
         }

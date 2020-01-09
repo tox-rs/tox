@@ -90,15 +90,11 @@ impl CryptoHandshake {
                 GetPayloadError::decrypt()
             })?;
         match CryptoHandshakePayload::from_bytes(&decrypted) {
-            IResult::Incomplete(needed) => {
-                debug!(target: "Dht", "CryptoHandshakePayload return deserialize error: {:?}", needed);
-                Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
-            },
-            IResult::Error(error) => {
+            Err(error) => {
                 debug!(target: "Dht", "CryptoHandshakePayload return deserialize error: {:?}", error);
-                Err(GetPayloadError::deserialize(error, self.payload.to_vec()))
+                Err(GetPayloadError::deserialize(error, decrypted.clone()))
             },
-            IResult::Done(_, payload) => {
+            Ok((_, payload)) => {
                 Ok(payload)
             }
         }
@@ -167,7 +163,7 @@ impl ToBytes for CryptoHandshakePayload {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nom::Needed;
+    use nom::{Needed, Err};
 
     encode_decode_test!(
         crypto_handshake_encode_decode,
@@ -246,8 +242,8 @@ mod tests {
         let dht_packet = CryptoHandshake::new(&shared_secret, &payload, cookie);
         // try to decode payload with eve's shared secret
         let decoded_payload = dht_packet.get_payload(&eve_shared_secret);
-        assert!(decoded_payload.is_err());
-        assert_eq!(*decoded_payload.err().unwrap().kind(), GetPayloadErrorKind::Decrypt);
+        let error = decoded_payload.err().unwrap();
+        assert_eq!(*error.kind(), GetPayloadErrorKind::Decrypt);
     }
 
     #[test]
@@ -270,8 +266,11 @@ mod tests {
             payload: invalid_payload_encoded
         };
         let decoded_payload = invalid_packet.get_payload(&shared_secret);
-        assert!(decoded_payload.is_err());
-        assert_eq!(*decoded_payload.err().unwrap().kind(), GetPayloadErrorKind::IncompletePayload { needed: Needed::Size(144), payload: invalid_packet.payload });
+        let error = decoded_payload.err().unwrap();
+        assert_eq!(*error.kind(), GetPayloadErrorKind::Deserialize {
+            error: Err::Incomplete(Needed::Size(24)),
+            payload: invalid_payload.to_vec()
+        });
         // Try short incomplete array
         let invalid_payload = [];
         let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
@@ -281,7 +280,10 @@ mod tests {
             payload: invalid_payload_encoded
         };
         let decoded_payload = invalid_packet.get_payload(&shared_secret);
-        assert!(decoded_payload.is_err());
-        assert_eq!(*decoded_payload.err().unwrap().kind(), GetPayloadErrorKind::IncompletePayload { needed: Needed::Size(24), payload: invalid_packet.payload });
+        let error = decoded_payload.err().unwrap();
+        assert_eq!(*error.kind(), GetPayloadErrorKind::Deserialize {
+            error: Err::Incomplete(Needed::Size(24)),
+            payload: invalid_payload.to_vec()
+        });
     }
 }

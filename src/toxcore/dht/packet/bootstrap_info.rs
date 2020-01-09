@@ -1,7 +1,10 @@
 /*! BootstrapInfo packet
 */
 
-use nom::{be_u32, rest};
+use nom::{
+    number::complete::be_u32,
+    combinator::rest,
+};
 
 use crate::toxcore::binary_io::*;
 

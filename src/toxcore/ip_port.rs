@@ -7,7 +7,10 @@ use std::net::{
     SocketAddr,
 };
 
-use nom::{be_u16, le_u8, IResult};
+use nom::{
+    IResult,
+    number::complete::{be_u16, le_u8},
+};
 
 use crate::toxcore::binary_io::*;
 

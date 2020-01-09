@@ -2,7 +2,10 @@
 It is used to start transferring file to a friend.
 */
 
-use nom::rest;
+use nom::{
+    combinator::rest,
+    number::complete::le_u8,
+};
 
 use std::str;
 

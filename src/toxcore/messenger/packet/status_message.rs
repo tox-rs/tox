@@ -4,7 +4,7 @@ This packet is sent to my friends every time they become online, or whenever my 
 */
 
 use std::str;
-use nom::rest;
+use nom::combinator::rest;
 
 use crate::toxcore::binary_io::*;
 

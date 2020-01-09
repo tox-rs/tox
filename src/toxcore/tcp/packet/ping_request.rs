@@ -3,7 +3,7 @@
 
 use crate::toxcore::binary_io::*;
 
-use nom::be_u64;
+use nom::number::streaming::be_u64;
 
 /** Sent by both client and server, both will respond.
 Ping packets are used to know if the other side of the connection is still

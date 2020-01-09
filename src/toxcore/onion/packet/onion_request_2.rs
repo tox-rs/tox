@@ -3,6 +3,8 @@
 
 use super::*;
 
+use nom::combinator::rest_len;
+
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
 use crate::toxcore::dht::packet::*;
@@ -38,15 +40,12 @@ pub struct OnionRequest2 {
 
 impl FromBytes for OnionRequest2 {
     named!(from_bytes<OnionRequest2>, do_parse!(
-        verify!(rest_len, |len| len <= ONION_MAX_PACKET_SIZE) >>
+        verify!(rest_len, |len| *len <= ONION_MAX_PACKET_SIZE) >>
         tag!(&[0x82][..]) >>
         nonce: call!(Nonce::from_bytes) >>
         temporary_pk: call!(PublicKey::from_bytes) >>
-        rest_len: rest_len >>
-        payload: cond_reduce!(
-            rest_len >= ONION_RETURN_2_SIZE,
-            take!(rest_len - ONION_RETURN_2_SIZE)
-        ) >>
+        rest_len: verify!(rest_len, |rest_len| *rest_len >= ONION_RETURN_2_SIZE) >>
+        payload: take!(rest_len - ONION_RETURN_2_SIZE) >>
         onion_return: call!(OnionReturn::from_bytes) >>
         (OnionRequest2 {
             nonce,
@@ -95,15 +94,11 @@ impl OnionRequest2 {
                 GetPayloadError::decrypt()
             })?;
         match OnionRequest2Payload::from_bytes(&decrypted) {
-            IResult::Incomplete(needed) => {
-                debug!(target: "Onion", "OnionRequest2Payload deserialize error: {:?}", needed);
-                Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
+            Err(error) => {
+                debug!(target: "Onion", "OnionRequest2Payload deserialize error: {:?}", error);
+                Err(GetPayloadError::deserialize(error, decrypted.clone()))
             },
-            IResult::Error(e) => {
-                debug!(target: "Onion", "OnionRequest2Payload deserialize error: {:?}", e);
-                Err(GetPayloadError::deserialize(e, self.payload.to_vec()))
-            },
-            IResult::Done(_, inner) => {
+            Ok((_, inner)) => {
                 Ok(inner)
             }
         }
