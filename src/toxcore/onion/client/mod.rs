@@ -409,7 +409,7 @@ impl OnionClient {
     }
 
     /// Handle `OnionAnnounceResponse` packet.
-    pub fn handle_announce_response(&self, packet: &OnionAnnounceResponse, addr: SocketAddr) -> impl Future<Item = (), Error = HandleAnnounceResponseError> + Send {
+    pub fn handle_announce_response(&self, packet: &OnionAnnounceResponse, is_global: bool) -> impl Future<Item = (), Error = HandleAnnounceResponseError> + Send {
         let state = &mut *self.state.lock();
 
         let announce_data = if let Some(announce_data) = state.announce_requests.check_ping_id(packet.sendback_data, |_| true) {
@@ -487,7 +487,7 @@ impl OnionClient {
 
         for node in &payload.nodes {
             // skip LAN nodes if the packet wasn't received from LAN
-            if !IsGlobal::is_global(&node.ip()) && IsGlobal::is_global(&addr.ip()) {
+            if !IsGlobal::is_global(&node.ip()) && is_global {
                 continue;
             }
 
@@ -1303,7 +1303,7 @@ mod tests {
         };
         let packet = OnionAnnounceResponse::new(&precompute(&real_pk, &sender_sk), request_id, &payload);
 
-        onion_client.handle_announce_response(&packet, saddr).wait().unwrap();
+        onion_client.handle_announce_response(&packet, true).wait().unwrap();
 
         let state = onion_client.state.lock();
 
@@ -1376,7 +1376,7 @@ mod tests {
         };
         let packet = OnionAnnounceResponse::new(&precompute(&friend_temporary_pk, &sender_sk), request_id, &payload);
 
-        let error = onion_client.handle_announce_response(&packet, saddr).wait().err().unwrap();
+        let error = onion_client.handle_announce_response(&packet, true).wait().err().unwrap();
         assert_eq!(error.kind(), &HandleAnnounceResponseErrorKind::InvalidAnnounceStatus);
     }
 
@@ -1432,7 +1432,7 @@ mod tests {
         };
         let packet = OnionAnnounceResponse::new(&precompute(&real_pk, &sender_sk), request_id, &payload);
 
-        onion_client.handle_announce_response(&packet, saddr).wait().unwrap();
+        onion_client.handle_announce_response(&packet, true).wait().unwrap();
 
         // Necessary to drop tx so that rx.collect() can be finished
         drop(onion_client);
@@ -1497,7 +1497,7 @@ mod tests {
         };
         let packet = OnionAnnounceResponse::new(&precompute(&friend_temporary_pk, &sender_sk), request_id, &payload);
 
-        onion_client.handle_announce_response(&packet, saddr).wait().unwrap();
+        onion_client.handle_announce_response(&packet, true).wait().unwrap();
 
         let state = onion_client.state.lock();
 
@@ -1565,7 +1565,7 @@ mod tests {
         };
         let packet = OnionAnnounceResponse::new(&precompute(&real_pk, &sender_sk), request_id, &payload);
 
-        let error = onion_client.handle_announce_response(&packet, saddr).wait().err().unwrap();
+        let error = onion_client.handle_announce_response(&packet, true).wait().err().unwrap();
         assert_eq!(error.kind(), &HandleAnnounceResponseErrorKind::InvalidAnnounceStatus);
     }
 
@@ -1607,7 +1607,7 @@ mod tests {
         };
         let packet = OnionAnnounceResponse::new(&precompute(&friend_temporary_pk, &sender_sk), request_id, &payload);
 
-        let error = onion_client.handle_announce_response(&packet, saddr).wait().err().unwrap();
+        let error = onion_client.handle_announce_response(&packet, true).wait().err().unwrap();
         assert_eq!(error.kind(), &HandleAnnounceResponseErrorKind::NoFriendWithPk);
     }
 
@@ -1649,7 +1649,7 @@ mod tests {
             payload: vec![42; 123],
         };
 
-        let error = onion_client.handle_announce_response(&packet, saddr).wait().err().unwrap();
+        let error = onion_client.handle_announce_response(&packet, true).wait().err().unwrap();
         assert_eq!(error.kind(), &HandleAnnounceResponseErrorKind::InvalidPayload);
     }
 
@@ -1712,7 +1712,7 @@ mod tests {
         };
         let packet = OnionAnnounceResponse::new(&precompute(&friend_temporary_pk, &sender_sk), request_id, &payload);
 
-        onion_client.handle_announce_response(&packet, saddr).wait().unwrap();
+        onion_client.handle_announce_response(&packet, true).wait().unwrap();
 
         // Necessary to drop tx so that rx.collect() can be finished
         drop(onion_client);

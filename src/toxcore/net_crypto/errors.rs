@@ -6,6 +6,8 @@ use std::net::SocketAddr;
 
 use failure::Fail;
 
+use crate::toxcore::crypto_core::*;
+
 error_kind! {
     #[doc = "Error that can happen while processing packets array"]
     #[derive(Debug)]
@@ -102,9 +104,15 @@ error_kind! {
         },
         #[doc = "Error indicates that no crypto connection for address."]
         #[fail(display = "No crypto connection for address: {:?}", addr)]
-        NoConnection {
+        NoUdpConnection {
             #[doc = "The address for connection which don't exist."]
             addr: SocketAddr,
+        },
+        #[doc = "Error indicates that no crypto connection for address."]
+        #[fail(display = "No crypto connection for DHT key: {:?}", pk)]
+        NoTcpConnection {
+            #[doc = "The DHT key for connection which don't exist."]
+            pk: PublicKey,
         },
         #[doc = "Unexpected crypto handshake."]
         #[fail(display = "Unexpected crypto handshake")]
@@ -144,9 +152,15 @@ impl HandlePacketError {
         })
     }
 
-    pub(crate) fn no_connection(addr: SocketAddr) -> HandlePacketError {
-        HandlePacketError::from(HandlePacketErrorKind::NoConnection {
+    pub(crate) fn no_udp_connection(addr: SocketAddr) -> HandlePacketError {
+        HandlePacketError::from(HandlePacketErrorKind::NoUdpConnection {
             addr,
+        })
+    }
+
+    pub(crate) fn no_tcp_connection(pk: PublicKey) -> HandlePacketError {
+        HandlePacketError::from(HandlePacketErrorKind::NoTcpConnection {
+            pk,
         })
     }
 
