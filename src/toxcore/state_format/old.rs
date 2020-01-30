@@ -410,7 +410,7 @@ impl FromBytes for FriendState {
 }
 
 impl ToBytes for FriendState {
-    #[allow(clippy::cyclomatic_complexity)]
+    #[allow(clippy::cognitive_complexity)]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         let mut fr_msg_pad = self.fr_msg.clone();
         let mut name_pad = self.name.0.clone();

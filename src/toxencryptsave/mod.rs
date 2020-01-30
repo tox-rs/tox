@@ -113,12 +113,10 @@ impl PassKey {
     E.g.
 
     ```
-    # fn main() {
     use sodiumoxide::crypto::pwhash::gen_salt;
     use tox::toxencryptsave::*;
 
     assert_eq!(PassKey::with_salt(&[], gen_salt()), Err(KeyDerivationError::Null));
-    # }
     ```
     */
     pub fn with_salt(passphrase: &[u8], salt: Salt) -> Result<PassKey, KeyDerivationError> {

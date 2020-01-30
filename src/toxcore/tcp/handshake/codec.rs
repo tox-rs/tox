@@ -5,9 +5,9 @@ use crate::toxcore::binary_io::*;
 use crate::toxcore::tcp::handshake::packet::*;
 
 use nom::{Err, Offset};
-use bytes::BytesMut;
+use bytes::{BytesMut, Buf};
 use std::io::{Error, ErrorKind};
-use tokio::codec::{Decoder, Encoder};
+use tokio_util::codec::{Decoder, Encoder};
 
 /// implements tokio-io's Decoder and Encoder to deal with Client handshake
 pub struct ClientHandshakeCodec;
@@ -26,7 +26,7 @@ impl Decoder for ClientHandshakeCodec {
                 (buf.offset(i), handshake)
             }
         };
-        buf.split_to(consumed);
+        buf.advance(consumed);
         Ok(Some(handshake))
     }
 }
@@ -65,7 +65,7 @@ impl Decoder for ServerHandshakeCodec {
                 (buf.offset(i), handshake)
             }
         };
-        buf.split_to(consumed);
+        buf.advance(consumed);
         Ok(Some(handshake))
     }
 }

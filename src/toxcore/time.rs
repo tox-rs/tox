@@ -1,15 +1,6 @@
 //! Functions to work with time
 
-#[cfg(test)]
-use std::sync::Arc;
 use std::time::{Duration, SystemTime, Instant, UNIX_EPOCH};
-
-#[cfg(test)]
-use parking_lot::RwLock;
-#[cfg(test)]
-use tokio_timer::clock;
-#[cfg(test)]
-use tokio_timer::clock::Now;
 
 /// Return number of seconds that have elapsed since Unix epoch.
 pub fn unix_time(time: SystemTime) -> u64 {
@@ -22,7 +13,7 @@ pub fn unix_time(time: SystemTime) -> u64 {
 /// `tokio_timer::clock::now()` to have zero cost mocked time.
 #[cfg(test)]
 pub fn clock_now() -> Instant {
-    clock::now()
+    tokio::time::Instant::now().into_std()
 }
 
 /// Returns an `Instant` corresponding to "now". Should be used instead of
@@ -39,64 +30,20 @@ pub fn clock_elapsed(time: Instant) -> Duration {
     clock_now() - time
 }
 
-/// Constant time mock for `tokio_timer::clock::now()`
-#[cfg(test)]
-pub struct ConstNow(pub Instant);
-
-#[cfg(test)]
-impl Now for ConstNow {
-    fn now(&self) -> Instant {
-        self.0
-    }
-}
-
-/// Mutable mock for `tokio_timer::clock::now()`
-#[cfg(test)]
-#[derive(Clone)]
-pub struct MutNow {
-    instant: Arc<RwLock<Instant>>,
-}
-
-#[cfg(test)]
-impl MutNow {
-    /// Create new `MutNow`.
-    pub fn new(instant: Instant) -> MutNow {
-        MutNow {
-            instant: Arc::new(RwLock::new(instant)),
-        }
-    }
-
-    /// Set new `Instant` to return.
-    pub fn set(&self, instant: Instant) {
-        *self.instant.write() = instant;
-    }
-}
-
-#[cfg(test)]
-impl Now for MutNow {
-    fn now(&self) -> Instant {
-        *self.instant.read()
-    }
-}
-
 #[cfg(test)]
 pub mod tests {
-    use super::*;
+    use super::{clock_now, clock_elapsed};
 
-    use tokio_executor;
-    use tokio_timer::clock::*;
+    #[tokio::test]
+    async fn const_elapsed() {
+        tokio::time::pause();
 
-    #[test]
-    fn const_elapsed() {
         let now = clock_now();
-        let duration = Duration::from_secs(42);
+        let duration = std::time::Duration::from_secs(42);
 
-        let clock = Clock::new_with_now(ConstNow(now + duration));
-        let mut enter = tokio_executor::enter().unwrap();
+        tokio::time::advance(duration).await;
 
-        with_default(&clock, &mut enter, |_| {
-            let elapsed = clock_elapsed(now);
-            assert_eq!(elapsed, duration);
-        });
+        let elapsed = clock_elapsed(now);
+        assert_eq!(elapsed, duration);
     }
 }

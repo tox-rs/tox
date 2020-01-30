@@ -230,19 +230,3 @@ impl KbucketNode for DhtNode {
         )
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn dht_node_clonable() {
-        crypto_init().unwrap();
-        let pn = PackedNode {
-            pk: gen_keypair().0,
-            saddr: "127.0.0.1:33445".parse().unwrap(),
-        };
-        let dht_node = DhtNode::new(pn);
-        let _ = dht_node.clone();
-    }
-}

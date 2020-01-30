@@ -3,10 +3,9 @@
 #[macro_use]
 extern crate log;
 
-use futures::*;
-use futures::sync::mpsc;
+use futures::{*, future::TryFutureExt};
+use futures::channel::mpsc;
 use hex::FromHex;
-use tokio::net::UdpSocket;
 use failure::{err_msg, Error};
 
 use std::net::SocketAddr;
@@ -27,26 +26,7 @@ use tox::toxcore::tcp::packet::DataPayload;
 use tox::toxcore::stats::Stats;
 use tox::toxcore::toxid::ToxId;
 
-const BOOTSTRAP_NODES: [(&str, &str); 9] = [
-    // Impyy
-    ("1D5A5F2F5D6233058BF0259B09622FB40B482E4FA0931EB8FD3AB8E7BF7DAF6F", "198.98.51.198:33445"),
-    // nurupo
-    ("F404ABAA1C99A9D37D61AB54898F56793E1DEF8BD46B1038B9D822E8460FAB67", "67.215.253.85:33445"),
-    // Manolis
-    ("461FA3776EF0FA655F1A05477DF1B3B614F7D6B124F7DB1DD4FE3C08B03B640F", "130.133.110.14:33445"),
-    // Busindre
-    ("A179B09749AC826FF01F37A9613F6B57118AE014D4196A0E1105A98F93A54702", "205.185.116.116:33445"),
-    // ray65536
-    ("8E7D0B859922EF569298B4D261A8CCB5FEA14FB91ED412A7603A585A25698832", "85.172.30.117:33445"),
-    // fluke571
-    ("3CEE1F054081E7A011234883BC4FC39F661A55B73637A5AC293DDF1251D9432B", "194.249.212.109:33445"),
-    // MAH69K
-    ("DA4E4ED4B697F2E9B000EEFE3A34B554ACD3F45F5C96EAEA2516DD7FF9AF7B43", "185.25.116.107:33445"),
-    // clearmartin
-    ("CD133B521159541FB1D326DE9850F5E56A6C724B5B8E5EB5CD8D950408E95707", "46.101.197.175:443"),
-    // tastytea
-    ("2B2137E094F743AC8BD44652C55F41DFACC502F125E99E4FE24D40537489E32F", "5.189.176.217:5190"),
-];
+mod common;
 
 const TCP_RELAYS: [(&str, &str); 5] = [
     // ray65536
@@ -61,17 +41,7 @@ const TCP_RELAYS: [(&str, &str); 5] = [
     ("82EF82BA33445A1F91A7DB27189ECFC0C013E06E3DA71F588ED692BED625EC23", "37.139.29.40:33445"),
 ];
 
-/// Bind a UDP listener to the socket address.
-fn bind_socket(addr: SocketAddr) -> UdpSocket {
-    let socket = UdpSocket::bind(&addr).expect("Failed to bind UDP socket");
-    socket.set_broadcast(true).expect("set_broadcast call failed");
-    if addr.is_ipv6() {
-        socket.set_multicast_loop_v6(true).expect("set_multicast_loop_v6 call failed");
-    }
-    socket
-}
-
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
     let (dht_pk, dht_sk) = gen_keypair();
@@ -84,172 +54,195 @@ fn main() {
     // Create a channel for server to communicate with network
     let (tx, rx) = mpsc::channel(32);
 
-    let local_addr: SocketAddr = "0.0.0.0:33447".parse().unwrap(); // 0.0.0.0 for IPv4
+    let local_addr: SocketAddr = "0.0.0.0:33447".parse()?; // 0.0.0.0 for IPv4
     // let local_addr: SocketAddr = "[::]:33445".parse().unwrap(); // [::] for IPv6
-
-    let socket = bind_socket(local_addr);
-    let stats = Stats::new();
-
-    let lan_discovery_sender = LanDiscoverySender::new(tx.clone(), dht_pk, local_addr.is_ipv6());
-
-    let (tcp_incoming_tx, tcp_incoming_rx) = mpsc::unbounded();
-
-    let mut dht_server = Server::new(tx.clone(), dht_pk, dht_sk.clone());
-    dht_server.enable_lan_discovery(true);
-    dht_server.enable_ipv6_mode(local_addr.is_ipv6());
-
-    let tcp_connections = Connections::new(dht_pk, dht_sk.clone(), tcp_incoming_tx);
-    let onion_client = OnionClient::new(dht_server.clone(), tcp_connections.clone(), real_sk.clone(), real_pk);
-
-    let (lossless_tx, lossless_rx) = mpsc::unbounded();
-    let (lossy_tx, lossy_rx) = mpsc::unbounded();
-
-    let (friend_request_tx, friend_request_sink_rx) = mpsc::unbounded();
-    onion_client.set_friend_request_sink(friend_request_tx);
-
-    let net_crypto = NetCrypto::new(NetCryptoNewArgs {
-        udp_tx: tx,
-        lossless_tx,
-        lossy_tx,
-        dht_pk,
-        dht_sk,
-        real_pk,
-        real_sk: real_sk.clone(),
-        precomputed_keys: dht_server.get_precomputed_keys(),
-    });
-
-    let (net_crypto_tcp_tx, net_crypto_tcp_rx) = mpsc::channel(32);
-    net_crypto.set_tcp_sink(net_crypto_tcp_tx);
-
-    dht_server.set_net_crypto(net_crypto.clone());
-    dht_server.set_onion_client(onion_client.clone());
-
-    let friend_connections = FriendConnections::new(
-        real_sk,
-        real_pk,
-        dht_server.clone(),
-        tcp_connections.clone(),
-        onion_client.clone(),
-        net_crypto.clone(),
-    );
-
-    // Bootstrap from nodes
-    for &(pk, saddr) in &BOOTSTRAP_NODES {
-        // get PK bytes of the bootstrap node
-        let bootstrap_pk_bytes: [u8; 32] = FromHex::from_hex(pk).unwrap();
-        // create PK from bytes
-        let bootstrap_pk = PublicKey::from_slice(&bootstrap_pk_bytes).unwrap();
-
-        let node = PackedNode::new(saddr.parse().unwrap(), &bootstrap_pk);
-
-        dht_server.add_initial_bootstrap(node);
-        onion_client.add_path_node(node);
-    }
-
-    // Add TCP relays
-    let relays_futures = TCP_RELAYS.iter().map(|&(pk, saddr)| {
-        // get PK bytes of the relay
-        let relay_pk_bytes: [u8; 32] = FromHex::from_hex(pk).unwrap();
-        // create PK from bytes
-        let relay_pk = PublicKey::from_slice(&relay_pk_bytes).unwrap();
-
-        tcp_connections.add_relay_global(saddr.parse().unwrap(), relay_pk)
-    }).collect::<Vec<_>>();
-
-    let tcp_connections_c = tcp_connections.clone();
-    let net_crypto_tcp_future = net_crypto_tcp_rx
-        .map_err(|()| unreachable!("rx can't fail"))
-        .for_each(move |(packet, pk)| tcp_connections_c.send_data(pk, packet));
-
-    let onion_client_c = onion_client.clone();
-    let net_crypto_c = net_crypto.clone();
-    let tcp_incoming_future = tcp_incoming_rx
-        .map_err(|()| unreachable!("rx can't fail"))
-        .for_each(move |(_relay_pk, packet)| { // TODO: do we need relay_pk at all?
-            let future = match packet {
-                IncomingPacket::Data(sender_pk, packet) => match packet {
-                    DataPayload::CookieRequest(packet) => Box::new(net_crypto_c.handle_tcp_cookie_request(&packet, sender_pk).map_err(Error::from)) as Box<dyn Future<Item = _, Error = _> + Send>,
-                    DataPayload::CookieResponse(packet) => Box::new(net_crypto_c.handle_tcp_cookie_response(&packet, sender_pk).map_err(Error::from)),
-                    DataPayload::CryptoHandshake(packet) => Box::new(net_crypto_c.handle_tcp_crypto_handshake(&packet, sender_pk).map_err(Error::from)),
-                    DataPayload::CryptoData(packet) => Box::new(net_crypto_c.handle_tcp_crypto_data(&packet, sender_pk).map_err(Error::from)),
-                },
-                IncomingPacket::Oob(_sender_pk, _packet) => Box::new(future::ok(())),
-                IncomingPacket::Onion(packet) => match packet {
-                    InnerOnionResponse::OnionAnnounceResponse(packet) => Box::new(onion_client_c.handle_announce_response(&packet, true).map_err(Error::from)) as Box<dyn Future<Item = _, Error = _> + Send>,
-                    InnerOnionResponse::OnionDataResponse(packet) => Box::new(onion_client_c.handle_data_response(&packet).map_err(Error::from)),
-                },
-            };
-            future.or_else(|err| {
-                error!("Failed to handle packet: {:?}", err);
-                future::ok(())
-            })
-        });
-
-    let net_crypto_c = net_crypto.clone();
-    let friend_connections_c = friend_connections.clone();
-    let lossless_future = lossless_rx
-        .map_err(|()| unreachable!("rx can't fail"))
-        .for_each(move |(pk, packet)| {
-            match packet[0] {
-                PACKET_ID_ALIVE => {
-                    friend_connections_c.handle_ping(pk);
-                    Box::new(future::ok(())) as Box<dyn Future<Item = _, Error = _> + Send>
-                },
-                PACKET_ID_SHARE_RELAYS => {
-                    match ShareRelays::from_bytes(&packet) {
-                        Ok((_, share_relays)) =>
-                            Box::new(friend_connections_c.handle_share_relays(pk, share_relays)
-                                .map_err(Error::from))
-                                    as Box<dyn Future<Item = _, Error = _> + Send>,
-                        _ => Box::new(future::err(err_msg("Failed to parse ShareRelays")))
-                    }
-                },
-                0x18 => { // PACKET_ID_ONLINE
-                    let online_future = net_crypto_c.send_lossless(pk, vec![0x18]);
-                    let name_future = net_crypto_c.send_lossless(pk, b"\x30tox-rs".to_vec());
-                    Box::new(online_future.join(name_future).map(|_| ()).map_err(Error::from))
-                },
-                0x40 => { // PACKET_ID_CHAT_MESSAGE
-                    Box::new(net_crypto_c.send_lossless(pk, packet).map_err(Error::from))
-                },
-                _ => Box::new(future::ok(())),
-            }
-        });
-
-    // handle incoming friend connections by just accepting all of them
-    let friend_connection_c = friend_connections.clone();
-    let friend_future = friend_request_sink_rx
-        .map_err(|()| unreachable!("rx can't fail"))
-        .for_each(move |(pk, _)| {
-            friend_connection_c.add_friend(pk);
-            future::ok(())
-        });
-
-    let lossy_future = lossy_rx
-        .map_err(|()| unreachable!("rx can't fail"))
-        .for_each(|_| future::ok(()));
-
-    let futures = vec![
-        Box::new(dht_server.run_socket(socket, rx, stats).map_err(Error::from)) as Box<dyn Future<Item = _, Error = _> + Send>,
-        Box::new(lan_discovery_sender.run().map_err(Error::from)),
-        Box::new(tcp_connections.run().map_err(Error::from)),
-        Box::new(onion_client.run().map_err(Error::from)),
-        Box::new(net_crypto.run().map_err(Error::from)),
-        Box::new(friend_connections.run().map_err(Error::from)),
-        Box::new(net_crypto_tcp_future.map_err(Error::from)),
-        Box::new(tcp_incoming_future),
-        Box::new(lossless_future),
-        Box::new(lossy_future),
-        Box::new(friend_future),
-    ];
-
-    let future = future::select_all(futures)
-        .map_err(|(e, _, _)| e)
-        .join(future::join_all(relays_futures).map_err(Error::from))
-        .map(|_| ())
-        .map_err(|e| error!("Processing ended with error: {:?}", e));
-
     info!("Running echo server on {}", local_addr);
 
-    tokio::run(future);
+    let future = async {
+        let socket = common::bind_socket(local_addr).await;
+        let stats = Stats::new();
+
+        let lan_discovery_sender = LanDiscoverySender::new(tx.clone(), dht_pk, local_addr.is_ipv6());
+
+        let (tcp_incoming_tx, mut tcp_incoming_rx) = mpsc::unbounded();
+
+        let mut dht_server = Server::new(tx.clone(), dht_pk, dht_sk.clone());
+        dht_server.enable_lan_discovery(true);
+        dht_server.enable_ipv6_mode(local_addr.is_ipv6());
+
+        let tcp_connections = Connections::new(dht_pk, dht_sk.clone(), tcp_incoming_tx);
+        let onion_client = OnionClient::new(dht_server.clone(), tcp_connections.clone(), real_sk.clone(), real_pk);
+
+        let (lossless_tx, mut lossless_rx) = mpsc::unbounded();
+        let (lossy_tx, mut lossy_rx) = mpsc::unbounded();
+
+        let (friend_request_tx, mut friend_request_sink_rx) = mpsc::unbounded();
+        onion_client.set_friend_request_sink(friend_request_tx);
+
+        let net_crypto = NetCrypto::new(NetCryptoNewArgs {
+            udp_tx: tx,
+            lossless_tx,
+            lossy_tx,
+            dht_pk,
+            dht_sk,
+            real_pk,
+            real_sk: real_sk.clone(),
+            precomputed_keys: dht_server.get_precomputed_keys(),
+        });
+
+        let (net_crypto_tcp_tx, mut net_crypto_tcp_rx) = mpsc::channel(32);
+        net_crypto.set_tcp_sink(net_crypto_tcp_tx);
+
+        dht_server.set_net_crypto(net_crypto.clone());
+        dht_server.set_onion_client(onion_client.clone());
+
+        let friend_connections = FriendConnections::new(
+            real_sk,
+            real_pk,
+            dht_server.clone(),
+            tcp_connections.clone(),
+            onion_client.clone(),
+            net_crypto.clone(),
+        );
+
+        // Bootstrap from nodes
+        for &(pk, saddr) in &common::BOOTSTRAP_NODES {
+            // get PK bytes of the bootstrap node
+            let bootstrap_pk_bytes: [u8; 32] = FromHex::from_hex(pk).unwrap();
+            // create PK from bytes
+            let bootstrap_pk = PublicKey::from_slice(&bootstrap_pk_bytes).unwrap();
+
+            let node = PackedNode::new(saddr.parse().unwrap(), &bootstrap_pk);
+
+            dht_server.add_initial_bootstrap(node);
+            onion_client.add_path_node(node);
+        }
+
+        let tcp_connections_c = tcp_connections.clone();
+        let net_crypto_tcp_future = async move {
+            while let Some((packet, pk)) = net_crypto_tcp_rx.next().await {
+                tcp_connections_c.send_data(pk, packet).await?;
+            }
+            Result::<(), Error>::Ok(())
+        };
+
+        let onion_client_c = onion_client.clone();
+        let net_crypto_c = net_crypto.clone();
+        let tcp_incoming_future = async {
+            while let Some((_relay_pk, packet)) = tcp_incoming_rx.next().await { // TODO: do we need relay_pk at all?
+                let future = async {
+                    match packet {
+                        IncomingPacket::Data(sender_pk, packet) => match packet {
+                            DataPayload::CookieRequest(packet) => net_crypto_c.handle_tcp_cookie_request(&packet, sender_pk).map_err(Error::from).await,
+                            DataPayload::CookieResponse(packet) => net_crypto_c.handle_tcp_cookie_response(&packet, sender_pk).map_err(Error::from).await,
+                            DataPayload::CryptoHandshake(packet) => net_crypto_c.handle_tcp_crypto_handshake(&packet, sender_pk).map_err(Error::from).await,
+                            DataPayload::CryptoData(packet) => net_crypto_c.handle_tcp_crypto_data(&packet, sender_pk).map_err(Error::from).await,
+                        },
+                        IncomingPacket::Oob(_sender_pk, _packet) => Ok(()),
+                        IncomingPacket::Onion(packet) => match packet {
+                            InnerOnionResponse::OnionAnnounceResponse(packet) => onion_client_c.handle_announce_response(&packet, true).map_err(Error::from).await,
+                            InnerOnionResponse::OnionDataResponse(packet) => onion_client_c.handle_data_response(&packet).map_err(Error::from).await,
+                        },
+                    }
+                };
+                future.await?;
+            }
+            Ok(())
+        };
+        let tcp_incoming_future = tcp_incoming_future.map_err(|err| {
+            error!("Failed to handle packet: {:?}", err);
+            err
+        });
+
+        let net_crypto_c = net_crypto.clone();
+        let friend_connections_c = friend_connections.clone();
+        let lossless_future = async {
+            while let Some((pk, packet)) = lossless_rx.next().await {
+                let future = async {
+                    match packet[0] {
+                        PACKET_ID_ALIVE => {
+                            friend_connections_c.handle_ping(pk);
+                            Ok(())
+                        },
+                        PACKET_ID_SHARE_RELAYS => {
+                            match ShareRelays::from_bytes(&packet) {
+                                Ok((_, share_relays)) =>
+                                    friend_connections_c.handle_share_relays(pk, share_relays)
+                                        .map_err(Error::from).await,
+                                _ => Err(err_msg("Failed to parse ShareRelays"))
+                            }
+                        },
+                        0x18 => { // PACKET_ID_ONLINE
+                            net_crypto_c.send_lossless(pk, vec![0x18]).map_err(Error::from).await?;
+                            net_crypto_c.send_lossless(pk, b"\x30tox-rs".to_vec()).map_err(Error::from).await?;
+                            Ok(())
+                        },
+                        0x40 => { // PACKET_ID_CHAT_MESSAGE
+                            net_crypto_c.send_lossless(pk, packet).map_err(Error::from).await?;
+                            Ok(())
+                        },
+                        _ => Ok(()),
+                    }
+                };
+                future.await?;
+            }
+            Ok(())
+        };
+
+        // handle incoming friend connections by just accepting all of them
+        let friend_connection_c = friend_connections.clone();
+        let friend_future = async {
+            while let Some((pk, _)) = friend_request_sink_rx.next().await {
+                friend_connection_c.add_friend(pk);
+            }
+            Ok(())
+        };
+
+        let lossy_future = async {
+            while let Some(_) = lossy_rx.next().await {
+                // ignore
+            }
+            Ok(())
+        };
+
+        // Add TCP relays
+        let tcp_connections_c = tcp_connections.clone();
+        let mut relays_futures: Vec<_> = TCP_RELAYS.iter()
+            .map(|&(pk, saddr)| {
+                // get PK bytes of the relay
+                let relay_pk_bytes: [u8; 32] = FromHex::from_hex(pk).unwrap();
+                // create PK from bytes
+                let relay_pk = PublicKey::from_slice(&relay_pk_bytes).unwrap();
+
+                tcp_connections_c.add_relay_global(saddr.parse().unwrap(), relay_pk)
+            })
+            .map(|future| future.map_err(Error::from).boxed())
+            .collect();
+
+        let mut futures = vec![
+            dht_server.run_socket(socket, rx, stats).map_err(Error::from).boxed(),
+            lan_discovery_sender.run().map_err(Error::from).boxed(),
+            tcp_connections.run().map_err(Error::from).boxed(),
+            onion_client.run().map_err(Error::from).boxed(),
+            net_crypto.run().map_err(Error::from).boxed(),
+            friend_connections.run().map_err(Error::from).boxed(),
+            net_crypto_tcp_future.boxed(),
+            tcp_incoming_future.boxed(),
+            lossless_future.boxed(),
+            lossy_future.boxed(),
+            friend_future.boxed(),
+        ];
+
+        futures.append(&mut relays_futures);
+
+        future::try_join_all(futures)
+            .map_err(|e| error!("Processing ended with error: {:?}", e))
+            .await
+            .unwrap();
+    };
+
+    let mut runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(future);
+
+    Ok(())
 }

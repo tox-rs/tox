@@ -99,11 +99,6 @@ mod tests {
 
     use std::time::Duration;
 
-    use tokio_executor;
-    use tokio_timer::clock::*;
-
-    use crate::toxcore::time::ConstNow;
-
     #[test]
     fn addr_is_unknown() {
         crypto_init().unwrap();
@@ -163,8 +158,8 @@ mod tests {
         assert_eq!(returned_addrs_set, addrs_set);
     }
 
-    #[test]
-    fn get_returned_addrs_timed_out() {
+    #[tokio::test]
+    async fn get_returned_addrs_timed_out() {
         crypto_init().unwrap();
         let pk = gen_keypair().0;
         let mut friend = DhtFriend::new(pk);
@@ -186,14 +181,10 @@ mod tests {
             dht_node.update_returned_addr(addr);
         }
 
-        let mut enter = tokio_executor::enter().unwrap();
-        let clock = Clock::new_with_now(ConstNow(
-            Instant::now() + BAD_NODE_TIMEOUT + Duration::from_secs(1)
-        ));
+        tokio::time::pause();
+        tokio::time::advance(BAD_NODE_TIMEOUT + Duration::from_secs(1)).await;
 
-        with_default(&clock, &mut enter, |_| {
-            assert!(friend.get_returned_addrs().is_empty());
-        });
+        assert!(friend.get_returned_addrs().is_empty());
     }
 
     #[test]

@@ -39,7 +39,7 @@ impl ToBytes for FriendRequest {
         do_gen!(buf,
             gen_be_u8!(0x20) >>
             gen_slice!(self.nospam.0) >>
-            gen_cond!(self.msg.len() > MAX_FRIEND_REQUEST_MSG_SIZE || self.msg.len() < 1, |buf| gen_error(buf, 0)) >>
+            gen_cond!(self.msg.len() > MAX_FRIEND_REQUEST_MSG_SIZE || self.msg.is_empty(), |buf| gen_error(buf, 0)) >>
             gen_slice!(self.msg.as_bytes())
         )
     }
@@ -49,7 +49,7 @@ impl FromBytes for FriendRequest {
     named!(from_bytes<FriendRequest>, do_parse!(
         tag!(&[0x20][..]) >>
         nospam: call!(NoSpam::from_bytes) >>
-        msg: map_res!(verify!(rest, |msg: &[u8]| msg.len() <= MAX_FRIEND_REQUEST_MSG_SIZE && msg.len() > 0), str::from_utf8) >>
+        msg: map_res!(verify!(rest, |msg: &[u8]| msg.len() <= MAX_FRIEND_REQUEST_MSG_SIZE && !msg.is_empty()), str::from_utf8) >>
         (FriendRequest {
             nospam,
             msg: msg.to_string(),

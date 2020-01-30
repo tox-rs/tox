@@ -11,7 +11,7 @@ use bytes::BytesMut;
 use cookie_factory::GenError;
 use failure::Fail;
 use nom::{error::ErrorKind, Err};
-use tokio::codec::{Decoder, Encoder};
+use tokio_util::codec::{Decoder, Encoder};
 
 /// A serialized `Packet` should be not longer than 2048 bytes.
 pub const MAX_DHT_PACKET_SIZE: usize = 2048;
@@ -373,14 +373,5 @@ mod tests {
         let error_serialize = unpack!(error_kind, EncodeErrorKind::Serialize, error);
         let too_small = unpack!(error_serialize, GenError::BufferTooSmall);
         assert_eq!(*too_small, 2106 - MAX_DHT_PACKET_SIZE);
-    }
-
-    #[test]
-    fn codec_is_clonable() {
-        crypto_init().unwrap();
-
-        let stats = Stats::new();
-        let codec = DhtCodec::new(stats);
-        let _codec_c = codec.clone();
     }
 }

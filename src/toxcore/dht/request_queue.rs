@@ -87,17 +87,7 @@ impl<T> RequestQueue<T> {
 mod tests {
     use super::*;
 
-    use tokio_executor;
-    use tokio_timer::clock::*;
-
     use crate::toxcore::crypto_core::*;
-    use crate::toxcore::time::ConstNow;
-
-    #[test]
-    fn clone() {
-        let queue = RequestQueue::<()>::new(Duration::from_secs(42));
-        let _ = queue.clone();
-    }
 
     #[test]
     fn insert_new_ping_id() {
@@ -140,53 +130,43 @@ mod tests {
         assert_eq!(queue.check_ping_id(ping_id.overflowing_sub(1).0, |_| true), None);
     }
 
-    #[test]
-    fn check_ping_id_timed_out() {
+    #[tokio::test]
+    async fn check_ping_id_timed_out() {
         crypto_init().unwrap();
 
         let mut queue = RequestQueue::new(Duration::from_secs(42));
-
         let ping_id = queue.new_ping_id(());
 
-        let time = queue.ping_map[&ping_id].0;
-        let mut enter = tokio_executor::enter().unwrap();
-        let clock = Clock::new_with_now(ConstNow(
-            time + Duration::from_secs(43)
-        ));
+        tokio::time::pause();
 
-        with_default(&clock, &mut enter, |_| {
-            assert_eq!(queue.check_ping_id(ping_id, |_| true), None);
-        });
+        let now = clock_now();
+        let time = queue.ping_map[&ping_id].0 + Duration::from_secs(43);
+        tokio::time::advance(time - now).await;
+
+        assert_eq!(queue.check_ping_id(ping_id, |_| true), None);
     }
 
-    #[test]
-    fn clear_timed_out() {
+    #[tokio::test]
+    async fn clear_timed_out() {
         crypto_init().unwrap();
 
         let mut queue = RequestQueue::new(Duration::from_secs(42));
-
         let ping_id_1 = queue.new_ping_id(());
 
+        tokio::time::pause();
+
+        let now = clock_now();
         let time = queue.ping_map[&ping_id_1].0;
-        let mut enter = tokio_executor::enter().unwrap();
-        let clock_1 = Clock::new_with_now(ConstNow(
-            time + Duration::from_secs(21)
-        ));
-        let clock_2 = Clock::new_with_now(ConstNow(
-            time + Duration::from_secs(43)
-        ));
 
-        let ping_id_2 = with_default(&clock_1, &mut enter, |_| {
-            queue.new_ping_id(())
-        });
+        tokio::time::advance((time + Duration::from_secs(21)) - now).await;
+        let ping_id_2 = queue.new_ping_id(());
 
-        with_default(&clock_2, &mut enter, |_| {
-            queue.clear_timed_out();
+        tokio::time::advance(Duration::from_secs(43 - 21)).await;
+        queue.clear_timed_out();
 
-            // ping_id_1 is timed out while ping_id_2 is not
-            assert!(!queue.ping_map.contains_key(&ping_id_1));
-            assert!(queue.ping_map.contains_key(&ping_id_2));
-        });
+        // ping_id_1 is timed out while ping_id_2 is not
+        assert!(!queue.ping_map.contains_key(&ping_id_1));
+        assert!(queue.ping_map.contains_key(&ping_id_2));
     }
 
     #[test]

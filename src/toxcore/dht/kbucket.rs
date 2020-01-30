@@ -378,15 +378,9 @@ mod tests {
         SocketAddr,
         SocketAddrV4,
     };
-    use std::time::{Duration, Instant};
-
-    use tokio_executor;
-    use tokio_timer::clock::*;
+    use std::time::Duration;
 
     use crate::toxcore::dht::dht_node::*;
-    use crate::toxcore::time::ConstNow;
-
-    // PublicKey::distance()
 
     #[test]
     fn public_key_distance() {
@@ -404,9 +398,6 @@ mod tests {
         assert_eq!(Ordering::Less, pk_fe.distance(&pk_ff, &pk_2));
     }
 
-
-    // kbucket_index()
-
     #[test]
     fn kbucket_index_test() {
         let pk1 = PublicKey([0b10_10_10_10; PUBLICKEYBYTES]);
@@ -416,11 +407,6 @@ mod tests {
         assert_eq!(Some(0), kbucket_index(&pk1, &pk2));
         assert_eq!(Some(2), kbucket_index(&pk2, &pk3));
     }
-
-
-    // Kbucket::
-
-    // Kbucket::try_add()
 
     #[test]
     fn kbucket_try_add() {
@@ -458,8 +444,8 @@ mod tests {
         assert!(kbucket.try_add(&pk, existing_node, /* evict */ false));
     }
 
-    #[test]
-    fn kbucket_try_add_should_replace_bad_nodes() {
+    #[tokio::test]
+    async fn kbucket_try_add_should_replace_bad_nodes() {
         let pk = PublicKey([0; PUBLICKEYBYTES]);
         let mut kbucket = Kbucket::<DhtNode>::new(1);
 
@@ -475,19 +461,15 @@ mod tests {
         assert!(kbucket.try_add(&pk, node_2, /* evict */ false));
         assert!(!kbucket.try_add(&pk, node_1, /* evict */ false));
 
-        let mut enter = tokio_executor::enter().unwrap();
-        let clock = Clock::new_with_now(ConstNow(
-            Instant::now() + BAD_NODE_TIMEOUT + Duration::from_secs(1)
-        ));
+        tokio::time::pause();
+        tokio::time::advance(BAD_NODE_TIMEOUT + Duration::from_secs(1)).await;
 
         // replacing bad node
-        with_default(&clock, &mut enter, |_| {
-            assert!(kbucket.try_add(&pk, node_1, /* evict */ false));
-        });
+        assert!(kbucket.try_add(&pk, node_1, /* evict */ false));
     }
 
-    #[test]
-    fn kbucket_try_add_evict_should_replace_bad_nodes() {
+    #[tokio::test]
+    async fn kbucket_try_add_evict_should_replace_bad_nodes() {
         let pk = PublicKey([0; PUBLICKEYBYTES]);
         let mut kbucket = Kbucket::<DhtNode>::new(1);
 
@@ -503,18 +485,12 @@ mod tests {
         assert!(kbucket.try_add(&pk, node_1, /* evict */ true));
         assert!(!kbucket.try_add(&pk, node_2, /* evict */ true));
 
-        let mut enter = tokio_executor::enter().unwrap();
-        let clock = Clock::new_with_now(ConstNow(
-            Instant::now() + BAD_NODE_TIMEOUT + Duration::from_secs(1)
-        ));
+        tokio::time::pause();
+        tokio::time::advance(BAD_NODE_TIMEOUT + Duration::from_secs(1)).await;
 
         // replacing bad node
-        with_default(&clock, &mut enter, |_| {
-            assert!(kbucket.try_add(&pk, node_2, /* evict */ true));
-        });
+        assert!(kbucket.try_add(&pk, node_2, /* evict */ true));
     }
-
-    // Kbucket::remove()
 
     #[test]
     fn kbucket_remove() {
@@ -539,8 +515,6 @@ mod tests {
         assert!(kbucket.is_empty());
     }
 
-    // Kbucket::is_empty()
-
     #[test]
     fn kbucket_is_empty() {
         let pk = PublicKey([0; PUBLICKEYBYTES]);
@@ -558,8 +532,6 @@ mod tests {
         assert!(!kbucket.is_empty());
     }
 
-    // Kbucket::get_node()
-
     #[test]
     fn kbucket_get_node() {
         crypto_init().unwrap();
@@ -576,8 +548,6 @@ mod tests {
         assert!(kbucket.try_add(&pk, pn, true));
         assert!(kbucket.get_node(&pk, &node_pk).is_some());
     }
-
-    // Kbucket::get_node_mut()
 
     #[test]
     fn kbucket_get_node_mut() {
@@ -702,8 +672,6 @@ mod tests {
         assert_eq!(kbucket.find(&base_pk, &n2.pk), Some(1));
         assert_eq!(kbucket.find(&base_pk, &n3.pk), None);
     }
-
-    // Kbucket::len()
 
     #[test]
     fn kbucket_len() {

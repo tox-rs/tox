@@ -13,9 +13,9 @@ use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
 use crate::toxcore::tcp::secure;
 
-use futures::{self, Stream, Sink, Future};
+use futures::{self, StreamExt, SinkExt, TryFutureExt};
 use std::io::{Error, ErrorKind};
-use tokio::codec::Framed;
+use tokio_util::codec::Framed;
 use tokio::net::TcpStream;
 
 /// Create a handshake from client to server
@@ -95,98 +95,84 @@ pub fn handle_server_handshake(common_key: &PrecomputedKey,
 
 /// Sends handshake to the server, receives handshake from the server
 /// and processes it
-pub fn make_client_handshake(socket: TcpStream,
-                            client_pk: &PublicKey,
-                            client_sk: &SecretKey,
-                            server_pk: &PublicKey)
-    -> impl Future<Item = (TcpStream, secure::Channel), Error = Error> + Send {
-    futures::done(create_client_handshake(client_pk, client_sk, server_pk))
-        .and_then(|(session, common_key, handshake)| {
-            // send handshake
-            Framed::new(socket, ClientHandshakeCodec)
-                .send(handshake)
-                .map_err(|e| {
-                    Error::new(
-                        ErrorKind::Other,
-                        format!("Could not send ClientHandshake {:?}", e),
-                    )
-                })
-                .map(|socket| {
-                    (socket.into_inner(), session, common_key)
-                })
+pub async fn make_client_handshake(
+    socket: TcpStream,
+    client_pk: &PublicKey,
+    client_sk: &SecretKey,
+    server_pk: &PublicKey
+) -> Result<(TcpStream, secure::Channel), Error> {
+    let (session, common_key, handshake) =
+        create_client_handshake(client_pk, client_sk, server_pk)?;
+
+    let mut client = Framed::new(socket, ClientHandshakeCodec);
+    client.send(handshake)
+        .map_err(|e| {
+            Error::new(
+                ErrorKind::Other,
+                format!("Could not send ClientHandshake {:?}", e),
+            )
         })
-        .and_then(|(socket, session, common_key)| {
-            // receive handshake from server
-            Framed::new(socket, ServerHandshakeCodec)
-                .into_future()
-                .map_err(|(e, _socket)| {
-                    Error::new(
-                        ErrorKind::Other,
-                        format!("Could not read ServerHandshake {:?}", e),
-                    )
-                })
-                .and_then(|(handshake, socket)| {
-                    // `handshake` here is an `Option<handshake::Server>`
-                    handshake.map_or_else(
-                        || Err(Error::new(ErrorKind::Other, "Option<ServerHandshake> is empty")),
-                        |handshake| Ok(( socket.into_inner(), common_key, session, handshake ))
-                    )
-                })
-        })
-        .and_then(|(socket, common_key, session, handshake)| {
-            // handle it
-            handle_server_handshake(&common_key, &session, &handshake)
-                .map(|channel| {
-                    (socket, channel)
-                })
-        })
+        .await?;
+
+    let socket = client.into_inner();
+    let server = Framed::new(socket, ServerHandshakeCodec);
+    let (handshake, server_socket) = server.into_future().await;
+    let handshake = match handshake {
+        None => Err(Error::new(
+            ErrorKind::Other, "Option<ServerHandshake> is empty"
+        )),
+        Some(Err(e)) => Err(Error::new(
+            ErrorKind::Other,
+            format!("Could not read ServerHandshake {:?}", e),
+        )),
+        Some(res) => res,
+    }?;
+
+    handle_server_handshake(&common_key, &session, &handshake)
+        .map(|chan| (server_socket.into_inner(), chan))
 }
 
 /// Receives handshake from the client, processes it and
 /// sends handshake to the client
-pub fn make_server_handshake(socket: TcpStream,
-                            server_sk: SecretKey)
-    -> impl Future<Item = (TcpStream, secure::Channel, PublicKey), Error = Error> + Send {
-    Framed::new(socket, ClientHandshakeCodec)
-        .into_future() // receive handshake from client
-        .map_err(|(e, _socket)| {
+pub async fn make_server_handshake(
+    socket: TcpStream,
+    server_sk: SecretKey
+) -> Result<(TcpStream, secure::Channel, PublicKey), Error> {
+    let client = Framed::new(socket, ClientHandshakeCodec);
+
+    let (handshake, client) = client.into_future().await;
+    let handshake = match handshake {
+        None => Err(Error::new(
+            ErrorKind::Other, "Option<ClientHandshake> is empty"
+        )),
+        Some(Err(e)) => Err(Error::new(
+            ErrorKind::Other,
+            format!("Could not read ClientHandshake {:?}", e),
+        )),
+        Some(res) => res,
+    }?;
+
+    let (channel, client_pk, server_handshake) =
+        handle_client_handshake(&server_sk, &handshake)?;
+
+    let socket = client.into_inner();
+    let mut server = Framed::new(socket, ServerHandshakeCodec);
+    server.send(server_handshake).await
+        .map_err(|e| {
             Error::new(
                 ErrorKind::Other,
-                format!("Could not read ClientHandshake {:?}", e),
+                format!("Could not send ServerHandshake {:?}", e),
             )
-        })
-        .and_then(|(handshake, socket)| {
-            // `handshake` here is an `Option<handshake::Client>`
-            handshake.map_or_else(
-                || Err(Error::new(ErrorKind::Other, "Option<ClientHandshake> is empty")),
-                |handshake| Ok(( socket.into_inner(), handshake ))
-            )
-        })
-        .and_then(move |(socket, handshake)| {
-            // handle handshake
-            handle_client_handshake(&server_sk, &handshake)
-                .map(|(channel, client_pk, server_handshake)| {
-                    (socket, channel, client_pk, server_handshake)
-                })
-        })
-        .and_then(|(socket, channel, client_pk, server_handshake)| {
-            // send handshake
-            Framed::new(socket, ServerHandshakeCodec)
-                .send(server_handshake)
-                .map_err(|e| {
-                    Error::new(
-                        ErrorKind::Other,
-                        format!("Could not send ServerHandshake {:?}", e),
-                    )
-                })
-                .map(move |socket| {
-                    (socket.into_inner(), channel, client_pk)
-                })
-        })
+        })?;
+
+    let socket = server.into_inner();
+    Ok((socket, channel, client_pk))
 }
 
 #[cfg(test)]
 mod tests {
+    use std::net::SocketAddr;
+
     use crate::toxcore::crypto_core::*;
     use crate::toxcore::tcp::*;
     use crate::toxcore::tcp::handshake::*;
@@ -305,38 +291,31 @@ mod tests {
         let server_handshake = create_bad_server_handshake(&common_key);
         assert!(handle_server_handshake(&common_key, &client_session, &server_handshake).is_err());
     }
-    #[test]
-    fn network_handshake() {
-        use futures::{Stream, Future};
-
-        use tokio;
+    #[tokio::test]
+    async fn network_handshake() {
+        use futures::{StreamExt};
         use tokio::net::{TcpListener, TcpStream};
 
         crypto_init().unwrap();
         let (client_pk, client_sk) = gen_keypair();
         let (server_pk, server_sk) = gen_keypair();
 
-        let addr = "127.0.0.1:0".parse().unwrap();
-        let listener = TcpListener::bind(&addr).unwrap();
+        let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let mut listener = TcpListener::bind(&addr).await.unwrap();
         let addr = listener.local_addr().unwrap();
 
-        let server = listener.incoming()
-            .into_future() // take the first connection
-            .map_err(|(e, _other_incomings)| e)
-            .map(|(connection, _other_incomings)| connection.unwrap())
-            .and_then(move |socket| {
-                make_server_handshake(socket, server_sk.clone())
-            });
-        let client = TcpStream::connect(&addr)
-            .and_then(move |socket| {
-                make_client_handshake(socket, &client_pk, &client_sk, &server_pk)
-            });
-        let both = server.join(client)
-            .then(|r| {
-                assert!(r.is_ok());
-                r
-            })
-            .map(|_| ()).map_err(|_| ());
-        tokio::run(both);
+        let server = async {
+            // take the first connection
+            let connection = listener.incoming().next().await.unwrap().unwrap();
+            make_server_handshake(connection, server_sk.clone()).await
+        };
+
+        let client = async {
+            let socket = TcpStream::connect(&addr).map_err(Error::from).await?;
+            make_client_handshake(socket, &client_pk, &client_sk, &server_pk).await
+        };
+
+        let res = futures::try_join!(server, client);
+        drop(res.unwrap())
     }
 }
