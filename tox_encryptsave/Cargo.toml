@@ -1,0 +1,23 @@
+[package]
+name = "tox_encryptsave"
+version = "0.1.0"
+authors = [
+    "Zetok Zalbavar <zetok@openmailbox.org>",
+    "Roman Proskuryakov <humbug@deeptown.org>",
+    "Namsoo CHO <nscho66@gmail.com>",
+    "Evgeny Kurnevsky <kurnevsky@gmail.com>",
+    "Сухарик <65870+suhr@users.noreply.github.com>"
+]
+description = "Encryptsave part of tox"
+documentation = "https://docs.rs/tox_encryptsave/"
+repository = "https://github.com/tox-rs/tox/"
+keywords = ["p2p", "instant-messaging", "tox", "toxcore", "networking"]
+categories = ["multimedia"]
+license = "MIT OR GPL-3.0+"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tox_crypto = { version = "0.1.0", path = "../tox_crypto" }
+failure = "0.1"

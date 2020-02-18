@@ -10,21 +10,21 @@ use failure::{err_msg, Error};
 
 use std::net::SocketAddr;
 
-use tox::toxcore::binary_io::*;
-use tox::toxcore::dht::server::Server;
-use tox::toxcore::dht::server_ext::ServerExt;
-use tox::toxcore::dht::packed_node::PackedNode;
-use tox::toxcore::dht::lan_discovery::LanDiscoverySender;
-use tox::toxcore::crypto_core::*;
-use tox::toxcore::friend_connection::FriendConnections;
-use tox::toxcore::friend_connection::packet::*;
-use tox::toxcore::net_crypto::{NetCrypto, NetCryptoNewArgs};
-use tox::toxcore::onion::client::OnionClient;
-use tox::toxcore::onion::packet::InnerOnionResponse;
-use tox::toxcore::tcp::client::{Connections, IncomingPacket};
-use tox::toxcore::tcp::packet::DataPayload;
-use tox::toxcore::stats::Stats;
-use tox::toxcore::toxid::ToxId;
+use tox_binary_io::*;
+use tox_crypto::*;
+use tox_packet::dht::packed_node::PackedNode;
+use tox_packet::friend_connection::*;
+use tox_packet::onion::InnerOnionResponse;
+use tox_packet::relay::DataPayload;
+use tox_packet::toxid::ToxId;
+use tox_core::dht::server::Server;
+use tox_core::dht::server_ext::ServerExt;
+use tox_core::dht::lan_discovery::LanDiscoverySender;
+use tox_core::friend_connection::FriendConnections;
+use tox_core::net_crypto::{NetCrypto, NetCryptoNewArgs};
+use tox_core::onion::client::OnionClient;
+use tox_core::relay::client::{Connections, IncomingPacket};
+use tox_core::stats::Stats;
 
 mod common;
 

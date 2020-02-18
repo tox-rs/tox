@@ -1,0 +1,17 @@
+[package]
+name = "tox_crypto"
+version = "0.1.0"
+authors = [
+    "Zetok Zalbavar <zetok@openmailbox.org>",
+    "Roman Proskuryakov <humbug@deeptown.org>",
+    "Namsoo CHO <nscho66@gmail.com>",
+    "Evgeny Kurnevsky <kurnevsky@gmail.com>",
+    "Сухарик <65870+suhr@users.noreply.github.com>"
+]
+description = "Cryptography used by tox"
+documentation = "https://docs.rs/tox_crypto/"
+repository = "https://github.com/tox-rs/tox/"
+edition = "2018"
+
+[dependencies]
+sodiumoxide = "0.2.5"

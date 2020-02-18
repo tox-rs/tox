@@ -1,0 +1,23 @@
+[package]
+name = "tox_binary_io"
+version = "0.1.0"
+authors = [
+    "Zetok Zalbavar <zetok@openmailbox.org>",
+    "Roman Proskuryakov <humbug@deeptown.org>",
+    "Namsoo CHO <nscho66@gmail.com>",
+    "Evgeny Kurnevsky <kurnevsky@gmail.com>",
+    "Сухарик <65870+suhr@users.noreply.github.com>"
+]
+documentation = "https://docs.rs/tox_binary_io/"
+repository = "https://github.com/tox-rs/tox/"
+license = "MIT OR GPL-3.0+"
+edition = "2018"
+
+[dependencies]
+nom = "5.1"
+cookie-factory = "0.3"
+sodiumoxide = { version = "0.2.5", optional = true }
+
+[features]
+default = []
+sodium = ["sodiumoxide"]

@@ -10,15 +10,15 @@ use futures::sink::SinkExt;
 use futures::channel::mpsc;
 use tokio_util::udp::UdpFramed;
 
-use tox::toxcore::dht::codec::*;
-use tox::toxcore::dht::ip_port::IsGlobal;
-use tox::toxcore::dht::packet::*;
-use tox::toxcore::dht::server::Server;
-use tox::toxcore::dht::packed_node::PackedNode;
-use tox::toxcore::crypto_core::*;
-use tox::toxcore::onion::client::*;
-use tox::toxcore::tcp::client::Connections;
-use tox::toxcore::stats::Stats;
+use tox_crypto::*;
+use tox_packet::dht::*;
+use tox_packet::dht::packed_node::PackedNode;
+use tox_core::dht::codec::*;
+use tox_core::dht::ip_port::IsGlobal;
+use tox_core::dht::server::Server;
+use tox_core::onion::client::*;
+use tox_core::relay::client::Connections;
+use tox_core::stats::Stats;
 
 mod common;
 
@@ -46,8 +46,8 @@ fn load_keypair() -> (PublicKey, SecretKey) {
 async fn main_task(
     local_addr: SocketAddr,
     onion_client: OnionClient,
-    mut net_rx: mpsc::Receiver<(tox::toxcore::dht::packet::Packet, SocketAddr)>,
-    dht_pk_rx: mpsc::UnboundedReceiver<(PublicKey, tox::toxcore::crypto_core::curve25519xsalsa20poly1305::PublicKey)>,
+    mut net_rx: mpsc::Receiver<(tox_packet::dht::Packet, SocketAddr)>,
+    dht_pk_rx: mpsc::UnboundedReceiver<(PublicKey, tox_crypto::curve25519xsalsa20poly1305::PublicKey)>,
 ) {
     let is_ipv4 = local_addr.is_ipv4();
     let socket = common::bind_socket(local_addr).await;
