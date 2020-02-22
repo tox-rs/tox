@@ -1,0 +1,17 @@
+name: Commit message
+
+on: [pull_request]
+
+jobs:
+  commit-msg:
+    name: Check commit messages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - name: Check PR commit messages
+        run: |
+          curl -s ${{ github.event.pull_request.commits_url }} |
+            jq --raw-output '.[].sha' |
+            xargs ./scripts/verify-commit-messages.sh
