@@ -245,9 +245,7 @@ fn app() -> App<'static, 'static> {
                    - uptime: uptime in the format 'XX days XX hours XX minutes'\n")
             .takes_value(true)
             .validator(|m| {
-                let template_regex = Regex::new(r"\{\{.*\}\}")
-                    .expect("Failed to compile template regex");
-                if !template_regex.is_match(&m) && m.len() > BOOSTRAP_SERVER_MAX_MOTD_LENGTH {
+                if m.len() > BOOSTRAP_SERVER_MAX_MOTD_LENGTH {
                     Err(format!("Message of the day must not be longer than {} bytes", BOOSTRAP_SERVER_MAX_MOTD_LENGTH))
                 } else {
                     Ok(())
