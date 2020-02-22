@@ -4,19 +4,17 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use failure::Fail;
-use futures::{future, Future, Stream};
+use futures::{future, Future, FutureExt, TryFutureExt, StreamExt, SinkExt};
 use futures::future::Either;
-use futures::sync::mpsc;
+use futures::channel::mpsc;
 use parking_lot::RwLock;
-use tokio::codec::Framed;
-use tokio;
+use tokio_util::codec::Framed;
 use tokio::net::TcpStream;
 
 use crate::toxcore::crypto_core::*;
-use crate::toxcore::io_tokio::*;
 use crate::toxcore::onion::packet::InnerOnionResponse;
 use crate::toxcore::stats::Stats;
-use crate::toxcore::tcp::codec::{Codec, EncodeError};
+use crate::toxcore::tcp::codec::{Codec};
 use crate::toxcore::tcp::connection_id::ConnectionId;
 use crate::toxcore::tcp::handshake::make_client_handshake;
 use crate::toxcore::tcp::links::*;
@@ -102,49 +100,49 @@ impl Client {
     }
 
     /// Handle packet received from TCP relay.
-    pub fn handle_packet(&self, packet: Packet) -> impl Future<Item = (), Error = HandlePacketError> + Send {
-        // TODO: use anonymous sum types when rust has them
-        // https://github.com/rust-lang/rfcs/issues/294
+    pub async fn handle_packet(&self, packet: Packet) -> Result<(), HandlePacketError> {
         match packet {
-            Packet::RouteRequest(packet) => Box::new(self.handle_route_request(&packet)) as Box<dyn Future<Item = _, Error = _> + Send>,
-            Packet::RouteResponse(packet) => Box::new(self.handle_route_response(&packet)),
-            Packet::ConnectNotification(packet) => Box::new(self.handle_connect_notification(&packet)),
-            Packet::DisconnectNotification(packet) => Box::new(self.handle_disconnect_notification(&packet)),
-            Packet::PingRequest(packet) => Box::new(self.handle_ping_request(&packet)),
-            Packet::PongResponse(packet) => Box::new(self.handle_pong_response(&packet)),
-            Packet::OobSend(packet) => Box::new(self.handle_oob_send(&packet)),
-            Packet::OobReceive(packet) => Box::new(self.handle_oob_receive(packet)),
-            Packet::Data(packet) => Box::new(self.handle_data(packet)),
-            Packet::OnionRequest(packet) => Box::new(self.handle_onion_request(&packet)),
-            Packet::OnionResponse(packet) => Box::new(self.handle_onion_response(packet)),
+            Packet::RouteRequest(packet) => self.handle_route_request(&packet).await,
+            Packet::RouteResponse(packet) => self.handle_route_response(&packet).await,
+            Packet::ConnectNotification(packet) => self.handle_connect_notification(&packet).await,
+            Packet::DisconnectNotification(packet) => self.handle_disconnect_notification(&packet).await,
+            Packet::PingRequest(packet) => self.handle_ping_request(&packet).await,
+            Packet::PongResponse(packet) => self.handle_pong_response(&packet).await,
+            Packet::OobSend(packet) => self.handle_oob_send(&packet).await,
+            Packet::OobReceive(packet) => self.handle_oob_receive(packet).await,
+            Packet::Data(packet) => self.handle_data(packet).await,
+            Packet::OnionRequest(packet) => self.handle_onion_request(&packet).await,
+            Packet::OnionResponse(packet) => self.handle_onion_response(packet).await,
         }
     }
 
     /// Send packet to this relay. If we are not connected to the relay an error
     /// will be returned.
-    fn send_packet(&self, packet: Packet) -> impl Future<Item = (), Error = SendPacketError> + Send {
+    fn send_packet(&self, packet: Packet) -> impl Future<Output = Result<(), SendPacketError>> + Send {
         if let ClientStatus::Connected(ref tx) = *self.status.read() {
-            Either::A(send_to(tx, packet).map_err(|e|
-                e.context(SendPacketErrorKind::SendTo).into()
-            ))
+            let mut tx = tx.clone();
+            Either::Left(async move {
+                tx.send(packet).await
+                    .map_err(|e| e.context(SendPacketErrorKind::SendTo).into())
+            })
         } else {
             // Attempt to send packet to TCP relay with wrong status. For
             // instance it can happen when we received ping request from the
             // relay and right after that relay became sleeping so we are not
             // able to respond anymore.
-            Either::B( future::err(
+            Either::Right(future::err(
                 SendPacketErrorKind::WrongStatus.into()
             ))
         }
     }
 
-    fn handle_route_request(&self, _packet: &RouteRequest) -> impl Future<Item = (), Error = HandlePacketError> + Send {
+    fn handle_route_request(&self, _packet: &RouteRequest) -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         future::err(
             HandlePacketErrorKind::MustNotSend.into()
         )
     }
 
-    fn handle_route_response(&self, packet: &RouteResponse) -> impl Future<Item = (), Error = HandlePacketError> + Send {
+    fn handle_route_response(&self, packet: &RouteResponse) -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         let index = if let Some(index) = packet.connection_id.index() {
             index
         } else {
@@ -171,7 +169,7 @@ impl Client {
         }
     }
 
-    fn handle_connect_notification(&self, packet: &ConnectNotification) -> impl Future<Item = (), Error = HandlePacketError> + Send {
+    fn handle_connect_notification(&self, packet: &ConnectNotification) -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         let index = if let Some(index) = packet.connection_id.index() {
             index
         } else {
@@ -189,7 +187,7 @@ impl Client {
         }
     }
 
-    fn handle_disconnect_notification(&self, packet: &DisconnectNotification) -> impl Future<Item = (), Error = HandlePacketError> + Send {
+    fn handle_disconnect_notification(&self, packet: &DisconnectNotification) -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         let index = if let Some(index) = packet.connection_id.index() {
             index
         } else {
@@ -207,139 +205,193 @@ impl Client {
         }
     }
 
-    fn handle_ping_request(&self, packet: &PingRequest) -> impl Future<Item = (), Error = HandlePacketError> + Send {
+    fn handle_ping_request(&self, packet: &PingRequest) -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         self.send_packet(Packet::PongResponse(
             PongResponse { ping_id: packet.ping_id }
         )).map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
     }
 
-    fn handle_pong_response(&self, _packet: &PongResponse) -> impl Future<Item = (), Error = HandlePacketError> + Send {
+    fn handle_pong_response(&self, _packet: &PongResponse) -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         // TODO check ping_id
         future::ok(())
     }
 
-    fn handle_oob_send(&self, _packet: &OobSend) -> impl Future<Item = (), Error = HandlePacketError> + Send {
+    fn handle_oob_send(&self, _packet: &OobSend) -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         future::err(
             HandlePacketErrorKind::MustNotSend.into()
         )
     }
 
-    fn handle_oob_receive(&self, packet: OobReceive) -> impl Future<Item = (), Error = HandlePacketError> + Send {
-        send_to(&self.incoming_tx, (self.pk, IncomingPacket::Oob(packet.sender_pk, packet.data))).map_err(|e|
-            e.context(HandlePacketErrorKind::SendTo).into()
-        )
+    fn handle_oob_receive(&self, packet: OobReceive) -> impl Future<Output = Result<(), HandlePacketError>> + Send {
+        let mut tx = self.incoming_tx.clone();
+        let msg = (
+            self.pk,
+            IncomingPacket::Oob(packet.sender_pk, packet.data)
+        );
+
+        async move {
+            tx.send(msg).await
+                .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
+        }
     }
 
-    fn handle_data(&self, packet: Data) -> impl Future<Item = (), Error = HandlePacketError> + Send {
+    fn handle_data(&self, packet: Data) -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         let index = if let Some(index) = packet.connection_id.index() {
             index
         } else {
-            return Either::A( future::err(
+            return Either::Left( future::err(
                 HandlePacketErrorKind::InvalidConnectionId.into()
             ))
         };
 
         let links = self.links.read();
         if let Some(link) = links.by_id(index) {
-            Either::B(send_to(&self.incoming_tx, (self.pk, IncomingPacket::Data(link.pk, packet.data))).map_err(|e|
-                e.context(HandlePacketErrorKind::SendTo).into()
-            ))
+            let mut tx = self.incoming_tx.clone();
+            let msg = (
+                self.pk,
+                IncomingPacket::Data(link.pk, packet.data)
+            );
+
+            Either::Right(async move {
+                tx.send(msg).await
+                    .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
+            })
         } else {
-            Either::A( future::err(
+            Either::Left( future::err(
                 HandlePacketErrorKind::AlreadyLinked.into()
             ))
         }
     }
 
-    fn handle_onion_request(&self, _packet: &OnionRequest) -> impl Future<Item = (), Error = HandlePacketError> + Send {
+    fn handle_onion_request(&self, _packet: &OnionRequest) -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         future::err(
             HandlePacketErrorKind::MustNotSend.into()
         )
     }
 
-    fn handle_onion_response(&self, packet: OnionResponse) -> impl Future<Item = (), Error = HandlePacketError> + Send {
-        send_to(&self.incoming_tx, (self.pk, IncomingPacket::Onion(packet.payload))).map_err(|e|
-            e.context(HandlePacketErrorKind::SendTo).into()
-        )
+    fn handle_onion_response(&self, packet: OnionResponse) -> impl Future<Output = Result<(), HandlePacketError>> + Send {
+        let mut tx = self.incoming_tx.clone();
+        let msg = (
+            self.pk,
+            IncomingPacket::Onion(packet.payload)
+        );
+
+        async move {
+            tx.send(msg).await
+                .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
+        }
     }
 
     /// Spawn a connection to this TCP relay if it is not connected already. The
     /// connection is spawned via `tokio::spawn` so the result future will be
     /// completed after first poll.
-    pub fn spawn(self, dht_sk: SecretKey, dht_pk: PublicKey) -> impl Future<Item = (), Error = SpawnError> + Send { // TODO: send pings periodically
-        future::lazy(move || {
-            let relay_pk = self.pk;
-            let self_c = self.clone();
+    async fn spawn_inner(self, dht_sk: SecretKey, dht_pk: PublicKey) -> Result<(), SpawnError> { // TODO: send pings periodically
+        let relay_pk = self.pk;
+        match *self.status.write() {
+            ref mut status @ ClientStatus::Disconnected
+            | ref mut status @ ClientStatus::Sleeping =>
+                *status = ClientStatus::Connecting,
+            _ => return Ok(()),
+        }
 
-            match *self.status.write() {
-                ref mut status @ ClientStatus::Disconnected
-                | ref mut status @ ClientStatus::Sleeping => *status = ClientStatus::Connecting,
-                _ => return future::ok(()),
+        let socket = TcpStream::connect(&self.addr).await
+            .map_err(|e| SpawnError::from(e.context(SpawnErrorKind::Io)))?;
+
+        let (socket, channel) =
+            make_client_handshake(socket, &dht_pk, &dht_sk, &relay_pk).await
+                .map_err(|e| SpawnError::from(e.context(SpawnErrorKind::Io)))?;
+
+        let stats = Stats::new();
+        let secure_socket =
+            Framed::new(socket, Codec::new(channel, stats));
+        let (mut to_server, mut from_server) =
+            secure_socket.split();
+        let (to_server_tx, to_server_rx) =
+            mpsc::channel(CLIENT_CHANNEL_SIZE);
+
+        match *self.status.write() {
+            ref mut status @ ClientStatus::Connecting =>
+                *status = ClientStatus::Connected(to_server_tx),
+            _ => return Ok(()),
+        }
+
+        *self.connection_attempts.write() = 0;
+        *self.connected_time.write() = Some(clock_now());
+
+        let route_requests = async {
+            self.send_route_requests().await
+                .map_err(|e|
+                    SpawnError::from(e.context(SpawnErrorKind::SendTo))
+                )
+        };
+
+        let mut to_server_rx = to_server_rx.map(Ok);
+        let writer = to_server
+            .send_all(&mut to_server_rx)
+            .map_err(|e|
+                SpawnError::from(e.context(SpawnErrorKind::Encode))
+            );
+
+        let reader = async {
+            while let Some(packet) = from_server.next().await {
+                let packet = packet
+                    .map_err(|e|
+                        SpawnError::from(e.context(SpawnErrorKind::ReadSocket))
+                    )?;
+                self.handle_packet(packet).await
+                    .map_err(|e|
+                        SpawnError::from(e.context(SpawnErrorKind::HandlePacket))
+                    )?
             }
 
-            let future = TcpStream::connect(&self.addr).map_err(|e| e.context(SpawnErrorKind::Io).into())
-                .and_then(move |socket| make_client_handshake(socket, &dht_pk, &dht_sk, &relay_pk)
-                    .map_err(|e| e.context(SpawnErrorKind::Io).into())) // TODO: timeout
-                .and_then(move |(socket, channel)| {
-                    let stats = Stats::new();
-                    let secure_socket = Framed::new(socket, Codec::new(channel, stats));
-                    let (to_server, from_server) = secure_socket.split();
-                    let (to_server_tx, to_server_rx) = mpsc::channel(CLIENT_CHANNEL_SIZE);
+            Result::<(), SpawnError>::Ok(())
+        };
 
-                    match *self.status.write() {
-                        ref mut status @ ClientStatus::Connecting => *status = ClientStatus::Connected(to_server_tx),
-                        _ => return Either::A(future::ok(())),
-                    }
+        let rw = async move {
+            futures::select! {
+                res = reader.fuse() => res,
+                res = writer.fuse() => res,
+            }
+        };
 
-                    *self.connection_attempts.write() = 0;
+        futures::try_join!(rw, route_requests).map(drop)
+    }
 
-                    *self.connected_time.write() = Some(clock_now());
+    async fn run(self, dht_sk: SecretKey, dht_pk: PublicKey) -> Result<(), SpawnError> {
+        let self_c = self.clone();
+        let future = self.spawn_inner(dht_sk, dht_pk);
 
-                    let route_requests = self.send_route_requests()
-                        .map_err(|e| e.context(SpawnErrorKind::SendTo).into());
+        future
+            .then(move |res| {
+                match *self_c.status.write() {
+                    ClientStatus::Sleeping => { },
+                    ref mut status => *status = ClientStatus::Disconnected,
+                }
+                if res.is_err() {
+                    let mut connection_attempts = self_c.connection_attempts.write();
+                    *connection_attempts = connection_attempts.saturating_add(1);
+                }
+                *self_c.connected_time.write() = None;
+                self_c.links.write().clear();
+                future::ready(res)
+            })
+            .map_err(|e| {
+                error!("TCP relay connection error: {}", e);
+                e
+            })
+            .await
+    }
 
-                    let writer = to_server_rx
-                        .map_err(|()| -> EncodeError { unreachable!("rx can't fail") })
-                        .forward(to_server)
-                        .map_err(|e| e.context(SpawnErrorKind::Encode).into())
-                        .map(|_| ());
-
-                    let reader = from_server
-                        .map_err(|e| e.context(SpawnErrorKind::ReadSocket).into())
-                        .for_each(move |packet| self.handle_packet(packet)
-                            .map_err(|e| e.context(SpawnErrorKind::HandlePacket).into()));
-
-                    Either::B(writer
-                        .select(reader)
-                        .map_err(|(e, _): (SpawnError, _)| e)
-                        .join(route_requests)
-                        .map(|_| ()))
-                })
-                .then(move |res| {
-                    match *self_c.status.write() {
-                        ClientStatus::Sleeping => { },
-                        ref mut status => *status = ClientStatus::Disconnected,
-                    }
-                    if res.is_err() {
-                        let mut connection_attempts = self_c.connection_attempts.write();
-                        *connection_attempts = connection_attempts.saturating_add(1);
-                    }
-                    *self_c.connected_time.write() = None;
-                    self_c.links.write().clear();
-                    future::result(res)
-                })
-                .map_err(|e|
-                    error!("TCP relay connection error: {}", e)
-                );
-
-            tokio::spawn(future);
-
-            future::ok(())
-        })
+    /// Spawn a connection to this TCP relay if it is not connected already. The
+    /// connection is spawned via `tokio::spawn` so the result future will be
+    /// completed after first poll.
+    pub async fn spawn(self, dht_sk: SecretKey, dht_pk: PublicKey) -> Result<(), SpawnError> { // TODO: send pings periodically
+        tokio::spawn(self.run(dht_sk, dht_pk));
+        Ok(())
     }
 
     /// Send `RouteRequest` packet with specified `PublicKey`.
-    fn send_route_request(&self, pk: PublicKey) -> impl Future<Item = (), Error = SendPacketError> + Send {
+    fn send_route_request(&self, pk: PublicKey) -> impl Future<Output = Result<(), SendPacketError>> + Send {
         self.send_packet(Packet::RouteRequest(RouteRequest {
             pk
         }))
@@ -347,40 +399,40 @@ impl Client {
 
     /// Send `RouteRequest` packets for all nodes we should be connected to via
     /// the relay. It should be done for every fresh connection to the relay.
-    fn send_route_requests(&self) -> impl Future<Item = (), Error = SendPacketError> + Send {
+    fn send_route_requests(&self) -> impl Future<Output = Result<(), SendPacketError>> + Send {
         let connections = self.connections.read();
         let futures = connections.iter()
             .map(|&pk| self.send_route_request(pk))
             .collect::<Vec<_>>();
-        future::join_all(futures).map(|_| ())
+        future::try_join_all(futures).map_ok(drop)
     }
 
     /// Send `Data` packet to a node via relay.
-    pub fn send_data(&self, destination_pk: PublicKey, data: DataPayload) -> impl Future<Item = (), Error = SendPacketError> + Send {
+    pub fn send_data(&self, destination_pk: PublicKey, data: DataPayload) -> impl Future<Output = Result<(), SendPacketError>> + Send {
         // it is important that the result future succeeds only if packet is
         // sent since we take only one successful future from several relays
         // when send data packet
         let links = self.links.read();
         if let Some(index) = links.id_by_pk(&destination_pk) {
             if links.by_id(index).map(|link| link.status) == Some(LinkStatus::Online) {
-                Either::A(self.send_packet(Packet::Data(Data {
+                Either::Left(self.send_packet(Packet::Data(Data {
                     connection_id: ConnectionId::from_index(index),
                     data,
                 })))
             } else {
-                Either::B( future::err(
+                Either::Right( future::err(
                     SendPacketErrorKind::NotOnline.into()
                 ))
             }
         } else {
-            Either::B( future::err(
+            Either::Right( future::err(
                 SendPacketErrorKind::NotLinked.into()
             ))
         }
     }
 
     /// Send `OobSend` packet to a node via relay.
-    pub fn send_oob(&self, destination_pk: PublicKey, data: Vec<u8>) -> impl Future<Item = (), Error = SendPacketError> + Send {
+    pub fn send_oob(&self, destination_pk: PublicKey, data: Vec<u8>) -> impl Future<Output = Result<(), SendPacketError>> + Send {
         self.send_packet(Packet::OobSend(OobSend {
             destination_pk,
             data,
@@ -388,42 +440,42 @@ impl Client {
     }
 
     /// Send `OnionRequest` packet to the relay.
-    pub fn send_onion(&self, onion_request: OnionRequest) -> impl Future<Item = (), Error = SendPacketError> + Send {
+    pub fn send_onion(&self, onion_request: OnionRequest) -> impl Future<Output = Result<(), SendPacketError>> + Send {
         self.send_packet(Packet::OnionRequest(onion_request))
     }
 
     /// Add connection to a friend via this relay. If we are connected to the
     /// relay `RouteRequest` packet will be sent. Also this packet will be sent
     /// when fresh connection is established.
-    pub fn add_connection(&self, pk: PublicKey) -> impl Future<Item = (), Error = SendPacketError> + Send {
+    pub fn add_connection(&self, pk: PublicKey) -> impl Future<Output = Result<(), SendPacketError>> + Send {
         if self.connections.write().insert(pk) {
             // ignore sending errors if we are not connected to the relay
             // in this case RouteRequest will be sent after connection
-            Either::A(self.send_route_request(pk).then(|_| Ok(())))
+            Either::Left(self.send_route_request(pk).then(|_| future::ok(())))
         } else {
-            Either::B(future::ok(()))
+            Either::Right(future::ok(()))
         }
     }
 
     /// Remove connection to a friend via this relay. If we are connected to the
     /// relay and linked to the friend `DisconnectNotification` packet will be
     /// sent.
-    pub fn remove_connection(&self, pk: PublicKey) -> impl Future<Item = (), Error = SendPacketError> + Send {
+    pub fn remove_connection(&self, pk: PublicKey) -> impl Future<Output = Result<(), SendPacketError>> + Send {
         if self.connections.write().remove(&pk) {
             let mut links = self.links.write();
             if let Some(index) = links.id_by_pk(&pk) {
                 links.take(index);
-                Either::A(self.send_packet(Packet::DisconnectNotification(DisconnectNotification {
+                Either::Left(self.send_packet(Packet::DisconnectNotification(DisconnectNotification {
                     connection_id: ConnectionId::from_index(index),
-                })).then(|_| Ok(())))
+                })).then(|_| future::ok(())))
             } else {
                 // the link may not exist if we delete the connection before we
                 // receive RouteResponse packet
                 // TODO: should it be handled better?
-                Either::B(future::ok(()))
+                Either::Right(future::ok(()))
             }
         } else {
-            Either::B( future::err(
+            Either::Right( future::err(
                 SendPacketErrorKind::NoSuchConnection.into()
             ))
         }
@@ -512,7 +564,6 @@ pub mod tests {
     use std::io::{Error as IoError, ErrorKind as IoErrorKind};
 
     use tokio::net::TcpListener;
-    use tokio::timer::Interval;
 
     use crate::toxcore::dht::packet::CryptoData;
     use crate::toxcore::ip_port::*;
@@ -535,20 +586,20 @@ pub mod tests {
         *client.connection_attempts.write() = attempts;
     }
 
-    #[test]
-    fn handle_route_request() {
+    #[tokio::test]
+    async fn handle_route_request() {
         let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let route_request = Packet::RouteRequest(RouteRequest {
             pk: gen_keypair().0,
         });
 
-        let error = client.handle_packet(route_request).wait().err().unwrap();
+        let error = client.handle_packet(route_request).await.err().unwrap();
         assert_eq!(*error.kind(), HandlePacketErrorKind::MustNotSend);
     }
 
-    #[test]
-    fn handle_route_response() {
+    #[tokio::test]
+    async fn handle_route_response() {
         let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let (new_pk, _new_sk) = gen_keypair();
@@ -561,7 +612,7 @@ pub mod tests {
             pk: new_pk,
         });
 
-        client.handle_packet(route_response).wait().unwrap();
+        client.handle_packet(route_response).await.unwrap();
 
         let link = client.links.read().by_id(index).cloned().unwrap();
 
@@ -569,8 +620,8 @@ pub mod tests {
         assert_eq!(link.status, LinkStatus::Registered);
     }
 
-    #[test]
-    fn handle_route_response_occupied() {
+    #[tokio::test]
+    async fn handle_route_response_occupied() {
         let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let (existing_pk, _existing_sk) = gen_keypair();
@@ -585,7 +636,7 @@ pub mod tests {
             pk: new_pk,
         });
 
-        assert!(client.handle_packet(route_response).wait().is_err());
+        assert!(client.handle_packet(route_response).await.is_err());
 
         let link = client.links.read().by_id(index).cloned().unwrap();
 
@@ -593,8 +644,8 @@ pub mod tests {
         assert_eq!(link.status, LinkStatus::Registered);
     }
 
-    #[test]
-    fn handle_route_response_unexpected() {
+    #[tokio::test]
+    async fn handle_route_response_unexpected() {
         let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let index = 42;
@@ -603,14 +654,14 @@ pub mod tests {
             pk: gen_keypair().0,
         });
 
-        let error = client.handle_packet(route_response).wait().err().unwrap();
+        let error = client.handle_packet(route_response).await.err().unwrap();
         assert_eq!(*error.kind(), HandlePacketErrorKind::UnexpectedRouteResponse);
 
         assert!(client.links.read().by_id(index).is_none());
     }
 
-    #[test]
-    fn handle_route_response_0() {
+    #[tokio::test]
+    async fn handle_route_response_0() {
         let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let route_response = Packet::RouteResponse(RouteResponse {
@@ -618,12 +669,12 @@ pub mod tests {
             pk: gen_keypair().0,
         });
 
-        let error = client.handle_packet(route_response).wait().err().unwrap();
+        let error = client.handle_packet(route_response).await.err().unwrap();
         assert_eq!(*error.kind(), HandlePacketErrorKind::InvalidConnectionId);
     }
 
-    #[test]
-    fn handle_connect_notification() {
+    #[tokio::test]
+    async fn handle_connect_notification() {
         let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let (existing_pk, _existing_sk) = gen_keypair();
@@ -635,7 +686,7 @@ pub mod tests {
             connection_id: ConnectionId::from_index(index),
         });
 
-        client.handle_packet(connect_notification).wait().unwrap();
+        client.handle_packet(connect_notification).await.unwrap();
 
         let link = client.links.read().by_id(index).cloned().unwrap();
 
@@ -643,8 +694,8 @@ pub mod tests {
         assert_eq!(link.status, LinkStatus::Online);
     }
 
-    #[test]
-    fn handle_connect_notification_unexpected() {
+    #[tokio::test]
+    async fn handle_connect_notification_unexpected() {
         let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let index = 42;
@@ -652,26 +703,26 @@ pub mod tests {
             connection_id: ConnectionId::from_index(index),
         });
 
-        let error = client.handle_packet(connect_notification).wait().err().unwrap();
+        let error = client.handle_packet(connect_notification).await.err().unwrap();
         assert_eq!(*error.kind(), HandlePacketErrorKind::AlreadyLinked);
 
         assert!(client.links.read().by_id(index).is_none());
     }
 
-    #[test]
-    fn handle_connect_notification_0() {
+    #[tokio::test]
+    async fn handle_connect_notification_0() {
         let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let connect_notification = Packet::ConnectNotification(ConnectNotification {
             connection_id: ConnectionId::zero(),
         });
 
-        let error = client.handle_packet(connect_notification).wait().err().unwrap();
+        let error = client.handle_packet(connect_notification).await.err().unwrap();
         assert_eq!(*error.kind(), HandlePacketErrorKind::InvalidConnectionId);
     }
 
-    #[test]
-    fn handle_disconnect_notification() {
+    #[tokio::test]
+    async fn handle_disconnect_notification() {
         let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let (existing_pk, _existing_sk) = gen_keypair();
@@ -684,7 +735,7 @@ pub mod tests {
             connection_id: ConnectionId::from_index(index),
         });
 
-        client.handle_packet(disconnect_notification).wait().unwrap();
+        client.handle_packet(disconnect_notification).await.unwrap();
 
         let link = client.links.read().by_id(index).cloned().unwrap();
 
@@ -692,8 +743,8 @@ pub mod tests {
         assert_eq!(link.status, LinkStatus::Registered);
     }
 
-    #[test]
-    fn handle_disconnect_notification_unexpected() {
+    #[tokio::test]
+    async fn handle_disconnect_notification_unexpected() {
         let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let index = 42;
@@ -701,26 +752,26 @@ pub mod tests {
             connection_id: ConnectionId::from_index(index),
         });
 
-        let error = client.handle_packet(disconnect_notification).wait().err().unwrap();
+        let error = client.handle_packet(disconnect_notification).await.err().unwrap();
         assert_eq!(*error.kind(), HandlePacketErrorKind::AlreadyLinked);
 
         assert!(client.links.read().by_id(index).is_none());
     }
 
-    #[test]
-    fn handle_disconnect_notification_0() {
+    #[tokio::test]
+    async fn handle_disconnect_notification_0() {
         let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let disconnect_notification = Packet::DisconnectNotification(DisconnectNotification {
             connection_id: ConnectionId::zero(),
         });
 
-        let error = client.handle_packet(disconnect_notification).wait().err().unwrap();
+        let error = client.handle_packet(disconnect_notification).await.err().unwrap();
         assert_eq!(*error.kind(), HandlePacketErrorKind::InvalidConnectionId);
     }
 
-    #[test]
-    fn handle_ping_request() {
+    #[tokio::test]
+    async fn handle_ping_request() {
         let (_incoming_rx, outgoing_rx, client) = create_client();
 
         let ping_id = 42;
@@ -728,15 +779,15 @@ pub mod tests {
             ping_id
         });
 
-        client.handle_packet(ping_request).wait().unwrap();
+        client.handle_packet(ping_request).await.unwrap();
 
-        let packet = unpack!(outgoing_rx.into_future().wait().unwrap().0.unwrap(), Packet::PongResponse);
+        let packet = unpack!(outgoing_rx.into_future().await.0.unwrap(), Packet::PongResponse);
 
         assert_eq!(packet.ping_id, ping_id);
     }
 
-    #[test]
-    fn handle_pong_response() {
+    #[tokio::test]
+    async fn handle_pong_response() {
         let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let ping_id = 42;
@@ -744,11 +795,11 @@ pub mod tests {
             ping_id
         });
 
-        client.handle_packet(pong_response).wait().unwrap();
+        client.handle_packet(pong_response).await.unwrap();
     }
 
-    #[test]
-    fn handle_oob_send() {
+    #[tokio::test]
+    async fn handle_oob_send() {
         let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let oob_send = Packet::OobSend(OobSend {
@@ -756,12 +807,12 @@ pub mod tests {
             data: vec![42; 123],
         });
 
-        let error = client.handle_packet(oob_send).wait().err().unwrap();
+        let error = client.handle_packet(oob_send).await.err().unwrap();
         assert_eq!(*error.kind(), HandlePacketErrorKind::MustNotSend);
     }
 
-    #[test]
-    fn handle_oob_receive() {
+    #[tokio::test]
+    async fn handle_oob_receive() {
         let (incoming_rx, _outgoing_rx, client) = create_client();
 
         let sender_pk = gen_keypair().0;
@@ -771,9 +822,9 @@ pub mod tests {
             data: data.clone(),
         });
 
-        client.handle_packet(oob_receive).wait().unwrap();
+        client.handle_packet(oob_receive).await.unwrap();
 
-        let (relay_pk, packet) = incoming_rx.into_future().wait().unwrap().0.unwrap();
+        let (relay_pk, packet) = incoming_rx.into_future().await.0.unwrap();
         let (received_pk, received_data) = unpack!(packet, IncomingPacket::Oob[pk, data]);
 
         assert_eq!(relay_pk, client.pk);
@@ -781,8 +832,8 @@ pub mod tests {
         assert_eq!(received_data, data);
     }
 
-    #[test]
-    fn handle_data() {
+    #[tokio::test]
+    async fn handle_data() {
         let (incoming_rx, _outgoing_rx, client) = create_client();
 
         let (sender_pk, _sender_sk) = gen_keypair();
@@ -800,9 +851,9 @@ pub mod tests {
             data: data.clone(),
         });
 
-        client.handle_packet(data_packet).wait().unwrap();
+        client.handle_packet(data_packet).await.unwrap();
 
-        let (relay_pk, packet) = incoming_rx.into_future().wait().unwrap().0.unwrap();
+        let (relay_pk, packet) = incoming_rx.into_future().await.0.unwrap();
         let (received_pk, received_data) = unpack!(packet, IncomingPacket::Data[pk, data]);
 
         assert_eq!(relay_pk, client.pk);
@@ -810,8 +861,8 @@ pub mod tests {
         assert_eq!(received_data, data);
     }
 
-    #[test]
-    fn handle_data_unexpected() {
+    #[tokio::test]
+    async fn handle_data_unexpected() {
         let (incoming_rx, _outgoing_rx, client) = create_client();
 
         let data_packet = Packet::Data(Data {
@@ -822,17 +873,17 @@ pub mod tests {
             }),
         });
 
-        let error = client.handle_packet(data_packet).wait().err().unwrap();
+        let error = client.handle_packet(data_packet).await.err().unwrap();
         assert_eq!(*error.kind(), HandlePacketErrorKind::AlreadyLinked);
 
         // Necessary to drop tx so that rx.collect() can be finished
         drop(client);
 
-        assert!(incoming_rx.collect().wait().unwrap().is_empty());
+        assert!(incoming_rx.collect::<Vec<_>>().await.is_empty());
     }
 
-    #[test]
-    fn handle_data_0() {
+    #[tokio::test]
+    async fn handle_data_0() {
         let (incoming_rx, _outgoing_rx, client) = create_client();
 
         let data_packet = Packet::Data(Data {
@@ -843,17 +894,17 @@ pub mod tests {
             }),
         });
 
-        let error = client.handle_packet(data_packet).wait().err().unwrap();
+        let error = client.handle_packet(data_packet).await.err().unwrap();
         assert_eq!(*error.kind(), HandlePacketErrorKind::InvalidConnectionId);
 
         // Necessary to drop tx so that rx.collect() can be finished
         drop(client);
 
-        assert!(incoming_rx.collect().wait().unwrap().is_empty());
+        assert!(incoming_rx.collect::<Vec<_>>().await.is_empty());
     }
 
-    #[test]
-    fn handle_onion_request() {
+    #[tokio::test]
+    async fn handle_onion_request() {
         let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let onion_request = Packet::OnionRequest(OnionRequest {
@@ -867,12 +918,12 @@ pub mod tests {
             payload: vec![42; 123],
         });
 
-        let error = client.handle_packet(onion_request).wait().err().unwrap();
+        let error = client.handle_packet(onion_request).await.err().unwrap();
         assert_eq!(*error.kind(), HandlePacketErrorKind::MustNotSend);
     }
 
-    #[test]
-    fn handle_onion_response() {
+    #[tokio::test]
+    async fn handle_onion_response() {
         let (incoming_rx, _outgoing_rx, client) = create_client();
 
         let payload = InnerOnionResponse::OnionDataResponse(OnionDataResponse {
@@ -884,17 +935,17 @@ pub mod tests {
             payload: payload.clone(),
         });
 
-        client.handle_packet(onion_response).wait().unwrap();
+        client.handle_packet(onion_response).await.unwrap();
 
-        let (relay_pk, packet) = incoming_rx.into_future().wait().unwrap().0.unwrap();
+        let (relay_pk, packet) = incoming_rx.into_future().await.0.unwrap();
         let received_payload = unpack!(packet, IncomingPacket::Onion);
 
         assert_eq!(relay_pk, client.pk);
         assert_eq!(received_payload, payload);
     }
 
-    #[test]
-    fn send_data() {
+    #[tokio::test]
+    async fn send_data() {
         let (_incoming_rx, outgoing_rx, client) = create_client();
 
         let (destination_pk, _destination_sk) = gen_keypair();
@@ -907,16 +958,16 @@ pub mod tests {
         client.links.write().insert_by_id(&destination_pk, index);
         client.links.write().upgrade(index);
 
-        client.send_data(destination_pk, data.clone()).wait().unwrap();
+        client.send_data(destination_pk, data.clone()).await.unwrap();
 
-        let packet = unpack!(outgoing_rx.into_future().wait().unwrap().0.unwrap(), Packet::Data);
+        let packet = unpack!(outgoing_rx.into_future().await.0.unwrap(), Packet::Data);
 
         assert_eq!(packet.connection_id, ConnectionId::from_index(index));
         assert_eq!(packet.data, data);
     }
 
-    #[test]
-    fn send_data_not_linked() {
+    #[tokio::test]
+    async fn send_data_not_linked() {
         let (_incoming_rx, outgoing_rx, client) = create_client();
 
         let (destination_pk, _destination_sk) = gen_keypair();
@@ -925,17 +976,17 @@ pub mod tests {
             payload: vec![42; 123],
         });
 
-        let error = client.send_data(destination_pk, data.clone()).wait().err().unwrap();
+        let error = client.send_data(destination_pk, data.clone()).await.err().unwrap();
         assert_eq!(*error.kind(), SendPacketErrorKind::NotLinked);
 
         // Necessary to drop tx so that rx.collect() can be finished
         drop(client);
 
-        assert!(outgoing_rx.collect().wait().unwrap().is_empty());
+        assert!(outgoing_rx.collect::<Vec<_>>().await.is_empty());
     }
 
-    #[test]
-    fn send_data_not_online() {
+    #[tokio::test]
+    async fn send_data_not_online() {
         let (_incoming_rx, outgoing_rx, client) = create_client();
 
         let (destination_pk, _destination_sk) = gen_keypair();
@@ -947,32 +998,32 @@ pub mod tests {
         let connection_id = 42;
         client.links.write().insert_by_id(&destination_pk, connection_id - 16);
 
-        let error = client.send_data(destination_pk, data.clone()).wait().err().unwrap();
+        let error = client.send_data(destination_pk, data.clone()).await.err().unwrap();
         assert_eq!(*error.kind(), SendPacketErrorKind::NotOnline);
 
         // Necessary to drop tx so that rx.collect() can be finished
         drop(client);
 
-        assert!(outgoing_rx.collect().wait().unwrap().is_empty());
+        assert!(outgoing_rx.collect::<Vec<_>>().await.is_empty());
     }
 
-    #[test]
-    fn send_oob() {
+    #[tokio::test]
+    async fn send_oob() {
         let (_incoming_rx, outgoing_rx, client) = create_client();
 
         let (destination_pk, _destination_sk) = gen_keypair();
         let data = vec![42; 123];
 
-        client.send_oob(destination_pk, data.clone()).wait().unwrap();
+        client.send_oob(destination_pk, data.clone()).await.unwrap();
 
-        let packet = unpack!(outgoing_rx.into_future().wait().unwrap().0.unwrap(), Packet::OobSend);
+        let packet = unpack!(outgoing_rx.into_future().await.0.unwrap(), Packet::OobSend);
 
         assert_eq!(packet.destination_pk, destination_pk);
         assert_eq!(packet.data, data);
     }
 
-    #[test]
-    fn send_onion() {
+    #[tokio::test]
+    async fn send_onion() {
         let (_incoming_rx, outgoing_rx, client) = create_client();
 
         let onion_request = OnionRequest {
@@ -986,37 +1037,37 @@ pub mod tests {
             payload: vec![42; 123],
         };
 
-        client.send_onion(onion_request.clone()).wait().unwrap();
+        client.send_onion(onion_request.clone()).await.unwrap();
 
-        let packet = unpack!(outgoing_rx.into_future().wait().unwrap().0.unwrap(), Packet::OnionRequest);
+        let packet = unpack!(outgoing_rx.into_future().await.0.unwrap(), Packet::OnionRequest);
 
         assert_eq!(packet, onion_request);
     }
 
-    #[test]
-    fn add_connection() {
+    #[tokio::test]
+    async fn add_connection() {
         let (_incoming_rx, outgoing_rx, client) = create_client();
 
         let (connection_pk, _connection_sk) = gen_keypair();
 
-        client.add_connection(connection_pk).wait().unwrap();
+        client.add_connection(connection_pk).await.unwrap();
 
-        let (packet, outgoing_rx) = outgoing_rx.into_future().wait().unwrap();
+        let (packet, outgoing_rx) = outgoing_rx.into_future().await;
         let packet = unpack!(packet.unwrap(), Packet::RouteRequest);
 
         assert_eq!(packet.pk, connection_pk);
 
         // RouteRequest shouldn't be sent again after we add the same connection
-        client.add_connection(connection_pk).wait().unwrap();
+        client.add_connection(connection_pk).await.unwrap();
 
         // Necessary to drop tx so that rx.collect() can be finished
         drop(client);
 
-        assert!(outgoing_rx.collect().wait().unwrap().is_empty());
+        assert!(outgoing_rx.collect::<Vec<_>>().await.is_empty());
     }
 
-    #[test]
-    fn remove_connection() {
+    #[tokio::test]
+    async fn remove_connection() {
         let (_incoming_rx, outgoing_rx, client) = create_client();
 
         let (connection_pk, _connection_sk) = gen_keypair();
@@ -1025,37 +1076,37 @@ pub mod tests {
         client.connections.write().insert(connection_pk);
         client.links.write().insert_by_id(&connection_pk, index);
 
-        client.remove_connection(connection_pk).wait().unwrap();
+        client.remove_connection(connection_pk).await.unwrap();
 
-        let packet = unpack!(outgoing_rx.into_future().wait().unwrap().0.unwrap(), Packet::DisconnectNotification);
+        let packet = unpack!(outgoing_rx.into_future().await.0.unwrap(), Packet::DisconnectNotification);
 
         assert_eq!(packet.connection_id, ConnectionId::from_index(index));
     }
 
-    #[test]
-    fn remove_connection_no_connection() {
+    #[tokio::test]
+    async fn remove_connection_no_connection() {
         let (_incoming_rx, _outgoing_rx, client) = create_client();
 
         let (connection_pk, _connection_sk) = gen_keypair();
 
-        let error = client.remove_connection(connection_pk).wait().err().unwrap();
+        let error = client.remove_connection(connection_pk).await.err().unwrap();
         assert_eq!(*error.kind(), SendPacketErrorKind::NoSuchConnection);
     }
 
-    #[test]
-    fn remove_connection_no_link() {
+    #[tokio::test]
+    async fn remove_connection_no_link() {
         let (_incoming_rx, outgoing_rx, client) = create_client();
 
         let (connection_pk, _connection_sk) = gen_keypair();
 
         client.connections.write().insert(connection_pk);
 
-        client.remove_connection(connection_pk).wait().unwrap();
+        client.remove_connection(connection_pk).await.unwrap();
 
         // Necessary to drop tx so that rx.collect() can be finished
         drop(client);
 
-        assert!(outgoing_rx.collect().wait().unwrap().is_empty());
+        assert!(outgoing_rx.collect::<Vec<_>>().await.is_empty());
     }
 
     #[test]
@@ -1126,86 +1177,84 @@ pub mod tests {
         assert!(!client.is_connection_online(connection_pk));
     }
 
-    #[test]
-    fn spawn() {
+    #[tokio::test]
+    async fn spawn() {
         // waits until the relay becomes connected
-        fn on_connected(client: Client) -> impl Future<Item = (), Error = Error> + Send {
-            Interval::new(Instant::now(), Duration::from_millis(10))
-                .map_err(Error::from)
-                .skip_while(move |_| match *client.status.read() {
-                    ClientStatus::Connecting => future::ok(true),
-                    ClientStatus::Connected(_) => future::ok(false),
-                    ref other => future::err(Error::from(IoError::new(IoErrorKind::Other, format!("Invalid status: {:?}", other)))),
-                })
-                .into_future()
-                .map(|_| ())
-                .map_err(|(e, _)| e)
+        async fn on_connected(client: Client) -> Result<(), Error> {
+            let mut interval = tokio::time::interval(Duration::from_millis(10));
+
+            while let Some(_) = interval.next().await {
+                match *client.status.read() {
+                    ClientStatus::Connecting => continue,
+                    ClientStatus::Connected(_) => return Ok(()),
+                    ref other => return Err(Error::from(IoError::new(IoErrorKind::Other, format!("Invalid status: {:?}", other)))),
+                }
+            }
+
+            Ok(())
         }
 
         // waits until link with PublicKey becomes online
-        fn on_online(client: Client, pk: PublicKey) -> impl Future<Item = (), Error = Error> + Send {
-            Interval::new(Instant::now(), Duration::from_millis(10))
-                .map_err(Error::from)
-                .skip_while(move |_| {
-                    let links = client.links.read();
-                    if let Some(index) = links.id_by_pk(&pk) {
-                        future::ok(links.by_id(index).map(|link| link.status) != Some(LinkStatus::Online))
-                    } else {
-                        future::ok(true)
-                    }
-                })
-                .into_future()
-                .map(|_| ())
-                .map_err(|(e, _)| e)
+        async fn on_online(client: Client, pk: PublicKey) -> Result<(), Error> {
+            let mut interval = tokio::time::interval(Duration::from_millis(10));
+
+            while let Some(_) = interval.next().await {
+                let links = client.links.read();
+                if let Some(index) = links.id_by_pk(&pk) {
+                    let status = links.by_id(index).map(|link| link.status);
+                    if status == Some(LinkStatus::Online) { return Ok(()) }
+                }
+            }
+
+            Ok(())
         }
 
         crypto_init().unwrap();
         // run server
         let (server_pk, server_sk) = gen_keypair();
 
-        let addr = "127.0.0.1:0".parse().unwrap();
-        let listener = TcpListener::bind(&addr).unwrap();
+        let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let listener = TcpListener::bind(&addr).await.unwrap();
         let addr = listener.local_addr().unwrap();
 
         let server = Server::new();
         let stats = Stats::new();
         let server_future = server.run(listener, server_sk, stats, 2)
             .map_err(Error::from);
+        tokio::spawn(server_future);
 
         // run first client
         let (client_pk_1, client_sk_1) = gen_keypair();
-        let (incoming_tx_1, incoming_rx_1) = mpsc::unbounded();
+        let (incoming_tx_1, mut incoming_rx_1) = mpsc::unbounded();
         let client_1 = Client::new(server_pk, addr, incoming_tx_1);
         // connection attempts should be set to 0 after successful connection
         set_connection_attempts(&client_1, 3);
-        let client_future_1 = client_1.clone().spawn(client_sk_1, client_pk_1)
-            .map_err(Error::from);
+        client_1.clone().spawn(client_sk_1, client_pk_1).await.unwrap();
 
         // run second client
         let (client_pk_2, client_sk_2) = gen_keypair();
-        let (incoming_tx_2, incoming_rx_2) = mpsc::unbounded();
+        let (incoming_tx_2, mut incoming_rx_2) = mpsc::unbounded();
         let client_2 = Client::new(server_pk, addr, incoming_tx_2);
         // connection attempts should be set to 0 after successful connection
         set_connection_attempts(&client_2, 3);
-        let client_future_2 = client_2.clone().spawn(client_sk_2, client_pk_2)
-            .map_err(Error::from);
-
-        // add connection immediately
-        let connection_future = client_2.add_connection(client_pk_1)
-            .map_err(Error::from);
+        client_2.clone().spawn(client_sk_2, client_pk_2).await.unwrap();
 
         // wait until connections are established
-        let client_1_c = client_1.clone();
-        let client_2_c = client_2.clone();
-        let on_connected_future = on_connected(client_1.clone()).join(on_connected(client_2.clone())).and_then(move |_| {
-            assert!(client_1_c.connected_time().is_some());
-            assert!(client_2_c.connected_time().is_some());
-            assert_eq!(client_1_c.connection_attempts(), 0);
-            assert_eq!(client_2_c.connection_attempts(), 0);
-            // add connection when relay is connected
-            client_1_c.add_connection(client_pk_2)
-                .map_err(Error::from)
-        });
+        on_connected(client_1.clone()).await.unwrap();
+        on_connected(client_2.clone()).await.unwrap();
+
+        assert!(client_1.connected_time().is_some());
+        assert!(client_2.connected_time().is_some());
+        assert_eq!(client_1.connection_attempts(), 0);
+        assert_eq!(client_2.connection_attempts(), 0);
+
+        // add connections when relay is connected
+        client_1.add_connection(client_pk_2).await.unwrap();
+        client_2.add_connection(client_pk_1).await.unwrap();
+
+        // wait until links become online
+        on_online(client_1.clone(), client_pk_2).await.unwrap();
+        on_online(client_2.clone(), client_pk_1).await.unwrap();
 
         let data_1 = DataPayload::CryptoData(CryptoData {
             nonce_last_bytes: 42,
@@ -1215,86 +1264,58 @@ pub mod tests {
             nonce_last_bytes: 42,
             payload: vec![43; 123],
         });
+        client_1.send_data(client_pk_2, data_1.clone()).await.unwrap();
+        client_2.send_data(client_pk_1, data_2.clone()).await.unwrap();
 
-        // wait until links become online
-        let client_1_c = client_1.clone();
-        let client_2_c = client_2.clone();
-        let data_1_c = data_1.clone();
-        let data_2_c = data_2.clone();
-        let on_online_future = on_online(client_1.clone(), client_pk_2).join(on_online(client_2.clone(), client_pk_1))
-            // and then send data packets to each other
-            .and_then(move |_| client_1_c.send_data(client_pk_2, data_1_c)
-                .map_err(Error::from))
-            .and_then(move |_| client_2_c.send_data(client_pk_1, data_2_c)
-                .map_err(Error::from))
-            // and then get them
-            .and_then(move |_| incoming_rx_1.map_err(|()| unreachable!("rx can't fail")).into_future().map(move |(packet, _)| {
-                let (relay_pk, packet) = packet.unwrap();
-                let (received_pk, received_data) = unpack!(packet, IncomingPacket::Data[pk, data]);
-                assert_eq!(relay_pk, server_pk);
-                assert_eq!(received_pk, client_pk_2);
-                assert_eq!(received_data, data_2);
-            }).map_err(|(e, _)| e))
-            .and_then(move |_| incoming_rx_2.map_err(|()| unreachable!("rx can't fail")).into_future().map(move |(packet, _)| {
-                let (relay_pk, packet) = packet.unwrap();
-                let (received_pk, received_data) = unpack!(packet, IncomingPacket::Data[pk, data]);
-                assert_eq!(relay_pk, server_pk);
-                assert_eq!(received_pk, client_pk_1);
-                assert_eq!(received_data, data_1);
-            }).map_err(|(e, _)| e))
-            .map(move |_| {
-                // tokio runtime won't become idle until we drop the connections
-                client_1.disconnect();
-                client_2.disconnect();
-            });
+        let packet1 = incoming_rx_1.next().await;
+        let (relay_pk, packet) = packet1.unwrap();
+        {
+            let (received_pk, received_data) = unpack!(packet, IncomingPacket::Data[pk, data]);
 
-        let future = client_future_1
-            .join5(client_future_2, connection_future, on_connected_future, on_online_future)
-            .map(|_| ());
-        let future = server_future
-            .select(future)
-            .then(|r| {
-                assert!(r.is_ok());
-                r
-            })
-            .map(|_| ())
-            .map_err(|_| ());
+            assert_eq!(relay_pk, server_pk);
+            assert_eq!(received_pk, client_pk_2);
+            assert_eq!(received_data, data_2);
+        }
 
-        tokio::run(future);
+        let packet2 = incoming_rx_2.next().await;
+        let (relay_pk, packet) = packet2.unwrap();
+        {
+            let (received_pk, received_data) = unpack!(packet, IncomingPacket::Data[pk, data]);
+
+            assert_eq!(relay_pk, server_pk);
+            assert_eq!(received_pk, client_pk_1);
+            assert_eq!(received_data, data_1);
+        }
     }
 
-    #[test]
-    fn spawn_unsuccessful() {
+    #[tokio::test]
+    async fn run_unsuccessful() {
         // run server
         let (_server_pk, server_sk) = gen_keypair();
 
-        let addr = "127.0.0.1:0".parse().unwrap();
-        let listener = TcpListener::bind(&addr).unwrap();
+        let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let mut listener = TcpListener::bind(&addr).await.unwrap();
         let addr = listener.local_addr().unwrap();
 
         let server = Server::new();
         let stats = Stats::new();
-        let server_future = server.run(listener, server_sk, stats, 2)
-            .map_err(Error::from);
+        let server_future = async {
+            let connection = listener.incoming().next().await.unwrap().unwrap();
+            server.run_connection(connection, server_sk, stats)
+                .map_err(Error::from).await
+        };
 
         // run a client with invalid server's pk
         let (client_pk_1, client_sk_1) = gen_keypair();
         let (invalid_server_pk, _invalid_server_sk) = gen_keypair();
         let (incoming_tx_1, _incoming_rx_1) = mpsc::unbounded();
         let client = Client::new(invalid_server_pk, addr, incoming_tx_1);
-        let client_future = client.clone().spawn(client_sk_1, client_pk_1)
+        let client_future = client.clone().run(client_sk_1, client_pk_1)
             .map_err(Error::from);
 
-        let future = server_future
-            .select(client_future)
-            .then(|r| {
-                assert!(r.is_ok());
-                r
-            })
-            .map(|_| ())
-            .map_err(|_| ());
-
-        tokio::run(future);
+        let (server_res, client_res) = future::join(server_future.boxed(), client_future.boxed()).await;
+        assert!(server_res.is_err()); // fail to process handshake
+        assert!(client_res.is_err()); // fail to process handshake
 
         // connection_attempts should be increased
         assert_eq!(*client.connection_attempts.read(), 1);

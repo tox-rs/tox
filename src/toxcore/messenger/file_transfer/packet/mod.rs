@@ -101,12 +101,19 @@ const FILE_UID_BYTES: usize = 32;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FileUID([u8; FILE_UID_BYTES]);
 
+impl Default for FileUID {
+    fn default() -> Self {
+        let mut array = [0; FILE_UID_BYTES];
+        randombytes_into(&mut array);
+        
+        FileUID(array)
+    }
+}
+
 impl FileUID {
     /// Create new object
     pub fn new() -> FileUID {
-        let mut array = [0; FILE_UID_BYTES];
-        randombytes_into(&mut array);
-        FileUID(array)
+        Default::default()
     }
 
     fn from_slice(bs: &[u8]) -> Option<FileUID> {

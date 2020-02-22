@@ -10,8 +10,8 @@ use crate::toxcore::stats::*;
 
 use failure::Fail;
 use nom::{Needed, Offset, Err, error::ErrorKind};
-use bytes::BytesMut;
-use tokio::codec::{Decoder, Encoder};
+use bytes::{BytesMut, Buf};
+use tokio_util::codec::{Decoder, Encoder};
 
 /// Error that can happen when decoding `Packet` from bytes
 #[derive(Debug, Fail)]
@@ -144,7 +144,7 @@ impl Decoder for Codec {
                 // Add 1 to incoming counter
                 self.stats.counters.increase_incoming();
 
-                buf.split_to(consumed);
+                buf.advance(consumed);
                 Ok(Some(packet))
             }
         }
@@ -211,36 +211,6 @@ mod tests {
         assert_eq!(unpack!(encode_error, EncodeError::IoError, error).kind(), IoErrorKind::Other);
     }
 
-    #[test]
-    fn decode_error_display() {
-        format!("{}", DecodeError::DeserializeEncryptedError {
-            error: ErrorKind::Alt,
-            buf: vec![42; 123],
-        });
-        format!("{}", DecodeError::DecryptError);
-        format!("{}", DecodeError::IncompleteDecryptedPacket {
-            needed: Needed::Unknown,
-            packet: vec![42; 123],
-        });
-        format!("{}", DecodeError::DeserializeDecryptedError {
-            error: ErrorKind::Alt,
-            packet: vec![42; 123],
-        });
-        format!("{}", DecodeError::IoError {
-            error: IoError::new(IoErrorKind::Other, "io error"),
-        });
-    }
-
-    #[test]
-    fn encode_error_display() {
-        format!("{}", EncodeError::SerializeError {
-            error: GenError::CustomError(0),
-        });
-        format!("{}", EncodeError::IoError {
-            error: IoError::new(IoErrorKind::Other, "io error"),
-        });
-    }
-
     fn create_channels() -> (Channel, Channel) {
         let alice_session = Session::random();
         let bob_session = Session::random();
@@ -268,7 +238,7 @@ mod tests {
         let mut buf = BytesMut::new();
         let stats = Stats::new();
         let mut alice_codec = Codec::new(alice_channel, stats.clone());
-        let mut bob_codec = Codec::new(bob_channel, stats.clone());
+        let mut bob_codec = Codec::new(bob_channel, stats);
 
         let test_packets = vec![
             Packet::RouteRequest( RouteRequest { pk } ),
@@ -363,7 +333,7 @@ mod tests {
 
         let stats = Stats::new();
         let mut alice_codec = Codec::new(alice_channel, stats.clone());
-        let mut mallory_codec = Codec::new(mallory_channel, stats.clone());
+        let mut mallory_codec = Codec::new(mallory_channel, stats);
 
         let mut buf = BytesMut::new();
         let packet = Packet::PingRequest( PingRequest { ping_id: 4242 } );

@@ -16,12 +16,11 @@ use parking_lot::RwLock;
 use std::collections::{hash_map, HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration};
 
-use futures::{future, stream, Future, Stream};
+use futures::{future, Future, FutureExt, TryFutureExt, StreamExt};
 use futures::future::Either;
-use futures::sync::mpsc;
-use tokio::timer::Interval;
+use futures::channel::mpsc;
 
 use crate::toxcore::crypto_core::*;
 use crate::toxcore::dht::packed_node::PackedNode;
@@ -119,15 +118,15 @@ impl Connections {
     /// for initial connection so that we are able to find friends and to send
     /// them our relays. Later when more relays are received from our friends
     /// they should be added via `add_relay_connection` method.
-    pub fn add_relay_global(&self, relay_addr: SocketAddr, relay_pk: PublicKey) -> impl Future<Item = (), Error = ConnectionError> + Send {
+    pub fn add_relay_global(&self, relay_addr: SocketAddr, relay_pk: PublicKey) -> impl Future<Output = Result<(), ConnectionError>> + Send {
         if let hash_map::Entry::Vacant(vacant) = self.clients.write().entry(relay_pk) {
             let client = Client::new(relay_pk, relay_addr, self.incoming_tx.clone());
             vacant.insert(client.clone());
-            Either::A(client.spawn(self.dht_sk.clone(), self.dht_pk)
+            Either::Left(client.spawn(self.dht_sk.clone(), self.dht_pk)
                 .map_err(|e| e.context(ConnectionErrorKind::Spawn).into()))
         } else {
             trace!("Attempt to add relay that already exists: {}", relay_addr);
-            Either::B(future::ok(()))
+            Either::Right(future::ok(()))
         }
     }
 
@@ -135,10 +134,10 @@ impl Connections {
     /// we already connected to this friend via at least
     /// `RECOMMENDED_FRIEND_TCP_CONNECTIONS` relays. Connection to our friend
     /// via this relay will be added as well.
-    pub fn add_relay_connection(&self, relay_addr: SocketAddr, relay_pk: PublicKey, node_pk: PublicKey) -> impl Future<Item = (), Error = ConnectionError> + Send {
+    pub fn add_relay_connection(&self, relay_addr: SocketAddr, relay_pk: PublicKey, node_pk: PublicKey) -> impl Future<Output = Result<(), ConnectionError>> + Send {
         let mut clients = self.clients.write();
         if let Some(client) = clients.get(&relay_pk) {
-            Box::new(self.add_connection_inner(client, node_pk))
+            self.add_connection_inner(client, node_pk).boxed()
         } else {
             let mut connections = self.connections.write();
             let connection = connections.entry(node_pk).or_insert_with(NodeConnection::new);
@@ -152,14 +151,17 @@ impl Connections {
                 let client = Client::new(relay_pk, relay_addr, self.incoming_tx.clone());
                 clients.insert(relay_pk, client.clone());
                 connection.connections.insert(relay_pk);
-                let future = client.add_connection(node_pk)
-                    .map_err(|e| e.context(ConnectionErrorKind::AddConnection).into())
-                    .join(client.spawn(self.dht_sk.clone(), self.dht_pk)
-                        .map_err(|e| e.context(ConnectionErrorKind::Spawn).into()))
-                    .map(|_| ());
-                Box::new(future) as Box<dyn Future<Item = _, Error = _> + Send>
+                let future =
+                    future::try_join(
+                        client.add_connection(node_pk)
+                            .map_err(|e| e.context(ConnectionErrorKind::AddConnection).into()),
+                        client.spawn(self.dht_sk.clone(), self.dht_pk)
+                            .map_err(|e| e.context(ConnectionErrorKind::Spawn).into())
+                    )
+                    .map_ok(drop);
+                future.boxed()
             } else {
-                Box::new(future::ok(()))
+                future::ok(()).boxed()
             }
         }
     }
@@ -167,94 +169,98 @@ impl Connections {
     /// Add a connection to our friend via relay. It means that we will send
     /// `RouteRequest` packet to this relay and wait for the friend to become
     /// connected.
-    pub fn add_connection(&self, relay_pk: PublicKey, node_pk: PublicKey) -> impl Future<Item = (), Error = ConnectionError> + Send {
+    pub fn add_connection(&self, relay_pk: PublicKey, node_pk: PublicKey) -> impl Future<Output = Result<(), ConnectionError>> + Send {
         if let Some(client) = self.clients.read().get(&relay_pk) {
-            Either::A(self.add_connection_inner(client, node_pk))
+            Either::Left(self.add_connection_inner(client, node_pk))
         } else {
-            Either::B( future::err(
+            Either::Right( future::err(
                 ConnectionErrorKind::NoSuchRelay.into()
             ))
         }
     }
 
     /// Remove connection to a friend via relays.
-    pub fn remove_connection(&self, node_pk: PublicKey) -> impl Future<Item = (), Error = ConnectionError> + Send {
+    pub fn remove_connection(&self, node_pk: PublicKey) -> impl Future<Output = Result<(), ConnectionError>> + Send {
         if let Some(connection) = self.connections.write().remove(&node_pk) {
             let clients = self.clients.read();
             let futures = connection.clients(&clients)
-                .map(|client| client.remove_connection(node_pk).then(Ok))
+                .map(|client| client.remove_connection(node_pk).then(future::ok))
                 .collect::<Vec<_>>();
-            Either::A(future::join_all(futures).map(|_| ()))
+            Either::Left(future::try_join_all(futures).map_ok(drop))
         } else {
             // TODO: what if we didn't receive relays from friend and delete him?
-            Either::B( future::err(
+            Either::Right( future::err(
                 ConnectionErrorKind::NoConnection.into()
             ))
         }
     }
 
     /// Inner function to add a connection to our friend via relay.
-    fn add_connection_inner(&self, client: &Client, node_pk: PublicKey) -> impl Future<Item = (), Error = ConnectionError> + Send {
+    fn add_connection_inner(&self, client: &Client, node_pk: PublicKey) -> impl Future<Output = Result<(), ConnectionError>> + Send {
         // TODO: check MAX_FRIEND_TCP_CONNECTIONS?
         let mut connections = self.connections.write();
         let connection = connections.entry(node_pk).or_insert_with(NodeConnection::new);
         connection.connections.insert(client.pk);
+
         let future = if connection.status == NodeConnectionStatus::TCP && client.is_sleeping() {
             // unsleep relay
-            Either::A(client.clone().spawn(self.dht_sk.clone(), self.dht_pk)
+            Either::Left(client.clone().spawn(self.dht_sk.clone(), self.dht_pk)
                 .map_err(|e| e.context(ConnectionErrorKind::Spawn).into()))
         } else {
-            Either::B(future::ok(()))
+            Either::Right(future::ok(()))
         };
-        future.join(client.add_connection(node_pk).map_err(|e| e.context(ConnectionErrorKind::AddConnection).into())).map(|_| ())
+
+        future::try_join(
+            future,
+            client.add_connection(node_pk)
+                .map_err(|e| e.context(ConnectionErrorKind::AddConnection).into())
+        ).map_ok(drop)
     }
 
     /// Send `Data` packet to a node via one of the relays.
-    pub fn send_data(&self, node_pk: PublicKey, data: DataPayload) -> impl Future<Item = (), Error = ConnectionError> + Send {
-        let connections = self.connections.read();
-        if let Some(connection) = connections.get(&node_pk) {
-            let clients = self.clients.read();
-            // TODO: shuffle?
-            let futures = connection.clients(&clients)
-                .map(move |client| client.send_data(node_pk, data.clone())
-                    .map_err(|e| e.context(ConnectionErrorKind::SendTo).into()));
+    pub fn send_data(&self, node_pk: PublicKey, data: DataPayload) -> impl Future<Output = Result<(), ConnectionError>> + Send {
+        let connections = self.connections.read().clone();
+        // FIXME: is there a way to avoid cloning HashMap?
+        let clients = self.clients.read().clone();
+
+        async move {
             // send packet to the first relay only that can accept it
             // errors are ignored
             // TODO: return error if stream is exhausted?
-            Either::A(stream::futures_unordered(futures)
-                .then(Ok)
-                .skip_while(|res: &Result<(), ConnectionError>| future::ok(res.is_err()))
-                .into_future()
-                .map(|_| ())
-                .map_err(|(e, _)| e))
-        } else {
-            Either::B(future::ok(()))
-        }
+            if let Some(connection) = connections.get(&node_pk) {
+                for c in connection.clients(&clients) {
+                    let res = c.send_data(node_pk, data.clone()).await;
 
-        // TODO: send as OOB?
+                    if res.is_ok() { break }
+                }
+            }
+
+            // TODO: send as OOB?
+            Ok(())
+        }
     }
 
     /// Send `OobSend` packet to a node via relay with specified `PublicKey`.
-    pub fn send_oob(&self, relay_pk: PublicKey, node_pk: PublicKey, data: Vec<u8>) -> impl Future<Item = (), Error = ConnectionError> + Send {
+    pub fn send_oob(&self, relay_pk: PublicKey, node_pk: PublicKey, data: Vec<u8>) -> impl Future<Output = Result<(), ConnectionError>> + Send {
         let clients = self.clients.read();
         if let Some(client) = clients.get(&relay_pk) {
-            Either::A(client.send_oob(node_pk, data)
+            Either::Left(client.send_oob(node_pk, data)
                 .map_err(|e| e.context(ConnectionErrorKind::SendTo).into()))
         } else {
-            Either::B( future::err(
+            Either::Right( future::err(
                 ConnectionErrorKind::NotConnected.into()
             ))
         }
     }
 
     /// Send `OnionRequest` packet to relay with specified `PublicKey`.
-    pub fn send_onion(&self, relay_pk: PublicKey, onion_request: OnionRequest) -> impl Future<Item = (), Error = ConnectionError> + Send {
+    pub fn send_onion(&self, relay_pk: PublicKey, onion_request: OnionRequest) -> impl Future<Output = Result<(), ConnectionError>> + Send {
         let clients = self.clients.read();
         if let Some(client) = clients.get(&relay_pk) {
-            Either::A(client.send_onion(onion_request)
+            Either::Left(client.send_onion(onion_request)
                 .map_err(|e| e.context(ConnectionErrorKind::SendTo).into()))
         } else {
-            Either::B( future::err(
+            Either::Right( future::err(
                 ConnectionErrorKind::NotConnected.into()
             ))
         }
@@ -262,7 +268,7 @@ impl Connections {
 
     /// Change status of connection to the node. Connections module need to know
     /// whether connection is used to be able to put to sleep relay connections.
-    pub fn set_connection_status(&self, node_pk: PublicKey, status: NodeConnectionStatus) -> impl Future<Item = (), Error = ConnectionError> + Send {
+    pub fn set_connection_status(&self, node_pk: PublicKey, status: NodeConnectionStatus) -> impl Future<Output = Result<(), ConnectionError>> + Send {
         if let Some(connection) = self.connections.write().get_mut(&node_pk) {
             let future = if status == NodeConnectionStatus::TCP && connection.status == NodeConnectionStatus::UDP {
                 // unsleep clients
@@ -271,14 +277,14 @@ impl Connections {
                     .map(|client| client.clone().spawn(self.dht_sk.clone(), self.dht_pk)
                         .map_err(|e| e.context(ConnectionErrorKind::Spawn).into()))
                     .collect::<Vec<_>>();
-                Either::A(future::join_all(futures).map(|_| ()))
+                Either::Left(future::try_join_all(futures).map_ok(drop))
             } else {
-                Either::B(future::ok(()))
+                Either::Right(future::ok(()))
             };
             connection.status = status;
             future
         } else {
-            Either::B( future::err(
+            Either::Right(future::err(
                 ConnectionErrorKind::NoSuchRelay.into()
             ))
         }
@@ -322,7 +328,7 @@ impl Connections {
     /// Main loop that should be run periodically. It removes unreachable and
     /// redundant relays, reconnects to relays if a connection was lost, puts
     /// relays to sleep if they are not used right now.
-    fn main_loop(&self) -> impl Future<Item = (), Error = ConnectionError> + Send {
+    fn main_loop(&self) -> impl Future<Output = Result<(), ConnectionError>> + Send {
         let mut clients = self.clients.write();
         let mut connections = self.connections.write();
 
@@ -385,17 +391,19 @@ impl Connections {
             // TODO: remove connections if there are too many?
         }
 
-        future::join_all(futures).map(|_| ())
+        future::try_join_all(futures).map_ok(drop)
     }
 
     /// Run TCP periodical tasks. Result future will never be completed
     /// successfully.
-    pub fn run(self) -> impl Future<Item = (), Error = ConnectionError> + Send {
-        let wakeups = Interval::new(Instant::now(), CONNECTIONS_INTERVAL);
+    pub async fn run(self) -> Result<(), ConnectionError> {
+        let mut wakeups = tokio::time::interval(CONNECTIONS_INTERVAL);
 
-        wakeups
-            .map_err(|e| e.context(ConnectionErrorKind::Wakeup).into())
-            .for_each(move |_instant| self.main_loop())
+        while let Some(_) = wakeups.next().await {
+            self.main_loop().await?
+        }
+
+        Ok(())
     }
 }
 
@@ -403,14 +411,10 @@ impl Connections {
 mod tests {
     use super::*;
 
-    use tokio_executor;
-    use tokio_timer::clock::*;
-
     use crate::toxcore::dht::packet::CryptoData;
     use crate::toxcore::ip_port::*;
     use crate::toxcore::tcp::client::client::tests::*;
     use crate::toxcore::tcp::connection_id::ConnectionId;
-    use crate::toxcore::time::ConstNow;
 
     impl Connections {
         pub fn add_client(&self) -> (mpsc::UnboundedReceiver<(PublicKey, IncomingPacket)>, mpsc::Receiver<Packet>, PublicKey) {
@@ -446,8 +450,8 @@ mod tests {
         assert!(connections.clients.read().contains_key(&relay_pk));
     }
 
-    #[test]
-    fn add_relay_global_exists() {
+    #[tokio::test]
+    async fn add_relay_global_exists() {
         crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
@@ -460,11 +464,11 @@ mod tests {
         connections.clients.write().insert(relay_pk, client);
 
         // new connection shouldn't be spawned
-        connections.add_relay_global(addr, relay_pk).wait().unwrap();
+        connections.add_relay_global(addr, relay_pk).await.unwrap();
     }
 
-    #[test]
-    fn add_relay_connection() {
+    #[tokio::test]
+    async fn add_relay_connection() {
         crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
@@ -489,8 +493,8 @@ mod tests {
         assert!(connections.get(&node_pk).unwrap().connections.contains(&relay_pk));
     }
 
-    #[test]
-    fn add_relay_connection_relay_exists() {
+    #[tokio::test]
+    async fn add_relay_connection_relay_exists() {
         crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
@@ -505,7 +509,7 @@ mod tests {
         let (node_pk, _node_sk) = gen_keypair();
 
         // new connection shouldn't be spawned
-        connections.add_relay_connection(addr, relay_pk, node_pk).wait().unwrap();
+        connections.add_relay_connection(addr, relay_pk, node_pk).await.unwrap();
 
         let clients = connections.clients.read();
         let connections = connections.connections.read();
@@ -518,8 +522,8 @@ mod tests {
         assert!(connections.get(&node_pk).unwrap().connections.contains(&relay_pk));
     }
 
-    #[test]
-    fn add_connection() {
+    #[tokio::test]
+    async fn add_connection() {
         crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
@@ -533,7 +537,7 @@ mod tests {
         let (node_pk, _node_sk) = gen_keypair();
 
         // new connection shouldn't be spawned
-        connections.add_connection(relay_pk, node_pk).wait().unwrap();
+        connections.add_connection(relay_pk, node_pk).await.unwrap();
 
         let clients = connections.clients.read();
         let connections = connections.connections.read();
@@ -546,8 +550,8 @@ mod tests {
         assert!(connections.get(&node_pk).unwrap().connections.contains(&relay_pk));
     }
 
-    #[test]
-    fn add_connection_no_relay() {
+    #[tokio::test]
+    async fn add_connection_no_relay() {
         crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
@@ -556,12 +560,12 @@ mod tests {
         let (relay_pk, _relay_sk) = gen_keypair();
         let (node_pk, _node_sk) = gen_keypair();
 
-        let error = connections.add_connection(relay_pk, node_pk).wait().err().unwrap();
+        let error = connections.add_connection(relay_pk, node_pk).await.err().unwrap();
         assert_eq!(*error.kind(), ConnectionErrorKind::NoSuchRelay);
     }
 
-    #[test]
-    fn remove_connection() {
+    #[tokio::test]
+    async fn remove_connection() {
         crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
@@ -572,7 +576,7 @@ mod tests {
         let (_incoming_rx, _outgoing_rx, client) = create_client();
         let relay_pk = client.pk;
 
-        client.add_connection(node_pk).wait().unwrap();
+        client.add_connection(node_pk).await.unwrap();
 
         let mut node_connection = NodeConnection::new();
         node_connection.connections.insert(relay_pk);
@@ -580,7 +584,7 @@ mod tests {
         connections.clients.write().insert(relay_pk, client);
         connections.connections.write().insert(node_pk, node_connection);
 
-        connections.remove_connection(node_pk).wait().unwrap();
+        connections.remove_connection(node_pk).await.unwrap();
 
         let clients = connections.clients.read();
         let connections = connections.connections.read();
@@ -590,8 +594,8 @@ mod tests {
         assert!(!connections.contains_key(&node_pk));
     }
 
-    #[test]
-    fn remove_connection_no_connection() {
+    #[tokio::test]
+    async fn remove_connection_no_connection() {
         crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
@@ -599,12 +603,12 @@ mod tests {
 
         let (node_pk, _node_sk) = gen_keypair();
 
-        let error = connections.remove_connection(node_pk).wait().err().unwrap();
+        let error = connections.remove_connection(node_pk).await.err().unwrap();
         assert_eq!(*error.kind(), ConnectionErrorKind::NoConnection);
     }
 
-    #[test]
-    fn send_data() {
+    #[tokio::test]
+    async fn send_data() {
         crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
@@ -617,28 +621,28 @@ mod tests {
         let (destination_pk, _destination_sk) = gen_keypair();
 
         // add connection to destination_pk to be able to send data packets
-        relay_1.add_connection(destination_pk).wait().unwrap();
-        relay_2.add_connection(destination_pk).wait().unwrap();
+        relay_1.add_connection(destination_pk).await.unwrap();
+        relay_2.add_connection(destination_pk).await.unwrap();
 
         // receive route request
-        let outgoing_rx_1 = outgoing_rx_1.into_future().wait().unwrap().1;
-        let outgoing_rx_2 = outgoing_rx_2.into_future().wait().unwrap().1;
+        let outgoing_rx_1 = outgoing_rx_1.into_future().await.1;
+        let outgoing_rx_2 = outgoing_rx_2.into_future().await.1;
 
         // make connections online
         relay_1.handle_packet(Packet::RouteResponse(RouteResponse {
             connection_id: ConnectionId::from_index(42),
             pk: destination_pk,
-        })).wait().unwrap();
+        })).await.unwrap();
         relay_2.handle_packet(Packet::RouteResponse(RouteResponse {
             connection_id: ConnectionId::from_index(42),
             pk: destination_pk,
-        })).wait().unwrap();
+        })).await.unwrap();
         relay_1.handle_packet(Packet::ConnectNotification(ConnectNotification {
             connection_id: ConnectionId::from_index(42),
-        })).wait().unwrap();
+        })).await.unwrap();
         relay_2.handle_packet(Packet::ConnectNotification(ConnectNotification {
             connection_id: ConnectionId::from_index(42),
-        })).wait().unwrap();
+        })).await.unwrap();
 
         connections.connections.write().insert(destination_pk, NodeConnection {
             status: NodeConnectionStatus::TCP,
@@ -653,21 +657,21 @@ mod tests {
             payload: vec![42; 123],
         });
 
-        connections.send_data(destination_pk, data.clone()).wait().unwrap();
+        connections.send_data(destination_pk, data.clone()).await.unwrap();
 
         // Necessary to drop tx so that rx.collect() can be finished
         drop(connections);
 
         // data packet should be sent only once
-        let packets = outgoing_rx_1.select(outgoing_rx_2).collect().wait().unwrap();
+        let packets: Vec<_> = outgoing_rx_1.chain(outgoing_rx_2).collect().await;
         assert_eq!(packets.len(), 1);
         let packet = unpack!(packets[0].clone(), Packet::Data);
 
         assert_eq!(packet.data, data);
     }
 
-    #[test]
-    fn send_data_no_connection() {
+    #[tokio::test]
+    async fn send_data_no_connection() {
         crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
@@ -679,11 +683,11 @@ mod tests {
             nonce_last_bytes: 42,
             payload: vec![42; 123],
         });
-        connections.send_data(destination_pk, data).wait().unwrap();
+        connections.send_data(destination_pk, data).await.unwrap();
     }
 
-    #[test]
-    fn send_oob() {
+    #[tokio::test]
+    async fn send_oob() {
         crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
@@ -698,15 +702,15 @@ mod tests {
 
         let data = vec![42; 123];
 
-        connections.send_oob(relay_pk, destination_pk, data.clone()).wait().unwrap();
+        connections.send_oob(relay_pk, destination_pk, data.clone()).await.unwrap();
 
-        let packet = unpack!(outgoing_rx.into_future().wait().unwrap().0.unwrap(), Packet::OobSend);
+        let packet = unpack!(outgoing_rx.into_future().await.0.unwrap(), Packet::OobSend);
 
         assert_eq!(packet.data, data);
     }
 
-    #[test]
-    fn send_oob_no_relay() {
+    #[tokio::test]
+    async fn send_oob_no_relay() {
         crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
@@ -715,12 +719,12 @@ mod tests {
         let (destination_pk, _destination_sk) = gen_keypair();
         let (relay_pk, _relay_sk) = gen_keypair();
 
-        let error = connections.send_oob(relay_pk, destination_pk, vec![42; 123]).wait().err().unwrap();
+        let error = connections.send_oob(relay_pk, destination_pk, vec![42; 123]).await.err().unwrap();
         assert_eq!(*error.kind(), ConnectionErrorKind::NotConnected);
     }
 
-    #[test]
-    fn send_onion() {
+    #[tokio::test]
+    async fn send_onion() {
         crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
@@ -742,15 +746,15 @@ mod tests {
             payload: vec![42; 123],
         };
 
-        connections.send_onion(relay_pk, onion_request.clone()).wait().unwrap();
+        connections.send_onion(relay_pk, onion_request.clone()).await.unwrap();
 
-        let packet = unpack!(outgoing_rx.into_future().wait().unwrap().0.unwrap(), Packet::OnionRequest);
+        let packet = unpack!(outgoing_rx.into_future().await.0.unwrap(), Packet::OnionRequest);
 
         assert_eq!(packet, onion_request);
     }
 
-    #[test]
-    fn send_onion_no_relay() {
+    #[tokio::test]
+    async fn send_onion_no_relay() {
         crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
@@ -769,12 +773,12 @@ mod tests {
             payload: vec![42; 123],
         };
 
-        let error = connections.send_onion(relay_pk, onion_request.clone()).wait().err().unwrap();
+        let error = connections.send_onion(relay_pk, onion_request.clone()).await.err().unwrap();
         assert_eq!(*error.kind(), ConnectionErrorKind::NotConnected);
     }
 
-    #[test]
-    fn set_connection_status() {
+    #[tokio::test]
+    async fn set_connection_status() {
         crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
@@ -787,13 +791,13 @@ mod tests {
             connections: HashSet::new(),
         });
 
-        connections.set_connection_status(node_pk, NodeConnectionStatus::UDP).wait().unwrap();
+        connections.set_connection_status(node_pk, NodeConnectionStatus::UDP).await.unwrap();
 
         assert_eq!(connections.connections.read().get(&node_pk).unwrap().status, NodeConnectionStatus::UDP);
     }
 
-    #[test]
-    fn set_connection_status_no_connection() {
+    #[tokio::test]
+    async fn set_connection_status_no_connection() {
         crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
@@ -801,7 +805,7 @@ mod tests {
 
         let (node_pk, _node_sk) = gen_keypair();
 
-        let error = connections.set_connection_status(node_pk, NodeConnectionStatus::UDP).wait().err().unwrap();
+        let error = connections.set_connection_status(node_pk, NodeConnectionStatus::UDP).await.err().unwrap();
         assert_eq!(*error.kind(), ConnectionErrorKind::NoSuchRelay);
     }
 
@@ -868,8 +872,8 @@ mod tests {
         assert!(relays.is_empty());
     }
 
-    #[test]
-    fn main_loop_put_to_sleep() {
+    #[tokio::test]
+    async fn main_loop_put_to_sleep() {
         crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
@@ -895,15 +899,11 @@ mod tests {
         connections.clients.write().insert(relay_pk_1, relay_1);
         connections.clients.write().insert(relay_pk_2, relay_2);
 
-        let mut enter = tokio_executor::enter().unwrap();
+        tokio::time::pause();
         // time when we don't wait for connections to appear
-        let clock = Clock::new_with_now(ConstNow(
-            Instant::now() + TCP_CONNECTION_ANNOUNCE_TIMEOUT + Duration::from_secs(1)
-        ));
+        tokio::time::advance(TCP_CONNECTION_ANNOUNCE_TIMEOUT + Duration::from_secs(1)).await;
 
-        with_default(&clock, &mut enter, |_| {
-            connections.main_loop().wait().unwrap();
-        });
+        connections.main_loop().await.unwrap();
 
         let clients = connections.clients.read();
 
@@ -959,8 +959,8 @@ mod tests {
         assert!(connection.connections.contains(&relay_pk_2));
     }
 
-    #[test]
-    fn main_loop_remove_not_used() {
+    #[tokio::test]
+    async fn main_loop_remove_not_used() {
         crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
@@ -978,9 +978,9 @@ mod tests {
 
         let (node_pk, _node_sk) = gen_keypair();
 
-        relay_1.add_connection(node_pk);
-        relay_2.add_connection(node_pk);
-        relay_3.add_connection(node_pk);
+        relay_1.add_connection(node_pk).await.unwrap();
+        relay_2.add_connection(node_pk).await.unwrap();
+        relay_3.add_connection(node_pk).await.unwrap();
 
         connections.connections.write().insert(node_pk, NodeConnection {
             status: NodeConnectionStatus::TCP,
@@ -992,7 +992,7 @@ mod tests {
         connections.clients.write().insert(relay_pk_2, relay_2);
         connections.clients.write().insert(relay_pk_3, relay_3);
 
-        connections.main_loop().wait().unwrap();
+        connections.main_loop().await.unwrap();
 
         let clients = connections.clients.read();
 

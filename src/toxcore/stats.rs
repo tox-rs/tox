@@ -56,12 +56,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn clonable() {
-        let stats = Stats::new();
-        let _stats_c = stats.clone();
-    }
-
-    #[test]
     fn incoming() {
         let stats = Stats::new();
         assert_eq!(0, stats.counters.incoming());

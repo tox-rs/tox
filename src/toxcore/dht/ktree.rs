@@ -209,14 +209,7 @@ mod tests {
     use super::*;
 
     use std::net::SocketAddr;
-    use std::time::{Duration, Instant};
-
-    use tokio_executor;
-    use tokio_timer::clock::*;
-
-    use crate::toxcore::time::ConstNow;
-
-    // Ktree::new()
+    use std::time::Duration;
 
     #[test]
     fn ktree_new() {
@@ -417,8 +410,8 @@ mod tests {
 
     // Ktree::is_all_discarded()
 
-    #[test]
-    fn ktree_is_all_discarded() {
+    #[tokio::test]
+    async fn ktree_is_all_discarded() {
         crypto_init().unwrap();
         let (pk, _) = gen_keypair();
         let mut ktree = Ktree::new(&pk);
@@ -437,13 +430,9 @@ mod tests {
 
         assert!(!ktree.is_all_discarded());
 
-        let time = Instant::now() + KILL_NODE_TIMEOUT + Duration::from_secs(1);
+        tokio::time::pause();
+        tokio::time::advance(KILL_NODE_TIMEOUT + Duration::from_secs(1)).await;
 
-        let mut enter = tokio_executor::enter().unwrap();
-        let clock = Clock::new_with_now(ConstNow(time));
-
-        with_default(&clock, &mut enter, |_| {
-            assert!(ktree.is_all_discarded());
-        });
+        assert!(ktree.is_all_discarded());
     }
 }

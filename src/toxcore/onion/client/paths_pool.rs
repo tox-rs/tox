@@ -218,18 +218,7 @@ impl Default for PathsPool {
 mod tests {
     use super::*;
 
-    use futures::sync::mpsc;
-
-    #[test]
-    fn default() {
-        let _paths_pool = PathsPool::default();
-    }
-
-    #[test]
-    fn clone() {
-        let paths_pool = PathsPool::new();
-        let _paths_pool_c = paths_pool.clone();
-    }
+    use futures::channel::mpsc;
 
     macro_rules! paths_pool_tests {
         ($mod:ident, $friends:expr, $paths:ident) => {

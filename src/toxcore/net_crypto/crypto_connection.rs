@@ -657,13 +657,8 @@ impl CryptoConnection {
 mod tests {
     use super::*;
 
-    use tokio_executor;
-    use tokio_timer::clock::*;
-
-    use crate::toxcore::time::ConstNow;
-
-    #[test]
-    fn status_packet_should_be_sent() {
+    #[tokio::test]
+    async fn status_packet_should_be_sent() {
         crypto_init().unwrap();
         // just created packet should be sent
         let mut packet = StatusPacketWithTime::new_cookie_request(CookieRequest {
@@ -678,22 +673,21 @@ mod tests {
         packet.num_sent += 1;
         assert!(!packet.should_be_sent());
 
-        let mut enter = tokio_executor::enter().unwrap();
-        let clock = Clock::new_with_now(ConstNow(
-            packet.sent_time + CRYPTO_SEND_PACKET_INTERVAL + Duration::from_secs(1)
-        ));
+        tokio::time::pause();
 
-        with_default(&clock, &mut enter, |_| {
-            // packet should be sent if it was sent earlier than 1 second ago
-            assert!(packet.should_be_sent());
-            // packet shouldn't be sent if it was sent 8 times or more
-            packet.num_sent += MAX_NUM_SENDPACKET_TRIES;
-            assert!(!packet.should_be_sent());
-        });
+        let now = clock_now();
+        let time = packet.sent_time + CRYPTO_SEND_PACKET_INTERVAL + Duration::from_secs(1);
+        tokio::time::advance(time - now).await;
+
+        // packet should be sent if it was sent earlier than 1 second ago
+        assert!(packet.should_be_sent());
+        // packet shouldn't be sent if it was sent 8 times or more
+        packet.num_sent += MAX_NUM_SENDPACKET_TRIES;
+        assert!(!packet.should_be_sent());
     }
 
-    #[test]
-    fn status_packet_is_timed_out() {
+    #[tokio::test]
+    async fn status_packet_is_timed_out() {
         crypto_init().unwrap();
         // just created packet isn't timed out
         let mut packet = StatusPacketWithTime::new_cookie_request(CookieRequest {
@@ -707,14 +701,13 @@ mod tests {
         // packet is timed out if it was sent 8 times and 1 second elapsed since last sending
         packet.num_sent += MAX_NUM_SENDPACKET_TRIES;
 
-        let mut enter = tokio_executor::enter().unwrap();
-        let clock = Clock::new_with_now(ConstNow(
-            packet.sent_time + CRYPTO_SEND_PACKET_INTERVAL + Duration::from_secs(1)
-        ));
+        tokio::time::pause();
 
-        with_default(&clock, &mut enter, |_| {
-            assert!(packet.is_timed_out());
-        });
+        let now = clock_now();
+        let time = packet.sent_time + CRYPTO_SEND_PACKET_INTERVAL + Duration::from_secs(1);
+        tokio::time::advance(time - now).await;
+
+        assert!(packet.is_timed_out());
     }
 
     #[test]
@@ -783,8 +776,8 @@ mod tests {
         assert_eq!(connection_c, connection);
     }
 
-    #[test]
-    fn update_congestion_stats() {
+    #[tokio::test]
+    async fn update_congestion_stats() {
         crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (real_pk, _real_sk) = gen_keypair();
@@ -793,25 +786,23 @@ mod tests {
         let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
-        let now = Instant::now();
+        tokio::time::pause();
+        let now = clock_now();
 
         connection.stats_calculation_time = now;
         connection.packets_received = 300;
         connection.packets_sent = 200;
         connection.packets_resent = 100;
 
-        let next_now = now + PACKET_COUNTER_AVERAGE_INTERVAL;
-        let mut enter = tokio_executor::enter().unwrap();
-        let clock = Clock::new_with_now(ConstNow(next_now));
+        let delay = PACKET_COUNTER_AVERAGE_INTERVAL;
+        tokio::time::advance(delay).await;
 
-        with_default(&clock, &mut enter, |_| {
-            connection.update_congestion_stats();
-        });
+        connection.update_congestion_stats();
 
         assert_eq!(connection.packets_received, 0);
         assert_eq!(connection.packets_sent, 0);
         assert_eq!(connection.packets_resent, 0);
-        assert_eq!(connection.stats_calculation_time, next_now);
+        assert_eq!(connection.stats_calculation_time, now + delay);
         // on windows instant stores floating point numbers internally
         // error in 1 ms gives 123 packets/s error
         assert!((connection.packet_recv_rate - 6000.0).abs() < 200.0);
@@ -982,8 +973,8 @@ mod tests {
         assert_eq!(connection.get_udp_addr(), Some(addr_v6));
     }
 
-    #[test]
-    fn get_udp_addr_alive_ipv4() {
+    #[tokio::test]
+    async fn get_udp_addr_alive_ipv4() {
         crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (real_pk, _real_sk) = gen_keypair();
@@ -997,18 +988,16 @@ mod tests {
 
         connection.set_udp_addr(addr_v4);
 
-        let mut enter = tokio_executor::enter().unwrap();
-        let clock = Clock::new_with_now(ConstNow(Instant::now() + UDP_DIRECT_TIMEOUT + Duration::from_secs(1)));
+        tokio::time::pause();
+        tokio::time::advance(UDP_DIRECT_TIMEOUT + Duration::from_secs(1)).await;
 
-        with_default(&clock, &mut enter, |_| {
-            connection.set_udp_addr(addr_v6);
+        connection.set_udp_addr(addr_v6);
 
-            assert_eq!(connection.get_udp_addr(), Some(addr_v6));
-        });
+        assert_eq!(connection.get_udp_addr(), Some(addr_v6));
     }
 
-    #[test]
-    fn get_udp_addr_ipv6() {
+    #[tokio::test]
+    async fn get_udp_addr_ipv6() {
         crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (real_pk, _real_sk) = gen_keypair();
@@ -1023,16 +1012,14 @@ mod tests {
         connection.set_udp_addr(addr_v4);
         connection.set_udp_addr(addr_v6);
 
-        let mut enter = tokio_executor::enter().unwrap();
-        let clock = Clock::new_with_now(ConstNow(Instant::now() + UDP_DIRECT_TIMEOUT + Duration::from_secs(1)));
+        tokio::time::pause();
+        tokio::time::advance(UDP_DIRECT_TIMEOUT + Duration::from_secs(1)).await;
 
-        with_default(&clock, &mut enter, |_| {
-            assert_eq!(connection.get_udp_addr(), Some(addr_v6));
-        });
+        assert_eq!(connection.get_udp_addr(), Some(addr_v6));
     }
 
-    #[test]
-    fn get_udp_addr_ipv4() {
+    #[tokio::test]
+    async fn get_udp_addr_ipv4() {
         crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (real_pk, _real_sk) = gen_keypair();
@@ -1045,12 +1032,10 @@ mod tests {
 
         connection.set_udp_addr(addr_v4);
 
-        let mut enter = tokio_executor::enter().unwrap();
-        let clock = Clock::new_with_now(ConstNow(Instant::now() + UDP_DIRECT_TIMEOUT + Duration::from_secs(1)));
+        tokio::time::pause();
+        tokio::time::advance(UDP_DIRECT_TIMEOUT + Duration::from_secs(1)).await;
 
-        with_default(&clock, &mut enter, |_| {
-            assert_eq!(connection.get_udp_addr(), Some(addr_v4));
-        });
+        assert_eq!(connection.get_udp_addr(), Some(addr_v4));
     }
 
     #[test]

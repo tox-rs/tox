@@ -2,18 +2,14 @@
 
 use std::iter;
 use std::net::{IpAddr, SocketAddr};
-use std::time::{Duration, Instant};
+use std::time::{Duration};
 
 use failure::Fail;
-use futures::{future, stream, Future, Stream};
-use futures::sync::mpsc;
-use get_if_addrs;
+use futures::{stream, StreamExt, SinkExt};
+use futures::channel::mpsc;
 use get_if_addrs::IfAddr;
-use tokio::timer::Interval;
-use tokio::util::FutureExt;
 
 use crate::toxcore::crypto_core::*;
-use crate::toxcore::io_tokio::*;
 use crate::toxcore::dht::packet::*;
 
 error_kind! {
@@ -127,38 +123,36 @@ impl LanDiscoverySender {
     }
 
     /// Send `LanDiscovery` packets.
-    fn send(&mut self) -> impl Future<Item=(), Error=mpsc::SendError<(Packet, SocketAddr)>> + Send {
+    async fn send(&mut self) -> Result<(), mpsc::SendError> {
         let addrs = self.get_broadcast_socket_addrs();
         let lan_packet = Packet::LanDiscovery(LanDiscovery {
             pk: self.dht_pk,
         });
 
-        let stream = stream::iter_ok(
-            addrs.into_iter().map(move |addr| (lan_packet.clone(), addr))
+        let mut stream = stream::iter(
+            addrs.into_iter().map(move |addr| Ok((lan_packet.clone(), addr)))
         );
 
-        send_all_to(&self.tx, stream)
+        self.tx.send_all(&mut stream).await?;
+
+        Ok(())
     }
 
     /// Run LAN discovery periodically. Result future will never be completed
     /// successfully.
-    pub fn run(mut self) -> impl Future<Item=(), Error=LanDiscoveryError> + Send {
+    pub async fn run(mut self) -> Result<(), LanDiscoveryError> {
         let interval = LAN_DISCOVERY_INTERVAL;
-        let wakeups = Interval::new(Instant::now(), interval);
-        wakeups
-            .map_err(|e| e.context(LanDiscoveryErrorKind::Wakeup).into())
-            .for_each(move |_instant| {
-                trace!("LAN discovery sender wake up");
-                self.send().timeout(interval).then(|r| {
-                    if let Err(e) = r {
-                        warn!("Failed to send LAN discovery packets: {}", e);
-                        if let Some(e) = e.into_inner() {
-                            return future::err(e.context(LanDiscoveryErrorKind::SendTo).into())
-                        }
-                    }
-                    future::ok(())
-                })
-            })
+        let mut wakeups = tokio::time::interval(interval);
+
+        while let Some(_) = wakeups.next().await {
+            if let Err(e) = tokio::time::timeout(interval, self.send()).await {
+                warn!("Failed to send LAN discovery packets: {}", e);
+
+                return Err(e.context(LanDiscoveryErrorKind::SendTo).into())
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -166,21 +160,19 @@ impl LanDiscoverySender {
 mod tests {
     use super::*;
 
-    use futures::{Future, Stream};
-
     fn broadcast_addrs_count() -> usize {
-        get_if_addrs::get_if_addrs().expect("no network interface").iter().filter_map(|interface|
-            match interface.addr {
-                IfAddr::V4(ref addr) => addr.broadcast,
-                _ => None,
-            }
-        ).map(|ipv4|
-            SocketAddr::new(IpAddr::V4(ipv4), 33445)
-        ).count()
+        get_if_addrs::get_if_addrs().expect("no network interface").iter()
+            .filter_map(|interface|
+                match interface.addr {
+                    IfAddr::V4(ref addr) => addr.broadcast,
+                    _ => None,
+                }
+            )
+            .count()
     }
 
-    #[test]
-    fn send_ipv4() {
+    #[tokio::test]
+    async fn send_ipv4() {
         crypto_init().unwrap();
         // `+1` for 255.255.255.255
         let packets_count = (broadcast_addrs_count() + 1) * (PORTS_PER_DISCOVERY + 1) as usize;
@@ -189,12 +181,12 @@ mod tests {
         let (dht_pk, _dht_sk) = gen_keypair();
         let mut lan_discovery = LanDiscoverySender::new(tx, dht_pk, /* ipv6 */ false);
 
-        assert!(lan_discovery.send().wait().is_ok());
+        assert!(lan_discovery.send().await.is_ok());
 
         assert_eq!(lan_discovery.next_port, START_PORT + PORTS_PER_DISCOVERY);
 
         for _i in 0 .. packets_count {
-            let (received, rx1) = rx.into_future().wait().unwrap();
+            let (received, rx1) = rx.into_future().await;
             let (packet, _addr) = received.unwrap();
 
             let lan_discovery = unpack!(packet, Packet::LanDiscovery);
@@ -205,8 +197,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn send_ipv6() {
+    #[tokio::test]
+    async fn send_ipv6() {
         crypto_init().unwrap();
         // `+2` for ::1 and ::ffff:255.255.255.255
         let packets_count = (broadcast_addrs_count() + 2) * (PORTS_PER_DISCOVERY + 1) as usize;
@@ -215,12 +207,12 @@ mod tests {
         let (dht_pk, _dht_sk) = gen_keypair();
         let mut lan_discovery = LanDiscoverySender::new(tx, dht_pk, /* ipv6 */ true);
 
-        assert!(lan_discovery.send().wait().is_ok());
+        assert!(lan_discovery.send().await.is_ok());
 
         assert_eq!(lan_discovery.next_port, START_PORT + PORTS_PER_DISCOVERY);
 
         for _i in 0 .. packets_count {
-            let (received, rx1) = rx.into_future().wait().unwrap();
+            let (received, rx1) = rx.into_future().await;
             let (packet, _addr) = received.unwrap();
 
             let lan_discovery = unpack!(packet, Packet::LanDiscovery);
@@ -231,8 +223,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn cycle_around_ports() {
+    #[tokio::test]
+    async fn cycle_around_ports() {
         crypto_init().unwrap();
         // `+1` for 255.255.255.255
         let packets_count = (broadcast_addrs_count() + 1) * (PORTS_PER_DISCOVERY + 1) as usize;
@@ -243,12 +235,12 @@ mod tests {
 
         lan_discovery.next_port = END_PORT - 1;
 
-        assert!(lan_discovery.send().wait().is_ok());
+        assert!(lan_discovery.send().await.is_ok());
 
         assert_eq!(lan_discovery.next_port, START_PORT + PORTS_PER_DISCOVERY - 1);
 
         for _i in 0 .. packets_count {
-            let (received, rx1) = rx.into_future().wait().unwrap();
+            let (received, rx1) = rx.into_future().await;
             let (packet, _addr) = received.unwrap();
 
             let lan_discovery = unpack!(packet, Packet::LanDiscovery);

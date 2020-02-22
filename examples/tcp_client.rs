@@ -15,19 +15,16 @@ use hex::FromHex;
 
 use futures::prelude::*;
 use futures::future;
-use futures::future::Either;
-use futures::sync::mpsc;
+use futures::channel::mpsc;
 
-use tokio::codec::Framed;
+use tokio_util::codec::Framed;
 use tokio::net::TcpStream;
-
-use std::{thread, time};
 
 // Notice that create_client create a future of client processing.
 //  The future will live untill all copies of tx is dropped or there is a IO error
 //  Since we pass a copy of tx as arg (to send PongResponses), the client will live untill IO error
 //  Comment out pong responser and client will be destroyed when there will be no messages to send
-fn create_client(rx: mpsc::Receiver<Packet>, tx: mpsc::Sender<Packet>) -> impl Future<Item = (), Error = Error> + Send {
+async fn create_client(mut rx: mpsc::Receiver<Packet>, tx: mpsc::Sender<Packet>) -> Result<(), Error> {
     // Use `gen_keypair` to generate random keys
     // Client constant keypair for examples/tests
     let client_pk = PublicKey([252, 72, 40, 127, 213, 13, 0, 95,
@@ -42,7 +39,7 @@ fn create_client(rx: mpsc::Receiver<Packet>, tx: mpsc::Sender<Packet>) -> impl F
     let (addr, server_pk) = match 1 {
         1 => {
             // local tcp relay server from example
-            let addr = "0.0.0.0:12345".parse().unwrap();
+            let addr: std::net::SocketAddr = "0.0.0.0:12345".parse().unwrap();
             // Server constant PK for examples/tests
             let server_pk = PublicKey([177, 185, 54, 250, 10, 168, 174,
                                     148, 0, 93, 99, 13, 131, 131, 239,
@@ -71,151 +68,78 @@ fn create_client(rx: mpsc::Receiver<Packet>, tx: mpsc::Sender<Packet>) -> impl F
 
     let stats = Stats::new();
 
-    TcpStream::connect(&addr)
-        .map_err(Error::from)
-        .and_then(move |socket| {
-            make_client_handshake(socket, &client_pk, &client_sk, &server_pk)
-                .map_err(Error::from)
-        })
-        .and_then(move |(socket, channel)| {
-            debug!("Handshake complited");
+    let socket = TcpStream::connect(&addr).await?;
+    let (socket, channel) = make_client_handshake(socket, &client_pk, &client_sk, &server_pk).await?;
+    debug!("Handshake complited");
+    let secure_socket = Framed::new(socket, codec::Codec::new(channel, stats));
+    let (mut to_server, mut from_server) = secure_socket.split();
 
-            let secure_socket = Framed::new(socket, codec::Codec::new(channel, stats));
-            let (to_server, from_server) = secure_socket.split();
-
-            let reader = from_server.map_err(Error::from).for_each(move |packet| {
-                debug!("Got packet {:?}", packet);
-                // Simple pong responser
-                if let Packet::PingRequest(ping) = packet {
-                    Either::A(
-                        tx.clone().send(Packet::PongResponse(
-                            PongResponse { ping_id: ping.ping_id }
-                        ))
-                        .map(|_| () )
-                        .map_err(|_| err_msg("Could not send pong") )
-                    )
-                } else {
-                    Either::B( future::ok(()) )
-                }
-            })
-            .then(|res| {
-                debug!("Reader ended with {:?}", res);
-                res
-            });
-
-            let writer = rx
-                .map_err(|()| unreachable!("rx can't fail"))
-                .fold(to_server, move |to_server, packet| {
-                    debug!("Send packet {:?}", packet);
-                    to_server.send(packet)
-                })
-                // drop to_client when rx stream is exhausted
-                .map(|_to_client| {
-                    debug!("Stream rx is exhausted");
-                    ()
-                })
-                .map_err(|err| {
-                    error!("Writer err: {}", err);
-                    err
-                });
-
-            reader.select(writer).map(|_| ()).map_err(|(err, _select_next)| err)
-        })
-        .then(|res| {
-            debug!("client ended with {:?}", res);
-            Ok(())
-        })
-}
-
-#[allow(dead_code)]
-fn send_packets(tx: mpsc::Sender<Packet>) {
-    // Client friend constant PK for examples/tests
-    let friend_pk = PublicKey([15, 107, 126, 130, 81, 55, 154, 157,
-                            192, 117, 0, 225, 119, 43, 48, 117,
-                            84, 109, 112, 57, 243, 216, 4, 171,
-                            185, 111, 33, 146, 221, 31, 77, 118]);
-
-    let mut i = 0u64;
-    loop {
-        let sleep_duration = time::Duration::from_millis(1);
-        match tx.clone().send(Packet::RouteRequest(RouteRequest {pk: friend_pk } )).wait() {
-            Ok(_tx) => (),
-            Err(e) => {
-                error!("send_packets: {:?}", e);
-                break
-            },
-        };
-        if i % 10000 == 0 {
-            thread::sleep(sleep_duration);
-            println!("i = {}", i);
+    let reader = async {
+        while let Some(packet) = from_server.next().await {
+            let packet = packet?;
+            debug!("Got packet {:?}", packet);
+            // Simple pong responser
+            if let Packet::PingRequest(ping) = packet {
+                tx.clone().send(Packet::PongResponse(
+                    PongResponse { ping_id: ping.ping_id }
+                ))
+                .map_err(|_| err_msg("Could not send pong") )
+                .await?;
+            }
         }
-        i = i + 1;
+        Ok(())
+    };
+    let reader = reader.inspect(|res| println!("Reader ended with {:?}", res));
 
-    }
-    /*
-    let packets = vec![
-        Packet::RouteRequest(RouteRequest {pk: friend_pk } ),
-        Packet::RouteRequest(RouteRequest {pk: friend_pk } ),
-        Packet::RouteRequest(RouteRequest {pk: friend_pk } ),
-        Packet::RouteRequest(RouteRequest {pk: friend_pk } )
-    ];
+    let writer = async {
+        while let Some(packet) = rx.next().await {
+            debug!("Send packet {:?}", packet);
+            to_server.send(packet).await?;
+        }
+        Ok(())
+    };
+    let writer = writer.inspect(|res| println!("Writer ended with {:?}", res));
 
-    let sleep_duration = time::Duration::from_millis(1500);
-    for packet in packets {
-        match tx.clone().send(packet).wait() {
-            Ok(_tx) => (),
-            Err(e) => {
-                error!("send_packets: {:?}", e);
-                break
-            },
-        };
-        thread::sleep(sleep_duration);
-    }
-    thread::sleep(sleep_duration);
-    */
+    futures::try_join!(reader, writer).map(drop)
 }
 
 fn main() {
     env_logger::init();
 
-    let (tx, rx) = mpsc::channel(1);
+    let (mut tx, rx) = mpsc::channel(1);
 
     let client = create_client(rx, tx.clone())
-        .map_err(|_| ());
+        .inspect(|res| println!("Client ended with {:?}", res));
 
-    // variant 1. send packets in the same thread, combine with select(...)
-    let mut i = 0u64;
-    let packet_sender = future::loop_fn(tx.clone(), move |tx| {
-        if i % 10000 == 0 {
-            println!("i = {}", i);
+    let packet_sender = async {
+        let mut i = 0u64;
+        while i < 1000000 {
+            if i % 10000 == 0 {
+                println!("i = {}", i);
+            }
+            i += 1;
+            if i == 1 {
+                // Client friend constant PK for examples/tests
+                let friend_pk = PublicKey([15, 107, 126, 130, 81, 55, 154, 157,
+                                        192, 117, 0, 225, 119, 43, 48, 117,
+                                        84, 109, 112, 57, 243, 216, 4, 171,
+                                        185, 111, 33, 146, 221, 31, 77, 118]);
+                tx.send(Packet::RouteRequest(RouteRequest { pk: friend_pk } )).await?;
+            } else {
+                tx.send(Packet::Data(Data {
+                    connection_id: ConnectionId::from_index(0),
+                    data: DataPayload::CryptoData(CryptoData {
+                        nonce_last_bytes: 42,
+                        payload: vec![42; 123],
+                    }),
+                })).await?;
+            }
         }
-        i = i + 1;
-        // Client friend constant PK for examples/tests
-        let friend_pk = PublicKey([15, 107, 126, 130, 81, 55, 154, 157,
-                                192, 117, 0, 225, 119, 43, 48, 117,
-                                84, 109, 112, 57, 243, 216, 4, 171,
-                                185, 111, 33, 146, 221, 31, 77, 118]);
+        Result::<(), Error>::Ok(())
+    };
 
-        let request = if i == 1 {
-            tx.send(Packet::RouteRequest(RouteRequest { pk: friend_pk } ))
-        } else {
-            tx.send(Packet::Data(Data {
-                connection_id: ConnectionId::from_index(0),
-                data: DataPayload::CryptoData(CryptoData {
-                    nonce_last_bytes: 42,
-                    payload: vec![42; 123],
-                }),
-            }))
-        };
+    let client = future::try_select(client.boxed(), packet_sender.boxed());
 
-        request
-            .and_then(|tx| Ok(future::Loop::Continue(tx)) )
-            .or_else(|e| Ok(future::Loop::Break(e)) )
-    }).map(|_| ());
-    let client = client.select(packet_sender).map(|_| ()).map_err(|_| ());
-
-    // variant 2. send packets in a separate thread
-    //thread::spawn(move || send_packets(tx));
-
-    tokio::run( client );
+    let mut runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(client).map_err(|e| e.into_inner().0).unwrap();
 }

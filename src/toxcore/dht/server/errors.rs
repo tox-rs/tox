@@ -63,9 +63,6 @@ error_kind! {
     #[doc = "The specific kind of error that can occur."]
     #[derive(Clone, Debug, Eq, PartialEq, Fail)]
     RunErrorKind {
-        #[doc = "Various loop wakeup timer error."]
-        #[fail(display = "Dht loop wakeup timer error")]
-        Wakeup,
         #[doc = "Send packet(s) error."]
         #[fail(display = "Send packet(s) error")]
         SendTo,

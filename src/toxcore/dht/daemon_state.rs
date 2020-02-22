@@ -4,8 +4,7 @@ When toxcore starts, it deserializes states from serialized file.
 Toxcore daemon may serialize its states to file with some interval.
 */
 
-use futures::{future, Future, Stream, stream};
-use futures::future::Either;
+use futures::future;
 
 use crate::toxcore::dht::server::*;
 use crate::toxcore::dht::packed_node::*;
@@ -72,10 +71,10 @@ impl DaemonState {
     }
 
     /// Deserialize DHT close list and then re-setup close list, old means that the format of deserialization is old version
-    pub fn deserialize_old(server: &Server, serialized_data: &[u8]) -> impl Future<Item=(), Error=DeserializeError> + Send {
+    pub async fn deserialize_old(server: &Server, serialized_data: &[u8]) -> Result<(), DeserializeError> {
         let nodes = match DhtState::from_bytes(serialized_data) {
             Err(error) => {
-                return Either::A(future::err(DeserializeError::deserialize(error, serialized_data.to_vec())))
+                return Err(DeserializeError::deserialize(error, serialized_data.to_vec()))
             },
             Ok((_, DhtState(nodes))) => {
                 nodes
@@ -85,8 +84,9 @@ impl DaemonState {
         let nodes_sender = nodes.iter()
             .map(|node| server.ping_node(node));
 
-        let nodes_stream = stream::futures_unordered(nodes_sender).then(|_| Ok(()));
-        Either::B(nodes_stream.for_each(|()| Ok(())))
+        future::join_all(nodes_sender).await;
+
+        Ok(())
     }
 }
 
@@ -97,7 +97,8 @@ mod tests {
     use crate::toxcore::crypto_core::*;
     use crate::toxcore::dht::packet::*;
 
-    use futures::sync::mpsc;
+    use futures::channel::mpsc;
+    use futures::StreamExt;
 
     macro_rules! unpack {
         ($variable:expr, $variant:path) => (
@@ -108,8 +109,8 @@ mod tests {
         )
     }
 
-    #[test]
-    fn daemon_state_serialize_deserialize() {
+    #[tokio::test]
+    async fn daemon_state_serialize_deserialize() {
         crypto_init().unwrap();
         let (pk, sk) = gen_keypair();
         let (tx, rx) = mpsc::channel(1);
@@ -121,9 +122,9 @@ mod tests {
         alice.close_nodes.write().try_add(pn);
 
         let serialized_vec = DaemonState::serialize_old(&alice);
-        DaemonState::deserialize_old(&alice, &serialized_vec).wait().unwrap();
+        DaemonState::deserialize_old(&alice, &serialized_vec).await.unwrap();
 
-        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
 
         assert_eq!(addr_to_send, addr_org);
@@ -135,7 +136,7 @@ mod tests {
         // test with incompleted serialized data
         let serialized_vec = DaemonState::serialize_old(&alice);
         let serialized_len = serialized_vec.len();
-        let res = DaemonState::deserialize_old(&alice, &serialized_vec[..serialized_len - 1]).wait();
+        let res = DaemonState::deserialize_old(&alice, &serialized_vec[..serialized_len - 1]).await;
         let error = res.err().unwrap();
         let mut input = vec![2, 1, 2, 3, 4, 4, 210];
         input.extend_from_slice(&pk_org.0[..PUBLICKEYBYTES - 1]);
@@ -144,7 +145,7 @@ mod tests {
 
         // test with serialized data corrupted
         let serialized_vec = [42; 10];
-        let res = DaemonState::deserialize_old(&alice, &serialized_vec).wait();
+        let res = DaemonState::deserialize_old(&alice, &serialized_vec).await;
         let error = res.err().unwrap();
         assert_eq!(*error.kind(), DeserializeErrorKind::Deserialize { error: Err::Error((
             vec![42; 10], NomErrorKind::Tag)), data: serialized_vec.to_vec() });
@@ -152,6 +153,6 @@ mod tests {
         // test with empty close list
         alice.close_nodes.write().remove(&pk_org);
         let serialized_vec = DaemonState::serialize_old(&alice);
-        assert!(DaemonState::deserialize_old(&alice, &serialized_vec).wait().is_ok());
+        assert!(DaemonState::deserialize_old(&alice, &serialized_vec).await.is_ok());
     }
 }

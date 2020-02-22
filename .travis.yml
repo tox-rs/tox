@@ -3,7 +3,7 @@ os:
   - linux
   - osx
 rust:
-  - 1.36.0
+  - 1.40.0
   - stable
 
 sudo: false

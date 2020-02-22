@@ -28,6 +28,9 @@ error_kind! {
         #[doc = "Wakeup timer error."]
         #[fail(display = "Wakeup timer error")]
         Wakeup,
+        #[doc = "Timeout error."]
+        #[fail(display = "Timeout error")]
+        Timeout,
         #[doc = "Failed to kill net_crypto connection."]
         #[fail(display = "Failed to kill net_crypto connection")]
         KillConnection,

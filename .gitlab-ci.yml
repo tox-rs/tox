@@ -27,8 +27,8 @@ macos:stable:
     cargo test --verbose
     cargo doc
 
-linux:v1-31-0:
-  image: rustdocker/rust:1.31.0
+linux:v1-40-0:
+  image: rustdocker/rust:1.40.0
   script: *linux_script
   after_script:
     ### measure code coverage and upload to coveralls.io
@@ -74,7 +74,7 @@ linux:nightly:
     - docker
 
 other:kcov-and-check-commit-message:
-  image: rustdocker/rust:1.31.0
+  image: rustdocker/rust:1.40.0
   script:
     ### export sha
     - |
@@ -96,7 +96,7 @@ other:kcov-and-check-commit-message:
       export ROOT_DIR=`pwd`
       rm -rf target/kcov || echo 'target/kcov not exist'
 
-    ### build kcov for 1.31.0
+    ### build kcov for 1.40.0
     - |
       sudo apt-get remove kcov -y || echo 'ok'
       sudo apt-get -o dir::cache::archives="$APT_CACHE_DIR" update -yq

@@ -29,25 +29,32 @@ coveralls = { repository = "tox-rs/tox" }
 maintenance = { status = "actively-developed" }
 
 [dependencies]
-bytes = "0.4"
-futures = "0.1"
+bytes = "0.5"
+futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
 log = "0.4"
 sodiumoxide = "0.2.5"
 nom = "5.1"
 cookie-factory = "0.3"
 get_if_addrs = "0.5"
-parking_lot = "0.9"
+parking_lot = "0.10"
 failure = "0.1"
 lru = "0.3"
 bitflags = "1.0"
 
 [dependencies.tokio]
-version = "0.1"
+version = "0.2"
 default-features = false
-features = ["tcp", "udp", "timer", "codec", "rt-full"]
+features = ["net", "sync", "stream", "time"]
+
+[dependencies.tokio-util]
+version = "0.2"
+features = ["codec", "udp"]
 
 [dev-dependencies]
 env_logger = "0.7"
 hex = "0.4"
-tokio-timer = "0.2"
-tokio-executor = "0.1"
+
+[dev-dependencies.tokio]
+version = "0.2"
+default-features = false
+features = ["macros", "test-util", "net", "rt-core", "rt-threaded", "sync", "stream", "time"]

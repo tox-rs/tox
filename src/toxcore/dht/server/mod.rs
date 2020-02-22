@@ -7,12 +7,10 @@ pub mod hole_punching;
 mod errors;
 
 use failure::Fail;
-use futures::{Future, Sink, Stream, future, stream};
-use futures::future::{Either, join_all};
-use futures::sync::mpsc;
+use futures::{Future, FutureExt, TryFutureExt, StreamExt, SinkExt, future};
+use futures::future::{Either};
+use futures::channel::mpsc;
 use parking_lot::RwLock;
-use tokio::timer::Interval;
-use tokio::util::FutureExt;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -31,7 +29,6 @@ use crate::toxcore::onion::client::*;
 use crate::toxcore::onion::packet::*;
 use crate::toxcore::onion::onion_announce::*;
 use crate::toxcore::dht::request_queue::*;
-use crate::toxcore::io_tokio::*;
 use crate::toxcore::ip_port::*;
 use crate::toxcore::dht::dht_friend::*;
 use crate::toxcore::dht::dht_node::*;
@@ -41,6 +38,7 @@ use crate::toxcore::net_crypto::*;
 use crate::toxcore::dht::ip_port::IsGlobal;
 use crate::toxcore::utils::*;
 use crate::toxcore::dht::server::errors::*;
+use crate::toxcore::io_tokio::*;
 
 /// Shorthand for the transmit half of the message channel.
 type Tx = mpsc::Sender<(Packet, SocketAddr)>;
@@ -118,7 +116,7 @@ pub struct Server {
     /// Tx split of a channel to send packets to this peer via UDP socket.
     pub tx: Tx,
     /// Sink to send friend's `SocketAddr` when it gets known.
-    friend_saddr_sink: Arc<RwLock<OptionalSink<mpsc::UnboundedSender<PackedNode>>>>,
+    friend_saddr_sink: Arc<RwLock<Option<mpsc::UnboundedSender<PackedNode>>>>,
     /// Struct that stores and manages requests IDs and timeouts.
     request_queue: Arc<RwLock<RequestQueue<PublicKey>>>,
     /// Close nodes list which contains nodes close to own DHT `PublicKey`.
@@ -315,7 +313,7 @@ impl Server {
     /// method iterates over all nodes from close nodes list, close nodes of
     /// friends and bootstrap nodes and sends `NodesRequest` packets if
     /// necessary.
-    fn dht_main_loop(&self) -> impl Future<Item = (), Error = RunError> + Send {
+    fn dht_main_loop(&self) -> impl Future<Output = Result<(), RunError>> + Send {
         // Check if we should send `NodesRequest` packet to a random node. This
         // request is sent every second 5 times and then every 20 seconds.
         fn send_random_request(last_nodes_req_time: &mut Instant, random_requests_count: &mut u32) -> bool {
@@ -338,42 +336,62 @@ impl Server {
         // Send NodesRequest packets to nodes from the Server
         let ping_nodes_to_bootstrap = self.ping_nodes_to_bootstrap(&mut request_queue, &mut nodes_to_bootstrap, self.pk);
         let ping_close_nodes = self.ping_close_nodes(&mut request_queue, close_nodes.iter_mut(), self.pk);
-        let send_nodes_req_random = if send_random_request(&mut self.last_nodes_req_time.write(), &mut self.random_requests_count.write()) {
-            Either::A(self.send_nodes_req_random(&mut request_queue, close_nodes.iter(), self.pk))
-        } else {
-            Either::B(future::ok(()))
-        };
+        let send_nodes_req_random =
+            if send_random_request(&mut self.last_nodes_req_time.write(), &mut self.random_requests_count.write()) {
+                Either::Left(self.send_nodes_req_random(&mut request_queue, close_nodes.iter(), self.pk))
+            } else {
+                Either::Right(future::ok(()))
+            };
 
         // Send NodesRequest packets to nodes from every DhtFriend
         let send_nodes_req_to_friends = friends.values_mut().map(|friend| {
             let ping_nodes_to_bootstrap = self.ping_nodes_to_bootstrap(&mut request_queue, &mut friend.nodes_to_bootstrap, friend.pk);
             let ping_close_nodes = self.ping_close_nodes(&mut request_queue, friend.close_nodes.nodes.iter_mut(), friend.pk);
             let send_nodes_req_random = if send_random_request(&mut friend.last_nodes_req_time, &mut friend.random_requests_count) {
-                Either::A(self.send_nodes_req_random(&mut request_queue, friend.close_nodes.nodes.iter(), friend.pk))
+                Either::Left(self.send_nodes_req_random(&mut request_queue, friend.close_nodes.nodes.iter(), friend.pk))
             } else {
-                Either::B(future::ok(()))
+                Either::Right(future::ok(()))
             };
-            ping_nodes_to_bootstrap.join3(ping_close_nodes, send_nodes_req_random)
+
+            future::try_join3(
+                ping_nodes_to_bootstrap.boxed(),
+                ping_close_nodes,
+                send_nodes_req_random
+            )
         }).collect::<Vec<_>>();
 
         let send_nat_ping_req = self.send_nat_ping_req(&mut request_queue, &mut friends);
 
-        ping_nodes_to_bootstrap.join5(
-            ping_close_nodes,
-            send_nodes_req_random,
-            future::join_all(send_nodes_req_to_friends),
-            send_nat_ping_req
-        ).map(|_| ()).map_err(|e| e.context(RunErrorKind::SendTo).into())
+        async {
+            let join = futures::try_join!(
+                ping_nodes_to_bootstrap,
+                ping_close_nodes,
+                send_nodes_req_random.into_future(),
+                future::try_join_all(send_nodes_req_to_friends),
+                send_nat_ping_req
+            );
+
+            join
+                .map(drop)
+                .map_err(|e| RunError::from(e.context(RunErrorKind::SendTo)))
+        }
     }
 
     /// Run DHT periodical tasks. Result future will never be completed
     /// successfully.
-    pub fn run(self) -> impl Future<Item = (), Error = RunError> + Send {
-        self.clone().run_pings_sending().join4(
-            self.clone().run_onion_key_refreshing(),
-            self.clone().run_main_loop(),
-            self.run_bootstrap_requests_sending()
-        ).map(|_| ())
+    pub fn run(self) -> impl Future<Output = Result<(), RunError>> + Send {
+        async {
+            let (r1, r2, r3, r4) = futures::join!(
+                self.clone().run_pings_sending(),
+                self.clone().run_onion_key_refreshing(),
+                self.clone().run_main_loop(),
+                self.run_bootstrap_requests_sending(),
+            );
+
+            r1?; r2?; r3?; r4?;
+
+            Ok(())
+        }
     }
 
     /// Store bootstap nodes
@@ -385,35 +403,47 @@ impl Server {
     /// nodes periodically if all nodes in Ktree are discarded (including the
     /// case when it's empty). It has to be an endless loop because we might
     /// loose the network connection and thereby loose all nodes in Ktree.
-    fn run_bootstrap_requests_sending(self) -> impl Future<Item = (), Error = RunError> + Send {
+    fn run_bootstrap_requests_sending(self) -> impl Future<Output = Result<(), RunError>> + Send {
         let interval = BOOTSTRAP_INTERVAL;
-        let wakeups = Interval::new(Instant::now(), interval);
+        let mut wakeups = tokio::time::interval(interval);
 
-        wakeups
-            .map_err(|e| e.context(RunErrorKind::Wakeup).into())
-            .for_each(move |_instant| {
+        async move {
+            while let Some(_) = wakeups.next().await {
                 trace!("Bootstrap wake up");
-                self.send_bootstrap_requests().timeout(interval).then(|r| {
-                    if let Err(e) = r {
-                        warn!("Failed to send initial bootstrap packets: {}", e);
-                        if let Some(e) = e.into_inner() {
-                            return future::err(e.context(RunErrorKind::SendTo).into())
-                        }
-                    }
-                    future::ok(())
-                })
-            })
+                let send_res = tokio::time::timeout(
+                    interval,
+                    self.send_bootstrap_requests(),
+                ).await;
+
+                let res =
+                    match send_res {
+                        Ok(Ok(_)) => Ok(()),
+                        Ok(Err(e)) =>
+                            Err(e.context(RunErrorKind::SendTo).into()),
+                        Err(e) =>
+                            Err(e.context(RunErrorKind::SendTo).into()),
+                    };
+
+                if let Err(ref e) = res {
+                    warn!("Failed to send initial bootstrap packets: {}", e);
+
+                    return res
+                }
+            }
+
+            Ok(())
+        }
     }
 
     /// Check if all nodes in Ktree are discarded (including the case when
     /// it's empty) and if so then send `NodesRequest` packet to nodes from
     /// initial bootstrap list and from Ktree.
-    fn send_bootstrap_requests(&self) -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
+    fn send_bootstrap_requests(&self) -> impl Future<Output = Result<(), mpsc::SendError>> + Send {
         let mut request_queue = self.request_queue.write();
         let close_nodes = self.close_nodes.read();
 
         if !close_nodes.is_all_discarded() {
-            return Either::A(future::ok(()));
+            return Either::Left(future::ok(()));
         }
 
         let futures = close_nodes
@@ -423,67 +453,81 @@ impl Server {
             .map(|node| self.send_nodes_req(&node, &mut request_queue, self.pk))
             .collect::<Vec<_>>();
 
-        Either::B(join_all(futures).map(|_| ()))
+        Either::Right(future::try_join_all(futures).map_ok(drop))
     }
 
     /// Run DHT main loop periodically. Result future will never be completed
     /// successfully.
-    fn run_main_loop(self) -> impl Future<Item = (), Error = RunError> + Send {
+    fn run_main_loop(self) -> impl Future<Output = Result<(), RunError>> + Send {
         let interval = Duration::from_secs(MAIN_LOOP_INTERVAL);
-        let wakeups = Interval::new(Instant::now(), interval);
-        wakeups
-            .map_err(|e| e.context(RunErrorKind::Wakeup).into())
-            .for_each(move |_instant| {
+        let mut wakeups = tokio::time::interval(interval);
+
+        async move {
+            while let Some(_) = wakeups.next().await {
                 trace!("DHT server wake up");
-                self.dht_main_loop().timeout(interval).then(|res| {
-                    if let Err(e) = res {
-                        warn!("Failed to send DHT periodical packets: {}", e);
-                        if let Some(e) = e.into_inner() {
-                            return future::err(e.context(RunErrorKind::SendTo).into())
-                        }
-                    }
-                    future::ok(())
-                })
-            })
+
+                let loop_res =
+                    tokio::time::timeout(interval, self.dht_main_loop()).await;
+
+                let res = match loop_res {
+                    Ok(Ok(_)) => Ok(()),
+                    Ok(Err(e)) =>
+                        Err(e.context(RunErrorKind::SendTo).into()),
+                    Err(e) =>
+                        Err(e.context(RunErrorKind::SendTo).into()),
+                };
+
+                if let Err(ref e) = res {
+                    warn!("Failed to send DHT periodical packets: {}", e);
+                    return res
+                }
+            }
+
+            Ok(())
+        }
     }
 
     /// Refresh onion symmetric key periodically. Result future will never be
     /// completed successfully.
-    fn run_onion_key_refreshing(self) -> impl Future<Item = (), Error = RunError> + Send {
+    fn run_onion_key_refreshing(self) -> impl Future<Output = Result<(), RunError>> + Send {
         let interval = ONION_REFRESH_KEY_INTERVAL;
-        let wakeups = Interval::new(Instant::now() + interval, interval);
-        wakeups
-            .map_err(|e| e.context(RunErrorKind::Wakeup).into())
-            .for_each(move |_instant| {
+        let mut wakeups = tokio::time::interval_at(tokio::time::Instant::now() + interval, interval);
+
+        async move {
+            while let Some(_) = wakeups.next().await {
                 trace!("Refreshing onion key");
                 self.refresh_onion_key();
-                future::ok(())
-            })
+            }
+
+            Ok(())
+        }
     }
 
     /// Run ping sending periodically. Result future will never be completed
     /// successfully.
-    fn run_pings_sending(self) -> impl Future<Item = (), Error = RunError> + Send {
+    fn run_pings_sending(self) -> impl Future<Output = Result<(), RunError>> + Send {
         let interval = TIME_TO_PING;
-        let wakeups = Interval::new(Instant::now() + interval, interval);
-        wakeups
-            .map_err(|e| e.context(RunErrorKind::Wakeup).into())
-            .for_each(move |_instant| {
-                trace!("Pings sending wake up");
-                self.send_pings()
-                    .map_err(|e| e.context(RunErrorKind::SendTo).into())
-            })
+        let mut wakeups = tokio::time::interval_at(tokio::time::Instant::now() + interval, interval);
+
+        async move {
+            while let Some(_) = wakeups.next().await {
+                self.send_pings().await
+                    .map_err(|e| RunError::from(e.context(RunErrorKind::SendTo)))?;
+            }
+
+            Ok(())
+        }
     }
 
     /// Send `PingRequest` packets to nodes from `nodes_to_ping` list.
-    fn send_pings(&self) -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
+    fn send_pings(&self) -> impl Future<Output = Result<(), mpsc::SendError>> + Send {
         let nodes_to_ping = mem::replace(
             &mut *self.nodes_to_ping.write(),
             Kbucket::<PackedNode>::new(MAX_TO_PING)
         );
 
         if nodes_to_ping.is_empty() {
-            return Either::A(future::ok(()))
+            return Either::Left(future::ok(()))
         }
 
         let mut request_queue = self.request_queue.write();
@@ -492,18 +536,18 @@ impl Server {
             self.send_ping_req(node, &mut request_queue)
         ).collect::<Vec<_>>();
 
-        Either::B(future::join_all(futures).map(|_| ()))
+        Either::Right(future::try_join_all(futures).map_ok(drop))
     }
 
     /// Add node to a `nodes_to_ping` list to send ping later. If node is
     /// a friend and we don't know it's address then this method will send
     /// `PingRequest` immediately instead of adding to a `nodes_to_ping`
     /// list.
-    fn ping_add(&self, node: &PackedNode) -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
+    fn ping_add(&self, node: &PackedNode) -> impl Future<Output = Result<(), mpsc::SendError>> + Send {
         let close_nodes = self.close_nodes.read();
 
         if !close_nodes.can_add(&node) {
-            return Either::A(future::ok(()))
+            return Either::Left(future::ok(()))
         }
 
         let friends = self.friends.read();
@@ -511,19 +555,19 @@ impl Server {
         // If node is friend and we don't know friend's IP address yet then send
         // PingRequest immediately and unconditionally
         if friends.get(&node.pk).map_or(false, |friend| !friend.is_addr_known()) {
-            return Either::B(self.send_ping_req(&node, &mut self.request_queue.write()))
+            return Either::Right(self.send_ping_req(&node, &mut self.request_queue.write()))
         }
 
         self.nodes_to_ping.write().try_add(&self.pk, *node, /* evict */ true);
 
-        Either::A(future::ok(()))
+        Either::Left(future::ok(()))
     }
 
     /// Send `NodesRequest` packets to nodes from bootstrap list. This is
     /// necessary to check whether node is alive before adding it to close
     /// nodes lists.
     fn ping_nodes_to_bootstrap(&self, request_queue: &mut RequestQueue<PublicKey>, nodes_to_bootstrap: &mut Kbucket<PackedNode>, pk: PublicKey)
-        -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
+        -> impl Future<Output = Result<(), mpsc::SendError>> + Send {
         let capacity = nodes_to_bootstrap.capacity() as u8;
         let nodes_to_bootstrap = mem::replace(nodes_to_bootstrap, Kbucket::new(capacity));
 
@@ -531,13 +575,13 @@ impl Server {
             .map(|node| self.send_nodes_req(&node, request_queue, pk))
             .collect::<Vec<_>>();
 
-        future::join_all(futures).map(|_| ())
+        future::try_join_all(futures).map_ok(drop)
     }
 
     /// Iterate over nodes from close nodes list and send `NodesRequest` packets
     /// to them if necessary.
     fn ping_close_nodes<'a, T>(&self, request_queue: &mut RequestQueue<PublicKey>, nodes: T, pk: PublicKey)
-        -> Box<dyn Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send>
+        -> Box<dyn Future<Output = Result<(), mpsc::SendError>> + Send + Unpin>
         where T: Iterator<Item = &'a mut DhtNode> // if change to impl Future the result will be dependent on nodes lifetime
     {
         let futures = nodes
@@ -553,14 +597,14 @@ impl Server {
             .map(|node| self.send_nodes_req(&node, request_queue, pk))
             .collect::<Vec<_>>();
 
-        Box::new(future::join_all(futures).map(|_| ()))
+        Box::new(future::try_join_all(futures).map_ok(drop))
     }
 
     /// Send `NodesRequest` packet to a random good node every 20 seconds or if
     /// it was sent less than `NODES_REQ_INTERVAL`. This function should be
     /// called every second.
     fn send_nodes_req_random<'a, T>(&self, request_queue: &mut RequestQueue<PublicKey>, nodes: T, pk: PublicKey)
-        -> Box<dyn Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send>
+        -> Box<dyn Future<Output = Result<(), mpsc::SendError>> + Send + Unpin>
         where T: Iterator<Item = &'a DhtNode> // if change to impl Future the result will be dependent on nodes lifetime
     {
         let good_nodes = nodes
@@ -585,7 +629,7 @@ impl Server {
     }
 
     /// Ping node with `NodesRequest` packet with self DHT `PublicKey`.
-    pub fn ping_node(&self, node: &PackedNode) -> impl Future<Item = (), Error = PingError> + Send {
+    pub fn ping_node(&self, node: &PackedNode) -> impl Future<Output = Result<(), PingError>> + Send {
         let mut request_queue = self.request_queue.write();
         self.send_nodes_req(node, &mut request_queue, self.pk)
             .map_err(|e| e.context(PingErrorKind::SendTo).into())
@@ -593,7 +637,7 @@ impl Server {
 
     /// Send `PingRequest` packet to the node.
     fn send_ping_req(&self, node: &PackedNode, request_queue: &mut RequestQueue<PublicKey>)
-        -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
+        -> impl Future<Output = Result<(), mpsc::SendError>> + Send {
         let payload = PingRequestPayload {
             id: request_queue.new_ping_id(node.pk),
         };
@@ -607,11 +651,11 @@ impl Server {
 
     /// Send `NodesRequest` packet to the node.
     fn send_nodes_req(&self, node: &PackedNode, request_queue: &mut RequestQueue<PublicKey>, search_pk: PublicKey)
-        -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
+        -> impl Future<Output = Result<(), mpsc::SendError>> + Send + Unpin {
         // Check if packet is going to be sent to ourselves.
         if self.pk == node.pk {
             trace!("Attempt to send NodesRequest to ourselves.");
-            return Either::A(future::ok(()))
+            return Either::Left(future::ok(()).boxed())
         }
 
         let payload = NodesRequestPayload {
@@ -623,12 +667,12 @@ impl Server {
             &self.pk,
             &payload
         ));
-        Either::B(self.send_to(node.saddr, nodes_req))
+        Either::Right(self.send_to(node.saddr, nodes_req).boxed())
     }
 
     /// Send `NatPingRequest` packet to all friends and try to punch holes.
     fn send_nat_ping_req(&self, request_queue: &mut RequestQueue<PublicKey>, friends: &mut HashMap<PublicKey, DhtFriend>)
-        -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
+        -> impl Future<Output = Result<(), mpsc::SendError>> + Send {
         let futures = friends.values_mut()
             .filter(|friend| !friend.is_addr_known())
             .map(|friend| {
@@ -654,19 +698,19 @@ impl Server {
                     );
                     let nat_ping_future = self.send_nat_ping_req_inner(friend, nat_ping_req_packet);
 
-                    Either::A(punch_future.join(nat_ping_future).map(|_| ()))
+                    Either::Left(future::try_join(punch_future, nat_ping_future).map_ok(drop))
                 } else {
-                    Either::B(punch_future)
+                    Either::Right(punch_future)
                 }
             })
             .collect::<Vec<_>>();
 
-        join_all(futures).map(|_| ())
+        future::try_join_all(futures).map_ok(drop)
     }
 
     /// Try to punch holes to specified friend.
     fn punch_holes(&self, request_queue: &mut RequestQueue<PublicKey>, friend: &mut DhtFriend, returned_addrs: &[SocketAddr])
-        -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
+        -> impl Future<Output = Result<(), mpsc::SendError>> + Send + 'static {
         let punch_addrs = friend.hole_punch.next_punch_addrs(returned_addrs);
 
         let packets = punch_addrs.into_iter().map(|addr| {
@@ -682,13 +726,17 @@ impl Server {
             (packet, addr)
         }).collect::<Vec<_>>();
 
-        send_all_to(&self.tx, stream::iter_ok(packets))
+        let mut tx = self.tx.clone();
+        async move {
+            let mut stream = futures::stream::iter(packets).map(Ok);
+            tx.send_all(&mut stream).await
+        }
     }
 
     /// Send `NatPingRequest` packet to all close nodes of friend in the hope
     /// that they will redirect it to this friend.
     fn send_nat_ping_req_inner(&self, friend: &DhtFriend, nat_ping_req_packet: DhtRequest)
-        -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
+        -> impl Future<Output = Result<(), mpsc::SendError>> + Send {
         let packet = Packet::DhtRequest(nat_ping_req_packet);
         let futures = friend.close_nodes.nodes
             .iter()
@@ -696,50 +744,78 @@ impl Server {
             .map(|node| self.send_to(node.saddr, packet.clone()))
             .collect::<Vec<_>>();
 
-        join_all(futures).map(|_| ())
+        future::try_join_all(futures).map_ok(drop)
     }
 
     /// Function to handle incoming packets and send responses if necessary.
-    pub fn handle_packet(&self, packet: Packet, addr: SocketAddr) -> impl Future<Item = (), Error = HandlePacketError> + Send {
+    pub fn handle_packet(&self, packet: Packet, addr: SocketAddr) -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         match packet {
-            Packet::PingRequest(packet) => Box::new(self.handle_ping_req(&packet, addr)) as Box<dyn Future<Item=_, Error=_> + Send>,
-            Packet::PingResponse(packet) => Box::new(self.handle_ping_resp(&packet, addr)),
-            Packet::NodesRequest(packet) => Box::new(self.handle_nodes_req(&packet, addr)),
-            Packet::NodesResponse(packet) => Box::new(self.handle_nodes_resp(&packet, addr)),
-            Packet::CookieRequest(packet) => Box::new(self.handle_cookie_request(&packet, addr)),
-            Packet::CookieResponse(packet) => Box::new(self.handle_cookie_response(&packet, addr)),
-            Packet::CryptoHandshake(packet) => Box::new(self.handle_crypto_handshake(&packet, addr)),
-            Packet::DhtRequest(packet) => Box::new(self.handle_dht_req(packet, addr)),
-            Packet::LanDiscovery(packet) => Box::new(self.handle_lan_discovery(&packet, addr)),
-            Packet::OnionRequest0(packet) => Box::new(self.handle_onion_request_0(&packet, addr)),
-            Packet::OnionRequest1(packet) => Box::new(self.handle_onion_request_1(&packet, addr)),
-            Packet::OnionRequest2(packet) => Box::new(self.handle_onion_request_2(&packet, addr)),
-            Packet::OnionAnnounceRequest(packet) => Box::new(self.handle_onion_announce_request(packet, addr)),
-            Packet::OnionDataRequest(packet) => Box::new(self.handle_onion_data_request(packet)),
-            Packet::OnionResponse3(packet) => Box::new(self.handle_onion_response_3(packet)),
-            Packet::OnionResponse2(packet) => Box::new(self.handle_onion_response_2(packet)),
-            Packet::OnionResponse1(packet) => Box::new(self.handle_onion_response_1(packet)),
-            Packet::BootstrapInfo(packet) => Box::new(self.handle_bootstrap_info(&packet, addr)),
-            Packet::CryptoData(packet) => Box::new(self.handle_crypto_data(&packet, addr)),
-            Packet::OnionDataResponse(packet) => Box::new(self.handle_onion_data_response(&packet)),
-            Packet::OnionAnnounceResponse(packet) => Box::new(self.handle_onion_announce_response(&packet, addr)),
+            Packet::PingRequest(packet) =>
+                self.handle_ping_req(&packet, addr).boxed(),
+            Packet::PingResponse(packet) =>
+                self.handle_ping_resp(&packet, addr).boxed(),
+            Packet::NodesRequest(packet) =>
+                self.handle_nodes_req(&packet, addr).boxed(),
+            Packet::NodesResponse(packet) =>
+                self.handle_nodes_resp(&packet, addr).boxed(),
+            Packet::CookieRequest(packet) =>
+                self.handle_cookie_request(&packet, addr).boxed(),
+            Packet::CookieResponse(packet) =>
+                self.handle_cookie_response(&packet, addr).boxed(),
+            Packet::CryptoHandshake(packet) =>
+                self.handle_crypto_handshake(&packet, addr).boxed(),
+            Packet::DhtRequest(packet) =>
+                self.handle_dht_req(packet, addr).boxed(),
+            Packet::LanDiscovery(packet) =>
+                self.handle_lan_discovery(&packet, addr).boxed(),
+            Packet::OnionRequest0(packet) =>
+                self.handle_onion_request_0(&packet, addr).boxed(),
+            Packet::OnionRequest1(packet) =>
+                self.handle_onion_request_1(&packet, addr).boxed(),
+            Packet::OnionRequest2(packet) =>
+                self.handle_onion_request_2(&packet, addr).boxed(),
+            Packet::OnionAnnounceRequest(packet) =>
+                self.handle_onion_announce_request(packet, addr).boxed(),
+            Packet::OnionDataRequest(packet) =>
+                self.handle_onion_data_request(packet).boxed(),
+            Packet::OnionResponse3(packet) =>
+                self.handle_onion_response_3(packet).boxed(),
+            Packet::OnionResponse2(packet) =>
+                self.handle_onion_response_2(packet).boxed(),
+            Packet::OnionResponse1(packet) =>
+                self.handle_onion_response_1(packet).boxed(),
+            Packet::BootstrapInfo(packet) =>
+                self.handle_bootstrap_info(&packet, addr).boxed(),
+            Packet::CryptoData(packet) =>
+                self.handle_crypto_data(&packet, addr).boxed(),
+            Packet::OnionDataResponse(packet) =>
+                self.handle_onion_data_response(&packet).boxed(),
+            Packet::OnionAnnounceResponse(packet) =>
+                self.handle_onion_announce_response(&packet, addr).boxed(),
         }
     }
 
     /// Send UDP packet to specified address.
     fn send_to(&self, addr: SocketAddr, packet: Packet)
-        -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
-        send_to(&self.tx, (packet, addr))
+        -> impl Future<Output = Result<(), mpsc::SendError>> + Send
+    {
+        let mut tx = self.tx.clone();
+
+        async move {
+            tx.send((packet, addr)).await
+        }
     }
 
     /// Handle received `PingRequest` packet and response with `PingResponse`
     /// packet. If node that sent this packet is not present in close nodes list
     /// and can be added there then it will be added to ping list.
     fn handle_ping_req(&self, packet: &PingRequest, addr: SocketAddr)
-        -> impl Future<Item = (), Error = HandlePacketError> + Send {
+        -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         let precomputed_key = self.precomputed_keys.get(packet.pk);
         let payload = match packet.get_payload(&precomputed_key) {
-            Err(e) => return Either::A(future::err(e.context(HandlePacketErrorKind::GetPayload).into())),
+            Err(e) => return Either::Left(
+                future::err(e.context(HandlePacketErrorKind::GetPayload).into())
+            ),
             Ok(payload) => payload,
         };
 
@@ -752,39 +828,45 @@ impl Server {
             &resp_payload
         ));
 
-        Either::B(self.ping_add(&PackedNode::new(addr, &packet.pk))
-            .join(self.send_to(addr, ping_resp))
-            .map(|_| ())
+        Either::Right(
+            future::try_join(
+                self.ping_add(&PackedNode::new(addr, &packet.pk)),
+                self.send_to(addr, ping_resp)
+            )
+            .map_ok(drop)
             .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
         )
     }
 
     /// Add node to close list after we received a response from it. If it's a
     /// friend then send it's IP address to appropriate sink.
-    fn try_add_to_close(&self, close_nodes: &mut Ktree, friends: &mut HashMap<PublicKey, DhtFriend>, node: PackedNode) -> impl Future<Item = (), Error = HandlePacketError> {
+    fn try_add_to_close(&self, close_nodes: &mut Ktree, friends: &mut HashMap<PublicKey, DhtFriend>, node: PackedNode) -> impl Future<Output = Result<(), HandlePacketError>> {
         close_nodes.try_add(node);
         for friend in friends.values_mut() {
             friend.try_add_to_close(node);
         }
         if friends.contains_key(&node.pk) {
-            Either::A(send_to(&*self.friend_saddr_sink.read(), node)
-                .map_err(|e| e.context(HandlePacketErrorKind::FriendSaddr).into()))
+            let sink = self.friend_saddr_sink.read().clone();
+            Either::Left(
+                maybe_send_unbounded(sink, node)
+                    .map_err(|e| e.context(HandlePacketErrorKind::FriendSaddr).into())
+            )
         } else {
-            Either::B(future::ok(()))
+            Either::Right(future::ok(()))
         }
     }
 
     /// Handle received `PingResponse` packet and if it's correct add the node
     /// that sent this packet to close nodes lists.
-    fn handle_ping_resp(&self, packet: &PingResponse, addr: SocketAddr) -> impl Future<Item = (), Error = HandlePacketError> + Send {
+    fn handle_ping_resp(&self, packet: &PingResponse, addr: SocketAddr) -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         let precomputed_key = self.precomputed_keys.get(packet.pk);
         let payload = match packet.get_payload(&precomputed_key) {
-            Err(e) => return Either::A(future::err(e.context(HandlePacketErrorKind::GetPayload).into())),
+            Err(e) => return Either::Left(future::err(e.context(HandlePacketErrorKind::GetPayload).into())),
             Ok(payload) => payload,
         };
 
         if payload.id == 0u64 {
-            return Either::A(future::err(
+            return Either::Left(future::err(
                 HandlePacketError::from(HandlePacketErrorKind::ZeroPingId)
             ))
         }
@@ -795,9 +877,9 @@ impl Server {
             let mut close_nodes = self.close_nodes.write();
             let mut friends = self.friends.write();
 
-            Either::B(self.try_add_to_close(&mut close_nodes, &mut friends, PackedNode::new(addr, &packet.pk)))
+            Either::Right(self.try_add_to_close(&mut close_nodes, &mut friends, PackedNode::new(addr, &packet.pk)))
         } else {
-            Either::A(future::err(
+            Either::Left(future::err(
                 HandlePacketError::from(HandlePacketErrorKind::PingIdMismatch)
             ))
         }
@@ -807,10 +889,10 @@ impl Server {
     /// packet. If node that sent this packet is not present in close nodes list
     /// and can be added there then it will be added to ping list.
     fn handle_nodes_req(&self, packet: &NodesRequest, addr: SocketAddr)
-        -> impl Future<Item = (), Error = HandlePacketError> + Send {
+        -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         let precomputed_key = self.precomputed_keys.get(packet.pk);
         let payload = match packet.get_payload(&precomputed_key) {
-            Err(e) => return Either::A(future::err(e.context(HandlePacketErrorKind::GetPayload).into())),
+            Err(e) => return Either::Left(future::err(e.context(HandlePacketErrorKind::GetPayload).into())),
             Ok(payload) => payload,
         };
 
@@ -826,9 +908,12 @@ impl Server {
             &resp_payload
         ));
 
-        Either::B(self.ping_add(&PackedNode::new(addr, &packet.pk))
-            .join(self.send_to(addr, nodes_resp))
-            .map(|_| ())
+        Either::Right(
+            future::try_join(
+                self.ping_add(&PackedNode::new(addr, &packet.pk)),
+                self.send_to(addr, nodes_resp)
+            )
+            .map_ok(drop)
             .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
         )
     }
@@ -838,10 +923,10 @@ impl Server {
     /// added to bootstrap nodes list to send `NodesRequest` packet to them
     /// later.
     fn handle_nodes_resp(&self, packet: &NodesResponse, addr: SocketAddr)
-        -> impl Future<Item = (), Error = HandlePacketError> + Send {
+        -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         let precomputed_key = self.precomputed_keys.get(packet.pk);
         let payload = match packet.get_payload(&precomputed_key) {
-            Err(e) => return Either::A(future::err(e.context(HandlePacketErrorKind::GetPayload).into())),
+            Err(e) => return Either::Left(future::err(e.context(HandlePacketErrorKind::GetPayload).into())),
             Ok(payload) => payload,
         };
 
@@ -875,12 +960,12 @@ impl Server {
                 self.update_returned_addr(&node, &packet.pk, &mut close_nodes, &mut friends);
             }
 
-            Either::B(future)
+            Either::Right(future)
         } else {
             // Some old version toxcore responds with wrong ping_id.
             // So we do not treat this as our own error.
             trace!("NodesResponse.ping_id does not match");
-            Either::A(future::ok(()))
+            Either::Left(future::ok(()))
         }
     }
 
@@ -902,12 +987,12 @@ impl Server {
     /// Handle received `CookieRequest` packet and pass it to `net_crypto`
     /// module.
     fn handle_cookie_request(&self, packet: &CookieRequest, addr: SocketAddr)
-        -> impl Future<Item = (), Error = HandlePacketError> + Send {
+        -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         if let Some(ref net_crypto) = self.net_crypto {
-            Either::A(net_crypto.handle_udp_cookie_request(packet, addr)
+            Either::Left(net_crypto.handle_udp_cookie_request(packet, addr)
                 .map_err(|e| e.context(HandlePacketErrorKind::HandleNetCrypto).into()))
         } else {
-            Either::B( future::err(
+            Either::Right(future::err(
                 HandlePacketError::from(HandlePacketErrorKind::NetCrypto)
             ))
         }
@@ -916,12 +1001,12 @@ impl Server {
     /// Handle received `CookieResponse` packet and pass it to `net_crypto`
     /// module.
     fn handle_cookie_response(&self, packet: &CookieResponse, addr: SocketAddr)
-        -> impl Future<Item = (), Error = HandlePacketError> + Send {
+        -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         if let Some(ref net_crypto) = self.net_crypto {
-            Either::A(net_crypto.handle_udp_cookie_response(packet, addr)
+            Either::Left(net_crypto.handle_udp_cookie_response(packet, addr)
                 .map_err(|e| e.context(HandlePacketErrorKind::HandleNetCrypto).into()))
         } else {
-            Either::B( future::err(
+            Either::Right( future::err(
                 HandlePacketError::from(HandlePacketErrorKind::NetCrypto)
             ))
         }
@@ -930,12 +1015,12 @@ impl Server {
     /// Handle received `CryptoHandshake` packet and pass it to `net_crypto`
     /// module.
     fn handle_crypto_handshake(&self, packet: &CryptoHandshake, addr: SocketAddr)
-        -> impl Future<Item = (), Error = HandlePacketError> + Send {
+        -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         if let Some(ref net_crypto) = self.net_crypto {
-            Either::A(net_crypto.handle_udp_crypto_handshake(packet, addr)
+            Either::Left(net_crypto.handle_udp_crypto_handshake(packet, addr)
                 .map_err(|e| e.context(HandlePacketErrorKind::HandleNetCrypto).into()))
         } else {
-            Either::B( future::err(
+            Either::Right( future::err(
                 HandlePacketError::from(HandlePacketErrorKind::NetCrypto)
             ))
         }
@@ -943,12 +1028,12 @@ impl Server {
 
     /// Handle received `CryptoData` packet and pass it to `net_crypto` module.
     fn handle_crypto_data(&self, packet: &CryptoData, addr: SocketAddr)
-        -> impl Future<Item = (), Error = HandlePacketError> + Send {
+        -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         if let Some(ref net_crypto) = self.net_crypto {
-            Either::A(net_crypto.handle_udp_crypto_data(packet, addr)
+            Either::Left(net_crypto.handle_udp_crypto_data(packet, addr)
                 .map_err(|e| e.context(HandlePacketErrorKind::HandleNetCrypto).into()))
         } else {
-            Either::B( future::err(
+            Either::Right( future::err(
                 HandlePacketError::from(HandlePacketErrorKind::NetCrypto)
             ))
         }
@@ -956,12 +1041,12 @@ impl Server {
 
     /// Handle received `OnionDataResponse` packet and pass it to `onion_client` module.
     fn handle_onion_data_response(&self, packet: &OnionDataResponse)
-        -> impl Future<Item = (), Error = HandlePacketError> + Send {
+        -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         if let Some(ref onion_client) = self.onion_client {
-            Either::A(onion_client.handle_data_response(packet)
+            Either::Left(onion_client.handle_data_response(packet)
                 .map_err(|e| e.context(HandlePacketErrorKind::HandleOnionClient).into()))
         } else {
-            Either::B( future::err(
+            Either::Right( future::err(
                 HandlePacketError::from(HandlePacketErrorKind::OnionClient)
             ))
         }
@@ -969,12 +1054,12 @@ impl Server {
 
     /// Handle received `OnionAnnounceResponse` packet and pass it to `onion_client` module.
     fn handle_onion_announce_response(&self, packet: &OnionAnnounceResponse, addr: SocketAddr)
-        -> impl Future<Item = (), Error = HandlePacketError> + Send {
+        -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         if let Some(ref onion_client) = self.onion_client {
-            Either::A(onion_client.handle_announce_response(packet, IsGlobal::is_global(&addr.ip()))
+            Either::Left(onion_client.handle_announce_response(packet, IsGlobal::is_global(&addr.ip()))
                 .map_err(|e| e.context(HandlePacketErrorKind::HandleOnionClient).into()))
         } else {
-            Either::B( future::err(
+            Either::Right( future::err(
                 HandlePacketError::from(HandlePacketErrorKind::OnionClient)
             ))
         }
@@ -983,72 +1068,72 @@ impl Server {
     /// Handle received `DhtRequest` packet, redirect it if it's sent for
     /// someone else or parse it and handle the payload if it's sent for us.
     fn handle_dht_req(&self, packet: DhtRequest, addr: SocketAddr)
-        -> impl Future<Item = (), Error = HandlePacketError> + Send { // TODO: split to functions
+        -> impl Future<Output = Result<(), HandlePacketError>> + Send { // TODO: split to functions
         if packet.rpk == self.pk { // the target peer is me
-            Either::A(self.handle_dht_req_for_us(&packet, addr))
+            Either::Left(self.handle_dht_req_for_us(&packet, addr))
         } else {
-            Either::B(self.handle_dht_req_for_others(packet))
+            Either::Right(self.handle_dht_req_for_others(packet))
         }
     }
 
     /// Parse received `DhtRequest` packet and handle the payload.
     fn handle_dht_req_for_us(&self, packet: &DhtRequest, addr: SocketAddr)
-        -> impl Future<Item = (), Error = HandlePacketError> + Send {
+        -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         let precomputed_key = self.precomputed_keys.get(packet.spk);
         let payload = packet.get_payload(&precomputed_key);
         let payload = match payload {
-            Err(e) => return Box::new(future::err(e.context(HandlePacketErrorKind::GetPayload).into())) as Box<dyn Future<Item = _, Error = _> + Send>,
+            Err(e) => return future::err(e.context(HandlePacketErrorKind::GetPayload).into()).boxed(),
             Ok(payload) => payload,
         };
 
         match payload {
             DhtRequestPayload::NatPingRequest(nat_payload) => {
                 debug!("Received nat ping request");
-                Box::new(self.handle_nat_ping_req(nat_payload, &packet.spk, addr)) as Box<dyn Future<Item = _, Error = _> + Send>
+                self.handle_nat_ping_req(nat_payload, &packet.spk, addr).boxed()
             },
             DhtRequestPayload::NatPingResponse(nat_payload) => {
                 debug!("Received nat ping response");
-                Box::new(self.handle_nat_ping_resp(nat_payload, &packet.spk))
+                self.handle_nat_ping_resp(nat_payload, &packet.spk).boxed()
             },
             DhtRequestPayload::DhtPkAnnounce(_dht_pk_payload) => {
                 debug!("Received DHT PublicKey Announce");
                 // TODO: handle this packet in onion client
-                Box::new( future::ok(()) )
+                future::ok(()).boxed()
             },
             DhtRequestPayload::HardeningRequest(_dht_pk_payload) => {
                 debug!("Received Hardening request");
                 // TODO: implement handler
-                Box::new( future::ok(()) )
+                future::ok(()).boxed()
             },
             DhtRequestPayload::HardeningResponse(_dht_pk_payload) => {
                 debug!("Received Hardening response");
                 // TODO: implement handler
-                Box::new( future::ok(()) )
+                future::ok(()).boxed()
             },
         }
     }
 
     /// Redirect received `DhtRequest` packet.
     fn handle_dht_req_for_others(&self, packet: DhtRequest)
-        -> impl Future<Item = (), Error = HandlePacketError> + Send {
+        -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         let close_nodes = self.close_nodes.read();
         if let Some(node) = close_nodes.get_node(&packet.rpk).and_then(|node| node.to_packed_node()) {
             let packet = Packet::DhtRequest(packet);
-            Either::A(self.send_to(node.saddr, packet)
+            Either::Left(self.send_to(node.saddr, packet)
                 .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into()))
         } else {
-            Either::B(future::ok(()))
+            Either::Right(future::ok(()))
         }
     }
 
     /// Handle received `NatPingRequest` packet and respond with
     /// `NatPingResponse` packet.
     fn handle_nat_ping_req(&self, payload: NatPingRequest, spk: &PublicKey, addr: SocketAddr)
-        -> impl Future<Item = (), Error = HandlePacketError> + Send {
+        -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         let mut friends = self.friends.write();
 
         let friend = match friends.get_mut(spk) {
-            None => return Either::A( future::err(
+            None => return Either::Left( future::err(
                 HandlePacketError::from(HandlePacketErrorKind::NoFriend))),
             Some(friend) => friend,
         };
@@ -1064,14 +1149,14 @@ impl Server {
             &self.pk,
             &resp_payload
         ));
-        Either::B(self.send_to(addr, nat_ping_resp)
+        Either::Right(self.send_to(addr, nat_ping_resp)
             .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into()))
     }
 
     /// Handle received `NatPingResponse` packet and enable hole punching if
     /// it's correct.
     fn handle_nat_ping_resp(&self, payload: NatPingResponse, spk: &PublicKey)
-        -> impl Future<Item = (), Error = HandlePacketError> + Send {
+        -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         if payload.id == 0 {
             return future::err(
                 HandlePacketError::from(HandlePacketErrorKind::ZeroPingId
@@ -1106,30 +1191,30 @@ impl Server {
     /// Handle received `LanDiscovery` packet and response with `NodesRequest`
     /// packet.
     fn handle_lan_discovery(&self, packet: &LanDiscovery, addr: SocketAddr)
-        -> impl Future<Item = (), Error = HandlePacketError> + Send {
+        -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         // LanDiscovery is optional
         if !self.lan_discovery_enabled {
-            return Either::A(future::ok(()));
+            return Either::Left(future::ok(()));
         }
 
         // if Lan Discovery packet has my PK, then it is sent by myself.
         if packet.pk == self.pk {
-            return Either::A(future::ok(()));
+            return Either::Left(future::ok(()));
         }
 
-        Either::B(self.send_nodes_req(&PackedNode::new(addr, &packet.pk), &mut self.request_queue.write(), self.pk)
+        Either::Right(self.send_nodes_req(&PackedNode::new(addr, &packet.pk), &mut self.request_queue.write(), self.pk)
             .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into()))
     }
 
     /// Handle received `OnionRequest0` packet and send `OnionRequest1` packet
     /// to the next peer.
     fn handle_onion_request_0(&self, packet: &OnionRequest0, addr: SocketAddr)
-        -> impl Future<Item = (), Error = HandlePacketError> + Send {
+        -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let shared_secret = self.precomputed_keys.get(packet.temporary_pk);
         let payload = packet.get_payload(&shared_secret);
         let payload = match payload {
-            Err(e) => return Either::A(future::err(e.context(HandlePacketErrorKind::GetPayload).into())),
+            Err(e) => return Either::Left(future::err(e.context(HandlePacketErrorKind::GetPayload).into())),
             Ok(payload) => payload,
         };
 
@@ -1144,19 +1229,19 @@ impl Server {
             payload: payload.inner,
             onion_return
         });
-        Either::B(self.send_to(payload.ip_port.to_saddr(), next_packet)
+        Either::Right(self.send_to(payload.ip_port.to_saddr(), next_packet)
             .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into()))
     }
 
     /// Handle received `OnionRequest1` packet and send `OnionRequest2` packet
     /// to the next peer.
     fn handle_onion_request_1(&self, packet: &OnionRequest1, addr: SocketAddr)
-        -> impl Future<Item = (), Error = HandlePacketError> + Send {
+        -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let shared_secret = self.precomputed_keys.get(packet.temporary_pk);
         let payload = packet.get_payload(&shared_secret);
         let payload = match payload {
-            Err(e) => return Either::A(future::err(e.context(HandlePacketErrorKind::GetPayload).into())),
+            Err(e) => return Either::Left(future::err(e.context(HandlePacketErrorKind::GetPayload).into())),
             Ok(payload) => payload,
         };
 
@@ -1171,19 +1256,19 @@ impl Server {
             payload: payload.inner,
             onion_return
         });
-        Either::B(self.send_to(payload.ip_port.to_saddr(), next_packet)
+        Either::Right(self.send_to(payload.ip_port.to_saddr(), next_packet)
             .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into()))
     }
 
     /// Handle received `OnionRequest2` packet and send `OnionAnnounceRequest`
     /// or `OnionDataRequest` packet to the next peer.
     fn handle_onion_request_2(&self, packet: &OnionRequest2, addr: SocketAddr)
-        -> impl Future<Item = (), Error = HandlePacketError> + Send {
+        -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let shared_secret = self.precomputed_keys.get(packet.temporary_pk);
         let payload = packet.get_payload(&shared_secret);
         let payload = match payload {
-            Err(e) => return Either::A(future::err(e.context(HandlePacketErrorKind::GetPayload).into())),
+            Err(e) => return Either::Left(future::err(e.context(HandlePacketErrorKind::GetPayload).into())),
             Ok(payload) => payload,
         };
 
@@ -1202,7 +1287,7 @@ impl Server {
                 onion_return
             }),
         };
-        Either::B(self.send_to(payload.ip_port.to_saddr(), next_packet)
+        Either::Right(self.send_to(payload.ip_port.to_saddr(), next_packet)
             .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
         )
     }
@@ -1214,12 +1299,12 @@ impl Server {
     /// from ktree. They are used to search closest to long term `PublicKey`
     /// nodes to announce.
     fn handle_onion_announce_request(&self, packet: OnionAnnounceRequest, addr: SocketAddr)
-        -> impl Future<Item = (), Error = HandlePacketError> + Send {
+        -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         let mut onion_announce = self.onion_announce.write();
 
         let shared_secret = self.precomputed_keys.get(packet.inner.pk);
         let payload = match packet.inner.get_payload(&shared_secret) {
-            Err(e) => return Either::A(future::err(e.context(HandlePacketErrorKind::GetPayload).into())),
+            Err(e) => return Either::Left(future::err(e.context(HandlePacketErrorKind::GetPayload).into())),
             Ok(payload) => payload,
         };
 
@@ -1239,7 +1324,7 @@ impl Server {
         };
         let response = OnionAnnounceResponse::new(&shared_secret, payload.sendback_data, &response_payload);
 
-        Either::B(self.send_to(addr, Packet::OnionResponse3(OnionResponse3 {
+        Either::Right(self.send_to(addr, Packet::OnionResponse3(OnionResponse3 {
             onion_return: packet.onion_return,
             payload: InnerOnionResponse::OnionAnnounceResponse(response)
         }))
@@ -1251,19 +1336,19 @@ impl Server {
     /// packet with inner `OnionDataResponse` to destination node through its
     /// onion path.
     fn handle_onion_data_request(&self, packet: OnionDataRequest)
-        -> impl Future<Item = (), Error = HandlePacketError> + Send {
+        -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         let onion_announce = self.onion_announce.read();
         match onion_announce.handle_data_request(packet) {
-            Ok((response, addr)) => Either::A(self.send_to(addr, Packet::OnionResponse3(response))
+            Ok((response, addr)) => Either::Left(self.send_to(addr, Packet::OnionResponse3(response))
                 .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
             ),
-            Err(e) => Either::B(future::err(e.context(HandlePacketErrorKind::OnionOrNetCrypto).into()))
+            Err(e) => Either::Right(future::err(e.context(HandlePacketErrorKind::OnionOrNetCrypto).into()))
         }
     }
 
     /// Handle received `OnionResponse3` packet and send `OnionResponse2` packet
     /// to the next peer which address is stored in encrypted onion return.
-    fn handle_onion_response_3(&self, packet: OnionResponse3) -> impl Future<Item = (), Error = HandlePacketError> + Send {
+    fn handle_onion_response_3(&self, packet: OnionResponse3) -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let payload = packet.onion_return.get_payload(&onion_symmetric_key);
         let payload = match payload {
@@ -1272,7 +1357,7 @@ impl Server {
                 // paths expiration. It means that we can get packets with old
                 // onion key. So we do not consider this as error.
                 trace!("Failed to decrypt onion_return from OnionResponse3: {}", e);
-                return Either::A(future::ok(()));
+                return Either::Left(future::ok(()));
             },
             Ok(payload) => payload,
         };
@@ -1282,17 +1367,17 @@ impl Server {
                 onion_return: next_onion_return,
                 payload: packet.payload
             });
-            Either::B(self.send_to(ip_port.to_saddr(), next_packet)
+            Either::Right(self.send_to(ip_port.to_saddr(), next_packet)
                 .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
             )
         } else {
-            Either::A(future::err(HandlePacketErrorKind::OnionResponseNext.into()))
+            Either::Left(future::err(HandlePacketErrorKind::OnionResponseNext.into()))
         }
     }
 
     /// Handle received `OnionResponse2` packet and send `OnionResponse1` packet
     /// to the next peer which address is stored in encrypted onion return.
-    fn handle_onion_response_2(&self, packet: OnionResponse2) -> impl Future<Item = (), Error = HandlePacketError> + Send {
+    fn handle_onion_response_2(&self, packet: OnionResponse2) -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let payload = packet.onion_return.get_payload(&onion_symmetric_key);
         let payload = match payload {
@@ -1301,7 +1386,7 @@ impl Server {
                 // paths expiration. It means that we can get packets with old
                 // onion key. So we do not consider this as error.
                 trace!("Failed to decrypt onion_return from OnionResponse2: {}", e);
-                return Either::A(future::ok(()));
+                return Either::Left(future::ok(()));
             },
             Ok(payload) => payload,
         };
@@ -1311,18 +1396,18 @@ impl Server {
                 onion_return: next_onion_return,
                 payload: packet.payload
             });
-            Either::B(self.send_to(ip_port.to_saddr(), next_packet)
+            Either::Right(self.send_to(ip_port.to_saddr(), next_packet)
                 .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
             )
         } else {
-            Either::A(future::err(HandlePacketErrorKind::OnionResponseNext.into()))
+            Either::Left(future::err(HandlePacketErrorKind::OnionResponseNext.into()))
         }
     }
 
     /// Handle received `OnionResponse1` packet and send `OnionAnnounceResponse`
     /// or `OnionDataResponse` packet to the next peer which address is stored
     /// in encrypted onion return.
-    fn handle_onion_response_1(&self, packet: OnionResponse1) -> impl Future<Item = (), Error = HandlePacketError> + Send {
+    fn handle_onion_response_1(&self, packet: OnionResponse1) -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         let onion_symmetric_key = self.onion_symmetric_key.read();
         let payload = packet.onion_return.get_payload(&onion_symmetric_key);
         let payload = match payload {
@@ -1331,7 +1416,7 @@ impl Server {
                 // paths expiration. It means that we can get packets with old
                 // onion key. So we do not consider this as error.
                 trace!("Failed to decrypt onion_return from OnionResponse1: {}", e);
-                return Box::new(future::ok(())) as Box<dyn Future<Item = _, Error = _> + Send>;
+                return future::ok(()).boxed()
             },
             Ok(payload) => payload,
         };
@@ -1343,24 +1428,26 @@ impl Server {
                         InnerOnionResponse::OnionAnnounceResponse(inner) => Packet::OnionAnnounceResponse(inner),
                         InnerOnionResponse::OnionDataResponse(inner) => Packet::OnionDataResponse(inner),
                     };
-                    Box::new(self.send_to(ip_port.to_saddr(), next_packet)
+                    self.send_to(ip_port.to_saddr(), next_packet)
                         .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
-                    ) as Box<dyn Future<Item = _, Error = _> + Send>
+                        .boxed()
                 },
                 ProtocolType::TCP => {
                     if let Some(ref tcp_onion_sink) = self.tcp_onion_sink {
-                        Box::new(tcp_onion_sink.clone() // clone sink for 1 send only
-                            .send((packet.payload, ip_port.to_saddr()))
-                            .map(|_sink| ()) // ignore sink because it was cloned
-                            .map_err(|e| e.context(HandlePacketErrorKind::OnionResponseRedirect).into())
-                        )
+                        let mut tx = tcp_onion_sink.clone(); // clone sink for 1 send only
+                        async move {
+                            tx.send((packet.payload, ip_port.to_saddr())).await
+                                .map_err(|e|
+                                    e.context(HandlePacketErrorKind::OnionResponseRedirect).into()
+                                )
+                        }.boxed()
                     } else {
-                        Box::new(future::err(HandlePacketErrorKind::OnionResponseRedirect.into()))
+                        future::err(HandlePacketErrorKind::OnionResponseRedirect.into()).boxed()
                     }
                 },
             }
         } else {
-            Box::new(future::err(HandlePacketErrorKind::OnionResponseNext.into()))
+            future::err(HandlePacketErrorKind::OnionResponseNext.into()).boxed()
         }
     }
 
@@ -1372,7 +1459,7 @@ impl Server {
     /// Handle `OnionRequest` from TCP relay and send `OnionRequest1` packet
     /// to the next node in the onion path.
     pub fn handle_tcp_onion_request(&self, packet: OnionRequest, addr: SocketAddr)
-        -> impl Future<Item = (), Error = mpsc::SendError<(Packet, SocketAddr)>> + Send {
+        -> impl Future<Output = Result<(), mpsc::SendError>> + Send {
         let onion_symmetric_key = self.onion_symmetric_key.read();
 
         let onion_return = OnionReturn::new(
@@ -1390,9 +1477,9 @@ impl Server {
     }
 
     /// Handle `BootstrapInfo` packet and response with `BootstrapInfo` packet.
-    fn handle_bootstrap_info(&self, packet: &BootstrapInfo, addr: SocketAddr) -> impl Future<Item = (), Error = HandlePacketError> + Send {
+    fn handle_bootstrap_info(&self, packet: &BootstrapInfo, addr: SocketAddr) -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         if packet.motd.len() != BOOSTRAP_CLIENT_MAX_MOTD_LENGTH {
-            return Either::A( future::err(
+            return Either::Left( future::err(
                 HandlePacketError::from(HandlePacketErrorKind::BootstrapInfoLength)
             ))
         }
@@ -1411,12 +1498,12 @@ impl Server {
                 version: bootstrap_info.version,
                 motd,
             });
-            Either::B(self.send_to(addr, packet)
+            Either::Right(self.send_to(addr, packet)
                 .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
             )
         } else {
             // Do not respond to BootstrapInfo packets if bootstrap_info not defined
-            Either::A(future::ok(()))
+            Either::Left(future::ok(()))
         }
     }
 
@@ -1470,7 +1557,7 @@ impl Server {
 
     /// Set sink to send friend's `SocketAddr` when it gets known.
     pub fn set_friend_saddr_sink(&self, friend_saddr_sink: mpsc::UnboundedSender<PackedNode>) {
-        self.friend_saddr_sink.write().set(friend_saddr_sink);
+        *self.friend_saddr_sink.write() = Some(friend_saddr_sink);
     }
 
     /// Get `PrecomputedKey`s cache.
@@ -1483,13 +1570,7 @@ impl Server {
 mod tests {
     use super::*;
 
-    use futures::Future;
     use std::net::SocketAddr;
-
-    use tokio_executor;
-    use tokio_timer::clock::*;
-
-    use crate::toxcore::time::ConstNow;
 
     const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - secretbox::NONCEBYTES;
     const ONION_RETURN_2_PAYLOAD_SIZE: usize = ONION_RETURN_2_SIZE - secretbox::NONCEBYTES;
@@ -1517,16 +1598,6 @@ mod tests {
 
         let addr: SocketAddr = "127.0.0.1:12346".parse().unwrap();
         (alice, precomp, bob_pk, bob_sk, rx, addr)
-    }
-
-    #[test]
-    fn server_is_clonable() {
-        crypto_init().unwrap();
-        let (pk, sk) = gen_keypair();
-        let (tx, _rx) = mpsc::channel(1);
-        let server = Server::new(tx, pk, sk);
-
-        let _ = server.clone();
     }
 
     #[test]
@@ -1574,9 +1645,8 @@ mod tests {
         assert!(!alice.friends.read().contains_key(&friend_pk));
     }
 
-    // handle_bootstrap_info
-    #[test]
-    fn handle_bootstrap_info() {
+    #[tokio::test]
+    async fn handle_bootstrap_info() {
         let (mut alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
 
         let version = 42;
@@ -1590,9 +1660,9 @@ mod tests {
             motd: vec![0; BOOSTRAP_CLIENT_MAX_MOTD_LENGTH],
         });
 
-        alice.handle_packet(packet, addr).wait().unwrap();
+        alice.handle_packet(packet, addr).await.unwrap();
 
-        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
 
         assert_eq!(addr_to_send, addr);
@@ -1603,8 +1673,8 @@ mod tests {
         assert_eq!(bootstrap_info.motd, motd);
     }
 
-    #[test]
-    fn handle_bootstrap_info_wrong_length() {
+    #[tokio::test]
+    async fn handle_bootstrap_info_wrong_length() {
         let (mut alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
 
         let version = 42;
@@ -1617,27 +1687,27 @@ mod tests {
             motd: Vec::new(),
         });
 
-        let res = alice.handle_packet(packet, addr).wait();
+        let res = alice.handle_packet(packet, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::BootstrapInfoLength);
 
-        // Necessary to drop tx so that rx.collect() can be finished
+        // Necessary to drop tx so that rx.collect::<Vec<_>>() can be finished
         drop(alice);
 
-        assert!(rx.collect().wait().unwrap().is_empty());
+        assert!(rx.collect::<Vec<_>>().await.is_empty());
     }
 
     // handle_ping_req
-    #[test]
-    fn handle_ping_req() {
+    #[tokio::test]
+    async fn handle_ping_req() {
         let (alice, precomp, bob_pk, bob_sk, rx, addr) = create_node();
 
         let req_payload = PingRequestPayload { id: 42 };
         let ping_req = Packet::PingRequest(PingRequest::new(&precomp, &bob_pk, &req_payload));
 
-        alice.handle_packet(ping_req, addr).wait().unwrap();
+        alice.handle_packet(ping_req, addr).await.unwrap();
 
-        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
 
         assert_eq!(addr_to_send, addr);
@@ -1651,8 +1721,8 @@ mod tests {
         assert!(alice.nodes_to_ping.read().contains(&alice.pk, &bob_pk));
     }
 
-    #[test]
-    fn handle_ping_req_from_friend_with_unknown_addr() {
+    #[tokio::test]
+    async fn handle_ping_req_from_friend_with_unknown_addr() {
         let (alice, precomp, bob_pk, bob_sk, rx, addr) = create_node();
 
         alice.add_friend(bob_pk);
@@ -1660,7 +1730,7 @@ mod tests {
         let req_payload = PingRequestPayload { id: 42 };
         let ping_req = Packet::PingRequest(PingRequest::new(&precomp, &bob_pk, &req_payload));
 
-        alice.handle_packet(ping_req, addr).wait().unwrap();
+        alice.handle_packet(ping_req, addr).await.unwrap();
 
         let mut request_queue = alice.request_queue.write();
 
@@ -1677,29 +1747,29 @@ mod tests {
                 let ping_req_payload = ping_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(ping_req_payload.id, |&pk| pk == bob_pk).is_some());
             }
-        }).collect().wait().unwrap();
+        }).collect::<Vec<_>>().await;
 
         // In case of friend with yet unknown address we should send ping
         // request immediately instead of adding node to nodes_to_ping list
         assert!(!alice.nodes_to_ping.read().contains(&alice.pk, &bob_pk));
     }
 
-    #[test]
-    fn handle_ping_req_invalid_payload() {
+    #[tokio::test]
+    async fn handle_ping_req_invalid_payload() {
         let (alice, precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         // can't be decrypted payload since packet contains wrong key
         let req_payload = PingRequestPayload { id: 42 };
         let ping_req = Packet::PingRequest(PingRequest::new(&precomp, &alice.pk, &req_payload));
 
-        let res = alice.handle_packet(ping_req, addr).wait();
+        let res = alice.handle_packet(ping_req, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
     }
 
     // handle_ping_resp
-    #[test]
-    fn handle_ping_resp() {
+    #[tokio::test]
+    async fn handle_ping_resp() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         alice.add_friend(bob_pk);
@@ -1712,14 +1782,10 @@ mod tests {
         let resp_payload = PingResponsePayload { id: ping_id };
         let ping_resp = Packet::PingResponse(PingResponse::new(&precomp, &bob_pk, &resp_payload));
 
-        let time = Instant::now() + Duration::from_secs(1);
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(1)).await;
 
-        let mut enter = tokio_executor::enter().unwrap();
-        let clock = Clock::new_with_now(ConstNow(time));
-
-        with_default(&clock, &mut enter, |_| {
-            alice.handle_packet(ping_resp, addr).wait().unwrap();
-        });
+        alice.handle_packet(ping_resp, addr).await.unwrap();
 
         let friends = alice.friends.read();
         let friend = friends.values().next().unwrap();
@@ -1733,11 +1799,12 @@ mod tests {
 
         // Node that sent PingResponse should be added to close nodes list and
         // have updated last_resp_time
+        let time = clock_now();
         assert_eq!(node.assoc4.last_resp_time.unwrap(), time);
     }
 
-    #[test]
-    fn handle_ping_resp_not_a_friend() {
+    #[tokio::test]
+    async fn handle_ping_resp_not_a_friend() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let (friend_saddr_tx, friend_saddr_rx) = mpsc::unbounded();
@@ -1751,16 +1818,16 @@ mod tests {
         let resp_payload = PingResponsePayload { id: ping_id };
         let ping_resp = Packet::PingResponse(PingResponse::new(&precomp, &bob_pk, &resp_payload));
 
-        alice.handle_packet(ping_resp, addr).wait().unwrap();
+        alice.handle_packet(ping_resp, addr).await.unwrap();
 
-        // Necessary to drop tx so that rx.collect() can be finished
+        // Necessary to drop tx so that rx.collect::<Vec<_>>() can be finished
         drop(alice);
 
-        assert!(friend_saddr_rx.collect().wait().unwrap().is_empty());
+        assert!(friend_saddr_rx.collect::<Vec<_>>().await.is_empty());
     }
 
-    #[test]
-    fn handle_ping_resp_friend_saddr() {
+    #[tokio::test]
+    async fn handle_ping_resp_friend_saddr() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let (friend_saddr_tx, friend_saddr_rx) = mpsc::unbounded();
@@ -1776,17 +1843,17 @@ mod tests {
         let resp_payload = PingResponsePayload { id: ping_id };
         let ping_resp = Packet::PingResponse(PingResponse::new(&precomp, &bob_pk, &resp_payload));
 
-        alice.handle_packet(ping_resp, addr).wait().unwrap();
+        alice.handle_packet(ping_resp, addr).await.unwrap();
 
-        let (received_node, _friend_saddr_rx) = friend_saddr_rx.into_future().wait().unwrap();
+        let (received_node, _friend_saddr_rx) = friend_saddr_rx.into_future().await;
         let received_node = received_node.unwrap();
 
         assert_eq!(received_node.pk, bob_pk);
         assert_eq!(received_node.saddr, addr);
     }
 
-    #[test]
-    fn handle_ping_resp_invalid_payload() {
+    #[tokio::test]
+    async fn handle_ping_resp_invalid_payload() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let packed_node = PackedNode::new(addr, &bob_pk);
@@ -1798,13 +1865,13 @@ mod tests {
         let payload = PingResponsePayload { id: ping_id };
         let ping_resp = Packet::PingResponse(PingResponse::new(&precomp, &alice.pk, &payload));
 
-        let res = alice.handle_packet(ping_resp, addr).wait();
+        let res = alice.handle_packet(ping_resp, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
     }
 
-    #[test]
-    fn handle_ping_resp_ping_id_is_0() {
+    #[tokio::test]
+    async fn handle_ping_resp_ping_id_is_0() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let packed_node = PackedNode::new(addr, &bob_pk);
@@ -1813,13 +1880,13 @@ mod tests {
         let payload = PingResponsePayload { id: 0 };
         let ping_resp = Packet::PingResponse(PingResponse::new(&precomp, &bob_pk, &payload));
 
-        let res = alice.handle_packet(ping_resp, addr).wait();
+        let res = alice.handle_packet(ping_resp, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::ZeroPingId);
     }
 
-    #[test]
-    fn handle_ping_resp_invalid_ping_id() {
+    #[tokio::test]
+    async fn handle_ping_resp_invalid_ping_id() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let packed_node = PackedNode::new(addr, &bob_pk);
@@ -1830,14 +1897,14 @@ mod tests {
         let payload = PingResponsePayload { id: ping_id + 1 };
         let ping_resp = Packet::PingResponse(PingResponse::new(&precomp, &bob_pk, &payload));
 
-        let res = alice.handle_packet(ping_resp, addr).wait();
+        let res = alice.handle_packet(ping_resp, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::PingIdMismatch);
     }
 
     // handle_nodes_req
-    #[test]
-    fn handle_nodes_req() {
+    #[tokio::test]
+    async fn handle_nodes_req() {
         let (alice, precomp, bob_pk, bob_sk, rx, addr) = create_node();
 
         let packed_node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &bob_pk);
@@ -1847,9 +1914,9 @@ mod tests {
         let req_payload = NodesRequestPayload { pk: bob_pk, id: 42 };
         let nodes_req = Packet::NodesRequest(NodesRequest::new(&precomp, &bob_pk, &req_payload));
 
-        alice.handle_packet(nodes_req, addr).wait().unwrap();
+        alice.handle_packet(nodes_req, addr).await.unwrap();
 
-        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
 
         assert_eq!(addr_to_send, addr);
@@ -1864,8 +1931,8 @@ mod tests {
         assert!(alice.nodes_to_ping.read().contains(&alice.pk, &bob_pk));
     }
 
-    #[test]
-    fn handle_nodes_req_should_return_nodes_from_friends() {
+    #[tokio::test]
+    async fn handle_nodes_req_should_return_nodes_from_friends() {
         let (alice, precomp, bob_pk, bob_sk, rx, addr) = create_node();
 
         alice.add_friend(bob_pk);
@@ -1876,9 +1943,9 @@ mod tests {
         let req_payload = NodesRequestPayload { pk: bob_pk, id: 42 };
         let nodes_req = Packet::NodesRequest(NodesRequest::new(&precomp, &bob_pk, &req_payload));
 
-        alice.handle_packet(nodes_req, addr).wait().unwrap();
+        alice.handle_packet(nodes_req, addr).await.unwrap();
 
-        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
 
         assert_eq!(addr_to_send, addr);
@@ -1893,8 +1960,8 @@ mod tests {
         assert!(alice.nodes_to_ping.read().contains(&alice.pk, &bob_pk));
     }
 
-    #[test]
-    fn handle_nodes_req_should_not_return_bad_nodes() {
+    #[tokio::test]
+    async fn handle_nodes_req_should_not_return_bad_nodes() {
         let (alice, precomp, bob_pk, bob_sk, rx, addr) = create_node();
 
         let packed_node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &bob_pk);
@@ -1904,16 +1971,14 @@ mod tests {
         let req_payload = NodesRequestPayload { pk: bob_pk, id: 42 };
         let nodes_req = Packet::NodesRequest(NodesRequest::new(&precomp, &bob_pk, &req_payload));
 
-        let time = Instant::now() + BAD_NODE_TIMEOUT + Duration::from_secs(1);
+        let delay = BAD_NODE_TIMEOUT + Duration::from_secs(1);
 
-        let mut enter = tokio_executor::enter().unwrap();
-        let clock = Clock::new_with_now(ConstNow(time));
+        tokio::time::pause();
+        tokio::time::advance(delay).await;
 
-        with_default(&clock, &mut enter, |_| {
-            alice.handle_packet(nodes_req, addr).wait().unwrap();
-        });
+        alice.handle_packet(nodes_req, addr).await.unwrap();
 
-        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
 
         assert_eq!(addr_to_send, addr);
@@ -1928,8 +1993,8 @@ mod tests {
         assert!(alice.nodes_to_ping.read().contains(&alice.pk, &bob_pk));
     }
 
-    #[test]
-    fn handle_nodes_req_should_not_return_lan_nodes_when_address_is_global() {
+    #[tokio::test]
+    async fn handle_nodes_req_should_not_return_lan_nodes_when_address_is_global() {
         let (alice, precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         let addr = "8.10.8.10:12345".parse().unwrap();
 
@@ -1940,9 +2005,9 @@ mod tests {
         let req_payload = NodesRequestPayload { pk: bob_pk, id: 42 };
         let nodes_req = Packet::NodesRequest(NodesRequest::new(&precomp, &bob_pk, &req_payload));
 
-        alice.handle_packet(nodes_req, addr).wait().unwrap();
+        alice.handle_packet(nodes_req, addr).await.unwrap();
 
-        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
 
         assert_eq!(addr_to_send, addr);
@@ -1957,22 +2022,22 @@ mod tests {
         assert!(alice.nodes_to_ping.read().contains(&alice.pk, &bob_pk));
     }
 
-    #[test]
-    fn handle_nodes_req_invalid_payload() {
+    #[tokio::test]
+    async fn handle_nodes_req_invalid_payload() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         // can't be decrypted payload since packet contains wrong key
         let req_payload = NodesRequestPayload { pk: bob_pk, id: 42 };
         let nodes_req = Packet::NodesRequest(NodesRequest::new(&precomp, &alice.pk, &req_payload));
 
-        let res = alice.handle_packet(nodes_req, addr).wait();
+        let res = alice.handle_packet(nodes_req, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
     }
 
     // handle_nodes_resp
-    #[test]
-    fn handle_nodes_resp() {
+    #[tokio::test]
+    async fn handle_nodes_resp() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         alice.add_friend(bob_pk);
@@ -1984,14 +2049,10 @@ mod tests {
         let resp_payload = NodesResponsePayload { nodes: vec![node], id: ping_id };
         let nodes_resp = Packet::NodesResponse(NodesResponse::new(&precomp, &bob_pk, &resp_payload));
 
-        let time = Instant::now() + Duration::from_secs(1);
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(1)).await;
 
-        let mut enter = tokio_executor::enter().unwrap();
-        let clock = Clock::new_with_now(ConstNow(time));
-
-        with_default(&clock, &mut enter, |_| {
-            alice.handle_packet(nodes_resp, addr).wait().unwrap();
-        });
+        alice.handle_packet(nodes_resp, addr).await.unwrap();
 
         // All nodes from NodesResponse should be added to bootstrap nodes list
         assert!(alice.nodes_to_bootstrap.read().contains(&alice.pk, &node.pk));
@@ -2011,11 +2072,12 @@ mod tests {
 
         // Node that sent NodesResponse should be added to close nodes list and
         // have updated last_resp_time
+        let time = clock_now();
         assert_eq!(node.assoc4.last_resp_time.unwrap(), time);
     }
 
-    #[test]
-    fn handle_nodes_resp_friend_saddr() {
+    #[tokio::test]
+    async fn handle_nodes_resp_friend_saddr() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let (friend_saddr_tx, friend_saddr_rx) = mpsc::unbounded();
@@ -2033,17 +2095,17 @@ mod tests {
         let resp_payload = NodesResponsePayload { nodes: vec![node], id: ping_id };
         let nodes_resp = Packet::NodesResponse(NodesResponse::new(&precomp, &bob_pk, &resp_payload));
 
-        alice.handle_packet(nodes_resp, addr).wait().unwrap();
+        alice.handle_packet(nodes_resp, addr).await.unwrap();
 
-        let (received_node, _friend_saddr_rx) = friend_saddr_rx.into_future().wait().unwrap();
+        let (received_node, _friend_saddr_rx) = friend_saddr_rx.into_future().await;
         let received_node = received_node.unwrap();
 
         assert_eq!(received_node.pk, bob_pk);
         assert_eq!(received_node.saddr, addr);
     }
 
-    #[test]
-    fn handle_nodes_resp_invalid_payload() {
+    #[tokio::test]
+    async fn handle_nodes_resp_invalid_payload() {
         let (alice, precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         // can't be decrypted payload since packet contains wrong key
@@ -2052,13 +2114,13 @@ mod tests {
         ], id: 38 };
         let nodes_resp = Packet::NodesResponse(NodesResponse::new(&precomp, &alice.pk, &resp_payload));
 
-        let res = alice.handle_packet(nodes_resp, addr).wait();
+        let res = alice.handle_packet(nodes_resp, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
     }
 
-    #[test]
-    fn handle_nodes_resp_ping_id_is_0() {
+    #[tokio::test]
+    async fn handle_nodes_resp_ping_id_is_0() {
         let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
 
         let resp_payload = NodesResponsePayload { nodes: vec![
@@ -2066,16 +2128,16 @@ mod tests {
         ], id: 0 };
         let nodes_resp = Packet::NodesResponse(NodesResponse::new(&precomp, &bob_pk, &resp_payload));
 
-        alice.handle_packet(nodes_resp, addr).wait().unwrap();
+        alice.handle_packet(nodes_resp, addr).await.unwrap();
 
-        // Necessary to drop tx so that rx.collect() can be finished
+        // Necessary to drop tx so that rx.collect::<Vec<_>>() can be finished
         drop(alice);
 
-        assert!(rx.collect().wait().unwrap().is_empty());
+        assert!(rx.collect::<Vec<_>>().await.is_empty());
     }
 
-    #[test]
-    fn handle_nodes_resp_invalid_ping_id() {
+    #[tokio::test]
+    async fn handle_nodes_resp_invalid_ping_id() {
         let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
 
         let ping_id = alice.request_queue.write().new_ping_id(bob_pk);
@@ -2088,17 +2150,17 @@ mod tests {
         };
         let nodes_resp = Packet::NodesResponse(NodesResponse::new(&precomp, &bob_pk, &resp_payload));
 
-        alice.handle_packet(nodes_resp, addr).wait().unwrap();
+        alice.handle_packet(nodes_resp, addr).await.unwrap();
 
-        // Necessary to drop tx so that rx.collect() can be finished
+        // Necessary to drop tx so that rx.collect::<Vec<_>>() can be finished
         drop(alice);
 
-        assert!(rx.collect().wait().unwrap().is_empty());
+        assert!(rx.collect::<Vec<_>>().await.is_empty());
     }
 
     // handle_cookie_request
-    #[test]
-    fn handle_cookie_request() {
+    #[tokio::test]
+    async fn handle_cookie_request() {
         crypto_init().unwrap();
         let (udp_tx, udp_rx) = mpsc::channel(1);
         let (dht_pk, dht_sk) = gen_keypair();
@@ -2132,9 +2194,9 @@ mod tests {
         };
         let cookie_request = Packet::CookieRequest(CookieRequest::new(&precomp, &bob_pk, &cookie_request_payload));
 
-        alice.handle_packet(cookie_request, addr).wait().unwrap();
+        alice.handle_packet(cookie_request, addr).await.unwrap();
 
-        let (received, _udp_rx) = udp_rx.into_future().wait().unwrap();
+        let (received, _udp_rx) = udp_rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
 
         assert_eq!(addr_to_send, addr);
@@ -2145,8 +2207,8 @@ mod tests {
         assert_eq!(payload.id, cookie_request_id);
     }
 
-    #[test]
-    fn handle_cookie_request_uninitialized() {
+    #[tokio::test]
+    async fn handle_cookie_request_uninitialized() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let (bob_real_pk, _bob_real_sk) = gen_keypair();
@@ -2157,14 +2219,14 @@ mod tests {
         };
         let cookie_request = Packet::CookieRequest(CookieRequest::new(&precomp, &bob_pk, &cookie_request_payload));
 
-        let res = alice.handle_packet(cookie_request, addr).wait();
+        let res = alice.handle_packet(cookie_request, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::NetCrypto);
     }
 
     // handle_cookie_response
-    #[test]
-    fn handle_cookie_response_uninitialized() {
+    #[tokio::test]
+    async fn handle_cookie_response_uninitialized() {
         let (alice, precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let cookie = EncryptedCookie {
@@ -2177,14 +2239,14 @@ mod tests {
         };
         let cookie_response = Packet::CookieResponse(CookieResponse::new(&precomp, &cookie_response_payload));
 
-        let res = alice.handle_packet(cookie_response, addr).wait();
+        let res = alice.handle_packet(cookie_response, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::NetCrypto);
     }
 
     // handle_crypto_handshake
-    #[test]
-    fn handle_crypto_handshake_uninitialized() {
+    #[tokio::test]
+    async fn handle_crypto_handshake_uninitialized() {
         let (alice, precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let cookie = EncryptedCookie {
@@ -2199,14 +2261,14 @@ mod tests {
         };
         let crypto_handshake = Packet::CryptoHandshake(CryptoHandshake::new(&precomp, &crypto_handshake_payload, cookie));
 
-        let res = alice.handle_packet(crypto_handshake, addr).wait();
+        let res = alice.handle_packet(crypto_handshake, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::NetCrypto);
     }
 
     // handle_dht_req
-    #[test]
-    fn handle_dht_req_for_unknown_node() {
+    #[tokio::test]
+    async fn handle_dht_req_for_unknown_node() {
         let (alice, _precomp, bob_pk, bob_sk, rx, addr) = create_node();
 
         let (charlie_pk, _charlie_sk) = gen_keypair();
@@ -2217,16 +2279,16 @@ mod tests {
         let nat_payload = DhtRequestPayload::NatPingRequest(nat_req);
         let dht_req = Packet::DhtRequest(DhtRequest::new(&precomp, &charlie_pk, &bob_pk, &nat_payload));
 
-        alice.handle_packet(dht_req, addr).wait().unwrap();
+        alice.handle_packet(dht_req, addr).await.unwrap();
 
-        // Necessary to drop tx so that rx.collect() can be finished
+        // Necessary to drop tx so that rx.collect::<Vec<_>>() can be finished
         drop(alice);
 
-        assert!(rx.collect().wait().unwrap().is_empty());
+        assert!(rx.collect::<Vec<_>>().await.is_empty());
     }
 
-    #[test]
-    fn handle_dht_req_for_known_node() {
+    #[tokio::test]
+    async fn handle_dht_req_for_known_node() {
         let (alice, _precomp, bob_pk, bob_sk, rx, addr) = create_node();
 
         let charlie_addr = "1.2.3.4:12345".parse().unwrap();
@@ -2241,17 +2303,17 @@ mod tests {
         let nat_payload = DhtRequestPayload::NatPingRequest(nat_req);
         let dht_req = Packet::DhtRequest(DhtRequest::new(&precomp, &charlie_pk, &bob_pk, &nat_payload));
 
-        alice.handle_packet(dht_req.clone(), addr).wait().unwrap();
+        alice.handle_packet(dht_req.clone(), addr).await.unwrap();
 
-        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
 
         assert_eq!(addr_to_send, charlie_addr);
         assert_eq!(packet, dht_req);
     }
 
-    #[test]
-    fn handle_dht_req_invalid_payload() {
+    #[tokio::test]
+    async fn handle_dht_req_invalid_payload() {
         let (alice, _precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let dht_req = Packet::DhtRequest(DhtRequest {
@@ -2261,14 +2323,14 @@ mod tests {
             payload: vec![42; 123]
         });
 
-        let res = alice.handle_packet(dht_req, addr).wait();
+        let res = alice.handle_packet(dht_req, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
     }
 
     // handle_nat_ping_request
-    #[test]
-    fn handle_nat_ping_req() {
+    #[tokio::test]
+    async fn handle_nat_ping_req() {
         let (alice, precomp, bob_pk, bob_sk, rx, addr) = create_node();
 
         alice.add_friend(bob_pk);
@@ -2277,15 +2339,12 @@ mod tests {
         let nat_payload = DhtRequestPayload::NatPingRequest(nat_req);
         let dht_req = Packet::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, &nat_payload));
 
-        let mut enter = tokio_executor::enter().unwrap();
-        let time = Instant::now() + Duration::from_secs(1);
-        let clock = Clock::new_with_now(ConstNow(time));
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(1)).await;
 
-        with_default(&clock, &mut enter, |_| {
-            alice.handle_packet(dht_req, addr).wait().unwrap();
-        });
+        alice.handle_packet(dht_req, addr).await.unwrap();
 
-        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
 
         assert_eq!(addr_to_send, addr);
@@ -2299,12 +2358,13 @@ mod tests {
 
         let friends = alice.friends.read();
 
+        let time = clock_now();
         assert_eq!(friends[&bob_pk].hole_punch.last_recv_ping_time, time);
     }
 
     // handle_nat_ping_response
-    #[test]
-    fn handle_nat_ping_resp() {
+    #[tokio::test]
+    async fn handle_nat_ping_resp() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         alice.add_friend(bob_pk);
@@ -2314,15 +2374,15 @@ mod tests {
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
         let dht_req = Packet::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, &nat_payload));
 
-        alice.handle_packet(dht_req, addr).wait().unwrap();
+        alice.handle_packet(dht_req, addr).await.unwrap();
 
         let friends = alice.friends.read();
 
         assert!(!friends[&bob_pk].hole_punch.is_punching_done);
     }
 
-    #[test]
-    fn handle_nat_ping_resp_ping_id_is_0() {
+    #[tokio::test]
+    async fn handle_nat_ping_resp_ping_id_is_0() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         // error case, ping_id = 0
@@ -2330,13 +2390,13 @@ mod tests {
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
         let dht_req = Packet::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, &nat_payload));
 
-        let res = alice.handle_packet(dht_req, addr).wait();
+        let res = alice.handle_packet(dht_req, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::ZeroPingId);
     }
 
-    #[test]
-    fn handle_nat_ping_resp_invalid_ping_id() {
+    #[tokio::test]
+    async fn handle_nat_ping_resp_invalid_ping_id() {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         // error case, incorrect ping_id
@@ -2346,14 +2406,14 @@ mod tests {
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
         let dht_req = Packet::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, &nat_payload));
 
-        let res = alice.handle_packet(dht_req, addr).wait();
+        let res = alice.handle_packet(dht_req, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::NoFriend);
     }
 
     // handle_onion_request_0
-    #[test]
-    fn handle_onion_request_0() {
+    #[tokio::test]
+    async fn handle_onion_request_0() {
         let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
 
         let temporary_pk = gen_keypair().0;
@@ -2370,9 +2430,9 @@ mod tests {
         };
         let packet = Packet::OnionRequest0(OnionRequest0::new(&precomp, &bob_pk, &payload));
 
-        alice.handle_packet(packet, addr).wait().unwrap();
+        alice.handle_packet(packet, addr).await.unwrap();
 
-        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
 
         assert_eq!(addr_to_send, ip_port.to_saddr());
@@ -2388,8 +2448,8 @@ mod tests {
         assert_eq!(onion_return_payload.0, IpPort::from_udp_saddr(addr));
     }
 
-    #[test]
-    fn handle_onion_request_0_invalid_payload() {
+    #[tokio::test]
+    async fn handle_onion_request_0_invalid_payload() {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let packet = Packet::OnionRequest0(OnionRequest0 {
@@ -2398,14 +2458,14 @@ mod tests {
             payload: vec![42; 123] // not encrypted with dht pk
         });
 
-        let res = alice.handle_packet(packet, addr).wait();
+        let res = alice.handle_packet(packet, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
     }
 
     // handle_onion_request_1
-    #[test]
-    fn handle_onion_request_1() {
+    #[tokio::test]
+    async fn handle_onion_request_1() {
         let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
 
         let temporary_pk = gen_keypair().0;
@@ -2426,9 +2486,9 @@ mod tests {
         };
         let packet = Packet::OnionRequest1(OnionRequest1::new(&precomp, &bob_pk, &payload, onion_return));
 
-        alice.handle_packet(packet, addr).wait().unwrap();
+        alice.handle_packet(packet, addr).await.unwrap();
 
-        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
 
         assert_eq!(addr_to_send, ip_port.to_saddr());
@@ -2444,8 +2504,8 @@ mod tests {
         assert_eq!(onion_return_payload.0, IpPort::from_udp_saddr(addr));
     }
 
-    #[test]
-    fn handle_onion_request_1_invalid_payload() {
+    #[tokio::test]
+    async fn handle_onion_request_1_invalid_payload() {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let packet = Packet::OnionRequest1(OnionRequest1 {
@@ -2458,14 +2518,14 @@ mod tests {
             }
         });
 
-        let res = alice.handle_packet(packet, addr).wait();
+        let res = alice.handle_packet(packet, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
     }
 
     // handle_onion_request_2
-    #[test]
-    fn handle_onion_request_2_with_onion_announce_request() {
+    #[tokio::test]
+    async fn handle_onion_request_2_with_onion_announce_request() {
         let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
 
         let inner = InnerOnionAnnounceRequest {
@@ -2488,9 +2548,9 @@ mod tests {
         };
         let packet = Packet::OnionRequest2(OnionRequest2::new(&precomp, &bob_pk, &payload, onion_return));
 
-        alice.handle_packet(packet, addr).wait().unwrap();
+        alice.handle_packet(packet, addr).await.unwrap();
 
-        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
 
         assert_eq!(addr_to_send, ip_port.to_saddr());
@@ -2505,8 +2565,8 @@ mod tests {
         assert_eq!(onion_return_payload.0, IpPort::from_udp_saddr(addr));
     }
 
-    #[test]
-    fn handle_onion_request_2_with_onion_data_request() {
+    #[tokio::test]
+    async fn handle_onion_request_2_with_onion_data_request() {
         let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
 
         let inner = InnerOnionDataRequest {
@@ -2530,9 +2590,9 @@ mod tests {
         };
         let packet = Packet::OnionRequest2(OnionRequest2::new(&precomp, &bob_pk, &payload, onion_return));
 
-        alice.handle_packet(packet, addr).wait().unwrap();
+        alice.handle_packet(packet, addr).await.unwrap();
 
-        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
 
         assert_eq!(addr_to_send, ip_port.to_saddr());
@@ -2547,8 +2607,8 @@ mod tests {
         assert_eq!(onion_return_payload.0, IpPort::from_udp_saddr(addr));
     }
 
-    #[test]
-    fn handle_onion_request_2_invalid_payload() {
+    #[tokio::test]
+    async fn handle_onion_request_2_invalid_payload() {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let packet = Packet::OnionRequest2(OnionRequest2 {
@@ -2561,14 +2621,14 @@ mod tests {
             }
         });
 
-        let res = alice.handle_packet(packet, addr).wait();
+        let res = alice.handle_packet(packet, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
     }
 
     // handle_onion_announce_request
-    #[test]
-    fn handle_onion_announce_request() {
+    #[tokio::test]
+    async fn handle_onion_announce_request() {
         let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
 
         let sendback_data = 42;
@@ -2588,9 +2648,9 @@ mod tests {
             onion_return: onion_return.clone()
         });
 
-        alice.handle_packet(packet, addr).wait().unwrap();
+        alice.handle_packet(packet, addr).await.unwrap();
 
-        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
 
         assert_eq!(addr_to_send, addr);
@@ -2608,8 +2668,8 @@ mod tests {
         assert_eq!(payload.announce_status, AnnounceStatus::Failed);
     }
 
-    #[test]
-    fn handle_onion_announce_request_invalid_payload() {
+    #[tokio::test]
+    async fn handle_onion_announce_request_invalid_payload() {
         let (alice, _precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let inner = InnerOnionAnnounceRequest {
@@ -2626,14 +2686,14 @@ mod tests {
             onion_return: onion_return.clone()
         });
 
-        let res = alice.handle_packet(packet, addr).wait();
+        let res = alice.handle_packet(packet, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
     }
 
     // handle_onion_data_request
-    #[test]
-    fn handle_onion_data_request() {
+    #[tokio::test]
+    async fn handle_onion_data_request() {
         let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
 
         // get ping id
@@ -2654,9 +2714,9 @@ mod tests {
             onion_return: onion_return.clone()
         });
 
-        alice.handle_packet(packet, addr).wait().unwrap();
+        alice.handle_packet(packet, addr).await.unwrap();
 
-        let (received, rx) = rx.into_future().wait().unwrap();
+        let (received, rx) = rx.into_future().await;
         let (packet, _addr_to_send) = received.unwrap();
         let response = unpack!(packet, Packet::OnionResponse3);
         let response = unpack!(response.payload, InnerOnionResponse::OnionAnnounceResponse);
@@ -2677,7 +2737,7 @@ mod tests {
             onion_return: onion_return.clone()
         });
 
-        alice.handle_packet(packet, addr).wait().unwrap();
+        alice.handle_packet(packet, addr).await.unwrap();
 
         // send onion data request
 
@@ -2695,9 +2755,9 @@ mod tests {
             onion_return: onion_return.clone()
         });
 
-        alice.handle_packet(packet, addr).wait().unwrap();
+        alice.handle_packet(packet, addr).await.unwrap();
 
-        let (received, _rx) = rx.skip(1).into_future().wait().unwrap();
+        let (received, _rx) = rx.skip(1).into_future().await;
         let (packet, addr_to_send) = received.unwrap();
 
         assert_eq!(addr_to_send, addr);
@@ -2714,8 +2774,8 @@ mod tests {
     }
 
     // handle_onion_response_3
-    #[test]
-    fn handle_onion_response_3() {
+    #[tokio::test]
+    async fn handle_onion_response_3() {
         let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
 
         let onion_symmetric_key = alice.onion_symmetric_key.read();
@@ -2740,9 +2800,9 @@ mod tests {
             payload: payload.clone()
         });
 
-        alice.handle_packet(packet, addr).wait().unwrap();
+        alice.handle_packet(packet, addr).await.unwrap();
 
-        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
 
         assert_eq!(addr_to_send, ip_port.to_saddr());
@@ -2753,8 +2813,8 @@ mod tests {
         assert_eq!(next_packet.onion_return, next_onion_return);
     }
 
-    #[test]
-    fn handle_onion_response_3_invalid_onion_return() {
+    #[tokio::test]
+    async fn handle_onion_response_3_invalid_onion_return() {
         let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
 
         let onion_return = OnionReturn {
@@ -2771,16 +2831,16 @@ mod tests {
             payload
         });
 
-        alice.handle_packet(packet, addr).wait().unwrap();
+        alice.handle_packet(packet, addr).await.unwrap();
 
-        // Necessary to drop tx so that rx.collect() can be finished
+        // Necessary to drop tx so that rx.collect::<Vec<_>>() can be finished
         drop(alice);
 
-        assert!(rx.collect().wait().unwrap().is_empty());
+        assert!(rx.collect::<Vec<_>>().await.is_empty());
     }
 
-    #[test]
-    fn handle_onion_response_3_invalid_next_onion_return() {
+    #[tokio::test]
+    async fn handle_onion_response_3_invalid_next_onion_return() {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let onion_symmetric_key = alice.onion_symmetric_key.read();
@@ -2801,14 +2861,14 @@ mod tests {
             payload: InnerOnionResponse::OnionDataResponse(inner.clone())
         });
 
-        let res = alice.handle_packet(packet, addr).wait();
+        let res = alice.handle_packet(packet, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::OnionResponseNext);
     }
 
     // handle_onion_response_2
-    #[test]
-    fn handle_onion_response_2() {
+    #[tokio::test]
+    async fn handle_onion_response_2() {
         let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
 
         let onion_symmetric_key = alice.onion_symmetric_key.read();
@@ -2833,9 +2893,9 @@ mod tests {
             payload: payload.clone()
         });
 
-        alice.handle_packet(packet, addr).wait().unwrap();
+        alice.handle_packet(packet, addr).await.unwrap();
 
-        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
 
         assert_eq!(addr_to_send, ip_port.to_saddr());
@@ -2846,8 +2906,8 @@ mod tests {
         assert_eq!(next_packet.onion_return, next_onion_return);
     }
 
-    #[test]
-    fn handle_onion_response_2_invalid_onion_return() {
+    #[tokio::test]
+    async fn handle_onion_response_2_invalid_onion_return() {
         let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
 
         let onion_return = OnionReturn {
@@ -2864,16 +2924,16 @@ mod tests {
             payload
         });
 
-        alice.handle_packet(packet, addr).wait().unwrap();
+        alice.handle_packet(packet, addr).await.unwrap();
 
-        // Necessary to drop tx so that rx.collect() can be finished
+        // Necessary to drop tx so that rx.collect::<Vec<_>>() can be finished
         drop(alice);
 
-        assert!(rx.collect().wait().unwrap().is_empty());
+        assert!(rx.collect::<Vec<_>>().await.is_empty());
     }
 
-    #[test]
-    fn handle_onion_response_2_invalid_next_onion_return() {
+    #[tokio::test]
+    async fn handle_onion_response_2_invalid_next_onion_return() {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let onion_symmetric_key = alice.onion_symmetric_key.read();
@@ -2894,14 +2954,14 @@ mod tests {
             payload: InnerOnionResponse::OnionDataResponse(inner.clone())
         });
 
-        let res = alice.handle_packet(packet, addr).wait();
+        let res = alice.handle_packet(packet, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::OnionResponseNext);
     }
 
     // handle_onion_response_1
-    #[test]
-    fn handle_onion_response_1_with_onion_announce_response() {
+    #[tokio::test]
+    async fn handle_onion_response_1_with_onion_announce_response() {
         let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
 
         let onion_symmetric_key = alice.onion_symmetric_key.read();
@@ -2922,9 +2982,9 @@ mod tests {
             payload: InnerOnionResponse::OnionAnnounceResponse(inner.clone())
         });
 
-        alice.handle_packet(packet, addr).wait().unwrap();
+        alice.handle_packet(packet, addr).await.unwrap();
 
-        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
 
         assert_eq!(addr_to_send, ip_port.to_saddr());
@@ -2934,8 +2994,8 @@ mod tests {
         assert_eq!(next_packet, inner);
     }
 
-    #[test]
-    fn server_handle_onion_response_1_with_onion_data_response_test() {
+    #[tokio::test]
+    async fn server_handle_onion_response_1_with_onion_data_response_test() {
         let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
 
         let onion_symmetric_key = alice.onion_symmetric_key.read();
@@ -2956,9 +3016,9 @@ mod tests {
             payload: InnerOnionResponse::OnionDataResponse(inner.clone())
         });
 
-        alice.handle_packet(packet, addr).wait().unwrap();
+        alice.handle_packet(packet, addr).await.unwrap();
 
-        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
 
         assert_eq!(addr_to_send, ip_port.to_saddr());
@@ -2968,8 +3028,8 @@ mod tests {
         assert_eq!(next_packet, inner);
     }
 
-    #[test]
-    fn handle_onion_response_1_redirect_to_tcp() {
+    #[tokio::test]
+    async fn handle_onion_response_1_redirect_to_tcp() {
         let (mut alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
         let (tcp_onion_tx, tcp_onion_rx) = mpsc::channel(1);
         alice.set_tcp_onion_sink(tcp_onion_tx);
@@ -2994,17 +3054,17 @@ mod tests {
             payload: inner.clone()
         });
 
-        alice.handle_packet(packet, addr).wait().unwrap();
+        alice.handle_packet(packet, addr).await.unwrap();
 
-        let (received, _tcp_onion_rx) = tcp_onion_rx.into_future().wait().unwrap();
+        let (received, _tcp_onion_rx) = tcp_onion_rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
 
         assert_eq!(addr_to_send, ip_port.to_saddr());
         assert_eq!(packet, inner);
     }
 
-    #[test]
-    fn handle_onion_response_1_can_not_redirect_to_tcp() {
+    #[tokio::test]
+    async fn handle_onion_response_1_can_not_redirect_to_tcp() {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let onion_symmetric_key = alice.onion_symmetric_key.read();
@@ -3025,13 +3085,13 @@ mod tests {
             payload: InnerOnionResponse::OnionAnnounceResponse(inner.clone())
         });
 
-        let res = alice.handle_packet(packet, addr).wait();
+        let res = alice.handle_packet(packet, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::OnionResponseRedirect);
     }
 
-    #[test]
-    fn handle_onion_response_1_invalid_onion_return() {
+    #[tokio::test]
+    async fn handle_onion_response_1_invalid_onion_return() {
         let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
 
         let onion_return = OnionReturn {
@@ -3048,16 +3108,16 @@ mod tests {
             payload
         });
 
-        alice.handle_packet(packet, addr).wait().unwrap();
+        alice.handle_packet(packet, addr).await.unwrap();
 
-        // Necessary to drop tx so that rx.collect() can be finished
+        // Necessary to drop tx so that rx.collect::<Vec<_>>() can be finished
         drop(alice);
 
-        assert!(rx.collect().wait().unwrap().is_empty());
+        assert!(rx.collect::<Vec<_>>().await.is_empty());
     }
 
-    #[test]
-    fn handle_onion_response_1_invalid_next_onion_return() {
+    #[tokio::test]
+    async fn handle_onion_response_1_invalid_next_onion_return() {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let onion_symmetric_key = alice.onion_symmetric_key.read();
@@ -3082,14 +3142,14 @@ mod tests {
             payload: InnerOnionResponse::OnionDataResponse(inner.clone())
         });
 
-        let res = alice.handle_packet(packet, addr).wait();
+        let res = alice.handle_packet(packet, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::OnionResponseNext);
     }
 
     // send_nat_ping_req()
-    #[test]
-    fn send_nat_ping_req() {
+    #[tokio::test]
+    async fn send_nat_ping_req() {
         let (alice, _precomp, _bob_pk, _bob_sk, mut rx, _addr) = create_node();
 
         let (friend_pk, friend_sk) = gen_keypair();
@@ -3111,10 +3171,10 @@ mod tests {
         }
         drop(friends);
 
-        alice.dht_main_loop().wait().unwrap();
+        alice.dht_main_loop().await.unwrap();
 
         loop {
-            let (received, rx1) = rx.into_future().wait().unwrap();
+            let (received, rx1) = rx.into_future().await;
             let (packet, _addr_to_send) = received.unwrap();
 
             if let Packet::DhtRequest(nat_ping_req) = packet {
@@ -3130,15 +3190,15 @@ mod tests {
     }
 
     // handle_lan_discovery
-    #[test]
-    fn handle_lan_discovery() {
+    #[tokio::test]
+    async fn handle_lan_discovery() {
         let (alice, _precomp, bob_pk, bob_sk, rx, addr) = create_node();
 
         let lan = Packet::LanDiscovery(LanDiscovery { pk: bob_pk });
 
-        alice.handle_packet(lan, addr).wait().unwrap();
+        alice.handle_packet(lan, addr).await.unwrap();
 
-        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
 
         assert_eq!(addr_to_send, addr);
@@ -3150,22 +3210,22 @@ mod tests {
         assert_eq!(nodes_req_payload.pk, alice.pk);
     }
 
-    #[test]
-    fn handle_lan_discovery_for_ourselves() {
+    #[tokio::test]
+    async fn handle_lan_discovery_for_ourselves() {
         let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
 
         let lan = Packet::LanDiscovery(LanDiscovery { pk: alice.pk });
 
-        alice.handle_packet(lan, addr).wait().unwrap();
+        alice.handle_packet(lan, addr).await.unwrap();
 
-        // Necessary to drop tx so that rx.collect() can be finished
+        // Necessary to drop tx so that rx.collect::<Vec<_>>() can be finished
         drop(alice);
 
-        assert!(rx.collect().wait().unwrap().is_empty());
+        assert!(rx.collect::<Vec<_>>().await.is_empty());
     }
 
-    #[test]
-    fn handle_lan_discovery_when_disabled() {
+    #[tokio::test]
+    async fn handle_lan_discovery_when_disabled() {
         let (mut alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
 
         alice.enable_lan_discovery(false);
@@ -3173,16 +3233,16 @@ mod tests {
 
         let lan = Packet::LanDiscovery(LanDiscovery { pk: alice.pk });
 
-        alice.handle_packet(lan, addr).wait().unwrap();
+        alice.handle_packet(lan, addr).await.unwrap();
 
-        // Necessary to drop tx so that rx.collect() can be finished
+        // Necessary to drop tx so that rx.collect::<Vec<_>>() can be finished
         drop(alice);
 
-        assert!(rx.collect().wait().unwrap().is_empty());
+        assert!(rx.collect::<Vec<_>>().await.is_empty());
     }
 
-    #[test]
-    fn refresh_onion_key() {
+    #[tokio::test]
+    async fn refresh_onion_key() {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
 
         let onion_symmetric_key_1 = alice.onion_symmetric_key.read().clone();
@@ -3194,8 +3254,8 @@ mod tests {
         assert_ne!(onion_symmetric_key_1, onion_symmetric_key_2)
     }
 
-    #[test]
-    fn handle_tcp_onion_request() {
+    #[tokio::test]
+    async fn handle_tcp_onion_request() {
         let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
 
         let temporary_pk = gen_keypair().0;
@@ -3212,9 +3272,9 @@ mod tests {
             payload: payload.clone()
         };
 
-        alice.handle_tcp_onion_request(packet, addr).wait().unwrap();
+        alice.handle_tcp_onion_request(packet, addr).await.unwrap();
 
-        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
 
         assert_eq!(addr_to_send, ip_port.to_saddr());
@@ -3230,8 +3290,8 @@ mod tests {
         assert_eq!(onion_return_payload.0, IpPort::from_tcp_saddr(addr));
     }
 
-    #[test]
-    fn ping_nodes_to_bootstrap() {
+    #[tokio::test]
+    async fn ping_nodes_to_bootstrap() {
         let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         let (node_pk, node_sk) = gen_keypair();
 
@@ -3241,7 +3301,7 @@ mod tests {
         let pn = PackedNode::new("127.0.0.1:33445".parse().unwrap(), &bob_pk);
         assert!(alice.nodes_to_bootstrap.write().try_add(&alice.pk, pn, /* evict */ true));
 
-        alice.dht_main_loop().wait().unwrap();
+        alice.dht_main_loop().await.unwrap();
 
         let mut request_queue = alice.request_queue.write();
 
@@ -3258,11 +3318,11 @@ mod tests {
                 assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == node_pk).is_some());
                 assert_eq!(nodes_req_payload.pk, alice.pk);
             }
-        }).collect().wait().unwrap();
+        }).collect::<Vec<_>>().await;
     }
 
-    #[test]
-    fn ping_nodes_from_nodes_to_ping_list() {
+    #[tokio::test]
+    async fn ping_nodes_from_nodes_to_ping_list() {
         let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         let (node_pk, node_sk) = gen_keypair();
 
@@ -3272,7 +3332,7 @@ mod tests {
         let pn = PackedNode::new("127.0.0.1:33445".parse().unwrap(), &bob_pk);
         assert!(alice.nodes_to_ping.write().try_add(&alice.pk, pn, /* evict */ true));
 
-        alice.send_pings().wait().unwrap();
+        alice.send_pings().await.unwrap();
 
         let mut request_queue = alice.request_queue.write();
 
@@ -3287,23 +3347,23 @@ mod tests {
                 let ping_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(ping_req_payload.id, |&pk| pk == node_pk).is_some());
             }
-        }).collect().wait().unwrap();
+        }).collect::<Vec<_>>().await;
     }
 
-    #[test]
-    fn ping_nodes_when_nodes_to_ping_list_is_empty() {
+    #[tokio::test]
+    async fn ping_nodes_when_nodes_to_ping_list_is_empty() {
         let (alice, _precomp, _bob_pk, _bob_sk, rx, _addr) = create_node();
 
-        alice.send_pings().wait().unwrap();
+        alice.send_pings().await.unwrap();
 
-        // Necessary to drop tx so that rx.collect() can be finished
+        // Necessary to drop tx so that rx.collect::<Vec<_>>() can be finished
         drop(alice);
 
-        assert!(rx.collect().wait().unwrap().is_empty());
+        assert!(rx.collect::<Vec<_>>().await.is_empty());
     }
 
-    #[test]
-    fn ping_close_nodes() {
+    #[tokio::test]
+    async fn ping_close_nodes() {
         let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         let (node_pk, node_sk) = gen_keypair();
 
@@ -3313,7 +3373,7 @@ mod tests {
         let pn = PackedNode::new("127.0.0.1:33445".parse().unwrap(), &bob_pk);
         assert!(alice.close_nodes.write().try_add(pn));
 
-        alice.dht_main_loop().wait().unwrap();
+        alice.dht_main_loop().await.unwrap();
 
         let mut request_queue = alice.request_queue.write();
 
@@ -3331,11 +3391,11 @@ mod tests {
                 assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == node_pk).is_some());
                 assert_eq!(nodes_req_payload.pk, alice.pk);
             }
-        }).collect().wait().unwrap();
+        }).collect::<Vec<_>>().await;
     }
 
-    #[test]
-    fn send_nodes_req_random_periodicity() {
+    #[tokio::test]
+    async fn send_nodes_req_random_periodicity() {
         let (alice, _precomp, bob_pk, _bob_sk, mut rx, _addr) = create_node();
 
         {
@@ -3348,42 +3408,33 @@ mod tests {
             node.assoc6.last_ping_req_time = Some(clock_now());
         }
 
-        let now = Instant::now();
-        let mut enter = tokio_executor::enter().unwrap();
+        tokio::time::pause();
 
         // Random request should be sent every second MAX_BOOTSTRAP_TIMES times
         // This loop will produce MAX_BOOTSTRAP_TIMES random packets
-        for i in 0 .. MAX_BOOTSTRAP_TIMES {
-            let clock = Clock::new_with_now(ConstNow(now + Duration::from_secs(u64::from(i))));
+        for _ in 0 .. MAX_BOOTSTRAP_TIMES {
+            alice.dht_main_loop().await.unwrap();
 
-            with_default(&clock, &mut enter, |_| {
-                alice.dht_main_loop().wait().unwrap();
-            });
-
-            let (received, rx1) = rx.into_future().wait().unwrap();
+            let (received, rx1) = rx.into_future().await;
             let (packet, _) = received.unwrap();
 
             unpack!(packet, Packet::NodesRequest);
 
+            tokio::time::advance(Duration::from_secs(1)).await;
             rx = rx1;
         }
 
         // Random packet won't be sent anymore if NODES_REQ_INTERVAL is not passed
-        let clock = Clock::new_with_now(ConstNow(
-            now + Duration::from_secs(u64::from(MAX_BOOTSTRAP_TIMES))
-        ));
-        with_default(&clock, &mut enter, |_| {
-            alice.dht_main_loop().wait().unwrap();
-        });
+        alice.dht_main_loop().await.unwrap();
 
-        // Necessary to drop tx so that rx.collect() can be finished
+        // Necessary to drop tx so that rx.collect::<Vec<_>>() can be finished
         drop(alice);
 
-        assert!(rx.collect().wait().unwrap().is_empty());
+        assert!(rx.collect::<Vec<_>>().await.is_empty());
     }
 
-    #[test]
-    fn ping_nodes_to_bootstrap_of_friend() {
+    #[tokio::test]
+    async fn ping_nodes_to_bootstrap_of_friend() {
         let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         let (node_pk, node_sk) = gen_keypair();
 
@@ -3402,7 +3453,7 @@ mod tests {
 
         drop(friends);
 
-        alice.dht_main_loop().wait().unwrap();
+        alice.dht_main_loop().await.unwrap();
 
         let mut request_queue = alice.request_queue.write();
 
@@ -3419,11 +3470,11 @@ mod tests {
                 assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == node_pk).is_some());
                 assert_eq!(nodes_req_payload.pk, friend_pk);
             }
-        }).collect().wait().unwrap();
+        }).collect::<Vec<_>>().await;
     }
 
-    #[test]
-    fn ping_close_nodes_of_friend() {
+    #[tokio::test]
+    async fn ping_close_nodes_of_friend() {
         let (alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         let (node_pk, node_sk) = gen_keypair();
 
@@ -3442,7 +3493,7 @@ mod tests {
             assert!(friend.try_add_to_close(pn));
         }
 
-        alice.dht_main_loop().wait().unwrap();
+        alice.dht_main_loop().await.unwrap();
 
         let mut request_queue = alice.request_queue.write();
 
@@ -3460,11 +3511,11 @@ mod tests {
                 assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == node_pk).is_some());
                 assert_eq!(nodes_req_payload.pk, friend_pk);
             }
-        }).collect().wait().unwrap();
+        }).collect::<Vec<_>>().await;
     }
 
-    #[test]
-    fn send_nodes_req_random_friend_periodicity() {
+    #[tokio::test]
+    async fn send_nodes_req_random_friend_periodicity() {
         let (alice, _precomp, bob_pk, _bob_sk, mut rx, _addr) = create_node();
 
         let friend_pk = gen_keypair().0;
@@ -3482,51 +3533,42 @@ mod tests {
 
         drop(friends);
 
-        let now = Instant::now();
-        let mut enter = tokio_executor::enter().unwrap();
+        tokio::time::pause();
 
         // Random request should be sent every second MAX_BOOTSTRAP_TIMES times
         // This loop will produce MAX_BOOTSTRAP_TIMES random packets
-        for i in 0 .. MAX_BOOTSTRAP_TIMES {
-            let clock = Clock::new_with_now(ConstNow(now + Duration::from_secs(u64::from(i))));
+        for _ in 0 .. MAX_BOOTSTRAP_TIMES {
+            alice.friends.write().get_mut(&friend_pk).unwrap().hole_punch.last_send_ping_time = Some(clock_now());
+            alice.dht_main_loop().await.unwrap();
 
-            with_default(&clock, &mut enter, |_| {
-                alice.friends.write().get_mut(&friend_pk).unwrap().hole_punch.last_send_ping_time = Some(clock_now());
-                alice.dht_main_loop().wait().unwrap();
-            });
-
-            let (received, rx1) = rx.into_future().wait().unwrap();
+            let (received, rx1) = rx.into_future().await;
             let (packet, _) = received.unwrap();
 
             unpack!(packet, Packet::NodesRequest);
 
+            tokio::time::advance(Duration::from_secs(1)).await;
             rx = rx1;
         }
 
         // Random packet won't be sent anymore if NODES_REQ_INTERVAL is not passed
-        let clock = Clock::new_with_now(ConstNow(
-            now + Duration::from_secs(u64::from(MAX_BOOTSTRAP_TIMES))
-        ));
-        with_default(&clock, &mut enter, |_| {
-            alice.dht_main_loop().wait().unwrap();
-        });
+        alice.dht_main_loop().await.unwrap();
 
-        // Necessary to drop tx so that rx.collect() can be finished
+        // Necessary to drop tx so that rx.collect::<Vec<_>>() can be finished
         drop(alice);
 
-        assert!(rx.collect().wait().unwrap().is_empty());
+        assert!(rx.collect::<Vec<_>>().await.is_empty());
     }
 
-    #[test]
-    fn enable_ipv6_mode() {
+    #[tokio::test]
+    async fn enable_ipv6_mode() {
         let (mut alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
 
         alice.enable_ipv6_mode(true);
         assert_eq!(alice.is_ipv6_enabled, true);
     }
 
-    #[test]
-    fn send_to() {
+    #[tokio::test]
+    async fn send_to() {
         let (mut alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         let (node_pk, node_sk) = gen_keypair();
 
@@ -3538,7 +3580,7 @@ mod tests {
 
         // test with ipv6 mode
         alice.enable_ipv6_mode(true);
-        alice.dht_main_loop().wait().unwrap();
+        alice.dht_main_loop().await.unwrap();
 
         let mut request_queue = alice.request_queue.write();
 
@@ -3553,11 +3595,11 @@ mod tests {
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == node_pk).is_some());
             }
-        }).collect().wait().unwrap();
+        }).collect::<Vec<_>>().await;
     }
 
-    #[test]
-    fn send_bootstrap_requests() {
+    #[tokio::test]
+    async fn send_bootstrap_requests() {
         let (mut alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         let (node_pk, node_sk) = gen_keypair();
 
@@ -3569,7 +3611,7 @@ mod tests {
 
         // test with ipv6 mode
         alice.enable_ipv6_mode(true);
-        alice.send_bootstrap_requests().wait().unwrap();
+        alice.send_bootstrap_requests().await.unwrap();
 
         let mut request_queue = alice.request_queue.write();
 
@@ -3584,11 +3626,11 @@ mod tests {
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == node_pk).is_some());
             }
-        }).collect().wait().unwrap();
+        }).collect::<Vec<_>>().await;
     }
 
-    #[test]
-    fn send_bootstrap_requests_when_ktree_has_good_node() {
+    #[tokio::test]
+    async fn send_bootstrap_requests_when_ktree_has_good_node() {
         let (mut alice, _precomp, bob_pk, _bob_sk, rx, _addr) = create_node();
         let (node_pk, _node_sk) = gen_keypair();
 
@@ -3600,16 +3642,16 @@ mod tests {
 
         // test with ipv6 mode
         alice.enable_ipv6_mode(true);
-        alice.send_bootstrap_requests().wait().unwrap();
+        alice.send_bootstrap_requests().await.unwrap();
 
-        // Necessary to drop tx so that rx.collect() can be finished
+        // Necessary to drop tx so that rx.collect::<Vec<_>>() can be finished
         drop(alice);
 
-        assert!(rx.collect().wait().unwrap().is_empty());
+        assert!(rx.collect::<Vec<_>>().await.is_empty());
     }
 
-    #[test]
-    fn send_bootstrap_requests_with_discarded() {
+    #[tokio::test]
+    async fn send_bootstrap_requests_with_discarded() {
         let (mut alice, _precomp, bob_pk, bob_sk, rx, _addr) = create_node();
         let (node_pk, node_sk) = gen_keypair();
 
@@ -3625,33 +3667,29 @@ mod tests {
         // test with ipv6 mode
         alice.enable_ipv6_mode(true);
 
-        let time = Instant::now() + KILL_NODE_TIMEOUT + Duration::from_secs(1);
+        tokio::time::pause();
+        tokio::time::advance(KILL_NODE_TIMEOUT + Duration::from_secs(1)).await;
 
-        let mut enter = tokio_executor::enter().unwrap();
-        let clock = Clock::new_with_now(ConstNow(time));
+        alice.send_bootstrap_requests().await.unwrap();
 
-        with_default(&clock, &mut enter, |_| {
-            alice.send_bootstrap_requests().wait().unwrap();
+        let mut request_queue = alice.request_queue.write();
 
-            let mut request_queue = alice.request_queue.write();
-
-            rx.take(2).map(|(packet, addr)| {
-                let nodes_req = unpack!(packet, Packet::NodesRequest);
-                if addr == "[FF::01]:33445".parse().unwrap() {
-                    let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
-                    let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                    assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == bob_pk).is_some());
-                } else {
-                    let precomputed_key = precompute(&nodes_req.pk, &node_sk);
-                    let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                    assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == node_pk).is_some());
-                }
-            }).collect().wait().unwrap();
-        });
+        rx.take(2).map(|(packet, addr)| {
+            let nodes_req = unpack!(packet, Packet::NodesRequest);
+            if addr == "[FF::01]:33445".parse().unwrap() {
+                let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
+                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
+                assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == bob_pk).is_some());
+            } else {
+                let precomputed_key = precompute(&nodes_req.pk, &node_sk);
+                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
+                assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == node_pk).is_some());
+            }
+        }).collect::<Vec<_>>().await;
     }
 
-    #[test]
-    fn handle_crypto_data_uninitialized() {
+    #[tokio::test]
+    async fn handle_crypto_data_uninitialized() {
         let (alice, precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let data_payload = CryptoDataPayload {
@@ -3662,13 +3700,13 @@ mod tests {
 
         let data = Packet::CryptoData(CryptoData::new(&precomp, gen_nonce(), &data_payload));
 
-        let res = alice.handle_packet(data, addr).wait();
+        let res = alice.handle_packet(data, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::NetCrypto);
     }
 
-    #[test]
-    fn handle_onion_data_response_uninitialized() {
+    #[tokio::test]
+    async fn handle_onion_data_response_uninitialized() {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let data = Packet::OnionDataResponse(OnionDataResponse {
@@ -3677,13 +3715,13 @@ mod tests {
             payload: vec![42; 123]
         });
 
-        let res = alice.handle_packet(data, addr).wait();
+        let res = alice.handle_packet(data, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::OnionClient);
     }
 
-    #[test]
-    fn handle_onion_announce_response_uninitialized() {
+    #[tokio::test]
+    async fn handle_onion_announce_response_uninitialized() {
         let (alice, precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let payload = OnionAnnounceResponsePayload {
@@ -3696,20 +3734,20 @@ mod tests {
 
         let data = Packet::OnionAnnounceResponse(OnionAnnounceResponse::new(&precomp, 12345, &payload));
 
-        let res = alice.handle_packet(data, addr).wait();
+        let res = alice.handle_packet(data, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::OnionClient);
     }
 
-    #[test]
-    fn ping_node() {
+    #[tokio::test]
+    async fn ping_node() {
         let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
 
         let node = PackedNode::new(addr, &bob_pk);
 
-        alice.ping_node(&node).wait().unwrap();
+        alice.ping_node(&node).await.unwrap();
 
-        let (received, _rx) = rx.into_future().wait().unwrap();
+        let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
 
         assert_eq!(addr_to_send, addr);
