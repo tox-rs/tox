@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Script for verifying conformance to commit message format of commits in commit
 # range supplied.
@@ -6,21 +6,15 @@
 # Scrpt fails (non-zero exit status) if commit messages don't conform.
 
 # usage:
-#   ./$script $commit_range
-#
-# $commit_range – in format `abdce..12345`
+#   ./$script $commit_sha_list
 
-ARG="$1"
+REGEX_NORMAL="(feat|fix|docs|style|refactor|perf|revert|test|chore)(\(.+\))?:.{1,68})"
+REGEX_MERGE="(Merge pull request #[[:digit:]]{1,10}( from .*/.*)?"
+REGEX="^(${REGEX_NORMAL}|${REGEX_MERGE})$"
 
-echo "" # ← formatting
+echo # formatting
 
-if [[ $CI_COMMIT_REF_NAME == "master" ]] || [[ -z $CI_COMMIT_REF_NAME ]]
-then
-    fail=$(git log --format=format:'%s' "$ARG" | grep -v -E '^((feat|fix|docs|style|refactor|perf|revert|test|chore)(\(.+\))?:.{1,68})|(Merge pull request #[[:digit:]]{1,10}( from .*/.*)?)$')
-else
-    git checkout $CI_COMMIT_REF_NAME
-    fail=$(git log --format=format:'%s' "$CI_COMMIT_REF_NAME" ^master | grep -v -E '^((feat|fix|docs|style|refactor|perf|revert|test|chore)(\(.+\))?:.{1,68})|(Merge pull request #[[:digit:]]{1,10}( from .*/.*)?)$')
-fi
+fail=$(git show -s --format=format:'%s' "$@" | grep -v -E "${REGEX}")
 
 echo "$fail"
 
@@ -29,7 +23,7 @@ if [[ $fail ]]
 then
     echo ""
     echo "Above ↑ commits don't conform to commit message format:"
-    echo "https://github.com/zetok/tox/blob/master/CONTRIBUTING.md#commit-message-format"
+    echo "https://github.com/tox-rs/tox/blob/master/CONTRIBUTING.md#commit-message-format"
     echo ""
     echo "Pls fix."
     echo ""
