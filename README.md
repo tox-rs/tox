@@ -90,8 +90,6 @@ Right now we are working on the client part.
 
 tox-rs has contributions from many users. See [AUTHORS.md](/AUTHORS.md). Thanks everyone!
 
-tox-rs is sponsored by [Zerho LLC](https://zerho.info/).
-
 ## License
 
 Dual licensed under the MIT or GPLv3+ licenses. You may use this project under the
