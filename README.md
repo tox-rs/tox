@@ -1,10 +1,9 @@
 # Tox
 
-![Github Build Status][gh-badge] [![Appveyor Build Status][appveyor-badge]][appveyor-url] [![Coverage Status][cov-badge]][cov-url] [![Docs][doc-badge]][doc-url] [![Current Crates.io Version][crates-badge]][crates-url] [![Join Gitter][gitter-badge]][gitter-url]
+[![Github Build Status][gh-badge]][gh-url] [![Coverage Status][cov-badge]][cov-url] [![Docs][doc-badge]][doc-url] [![Current Crates.io Version][crates-badge]][crates-url] [![Join Gitter][gitter-badge]][gitter-url]
 
 [gh-badge]: https://github.com/tox-rs/tox/workflows/Rust/badge.svg?branch=master
-[appveyor-badge]: https://ci.appveyor.com/api/projects/status/m47ke5odayd6enbn/branch/master?svg=true
-[appveyor-url]: https://ci.appveyor.com/project/tox-rs/tox/branch/master
+[gh-url]: https://github.com/tox-rs/tox/actions?query=branch%3Amaster
 [cov-badge]: https://coveralls.io/repos/github/tox-rs/tox/badge.svg?branch=master
 [cov-url]: https://coveralls.io/github/tox-rs/tox?branch=master
 [doc-badge]: https://docs.rs/tox/badge.svg
