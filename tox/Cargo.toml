@@ -1,0 +1,35 @@
+[package]
+name = "tox"
+version = "0.1.0"
+authors = [
+    "Zetok Zalbavar <zetok@openmailbox.org>",
+    "Roman Proskuryakov <humbug@deeptown.org>",
+    "Namsoo CHO <nscho66@gmail.com>",
+    "Evgeny Kurnevsky <kurnevsky@gmail.com>",
+    "Сухарик <65870+suhr@users.noreply.github.com>"
+]
+readme = "README.md"
+description = '''
+Implementation of toxcore in pure Rust -
+P2P, distributed, encrypted, easy
+to use DHT-based network.
+'''
+documentation = "https://docs.rs/tox/"
+repository = "https://github.com/tox-rs/tox/"
+keywords = ["p2p", "instant-messaging", "tox", "toxcore", "networking"]
+categories = ["multimedia"]
+license = "MIT OR GPL-3.0+"
+edition = "2018"
+
+[badges]
+travis-ci = { repository = "tox-rs/tox" }
+appveyor = { repository = "tox-rs/tox", id = "m47ke5odayd6enbn" }
+coveralls = { repository = "tox-rs/tox" }
+# Available options are `actively-developed`, `passively-maintained`,
+# `as-is`, `none`, `experimental`, `looking-for-maintainer`, `deprecated`.
+maintenance = { status = "actively-developed" }
+
+[dependencies]
+tox_packet = { version = "0.1.0", path = "../tox_packet" }
+tox_core = { version = "0.1.0", path = "../tox_core" }
+tox_encryptsave = { version = "0.1.0", path = "../tox_encryptsave" }

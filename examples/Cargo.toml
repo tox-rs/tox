@@ -1,0 +1,46 @@
+[package]
+name = "examples"
+version = "0.0.0"
+publish = false
+edition = "2018"
+
+[dev-dependencies]
+tox_binary_io = { version = "0.1.0", path = "../tox_binary_io", features = ["sodium"] }
+tox_crypto = { version = "0.1.0", path = "../tox_crypto" }
+tox_packet = { version = "0.1.0", path = "../tox_packet" }
+tox_core = { version = "0.1.0", path = "../tox_core" }
+
+log = "0.4"
+futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
+env_logger = "0.7"
+hex = "0.4"
+failure = "0.1"
+
+[dev-dependencies.tokio]
+version = "0.2"
+default-features = false
+features = ["macros", "test-util", "net", "rt-core", "rt-threaded", "sync", "stream", "time"]
+
+[dev-dependencies.tokio-util]
+version = "0.2"
+features = ["codec", "udp"]
+
+[[example]]
+name = "dht_server"
+path = "dht_server.rs"
+
+[[example]]
+name = "echo"
+path = "echo.rs"
+
+[[example]]
+name = "onion_client"
+path = "onion_client.rs"
+
+[[example]]
+name = "tcp_client"
+path = "tcp_client.rs"
+
+[[example]]
+name = "tcp_server"
+path = "tcp_server.rs"

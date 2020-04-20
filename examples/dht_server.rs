@@ -11,13 +11,12 @@ use failure::Fail;
 
 use std::net::SocketAddr;
 
-use tox::toxcore::dht::server::*;
-use tox::toxcore::dht::server_ext::ServerExt;
-use tox::toxcore::dht::lan_discovery::*;
-use tox::toxcore::dht::packed_node::PackedNode;
-use tox::toxcore::crypto_core::*;
-use tox::toxcore::stats::Stats;
-
+use tox_crypto::*;
+use tox_packet::dht::packed_node::PackedNode;
+use tox_core::dht::server::*;
+use tox_core::dht::server_ext::ServerExt;
+use tox_core::dht::lan_discovery::*;
+use tox_core::stats::Stats;
 
 mod common;
 

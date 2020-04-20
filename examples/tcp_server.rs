@@ -1,9 +1,9 @@
 #[macro_use]
 extern crate log;
 
-use tox::toxcore::crypto_core::*;
-use tox::toxcore::tcp::server::{Server, ServerExt};
-use tox::toxcore::stats::Stats;
+use tox_crypto::*;
+use tox_core::relay::server::{Server, ServerExt};
+use tox_core::stats::Stats;
 
 use tokio::net::TcpListener;
 

@@ -1,13 +1,13 @@
 #[macro_use]
 extern crate log;
 
-use tox::toxcore::crypto_core::*;
-use tox::toxcore::dht::packet::CryptoData;
-use tox::toxcore::tcp::connection_id::ConnectionId;
-use tox::toxcore::tcp::packet::*;
-use tox::toxcore::tcp::handshake::make_client_handshake;
-use tox::toxcore::tcp::codec;
-use tox::toxcore::stats::Stats;
+use tox_crypto::*;
+use tox_packet::dht::CryptoData;
+use tox_packet::relay::connection_id::ConnectionId;
+use tox_packet::relay::*;
+use tox_core::relay::handshake::make_client_handshake;
+use tox_core::relay::codec;
+use tox_core::stats::Stats;
 
 use failure::{Error, err_msg};
 
