@@ -33,15 +33,13 @@ use tox_crypto::{
     NONCEBYTES, MACBYTES,
     Nonce, PrecomputedKey,
     gen_nonce,
-    sha256, memzero
+    secretbox, sha256
 };
 
 /// Length in bytes of the salt used to encrypt/decrypt data.
 pub use tox_crypto::pwhash::SALTBYTES as SALT_LENGTH;
 /// Length in bytes of the key used to encrypt/decrypt data.
 pub use tox_crypto::PRECOMPUTEDKEYBYTES as KEY_LENGTH;
-
-use tox_crypto;
 
 /// Length (in bytes) of [`MAGIC_NUMBER`](./constant.MAGIC_NUMBER.html).
 pub const MAGIC_LENGTH: usize = 8;
@@ -121,19 +119,19 @@ impl PassKey {
 
         let sha256::Digest(passhash) = sha256::hash(passphrase);
         let OpsLimit(ops) = OPSLIMIT_INTERACTIVE;
-        let mut key = [0; KEY_LENGTH];
+        let mut key = secretbox::Key([0; secretbox::KEYBYTES]);
 
-        let maybe_key = PrecomputedKey::from_slice(
+        let maybe_key = PrecomputedKey::from_slice({
+            // securely zeroes the key when `kb` goes out of scope
+            let secretbox::Key(ref mut kb) = key;
             derive_key(
-                &mut key,
+                kb,
                 &passhash,
                 &salt,
                 OpsLimit(ops * 2),
                 MEMLIMIT_INTERACTIVE
             ).or(Err(KeyDerivationError::Failed))?
-        );
-
-        memzero(&mut key);
+        });
 
         let salt = Box::new(salt);
         let key = Box::new(maybe_key.ok_or(KeyDerivationError::Failed)?);
