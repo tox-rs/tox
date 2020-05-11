@@ -533,16 +533,16 @@ impl OnionClient {
     }
 
     /// Handle DHT `PublicKey` announce from both onion and DHT.
-    pub fn handle_dht_pk_announce(&self, friend_pk: PublicKey, dht_pk_announce: DhtPkAnnouncePayload) -> impl Future<Output = Result<(), HandleDhtPkAnnounceError>> + Send {
-        let mut state = self.state.lock();
+    pub async fn handle_dht_pk_announce(&self, friend_pk: PublicKey, dht_pk_announce: DhtPkAnnouncePayload) -> Result<(), HandleDhtPkAnnounceError> {
+        let mut state = self.state.lock().clone();
 
         let friend = match state.friends.get_mut(&friend_pk) {
             Some(friend) => friend,
-            None => return Either::Left(future::err(HandleDhtPkAnnounceErrorKind::NoFriendWithPk.into()))
+            None => return Err(HandleDhtPkAnnounceErrorKind::NoFriendWithPk.into()),
         };
 
         if dht_pk_announce.no_reply <= friend.last_no_reply {
-            return Either::Left(future::err(HandleDhtPkAnnounceErrorKind::InvalidNoReply.into()))
+            return Err(HandleDhtPkAnnounceErrorKind::InvalidNoReply.into());
         }
 
         friend.last_no_reply = dht_pk_announce.no_reply;
@@ -551,56 +551,57 @@ impl OnionClient {
 
         let tx = state.dht_pk_tx.clone();
         let dht_pk = dht_pk_announce.dht_pk;
-        let dht_pk_future = maybe_send_unbounded(tx, (friend_pk, dht_pk))
-            .map_err(|e| e.context(HandleDhtPkAnnounceErrorKind::SendTo).into());
+        maybe_send_unbounded(tx, (friend_pk, dht_pk))
+            .await
+            .map_err(|e| HandleDhtPkAnnounceError::from(e.context(HandleDhtPkAnnounceErrorKind::SendTo)))?;
 
         let friend_dht_pk = dht_pk_announce.dht_pk;
-        let futures = dht_pk_announce.nodes.into_iter().map(|node| match node.ip_port.protocol {
-            ProtocolType::UDP => {
-                let packed_node = PackedNode::new(node.ip_port.to_saddr(), &node.pk);
-                Either::Left(self.dht.ping_node(&packed_node)
-                    .map_err(|e| e.context(HandleDhtPkAnnounceErrorKind::PingNode).into()))
-            },
-            ProtocolType::TCP => {
-                Either::Right(self.tcp_connections.add_relay_connection(node.ip_port.to_saddr(), node.pk, friend_dht_pk)
-                    .map_err(|e| e.context(HandleDhtPkAnnounceErrorKind::AddRelay).into()))
+        for node in dht_pk_announce.nodes.into_iter() {
+            match node.ip_port.protocol {
+                ProtocolType::UDP => {
+                    let packed_node = PackedNode::new(node.ip_port.to_saddr(), &node.pk);
+                    self.dht.ping_node(&packed_node)
+                        .await
+                        .map_err(|e| HandleDhtPkAnnounceError::from(e.context(HandleDhtPkAnnounceErrorKind::PingNode)))?;
+                },
+                ProtocolType::TCP => {
+                    self.tcp_connections.add_relay_connection(node.ip_port.to_saddr(), node.pk, friend_dht_pk)
+                        .await
+                        .map_err(|e| HandleDhtPkAnnounceError::from(e.context(HandleDhtPkAnnounceErrorKind::AddRelay)))?;
+                },
             }
-        }).collect::<Vec<_>>();
+        }
 
-        Either::Right(
-            future::try_join(
-                dht_pk_future,
-                future::try_join_all(futures).map_ok(drop)
-            )
-            .map_ok(drop)
-        )
+        let mut new_state = self.state.lock();
+        *new_state = state;
+
+        Ok(())
     }
 
     /// Handle `OnionDataResponse` packet.
-    pub fn handle_data_response(&self, packet: &OnionDataResponse) -> impl Future<Output = Result<(), HandleDataResponseError>> + Send {
+    pub async fn handle_data_response(&self, packet: &OnionDataResponse) -> Result<(), HandleDataResponseError> {
         let payload = match packet.get_payload(&precompute(&packet.temporary_pk, &self.data_sk)) {
             Ok(payload) => payload,
-            Err(e) => return Either::Left(future::err(e.context(HandleDataResponseErrorKind::InvalidPayload).into()))
+            Err(e) => return Err(e.context(HandleDataResponseErrorKind::InvalidPayload).into()),
         };
         let iner_payload = match payload.get_payload(&packet.nonce, &precompute(&payload.real_pk, &self.real_sk)) {
             Ok(payload) => payload,
-            Err(e) => return Either::Left(future::err(e.context(HandleDataResponseErrorKind::InvalidInnerPayload).into()))
+            Err(e) => return Err(e.context(HandleDataResponseErrorKind::InvalidInnerPayload).into()),
         };
-        let future = match iner_payload {
+        match iner_payload {
             OnionDataResponseInnerPayload::DhtPkAnnounce(dht_pk_announce) =>
-                Either::Left(self.handle_dht_pk_announce(payload.real_pk, dht_pk_announce)
-                    .map_err(|e| e.context(HandleDataResponseErrorKind::DhtPkAnnounce).into())),
+                self.handle_dht_pk_announce(payload.real_pk, dht_pk_announce)
+                    .await
+                    .map_err(|e| HandleDataResponseError::from(e.context(HandleDataResponseErrorKind::DhtPkAnnounce)))?,
             OnionDataResponseInnerPayload::FriendRequest(friend_request) => {
                 let tx = self.state.lock().friend_request_tx.clone();
-                Either::Right(
-                    maybe_send_unbounded(tx, (payload.real_pk, friend_request))
-                        .map_err(|e|
-                            e.context(HandleDataResponseErrorKind::FriendRequest).into()
-                        )
-                )
-            }
-        };
-        Either::Right(future)
+                maybe_send_unbounded(tx, (payload.real_pk, friend_request))
+                    .await
+                    .map_err(|e| HandleDataResponseError::from(e.context(HandleDataResponseErrorKind::FriendRequest)))?;
+            },
+        }
+
+        Ok(())
     }
 
     /// Add new node to random nodes pool to use them to build random paths.
@@ -1766,7 +1767,7 @@ mod tests {
 
         // ignore result future since it spawns the connection which should be
         // executed inside tokio context
-        let _ = onion_client.handle_data_response(&onion_data_response);
+        let _ = onion_client.handle_data_response(&onion_data_response).await;
 
         let state = onion_client.state.lock();
 
