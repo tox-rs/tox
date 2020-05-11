@@ -6,7 +6,6 @@ pub use sodiumoxide::crypto::hash::{sha256, sha512};
 pub use sodiumoxide::crypto::secretbox;
 
 pub use sodiumoxide::crypto::pwhash;
-pub use sodiumoxide::utils::memzero;
 
 // TODO: check if `#[inline]` is actually useful
 
