@@ -7,3 +7,4 @@
     Namsoo CHO (NamsooCho)
     Roman Proskuryakov (kpp)
     Zetok Zalbavar (zetok)
+    Сухарик (suhr)
