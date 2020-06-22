@@ -399,7 +399,7 @@ impl Connections {
     pub async fn run(self) -> Result<(), ConnectionError> {
         let mut wakeups = tokio::time::interval(CONNECTIONS_INTERVAL);
 
-        while let Some(_) = wakeups.next().await {
+        while wakeups.next().await.is_some() {
             self.main_loop().await?
         }
 

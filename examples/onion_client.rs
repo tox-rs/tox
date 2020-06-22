@@ -150,7 +150,7 @@ fn main() {
     let (dht_pk_tx, dht_pk_rx) = mpsc::unbounded();
     let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
 
-    let dht_server = Server::new(tx.clone(), dht_pk, dht_sk.clone());
+    let dht_server = Server::new(tx, dht_pk, dht_sk.clone());
     let tcp_connections = Connections::new(dht_pk, dht_sk, tcp_incoming_tx);
     let onion_client = OnionClient::new(dht_server, tcp_connections, real_sk, real_pk);
 

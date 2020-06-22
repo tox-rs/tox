@@ -933,10 +933,9 @@ impl NetCrypto {
             connection.recv_array.set_buffer_end(payload.packet_number).ok();
             let mut tx = self.lossy_tx.clone();
             let peer_real_pk = connection.peer_real_pk;
-            let data = payload.data.clone();
 
             async move {
-                tx.send((peer_real_pk, data)).await
+                tx.send((peer_real_pk, payload.data)).await
                     .map_err(|e| e.context(HandlePacketErrorKind::SendToLossy).into())
             }.boxed()
 
@@ -1152,7 +1151,7 @@ impl NetCrypto {
         let mut wakeups = tokio::time::interval(PACKET_COUNTER_AVERAGE_INTERVAL);
 
         async move {
-            while let Some(_) = wakeups.next().await {
+            while wakeups.next().await.is_some() {
                 let fut = tokio::time::timeout(
                     PACKET_COUNTER_AVERAGE_INTERVAL, self.main_loop()
                 );

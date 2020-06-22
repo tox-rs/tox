@@ -48,7 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // create random tox id and print it
     let (real_pk, real_sk) = gen_keypair();
-    let id = ToxId::new(real_pk.clone());
+    let id = ToxId::new(real_pk);
     println!("your tox id is: {:X}",id);
 
     // Create a channel for server to communicate with network
@@ -199,7 +199,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         let lossy_future = async {
-            while let Some(_) = lossy_rx.next().await {
+            while lossy_rx.next().await.is_some() {
                 // ignore
             }
             Ok(())

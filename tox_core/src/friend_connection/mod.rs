@@ -423,7 +423,7 @@ impl FriendConnections {
     async fn run_main_loop(self) -> Result<(), RunError> {
         let mut wakeups = tokio::time::interval(MAIN_LOOP_INTERVAL);
 
-        while let Some(_) = wakeups.next().await {
+        while wakeups.next().await.is_some() {
             let fut = tokio::time::timeout(MAIN_LOOP_INTERVAL, self.main_loop());
             let res = match fut.await {
                 Err(e) => Err(e.context(RunErrorKind::Timeout).into()),
