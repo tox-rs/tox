@@ -10,7 +10,7 @@ authors = [
 ]
 documentation = "https://docs.rs/tox_binary_io/"
 repository = "https://github.com/tox-rs/tox/"
-license = "MIT OR GPL-3.0+"
+license = "GPL-3.0+"
 edition = "2018"
 
 [dependencies]

@@ -18,7 +18,7 @@ documentation = "https://docs.rs/tox/"
 repository = "https://github.com/tox-rs/tox/"
 keywords = ["p2p", "instant-messaging", "tox", "toxcore", "networking"]
 categories = ["multimedia"]
-license = "MIT OR GPL-3.0+"
+license = "GPL-3.0+"
 edition = "2018"
 
 [badges]

@@ -92,10 +92,7 @@ tox-rs has contributions from many users. See [AUTHORS.md](/AUTHORS.md). Thanks 
 
 ## License
 
-Dual licensed under the MIT or GPLv3+ licenses. You may use this project under the
-terms of either the MIT License or the GNU General Public License (GPL) Version 3+.
-
-For details, see [LICENSE-MIT](/LICENSE-MIT) and [LICENSE-GPL](/LICENSE-GPL).
+Licensed under [GPLv3+](/LICENSE) with [Apple app store exception](/COPYING.iOS).
 
 [Reference source repository]: https://github.com/zetok/tox-spec
 [Rust]: https://www.rust-lang.org/
