@@ -136,7 +136,7 @@ impl<T> PacketsArray<T> {
             return None
         }
 
-        self.buffer[real_index(index)].as_ref().map(|packet| &**packet)
+        self.buffer[real_index(index)].as_deref()
     }
 
     /// Get mutable reference to the packet by its index
@@ -147,7 +147,7 @@ impl<T> PacketsArray<T> {
             return None
         }
 
-        self.buffer[real_index(index)].as_mut().map(|packet| &mut **packet)
+        self.buffer[real_index(index)].as_deref_mut()
     }
 
     /// Remove packet by its index and return it if it was previously in the

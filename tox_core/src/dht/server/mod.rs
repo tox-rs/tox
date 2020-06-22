@@ -408,7 +408,7 @@ impl Server {
         let mut wakeups = tokio::time::interval(interval);
 
         async move {
-            while let Some(_) = wakeups.next().await {
+            while wakeups.next().await.is_some() {
                 trace!("Bootstrap wake up");
                 let send_res = tokio::time::timeout(
                     interval,
@@ -463,7 +463,7 @@ impl Server {
         let mut wakeups = tokio::time::interval(interval);
 
         async move {
-            while let Some(_) = wakeups.next().await {
+            while wakeups.next().await.is_some() {
                 trace!("DHT server wake up");
 
                 let loop_res =
@@ -494,7 +494,7 @@ impl Server {
         let mut wakeups = tokio::time::interval_at(tokio::time::Instant::now() + interval, interval);
 
         async move {
-            while let Some(_) = wakeups.next().await {
+            while wakeups.next().await.is_some() {
                 trace!("Refreshing onion key");
                 self.refresh_onion_key();
             }
@@ -510,7 +510,7 @@ impl Server {
         let mut wakeups = tokio::time::interval_at(tokio::time::Instant::now() + interval, interval);
 
         async move {
-            while let Some(_) = wakeups.next().await {
+            while wakeups.next().await.is_some() {
                 self.send_pings().await
                     .map_err(|e| RunError::from(e.context(RunErrorKind::SendTo)))?;
             }

@@ -1184,7 +1184,7 @@ pub mod tests {
         async fn on_connected(client: Client) -> Result<(), Error> {
             let mut interval = tokio::time::interval(Duration::from_millis(10));
 
-            while let Some(_) = interval.next().await {
+            while interval.next().await.is_some() {
                 match *client.status.read() {
                     ClientStatus::Connecting => continue,
                     ClientStatus::Connected(_) => return Ok(()),
@@ -1199,7 +1199,7 @@ pub mod tests {
         async fn on_online(client: Client, pk: PublicKey) -> Result<(), Error> {
             let mut interval = tokio::time::interval(Duration::from_millis(10));
 
-            while let Some(_) = interval.next().await {
+            while interval.next().await.is_some() {
                 let links = client.links.read();
                 if let Some(index) = links.id_by_pk(&pk) {
                     let status = links.by_id(index).map(|link| link.status);

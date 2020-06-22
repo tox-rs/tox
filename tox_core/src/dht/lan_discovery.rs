@@ -144,7 +144,7 @@ impl LanDiscoverySender {
         let interval = LAN_DISCOVERY_INTERVAL;
         let mut wakeups = tokio::time::interval(interval);
 
-        while let Some(_) = wakeups.next().await {
+        while wakeups.next().await.is_some() {
             if let Err(e) = tokio::time::timeout(interval, self.send()).await {
                 warn!("Failed to send LAN discovery packets: {}", e);
 

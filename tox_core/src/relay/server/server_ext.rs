@@ -168,7 +168,7 @@ impl ServerExt for Server {
 
         let mut wakeups = tokio::time::interval(TCP_PING_INTERVAL);
         let ping_future = async move {
-            while let Some(_) = wakeups.next().await {
+            while wakeups.next().await.is_some() {
                 trace!("Tcp server ping sender wake up");
                 self.send_pings().await
                     .map_err(|error| ServerRunError::SendPingsError { error })?;
