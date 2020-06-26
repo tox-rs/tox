@@ -174,12 +174,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         },
                         0x18 => { // PACKET_ID_ONLINE
                             net_crypto_c.send_lossless(pk, vec![0x18]).map_err(Error::from).await?;
-                            net_crypto_c.send_lossless(pk, b"\x30tox-rs".to_vec()).map_err(Error::from).await?;
-                            Ok(())
+                            net_crypto_c.send_lossless(pk, vec![0x32, 0x00]).map_err(Error::from).await?; // PACKET_ID_USERSTATUS
+                            net_crypto_c.send_lossless(pk, b"\x30tox-rs".to_vec()).map_err(Error::from).await
                         },
                         0x40 => { // PACKET_ID_CHAT_MESSAGE
-                            net_crypto_c.send_lossless(pk, packet).map_err(Error::from).await?;
-                            Ok(())
+                            net_crypto_c.send_lossless(pk, packet).map_err(Error::from).await
                         },
                         _ => Ok(()),
                     }
