@@ -28,8 +28,8 @@ Length    | Content
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FileData {
-    file_id: u8,
-    data: Vec<u8>,
+    pub file_id: u8,
+    pub data: Vec<u8>,
 }
 
 impl FromBytes for FileData {

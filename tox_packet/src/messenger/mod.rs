@@ -28,6 +28,7 @@ pub use self::status_message::*;
 
 pub use crate::messenger::conference::Packet as ConferencePacket;
 pub use crate::messenger::file_transfer::Packet as FileTransferPacket;
+pub use crate::messenger::file_transfer::{FileUID, FileControl, TransferDirection, ControlType, FileData};
 
 use nom::{
     named,
