@@ -145,8 +145,7 @@ impl FriendConnections {
 
     /// Remove a friend and drop all connections with him.
     pub fn remove_friend(&self, friend_pk: PublicKey) -> impl Future<Output = Result<(), RemoveFriendError>> + Send {
-        let mut friends = self.friends.write();
-        if let Some(friend) = friends.remove(&friend_pk) {
+        if let Some(friend) = self.friends.write().remove(&friend_pk) {
             let tcp_remove_future = if let Some(dht_pk) = friend.dht_pk {
                 self.dht.remove_friend(dht_pk);
                 // TODO: handle error properly after migrating the TCP client to failure

@@ -133,8 +133,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let future = async {
                     match packet {
                         IncomingPacket::Data(sender_pk, packet) => match packet {
-                            DataPayload::CookieRequest(packet) => net_crypto_c.handle_tcp_cookie_request(&packet, sender_pk).map_err(Error::from).await,
-                            DataPayload::CookieResponse(packet) => net_crypto_c.handle_tcp_cookie_response(&packet, sender_pk).map_err(Error::from).await,
+                            DataPayload::CookieRequest(packet) => net_crypto_c.handle_tcp_cookie_request(packet, sender_pk).map_err(Error::from).await,
+                            DataPayload::CookieResponse(packet) => net_crypto_c.handle_tcp_cookie_response(packet, sender_pk).map_err(Error::from).await,
                             DataPayload::CryptoHandshake(packet) => net_crypto_c.handle_tcp_crypto_handshake(&packet, sender_pk).map_err(Error::from).await,
                             DataPayload::CryptoData(packet) => net_crypto_c.handle_tcp_crypto_data(&packet, sender_pk).map_err(Error::from).await,
                         },

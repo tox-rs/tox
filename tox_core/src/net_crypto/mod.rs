@@ -290,9 +290,9 @@ impl NetCrypto {
     }
 
     /// Send kill packet to a connection if it's established or not confirmed.
-    fn send_kill_packet(&self, connection: &mut CryptoConnection) -> impl Future<Output = Result<(), SendDataError>> + Send {
-        if connection.is_established() || connection.is_not_confirmed() {
-            let packet_number = connection.send_array.buffer_end;
+    fn send_kill_packet(&self, connection: Arc<RwLock<CryptoConnection>>) -> impl Future<Output = Result<(), SendDataError>> + Send {
+        if connection.read().is_established() || connection.read().is_not_confirmed() {
+            let packet_number = connection.read().send_array.buffer_end;
             Either::Left(self.send_data_packet(connection, vec![PACKET_ID_KILL], packet_number))
         } else {
             Either::Right(future::ok(()))
@@ -303,12 +303,11 @@ impl NetCrypto {
     /// the connections list.
     pub fn kill_connection(&self, real_pk: PublicKey) -> impl Future<Output = Result<(), KillConnectionError>> {
         if let Some(connection) = self.connections.write().remove(&real_pk) {
-            let mut connection = connection.write();
-            self.clear_keys_by_addr(&connection);
+            self.clear_keys_by_addr(&connection.read());
 
-            let status_future = self.send_connection_status(&connection, false)
+            let status_future = self.send_connection_status(&connection.read(), false)
                 .map_err(|e| e.context(KillConnectionErrorKind::SendToConnectionStatus).into());
-            let kill_future = self.send_kill_packet(&mut connection)
+            let kill_future = self.send_kill_packet(connection)
                 .map_err(|e| e.context(KillConnectionErrorKind::SendTo).into());
 
             Either::Left(
@@ -355,13 +354,13 @@ impl NetCrypto {
         }
 
         if let Some(connection) = self.connections.read().get(&real_pk) {
-            let mut connection = connection.write();
-            let packet_number = connection.send_array.buffer_end;
-            if let Err(e) = connection.send_array.push_back(SentPacket::new(packet.clone())) {
+            let packet_number = connection.read().send_array.buffer_end;
+            let add_packet_result = connection.write().send_array.push_back(SentPacket::new(packet.clone()));
+            if let Err(e) = add_packet_result {
                 Either::Right(future::err(e.context(SendLosslessPacketErrorKind::FullSendArray).into()))
             } else {
-                connection.packets_sent += 1;
-                Either::Left(self.send_data_packet(&mut connection, packet, packet_number)
+                connection.write().packets_sent += 1;
+                Either::Left(self.send_data_packet(connection.clone(), packet, packet_number)
                     .map_err(|e| e.context(SendLosslessPacketErrorKind::SendTo).into()))
             }
         } else {
@@ -394,84 +393,114 @@ impl NetCrypto {
     }
 
     /// Create `CookieResponse` packet with `Cookie` requested by `CookieRequest` packet
-    fn handle_cookie_request(&self, packet: &CookieRequest) -> Result<CookieResponse, HandlePacketError> {
-        let payload = packet.get_payload(&self.precomputed_keys.get(packet.pk))
-            .map_err(|e| e.context(HandlePacketErrorKind::GetPayload))?;
+    fn handle_cookie_request(&self, packet: CookieRequest)
+        -> impl Future<Output = Result<CookieResponse, HandlePacketError>> + Send {
+        let net_crypto = self.clone();
+        async move {
+            let payload = packet
+                .get_payload(&net_crypto.precomputed_keys.get(packet.pk).await)
+                .map_err(|e| e.context(HandlePacketErrorKind::GetPayload))?;
 
-        let cookie = Cookie::new(payload.pk, packet.pk);
-        let encrypted_cookie = EncryptedCookie::new(&self.symmetric_key, &cookie);
+            let cookie = Cookie::new(payload.pk, packet.pk);
+            let encrypted_cookie = EncryptedCookie::new(&net_crypto.symmetric_key, &cookie);
 
-        let response_payload = CookieResponsePayload {
-            cookie: encrypted_cookie,
-            id: payload.id,
-        };
-        let precomputed_key = precompute(&packet.pk, &self.dht_sk);
-        let response = CookieResponse::new(&precomputed_key, &response_payload);
+            let response_payload = CookieResponsePayload {
+                cookie: encrypted_cookie,
+                id: payload.id,
+            };
+            let precomputed_key = precompute(&packet.pk, &net_crypto.dht_sk);
+            let response = CookieResponse::new(&precomputed_key, &response_payload);
 
-        Ok(response)
-    }
-
-    /// Handle `CookieRequest` packet received from UDP socket
-    pub fn handle_udp_cookie_request(&self, packet: &CookieRequest, addr: SocketAddr) -> impl Future<Output = Result<(), HandlePacketError>> + Send {
-        match self.handle_cookie_request(packet) {
-            Ok(response) => Either::Left(self.send_to_udp(addr, DhtPacket::CookieResponse(response))
-                .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())),
-            Err(e) => Either::Right(future::err(e))
+            Ok(response)
         }
     }
 
-    /// Handle `CookieRequest` packet received from TCP socket
-    pub fn handle_tcp_cookie_request(&self, packet: &CookieRequest, sender_pk: PublicKey) -> impl Future<Output = Result<(), HandlePacketError>> + Send {
-        match self.handle_cookie_request(packet) {
-            Ok(response) => {
-                let msg = (TcpDataPayload::CookieResponse(response), sender_pk);
+    /// Handle `CookieRequest` packet received from UDP socket
+    pub fn handle_udp_cookie_request(&self, packet: CookieRequest, addr: SocketAddr)
+        -> impl Future<Output = Result<(), HandlePacketError>> + Send {
+        let net_crypto = self.clone();
+        async move {
+            match net_crypto.handle_cookie_request(packet).await {
+                Ok(response) => {
+                    net_crypto.send_to_udp(addr, DhtPacket::CookieResponse(response))
+                        .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into()).await
+                },
+                Err(e) => Err(e)
+            }
+        }
+    }
 
-                Either::Left(
-                    maybe_send_bounded(self.tcp_tx.read().clone(), msg)
-                        .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
-                )
-            },
-            Err(e) => Either::Right(future::err(e))
+    /// Adapt `maybe_send_bounded()`.
+    fn tcp_tx_send(&self, msg: (TcpDataPayload, PublicKey))
+        -> impl Future<Output = Result<(), HandlePacketError>> + Send {
+        maybe_send_bounded(self.tcp_tx.read().clone(), msg)
+            .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
+    }
+
+    /// Handle `CookieRequest` packet received from TCP socket
+    pub fn handle_tcp_cookie_request(&self, packet: CookieRequest, sender_pk: PublicKey)
+        -> impl Future<Output = Result<(), HandlePacketError>> + Send {
+        let net_crypto = self.clone();
+        async move {
+            match net_crypto.handle_cookie_request(packet).await {
+                Ok(response) => {
+                    let msg = (TcpDataPayload::CookieResponse(response), sender_pk);
+                    net_crypto.tcp_tx_send(msg).await
+                }
+                Err(e) => Err(e)
+            }
         }
     }
 
     /// Handle `CookieResponse` and if it's correct change connection status to `HandshakeSending`.
-    pub fn handle_cookie_response(&self, connection: &mut CryptoConnection, packet: &CookieResponse)
+    pub fn handle_cookie_response(&self, connection: Arc<RwLock<CryptoConnection>>, packet: CookieResponse)
         -> impl Future<Output = Result<(), HandlePacketError>> + Send {
-        let cookie_request_id = if let ConnectionStatus::CookieRequesting { cookie_request_id, .. } = connection.status {
-            cookie_request_id
-        } else {
-            return Either::Left(future::err(HandlePacketError::from(HandlePacketErrorKind::InvalidState)))
-        };
+        let net_crypto = self.clone();
+        async move {
+            let connection = connection.clone();
+            let cookie_request_id = if let ConnectionStatus::CookieRequesting { cookie_request_id, .. } =
+            connection.read().status {
+                cookie_request_id
+            } else {
+                return Err(HandlePacketError::from(HandlePacketErrorKind::InvalidState))
+            };
 
-        let payload = match packet.get_payload(&self.precomputed_keys.get(connection.peer_dht_pk)) {
-            Ok(payload) => payload,
-            Err(e) => return Either::Left(future::err(e.context(HandlePacketErrorKind::GetPayload).into())),
-        };
+            let peer_dht_pk = connection.read().peer_dht_pk;
+            let payload = match packet.get_payload(
+                &net_crypto.precomputed_keys.get(peer_dht_pk).await)
+            {
+                Ok(payload) => payload,
+                Err(e) => return Err(e.context(HandlePacketErrorKind::GetPayload).into()),
+            };
 
-        if payload.id != cookie_request_id {
-            return Either::Left(future::err(HandlePacketError::invalid_request_id(cookie_request_id, payload.id)))
+            if payload.id != cookie_request_id {
+                return Err(HandlePacketError::invalid_request_id(cookie_request_id, payload.id));
+            }
+
+            let sent_nonce = gen_nonce();
+            let our_cookie = Cookie::new(connection.read().peer_real_pk, connection.read().peer_dht_pk);
+            let our_encrypted_cookie = EncryptedCookie::new(&net_crypto.symmetric_key, &our_cookie);
+            let handshake_payload = CryptoHandshakePayload {
+                base_nonce: sent_nonce,
+                session_pk: connection.read().session_pk,
+                cookie_hash: payload.cookie.hash(),
+                cookie: our_encrypted_cookie,
+            };
+            let handshake = CryptoHandshake::new(
+                &precompute(&connection.read().peer_real_pk, &net_crypto.real_sk),
+                &handshake_payload,
+                payload.cookie
+            );
+
+            let status = ConnectionStatus::HandshakeSending {
+                sent_nonce,
+                packet: StatusPacketWithTime::new_crypto_handshake(handshake),
+            };
+
+            net_crypto.send_status_packet(connection.clone(), Some(status))
+                .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
+                .await
         }
-
-        let sent_nonce = gen_nonce();
-        let our_cookie = Cookie::new(connection.peer_real_pk, connection.peer_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(&self.symmetric_key, &our_cookie);
-        let handshake_payload = CryptoHandshakePayload {
-            base_nonce: sent_nonce,
-            session_pk: connection.session_pk,
-            cookie_hash: payload.cookie.hash(),
-            cookie: our_encrypted_cookie,
-        };
-        let handshake = CryptoHandshake::new(&precompute(&connection.peer_real_pk, &self.real_sk), &handshake_payload, payload.cookie);
-
-        connection.status = ConnectionStatus::HandshakeSending {
-            sent_nonce,
-            packet: StatusPacketWithTime::new_crypto_handshake(handshake)
-        };
-
-        Either::Right(self.send_status_packet(connection)
-                      .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
-        )
     }
 
     /// Handle `CookieResponse` packet received from UDP socket
@@ -479,9 +508,8 @@ impl NetCrypto {
         -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         let connection = self.key_by_addr(addr).and_then(|pk| self.connection_by_key(pk));
         if let Some(connection) = connection {
-            let mut connection = connection.write();
-            connection.set_udp_addr(addr);
-            Either::Left(self.handle_cookie_response(&mut connection, packet))
+            connection.write().set_udp_addr(addr);
+            Either::Left(self.handle_cookie_response(connection, packet.clone()))
         } else {
             Either::Right(future::err(
                 HandlePacketError::no_udp_connection(addr)))
@@ -489,12 +517,11 @@ impl NetCrypto {
     }
 
     /// Handle `CookieResponse` packet received from TCP socket
-    pub fn handle_tcp_cookie_response(&self, packet: &CookieResponse, sender_pk: PublicKey)
+    pub fn handle_tcp_cookie_response(&self, packet: CookieResponse, sender_pk: PublicKey)
         -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         let connection = self.connection_by_dht_key(sender_pk);
         if let Some(connection) = connection {
-            let mut connection = connection.write();
-            Either::Left(self.handle_cookie_response(&mut connection, packet))
+            Either::Left(self.handle_cookie_response(connection, packet))
         } else {
             Either::Right(future::err(
                 HandlePacketError::no_tcp_connection(sender_pk)))
@@ -530,9 +557,9 @@ impl NetCrypto {
     }
 
     /// Handle `CryptoHandshake` and if it's correct change connection status to `NotConfirmed`.
-    pub fn handle_crypto_handshake(&self, connection: &mut CryptoConnection, packet: &CryptoHandshake)
+    pub fn handle_crypto_handshake(&self, connection: Arc<RwLock<CryptoConnection>>, packet: &CryptoHandshake)
         -> impl Future<Output = Result<(), HandlePacketError>> + Send {
-        if let ConnectionStatus::Established { .. } = connection.status {
+        if let ConnectionStatus::Established { .. } = connection.read().status {
             return future::err(
                 HandlePacketError::from(HandlePacketErrorKind::InvalidState)
             ).boxed()
@@ -543,13 +570,13 @@ impl NetCrypto {
             Err(e) => return future::err(e).boxed(),
         };
 
-        if cookie.real_pk != connection.peer_real_pk {
+        if cookie.real_pk != connection.read().peer_real_pk {
             return future::err(
                 HandlePacketError::from(HandlePacketErrorKind::InvalidRealPk)
             ).boxed()
         }
-        if cookie.dht_pk != connection.peer_dht_pk {
-            let msg = (connection.peer_real_pk, cookie.dht_pk);
+        if cookie.dht_pk != connection.read().peer_dht_pk {
+            let msg = (connection.read().peer_real_pk, cookie.dht_pk);
 
             let dht_pk_future = maybe_send_unbounded(self.dht_pk_tx.read().clone(), msg)
                 .map_err(|e| e.context(HandlePacketErrorKind::SendToDhtpk).into());
@@ -561,14 +588,14 @@ impl NetCrypto {
                 .boxed()
         }
 
-        connection.status = match connection.status {
+        let status = match connection.read().status {
             ConnectionStatus::CookieRequesting { .. } => {
                 let sent_nonce = gen_nonce();
-                let our_cookie = Cookie::new(connection.peer_real_pk, connection.peer_dht_pk);
+                let our_cookie = Cookie::new(connection.read().peer_real_pk, connection.read().peer_dht_pk);
                 let our_encrypted_cookie = EncryptedCookie::new(&self.symmetric_key, &our_cookie);
                 let handshake_payload = CryptoHandshakePayload {
                     base_nonce: sent_nonce,
-                    session_pk: connection.session_pk,
+                    session_pk: connection.read().session_pk,
                     cookie_hash: payload.cookie.hash(),
                     cookie: our_encrypted_cookie,
                 };
@@ -576,7 +603,7 @@ impl NetCrypto {
                 ConnectionStatus::NotConfirmed {
                     sent_nonce,
                     received_nonce: payload.base_nonce,
-                    session_precomputed_key: precompute(&payload.session_pk, &connection.session_sk),
+                    session_precomputed_key: precompute(&payload.session_pk, &connection.read().session_sk),
                     packet: StatusPacketWithTime::new_crypto_handshake(handshake)
                 }
             },
@@ -584,13 +611,13 @@ impl NetCrypto {
             | ConnectionStatus::NotConfirmed { sent_nonce, ref packet, .. } => ConnectionStatus::NotConfirmed {
                 sent_nonce,
                 received_nonce: payload.base_nonce,
-                session_precomputed_key: precompute(&payload.session_pk, &connection.session_sk),
+                session_precomputed_key: precompute(&payload.session_pk, &connection.read().session_sk),
                 packet: packet.clone()
             },
             ConnectionStatus::Established { .. } => unreachable!("Checked for Established status above"),
         };
 
-        self.send_status_packet(connection)
+        self.send_status_packet(connection, Some(status))
             .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
             .boxed()
     }
@@ -611,19 +638,18 @@ impl NetCrypto {
         let mut connections = self.connections.write();
 
         let kill_future = if let Some(connection) = connections.get(&cookie.real_pk) {
-            let mut connection = connection.write();
-            if connection.peer_dht_pk != cookie.dht_pk {
+            if connection.read().peer_dht_pk != cookie.dht_pk {
                 // We received a handshake packet for an existent connection
                 // from a new address and this packet contains a different DHT
                 // PublicKey. In this case we kill the old connection and create
                 // a new one.
 
-                self.clear_keys_by_addr(&connection);
-                let status_future = self.send_connection_status(&connection, false)
+                self.clear_keys_by_addr(&connection.read());
+                let status_future = self.send_connection_status(&connection.read(), false)
                     .map_err(|e|
                         e.context(HandlePacketErrorKind::SendToConnectionStatus).into()
                     );
-                let kill_future = self.send_kill_packet(&mut connection)
+                let kill_future = self.send_kill_packet(connection.clone())
                     .map_err(|e|
                         e.context(HandlePacketErrorKind::SendTo).into()
                     );
@@ -636,13 +662,13 @@ impl NetCrypto {
                 // received a handshake from the old connection and accept it
                 // otherwise.
 
-                if connection.is_established() || connection.is_not_confirmed() {
+                if connection.read().is_established() || connection.read().is_not_confirmed() {
                     return Either::Left(future::err(
                         HandlePacketErrorKind::UnexpectedCryptoHandshake.into()
                     ));
                 }
 
-                self.clear_keys_by_addr(&connection);
+                self.clear_keys_by_addr(&connection.read());
 
                 Either::Right(future::ok(()))
             }
@@ -681,9 +707,8 @@ impl NetCrypto {
         -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         let connection = self.key_by_addr(addr).and_then(|pk| self.connection_by_key(pk));
         if let Some(connection) = connection {
-            let mut connection = connection.write();
-            connection.set_udp_addr(addr);
-            Either::Left(self.handle_crypto_handshake(&mut connection, packet))
+            connection.write().set_udp_addr(addr);
+            Either::Left(self.handle_crypto_handshake(connection, packet))
         } else {
             Either::Right(self.handle_crypto_handshake_new_connection(packet, Some(addr)))
         }
@@ -694,8 +719,7 @@ impl NetCrypto {
         -> impl Future<Output = Result<(), HandlePacketError>> + Send {
         let connection = self.connection_by_dht_key(sender_pk);
         if let Some(connection) = connection {
-            let mut connection = connection.write();
-            Either::Left(self.handle_crypto_handshake(&mut connection, packet))
+            Either::Left(self.handle_crypto_handshake(connection, packet))
         } else {
             Either::Right(self.handle_crypto_handshake_new_connection(packet, None))
         }
@@ -979,10 +1003,12 @@ impl NetCrypto {
     }
 
     /// Send packet to crypto connection choosing TCP or UDP protocol
-    fn send_packet(&self, packet: Packet, connection: &mut CryptoConnection) -> impl Future<Output = Result<(), SendPacketError>> + Send {
+    fn send_packet(&self, packet: Packet, connection: Arc<RwLock<CryptoConnection>>)
+        -> impl Future<Output = Result<(), SendPacketError>> + Send {
         // TODO: can backpressure be used instead of congestion control? It
         // seems it's possible to implement wrapper for bounded sender with
         // priority queue and just send packets there
+        let mut connection = connection.write();
         let udp_future = if let Some(addr) = connection.get_udp_addr() {
             if connection.is_udp_alive() {
                 return Either::Left(Box::new(self.send_to_udp(addr, packet.into()))
@@ -1021,21 +1047,27 @@ impl NetCrypto {
 
     /// Send `CookieRequest` or `CryptoHandshake` packet if needed depending on
     /// connection status and update sent counter
-    fn send_status_packet(&self, connection: &mut CryptoConnection) -> impl Future<Output = Result<(), SendPacketError>> + Send {
-        match connection.packet_to_send() {
+    fn send_status_packet(&self, connection: Arc<RwLock<CryptoConnection>>, status: Option<ConnectionStatus>)
+        -> impl Future<Output = Result<(), SendPacketError>> + Send {
+        if let Some(status) = status {
+            connection.write().status = status;
+        }
+        let packet_to_send = connection.write().packet_to_send();
+        match packet_to_send {
             Some(packet) => Either::Left(self.send_packet(packet.into(), connection)),
             None => Either::Right(future::ok(())),
         }
     }
 
     /// Send `CryptoData` packet if the connection is established.
-    fn send_data_packet(&self, connection: &mut CryptoConnection, data: Vec<u8>, packet_number: u32)
+    fn send_data_packet(&self, connection: Arc<RwLock<CryptoConnection>>, data: Vec<u8>, packet_number: u32)
         -> impl Future<Output = Result<(), SendDataError>> + Send {
-        let packet = match connection.status {
+        let buffer_start = connection.read().recv_array.buffer_start;
+        let packet = match connection.write().status {
             ConnectionStatus::NotConfirmed { ref mut sent_nonce, ref session_precomputed_key, .. }
             | ConnectionStatus::Established { ref mut sent_nonce, ref session_precomputed_key, .. } => {
                 let payload = CryptoDataPayload {
-                    buffer_start: connection.recv_array.buffer_start,
+                    buffer_start,
                     packet_number,
                     data,
                 };
@@ -1050,18 +1082,18 @@ impl NetCrypto {
     }
 
     /// Send request packet with indices of not received packets.
-    fn send_request_packet(&self, connection: &mut CryptoConnection) -> impl Future<Output = Result<(), SendDataError>> + Send {
-        let data = NetCrypto::generate_request_packet(&connection.recv_array);
-        let packet_number = connection.send_array.buffer_end;
+    fn send_request_packet(&self, connection: Arc<RwLock<CryptoConnection>>) -> impl Future<Output = Result<(), SendDataError>> + Send {
+        let data = NetCrypto::generate_request_packet(&connection.read().recv_array);
+        let packet_number = connection.write().send_array.buffer_end;
         // TODO: set only if packet was sent successfully?
-        connection.request_packet_sent_time = Some(clock_now());
+        connection.write().request_packet_sent_time = Some(clock_now());
         self.send_data_packet(connection, data, packet_number)
     }
 
     /// Send packets that were requested.
-    fn send_requested_packets(&self, connection: &mut CryptoConnection) -> impl Future<Output = Result<(), SendDataError>> + Send {
+    fn send_requested_packets(&self, connection: Arc<RwLock<CryptoConnection>>) -> impl Future<Output = Result<(), SendDataError>> + Send {
         let now = clock_now();
-        let packets = connection.send_array.iter_mut()
+        let packets = connection.write().send_array.iter_mut()
             .filter(|(_, packet)| packet.requested)
             .map(|(i, packet)| {
                 packet.requested = false;
@@ -1070,7 +1102,7 @@ impl NetCrypto {
             }).collect::<Vec<_>>();
 
         let futures: Vec<_> = packets.into_iter().map(|(i, data)|
-            self.send_data_packet(connection, data, i)
+            self.send_data_packet(connection.clone(), data, i)
         ).collect();
 
         future::try_join_all(futures).map_ok(drop)
@@ -1086,57 +1118,56 @@ impl NetCrypto {
 
         // Only one cycle over all connections to prevent many lock acquirements
         connections.retain(|_pk, connection| {
-            let mut connection = connection.write();
 
-            if connection.is_timed_out() {
-                if let Some(addr) = connection.get_udp_addr_v4() {
+            if connection.read().is_timed_out() {
+                if let Some(addr) = connection.read().get_udp_addr_v4() {
                     keys_by_addr.remove(&(addr.ip(), addr.port()));
                 }
-                if let Some(addr) = connection.get_udp_addr_v6() {
+                if let Some(addr) = connection.read().get_udp_addr_v6() {
                     keys_by_addr.remove(&(addr.ip(), addr.port()));
                 }
 
-                if connection.is_established() {
-                    let status_future = self.send_connection_status(&connection, false)
+                if connection.read().is_established() {
+                    let status_future = self.send_connection_status(&connection.read(), false)
                         .map_err(|e| e.context(SendDataErrorKind::SendToConnectionStatus).into());
                     futures.push(Box::pin(status_future));
                 }
 
-                if connection.is_established() || connection.is_not_confirmed() {
-                    futures.push(Box::pin(self.send_kill_packet(&mut connection)));
+                if connection.read().is_established() || connection.read().is_not_confirmed() {
+                    futures.push(Box::pin(self.send_kill_packet(connection.clone())));
                 }
 
                 return false;
             }
 
-            let send_future = self.send_status_packet(&mut connection)
+            let send_future = self.send_status_packet(connection.clone(), None)
                 .map_err(|e| e.context(SendDataErrorKind::SendTo).into());
             futures.push(Box::pin(send_future));
 
-            if connection.is_not_confirmed() || connection.is_established() {
-                let should_send = connection.request_packet_sent_time.map_or(true, |time|
+            if connection.read().is_not_confirmed() || connection.read().is_established() {
+                let should_send = connection.read().request_packet_sent_time.map_or(true, |time|
                     clock_elapsed(time) > CRYPTO_SEND_PACKET_INTERVAL
                 );
                 if should_send {
-                    futures.push(Box::pin(self.send_request_packet(&mut connection)));
+                    futures.push(Box::pin(self.send_request_packet(connection.clone())));
                 }
             }
 
-            if connection.is_established() {
-                if connection.packet_recv_rate > CRYPTO_PACKET_MIN_RATE {
-                    let request_packet_interval = connection.request_packet_interval();
-                    let should_send = connection.request_packet_sent_time.map_or(true, |time|
+            if connection.read().is_established() {
+                if connection.read().packet_recv_rate > CRYPTO_PACKET_MIN_RATE {
+                    let request_packet_interval = connection.read().request_packet_interval();
+                    let should_send = connection.read().request_packet_sent_time.map_or(true, |time|
                         clock_elapsed(time) > request_packet_interval
                     );
                     if should_send {
-                        futures.push(Box::pin(self.send_request_packet(&mut connection)));
+                        futures.push(Box::pin(self.send_request_packet(connection.clone())));
                     }
                 }
 
                 // TODO: either use send_rate or remove it
-                connection.update_congestion_stats();
+                connection.write().update_congestion_stats();
 
-                futures.push(Box::pin(self.send_requested_packets(&mut connection)));
+                futures.push(Box::pin(self.send_requested_packets(connection.clone())));
             }
 
             true
@@ -1264,8 +1295,8 @@ mod tests {
         assert!(!net_crypto.friends.read().contains(&peer_real_pk));
     }
 
-    #[test]
-    fn handle_cookie_request() {
+    #[tokio::test]
+    async fn handle_cookie_request() {
         crypto_init().unwrap();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
@@ -1295,7 +1326,7 @@ mod tests {
         };
         let cookie_request = CookieRequest::new(&precomputed_key, &peer_dht_pk, &cookie_request_payload);
 
-        let cookie_response = net_crypto.handle_cookie_request(&cookie_request).unwrap();
+        let cookie_response = net_crypto.handle_cookie_request(cookie_request).await.unwrap();
         let cookie_response_payload = cookie_response.get_payload(&precomputed_key).unwrap();
 
         assert_eq!(cookie_response_payload.id, cookie_request_id);
@@ -1331,7 +1362,7 @@ mod tests {
             payload: vec![42; 88]
         };
 
-        let res = net_crypto.handle_cookie_request(&cookie_request);
+        let res = net_crypto.handle_cookie_request(cookie_request).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
     }
@@ -1369,7 +1400,7 @@ mod tests {
 
         let addr = "127.0.0.1:12345".parse().unwrap();
 
-        net_crypto.handle_udp_cookie_request(&cookie_request, addr).await.unwrap();
+        net_crypto.handle_udp_cookie_request(cookie_request, addr).await.unwrap();
 
         let (received, _udp_rx) = udp_rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
@@ -1420,7 +1451,7 @@ mod tests {
         };
         let cookie_request = CookieRequest::new(&precomputed_key, &peer_dht_pk, &cookie_request_payload);
 
-        net_crypto.handle_tcp_cookie_request(&cookie_request, peer_dht_pk).await.unwrap();
+        net_crypto.handle_tcp_cookie_request(cookie_request, peer_dht_pk).await.unwrap();
 
         let (received, _net_crypto_tcp_rx) = net_crypto_tcp_rx.into_future().await;
         let (packet, pk_to_send) = received.unwrap();
@@ -1465,7 +1496,7 @@ mod tests {
 
         let addr = "127.0.0.1:12345".parse().unwrap();
 
-        let res = net_crypto.handle_udp_cookie_request(&cookie_request, addr).await;
+        let res = net_crypto.handle_udp_cookie_request(cookie_request, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
     }
@@ -1493,9 +1524,10 @@ mod tests {
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, peer_real_sk) = gen_keypair();
         let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = Arc::new(RwLock::new(connection));
 
-        let cookie_request_id = unpack!(connection.status, ConnectionStatus::CookieRequesting, cookie_request_id);
+        let cookie_request_id = unpack!(connection.read().status.clone(), ConnectionStatus::CookieRequesting, cookie_request_id);
 
         let cookie = EncryptedCookie {
             nonce: secretbox::gen_nonce(),
@@ -1507,9 +1539,9 @@ mod tests {
         };
         let cookie_response = CookieResponse::new(&dht_precomputed_key, &cookie_response_payload);
 
-        net_crypto.handle_cookie_response(&mut connection, &cookie_response).await.unwrap();
+        net_crypto.handle_cookie_response(connection.clone(), cookie_response).await.unwrap();
 
-        let packet = unpack!(connection.status, ConnectionStatus::HandshakeSending, packet);
+        let packet = unpack!(connection.read().status.clone(), ConnectionStatus::HandshakeSending, packet);
         let packet = unpack!(packet.packet, StatusPacket::CryptoHandshake);
         assert_eq!(packet.cookie, cookie);
 
@@ -1539,7 +1571,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let mut connection = CryptoConnection::new_not_confirmed(
+        let connection = CryptoConnection::new_not_confirmed(
             &real_sk,
             peer_real_pk,
             peer_dht_pk,
@@ -1551,6 +1583,7 @@ mod tests {
             },
             &net_crypto.symmetric_key
         );
+        let connection = Arc::new(RwLock::new(connection));
 
         let cookie = EncryptedCookie {
             nonce: secretbox::gen_nonce(),
@@ -1562,7 +1595,7 @@ mod tests {
         };
         let cookie_response = CookieResponse::new(&precompute(&peer_dht_pk, &dht_sk), &cookie_response_payload);
 
-        let res = net_crypto.handle_cookie_response(&mut connection, &cookie_response).await;
+        let res = net_crypto.handle_cookie_response(connection.clone(), cookie_response).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::InvalidState);
     }
@@ -1590,9 +1623,9 @@ mod tests {
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
         let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
-
-        let cookie_request_id = unpack!(connection.status, ConnectionStatus::CookieRequesting, cookie_request_id);
+        let connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = Arc::new(RwLock::new(connection));
+        let cookie_request_id = unpack!(connection.read().status.clone(), ConnectionStatus::CookieRequesting, cookie_request_id);
 
         let cookie = EncryptedCookie {
             nonce: secretbox::gen_nonce(),
@@ -1604,7 +1637,7 @@ mod tests {
         };
         let cookie_response = CookieResponse::new(&dht_precomputed_key, &cookie_response_payload);
 
-        assert!(net_crypto.handle_cookie_response(&mut connection, &cookie_response).await.is_err());
+        assert!(net_crypto.handle_cookie_response(connection.clone(), cookie_response).await.is_err());
     }
 
     async fn handle_cookie_response_test<'a, R, F>(handle_function: F)
@@ -1679,7 +1712,7 @@ mod tests {
     #[tokio::test]
     async fn handle_tcp_cookie_response() {
         async fn test_me(net_crypto: NetCrypto, packet: CookieResponse, _saddr: SocketAddr, pk: PublicKey) -> NetCrypto {
-            net_crypto.handle_tcp_cookie_response(&packet, pk).await.unwrap();
+            net_crypto.handle_tcp_cookie_response(packet, pk).await.unwrap();
             net_crypto
         }
 
@@ -1749,7 +1782,8 @@ mod tests {
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, peer_real_sk) = gen_keypair();
         let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = Arc::new(RwLock::new(connection));
 
         let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
         let base_nonce = gen_nonce();
@@ -1768,12 +1802,12 @@ mod tests {
         };
         let crypto_handshake = CryptoHandshake::new(&real_precomputed_key, &crypto_handshake_payload, our_encrypted_cookie);
 
-        net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).await.unwrap();
+        net_crypto.handle_crypto_handshake(connection.clone(), &crypto_handshake).await.unwrap();
 
-        let received_nonce = unpack!(connection.status, ConnectionStatus::NotConfirmed, received_nonce);
+        let received_nonce = unpack!(connection.read().status.clone(), ConnectionStatus::NotConfirmed, received_nonce);
         assert_eq!(received_nonce, base_nonce);
 
-        let packet = unpack!(connection.status, ConnectionStatus::NotConfirmed, packet);
+        let packet = unpack!(connection.read().status.clone(), ConnectionStatus::NotConfirmed, packet);
         let packet = unpack!(packet.packet, StatusPacket::CryptoHandshake);
         assert_eq!(packet.cookie, cookie);
 
@@ -1807,7 +1841,7 @@ mod tests {
             nonce: secretbox::gen_nonce(),
             payload: vec![42; 88]
         };
-        let mut connection = CryptoConnection::new_not_confirmed(
+        let connection = CryptoConnection::new_not_confirmed(
             &real_sk,
             peer_real_pk,
             peer_dht_pk,
@@ -1816,6 +1850,7 @@ mod tests {
             cookie.clone(),
             &net_crypto.symmetric_key
         );
+        let connection = Arc::new(RwLock::new(connection));
 
         let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
         let base_nonce = gen_nonce();
@@ -1834,14 +1869,14 @@ mod tests {
         };
         let crypto_handshake = CryptoHandshake::new(&real_precomputed_key, &crypto_handshake_payload, our_encrypted_cookie);
 
-        net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).await.unwrap();
+        net_crypto.handle_crypto_handshake(connection.clone(), &crypto_handshake).await.unwrap();
 
         // Nonce should be taken from the packet
-        let received_nonce = unpack!(connection.status, ConnectionStatus::NotConfirmed, received_nonce);
+        let received_nonce = unpack!(connection.read().status.clone(), ConnectionStatus::NotConfirmed, received_nonce);
         assert_eq!(received_nonce, base_nonce);
 
         // cookie should not be updated
-        let packet = unpack!(connection.status, ConnectionStatus::NotConfirmed, packet);
+        let packet = unpack!(connection.read().status.clone(), ConnectionStatus::NotConfirmed, packet);
         let packet = unpack!(packet.packet, StatusPacket::CryptoHandshake);
         assert_eq!(packet.cookie, cookie);
 
@@ -1872,12 +1907,13 @@ mod tests {
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
         let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = Arc::new(RwLock::new(connection));
 
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
         let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
-        connection.status = ConnectionStatus::Established {
+        connection.write().status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce: gen_nonce(),
             session_precomputed_key,
@@ -1899,7 +1935,7 @@ mod tests {
         };
         let crypto_handshake = CryptoHandshake::new(&dht_precomputed_key, &crypto_handshake_payload, our_encrypted_cookie);
 
-        let res = net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).await;
+        let res = net_crypto.handle_crypto_handshake(connection.clone(), &crypto_handshake).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::InvalidState);
     }
@@ -1927,7 +1963,8 @@ mod tests {
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, peer_real_sk) = gen_keypair();
         let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = Arc::new(RwLock::new(connection));
 
         let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
         let base_nonce = gen_nonce();
@@ -1946,7 +1983,7 @@ mod tests {
         };
         let crypto_handshake = CryptoHandshake::new(&real_precomputed_key, &crypto_handshake_payload, our_encrypted_cookie);
 
-        let res = net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).await;
+        let res = net_crypto.handle_crypto_handshake(connection.clone(), &crypto_handshake).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::BadSha512);
     }
@@ -1974,7 +2011,8 @@ mod tests {
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, peer_real_sk) = gen_keypair();
         let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = Arc::new(RwLock::new(connection));
 
         let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
         let base_nonce = gen_nonce();
@@ -1994,7 +2032,7 @@ mod tests {
         };
         let crypto_handshake = CryptoHandshake::new(&real_precomputed_key, &crypto_handshake_payload, our_encrypted_cookie);
 
-        let res = net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).await;
+        let res = net_crypto.handle_crypto_handshake(connection.clone(), &crypto_handshake).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::CookieTimedOut);
     }
@@ -2023,7 +2061,8 @@ mod tests {
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
         let (another_peer_real_pk, another_peer_real_sk) = gen_keypair();
         let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = Arc::new(RwLock::new(connection));
 
         let real_precomputed_key = precompute(&real_pk, &another_peer_real_sk);
         let base_nonce = gen_nonce();
@@ -2042,7 +2081,7 @@ mod tests {
         };
         let crypto_handshake = CryptoHandshake::new(&real_precomputed_key, &crypto_handshake_payload, our_encrypted_cookie);
 
-        let res = net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).await;
+        let res = net_crypto.handle_crypto_handshake(connection.clone(), &crypto_handshake).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::InvalidRealPk);
     }
@@ -2073,7 +2112,8 @@ mod tests {
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, peer_real_sk) = gen_keypair();
         let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = Arc::new(RwLock::new(connection));
 
         let (new_dht_pk, _new_dht_sk) = gen_keypair();
 
@@ -2094,7 +2134,7 @@ mod tests {
         };
         let crypto_handshake = CryptoHandshake::new(&real_precomputed_key, &crypto_handshake_payload, our_encrypted_cookie);
 
-        let res = net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).await;
+        let res = net_crypto.handle_crypto_handshake(connection.clone(), &crypto_handshake).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::InvalidDhtPk);
 
@@ -3399,15 +3439,16 @@ mod tests {
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
         let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = Arc::new(RwLock::new(connection));
 
         let addr = "127.0.0.1:12345".parse().unwrap();
-        connection.set_udp_addr(addr);
+        connection.write().set_udp_addr(addr);
 
         // send status packet first time - it should be sent
-        net_crypto.send_status_packet(&mut connection).await.unwrap();
+        net_crypto.send_status_packet(connection.clone(), None).await.unwrap();
 
-        let packet = unpack!(connection.status.clone(), ConnectionStatus::CookieRequesting, packet);
+        let packet = unpack!(connection.read().status.clone(), ConnectionStatus::CookieRequesting, packet);
         assert_eq!(packet.num_sent, 1);
 
         let (received, _udp_rx) = udp_rx.into_future().await;
@@ -3420,9 +3461,9 @@ mod tests {
         assert_eq!(addr_to_send, addr);
 
         // send status packet again - it shouldn't be sent
-        net_crypto.send_status_packet(&mut connection).await.unwrap();
+        net_crypto.send_status_packet(connection.clone(), None).await.unwrap();
 
-        let packet = unpack!(connection.status, ConnectionStatus::CookieRequesting, packet);
+        let packet = unpack!(connection.read().status.clone(), ConnectionStatus::CookieRequesting, packet);
         assert_eq!(packet.num_sent, 1);
     }
 
@@ -3449,17 +3490,18 @@ mod tests {
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
         let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = Arc::new(RwLock::new(connection));
 
         let addr = "127.0.0.1:12345".parse().unwrap();
-        connection.set_udp_addr(addr);
+        connection.write().set_udp_addr(addr);
 
         let packet = CryptoData {
             nonce_last_bytes: 123,
             payload: vec![42; DHT_ATTEMPT_MAX_PACKET_LENGTH]
         };
 
-        net_crypto.send_packet(Packet::CryptoData(packet.clone()), &mut connection).await.unwrap();
+        net_crypto.send_packet(Packet::CryptoData(packet.clone()), connection.clone()).await.unwrap();
 
         let (received, _udp_rx) = udp_rx.into_future().await;
         let (received, addr_to_send) = received.unwrap();
@@ -3494,10 +3536,11 @@ mod tests {
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
         let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = Arc::new(RwLock::new(connection));
 
         let addr = "127.0.0.1:12345".parse().unwrap();
-        connection.set_udp_addr(addr);
+        connection.write().set_udp_addr(addr);
 
         let packet = CryptoData {
             nonce_last_bytes: 123,
@@ -3507,7 +3550,7 @@ mod tests {
         tokio::time::pause();
         tokio::time::advance(UDP_DIRECT_TIMEOUT + Duration::from_secs(1)).await;
 
-        net_crypto.send_packet(Packet::CryptoData(packet.clone()), &mut connection).await.unwrap();
+        net_crypto.send_packet(Packet::CryptoData(packet.clone()), connection.clone()).await.unwrap();
 
         let (received, _udp_rx) = udp_rx.into_future().await;
         let (received, addr_to_send) = received.unwrap();
@@ -3548,10 +3591,11 @@ mod tests {
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
         let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = Arc::new(RwLock::new(connection));
 
         let addr = "127.0.0.1:12345".parse().unwrap();
-        connection.set_udp_addr(addr);
+        connection.write().set_udp_addr(addr);
 
         let packet = CryptoData {
             nonce_last_bytes: 123,
@@ -3561,7 +3605,7 @@ mod tests {
         tokio::time::pause();
         tokio::time::advance(UDP_DIRECT_TIMEOUT + Duration::from_secs(1)).await;
 
-        net_crypto.send_packet(Packet::CryptoData(packet.clone()), &mut connection).await.unwrap();
+        net_crypto.send_packet(Packet::CryptoData(packet.clone()), connection.clone()).await.unwrap();
 
         let (received, _tcp_rx) = tcp_rx.into_future().await;
         let (received, key_to_send) = received.unwrap();
@@ -3593,14 +3637,15 @@ mod tests {
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
         let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = Arc::new(RwLock::new(connection));
 
         let packet = Packet::CryptoData(CryptoData {
             nonce_last_bytes: 123,
             payload: vec![42; DHT_ATTEMPT_MAX_PACKET_LENGTH]
         });
 
-        net_crypto.send_packet(packet.clone(), &mut connection).await.unwrap();
+        net_crypto.send_packet(packet.clone(), connection.clone()).await.unwrap();
 
         // TODO: check that TCP received the packet
     }
@@ -3628,14 +3673,15 @@ mod tests {
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
         let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = Arc::new(RwLock::new(connection));
 
-        let packet = unpack!(connection.status.clone(), ConnectionStatus::CookieRequesting, packet);
+        let packet = unpack!(connection.read().status.clone(), ConnectionStatus::CookieRequesting, packet);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
-        connection.set_udp_addr(addr);
+        connection.write().set_udp_addr(addr);
 
-        net_crypto.connections.write().insert(peer_real_pk, Arc::new(RwLock::new(connection)));
+        net_crypto.connections.write().insert(peer_real_pk, connection);
 
         net_crypto.main_loop().await.unwrap();
 
@@ -3672,24 +3718,25 @@ mod tests {
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
         let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = Arc::new(RwLock::new(connection));
 
         let addr = "127.0.0.1:12345".parse().unwrap();
-        connection.set_udp_addr(addr);
+        connection.write().set_udp_addr(addr);
 
         // make the connection timed out
-        let cookie_request_id = unpack!(connection.status.clone(), ConnectionStatus::CookieRequesting, cookie_request_id);
-        let mut packet = unpack!(connection.status.clone(), ConnectionStatus::CookieRequesting, packet);
+        let cookie_request_id = unpack!(connection.read().status.clone(), ConnectionStatus::CookieRequesting, cookie_request_id);
+        let mut packet = unpack!(connection.read().status.clone(), ConnectionStatus::CookieRequesting, packet);
         packet.num_sent = MAX_NUM_SENDPACKET_TRIES;
         packet.sent_time -= CRYPTO_SEND_PACKET_INTERVAL + Duration::from_secs(1);
-        connection.status = ConnectionStatus::CookieRequesting {
+        connection.write().status = ConnectionStatus::CookieRequesting {
             cookie_request_id,
             packet
         };
 
-        assert!(connection.is_timed_out());
+        assert!(connection.read().is_timed_out());
 
-        net_crypto.connections.write().insert(peer_real_pk, Arc::new(RwLock::new(connection)));
+        net_crypto.connections.write().insert(peer_real_pk, connection);
         net_crypto.keys_by_addr.write().insert((addr.ip(), addr.port()), peer_real_pk);
 
         net_crypto.main_loop().await.unwrap();
@@ -3721,23 +3768,24 @@ mod tests {
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
         let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = Arc::new(RwLock::new(connection));
 
         let addr = "127.0.0.1:12345".parse().unwrap();
-        connection.set_udp_addr(addr);
+        connection.write().set_udp_addr(addr);
 
         let received_nonce = gen_nonce();
         let sent_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
         let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
-        connection.status = ConnectionStatus::Established {
+        connection.write().status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
             session_precomputed_key: session_precomputed_key.clone(),
         };
 
-        net_crypto.connections.write().insert(peer_real_pk, Arc::new(RwLock::new(connection)));
+        net_crypto.connections.write().insert(peer_real_pk, connection);
         net_crypto.keys_by_addr.write().insert((addr.ip(), addr.port()), peer_real_pk);
 
         net_crypto.main_loop().await.unwrap();
@@ -3846,20 +3894,21 @@ mod tests {
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
         let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = Arc::new(RwLock::new(connection));
 
         let received_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
         let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
-        connection.status = ConnectionStatus::Established {
+        let status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce,
             session_precomputed_key,
         };
 
         // send status packet with connection.status is Established
-        net_crypto.send_status_packet(&mut connection).await.unwrap();
+        net_crypto.send_status_packet(connection.clone(), Some(status)).await.unwrap();
 
         // Necessary to drop udp_tx so that udp_rx.collect() can be finished
         drop(net_crypto.udp_tx);
@@ -3890,27 +3939,28 @@ mod tests {
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
         let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = Arc::new(RwLock::new(connection));
 
         let addr = "127.0.0.1:12345".parse().unwrap();
-        connection.set_udp_addr(addr);
+        connection.write().set_udp_addr(addr);
 
         let received_nonce = gen_nonce();
         let mut sent_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
         let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
-        connection.status = ConnectionStatus::Established {
+        connection.write().status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
             session_precomputed_key: session_precomputed_key.clone(),
         };
 
-        connection.recv_array.buffer_start = 23;
-        connection.recv_array.buffer_end = 25;
+        connection.write().recv_array.buffer_start = 23;
+        connection.write().recv_array.buffer_end = 25;
 
         let data = vec![42; 123];
-        net_crypto.send_data_packet(&mut connection, data.clone(), 7).await.unwrap();
+        net_crypto.send_data_packet(connection.clone(), data.clone(), 7).await.unwrap();
 
         let (received, _udp_rx) = udp_rx.into_future().await;
         let (received, addr_to_send) = received.unwrap();
@@ -3924,8 +3974,8 @@ mod tests {
         assert_eq!(payload.data, data);
 
         increment_nonce(&mut sent_nonce);
-        assert_eq!(unpack!(connection.status, ConnectionStatus::Established, sent_nonce), sent_nonce);
-        assert_eq!(unpack!(connection.status, ConnectionStatus::Established, received_nonce), received_nonce);
+        assert_eq!(unpack!(connection.read().status.clone(), ConnectionStatus::Established, sent_nonce), sent_nonce);
+        assert_eq!(unpack!(connection.read().status.clone(), ConnectionStatus::Established, received_nonce), received_nonce);
     }
 
     #[tokio::test]
@@ -3951,28 +4001,29 @@ mod tests {
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
         let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = Arc::new(RwLock::new(connection));
 
         let addr = "127.0.0.1:12345".parse().unwrap();
-        connection.set_udp_addr(addr);
+        connection.write().set_udp_addr(addr);
 
         let received_nonce = gen_nonce();
         let sent_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
         let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
-        connection.status = ConnectionStatus::Established {
+        connection.write().status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
             session_precomputed_key: session_precomputed_key.clone(),
         };
 
-        connection.recv_array.buffer_end = 270;
-        assert!(connection.recv_array.insert(2, RecvPacket {
+        connection.write().recv_array.buffer_end = 270;
+        assert!(connection.write().recv_array.insert(2, RecvPacket {
             data: vec![42; 123],
         }).is_ok());
         for i in 5 .. 269 {
-            assert!(connection.recv_array.insert(i, RecvPacket {
+            assert!(connection.write().recv_array.insert(i, RecvPacket {
                 data: vec![42; 123],
             }).is_ok());
         }
@@ -3982,9 +4033,9 @@ mod tests {
         let delay = Duration::from_secs(1);
         tokio::time::advance(delay).await;
 
-        net_crypto.send_request_packet(&mut connection).await.unwrap();
+        net_crypto.send_request_packet(connection.clone()).await.unwrap();
 
-        assert_eq!(connection.request_packet_sent_time, Some(now + delay));
+        assert_eq!(connection.read().request_packet_sent_time, Some(now + delay));
 
         let (received, _udp_rx) = udp_rx.into_future().await;
         let (received, addr_to_send) = received.unwrap();
@@ -4021,25 +4072,26 @@ mod tests {
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
         let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = Arc::new(RwLock::new(connection));
 
         let addr = "127.0.0.1:12345".parse().unwrap();
-        connection.set_udp_addr(addr);
+        connection.write().set_udp_addr(addr);
 
         let received_nonce = gen_nonce();
         let sent_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
         let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
-        connection.status = ConnectionStatus::Established {
+        connection.write().status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
             session_precomputed_key: session_precomputed_key.clone(),
         };
 
-        connection.recv_array.buffer_end = MAX_CRYPTO_DATA_SIZE as u32 + 42;
+        connection.write().recv_array.buffer_end = MAX_CRYPTO_DATA_SIZE as u32 + 42;
 
-        net_crypto.send_request_packet(&mut connection).await.unwrap();
+        net_crypto.send_request_packet(connection.clone()).await.unwrap();
 
         let (received, _udp_rx) = udp_rx.into_future().await;
         let (received, addr_to_send) = received.unwrap();
@@ -4079,34 +4131,35 @@ mod tests {
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
         let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let connection = Arc::new(RwLock::new(connection));
 
         let addr = "127.0.0.1:12345".parse().unwrap();
-        connection.set_udp_addr(addr);
+        connection.write().set_udp_addr(addr);
 
         let received_nonce = gen_nonce();
         let sent_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
         let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
-        connection.status = ConnectionStatus::Established {
+        connection.write().status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
             session_precomputed_key,
         };
 
-        connection.send_array.buffer_end = 7;
-        assert!(connection.send_array.insert(2, SentPacket {
+        connection.write().send_array.buffer_end = 7;
+        assert!(connection.write().send_array.insert(2, SentPacket {
             data: vec![42; 123],
             sent_time: now,
             requested: true,
         }).is_ok());
-        assert!(connection.send_array.insert(4, SentPacket {
+        assert!(connection.write().send_array.insert(4, SentPacket {
             data: vec![42; 123],
             sent_time: now,
             requested: false,
         }).is_ok());
-        assert!(connection.send_array.insert(5, SentPacket {
+        assert!(connection.write().send_array.insert(5, SentPacket {
             data: vec![42; 123],
             sent_time: now,
             requested: true,
@@ -4115,14 +4168,14 @@ mod tests {
         let delay = Duration::from_secs(1);
         tokio::time::advance(delay).await;
 
-        net_crypto.send_requested_packets(&mut connection).await.unwrap();
+        net_crypto.send_requested_packets(connection.clone()).await.unwrap();
 
-        assert!(!connection.send_array.get(2).unwrap().requested);
-        assert!(!connection.send_array.get(4).unwrap().requested);
-        assert!(!connection.send_array.get(5).unwrap().requested);
-        assert_eq!(connection.send_array.get(2).unwrap().sent_time, now + delay);
-        assert_eq!(connection.send_array.get(4).unwrap().sent_time, now);
-        assert_eq!(connection.send_array.get(5).unwrap().sent_time, now + delay);
+        assert!(!connection.read().send_array.get(2).unwrap().requested);
+        assert!(!connection.read().send_array.get(4).unwrap().requested);
+        assert!(!connection.read().send_array.get(5).unwrap().requested);
+        assert_eq!(connection.read().send_array.get(2).unwrap().sent_time, now + delay);
+        assert_eq!(connection.read().send_array.get(4).unwrap().sent_time, now);
+        assert_eq!(connection.read().send_array.get(5).unwrap().sent_time, now + delay);
 
         // Necessary to drop udp_tx so that udp_rx.collect() can be finished
         drop(net_crypto.udp_tx);
