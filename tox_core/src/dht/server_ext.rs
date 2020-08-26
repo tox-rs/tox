@@ -17,7 +17,7 @@ use crate::stats::Stats;
 /// Extension trait for running DHT server on `UdpSocket`.
 pub trait ServerExt {
     /// Run DHT server on `UdpSocket`.
-    fn run_socket(self, socket: UdpSocket, rx: Receiver<(Packet, SocketAddr)>, stats: Stats) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send>>;
+    fn run_socket(self, socket: UdpSocket, rx: Receiver<(Packet, SocketAddr)>, stats: Stats) -> Pin<Box<dyn Future<Output = Result<(), Error>>>>;
 }
 
 impl ServerExt for Server {
@@ -26,7 +26,7 @@ impl ServerExt for Server {
         socket: UdpSocket,
         mut rx: Receiver<(Packet, SocketAddr)>,
         stats: Stats
-    ) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send>> {
+    ) -> Pin<Box<dyn Future<Output = Result<(), Error>>>> {
         let udp_addr = socket.local_addr()
             .expect("Failed to get socket address");
 

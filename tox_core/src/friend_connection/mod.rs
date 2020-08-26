@@ -144,34 +144,25 @@ impl FriendConnections {
     }
 
     /// Remove a friend and drop all connections with him.
-    pub fn remove_friend(&self, friend_pk: PublicKey) -> impl Future<Output = Result<(), RemoveFriendError>> + Send {
+    pub async fn remove_friend(&self, friend_pk: PublicKey) -> Result<(), RemoveFriendError> {
         if let Some(friend) = self.friends.write().remove(&friend_pk) {
-            let tcp_remove_future = if let Some(dht_pk) = friend.dht_pk {
+            if let Some(dht_pk) = friend.dht_pk {
                 self.dht.remove_friend(dht_pk);
                 // TODO: handle error properly after migrating the TCP client to failure
-                Either::Left(
-                    self.tcp_connections.remove_connection(dht_pk)
-                        .then(|_| future::ok(()))
-                )
-            } else {
-                Either::Right(future::ok(()))
+                self.tcp_connections.remove_connection(dht_pk).await.ok();
             };
             self.net_crypto.remove_friend(friend_pk);
             self.onion_client.remove_friend(friend_pk);
-            let kill_connection_future = self.net_crypto.kill_connection(friend_pk)
+            self.net_crypto.kill_connection(friend_pk)
                 .then(|res| future::ready(match res {
                     Err(ref e)
                     if *e.kind() == KillConnectionErrorKind::NoConnection =>
                         Ok(()),
                     res => res,
-                }))
-                .map_err(|e| e.context(RemoveFriendErrorKind::KillConnection).into());
-            Either::Left(
-                future::try_join(kill_connection_future, tcp_remove_future)
-                    .map_ok(drop)
-            )
+                })).await
+                .map_err(|e| e.context(RemoveFriendErrorKind::KillConnection).into())
         } else {
-            Either::Right(future::err(RemoveFriendErrorKind::NoFriend.into()))
+            Err(RemoveFriendErrorKind::NoFriend.into())
         }
     }
 
@@ -206,60 +197,46 @@ impl FriendConnections {
     }
 
     /// Handle the stream of found DHT `PublicKey`s.
-    fn handle_dht_pk(&self, dht_pk_rx: mpsc::UnboundedReceiver<(PublicKey, PublicKey)>) -> impl Future<Output = Result<(), RunError>> + Send {
+    async fn handle_dht_pk(&self, mut dht_pk_rx: mpsc::UnboundedReceiver<(PublicKey, PublicKey)>) -> Result<(), RunError> {
         let dht = self.dht.clone();
         let net_crypto = self.net_crypto.clone();
         let onion_client = self.onion_client.clone();
         let friends = self.friends.clone();
         let tcp_connections = self.tcp_connections.clone();
-        dht_pk_rx
-            .map(Ok)
-            .try_for_each(move |(real_pk, dht_pk)| {
-                if let Some(friend) = friends.write().get_mut(&real_pk) {
-                    friend.dht_pk_time = Some(clock_now());
+        while let Some((real_pk, dht_pk)) = dht_pk_rx.next().await {
+            if let Some(friend) = friends.write().get_mut(&real_pk) {
+                friend.dht_pk_time = Some(clock_now());
 
-                    if friend.dht_pk != Some(dht_pk) {
-                        info!("Found a friend's DHT key");
+                if friend.dht_pk != Some(dht_pk) {
+                    info!("Found a friend's DHT key");
 
-                        let kill_future = if let Some(dht_pk) = friend.dht_pk {
-                            dht.remove_friend(dht_pk);
+                    if let Some(dht_pk) = friend.dht_pk {
+                        dht.remove_friend(dht_pk);
 
-                            let kill_connection_future = net_crypto.kill_connection(real_pk)
-                                .then(|res| future::ready(
-                                    match res {
-                                        Err(ref e)
+                        net_crypto.kill_connection(real_pk)
+                            .then(|res| future::ready(
+                                match res {
+                                    Err(ref e)
                                         if *e.kind() == KillConnectionErrorKind::NoConnection =>
-                                            Ok(()),
-                                        res => res,
-                                    }
-                                ))
-                                .map_err(|e| e.context(RunErrorKind::KillConnection).into());
-                            // TODO: handle error properly after migrating the TCP client to failure
-                            let tcp_remove_future = tcp_connections.remove_connection(dht_pk)
-                                .then(|_| future::ok(()));
+                                        Ok(()),
+                                    res => res,
+                                }
+                            )).await
+                            .map_err(|e| RunError::from(e.context(RunErrorKind::KillConnection)))?;
+                        // TODO: handle error properly after migrating the TCP client to failure
+                        tcp_connections.remove_connection(dht_pk).await.ok();
+                    };
 
-                            Either::Left(
-                                future::try_join(kill_connection_future, tcp_remove_future)
-                                    .map_ok(drop)
-                            )
-                        } else {
-                            Either::Right(future::ok(()))
-                        };
+                    friend.dht_pk = Some(dht_pk);
 
-                        friend.dht_pk = Some(dht_pk);
-
-                        dht.add_friend(dht_pk);
-                        net_crypto.add_connection(real_pk, dht_pk);
-                        onion_client.set_friend_dht_pk(real_pk, dht_pk);
-
-                        kill_future
-                    } else {
-                        Either::Right(future::ok(()))
-                    }
-                } else {
-                    Either::Right(future::ok(()))
+                    dht.add_friend(dht_pk);
+                    net_crypto.add_connection(real_pk, dht_pk);
+                    onion_client.set_friend_dht_pk(real_pk, dht_pk);
                 }
-            })
+            }
+        }
+
+        Ok(())
     }
 
     /// Handle the stream of found IP addresses.
@@ -331,13 +308,13 @@ impl FriendConnections {
 
     /// Send some of our relays to a friend and start using these relays to
     /// connect to this friend.
-    fn share_relays(&self, friend_pk: PublicKey) -> impl Future<Output = Result<(), RunError>> + Send {
+    async fn share_relays(&self, friend_pk: PublicKey) -> Result<(), RunError> {
         let relays = self.tcp_connections.get_random_relays(MAX_SHARED_RELAYS as u8);
         if !relays.is_empty() {
-            let relay_futures = relays.iter().map(|relay|
-                self.tcp_connections.add_connection(relay.pk, friend_pk)
-                    .map_err(|e| e.context(RunErrorKind::AddTcpConnection).into())
-            ).collect::<Vec<_>>();
+            for relay in &relays {
+                self.tcp_connections.add_connection(relay.pk, friend_pk).await
+                    .map_err(|e| RunError::from(e.context(RunErrorKind::AddTcpConnection)))?;
+            }
 
             let share_relays = ShareRelays {
                 relays,
@@ -345,50 +322,37 @@ impl FriendConnections {
             let mut buf = vec![0; 154];
             let (_, size) = share_relays.to_bytes((&mut buf, 0)).unwrap();
             buf.truncate(size);
-            let send_future = self.net_crypto.send_lossless(friend_pk, buf)
-                .map_err(|e| e.context(RunErrorKind::SendTo).into());
-
-            Either::Left(
-                future::try_join(
-                    future::try_join_all(relay_futures),
-                    send_future
-                )
-                .map_ok(drop)
-            )
+            self.net_crypto.send_lossless(friend_pk, buf).await
+                .map_err(|e| e.context(RunErrorKind::SendTo).into())
         } else {
-            Either::Right(future::ok(()))
+            Ok(())
         }
     }
 
     /// Main loop that should be called periodically.
-    fn main_loop(&self) -> impl Future<Output = Result<(), RunError>> + Send {
-        use std::pin::Pin;
-        let mut futures: Vec<Pin<Box<dyn Future<Output = Result<_, _>> + Send>>> = Vec::new();
-
+    async fn main_loop(&self) -> Result<(), RunError> {
         for friend in self.friends.write().values_mut() {
             if friend.connected {
                 if friend.ping_received_time.map_or(true, |time| clock_elapsed(time) >= FRIEND_CONNECTION_TIMEOUT) {
-                    let future = self.net_crypto.kill_connection(friend.real_pk)
+                    self.net_crypto.kill_connection(friend.real_pk)
                         .then(|res| future::ready(match res {
                             Err(ref e)
                             if *e.kind() == KillConnectionErrorKind::NoConnection =>
                                 Ok(()),
                             res => res,
-                        }))
-                        .map_err(|e| e.context(RunErrorKind::KillConnection).into());
-                    futures.push(Box::pin(future));
+                        })).await
+                        .map_err(|e| RunError::from(e.context(RunErrorKind::KillConnection)))?;
                     continue;
                 }
 
                 if friend.ping_sent_time.map_or(true, |time| clock_elapsed(time) >= FRIEND_PING_INTERVAL) {
-                    let future = self.net_crypto.send_lossless(friend.real_pk, vec![PACKET_ID_ALIVE])
-                        .map_err(|e| e.context(RunErrorKind::SendTo).into());
-                    futures.push(Box::pin(future));
+                    self.net_crypto.send_lossless(friend.real_pk, vec![PACKET_ID_ALIVE]).await
+                        .map_err(|e| RunError::from(e.context(RunErrorKind::SendTo)))?;
                     friend.ping_sent_time = Some(clock_now());
                 }
 
                 if friend.share_relays_time.map_or(true, |time| clock_elapsed(time) >= SHARE_RELAYS_INTERVAL) {
-                    futures.push(Box::pin(self.share_relays(friend.real_pk)));
+                    self.share_relays(friend.real_pk).await?;
                     friend.share_relays_time = Some(clock_now());
                 }
             } else {
@@ -414,12 +378,11 @@ impl FriendConnections {
             }
         }
 
-        future::try_join_all(futures)
-            .map_ok(drop)
+        Ok(())
     }
 
     /// Call the main loop periodically.
-    async fn run_main_loop(self) -> Result<(), RunError> {
+    async fn run_main_loop(&self) -> Result<(), RunError> {
         let mut wakeups = tokio::time::interval(MAIN_LOOP_INTERVAL);
 
         while wakeups.next().await.is_some() {
@@ -442,7 +405,7 @@ impl FriendConnections {
     /// Run friends connection module. This will add handlers for DHT
     /// `PublicKey`, IP address and connection status updates to appropriate
     /// modules.
-    pub fn run(self) -> impl Future<Output = Result<(), RunError>> + Send {
+    pub async fn run(&self) -> Result<(), RunError> {
         let (dht_pk_tx, dht_pk_rx) = mpsc::unbounded();
         self.onion_client.set_dht_pk_sink(dht_pk_tx.clone());
         self.net_crypto.set_dht_pk_sink(dht_pk_tx);
@@ -458,15 +421,11 @@ impl FriendConnections {
         let connection_status_future = self.handle_connection_status(connection_status_rx);
         let main_loop_future = self.run_main_loop();
 
-        async {
-            let res = futures::select! {
-                res = dht_pk_future.fuse() => res,
-                res = friend_saddr_future.fuse() => res,
-                res = connection_status_future.fuse() => res,
-                res = main_loop_future.fuse() => res,
-            };
-
-            res
+        futures::select! {
+            res = dht_pk_future.fuse() => res,
+            res = friend_saddr_future.fuse() => res,
+            res = connection_status_future.fuse() => res,
+            res = main_loop_future.fuse() => res,
         }
     }
 
@@ -1003,7 +962,7 @@ mod tests {
 
         // the ordering is essential since `run` adds its handlers that should
         // be done before packets handling
-        let run_future = friend_connections.clone().run()
+        let run_future = friend_connections.run()
             .map(Result::unwrap);
 
         let precomputed_key = precompute(&friend_connections.real_pk, &friend_sk);
@@ -1025,7 +984,7 @@ mod tests {
         let net_crypto = friend_connections.net_crypto.clone();
         let dht = friend_connections.dht.clone();
         let packets_future = async move {
-            friend_connections.dht.handle_packet(DhtPacket::CryptoHandshake(handshake), friend_saddr).await.unwrap();
+            dht.handle_packet(DhtPacket::CryptoHandshake(handshake), friend_saddr).await.unwrap();
 
             let session_pk = net_crypto.get_session_pk(&friend_pk).unwrap();
             let session_precomputed_key = precompute(&session_pk, &friend_session_sk);
@@ -1052,15 +1011,11 @@ mod tests {
             assert!(status);
         };
 
-        let future = async move {
-            let join = future::join(packets_future, run_future);
+        let join = future::join(run_future, packets_future);
 
-            futures::select! {
-                _ = join.fuse() => (),
-                _ = connection_status_future.fuse() => (),
-            }
-        };
-
-        future.await;
+        futures::select! {
+            _ = join.fuse() => (),
+            _ = connection_status_future.fuse() => (),
+        }
     }
 }
