@@ -11,8 +11,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use failure::Fail;
-use futures::{Future, FutureExt, TryFutureExt, StreamExt, TryStreamExt, SinkExt, future};
-use futures::future::Either;
+use futures::{StreamExt, SinkExt};
 use futures::channel::mpsc;
 use parking_lot::Mutex;
 
@@ -276,7 +275,7 @@ impl<'a> AnnouncePacketData<'a> {
             sendback_data: request_id,
         };
         InnerOnionAnnounceRequest::new(
-            &precompute(node_pk, self.packet_sk),
+            &precompute(node_pk, &self.packet_sk),
             &self.packet_pk,
             &payload
         )
@@ -390,42 +389,37 @@ impl OnionClient {
     }
 
     /// Send onion request via TCP or UDP depending on path.
-    fn send_onion_request(&self, path: OnionPath, inner_onion_request: InnerOnionRequest, saddr: SocketAddr)
-        -> impl Future<Output = Result<(), mpsc::SendError>> + Send {
+    async fn send_onion_request(&self, path: OnionPath, inner_onion_request: InnerOnionRequest, saddr: SocketAddr)
+        -> Result<(), mpsc::SendError> {
         match path.path_type {
             OnionPathType::TCP => {
                 let onion_request = path.create_tcp_onion_request(saddr, inner_onion_request);
                 // TODO: can we handle errors better? Right now we can try send a
                 // request to a non-existent or suspended node which returns an error
-                Either::Left(
-                    self.tcp_connections.send_onion(path.nodes[0].public_key, onion_request)
-                        .then(future::ok)
-                        .map_ok(drop)
-                )
+                self.tcp_connections.send_onion(path.nodes[0].public_key, onion_request).await.ok();
+                Ok(())
             },
             OnionPathType::UDP => {
                 let onion_request =
                     path.create_udp_onion_request(saddr, inner_onion_request);
                 let mut tx = self.dht.tx.clone();
 
-                Either::Right(async move {
-                    tx.send((
-                        Packet::OnionRequest0(onion_request),
-                        path.nodes[0].saddr
-                    )).await
-                })
+                tx.send((
+                    Packet::OnionRequest0(onion_request),
+                    path.nodes[0].saddr
+                )).await
             },
         }
     }
 
     /// Handle `OnionAnnounceResponse` packet.
-    pub fn handle_announce_response(&self, packet: &OnionAnnounceResponse, is_global: bool) -> impl Future<Output = Result<(), HandleAnnounceResponseError>> + Send {
+    pub async fn handle_announce_response(&self, packet: &OnionAnnounceResponse, is_global: bool) -> Result<(), HandleAnnounceResponseError> {
         let state = &mut *self.state.lock();
 
         let announce_data = if let Some(announce_data) = state.announce_requests.check_ping_id(packet.sendback_data, |_| true) {
             announce_data
         } else {
-            return Either::Left(future::err(HandleAnnounceResponseErrorKind::InvalidRequestId.into()))
+            return Err(HandleAnnounceResponseErrorKind::InvalidRequestId.into());
         };
 
         // Assign variables depending on response type (was it announcing or searching request)
@@ -439,7 +433,7 @@ impl OnionClient {
                 };
                 (&mut friend.close_nodes, Some(&mut friend.last_seen), announce_packet_data)
             } else {
-                return Either::Left(future::err(HandleAnnounceResponseErrorKind::NoFriendWithPk.into()))
+                return Err(HandleAnnounceResponseErrorKind::NoFriendWithPk.into());
             }
         } else {
             let announce_packet_data = AnnouncePacketData {
@@ -451,16 +445,16 @@ impl OnionClient {
             (&mut state.announce_list, None, announce_packet_data)
         };
 
-        let payload = match packet.get_payload(&precompute(&announce_data.pk, announce_packet_data.packet_sk)) {
+        let payload = match packet.get_payload(&precompute(&announce_data.pk, &announce_packet_data.packet_sk)) {
             Ok(payload) => payload,
-            Err(e) => return Either::Left(future::err(e.context(HandleAnnounceResponseErrorKind::InvalidPayload).into()))
+            Err(e) => return Err(e.context(HandleAnnounceResponseErrorKind::InvalidPayload).into())
         };
 
         trace!("OnionAnnounceResponse status: {:?}, data: {:?}", payload.announce_status, announce_data);
 
         if announce_data.friend_pk.is_some() && payload.announce_status == AnnounceStatus::Announced ||
             announce_data.friend_pk.is_none() && payload.announce_status == AnnounceStatus::Found {
-            return Either::Left(future::err(HandleAnnounceResponseErrorKind::InvalidAnnounceStatus.into()));
+            return Err(HandleAnnounceResponseErrorKind::InvalidAnnounceStatus.into());
         }
 
         state.paths_pool.set_timeouts(announce_data.path_id, announce_data.friend_pk.is_some());
@@ -493,8 +487,6 @@ impl OnionClient {
 
         state.paths_pool.path_nodes.put(PackedNode::new(announce_data.saddr, &announce_data.pk));
 
-        let mut futures = Vec::with_capacity(payload.nodes.len());
-
         for node in &payload.nodes {
             // skip LAN nodes if the packet wasn't received from LAN
             if !IsGlobal::is_global(&node.ip()) && is_global {
@@ -524,12 +516,12 @@ impl OnionClient {
             });
 
             let inner_announce_request = announce_packet_data.search_request(&node.pk, request_id);
-            futures.push(self.send_onion_request(path, InnerOnionRequest::InnerOnionAnnounceRequest(inner_announce_request), node.saddr));
+            self.send_onion_request(path, InnerOnionRequest::InnerOnionAnnounceRequest(inner_announce_request), node.saddr)
+                .await
+                .map_err(|e| HandleAnnounceResponseError::from(e.context(HandleAnnounceResponseErrorKind::SendTo)))?;
         }
 
-        Either::Right(future::try_join_all(futures)
-            .map_ok(drop)
-            .map_err(|e| e.context(HandleAnnounceResponseErrorKind::SendTo).into()))
+        Ok(())
     }
 
     /// Handle DHT `PublicKey` announce from both onion and DHT.
@@ -641,22 +633,22 @@ impl OnionClient {
     }
 
     /// Generic function for sending search and announce requests to close nodes.
-    fn ping_close_nodes(
+    async fn ping_close_nodes<'a>(
         &self,
         close_nodes: &mut Kbucket<OnionNode>,
         paths_pool: &mut PathsPool,
         announce_requests: &mut RequestQueue<AnnounceRequestData>,
-        announce_packet_data: AnnouncePacketData,
+        announce_packet_data: AnnouncePacketData<'a>,
         friend_pk: Option<PublicKey>,
         interval: Option<Duration>
-    ) -> (impl Future<Output = Result<(), mpsc::SendError>> + Send, bool) {
+    ) -> Result<bool, mpsc::SendError> {
         let capacity = close_nodes.capacity();
         let ping_random = close_nodes.iter().all(|node|
             clock_elapsed(node.ping_time) >= ONION_NODE_PING_INTERVAL &&
                 // ensure we get a response from some node roughly once per interval / capacity
                 interval.map_or(true, |interval| clock_elapsed(node.response_time) >= interval / capacity as u32)
         );
-        let mut futures = Vec::new();
+        let mut packets_sent = false;
         let mut good_nodes_count = 0;
         for node in close_nodes.iter_mut() {
             if !node.is_timed_out() {
@@ -711,7 +703,8 @@ impl OnionClient {
                     Some(ping_id) if friend_pk.is_none() => announce_packet_data.announce_request(&node.pk, ping_id, request_id),
                     _ => announce_packet_data.search_request(&node.pk, request_id)
                 };
-                futures.push(self.send_onion_request(path, InnerOnionRequest::InnerOnionAnnounceRequest(inner_announce_request), node.saddr));
+                self.send_onion_request(path, InnerOnionRequest::InnerOnionAnnounceRequest(inner_announce_request), node.saddr).await?;
+                packets_sent = true;
             }
         }
 
@@ -737,16 +730,16 @@ impl OnionClient {
                 });
 
                 let inner_announce_request = announce_packet_data.request(&node.pk, None, request_id);
-                futures.push(self.send_onion_request(path, InnerOnionRequest::InnerOnionAnnounceRequest(inner_announce_request), node.saddr));
+                self.send_onion_request(path, InnerOnionRequest::InnerOnionAnnounceRequest(inner_announce_request), node.saddr).await?;
+                packets_sent = true;
             }
         }
 
-        let packets_sent = !futures.is_empty();
-        (future::try_join_all(futures).map_ok(drop), packets_sent)
+        Ok(packets_sent)
     }
 
     /// Announce ourselves periodically.
-    fn announce_loop(&self, state: &mut OnionClientState) -> impl Future<Output = Result<(), RunError>> + Send {
+    async fn announce_loop(&self, state: &mut OnionClientState) -> Result<(), RunError> {
         let announce_packet_data = AnnouncePacketData {
             packet_sk: &self.real_sk,
             packet_pk: self.real_pk,
@@ -761,7 +754,7 @@ impl OnionClient {
             announce_packet_data,
             None,
             None,
-        ).0.map_err(|e| e.context(RunErrorKind::SendTo).into())
+        ).await.map(drop).map_err(|e| e.context(RunErrorKind::SendTo).into())
     }
 
     /// Get nodes to include to DHT `PublicKey` announcement packet.
@@ -778,13 +771,13 @@ impl OnionClient {
     }
 
     /// Announce our DHT `PublicKey` to a friend via onion.
-    fn send_dht_pk_onion(&self, friend: &mut OnionFriend, paths_pool: &mut PathsPool) -> impl Future<Output = Result<(), mpsc::SendError>> + Send {
+    async fn send_dht_pk_onion(&self, friend: &mut OnionFriend, paths_pool: &mut PathsPool) -> Result<(), mpsc::SendError> {
         let dht_pk_announce = DhtPkAnnouncePayload::new(self.dht.pk, self.dht_pk_nodes());
         let inner_payload = OnionDataResponseInnerPayload::DhtPkAnnounce(dht_pk_announce);
         let nonce = gen_nonce();
         let payload = OnionDataResponsePayload::new(&precompute(&friend.real_pk, &self.real_sk), self.real_pk, &nonce, &inner_payload);
 
-        let mut futures = Vec::new();
+        let mut packets_sent = false;
 
         for node in friend.close_nodes.iter() {
             if node.is_timed_out() {
@@ -806,22 +799,23 @@ impl OnionClient {
             let (temporary_pk, temporary_sk) = gen_keypair();
             let inner_data_request = InnerOnionDataRequest::new(&precompute(&data_pk, &temporary_sk), friend.real_pk, temporary_pk, nonce, &payload);
 
-            futures.push(self.send_onion_request(path, InnerOnionRequest::InnerOnionDataRequest(inner_data_request), node.saddr));
+            self.send_onion_request(path, InnerOnionRequest::InnerOnionDataRequest(inner_data_request), node.saddr).await?;
+            packets_sent = true;
         }
 
-        if !futures.is_empty() {
+        if packets_sent {
             friend.last_dht_pk_onion_sent = Some(clock_now());
         }
 
-        future::try_join_all(futures).map_ok(drop)
+        Ok(())
     }
 
     /// Announce our DHT `PublicKey` to a friend via `DhtRequest`.
-    fn send_dht_pk_dht_request(&self, friend: &mut OnionFriend) -> impl Future<Output = Result<(), mpsc::SendError>> + Send {
+    async fn send_dht_pk_dht_request(&self, friend: &mut OnionFriend) -> Result<(), mpsc::SendError> {
         let friend_dht_pk = if let Some(friend_dht_pk) = friend.dht_pk {
             friend_dht_pk
         } else {
-            return Either::Left(future::ok(()))
+            return Ok(());
         };
 
         let dht_pk_announce_payload = DhtPkAnnouncePayload::new(self.dht.pk, self.dht_pk_nodes());
@@ -850,18 +844,12 @@ impl OnionClient {
             .collect::<Vec<_>>();
 
         let mut tx = self.dht.tx.clone();
-        Either::Right(async move {
-            let mut fut = futures::stream::iter(packets).map(Ok);
-            tx.send_all(&mut fut).await
-        })
+        let mut stream = futures::stream::iter(packets).map(Ok);
+        tx.send_all(&mut stream).await
     }
 
     /// Search friends periodically.
-    fn friends_loop(&self, state: &mut OnionClientState) -> impl Future<Output = Result<(), RunError>> + Send {
-        use std::pin::Pin;
-
-        let mut futures: Vec<Pin<Box<dyn Future<Output = Result<_, _>> + Send>>> = vec![];
-
+    async fn friends_loop(&self, state: &mut OnionClientState) -> Result<(), RunError> {
         for friend in state.friends.values_mut() {
             if friend.connected {
                 continue;
@@ -886,33 +874,29 @@ impl OnionClient {
                     .max(ANNOUNCE_FRIEND)
             };
 
-            let (friend_future, packets_sent) = self.ping_close_nodes(
+            let packets_sent = self.ping_close_nodes(
                 &mut friend.close_nodes,
                 &mut state.paths_pool,
                 &mut state.announce_requests,
                 announce_packet_data,
                 Some(friend.real_pk),
                 Some(interval),
-            );
+            ).await.map_err(|e| RunError::from(e.context(RunErrorKind::SendTo)))?;
 
             if packets_sent {
                 friend.search_count = friend.search_count.saturating_add(1);
             }
 
-            futures.push(Box::pin(friend_future));
-
             if friend.last_dht_pk_onion_sent.map_or(true, |time| clock_elapsed(time) > ONION_DHTPK_SEND_INTERVAL) {
-                futures.push(Box::pin(self.send_dht_pk_onion(friend, &mut state.paths_pool)));
+                self.send_dht_pk_onion(friend, &mut state.paths_pool).await.map_err(|e| RunError::from(e.context(RunErrorKind::SendTo)))?;
             }
 
             if friend.last_dht_pk_dht_sent.map_or(true, |time| clock_elapsed(time) > DHT_DHTPK_SEND_INTERVAL) {
-                futures.push(Box::pin(self.send_dht_pk_dht_request(friend)));
+                self.send_dht_pk_dht_request(friend).await.map_err(|e| RunError::from(e.context(RunErrorKind::SendTo)))?;
             }
         }
 
-        future::try_join_all(futures)
-            .map_ok(drop)
-            .map_err(|e| e.context(RunErrorKind::SendTo).into())
+        Ok(())
     }
 
     /// Populate nodes pool from DHT for building random paths.
@@ -923,23 +907,21 @@ impl OnionClient {
     }
 
     /// Run periodical announcements and friends searching.
-    pub fn run(self) -> impl Future<Output = Result<(), RunError>> + Send {
+    pub async fn run(self) -> Result<(), RunError> {
         let interval = Duration::from_secs(1);
-        let wakeups = tokio::time::interval(interval);
+        let mut wakeups = tokio::time::interval(interval);
 
-        wakeups
-            .map(Ok)
-            .try_for_each(move |_instant| {
-                trace!("Onion client sender wake up");
+        while wakeups.next().await.is_some() {
+            trace!("Onion client sender wake up");
 
-                let mut state = self.state.lock();
-                self.populate_path_nodes(&mut state);
+            let mut state = self.state.lock();
+            self.populate_path_nodes(&mut state);
 
-                future::try_join(
-                    self.announce_loop(&mut state),
-                    self.friends_loop(&mut state)
-                ).map_ok(drop)
-            })
+            self.announce_loop(&mut state).await?;
+            self.friends_loop(&mut state).await?;
+        }
+
+        Ok(())
     }
 }
 
