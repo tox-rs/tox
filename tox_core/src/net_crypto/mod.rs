@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 use std::u16;
 
 use failure::Fail;
-use futures::{Future, TryFutureExt, StreamExt, SinkExt};
+use futures::{TryFutureExt, StreamExt, SinkExt};
 use futures::future;
 use futures::future::Either;
 use futures::channel::mpsc;
@@ -36,7 +36,7 @@ use tox_crypto::*;
 use tox_packet::dht::{Packet as DhtPacket, *};
 use crate::dht::precomputed_cache::*;
 use crate::io_tokio::*;
-use tox_packet::relay::{DataPayload as TcpDataPayload};
+use tox_packet::relay::DataPayload as TcpDataPayload;
 use crate::time::*;
 
 /// Maximum size of `Packet` when we try to send it to UDP address even if
@@ -740,18 +740,15 @@ impl NetCrypto {
 
     /// Send received lossless packets from the beginning of the receiving
     /// buffer to lossless sink and delete them
-    fn process_ready_lossless_packets(&self, recv_array: &mut PacketsArray<RecvPacket>, pk: PublicKey)
-        -> impl Future<Output = Result<(), mpsc::SendError>> + Send {
-        let tx = self.lossless_tx.clone();
+    async fn process_ready_lossless_packets(&self, recv_array: &mut PacketsArray<RecvPacket>, pk: PublicKey)
+        -> Result<(), mpsc::SendError> {
+        let mut tx = self.lossless_tx.clone();
 
         while let Some(packet) = recv_array.pop_front() {
-            let res = tx.unbounded_send((pk, packet.data))
-                .map_err(|e| e.into_send_error());
-
-            if res.is_err() { return future::ready(res) }
+            tx.send((pk, packet.data)).await?;
         }
 
-        future::ok(())
+        Ok(())
     }
 
     /// Find the time when the last acknowledged packet was sent. This time is
@@ -1136,6 +1133,7 @@ impl NetCrypto {
 mod tests {
     // https://github.com/rust-lang/rust/issues/61520
     use super::{*, Packet};
+    use futures::Future;
 
     impl NetCrypto {
         pub fn has_friend(&self, pk: &PublicKey) -> bool {

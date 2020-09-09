@@ -20,7 +20,7 @@ use crate::dht::ip_port::IsGlobal;
 use tox_packet::dht::packed_node::PackedNode;
 use tox_packet::dht::*;
 use crate::dht::request_queue::RequestQueue;
-use crate::dht::server::{Server as DhtServer};
+use crate::dht::server::Server as DhtServer;
 use crate::dht::kbucket::*;
 use tox_packet::ip_port::*;
 use crate::onion::client::errors::*;
@@ -29,7 +29,7 @@ use crate::onion::client::paths_pool::*;
 use crate::onion::onion_announce::initial_ping_id;
 use tox_packet::onion::*;
 use tox_packet::packed_node::*;
-use crate::relay::client::{Connections as TcpConnections};
+use crate::relay::client::Connections as TcpConnections;
 use crate::time::*;
 use crate::io_tokio::*;
 

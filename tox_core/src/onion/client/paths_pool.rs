@@ -2,12 +2,12 @@ use std::time::{Duration, Instant};
 
 use tox_crypto::*;
 use tox_packet::dht::packed_node::PackedNode;
-use crate::dht::server::{Server as DhtServer};
+use crate::dht::server::Server as DhtServer;
 use crate::onion::client::nodes_pool::*;
 use crate::onion::client::onion_path::*;
 use crate::time::*;
 use crate::onion::client::TIME_TO_STABLE;
-use crate::relay::client::{Connections as TcpConnections};
+use crate::relay::client::Connections as TcpConnections;
 
 /// Onion path is considered invalid after this number of unsuccessful attempts
 /// to use it.

@@ -78,8 +78,6 @@ impl Server {
     handshaked client.
     */
     pub fn handle_packet(&self, pk: &PublicKey, packet: Packet) -> impl Future<Output = Result<(), Error>> + Send {
-        // TODO: use anonymous sum types when rust has them
-        // https://github.com/rust-lang/rfcs/issues/294
         match packet {
             Packet::RouteRequest(packet) => self.handle_route_request(pk, &packet).boxed(),
             Packet::RouteResponse(packet) => self.handle_route_response(pk, &packet).boxed(),

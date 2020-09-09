@@ -6,7 +6,7 @@ use std::pin::Pin;
 
 use futures::{Future, FutureExt, SinkExt, StreamExt};
 use futures::channel::mpsc::Receiver;
-use tokio::net::{UdpSocket};
+use tokio::net::UdpSocket;
 use failure::Fail;
 
 use crate::dht::codec::*;

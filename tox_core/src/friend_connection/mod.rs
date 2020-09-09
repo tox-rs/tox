@@ -10,8 +10,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use failure::Fail;
-use futures::{Future, FutureExt, TryFutureExt, StreamExt, TryStreamExt, SinkExt, future};
-use futures::future::Either;
+use futures::{FutureExt, StreamExt, SinkExt, future};
 use futures::channel::mpsc;
 use parking_lot::RwLock;
 
@@ -19,13 +18,13 @@ use tox_binary_io::*;
 use tox_crypto::*;
 use crate::dht::dht_node::BAD_NODE_TIMEOUT;
 use tox_packet::dht::packed_node::PackedNode;
-use crate::dht::server::{Server as DhtServer};
+use crate::dht::server::Server as DhtServer;
 use crate::friend_connection::errors::*;
 use tox_packet::friend_connection::*;
 use crate::net_crypto::NetCrypto;
 use crate::net_crypto::errors::KillConnectionErrorKind;
 use crate::onion::client::OnionClient;
-use crate::relay::client::{Connections as TcpConnections};
+use crate::relay::client::Connections as TcpConnections;
 use crate::time::*;
 
 /// Shorthand for the transmit half of the message channel for sending a
@@ -167,26 +166,17 @@ impl FriendConnections {
     }
 
     /// Handle received `ShareRelays` packet.
-    pub fn handle_share_relays(&self, friend_pk: PublicKey, share_relays: ShareRelays) -> impl Future<Output = Result<(), HandleShareRelaysError>> + Send {
+    pub async fn handle_share_relays(&self, friend_pk: PublicKey, share_relays: ShareRelays) -> Result<(), HandleShareRelaysError> {
         if let Some(friend) = self.friends.read().get(&friend_pk) {
             if let Some(dht_pk) = friend.dht_pk {
-                let futures = share_relays.relays
-                    .iter()
-                    .map(|node| self.tcp_connections.add_relay_connection(node.saddr, node.pk, dht_pk))
-                    .collect::<Vec<_>>();
-                Either::Left(
-                    future::try_join_all(futures)
-                        .map_ok(drop)
-                        .map_err(|e|
-                            e.context(HandleShareRelaysErrorKind::AddTcpConnection).into()
-                        )
-                )
-            } else {
-                Either::Right(future::ok(()))
+                for node in share_relays.relays {
+                    self.tcp_connections.add_relay_connection(node.saddr, node.pk, dht_pk).await
+                        .map_err(|e| HandleShareRelaysError::from(e.context(HandleShareRelaysErrorKind::AddTcpConnection)))?;
+                }
             }
-        } else {
-            Either::Right(future::ok(()))
         }
+
+        Ok(())
     }
 
     /// Handle received ping packet.
@@ -240,70 +230,62 @@ impl FriendConnections {
     }
 
     /// Handle the stream of found IP addresses.
-    fn handle_friend_saddr(&self, friend_saddr_rx: mpsc::UnboundedReceiver<PackedNode>) -> impl Future<Output = Result<(), RunError>> + Send {
+    async fn handle_friend_saddr(&self, mut friend_saddr_rx: mpsc::UnboundedReceiver<PackedNode>) -> Result<(), RunError> {
         let net_crypto = self.net_crypto.clone();
         let friends = self.friends.clone();
-        friend_saddr_rx
-            .map(Ok)
-            .try_for_each(move |node| {
-                let mut friends = friends.write();
-                let friend = friends.values_mut()
-                    .find(|friend| friend.dht_pk == Some(node.pk));
-                if let Some(friend) = friend {
-                    friend.saddr_time = Some(clock_now());
+        while let Some(node) = friend_saddr_rx.next().await {
+            let mut friends = friends.write();
+            let friend = friends.values_mut()
+                .find(|friend| friend.dht_pk == Some(node.pk));
+            if let Some(friend) = friend {
+                friend.saddr_time = Some(clock_now());
 
-                    if friend.saddr != Some(node.saddr) {
-                        info!("Found a friend's IP address");
+                if friend.saddr != Some(node.saddr) {
+                    info!("Found a friend's IP address");
 
-                        friend.saddr = Some(node.saddr);
+                    friend.saddr = Some(node.saddr);
 
-                        net_crypto.add_connection(friend.real_pk, node.pk);
-                        net_crypto.set_friend_udp_addr(friend.real_pk, node.saddr);
-                    }
+                    net_crypto.add_connection(friend.real_pk, node.pk);
+                    net_crypto.set_friend_udp_addr(friend.real_pk, node.saddr);
                 }
+            }
+        }
 
-                future::ok(())
-            })
+        Ok(())
     }
 
     /// Handle the stream of connection statuses.
-    fn handle_connection_status(&self, connnection_status_rx: mpsc::UnboundedReceiver<(PublicKey, bool)>) -> impl Future<Output = Result<(), RunError>> + Send {
+    async fn handle_connection_status(&self, mut connnection_status_rx: mpsc::UnboundedReceiver<(PublicKey, bool)>) -> Result<(), RunError> {
         let onion_client = self.onion_client.clone();
         let friends = self.friends.clone();
         let connection_status_tx = self.connection_status_tx.clone();
-        connnection_status_rx
-            .map(Ok)
-            .try_for_each(move |(real_pk, status)| {
-                if let Some(friend) = friends.write().get_mut(&real_pk) {
-                    if status && !friend.connected {
-                        info!("Connection with a friend is established");
+        while let Some((real_pk, status)) = connnection_status_rx.next().await {
+            if let Some(friend) = friends.write().get_mut(&real_pk) {
+                if status && !friend.connected {
+                    info!("Connection with a friend is established");
 
-                        friend.ping_received_time = Some(clock_now());
-                        friend.ping_sent_time = None;
-                        friend.share_relays_time = None;
-                    } else if !status && friend.connected {
-                        info!("Connection with a friend is lost");
+                    friend.ping_received_time = Some(clock_now());
+                    friend.ping_sent_time = None;
+                    friend.share_relays_time = None;
+                } else if !status && friend.connected {
+                    info!("Connection with a friend is lost");
 
-                        // update dht_pk_time right after it went offline to enforce attemts to reconnect
-                        friend.dht_pk_time = Some(clock_now());
-                    }
-
-                    if status != friend.connected {
-                        friend.connected = status;
-                        onion_client.set_friend_connected(real_pk, status);
-                        if let Some(mut connection_status_tx) = connection_status_tx.read().clone() {
-                            let res = async move {
-                                connection_status_tx.send((real_pk, status)).await
-                                    .map_err(|e| e.context(RunErrorKind::SendToConnectionStatus).into())
-                            };
-
-                            return Either::Left(res);
-                        }
-                    }
+                    // update dht_pk_time right after it went offline to enforce attemts to reconnect
+                    friend.dht_pk_time = Some(clock_now());
                 }
 
-                Either::Right(future::ok(()))
-            })
+                if status != friend.connected {
+                    friend.connected = status;
+                    onion_client.set_friend_connected(real_pk, status);
+                    if let Some(mut connection_status_tx) = connection_status_tx.read().clone() {
+                        connection_status_tx.send((real_pk, status)).await
+                            .map_err(|e| RunError::from(e.context(RunErrorKind::SendToConnectionStatus)))?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Send some of our relays to a friend and start using these relays to
@@ -917,9 +899,7 @@ mod tests {
             relays: vec![PackedNode::new(relay_saddr, &relay_pk)],
         };
 
-        // ignore result future since it spawns the connection which should be
-        // executed inside tokio context
-        let _ = friend_connections.handle_share_relays(friend_pk, share_relays);
+        friend_connections.handle_share_relays(friend_pk, share_relays).await.unwrap();
 
         assert!(friend_connections.tcp_connections.has_relay(&relay_pk));
         assert!(friend_connections.tcp_connections.has_connection(&friend_dht_pk));

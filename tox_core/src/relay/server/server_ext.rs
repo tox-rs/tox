@@ -1,10 +1,10 @@
 /*! Extension trait for run TCP server on `TcpStream` and ping sender
 */
 
-use std::io::{Error as IoError};
+use std::io::Error as IoError;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{Duration};
+use std::time::Duration;
 use std::pin::Pin;
 
 use failure::Fail;
@@ -12,8 +12,7 @@ use futures::{future, Future, FutureExt, TryFutureExt, SinkExt, StreamExt, TrySt
 use futures::channel::mpsc;
 use tokio::net::{TcpStream, TcpListener};
 use tokio_util::codec::Framed;
-use tokio::time::{Error as TimerError};
-// use tokio_timer::timeout::{Error as TimeoutError};
+use tokio::time::Error as TimerError;
 
 use tox_crypto::*;
 use crate::relay::codec::{DecodeError, EncodeError, Codec};
