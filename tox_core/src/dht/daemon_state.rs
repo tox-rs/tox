@@ -58,8 +58,8 @@ pub const DHT_STATE_BUFFER_SIZE: usize =
 
 impl DaemonState {
     /// Serialize DHT states, old means that the format of seriaization is old version
-    pub fn serialize_old(server: &Server) -> Vec<u8> {
-        let close_nodes = server.close_nodes.read();
+    pub async fn serialize_old(server: &Server) -> Vec<u8> {
+        let close_nodes = server.close_nodes.read().await;
 
         let nodes = close_nodes.iter()
             .flat_map(|node| node.to_packed_node())
@@ -120,9 +120,9 @@ mod tests {
         let addr_org = "1.2.3.4:1234".parse().unwrap();
         let pk_org = gen_keypair().0;
         let pn = PackedNode { pk: pk_org, saddr: addr_org };
-        alice.close_nodes.write().try_add(pn);
+        alice.close_nodes.write().await.try_add(pn);
 
-        let serialized_vec = DaemonState::serialize_old(&alice);
+        let serialized_vec = DaemonState::serialize_old(&alice).await;
         DaemonState::deserialize_old(&alice, &serialized_vec).await.unwrap();
 
         let (received, _rx) = rx.into_future().await;
@@ -135,7 +135,7 @@ mod tests {
         assert_eq!(sending_packet.pk, pk);
 
         // test with incompleted serialized data
-        let serialized_vec = DaemonState::serialize_old(&alice);
+        let serialized_vec = DaemonState::serialize_old(&alice).await;
         let serialized_len = serialized_vec.len();
         let res = DaemonState::deserialize_old(&alice, &serialized_vec[..serialized_len - 1]).await;
         let error = res.err().unwrap();
@@ -152,8 +152,8 @@ mod tests {
             vec![42; 10], NomErrorKind::Tag)), data: serialized_vec.to_vec() });
 
         // test with empty close list
-        alice.close_nodes.write().remove(&pk_org);
-        let serialized_vec = DaemonState::serialize_old(&alice);
+        alice.close_nodes.write().await.remove(&pk_org);
+        let serialized_vec = DaemonState::serialize_old(&alice).await;
         assert!(DaemonState::deserialize_old(&alice, &serialized_vec).await.is_ok());
     }
 }

@@ -147,7 +147,7 @@ impl FriendConnections {
     pub async fn remove_friend(&self, friend_pk: PublicKey) -> Result<(), RemoveFriendError> {
         if let Some(friend) = self.friends.write().remove(&friend_pk) {
             if let Some(dht_pk) = friend.dht_pk {
-                self.dht.remove_friend(dht_pk);
+                self.dht.remove_friend(dht_pk).await;
                 // TODO: handle error properly after migrating the TCP client to failure
                 self.tcp_connections.remove_connection(dht_pk).await.ok();
             };
@@ -211,7 +211,7 @@ impl FriendConnections {
                     info!("Found a friend's DHT key");
 
                     if let Some(dht_pk) = friend.dht_pk {
-                        dht.remove_friend(dht_pk);
+                        dht.remove_friend(dht_pk).await;
 
                         net_crypto.kill_connection(real_pk)
                             .then(|res| future::ready(
@@ -229,7 +229,7 @@ impl FriendConnections {
 
                     friend.dht_pk = Some(dht_pk);
 
-                    dht.add_friend(dht_pk);
+                    dht.add_friend(dht_pk).await;
                     net_crypto.add_connection(real_pk, dht_pk);
                     onion_client.set_friend_dht_pk(real_pk, dht_pk);
                 }
@@ -358,7 +358,7 @@ impl FriendConnections {
             } else {
                 if friend.dht_pk_time.map_or(false, |time| clock_elapsed(time) >= FRIEND_DHT_TIMEOUT) {
                     if let Some(dht_pk) = friend.dht_pk {
-                        self.dht.remove_friend(dht_pk);
+                        self.dht.remove_friend(dht_pk).await;
                     }
                     friend.dht_pk = None;
                     friend.dht_pk_time = None;
@@ -411,7 +411,7 @@ impl FriendConnections {
         self.net_crypto.set_dht_pk_sink(dht_pk_tx);
 
         let (friend_saddr_tx, friend_saddr_rx) = mpsc::unbounded();
-        self.dht.set_friend_saddr_sink(friend_saddr_tx);
+        self.dht.set_friend_saddr_sink(friend_saddr_tx).await;
 
         let (connection_status_tx, connection_status_rx) = mpsc::unbounded();
         self.net_crypto.set_connection_status_sink(connection_status_tx);
@@ -500,7 +500,7 @@ mod tests {
 
         // add friend to all modules to check later that it will be deleted
         // from everywhere
-        friend_connections.dht.add_friend(friend_dht_pk);
+        friend_connections.dht.add_friend(friend_dht_pk).await;
         friend_connections.onion_client.add_friend(friend_pk);
         friend_connections.net_crypto.add_friend(friend_pk);
         let (_relay_incoming_rx, _relay_outgoing_rx, relay_pk) = friend_connections.tcp_connections.add_client();
@@ -521,7 +521,7 @@ mod tests {
 
         friend_connections.remove_friend(friend_pk).await.unwrap();
 
-        assert!(!friend_connections.dht.has_friend(&friend_dht_pk));
+        assert!(!friend_connections.dht.has_friend(&friend_dht_pk).await);
         assert!(!friend_connections.onion_client.has_friend(&friend_pk));
         assert!(!friend_connections.net_crypto.has_friend(&friend_pk));
         assert!(!friend_connections.tcp_connections.has_connection(&friend_dht_pk));
@@ -552,7 +552,7 @@ mod tests {
         friend.saddr = Some(saddr);
         friend.saddr_time = Some(now);
         friend_connections.friends.write().insert(friend_pk, friend);
-        friend_connections.dht.add_friend(friend_dht_pk);
+        friend_connections.dht.add_friend(friend_dht_pk).await;
         friend_connections.net_crypto.add_friend(friend_pk);
         friend_connections.onion_client.add_friend(friend_pk);
         let (_relay_incoming_rx, _relay_outgoing_rx, relay_pk) = friend_connections.tcp_connections.add_client();
@@ -581,8 +581,8 @@ mod tests {
 
         friend_connections.handle_dht_pk(dht_pk_rx).await.unwrap();
 
-        assert!(!friend_connections.dht.has_friend(&friend_dht_pk));
-        assert!(friend_connections.dht.has_friend(&new_friend_dht_pk));
+        assert!(!friend_connections.dht.has_friend(&friend_dht_pk).await);
+        assert!(friend_connections.dht.has_friend(&new_friend_dht_pk).await);
         assert_eq!(friend_connections.net_crypto.connection_dht_pk(&friend_pk), Some(new_friend_dht_pk));
         assert_eq!(friend_connections.onion_client.friend_dht_pk(&friend_pk), Some(new_friend_dht_pk));
         assert!(!friend_connections.tcp_connections.has_connection(&friend_dht_pk));
