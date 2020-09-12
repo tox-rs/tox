@@ -160,7 +160,7 @@ async fn main() -> Result<(), Error> {
         while let Some((pk, packet)) = lossless_rx.next().await {
             match packet[0] {
                 PACKET_ID_ALIVE => {
-                    friend_connections_c.handle_ping(pk);
+                    friend_connections_c.handle_ping(pk).await;
                 },
                 PACKET_ID_SHARE_RELAYS => {
                     match ShareRelays::from_bytes(&packet) {
@@ -188,7 +188,7 @@ async fn main() -> Result<(), Error> {
     let friend_connection_c = friend_connections.clone();
     let friend_future = async {
         while let Some((pk, _)) = friend_request_sink_rx.next().await {
-            friend_connection_c.add_friend(pk);
+            friend_connection_c.add_friend(pk).await;
         }
         Result::<(), Error>::Ok(())
     };
