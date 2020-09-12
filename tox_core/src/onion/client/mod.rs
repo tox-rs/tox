@@ -518,7 +518,7 @@ impl OnionClient {
             let inner_announce_request = announce_packet_data.search_request(&node.pk, request_id);
             self.send_onion_request(path, InnerOnionRequest::InnerOnionAnnounceRequest(inner_announce_request), node.saddr)
                 .await
-                .map_err(|e| HandleAnnounceResponseError::from(e.context(HandleAnnounceResponseErrorKind::SendTo)))?;
+                .map_err(|e| e.context(HandleAnnounceResponseErrorKind::SendTo))?;
         }
 
         Ok(())
@@ -544,18 +544,18 @@ impl OnionClient {
         let tx = state.dht_pk_tx.clone();
         let dht_pk = dht_pk_announce.dht_pk;
         maybe_send_unbounded(tx, (friend_pk, dht_pk)).await
-            .map_err(|e| HandleDhtPkAnnounceError::from(e.context(HandleDhtPkAnnounceErrorKind::SendTo)))?;
+            .map_err(|e| e.context(HandleDhtPkAnnounceErrorKind::SendTo))?;
 
         for node in dht_pk_announce.nodes.into_iter() {
             match node.ip_port.protocol {
                 ProtocolType::UDP => {
                     let packed_node = PackedNode::new(node.ip_port.to_saddr(), &node.pk);
                     self.dht.ping_node(&packed_node).await
-                        .map_err(|e| HandleDhtPkAnnounceError::from(e.context(HandleDhtPkAnnounceErrorKind::PingNode)))?;
+                        .map_err(|e| e.context(HandleDhtPkAnnounceErrorKind::PingNode))?;
                 },
                 ProtocolType::TCP => {
                     self.tcp_connections.add_relay_connection(node.ip_port.to_saddr(), node.pk, dht_pk_announce.dht_pk).await
-                        .map_err(|e| HandleDhtPkAnnounceError::from(e.context(HandleDhtPkAnnounceErrorKind::AddRelay)))?;
+                        .map_err(|e| e.context(HandleDhtPkAnnounceErrorKind::AddRelay))?;
                 }
             }
         }
@@ -881,18 +881,18 @@ impl OnionClient {
                 announce_packet_data,
                 Some(friend.real_pk),
                 Some(interval),
-            ).await.map_err(|e| RunError::from(e.context(RunErrorKind::SendTo)))?;
+            ).await.map_err(|e| e.context(RunErrorKind::SendTo))?;
 
             if packets_sent {
                 friend.search_count = friend.search_count.saturating_add(1);
             }
 
             if friend.last_dht_pk_onion_sent.map_or(true, |time| clock_elapsed(time) > ONION_DHTPK_SEND_INTERVAL) {
-                self.send_dht_pk_onion(friend, &mut state.paths_pool).await.map_err(|e| RunError::from(e.context(RunErrorKind::SendTo)))?;
+                self.send_dht_pk_onion(friend, &mut state.paths_pool).await.map_err(|e| e.context(RunErrorKind::SendTo))?;
             }
 
             if friend.last_dht_pk_dht_sent.map_or(true, |time| clock_elapsed(time) > DHT_DHTPK_SEND_INTERVAL) {
-                self.send_dht_pk_dht_request(friend).await.map_err(|e| RunError::from(e.context(RunErrorKind::SendTo)))?;
+                self.send_dht_pk_dht_request(friend).await.map_err(|e| e.context(RunErrorKind::SendTo))?;
             }
         }
 

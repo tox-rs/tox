@@ -303,7 +303,7 @@ impl NetCrypto {
             self.clear_keys_by_addr(&connection).await;
 
             self.send_connection_status(&connection, false).await
-                .map_err(|e| KillConnectionError::from(e.context(KillConnectionErrorKind::SendToConnectionStatus)))?;
+                .map_err(|e| e.context(KillConnectionErrorKind::SendToConnectionStatus))?;
             self.send_kill_packet(&mut connection).await
                 .map_err(|e| e.context(KillConnectionErrorKind::SendTo).into())
         } else {
@@ -860,7 +860,7 @@ impl NetCrypto {
         }
 
         self.send_connection_status(&connection, true).await
-            .map_err(|e| HandlePacketError::from(e.context(HandlePacketErrorKind::SendToConnectionStatus)))?;
+            .map_err(|e| e.context(HandlePacketErrorKind::SendToConnectionStatus))?;
 
         connection.status = ConnectionStatus::Established {
             sent_nonce,
@@ -885,7 +885,7 @@ impl NetCrypto {
             }
             connection.packets_received += 1;
             self.process_ready_lossless_packets(&mut connection.recv_array, connection.peer_real_pk).await
-                .map_err(|e| HandlePacketError::from(e.context(HandlePacketErrorKind::SendToLossless)))?;
+                .map_err(|e| e.context(HandlePacketErrorKind::SendToLossless))?;
         } else if packet_id >= PACKET_ID_LOSSY_RANGE_START && packet_id <= PACKET_ID_LOSSY_RANGE_END {
             // Update end index of received buffer ignoring the error - we still
             // want to handle this packet even if connection is too slow
@@ -895,7 +895,7 @@ impl NetCrypto {
             let data = payload.data.clone();
 
             tx.send((peer_real_pk, data)).await
-                .map_err(|e| HandlePacketError::from(e.context(HandlePacketErrorKind::SendToLossy)))?;
+                .map_err(|e| e.context(HandlePacketErrorKind::SendToLossy))?;
         } else {
             return Err(HandlePacketError::packet_id(packet_id))
         };
@@ -1049,7 +1049,7 @@ impl NetCrypto {
 
                 if connection.is_established() {
                     self.send_connection_status(&connection, false).await
-                        .map_err(|e| SendDataError::from(e.context(SendDataErrorKind::SendToConnectionStatus)))?;
+                        .map_err(|e| e.context(SendDataErrorKind::SendToConnectionStatus))?;
                 }
 
                 if connection.is_established() || connection.is_not_confirmed() {
@@ -1060,7 +1060,7 @@ impl NetCrypto {
             }
 
             self.send_status_packet(&mut connection).await
-                .map_err(|e| SendDataError::from(e.context(SendDataErrorKind::SendTo)))?;
+                .map_err(|e| e.context(SendDataErrorKind::SendTo))?;
 
             if connection.is_not_confirmed() || connection.is_established() {
                 let should_send = connection.request_packet_sent_time.map_or(true, |time|

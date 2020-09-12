@@ -171,7 +171,7 @@ impl FriendConnections {
             if let Some(dht_pk) = friend.dht_pk {
                 for node in share_relays.relays {
                     self.tcp_connections.add_relay_connection(node.saddr, node.pk, dht_pk).await
-                        .map_err(|e| HandleShareRelaysError::from(e.context(HandleShareRelaysErrorKind::AddTcpConnection)))?;
+                        .map_err(|e| e.context(HandleShareRelaysErrorKind::AddTcpConnection))?;
                 }
             }
         }
@@ -212,7 +212,7 @@ impl FriendConnections {
                                     res => res,
                                 }
                             )).await
-                            .map_err(|e| RunError::from(e.context(RunErrorKind::KillConnection)))?;
+                            .map_err(|e| e.context(RunErrorKind::KillConnection))?;
                         // TODO: handle error properly after migrating the TCP client to failure
                         tcp_connections.remove_connection(dht_pk).await.ok();
                     };
@@ -279,7 +279,7 @@ impl FriendConnections {
                     onion_client.set_friend_connected(real_pk, status).await;
                     if let Some(mut connection_status_tx) = connection_status_tx.read().await.clone() {
                         connection_status_tx.send((real_pk, status)).await
-                            .map_err(|e| RunError::from(e.context(RunErrorKind::SendToConnectionStatus)))?;
+                            .map_err(|e| e.context(RunErrorKind::SendToConnectionStatus))?;
                     }
                 }
             }
@@ -295,7 +295,7 @@ impl FriendConnections {
         if !relays.is_empty() {
             for relay in &relays {
                 self.tcp_connections.add_connection(relay.pk, friend_pk).await
-                    .map_err(|e| RunError::from(e.context(RunErrorKind::AddTcpConnection)))?;
+                    .map_err(|e| e.context(RunErrorKind::AddTcpConnection))?;
             }
 
             let share_relays = ShareRelays {
@@ -323,13 +323,13 @@ impl FriendConnections {
                                 Ok(()),
                             res => res,
                         })).await
-                        .map_err(|e| RunError::from(e.context(RunErrorKind::KillConnection)))?;
+                        .map_err(|e| e.context(RunErrorKind::KillConnection))?;
                     continue;
                 }
 
                 if friend.ping_sent_time.map_or(true, |time| clock_elapsed(time) >= FRIEND_PING_INTERVAL) {
                     self.net_crypto.send_lossless(friend.real_pk, vec![PACKET_ID_ALIVE]).await
-                        .map_err(|e| RunError::from(e.context(RunErrorKind::SendTo)))?;
+                        .map_err(|e| e.context(RunErrorKind::SendTo))?;
                     friend.ping_sent_time = Some(clock_now());
                 }
 

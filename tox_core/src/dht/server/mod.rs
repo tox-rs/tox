@@ -335,23 +335,23 @@ impl Server {
 
         // Send NodesRequest packets to nodes from the Server
         self.ping_nodes_to_bootstrap(&mut request_queue, &mut nodes_to_bootstrap, self.pk).await
-            .map_err(|e| RunError::from(e.context(RunErrorKind::SendTo)))?;
+            .map_err(|e| e.context(RunErrorKind::SendTo))?;
         self.ping_close_nodes(&mut request_queue, close_nodes.iter_mut(), self.pk).await
-            .map_err(|e| RunError::from(e.context(RunErrorKind::SendTo)))?;
+            .map_err(|e| e.context(RunErrorKind::SendTo))?;
         if send_random_request(&mut *self.last_nodes_req_time.write().await, &mut *self.random_requests_count.write().await) {
             self.send_nodes_req_random(&mut request_queue, close_nodes.iter(), self.pk).await
-                .map_err(|e| RunError::from(e.context(RunErrorKind::SendTo)))?;
+                .map_err(|e| e.context(RunErrorKind::SendTo))?;
         }
 
         // Send NodesRequest packets to nodes from every DhtFriend
         for friend in friends.values_mut() {
             self.ping_nodes_to_bootstrap(&mut request_queue, &mut friend.nodes_to_bootstrap, friend.pk).await
-                .map_err(|e| RunError::from(e.context(RunErrorKind::SendTo)))?;
+                .map_err(|e| e.context(RunErrorKind::SendTo))?;
             self.ping_close_nodes(&mut request_queue, friend.close_nodes.nodes.iter_mut(), friend.pk).await
-                .map_err(|e| RunError::from(e.context(RunErrorKind::SendTo)))?;
+                .map_err(|e| e.context(RunErrorKind::SendTo))?;
             if send_random_request(&mut friend.last_nodes_req_time, &mut friend.random_requests_count) {
                 self.send_nodes_req_random(&mut request_queue, friend.close_nodes.nodes.iter(), friend.pk).await
-                    .map_err(|e| RunError::from(e.context(RunErrorKind::SendTo)))?
+                    .map_err(|e| e.context(RunErrorKind::SendTo))?
             }
         }
 
@@ -487,7 +487,7 @@ impl Server {
 
         while wakeups.next().await.is_some() {
             self.send_pings().await
-                .map_err(|e| RunError::from(e.context(RunErrorKind::SendTo)))?;
+                .map_err(|e| e.context(RunErrorKind::SendTo))?;
         }
 
         Ok(())
@@ -1071,7 +1071,7 @@ impl Server {
         if let Some(node) = close_nodes.get_node(&packet.rpk).and_then(|node| node.to_packed_node()) {
             let packet = Packet::DhtRequest(packet);
             self.send_to(node.saddr, packet).await
-                .map_err(|e| HandlePacketError::from(e.context(HandlePacketErrorKind::SendTo)))?;
+                .map_err(|e| e.context(HandlePacketErrorKind::SendTo))?;
         }
 
         Ok(())
@@ -1444,7 +1444,7 @@ impl Server {
                 motd,
             });
             self.send_to(addr, packet).await
-                .map_err(|e| HandlePacketError::from(e.context(HandlePacketErrorKind::SendTo)))?;
+                .map_err(|e| e.context(HandlePacketErrorKind::SendTo))?;
         }
 
         Ok(())

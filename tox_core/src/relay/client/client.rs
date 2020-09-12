@@ -295,11 +295,11 @@ impl Client {
         }
 
         let socket = TcpStream::connect(&self.addr).await
-            .map_err(|e| SpawnError::from(e.context(SpawnErrorKind::Io)))?;
+            .map_err(|e| e.context(SpawnErrorKind::Io))?;
 
         let (socket, channel) =
             make_client_handshake(socket, &dht_pk, &dht_sk, &relay_pk).await
-                .map_err(|e| SpawnError::from(e.context(SpawnErrorKind::Io)))?;
+                .map_err(|e| e.context(SpawnErrorKind::Io))?;
 
         let stats = Stats::new();
         let secure_socket =
@@ -335,13 +335,9 @@ impl Client {
         let reader = async {
             while let Some(packet) = from_server.next().await {
                 let packet = packet
-                    .map_err(|e|
-                        SpawnError::from(e.context(SpawnErrorKind::ReadSocket))
-                    )?;
+                    .map_err(|e| e.context(SpawnErrorKind::ReadSocket))?;
                 self.handle_packet(packet).await
-                    .map_err(|e|
-                        SpawnError::from(e.context(SpawnErrorKind::HandlePacket))
-                    )?
+                    .map_err(|e| e.context(SpawnErrorKind::HandlePacket))?;
             }
 
             Result::<(), SpawnError>::Ok(())
