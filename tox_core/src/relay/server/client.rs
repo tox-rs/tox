@@ -13,9 +13,8 @@ use std::io::{Error, ErrorKind};
 use std::net::IpAddr;
 use std::time::{Instant, Duration};
 
-use futures::Future;
 use futures::channel::mpsc;
-use futures::{FutureExt, SinkExt};
+use futures::SinkExt;
 
 /// Interval of time for sending TCP PingRequest
 pub const TCP_PING_FREQUENCY: Duration = Duration::from_secs(30);
@@ -127,86 +126,84 @@ impl Client {
 
     /** Send a packet. This method does not ignore IO error
     */
-    fn send(&self, packet: Packet) -> impl Future<Output = Result<(), Error>> + Send {
+    async fn send(&self, packet: Packet) -> Result<(), Error> {
         let mut tx = self.tx.clone();
 
-        async move {
-            let timeout = tokio::time::timeout(
-                TCP_SEND_TIMEOUT,
-                tx.send(packet)
-            );
+        let timeout = tokio::time::timeout(
+            TCP_SEND_TIMEOUT,
+            tx.send(packet)
+        );
 
-            match timeout.await {
-                Err(e) => Err(Error::new(
-                    ErrorKind::Other,
-                    format!("Failed to send packet: {:?}", e)
-                )),
-                Ok(Err(e)) => Err(Error::new(
-                    ErrorKind::Other,
-                    format!("Failed to send packet: {:?}", e)
-                )),
-                Ok(_) => Ok(())
-            }
+        match timeout.await {
+            Err(e) => Err(Error::new(
+                ErrorKind::Other,
+                format!("Failed to send packet: {:?}", e)
+            )),
+            Ok(Err(e)) => Err(Error::new(
+                ErrorKind::Other,
+                format!("Failed to send packet: {:?}", e)
+            )),
+            Ok(_) => Ok(())
         }
     }
     /** Send a packet. This method ignores IO error
     */
-    fn send_ignore_error(&self, packet: Packet) -> impl Future<Output = Result<(), Error>> + Send {
-        self.send(packet)
-            .then(|_| futures::future::ok(())) // ignore if somehow failed to send it
+    async fn send_ignore_error(&self, packet: Packet) {
+        // ignore if somehow failed to send it
+        self.send(packet).await.ok();
     }
     /** Construct RouteResponse and send it to Client
     */
-    pub fn send_route_response(&self, pk: &PublicKey, connection_id: ConnectionId) -> impl Future<Output = Result<(), Error>> + Send {
+    pub async fn send_route_response(&self, pk: &PublicKey, connection_id: ConnectionId) -> Result<(), Error> {
         self.send(
             Packet::RouteResponse(RouteResponse { connection_id, pk: *pk })
-        )
+        ).await
     }
     /** Construct ConnectNotification and send it to Client ignoring IO error
     */
-    pub fn send_connect_notification(&self, connection_id: ConnectionId) -> impl Future<Output = Result<(), Error>> + Send {
+    pub async fn send_connect_notification(&self, connection_id: ConnectionId) {
         self.send_ignore_error(
             Packet::ConnectNotification(ConnectNotification { connection_id })
-        )
+        ).await;
     }
     /** Construct DisconnectNotification and send it to Client ignoring IO error
     */
-    pub fn send_disconnect_notification(&self, connection_id: ConnectionId) -> impl Future<Output = Result<(), Error>> + Send {
+    pub async fn send_disconnect_notification(&self, connection_id: ConnectionId) {
         self.send_ignore_error(
             Packet::DisconnectNotification(DisconnectNotification { connection_id })
-        )
+        ).await;
     }
     /** Construct PongResponse and send it to Client
     */
-    pub fn send_pong_response(&self, ping_id: u64) -> impl Future<Output = Result<(), Error>> + Send {
+    pub async fn send_pong_response(&self, ping_id: u64) -> Result<(), Error> {
         self.send(
             Packet::PongResponse(PongResponse { ping_id })
-        )
+        ).await
     }
     /** Construct OobReceive and send it to Client ignoring IO error
     */
-    pub fn send_oob(&self, sender_pk: &PublicKey, data: Vec<u8>) -> impl Future<Output = Result<(), Error>> + Send {
+    pub async fn send_oob(&self, sender_pk: &PublicKey, data: Vec<u8>) {
         self.send_ignore_error(
             Packet::OobReceive(OobReceive { sender_pk: *sender_pk, data })
-        )
+        ).await;
     }
     /** Construct OnionResponse and send it to Client
     */
-    pub fn send_onion_response(&self, payload: InnerOnionResponse) -> impl Future<Output = Result<(), Error>> + Send {
+    pub async fn send_onion_response(&self, payload: InnerOnionResponse) -> Result<(), Error> {
         self.send(
             Packet::OnionResponse(OnionResponse { payload })
-        )
+        ).await
     }
     /** Construct Data and send it to Client
     */
-    pub fn send_data(&self, connection_id: ConnectionId, data: DataPayload) -> impl Future<Output = Result<(), Error>> + Send {
+    pub async fn send_data(&self, connection_id: ConnectionId, data: DataPayload) -> Result<(), Error> {
         self.send(
             Packet::Data(Data { connection_id, data })
-        )
+        ).await
     }
     /** Construct PingRequest and send it to Client
     */
-    pub fn send_ping_request(&mut self) -> impl Future<Output = Result<(), Error>> + Send {
+    pub async fn send_ping_request(&mut self) -> Result<(), Error> {
         let ping_id = gen_ping_id();
 
         self.last_pinged = Instant::now();
@@ -214,6 +211,6 @@ impl Client {
 
         self.send(
             Packet::PingRequest(PingRequest { ping_id })
-        )
+        ).await
     }
 }

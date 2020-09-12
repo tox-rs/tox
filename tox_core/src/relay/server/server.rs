@@ -152,7 +152,7 @@ impl Server {
 
                             client_b.send_disconnect_notification(
                                 ConnectionId::from_index(a_id_in_client_b)
-                            ).await?;
+                            ).await;
                         }
                     }
                 }
@@ -215,11 +215,13 @@ impl Server {
         // we don't care if connect notifications fail
         let client_a = state.connected_clients.get_mut(pk).unwrap();
         client_a.links_mut().upgrade(b_id_in_client_a);
-        client_a.send_connect_notification(ConnectionId::from_index(b_id_in_client_a)).await?;
+        client_a.send_connect_notification(ConnectionId::from_index(b_id_in_client_a)).await;
 
         let client_b = state.connected_clients.get_mut(&packet.pk).unwrap();
         client_b.links_mut().upgrade(a_id_in_client_b);
-        client_b.send_connect_notification(ConnectionId::from_index(a_id_in_client_b)).await
+        client_b.send_connect_notification(ConnectionId::from_index(a_id_in_client_b)).await;
+
+        Ok(())
     }
 
     async fn handle_route_response(&self, _pk: &PublicKey, _packet: &RouteResponse) -> Result<(), Error> {
@@ -282,7 +284,8 @@ impl Server {
                 // it is linked, we should notify client_b
                 // link from client_b.links should be downgraded
                 client_b.links_mut().downgrade(a_id_in_client_b);
-                client_b.send_disconnect_notification(ConnectionId::from_index(a_id_in_client_b)).await
+                client_b.send_disconnect_notification(ConnectionId::from_index(a_id_in_client_b)).await;
+                Ok(())
             }
         }
     }
@@ -326,11 +329,10 @@ impl Server {
         }
         let state = self.state.read().await;
         if let Some(client_b) = state.connected_clients.get(&packet.destination_pk) {
-            client_b.send_oob(pk, packet.data).await
-        } else {
-            // Do nothing because client_b is not connected to server
-            Ok(())
+            client_b.send_oob(pk, packet.data).await;
         }
+
+        Ok(())
     }
 
     async fn handle_oob_receive(&self, _pk: &PublicKey, _packet: &OobReceive) -> Result<(), Error> {

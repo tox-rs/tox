@@ -14,7 +14,7 @@ use tokio::net::TcpStream;
 use tox_crypto::*;
 use tox_packet::onion::InnerOnionResponse;
 use crate::stats::Stats;
-use crate::relay::codec::{Codec};
+use crate::relay::codec::Codec;
 use tox_packet::relay::connection_id::ConnectionId;
 use crate::relay::handshake::make_client_handshake;
 use crate::relay::links::*;
@@ -285,7 +285,7 @@ impl Client {
     /// Spawn a connection to this TCP relay if it is not connected already. The
     /// connection is spawned via `tokio::spawn` so the result future will be
     /// completed after first poll.
-    async fn spawn_inner(self, dht_sk: SecretKey, dht_pk: PublicKey) -> Result<(), SpawnError> { // TODO: send pings periodically
+    async fn spawn_inner(&self, dht_sk: SecretKey, dht_pk: PublicKey) -> Result<(), SpawnError> { // TODO: send pings periodically
         let relay_pk = self.pk;
         match *self.status.write() {
             ref mut status @ ClientStatus::Disconnected
@@ -353,22 +353,21 @@ impl Client {
         futures::try_join!(rw, route_requests).map(drop)
     }
 
-    async fn run(self, dht_sk: SecretKey, dht_pk: PublicKey) -> Result<(), SpawnError> {
-        let self_c = self.clone();
+    async fn run(&self, dht_sk: SecretKey, dht_pk: PublicKey) -> Result<(), SpawnError> {
         let future = self.spawn_inner(dht_sk, dht_pk);
 
         future
             .then(move |res| {
-                match *self_c.status.write() {
+                match *self.status.write() {
                     ClientStatus::Sleeping => { },
                     ref mut status => *status = ClientStatus::Disconnected,
                 }
                 if res.is_err() {
-                    let mut connection_attempts = self_c.connection_attempts.write();
+                    let mut connection_attempts = self.connection_attempts.write();
                     *connection_attempts = connection_attempts.saturating_add(1);
                 }
-                *self_c.connected_time.write() = None;
-                self_c.links.write().clear();
+                *self.connected_time.write() = None;
+                self.links.write().clear();
                 future::ready(res)
             })
             .map_err(|e| {
@@ -382,7 +381,9 @@ impl Client {
     /// connection is spawned via `tokio::spawn` so the result future will be
     /// completed after first poll.
     pub async fn spawn(self, dht_sk: SecretKey, dht_pk: PublicKey) -> Result<(), SpawnError> { // TODO: send pings periodically
-        tokio::spawn(self.run(dht_sk, dht_pk));
+        tokio::spawn(async move {
+            self.run(dht_sk, dht_pk).await
+        });
         Ok(())
     }
 
@@ -1308,7 +1309,7 @@ pub mod tests {
         let (invalid_server_pk, _invalid_server_sk) = gen_keypair();
         let (incoming_tx_1, _incoming_rx_1) = mpsc::unbounded();
         let client = Client::new(invalid_server_pk, addr, incoming_tx_1);
-        let client_future = client.clone().run(client_sk_1, client_pk_1)
+        let client_future = client.run(client_sk_1, client_pk_1)
             .map_err(Error::from);
 
         let (server_res, client_res) = future::join(server_future.boxed(), client_future.boxed()).await;
