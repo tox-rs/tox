@@ -94,7 +94,7 @@ async fn main() -> Result<(), Error> {
     });
 
     let (net_crypto_tcp_tx, mut net_crypto_tcp_rx) = mpsc::channel(32);
-    net_crypto.set_tcp_sink(net_crypto_tcp_tx);
+    net_crypto.set_tcp_sink(net_crypto_tcp_tx).await;
 
     dht_server.set_net_crypto(net_crypto.clone());
     dht_server.set_onion_client(onion_client.clone());

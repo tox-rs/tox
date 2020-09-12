@@ -29,7 +29,7 @@ use futures::{TryFutureExt, StreamExt, SinkExt};
 use futures::future;
 use futures::future::Either;
 use futures::channel::mpsc;
-use parking_lot::RwLock;
+use tokio::sync::RwLock;
 
 use tox_binary_io::*;
 use tox_crypto::*;
@@ -232,18 +232,18 @@ impl NetCrypto {
     }
 
     /// Add a friend to accept incoming connections from him.
-    pub fn add_friend(&self, real_pk: PublicKey) {
-        self.friends.write().insert(real_pk);
+    pub async fn add_friend(&self, real_pk: PublicKey) {
+        self.friends.write().await.insert(real_pk);
     }
 
     /// Remove a friend to stop accepting incoming connections from him.
-    pub fn remove_friend(&self, real_pk: PublicKey) {
-        self.friends.write().remove(&real_pk);
+    pub async fn remove_friend(&self, real_pk: PublicKey) {
+        self.friends.write().await.remove(&real_pk);
     }
 
     /// Add connection to a friend when its DHT `PublicKey` is known.
-    pub fn add_connection(&self, peer_real_pk: PublicKey, peer_dht_pk: PublicKey) {
-        let mut connections = self.connections.write();
+    pub async fn add_connection(&self, peer_real_pk: PublicKey, peer_dht_pk: PublicKey) {
+        let mut connections = self.connections.write().await;
 
         if connections.contains_key(&peer_real_pk) {
             return;
@@ -262,9 +262,9 @@ impl NetCrypto {
     }
 
     /// Clear stored addresses from `keys_by_addr`.
-    fn clear_keys_by_addr(&self, connection: &CryptoConnection) {
+    async fn clear_keys_by_addr(&self, connection: &CryptoConnection) {
         if connection.udp_addr_v4.is_some() || connection.udp_addr_v6.is_some() {
-            let mut keys_by_addr = self.keys_by_addr.write();
+            let mut keys_by_addr = self.keys_by_addr.write().await;
             if let Some(addr) = connection.get_udp_addr_v4() {
                 keys_by_addr.remove(&(addr.ip(), addr.port()));
             }
@@ -278,7 +278,7 @@ impl NetCrypto {
     /// or disconnected.
     async fn send_connection_status(&self, connection: &CryptoConnection, status: bool) -> Result<(), mpsc::SendError> {
         if connection.is_established() != status {
-            let tx = (&*self.connection_status_tx.read()).clone();
+            let tx = (&*self.connection_status_tx.read().await).clone();
             maybe_send_unbounded(tx, (connection.peer_real_pk, status)).await
         } else {
             Ok(())
@@ -298,9 +298,9 @@ impl NetCrypto {
     /// Kill a connection sending `PACKET_ID_KILL` packet and removing it from
     /// the connections list.
     pub async fn kill_connection(&self, real_pk: PublicKey) -> Result<(), KillConnectionError> {
-        if let Some(connection) = self.connections.write().remove(&real_pk) {
-            let mut connection = connection.write();
-            self.clear_keys_by_addr(&connection);
+        if let Some(connection) = self.connections.write().await.remove(&real_pk) {
+            let mut connection = connection.write().await;
+            self.clear_keys_by_addr(&connection).await;
 
             self.send_connection_status(&connection, false).await
                 .map_err(|e| KillConnectionError::from(e.context(KillConnectionErrorKind::SendToConnectionStatus)))?;
@@ -312,10 +312,10 @@ impl NetCrypto {
     }
 
     /// Set friend's UDP IP address when it gets known.
-    pub fn set_friend_udp_addr(&self, real_pk: PublicKey, saddr: SocketAddr) {
-        let connections = self.connections.read();
+    pub async fn set_friend_udp_addr(&self, real_pk: PublicKey, saddr: SocketAddr) {
+        let connections = self.connections.read().await;
         let mut connection = if let Some(connection) = connections.get(&real_pk) {
-            connection.write()
+            connection.write().await
         } else {
             return
         };
@@ -324,7 +324,7 @@ impl NetCrypto {
             return
         }
 
-        let mut keys_by_addr = self.keys_by_addr.write();
+        let mut keys_by_addr = self.keys_by_addr.write().await;
         let current_addr = if saddr.is_ipv4() {
             connection.get_udp_addr_v4()
         } else {
@@ -343,8 +343,8 @@ impl NetCrypto {
             return Err(SendLosslessPacketErrorKind::InvalidPacketId.into());
         }
 
-        if let Some(connection) = self.connections.read().get(&real_pk) {
-            let mut connection = connection.write();
+        if let Some(connection) = self.connections.read().await.get(&real_pk) {
+            let mut connection = connection.write().await;
             let packet_number = connection.send_array.buffer_end;
             if let Err(e) = connection.send_array.push_back(SentPacket::new(packet.clone())) {
                 Err(e.context(SendLosslessPacketErrorKind::FullSendArray).into())
@@ -364,19 +364,33 @@ impl NetCrypto {
     }
 
     /// Get long term `PublicKey` of the peer by its UDP address
-    fn key_by_addr(&self, addr: SocketAddr) -> Option<PublicKey> {
-        self.keys_by_addr.read().get(&(addr.ip(), addr.port())).cloned()
+    async fn key_by_addr(&self, addr: SocketAddr) -> Option<PublicKey> {
+        self.keys_by_addr.read().await.get(&(addr.ip(), addr.port())).cloned()
     }
 
     /// Get crypto connection by long term `PublicKey`
-    fn connection_by_key(&self, pk: PublicKey) -> Option<Arc<RwLock<CryptoConnection>>> {
-        self.connections.read().get(&pk).cloned()
+    async fn connection_by_key(&self, pk: PublicKey) -> Option<Arc<RwLock<CryptoConnection>>> {
+        self.connections.read().await.get(&pk).cloned()
+    }
+
+    /// Get crypto connection by its UDP address
+    async fn connection_by_addr(&self, addr: SocketAddr) -> Option<Arc<RwLock<CryptoConnection>>> {
+        if let Some(pk) = self.key_by_addr(addr).await {
+            self.connection_by_key(pk).await
+        } else {
+            None
+        }
     }
 
     /// Get crypto connection by long term `PublicKey`
-    fn connection_by_dht_key(&self, pk: PublicKey) -> Option<Arc<RwLock<CryptoConnection>>> {
+    async fn connection_by_dht_key(&self, pk: PublicKey) -> Option<Arc<RwLock<CryptoConnection>>> {
         // TODO: should it be optimized?
-        self.connections.read().values().find(|connection| connection.read().peer_dht_pk == pk).cloned()
+        for connection in self.connections.read().await.values() {
+            if connection.read().await.peer_dht_pk == pk {
+                return Some(connection.clone());
+            }
+        }
+        None
     }
 
     /// Create `CookieResponse` packet with `Cookie` requested by `CookieRequest` packet
@@ -411,7 +425,7 @@ impl NetCrypto {
         match self.handle_cookie_request(packet).await {
             Ok(response) => {
                 let msg = (TcpDataPayload::CookieResponse(response), sender_pk);
-                maybe_send_bounded(self.tcp_tx.read().clone(), msg).await
+                maybe_send_bounded(self.tcp_tx.read().await.clone(), msg).await
                     .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
             }
             Err(e) => Err(e),
@@ -459,9 +473,8 @@ impl NetCrypto {
     /// Handle `CookieResponse` packet received from UDP socket
     pub async fn handle_udp_cookie_response(&self, packet: &CookieResponse, addr: SocketAddr)
         -> Result<(), HandlePacketError> {
-        let connection = self.key_by_addr(addr).and_then(|pk| self.connection_by_key(pk));
-        if let Some(connection) = connection {
-            let mut connection = connection.write();
+        if let Some(connection) = self.connection_by_addr(addr).await {
+            let mut connection = connection.write().await;
             connection.set_udp_addr(addr);
             self.handle_cookie_response(&mut connection, packet).await
         } else {
@@ -472,9 +485,9 @@ impl NetCrypto {
     /// Handle `CookieResponse` packet received from TCP socket
     pub async fn handle_tcp_cookie_response(&self, packet: &CookieResponse, sender_pk: PublicKey)
         -> Result<(), HandlePacketError> {
-        let connection = self.connection_by_dht_key(sender_pk);
+        let connection = self.connection_by_dht_key(sender_pk).await;
         if let Some(connection) = connection {
-            let mut connection = connection.write();
+            let mut connection = connection.write().await;
             self.handle_cookie_response(&mut connection, packet).await
         } else {
             Err(HandlePacketError::no_tcp_connection(sender_pk))
@@ -527,7 +540,7 @@ impl NetCrypto {
         if cookie.dht_pk != connection.peer_dht_pk {
             let msg = (connection.peer_real_pk, cookie.dht_pk);
 
-            let dht_pk_future = maybe_send_unbounded(self.dht_pk_tx.read().clone(), msg)
+            let dht_pk_future = maybe_send_unbounded(self.dht_pk_tx.read().await.clone(), msg)
                 .map_err(|e| e.context(HandlePacketErrorKind::SendToDhtpk).into());
 
             return dht_pk_future.and_then(|()| future::err(
@@ -577,21 +590,21 @@ impl NetCrypto {
             Err(e) => return Err(e),
         };
 
-        if !self.friends.read().contains(&cookie.real_pk) {
+        if !self.friends.read().await.contains(&cookie.real_pk) {
             return Err(HandlePacketErrorKind::UnexpectedCryptoHandshake.into());
         }
 
-        let mut connections = self.connections.write();
+        let mut connections = self.connections.write().await;
 
         if let Some(connection) = connections.get(&cookie.real_pk) {
-            let mut connection = connection.write();
+            let mut connection = connection.write().await;
             if connection.peer_dht_pk != cookie.dht_pk {
                 // We received a handshake packet for an existent connection
                 // from a new address and this packet contains a different DHT
                 // PublicKey. In this case we kill the old connection and create
                 // a new one.
 
-                self.clear_keys_by_addr(&connection);
+                self.clear_keys_by_addr(&connection).await;
                 self.send_connection_status(&connection, false).await
                     .map_err(|e|
                         HandlePacketError::from(e.context(HandlePacketErrorKind::SendToConnectionStatus))
@@ -611,7 +624,7 @@ impl NetCrypto {
                     return Err(HandlePacketErrorKind::UnexpectedCryptoHandshake.into());
                 }
 
-                self.clear_keys_by_addr(&connection);
+                self.clear_keys_by_addr(&connection).await;
             }
         };
 
@@ -626,22 +639,21 @@ impl NetCrypto {
         );
         if let Some(addr) = addr {
             connection.set_udp_addr(addr);
-            self.keys_by_addr.write().insert((addr.ip(), addr.port()), cookie.real_pk);
+            self.keys_by_addr.write().await.insert((addr.ip(), addr.port()), cookie.real_pk);
         }
         let connection = Arc::new(RwLock::new(connection));
         connections.insert(cookie.real_pk, connection);
 
         let msg = (cookie.real_pk, cookie.dht_pk);
-        maybe_send_unbounded(self.dht_pk_tx.read().clone(), msg).await
+        maybe_send_unbounded(self.dht_pk_tx.read().await.clone(), msg).await
             .map_err(|e| e.context(HandlePacketErrorKind::SendToDhtpk).into())
     }
 
     /// Handle `CryptoHandshake` packet received from UDP socket
     pub async fn handle_udp_crypto_handshake(&self, packet: &CryptoHandshake, addr: SocketAddr)
         -> Result<(), HandlePacketError> {
-        let connection = self.key_by_addr(addr).and_then(|pk| self.connection_by_key(pk));
-        if let Some(connection) = connection {
-            let mut connection = connection.write();
+        if let Some(connection) = self.connection_by_addr(addr).await {
+            let mut connection = connection.write().await;
             connection.set_udp_addr(addr);
             self.handle_crypto_handshake(&mut connection, packet).await
         } else {
@@ -652,9 +664,9 @@ impl NetCrypto {
     /// Handle `CryptoHandshake` packet received from TCP socket
     pub async fn handle_tcp_crypto_handshake(&self, packet: &CryptoHandshake, sender_pk: PublicKey)
         -> Result<(), HandlePacketError> {
-        let connection = self.connection_by_dht_key(sender_pk);
+        let connection = self.connection_by_dht_key(sender_pk).await;
         if let Some(connection) = connection {
-            let mut connection = connection.write();
+            let mut connection = connection.write().await;
             self.handle_crypto_handshake(&mut connection, packet).await
         } else {
             self.handle_crypto_handshake_new_connection(packet, None).await
@@ -836,8 +848,8 @@ impl NetCrypto {
 
         if packet_id == PACKET_ID_KILL {
             // Kill the connection
-            self.connections.write().remove(&connection.peer_real_pk);
-            self.clear_keys_by_addr(&connection);
+            self.connections.write().await.remove(&connection.peer_real_pk);
+            self.clear_keys_by_addr(&connection).await;
             return self.send_connection_status(&connection, false)
                 .map_err(|e| e.context(HandlePacketErrorKind::SendToConnectionStatus).into()).await;
         }
@@ -902,9 +914,8 @@ impl NetCrypto {
 
     /// Handle `CryptoData` packet received from UDP socket
     pub async fn handle_udp_crypto_data(&self, packet: &CryptoData, addr: SocketAddr) -> Result<(), HandlePacketError> {
-        let connection = self.key_by_addr(addr).and_then(|pk| self.connection_by_key(pk));
-        if let Some(connection) = connection {
-            let mut connection = connection.write();
+        if let Some(connection) = self.connection_by_addr(addr).await {
+            let mut connection = connection.write().await;
             connection.set_udp_addr(addr);
             self.handle_crypto_data(&mut connection, packet, /* udp */ true).await
         } else {
@@ -914,9 +925,8 @@ impl NetCrypto {
 
     /// Handle `CryptoData` packet received from TCP socket
     pub async fn handle_tcp_crypto_data(&self, packet: &CryptoData, sender_pk: PublicKey) -> Result<(), HandlePacketError> {
-        let connection = self.connection_by_dht_key(sender_pk);
-        if let Some(connection) = connection {
-            let mut connection = connection.write();
+        if let Some(connection) = self.connection_by_dht_key(sender_pk).await {
+            let mut connection = connection.write().await;
             self.handle_crypto_data(&mut connection, packet, /* udp */ false).await
         } else {
             Err(HandlePacketError::no_tcp_connection(sender_pk))
@@ -954,7 +964,7 @@ impl NetCrypto {
         let udp_future = udp_future
             .map_err(|e| e.context(SendPacketErrorKind::Udp).into());
 
-        let tcp_tx = self.tcp_tx.read().clone();
+        let tcp_tx = self.tcp_tx.read().await.clone();
         let tcp_future = maybe_send_bounded(tcp_tx, (packet.into(), connection.peer_dht_pk))
             .map_err(|e| e.context(SendPacketErrorKind::Tcp).into());
 
@@ -1021,13 +1031,13 @@ impl NetCrypto {
 
     /// The main loop that should be run at least 20 times per second
     async fn main_loop(&self) -> Result<(), SendDataError> {
-        let mut connections = self.connections.write();
-        let mut keys_by_addr = self.keys_by_addr.write();
+        let mut connections = self.connections.write().await;
+        let mut keys_by_addr = self.keys_by_addr.write().await;
         let mut to_remove = Vec::new();
 
         // Only one cycle over all connections to prevent many lock acquirements
         for (&pk, connection) in connections.iter() {
-            let mut connection = connection.write();
+            let mut connection = connection.write().await;
 
             if connection.is_timed_out() {
                 if let Some(addr) = connection.get_udp_addr_v4() {
@@ -1113,19 +1123,19 @@ impl NetCrypto {
     }
 
     /// Set sink to send DHT `PublicKey` when it gets known.
-    pub fn set_dht_pk_sink(&self, dht_pk_tx: DhtPkTx) {
-        *self.dht_pk_tx.write() = Some(dht_pk_tx);
+    pub async fn set_dht_pk_sink(&self, dht_pk_tx: DhtPkTx) {
+        *self.dht_pk_tx.write().await = Some(dht_pk_tx);
     }
 
     /// Set sink to send a connection status when it becomes connected or
     /// disconnected.
-    pub fn set_connection_status_sink(&self, connection_status_tx: ConnectionStatusTx) {
-        *self.connection_status_tx.write() = Some(connection_status_tx);
+    pub async fn set_connection_status_sink(&self, connection_status_tx: ConnectionStatusTx) {
+        *self.connection_status_tx.write().await = Some(connection_status_tx);
     }
 
     /// Set sink for sending TCP packets via relays.
-    pub fn set_tcp_sink(&self, tcp_tx: TcpTx) {
-        *self.tcp_tx.write() = Some(tcp_tx);
+    pub async fn set_tcp_sink(&self, tcp_tx: TcpTx) {
+        *self.tcp_tx.write().await = Some(tcp_tx);
     }
 }
 
@@ -1136,19 +1146,27 @@ mod tests {
     use futures::Future;
 
     impl NetCrypto {
-        pub fn has_friend(&self, pk: &PublicKey) -> bool {
-            self.friends.read().contains(pk)
+        pub async fn has_friend(&self, pk: &PublicKey) -> bool {
+            self.friends.read().await.contains(pk)
         }
 
-        pub fn connection_dht_pk(&self, pk: &PublicKey) -> Option<PublicKey> {
-            self.connections.read().get(pk).map(|connection| connection.read().peer_dht_pk)
+        pub async fn connection_dht_pk(&self, pk: &PublicKey) -> Option<PublicKey> {
+            if let Some(connection) = self.connections.read().await.get(pk) {
+                Some(connection.read().await.peer_dht_pk)
+            } else {
+                None
+            }
         }
 
-        pub fn connection_saddr(&self, pk: &PublicKey) -> Option<SocketAddr> {
-            self.connections.read().get(pk).and_then(|connection| connection.read().get_udp_addr())
+        pub async fn connection_saddr(&self, pk: &PublicKey) -> Option<SocketAddr> {
+            if let Some(connection) = self.connections.read().await.get(pk) {
+                connection.read().await.get_udp_addr()
+            } else {
+                None
+            }
         }
 
-        pub fn add_established_connection(
+        pub async fn add_established_connection(
             &self,
             peer_dht_pk: PublicKey,
             peer_real_pk: PublicKey,
@@ -1163,7 +1181,7 @@ mod tests {
                 received_nonce,
                 session_precomputed_key,
             };
-            self.connections.write().insert(peer_real_pk, Arc::new(RwLock::new(connection)));
+            self.connections.write().await.insert(peer_real_pk, Arc::new(RwLock::new(connection)));
         }
 
         pub fn get_cookie(&self, real_pk: PublicKey, dht_pk: PublicKey) -> EncryptedCookie {
@@ -1171,13 +1189,17 @@ mod tests {
             EncryptedCookie::new(&self.symmetric_key, &cookie)
         }
 
-        pub fn get_session_pk(&self, friend_pk: &PublicKey) -> Option<PublicKey> {
-            self.connections.read().get(friend_pk).map(|connection| connection.read().session_pk)
+        pub async fn get_session_pk(&self, friend_pk: &PublicKey) -> Option<PublicKey> {
+            if let Some(connection) = self.connections.read().await.get(friend_pk) {
+                Some(connection.read().await.session_pk)
+            } else {
+                None
+            }
         }
     }
 
-    #[test]
-    fn add_remove_friend() {
+    #[tokio::test]
+    async fn add_remove_friend() {
         crypto_init().unwrap();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
@@ -1198,10 +1220,10 @@ mod tests {
 
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
 
-        net_crypto.add_friend(peer_real_pk);
-        assert!(net_crypto.friends.read().contains(&peer_real_pk));
-        net_crypto.remove_friend(peer_real_pk);
-        assert!(!net_crypto.friends.read().contains(&peer_real_pk));
+        net_crypto.add_friend(peer_real_pk).await;
+        assert!(net_crypto.friends.read().await.contains(&peer_real_pk));
+        net_crypto.remove_friend(peer_real_pk).await;
+        assert!(!net_crypto.friends.read().await.contains(&peer_real_pk));
     }
 
     #[tokio::test]
@@ -1350,7 +1372,7 @@ mod tests {
         });
 
         let (net_crypto_tcp_tx, net_crypto_tcp_rx) = mpsc::channel(1);
-        net_crypto.set_tcp_sink(net_crypto_tcp_tx);
+        net_crypto.set_tcp_sink(net_crypto_tcp_tx).await;
 
         let cookie_request_id = 12345;
 
@@ -1580,8 +1602,8 @@ mod tests {
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.set_udp_addr(addr);
 
-        net_crypto.connections.write().insert(peer_real_pk, Arc::new(RwLock::new(connection)));
-        net_crypto.keys_by_addr.write().insert((addr.ip(), addr.port()), peer_real_pk);
+        net_crypto.connections.write().await.insert(peer_real_pk, Arc::new(RwLock::new(connection)));
+        net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk);
 
         let cookie = EncryptedCookie {
             nonce: secretbox::gen_nonce(),
@@ -1595,8 +1617,8 @@ mod tests {
 
         let net_crypto = handle_function(net_crypto, cookie_response, addr, peer_dht_pk).await;
 
-        let connections = net_crypto.connections.read();
-        let connection = connections.get(&peer_real_pk).unwrap().read().clone();
+        let connections = net_crypto.connections.read().await;
+        let connection = connections.get(&peer_real_pk).unwrap().read().await.clone();
 
         let packet = unpack!(connection.status, ConnectionStatus::HandshakeSending, packet);
         let packet = unpack!(packet.packet, StatusPacket::CryptoHandshake);
@@ -2008,7 +2030,7 @@ mod tests {
         });
 
         let (dht_pk_tx, dht_pk_rx) = mpsc::unbounded();
-        net_crypto.set_dht_pk_sink(dht_pk_tx);
+        net_crypto.set_dht_pk_sink(dht_pk_tx).await;
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, peer_real_sk) = gen_keypair();
@@ -2076,8 +2098,8 @@ mod tests {
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.set_udp_addr(addr);
 
-        net_crypto.connections.write().insert(peer_real_pk, Arc::new(RwLock::new(connection)));
-        net_crypto.keys_by_addr.write().insert((addr.ip(), addr.port()), peer_real_pk);
+        net_crypto.connections.write().await.insert(peer_real_pk, Arc::new(RwLock::new(connection)));
+        net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk);
 
         let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
         let base_nonce = gen_nonce();
@@ -2098,8 +2120,8 @@ mod tests {
 
         let net_crypto = handle_function(net_crypto, crypto_handshake, addr, peer_dht_pk).await;
 
-        let connections = net_crypto.connections.read();
-        let connection = connections.get(&peer_real_pk).unwrap().read().clone();
+        let connections = net_crypto.connections.read().await;
+        let connection = connections.get(&peer_real_pk).unwrap().read().await.clone();
 
         let received_nonce = unpack!(connection.status, ConnectionStatus::NotConfirmed, received_nonce);
         assert_eq!(received_nonce, base_nonce);
@@ -2155,7 +2177,7 @@ mod tests {
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, peer_real_sk) = gen_keypair();
 
-        net_crypto.add_friend(peer_real_pk);
+        net_crypto.add_friend(peer_real_pk).await;
 
         let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
         let base_nonce = gen_nonce();
@@ -2178,8 +2200,8 @@ mod tests {
 
         net_crypto.handle_udp_crypto_handshake(&crypto_handshake, addr).await.unwrap();
 
-        let connections = net_crypto.connections.read();
-        let connection = connections.get(&peer_real_pk).unwrap().read().clone();
+        let connections = net_crypto.connections.read().await;
+        let connection = connections.get(&peer_real_pk).unwrap().read().await.clone();
 
         assert_eq!(connection.get_udp_addr_v4(), Some(addr));
 
@@ -2216,7 +2238,7 @@ mod tests {
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, peer_real_sk) = gen_keypair();
 
-        net_crypto.add_friend(peer_real_pk);
+        net_crypto.add_friend(peer_real_pk).await;
 
         let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
@@ -2235,8 +2257,8 @@ mod tests {
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.set_udp_addr(addr);
 
-        net_crypto.connections.write().insert(peer_real_pk, Arc::new(RwLock::new(connection)));
-        net_crypto.keys_by_addr.write().insert((addr.ip(), addr.port()), peer_real_pk);
+        net_crypto.connections.write().await.insert(peer_real_pk, Arc::new(RwLock::new(connection)));
+        net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk);
 
         let (new_peer_dht_pk, _new_peer_dht_sk) = gen_keypair();
         let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
@@ -2261,8 +2283,8 @@ mod tests {
 
         // the old connection should be replaced with the new one
 
-        let connections = net_crypto.connections.read();
-        let connection = connections.get(&peer_real_pk).unwrap().read().clone();
+        let connections = net_crypto.connections.read().await;
+        let connection = connections.get(&peer_real_pk).unwrap().read().await.clone();
 
         assert_eq!(connection.peer_dht_pk, new_peer_dht_pk);
         assert_eq!(connection.get_udp_addr_v4(), Some(new_addr));
@@ -2277,8 +2299,8 @@ mod tests {
         let payload = packet.get_payload(&real_precomputed_key).unwrap();
         assert_eq!(payload.cookie_hash, cookie.hash());
 
-        assert!(!net_crypto.keys_by_addr.read().contains_key(&(addr.ip(), addr.port())));
-        assert!(net_crypto.keys_by_addr.read().contains_key(&(new_addr.ip(), new_addr.port())));
+        assert!(!net_crypto.keys_by_addr.read().await.contains_key(&(addr.ip(), addr.port())));
+        assert!(net_crypto.keys_by_addr.read().await.contains_key(&(new_addr.ip(), new_addr.port())));
 
         // the old connection should be killed
 
@@ -2316,7 +2338,7 @@ mod tests {
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, peer_real_sk) = gen_keypair();
 
-        net_crypto.add_friend(peer_real_pk);
+        net_crypto.add_friend(peer_real_pk).await;
 
         let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
@@ -2324,8 +2346,8 @@ mod tests {
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.set_udp_addr(addr);
 
-        net_crypto.connections.write().insert(peer_real_pk, Arc::new(RwLock::new(connection)));
-        net_crypto.keys_by_addr.write().insert((addr.ip(), addr.port()), peer_real_pk);
+        net_crypto.connections.write().await.insert(peer_real_pk, Arc::new(RwLock::new(connection)));
+        net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk);
 
         let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
         let base_nonce = gen_nonce();
@@ -2349,8 +2371,8 @@ mod tests {
 
         // the old connection should be updated with a new address
 
-        let connections = net_crypto.connections.read();
-        let connection = connections.get(&peer_real_pk).unwrap().read().clone();
+        let connections = net_crypto.connections.read().await;
+        let connection = connections.get(&peer_real_pk).unwrap().read().await.clone();
 
         assert_eq!(connection.get_udp_addr_v4(), Some(new_addr));
 
@@ -2364,8 +2386,8 @@ mod tests {
         let payload = packet.get_payload(&real_precomputed_key).unwrap();
         assert_eq!(payload.cookie_hash, cookie.hash());
 
-        assert!(!net_crypto.keys_by_addr.read().contains_key(&(addr.ip(), addr.port())));
-        assert!(net_crypto.keys_by_addr.read().contains_key(&(new_addr.ip(), new_addr.port())));
+        assert!(!net_crypto.keys_by_addr.read().await.contains_key(&(addr.ip(), addr.port())));
+        assert!(net_crypto.keys_by_addr.read().await.contains_key(&(new_addr.ip(), new_addr.port())));
     }
 
     #[tokio::test]
@@ -2390,7 +2412,7 @@ mod tests {
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, peer_real_sk) = gen_keypair();
 
-        net_crypto.add_friend(peer_real_pk);
+        net_crypto.add_friend(peer_real_pk).await;
 
         let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
@@ -2409,8 +2431,8 @@ mod tests {
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.set_udp_addr(addr);
 
-        net_crypto.connections.write().insert(peer_real_pk, Arc::new(RwLock::new(connection)));
-        net_crypto.keys_by_addr.write().insert((addr.ip(), addr.port()), peer_real_pk);
+        net_crypto.connections.write().await.insert(peer_real_pk, Arc::new(RwLock::new(connection)));
+        net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk);
 
         let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
         let base_nonce = gen_nonce();
@@ -2920,8 +2942,8 @@ mod tests {
         };
 
         let connection = Arc::new(RwLock::new(connection));
-        net_crypto.connections.write().insert(peer_real_pk, connection.clone());
-        net_crypto.keys_by_addr.write().insert((addr.ip(), addr.port()), peer_real_pk);
+        net_crypto.connections.write().await.insert(peer_real_pk, connection.clone());
+        net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk);
 
         let crypto_data_payload = CryptoDataPayload {
             buffer_start: 0,
@@ -2930,10 +2952,10 @@ mod tests {
         };
         let crypto_data = CryptoData::new(&session_precomputed_key, received_nonce, &crypto_data_payload);
 
-        net_crypto.handle_crypto_data(&mut connection.write(), &crypto_data, /* udp */ true).await.unwrap();
+        net_crypto.handle_crypto_data(&mut *connection.write().await, &crypto_data, /* udp */ true).await.unwrap();
 
-        assert!(net_crypto.connections.read().is_empty());
-        assert!(net_crypto.keys_by_addr.read().is_empty());
+        assert!(net_crypto.connections.read().await.is_empty());
+        assert!(net_crypto.keys_by_addr.read().await.is_empty());
     }
 
     #[tokio::test]
@@ -3266,8 +3288,8 @@ mod tests {
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.set_udp_addr(addr);
 
-        net_crypto.connections.write().insert(peer_real_pk, Arc::new(RwLock::new(connection)));
-        net_crypto.keys_by_addr.write().insert((addr.ip(), addr.port()), peer_real_pk);
+        net_crypto.connections.write().await.insert(peer_real_pk, Arc::new(RwLock::new(connection)));
+        net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk);
 
         let crypto_data_payload = CryptoDataPayload {
             buffer_start: 0,
@@ -3278,8 +3300,8 @@ mod tests {
 
         let net_crypto = handle_function(net_crypto, crypto_data, addr, peer_dht_pk).await;
 
-        let connections = net_crypto.connections.read();
-        let connection = connections.get(&peer_real_pk).unwrap().read().clone();
+        let connections = net_crypto.connections.read().await;
+        let connection = connections.get(&peer_real_pk).unwrap().read().await.clone();
 
         // The diff between nonces is not bigger than the threshold so received
         // nonce shouldn't be changed
@@ -3429,7 +3451,7 @@ mod tests {
             precomputed_keys,
         });
 
-        net_crypto.set_tcp_sink(tcp_tx);
+        net_crypto.set_tcp_sink(tcp_tx).await;
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
@@ -3483,7 +3505,7 @@ mod tests {
             precomputed_keys,
         });
 
-        net_crypto.set_tcp_sink(tcp_tx);
+        net_crypto.set_tcp_sink(tcp_tx).await;
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
@@ -3575,7 +3597,7 @@ mod tests {
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.set_udp_addr(addr);
 
-        net_crypto.connections.write().insert(peer_real_pk, Arc::new(RwLock::new(connection)));
+        net_crypto.connections.write().await.insert(peer_real_pk, Arc::new(RwLock::new(connection)));
 
         net_crypto.main_loop().await.unwrap();
 
@@ -3629,13 +3651,13 @@ mod tests {
 
         assert!(connection.is_timed_out());
 
-        net_crypto.connections.write().insert(peer_real_pk, Arc::new(RwLock::new(connection)));
-        net_crypto.keys_by_addr.write().insert((addr.ip(), addr.port()), peer_real_pk);
+        net_crypto.connections.write().await.insert(peer_real_pk, Arc::new(RwLock::new(connection)));
+        net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk);
 
         net_crypto.main_loop().await.unwrap();
 
-        assert!(net_crypto.connections.read().is_empty());
-        assert!(net_crypto.keys_by_addr.read().is_empty());
+        assert!(net_crypto.connections.read().await.is_empty());
+        assert!(net_crypto.keys_by_addr.read().await.is_empty());
     }
 
     #[tokio::test]
@@ -3677,8 +3699,8 @@ mod tests {
             session_precomputed_key: session_precomputed_key.clone(),
         };
 
-        net_crypto.connections.write().insert(peer_real_pk, Arc::new(RwLock::new(connection)));
-        net_crypto.keys_by_addr.write().insert((addr.ip(), addr.port()), peer_real_pk);
+        net_crypto.connections.write().await.insert(peer_real_pk, Arc::new(RwLock::new(connection)));
+        net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk);
 
         net_crypto.main_loop().await.unwrap();
 
@@ -3746,8 +3768,8 @@ mod tests {
             requested: true,
         }).is_ok());
 
-        net_crypto.connections.write().insert(peer_real_pk, Arc::new(RwLock::new(connection)));
-        net_crypto.keys_by_addr.write().insert((addr.ip(), addr.port()), peer_real_pk);
+        net_crypto.connections.write().await.insert(peer_real_pk, Arc::new(RwLock::new(connection)));
+        net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk);
 
         net_crypto.main_loop().await.unwrap();
 
@@ -4110,14 +4132,14 @@ mod tests {
         };
 
         let connection = Arc::new(RwLock::new(connection));
-        net_crypto.connections.write().insert(peer_real_pk, connection.clone());
-        net_crypto.keys_by_addr.write().insert((addr.ip(), addr.port()), peer_real_pk);
+        net_crypto.connections.write().await.insert(peer_real_pk, connection.clone());
+        net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk);
 
         let data = vec![16, 42];
 
         net_crypto.send_lossless(peer_real_pk, data.clone()).await.unwrap();
 
-        let connection = connection.read();
+        let connection = connection.read().await;
 
         assert_eq!(connection.packets_sent, 1);
 
@@ -4213,10 +4235,10 @@ mod tests {
 
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
         let (peer_dht_pk, peer_dht_sk) = gen_keypair();
-        net_crypto.add_connection(peer_real_pk, peer_dht_pk);
+        net_crypto.add_connection(peer_real_pk, peer_dht_pk).await;
 
-        let connections = net_crypto.connections.read();
-        let connection = connections[&peer_real_pk].read();
+        let connections = net_crypto.connections.read().await;
+        let connection = connections[&peer_real_pk].read().await;
 
         assert_eq!(connection.peer_real_pk, peer_real_pk);
         assert_eq!(connection.peer_dht_pk, peer_dht_pk);
@@ -4250,21 +4272,21 @@ mod tests {
 
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        net_crypto.add_connection(peer_real_pk, peer_dht_pk);
+        net_crypto.add_connection(peer_real_pk, peer_dht_pk).await;
 
         // adding a friend that already exists won't do anything
         let (another_peer_dht_pk, _another_peer_dht_sk) = gen_keypair();
-        net_crypto.add_connection(peer_real_pk, another_peer_dht_pk);
+        net_crypto.add_connection(peer_real_pk, another_peer_dht_pk).await;
 
-        let connections = net_crypto.connections.read();
-        let connection = connections[&peer_real_pk].read();
+        let connections = net_crypto.connections.read().await;
+        let connection = connections[&peer_real_pk].read().await;
 
         assert_eq!(connection.peer_real_pk, peer_real_pk);
         assert_eq!(connection.peer_dht_pk, peer_dht_pk);
     }
 
-    #[test]
-    fn set_friend_udp_addr() {
+    #[tokio::test]
+    async fn set_friend_udp_addr() {
         crypto_init().unwrap();
         let (udp_tx, _udp_rx) = mpsc::channel(2);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
@@ -4285,24 +4307,24 @@ mod tests {
 
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        net_crypto.add_connection(peer_real_pk, peer_dht_pk);
+        net_crypto.add_connection(peer_real_pk, peer_dht_pk).await;
 
         let addr_v4 = "127.0.0.1:12345".parse().unwrap();
-        net_crypto.set_friend_udp_addr(peer_real_pk, addr_v4);
+        net_crypto.set_friend_udp_addr(peer_real_pk, addr_v4).await;
         let addr_v6 = "[::]:12345".parse().unwrap();
-        net_crypto.set_friend_udp_addr(peer_real_pk, addr_v6);
+        net_crypto.set_friend_udp_addr(peer_real_pk, addr_v6).await;
 
-        let connections = net_crypto.connections.read();
-        let connection = connections[&peer_real_pk].read();
+        let connections = net_crypto.connections.read().await;
+        let connection = connections[&peer_real_pk].read().await;
 
         assert_eq!(connection.get_udp_addr_v4(), Some(addr_v4));
         assert_eq!(connection.get_udp_addr_v6(), Some(addr_v6));
-        assert_eq!(net_crypto.keys_by_addr.read()[&(addr_v4.ip(), addr_v4.port())], peer_real_pk);
-        assert_eq!(net_crypto.keys_by_addr.read()[&(addr_v6.ip(), addr_v6.port())], peer_real_pk);
+        assert_eq!(net_crypto.keys_by_addr.read().await[&(addr_v4.ip(), addr_v4.port())], peer_real_pk);
+        assert_eq!(net_crypto.keys_by_addr.read().await[&(addr_v6.ip(), addr_v6.port())], peer_real_pk);
     }
 
-    #[test]
-    fn set_friend_udp_addr_update() {
+    #[tokio::test]
+    async fn set_friend_udp_addr_update() {
         crypto_init().unwrap();
         let (udp_tx, _udp_rx) = mpsc::channel(2);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
@@ -4323,28 +4345,28 @@ mod tests {
 
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        net_crypto.add_connection(peer_real_pk, peer_dht_pk);
+        net_crypto.add_connection(peer_real_pk, peer_dht_pk).await;
 
         let addr = "127.0.0.1:12345".parse().unwrap();
-        net_crypto.set_friend_udp_addr(peer_real_pk, addr);
+        net_crypto.set_friend_udp_addr(peer_real_pk, addr).await;
         // setting the same address won't do anything
-        net_crypto.set_friend_udp_addr(peer_real_pk, addr);
+        net_crypto.set_friend_udp_addr(peer_real_pk, addr).await;
 
         let addr = "127.0.0.1:12346".parse().unwrap();
-        net_crypto.set_friend_udp_addr(peer_real_pk, addr);
+        net_crypto.set_friend_udp_addr(peer_real_pk, addr).await;
 
-        let connections = net_crypto.connections.read();
-        let connection = connections[&peer_real_pk].read();
+        let connections = net_crypto.connections.read().await;
+        let connection = connections[&peer_real_pk].read().await;
 
         assert_eq!(connection.get_udp_addr_v4(), Some(addr));
 
-        let keys_by_addr = net_crypto.keys_by_addr.read();
+        let keys_by_addr = net_crypto.keys_by_addr.read().await;
         assert_eq!(keys_by_addr[&(addr.ip(), addr.port())], peer_real_pk);
         assert_eq!(keys_by_addr.len(), 1);
     }
 
-    #[test]
-    fn set_friend_udp_addr_no_connection() {
+    #[tokio::test]
+    async fn set_friend_udp_addr_no_connection() {
         crypto_init().unwrap();
         let (udp_tx, _udp_rx) = mpsc::channel(2);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
@@ -4367,9 +4389,9 @@ mod tests {
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
 
         // setting an address to nonexistent connection won't do anything
-        net_crypto.set_friend_udp_addr(peer_real_pk, addr);
+        net_crypto.set_friend_udp_addr(peer_real_pk, addr).await;
 
-        assert!(net_crypto.keys_by_addr.read().is_empty());
+        assert!(net_crypto.keys_by_addr.read().await.is_empty());
     }
 
     #[tokio::test]
@@ -4411,13 +4433,13 @@ mod tests {
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.set_udp_addr(addr);
 
-        net_crypto.connections.write().insert(peer_real_pk, Arc::new(RwLock::new(connection)));
-        net_crypto.keys_by_addr.write().insert((addr.ip(), addr.port()), peer_real_pk);
+        net_crypto.connections.write().await.insert(peer_real_pk, Arc::new(RwLock::new(connection)));
+        net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk);
 
         net_crypto.kill_connection(peer_real_pk).await.unwrap();
 
-        assert!(!net_crypto.connections.read().contains_key(&peer_real_pk));
-        assert!(!net_crypto.keys_by_addr.read().contains_key(&(addr.ip(), addr.port())));
+        assert!(!net_crypto.connections.read().await.contains_key(&peer_real_pk));
+        assert!(!net_crypto.keys_by_addr.read().await.contains_key(&(addr.ip(), addr.port())));
 
         let (received, _udp_rx) = udp_rx.into_future().await;
         let (received, addr_to_send) = received.unwrap();
@@ -4485,13 +4507,13 @@ mod tests {
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.set_udp_addr(addr);
 
-        net_crypto.connections.write().insert(peer_real_pk, Arc::new(RwLock::new(connection)));
-        net_crypto.keys_by_addr.write().insert((addr.ip(), addr.port()), peer_real_pk);
+        net_crypto.connections.write().await.insert(peer_real_pk, Arc::new(RwLock::new(connection)));
+        net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk);
 
         net_crypto.kill_connection(peer_real_pk).await.unwrap();
 
-        assert!(!net_crypto.connections.read().contains_key(&peer_real_pk));
-        assert!(!net_crypto.keys_by_addr.read().contains_key(&(addr.ip(), addr.port())));
+        assert!(!net_crypto.connections.read().await.contains_key(&peer_real_pk));
+        assert!(!net_crypto.keys_by_addr.read().await.contains_key(&(addr.ip(), addr.port())));
 
         // Necessary to drop udp_tx so that udp_rx.collect() can be finished
         drop(net_crypto.udp_tx);
