@@ -1,5 +1,7 @@
 // an example of DHT node with current code
 //
+#![type_length_limit="4194304"]
+
 #[macro_use]
 extern crate log;
 
@@ -12,7 +14,7 @@ use std::net::SocketAddr;
 use tox_crypto::*;
 use tox_packet::dht::packed_node::PackedNode;
 use tox_core::dht::server::*;
-use tox_core::dht::server_ext::ServerExt;
+use tox_core::dht::server_ext::dht_run_socket;
 use tox_core::dht::lan_discovery::*;
 use tox_core::stats::Stats;
 
@@ -64,7 +66,7 @@ async fn main() -> Result<(), Error> {
     info!("Running DHT server on {}", local_addr);
 
     futures::select! {
-        res = server.run_socket(socket, rx, stats).fuse() => res.map_err(Error::from),
+        res = dht_run_socket(&server, socket, rx, stats).fuse() => res.map_err(Error::from),
         res = lan_discovery_sender.run().fuse() => res.map_err(Error::from),
     }
 }

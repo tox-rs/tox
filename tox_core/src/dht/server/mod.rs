@@ -361,7 +361,7 @@ impl Server {
 
     /// Run DHT periodical tasks. Result future will never be completed
     /// successfully.
-    pub async fn run(self) -> Result<(), RunError> {
+    pub async fn run(&self) -> Result<(), RunError> {
         let (r1, r2, r3, r4) = futures::join!(
             self.run_pings_sending(),
             self.run_onion_key_refreshing(),

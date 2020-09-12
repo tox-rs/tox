@@ -1,6 +1,7 @@
 // an example of echo server with current code
 //
 #![recursion_limit="256"]
+#![type_length_limit="4194304"]
 
 #[macro_use]
 extern crate log;
@@ -20,7 +21,7 @@ use tox_packet::onion::InnerOnionResponse;
 use tox_packet::relay::DataPayload;
 use tox_packet::toxid::ToxId;
 use tox_core::dht::server::Server;
-use tox_core::dht::server_ext::ServerExt;
+use tox_core::dht::server_ext::dht_run_socket;
 use tox_core::dht::lan_discovery::LanDiscoverySender;
 use tox_core::friend_connection::FriendConnections;
 use tox_core::net_crypto::{NetCrypto, NetCryptoNewArgs};
@@ -211,7 +212,7 @@ async fn main() -> Result<(), Error> {
     }
 
     futures::select!(
-        res = dht_server.run_socket(socket, rx, stats).fuse() => res.map_err(Error::from),
+        res = dht_run_socket(&dht_server, socket, rx, stats).fuse() => res.map_err(Error::from),
         res = lan_discovery_sender.run().fuse() => res.map_err(Error::from),
         res = tcp_connections.run().fuse() => res.map_err(Error::from),
         res = onion_client.run().fuse() => res.map_err(Error::from),
