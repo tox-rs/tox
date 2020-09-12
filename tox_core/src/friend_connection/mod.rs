@@ -137,7 +137,7 @@ impl FriendConnections {
         let mut friends = self.friends.write().await;
         if let Entry::Vacant(entry) = friends.entry(friend_pk) {
             entry.insert(Friend::new(friend_pk));
-            self.onion_client.add_friend(friend_pk);
+            self.onion_client.add_friend(friend_pk).await;
             self.net_crypto.add_friend(friend_pk).await;
         }
     }
@@ -151,7 +151,7 @@ impl FriendConnections {
                 self.tcp_connections.remove_connection(dht_pk).await.ok();
             };
             self.net_crypto.remove_friend(friend_pk).await;
-            self.onion_client.remove_friend(friend_pk);
+            self.onion_client.remove_friend(friend_pk).await;
             self.net_crypto.kill_connection(friend_pk)
                 .then(|res| future::ready(match res {
                     Err(ref e)
@@ -221,7 +221,7 @@ impl FriendConnections {
 
                     dht.add_friend(dht_pk).await;
                     net_crypto.add_connection(real_pk, dht_pk).await;
-                    onion_client.set_friend_dht_pk(real_pk, dht_pk);
+                    onion_client.set_friend_dht_pk(real_pk, dht_pk).await;
                 }
             }
         }
@@ -276,7 +276,7 @@ impl FriendConnections {
 
                 if status != friend.connected {
                     friend.connected = status;
-                    onion_client.set_friend_connected(real_pk, status);
+                    onion_client.set_friend_connected(real_pk, status).await;
                     if let Some(mut connection_status_tx) = connection_status_tx.read().await.clone() {
                         connection_status_tx.send((real_pk, status)).await
                             .map_err(|e| RunError::from(e.context(RunErrorKind::SendToConnectionStatus)))?;
@@ -389,7 +389,7 @@ impl FriendConnections {
     /// modules.
     pub async fn run(&self) -> Result<(), RunError> {
         let (dht_pk_tx, dht_pk_rx) = mpsc::unbounded();
-        self.onion_client.set_dht_pk_sink(dht_pk_tx.clone());
+        self.onion_client.set_dht_pk_sink(dht_pk_tx.clone()).await;
         self.net_crypto.set_dht_pk_sink(dht_pk_tx).await;
 
         let (friend_saddr_tx, friend_saddr_rx) = mpsc::unbounded();
@@ -483,7 +483,7 @@ mod tests {
         // add friend to all modules to check later that it will be deleted
         // from everywhere
         friend_connections.dht.add_friend(friend_dht_pk).await;
-        friend_connections.onion_client.add_friend(friend_pk);
+        friend_connections.onion_client.add_friend(friend_pk).await;
         friend_connections.net_crypto.add_friend(friend_pk).await;
         let (_relay_incoming_rx, _relay_outgoing_rx, relay_pk) = friend_connections.tcp_connections.add_client();
         // ignore result future since it spawns the connection which should be
@@ -504,7 +504,7 @@ mod tests {
         friend_connections.remove_friend(friend_pk).await.unwrap();
 
         assert!(!friend_connections.dht.has_friend(&friend_dht_pk).await);
-        assert!(!friend_connections.onion_client.has_friend(&friend_pk));
+        assert!(!friend_connections.onion_client.has_friend(&friend_pk).await);
         assert!(!friend_connections.net_crypto.has_friend(&friend_pk).await);
         assert!(!friend_connections.tcp_connections.has_connection(&friend_dht_pk));
 
@@ -536,7 +536,7 @@ mod tests {
         friend_connections.friends.write().await.insert(friend_pk, friend);
         friend_connections.dht.add_friend(friend_dht_pk).await;
         friend_connections.net_crypto.add_friend(friend_pk).await;
-        friend_connections.onion_client.add_friend(friend_pk);
+        friend_connections.onion_client.add_friend(friend_pk).await;
         let (_relay_incoming_rx, _relay_outgoing_rx, relay_pk) = friend_connections.tcp_connections.add_client();
         // ignore result future since it spawns the connection which should be
         // executed inside tokio context
@@ -566,7 +566,7 @@ mod tests {
         assert!(!friend_connections.dht.has_friend(&friend_dht_pk).await);
         assert!(friend_connections.dht.has_friend(&new_friend_dht_pk).await);
         assert_eq!(friend_connections.net_crypto.connection_dht_pk(&friend_pk).await, Some(new_friend_dht_pk));
-        assert_eq!(friend_connections.onion_client.friend_dht_pk(&friend_pk), Some(new_friend_dht_pk));
+        assert_eq!(friend_connections.onion_client.friend_dht_pk(&friend_pk).await, Some(new_friend_dht_pk));
         assert!(!friend_connections.tcp_connections.has_connection(&friend_dht_pk));
 
         let friend = &friend_connections.friends.read().await[&friend_pk];
@@ -629,7 +629,7 @@ mod tests {
         friend.ping_sent_time = Some(now);
         friend.share_relays_time = Some(now);
         friend_connections.friends.write().await.insert(friend_pk, friend);
-        friend_connections.onion_client.add_friend(friend_pk);
+        friend_connections.onion_client.add_friend(friend_pk).await;
 
         let (mut connnection_status_tx, connnection_status_rx) = mpsc::unbounded();
         connnection_status_tx.send((friend_pk, true)).await.unwrap();
@@ -643,7 +643,7 @@ mod tests {
         assert!(friend.ping_sent_time.is_none());
         assert!(friend.share_relays_time.is_none());
 
-        assert!(friend_connections.onion_client.is_friend_connected(&friend_pk));
+        assert!(friend_connections.onion_client.is_friend_connected(&friend_pk).await);
     }
 
     #[tokio::test]
@@ -659,8 +659,8 @@ mod tests {
         friend.dht_pk_time = Some(now);
         friend.connected = true;
         friend_connections.friends.write().await.insert(friend_pk, friend);
-        friend_connections.onion_client.add_friend(friend_pk);
-        friend_connections.onion_client.set_friend_connected(friend_pk, true);
+        friend_connections.onion_client.add_friend(friend_pk).await;
+        friend_connections.onion_client.set_friend_connected(friend_pk, true).await;
 
         let (mut connnection_status_tx, connnection_status_rx) = mpsc::unbounded();
         connnection_status_tx.send((friend_pk, false)).await.unwrap();
@@ -672,7 +672,7 @@ mod tests {
         assert!(!friend.connected);
         assert_eq!(friend.dht_pk_time, Some(now));
 
-        assert!(!friend_connections.onion_client.is_friend_connected(&friend_pk));
+        assert!(!friend_connections.onion_client.is_friend_connected(&friend_pk).await);
     }
 
     #[tokio::test]

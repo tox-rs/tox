@@ -80,7 +80,7 @@ async fn main() -> Result<(), Error> {
     let (lossy_tx, mut lossy_rx) = mpsc::unbounded();
 
     let (friend_request_tx, mut friend_request_sink_rx) = mpsc::unbounded();
-    onion_client.set_friend_request_sink(friend_request_tx);
+    onion_client.set_friend_request_sink(friend_request_tx).await;
 
     let net_crypto = NetCrypto::new(NetCryptoNewArgs {
         udp_tx: tx,
@@ -118,7 +118,7 @@ async fn main() -> Result<(), Error> {
         let node = PackedNode::new(saddr.parse().unwrap(), &bootstrap_pk);
 
         dht_server.add_initial_bootstrap(node);
-        onion_client.add_path_node(node);
+        onion_client.add_path_node(node).await;
     }
 
     let tcp_connections_c = tcp_connections.clone();
