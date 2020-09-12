@@ -2,7 +2,7 @@
 extern crate log;
 
 use tox_crypto::*;
-use tox_core::relay::server::{Server, ServerExt};
+use tox_core::relay::server::{Server, tcp_run};
 use tox_core::stats::Stats;
 
 use tokio::net::TcpListener;
@@ -35,7 +35,7 @@ fn main() {
     let stats = Stats::new();
     let future = async move {
         let listener = TcpListener::bind(&addr).await.unwrap();
-        drop(server.run(listener, server_sk, stats, TCP_CONNECTIONS_LIMIT).await);
+        drop(tcp_run(&server, listener, server_sk, stats, TCP_CONNECTIONS_LIMIT).await);
     };
 
     let mut runtime = tokio::runtime::Runtime::new().unwrap();

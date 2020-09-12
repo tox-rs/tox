@@ -5,10 +5,9 @@ use std::io::Error as IoError;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
-use std::pin::Pin;
 
 use failure::Fail;
-use futures::{future, Future, FutureExt, TryFutureExt, SinkExt, StreamExt, TryStreamExt};
+use futures::{future, FutureExt, TryFutureExt, SinkExt, StreamExt, TryStreamExt};
 use futures::channel::mpsc;
 use tokio::net::{TcpStream, TcpListener};
 use tokio_util::codec::Framed;
@@ -116,154 +115,133 @@ pub enum ConnectionError {
     },
 }
 
-/// Extension trait for running TCP server on incoming `TcpStream` and ping sender
-pub trait ServerExt {
-    /// Running TCP ping sender and incoming `TcpStream`. This function uses
-    /// `tokio::spawn` inside so it should be executed via tokio to be able to
-    /// get tokio default executor.
-    fn run(self: Self, listener: TcpListener, dht_sk: SecretKey, stats: Stats, connections_limit: usize) -> Pin<Box<dyn Future<Output = Result<(), ServerRunError>> + Send>>;
-    /// Running TCP server on incoming `TcpStream`
-    fn run_connection(self: Self, stream: TcpStream, dht_sk: SecretKey, stats: Stats) -> Box<dyn Future<Output = Result<(), ConnectionError>> + Send + Unpin>;
-}
+/// Running TCP ping sender and incoming `TcpStream`. This function uses
+/// `tokio::spawn` inside so it should be executed via tokio to be able to
+/// get tokio default executor.
+pub async fn tcp_run(server: &Server, mut listener: TcpListener, dht_sk: SecretKey, stats: Stats, connections_limit: usize) -> Result<(), ServerRunError> {
+    let connections_count = Arc::new(AtomicUsize::new(0));
 
-impl ServerExt for Server {
-    fn run(self: Self, mut listener: TcpListener, dht_sk: SecretKey, stats: Stats, connections_limit: usize) -> Pin<Box<dyn Future<Output = Result<(), ServerRunError>> + Send>> {
-        let connections_count = Arc::new(AtomicUsize::new(0));
+    let connections_future = async {
+        listener.incoming()
+            .map_err(|error| ServerRunError::IncomingError { error })
+            .try_for_each(|stream| {
+                if connections_count.load(Ordering::SeqCst) < connections_limit {
+                    connections_count.fetch_add(1, Ordering::SeqCst);
+                    let connections_count_c = connections_count.clone();
+                    let dht_sk = dht_sk.clone();
+                    let stats = stats.clone();
+                    let server = server.clone();
 
-        let self_c = self.clone();
+                    tokio::spawn(
+                        async move {
+                            let res = tcp_run_connection(&server, stream, dht_sk, stats).await;
 
-        let connections_future = async move {
-            listener.incoming()
-                .map_err(|error| ServerRunError::IncomingError { error })
-                .try_for_each(move |stream| {
-                    if connections_count.load(Ordering::SeqCst) < connections_limit {
-                        connections_count.fetch_add(1, Ordering::SeqCst);
-                        let connections_count_c = connections_count.clone();
-                        let self_cc = self_c.clone();
-                        let dht_sk = dht_sk.clone();
-                        let stats = stats.clone();
-
-                        tokio::spawn(
-                            async move {
-                                let res: Result<_, ConnectionError> = self_cc
-                                    .run_connection(stream, dht_sk, stats)
-                                    .await;
-
-                                if let Err(ref e) = res {
-                                    error!("Error while running tcp connection: {:?}", e)
-                                }
-
-                                connections_count_c.fetch_sub(1, Ordering::SeqCst);
-                                res
+                            if let Err(ref e) = res {
+                                error!("Error while running tcp connection: {:?}", e)
                             }
-                        );
-                    } else {
-                        trace!("Tcp server has reached the limit of {} connections", connections_limit);
-                    }
 
-                    future::ok(())
-                }).await
-        };
-
-        let mut wakeups = tokio::time::interval(TCP_PING_INTERVAL);
-        let ping_future = async move {
-            while wakeups.next().await.is_some() {
-                trace!("Tcp server ping sender wake up");
-                self.send_pings().await
-                    .map_err(|error| ServerRunError::SendPingsError { error })?;
-            }
-
-            Ok(())
-        };
-
-        Box::pin(async move {
-            let res = futures::select! {
-                res = connections_future.fuse() => res,
-                res = ping_future.fuse() => res,
-            };
-
-            res.map(drop)
-        })
-    }
-
-    fn run_connection(self: Self, stream: TcpStream, dht_sk: SecretKey, stats: Stats) -> Box<dyn Future<Output = Result<(), ConnectionError>> + Send + Unpin> {
-        let addr = match stream.peer_addr() {
-            Ok(addr) => addr,
-            Err(error) => return Box::new(future::err(ConnectionError::PeerAddrError {
-                error
-            })),
-        };
-
-        debug!("A new TCP client connected from {}", addr);
-
-        let process = async move {
-            let fut = tokio::time::timeout(
-                TCP_HANDSHAKE_TIMEOUT,
-                make_server_handshake(stream, dht_sk.clone())
-            );
-            let (stream, channel, client_pk) = match fut.await {
-                Err(error) => Err(
-                    ConnectionError::ServerHandshakeTimeoutError { error }
-                ),
-                Ok(Err(error)) => Err(
-                    ConnectionError::ServerHandshakeIoError { error }
-                ),
-                Ok(Ok(res)) => Ok(res)
-            }?;
-
-            debug!("Handshake for TCP client {:?} is completed", client_pk);
-
-            let secure_socket = Framed::new(stream, Codec::new(channel, stats));
-            let (mut to_client, from_client) = secure_socket.split();
-            let (to_client_tx, mut to_client_rx) = mpsc::channel(SERVER_CHANNEL_SIZE);
-
-            let server = self.clone();
-            // processor = for each Packet from client process it
-            let processor = from_client
-                .map_err(|error| ConnectionError::DecodePacketError { error })
-                .try_for_each(move |packet| {
-                    debug!("Handle {:?} => {:?}", client_pk, packet);
-                    server.handle_packet(&client_pk, packet)
-                        .map_err(|error| ConnectionError::PacketHandlingError { error } )
-                });
-
-            let writer = async {
-                while let Some(packet) = to_client_rx.next().await {
-                    trace!("Sending TCP packet {:?} to {:?}", packet, client_pk);
-                    to_client.send(packet).await
-                        .map_err(|error| ConnectionError::SendPacketError {
-                            error
-                        })?;
+                            connections_count_c.fetch_sub(1, Ordering::SeqCst);
+                            res
+                        }
+                    );
+                } else {
+                    trace!("Tcp server has reached the limit of {} connections", connections_limit);
                 }
 
-                Ok(())
-            };
+                future::ok(())
+            }).await
+    };
 
-            let client = Client::new(
-                to_client_tx,
-                &client_pk,
-                addr.ip(),
-                addr.port()
-            );
-            self.insert(client).await
-                .map_err(|error| ConnectionError::InsertClientError { error })?;
+    let mut wakeups = tokio::time::interval(TCP_PING_INTERVAL);
+    let ping_future = async {
+        while wakeups.next().await.is_some() {
+            trace!("Tcp server ping sender wake up");
+            server.send_pings().await
+                .map_err(|error| ServerRunError::SendPingsError { error })?;
+        }
 
-            let r_processing = futures::select! {
-                res = processor.fuse() => res,
-                res = writer.fuse() => res
-            };
+        Ok(())
+    };
 
-            debug!("Shutdown a client with PK {:?}", &client_pk);
-
-            self.shutdown_client(&client_pk, addr.ip(), addr.port())
-                .await
-                .map_err(|error| ConnectionError::ShutdownError { error })?;
-
-            r_processing
-        };
-
-        Box::new(process.boxed())
+    futures::select! {
+        res = connections_future.fuse() => res,
+        res = ping_future.fuse() => res,
     }
+}
+
+/// Running TCP server on incoming `TcpStream`
+pub async fn tcp_run_connection(server: &Server, stream: TcpStream, dht_sk: SecretKey, stats: Stats) -> Result<(), ConnectionError> {
+    let addr = match stream.peer_addr() {
+        Ok(addr) => addr,
+        Err(error) => return Err(ConnectionError::PeerAddrError {
+            error
+        }),
+    };
+
+    debug!("A new TCP client connected from {}", addr);
+
+    let fut = tokio::time::timeout(
+        TCP_HANDSHAKE_TIMEOUT,
+        make_server_handshake(stream, dht_sk.clone())
+    );
+    let (stream, channel, client_pk) = match fut.await {
+        Err(error) => Err(
+            ConnectionError::ServerHandshakeTimeoutError { error }
+        ),
+        Ok(Err(error)) => Err(
+            ConnectionError::ServerHandshakeIoError { error }
+        ),
+        Ok(Ok(res)) => Ok(res)
+    }?;
+
+    debug!("Handshake for TCP client {:?} is completed", client_pk);
+
+    let secure_socket = Framed::new(stream, Codec::new(channel, stats));
+    let (mut to_client, from_client) = secure_socket.split();
+    let (to_client_tx, mut to_client_rx) = mpsc::channel(SERVER_CHANNEL_SIZE);
+
+    // processor = for each Packet from client process it
+    let processor = from_client
+        .map_err(|error| ConnectionError::DecodePacketError { error })
+        .try_for_each(|packet| {
+            debug!("Handle {:?} => {:?}", client_pk, packet);
+            server.handle_packet(&client_pk, packet)
+                .map_err(|error| ConnectionError::PacketHandlingError { error } )
+        });
+
+    let writer = async {
+        while let Some(packet) = to_client_rx.next().await {
+            trace!("Sending TCP packet {:?} to {:?}", packet, client_pk);
+            to_client.send(packet).await
+                .map_err(|error| ConnectionError::SendPacketError {
+                    error
+                })?;
+        }
+
+        Ok(())
+    };
+
+    let client = Client::new(
+        to_client_tx,
+        &client_pk,
+        addr.ip(),
+        addr.port()
+    );
+    server.insert(client).await
+        .map_err(|error| ConnectionError::InsertClientError { error })?;
+
+    let r_processing = futures::select! {
+        res = processor.fuse() => res,
+        res = writer.fuse() => res
+    };
+
+    debug!("Shutdown a client with PK {:?}", &client_pk);
+
+    server.shutdown_client(&client_pk, addr.ip(), addr.port())
+        .await
+        .map_err(|error| ConnectionError::ShutdownError { error })?;
+
+    r_processing
 }
 
 #[cfg(test)]
@@ -294,7 +272,7 @@ mod tests {
         let server = async {
             // take the first connection
             let connection = listener.incoming().next().await.unwrap().unwrap();
-            Server::new().run_connection(connection, server_sk, stats.clone())
+            tcp_run_connection(&Server::new(), connection, server_sk, stats.clone())
                 .map_err(Error::from).await
         };
 
@@ -314,13 +292,16 @@ mod tests {
             assert_eq!(packet.unwrap(), Packet::PongResponse(PongResponse {
                 ping_id: 42
             }));
-            Ok(())
 
+            Ok(())
         };
 
-        let both = futures::future::select(server.boxed(), client.boxed());
-        let r = both.await.into_inner().0;
-        assert!(r.is_ok());
+        let result = futures::select!(
+            res = server.fuse() => res,
+            res = client.fuse() => res,
+        );
+
+        assert!(result.is_ok());
     }
 
     #[tokio::test]
@@ -336,8 +317,10 @@ mod tests {
         let addr = listener.local_addr().unwrap();
 
         let stats = Stats::new();
-        let server = Server::new().run(listener, server_sk, stats.clone(), 1)
-            .map_err(Error::from);
+        let server = async {
+            tcp_run(&Server::new(), listener, server_sk, stats.clone(), 1).await
+                .map_err(Error::from)
+        };
 
         let client = async {
             let socket = TcpStream::connect(&addr).map_err(Error::from).await?;
@@ -350,6 +333,7 @@ mod tests {
                 ping_id: 42
             });
             to_server.send(packet).map_err(Error::from).await?;
+
             let packet = from_server.next().await.unwrap();
             assert_eq!(packet.unwrap(), Packet::PongResponse(PongResponse {
                 ping_id: 42
@@ -360,11 +344,15 @@ mod tests {
                 // check the packet
                 let _ping_packet = unpack!(packet.unwrap(), Packet::PingRequest);
             }
+
             Ok(())
         };
 
-        let both = futures::future::select(server.boxed(), client.boxed());
-        let r = both.await.into_inner().0;
-        assert!(r.is_ok());
+        let result = futures::select!(
+            res = server.fuse() => res,
+            res = client.fuse() => res,
+        );
+
+        assert!(result.is_ok());
     }
 }

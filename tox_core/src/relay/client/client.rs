@@ -569,7 +569,7 @@ pub mod tests {
     use tox_packet::dht::CryptoData;
     use tox_packet::ip_port::*;
     use tox_packet::onion::*;
-    use crate::relay::server::{Server, ServerExt};
+    use crate::relay::server::{Server, tcp_run, tcp_run_connection};
 
     pub fn create_client() -> (mpsc::UnboundedReceiver<(PublicKey, IncomingPacket)>, mpsc::Receiver<Packet>, Client) {
         crypto_init().unwrap();
@@ -1218,10 +1218,11 @@ pub mod tests {
         let listener = TcpListener::bind(&addr).await.unwrap();
         let addr = listener.local_addr().unwrap();
 
-        let server = Server::new();
         let stats = Stats::new();
-        let server_future = server.run(listener, server_sk, stats, 2)
-            .map_err(Error::from);
+        let server_future = async {
+            tcp_run(&Server::new(), listener, server_sk, stats, 2).await
+                .map_err(Error::from)
+        };
         tokio::spawn(server_future);
 
         // run first client
@@ -1302,7 +1303,7 @@ pub mod tests {
         let stats = Stats::new();
         let server_future = async {
             let connection = listener.incoming().next().await.unwrap().unwrap();
-            server.run_connection(connection, server_sk, stats)
+            tcp_run_connection(&server, connection, server_sk, stats)
                 .map_err(Error::from).await
         };
 
