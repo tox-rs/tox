@@ -27,7 +27,6 @@ use std::u16;
 use failure::Fail;
 use futures::{TryFutureExt, StreamExt, SinkExt};
 use futures::future;
-use futures::future::Either;
 use futures::channel::mpsc;
 use tokio::sync::RwLock;
 
@@ -938,7 +937,7 @@ impl NetCrypto {
         // TODO: can backpressure be used instead of congestion control? It
         // seems it's possible to implement wrapper for bounded sender with
         // priority queue and just send packets there
-        let udp_future = if let Some(addr) = connection.get_udp_addr() {
+        if let Some(addr) = connection.get_udp_addr() {
             if connection.is_udp_alive() {
                 return self.send_to_udp(addr, packet.into()).await
                     .map_err(|e| e.context(SendPacketErrorKind::Udp).into())
@@ -953,23 +952,14 @@ impl NetCrypto {
 
             if udp_attempt_should_be_made {
                 connection.update_udp_send_attempt_time();
-                Either::Left(self.send_to_udp(addr, dht_packet))
-            } else {
-                Either::Right(future::ok(()))
+                self.send_to_udp(addr, dht_packet).await
+                    .map_err(|e| e.context(SendPacketErrorKind::Udp))?;
             }
-        } else {
-            Either::Right(future::ok(()))
         };
 
-        let udp_future = udp_future
-            .map_err(|e| e.context(SendPacketErrorKind::Udp).into());
-
         let tcp_tx = self.tcp_tx.read().await.clone();
-        let tcp_future = maybe_send_bounded(tcp_tx, (packet.into(), connection.peer_dht_pk))
-            .map_err(|e| e.context(SendPacketErrorKind::Tcp).into());
-
-        future::try_join(udp_future, tcp_future)
-            .map_ok(drop).await
+        maybe_send_bounded(tcp_tx, (packet.into(), connection.peer_dht_pk)).await
+            .map_err(|e| e.context(SendPacketErrorKind::Tcp).into())
     }
 
     /// Send `CookieRequest` or `CryptoHandshake` packet if needed depending on

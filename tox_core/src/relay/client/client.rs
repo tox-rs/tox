@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use failure::Fail;
-use futures::{future, Future, FutureExt, TryFutureExt, StreamExt, SinkExt};
+use futures::{FutureExt, TryFutureExt, StreamExt, SinkExt};
 use futures::channel::mpsc;
 use tokio_util::codec::Framed;
 use tokio::net::TcpStream;
@@ -131,10 +131,8 @@ impl Client {
         }
     }
 
-    fn handle_route_request(&self, _packet: &RouteRequest) -> impl Future<Output = Result<(), HandlePacketError>> + Send {
-        future::err(
-            HandlePacketErrorKind::MustNotSend.into()
-        )
+    async fn handle_route_request(&self, _packet: &RouteRequest) -> Result<(), HandlePacketError> {
+        Err(HandlePacketErrorKind::MustNotSend.into())
     }
 
     async fn handle_route_response(&self, packet: &RouteResponse) -> Result<(), HandlePacketError> {
@@ -192,28 +190,24 @@ impl Client {
         )).await.map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
     }
 
-    fn handle_pong_response(&self, _packet: &PongResponse) -> impl Future<Output = Result<(), HandlePacketError>> + Send {
+    async fn handle_pong_response(&self, _packet: &PongResponse) -> Result<(), HandlePacketError> {
         // TODO check ping_id
-        future::ok(())
+        Ok(())
     }
 
-    fn handle_oob_send(&self, _packet: &OobSend) -> impl Future<Output = Result<(), HandlePacketError>> + Send {
-        future::err(
-            HandlePacketErrorKind::MustNotSend.into()
-        )
+    async fn handle_oob_send(&self, _packet: &OobSend) -> Result<(), HandlePacketError> {
+        Err(HandlePacketErrorKind::MustNotSend.into())
     }
 
-    fn handle_oob_receive(&self, packet: OobReceive) -> impl Future<Output = Result<(), HandlePacketError>> + Send {
+    async fn handle_oob_receive(&self, packet: OobReceive) -> Result<(), HandlePacketError> {
         let mut tx = self.incoming_tx.clone();
         let msg = (
             self.pk,
             IncomingPacket::Oob(packet.sender_pk, packet.data)
         );
 
-        async move {
-            tx.send(msg).await
-                .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
-        }
+        tx.send(msg).await
+            .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
     }
 
     async fn handle_data(&self, packet: Data) -> Result<(), HandlePacketError> {
@@ -238,23 +232,19 @@ impl Client {
         }
     }
 
-    fn handle_onion_request(&self, _packet: &OnionRequest) -> impl Future<Output = Result<(), HandlePacketError>> + Send {
-        future::err(
-            HandlePacketErrorKind::MustNotSend.into()
-        )
+    async fn handle_onion_request(&self, _packet: &OnionRequest) -> Result<(), HandlePacketError> {
+        Err(HandlePacketErrorKind::MustNotSend.into())
     }
 
-    fn handle_onion_response(&self, packet: OnionResponse) -> impl Future<Output = Result<(), HandlePacketError>> + Send {
+    async fn handle_onion_response(&self, packet: OnionResponse) -> Result<(), HandlePacketError> {
         let mut tx = self.incoming_tx.clone();
         let msg = (
             self.pk,
             IncomingPacket::Onion(packet.payload)
         );
 
-        async move {
-            tx.send(msg).await
-                .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
-        }
+        tx.send(msg).await
+            .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
     }
 
     /// Spawn a connection to this TCP relay if it is not connected already. The
@@ -1262,7 +1252,7 @@ pub mod tests {
         let client_future = client.run(client_sk_1, client_pk_1)
             .map_err(Error::from);
 
-        let (server_res, client_res) = future::join(server_future.boxed(), client_future.boxed()).await;
+        let (server_res, client_res) = futures::join!(server_future, client_future);
         assert!(server_res.is_err()); // fail to process handshake
         assert!(client_res.is_err()); // fail to process handshake
 
