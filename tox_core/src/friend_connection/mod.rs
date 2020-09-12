@@ -291,7 +291,7 @@ impl FriendConnections {
     /// Send some of our relays to a friend and start using these relays to
     /// connect to this friend.
     async fn share_relays(&self, friend_pk: PublicKey) -> Result<(), RunError> {
-        let relays = self.tcp_connections.get_random_relays(MAX_SHARED_RELAYS as u8);
+        let relays = self.tcp_connections.get_random_relays(MAX_SHARED_RELAYS as u8).await;
         if !relays.is_empty() {
             for relay in &relays {
                 self.tcp_connections.add_connection(relay.pk, friend_pk).await
@@ -485,7 +485,7 @@ mod tests {
         friend_connections.dht.add_friend(friend_dht_pk).await;
         friend_connections.onion_client.add_friend(friend_pk).await;
         friend_connections.net_crypto.add_friend(friend_pk).await;
-        let (_relay_incoming_rx, _relay_outgoing_rx, relay_pk) = friend_connections.tcp_connections.add_client();
+        let (_relay_incoming_rx, _relay_outgoing_rx, relay_pk) = friend_connections.tcp_connections.add_client().await;
         // ignore result future since it spawns the connection which should be
         // executed inside tokio context
         let _ = friend_connections.tcp_connections.add_connection(relay_pk, friend_dht_pk);
@@ -506,7 +506,7 @@ mod tests {
         assert!(!friend_connections.dht.has_friend(&friend_dht_pk).await);
         assert!(!friend_connections.onion_client.has_friend(&friend_pk).await);
         assert!(!friend_connections.net_crypto.has_friend(&friend_pk).await);
-        assert!(!friend_connections.tcp_connections.has_connection(&friend_dht_pk));
+        assert!(!friend_connections.tcp_connections.has_connection(&friend_dht_pk).await);
 
         let (received, _udp_rx) = udp_rx.into_future().await;
         let (received, addr_to_send) = received.unwrap();
@@ -537,7 +537,7 @@ mod tests {
         friend_connections.dht.add_friend(friend_dht_pk).await;
         friend_connections.net_crypto.add_friend(friend_pk).await;
         friend_connections.onion_client.add_friend(friend_pk).await;
-        let (_relay_incoming_rx, _relay_outgoing_rx, relay_pk) = friend_connections.tcp_connections.add_client();
+        let (_relay_incoming_rx, _relay_outgoing_rx, relay_pk) = friend_connections.tcp_connections.add_client().await;
         // ignore result future since it spawns the connection which should be
         // executed inside tokio context
         let _ = friend_connections.tcp_connections.add_connection(relay_pk, friend_dht_pk);
@@ -567,7 +567,7 @@ mod tests {
         assert!(friend_connections.dht.has_friend(&new_friend_dht_pk).await);
         assert_eq!(friend_connections.net_crypto.connection_dht_pk(&friend_pk).await, Some(new_friend_dht_pk));
         assert_eq!(friend_connections.onion_client.friend_dht_pk(&friend_pk).await, Some(new_friend_dht_pk));
-        assert!(!friend_connections.tcp_connections.has_connection(&friend_dht_pk));
+        assert!(!friend_connections.tcp_connections.has_connection(&friend_dht_pk).await);
 
         let friend = &friend_connections.friends.read().await[&friend_pk];
         assert_eq!(friend.dht_pk, Some(new_friend_dht_pk));
@@ -800,7 +800,7 @@ mod tests {
         ).await;
         friend_connections.net_crypto.set_friend_udp_addr(friend_pk, saddr).await;
 
-        let (_relay_incoming_rx, _relay_outgoing_rx, relay_pk) = friend_connections.tcp_connections.add_client();
+        let (_relay_incoming_rx, _relay_outgoing_rx, relay_pk) = friend_connections.tcp_connections.add_client().await;
 
         let delay = Duration::from_secs(1);
         tokio::time::advance(delay).await;
@@ -901,8 +901,8 @@ mod tests {
 
         friend_connections.handle_share_relays(friend_pk, share_relays).await.unwrap();
 
-        assert!(friend_connections.tcp_connections.has_relay(&relay_pk));
-        assert!(friend_connections.tcp_connections.has_connection(&friend_dht_pk));
+        assert!(friend_connections.tcp_connections.has_relay(&relay_pk).await);
+        assert!(friend_connections.tcp_connections.has_connection(&friend_dht_pk).await);
     }
 
     #[tokio::test]

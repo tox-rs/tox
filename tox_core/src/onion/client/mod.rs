@@ -759,7 +759,7 @@ impl OnionClient {
 
     /// Get nodes to include to DHT `PublicKey` announcement packet.
     async fn dht_pk_nodes(&self) -> Vec<TcpUdpPackedNode> {
-        let relays = self.tcp_connections.get_random_relays(2);
+        let relays = self.tcp_connections.get_random_relays(2).await;
         let close_nodes: Vec<PackedNode> = self.dht.get_closest(&self.dht.pk, 4 - relays.len() as u8, false).await.into();
         relays.into_iter().map(|node| TcpUdpPackedNode {
             pk: node.pk,
@@ -1745,8 +1745,8 @@ mod tests {
         assert_eq!(friend.last_no_reply, no_reply);
         assert_eq!(friend.dht_pk, Some(friend_dht_pk));
 
-        assert!(onion_client.tcp_connections.has_relay(&node_pk));
-        assert!(onion_client.tcp_connections.has_connection(&friend_dht_pk));
+        assert!(onion_client.tcp_connections.has_relay(&node_pk).await);
+        assert!(onion_client.tcp_connections.has_connection(&friend_dht_pk).await);
     }
 
     #[tokio::test]
@@ -2367,7 +2367,7 @@ mod tests {
         let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
         let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
         let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
-        let (_relay_incoming_rx, relay_outgoing_rx, relay_pk) = tcp_connections.add_client();
+        let (_relay_incoming_rx, relay_outgoing_rx, relay_pk) = tcp_connections.add_client().await;
         let onion_client = OnionClient::new(dht, tcp_connections, real_sk, real_pk);
 
         let inner_onion_request = InnerOnionRequest::InnerOnionAnnounceRequest(InnerOnionAnnounceRequest {

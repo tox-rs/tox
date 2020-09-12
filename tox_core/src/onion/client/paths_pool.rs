@@ -134,7 +134,7 @@ impl PathsPool {
 
         let path = if dht.is_connected().await {
             self.path_nodes.udp_path()
-        } else if let Some(relay) = tcp_connections.get_random_relay() {
+        } else if let Some(relay) = tcp_connections.get_random_relay().await {
             self.path_nodes.tcp_path(relay)
         } else {
             None
@@ -278,7 +278,7 @@ mod tests {
                     let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
                     let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
                     // add a relay that will be used as first node for onion path
-                    let (_relay_incoming_rx, _relay_outgoing_rx, relay_pk) = tcp_connections.add_client();
+                    let (_relay_incoming_rx, _relay_outgoing_rx, relay_pk) = tcp_connections.add_client().await;
                     let mut paths_pool = PathsPool::new();
                     for _ in 0 .. MIN_NODES_POOL_SIZE {
                         let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
@@ -342,7 +342,7 @@ mod tests {
                     let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
                     let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
                     // add a relay that will be used as first node for onion path
-                    let (_relay_incoming_rx, _relay_outgoing_rx, relay_pk) = tcp_connections.add_client();
+                    let (_relay_incoming_rx, _relay_outgoing_rx, relay_pk) = tcp_connections.add_client().await;
                     let mut paths_pool = PathsPool::new();
                     for _ in 0 .. MIN_NODES_POOL_SIZE {
                         let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
