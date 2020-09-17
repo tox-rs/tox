@@ -75,6 +75,7 @@ impl PingRequest {
             payload,
         }
     }
+
     /** Decrypt payload and try to parse it as `PingRequestPayload`.
 
     Returns `Error` in case of failure:

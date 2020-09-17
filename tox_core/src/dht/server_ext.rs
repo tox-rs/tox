@@ -2,11 +2,10 @@
 
 use std::io::{Error, ErrorKind};
 use std::net::{SocketAddr, IpAddr};
-use std::pin::Pin;
 
-use futures::{Future, FutureExt, SinkExt, StreamExt};
+use futures::{FutureExt, SinkExt, StreamExt};
 use futures::channel::mpsc::Receiver;
-use tokio::net::{UdpSocket};
+use tokio::net::UdpSocket;
 use failure::Fail;
 
 use crate::dht::codec::*;
@@ -14,84 +13,71 @@ use tox_packet::dht::Packet;
 use crate::dht::server::Server;
 use crate::stats::Stats;
 
-/// Extension trait for running DHT server on `UdpSocket`.
-pub trait ServerExt {
-    /// Run DHT server on `UdpSocket`.
-    fn run_socket(self, socket: UdpSocket, rx: Receiver<(Packet, SocketAddr)>, stats: Stats) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send>>;
-}
+/// Run DHT server on `UdpSocket`.
+pub async fn dht_run_socket(
+    dht: &Server,
+    socket: UdpSocket,
+    mut rx: Receiver<(Packet, SocketAddr)>,
+    stats: Stats
+) -> Result<(), Error> {
+    let udp_addr = socket.local_addr()
+        .expect("Failed to get socket address");
 
-impl ServerExt for Server {
-    fn run_socket(
-        self,
-        socket: UdpSocket,
-        mut rx: Receiver<(Packet, SocketAddr)>,
-        stats: Stats
-    ) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send>> {
-        let udp_addr = socket.local_addr()
-            .expect("Failed to get socket address");
+    let codec = DhtCodec::new(stats);
+    let (mut sink, mut stream) =
+        tokio_util::udp::UdpFramed::new(socket, codec).split();
 
-        let codec = DhtCodec::new(stats);
-        let (mut sink, mut stream) =
-            tokio_util::udp::UdpFramed::new(socket, codec).split();
+    let network_reader = async {
+        while let Some(event) = stream.next().await {
+            match event {
+                Ok((packet, addr)) => {
+                    trace!("Received packet {:?}", packet);
+                    let res = dht.handle_packet(packet, addr).await;
 
-        let self_c = self.clone();
-
-        let network_reader = async move {
-            while let Some(event) = stream.next().await {
-                match event {
-                    Ok((packet, addr)) => {
-                        trace!("Received packet {:?}", packet);
-                        let res = self_c.handle_packet(packet, addr).await;
-
-                        if let Err(ref err) = res {
-                            error!("Failed to handle packet: {:?}", err);
-                        }
-                    },
-                    Err(e) => {
-                        error!("packet receive error = {:?}", e);
-                        // ignore packet decode errors
-                        if *e.kind() != DecodeErrorKind::Io { continue }
-                        else {
-                            return Err(Error::new(ErrorKind::Other, e.compat()))
-                        }
+                    if let Err(ref err) = res {
+                        error!("Failed to handle packet: {:?}", err);
+                    }
+                },
+                Err(e) => {
+                    error!("packet receive error = {:?}", e);
+                    // ignore packet decode errors
+                    if *e.kind() != DecodeErrorKind::Io { continue }
+                    else {
+                        return Err(Error::new(ErrorKind::Other, e.compat()))
                     }
                 }
             }
+        }
 
-            Ok(())
-        };
+        Ok(())
+    };
 
-        let network_writer = async move {
-            while let Some((packet, mut addr)) = rx.next().await {
-                // filter out IPv6 packets if node is running in IPv4 mode
-                if udp_addr.is_ipv4() && addr.is_ipv6() { continue }
+    let network_writer = async {
+        while let Some((packet, mut addr)) = rx.next().await {
+            // filter out IPv6 packets if node is running in IPv4 mode
+            if udp_addr.is_ipv4() && addr.is_ipv6() { continue }
 
-                if udp_addr.is_ipv6() {
-                    if let IpAddr::V4(ip) = addr.ip() {
-                        addr = SocketAddr::new(IpAddr::V6(ip.to_ipv6_mapped()), addr.port());
-                    }
-                }
-
-                trace!("Sending packet {:?} to {:?}", packet, addr);
-                sink.send((packet, addr)).await
-                    .map_err(|e| Error::new(ErrorKind::Other, e.compat()))?
-            }
-
-            Ok(())
-        };
-
-        let select = async move {
-            futures::select! {
-                read = network_reader.fuse() => read,
-                write = network_writer.fuse() => write,
-                run = self.run().fuse() => {
-                    let res: Result<_, _> = run;
-                    res.map_err(|e| Error::new(ErrorKind::Other, e.compat()))
+            if udp_addr.is_ipv6() {
+                if let IpAddr::V4(ip) = addr.ip() {
+                    addr = SocketAddr::new(IpAddr::V6(ip.to_ipv6_mapped()), addr.port());
                 }
             }
-        };
 
-        Box::pin(select)
+            trace!("Sending packet {:?} to {:?}", packet, addr);
+            sink.send((packet, addr)).await
+                .map_err(|e| Error::new(ErrorKind::Other, e.compat()))?
+        }
+
+        Ok(())
+    };
+
+    futures::select! {
+        read = network_reader.fuse() => read,
+        write = network_writer.fuse() => write,
+        run = dht.run().fuse() => {
+            let res: Result<_, _> = run;
+            res.map_err(|e| Error::new(ErrorKind::Other, e.compat()))
+        }
     }
 }
 
@@ -122,13 +108,13 @@ mod tests {
         let server_addr = server_socket.local_addr().unwrap();
 
         let stats = Stats::new();
-        let server_future = server.run_socket(server_socket, rx, stats);
+        let server_future = dht_run_socket(&server, server_socket, rx, stats);
 
         // Bind client socket to communicate with the server
         let client_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
         let client_socket = UdpSocket::bind(&client_addr).await.unwrap();
 
-        let client_future = async move {
+        let client_future = async {
             // Send invalid request first to ensure that the server won't crash
             let mut client_socket = client_socket;
             client_socket.send_to(&[42; 123][..], &server_addr)
@@ -173,7 +159,7 @@ mod tests {
 
         futures::select! {
             res = client_future.fuse() => res.unwrap(),
-            res = server_future.fuse() => ()
+            res = server_future.fuse() => (),
         };
     }
 }

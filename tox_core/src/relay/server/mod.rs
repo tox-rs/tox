@@ -8,4 +8,4 @@ mod server_ext;
 
 pub use self::client::Client;
 pub use self::server::Server;
-pub use self::server_ext::ServerExt;
+pub use self::server_ext::{tcp_run, tcp_run_connection};

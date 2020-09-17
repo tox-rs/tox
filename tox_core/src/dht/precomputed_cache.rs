@@ -3,9 +3,9 @@
 use std::sync::Arc;
 
 use lru::LruCache;
-use parking_lot::Mutex;
 
 use tox_crypto::*;
+use futures::lock::Mutex;
 
 /// LRU cache for `PrecomputedKey`s.
 ///
@@ -28,8 +28,8 @@ impl PrecomputedCache {
     }
 
     /// Get `PrecomputedKey` for the given `PublicKey`.
-    pub fn get(&self, pk: PublicKey) -> PrecomputedKey {
-        let mut keys = self.precomputed_keys.lock();
+    pub async fn get(&self, pk: PublicKey) -> PrecomputedKey {
+        let mut keys = self.precomputed_keys.lock().await;
 
         if let Some(precomputed_key) = keys.get(&pk) {
             return precomputed_key.clone();
