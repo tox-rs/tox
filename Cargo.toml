@@ -12,7 +12,7 @@ documentation = "https://docs.rs/crate/tox-node/"
 repository = "https://github.com/tox-rs/tox-node/"
 keywords = ["p2p", "instant-messaging", "tox", "toxcore", "networking"]
 categories = ["multimedia"]
-license = "MIT"
+license = "GPLv3"
 edition = "2018"
 
 
@@ -35,17 +35,18 @@ maintainer-scripts = "dpkg/info"
 
 [dependencies]
 chrono = "0.4"
-clap = "2.32"
+clap = "2.33"
 env_logger = "0.6"
 failure = "0.1"
-futures = "0.1"
+futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
 hex = "0.3"
 itertools = "0.8"
 log = "0.4"
 regex = "1"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.8"
-tox = "0.0.10"
+tox = "0.1.0"
+tox_crypto = "0.1.0"
 
 [dependencies.config]
 version = "0.9"
@@ -53,9 +54,9 @@ default-features = false
 features = ["yaml"]
 
 [dependencies.tokio]
-version = "0.1"
+version = "0.2"
 default-features = false
-features = ["tcp", "udp", "timer", "codec", "rt-full"]
+features = ["net", "time", "rt-core", "rt-threaded"]
 
 [target.'cfg(unix)'.dependencies]
 syslog = "4.0"
