@@ -66,7 +66,7 @@ async fn main() -> Result<(), Error> {
     let socket = common::bind_socket(local_addr).await;
     let stats = Stats::new();
 
-    let lan_discovery_sender = LanDiscoverySender::new(tx.clone(), dht_pk, local_addr.is_ipv6());
+    let mut lan_discovery_sender = LanDiscoverySender::new(tx.clone(), dht_pk, local_addr.is_ipv6());
 
     let (tcp_incoming_tx, mut tcp_incoming_rx) = mpsc::unbounded();
 
@@ -122,10 +122,9 @@ async fn main() -> Result<(), Error> {
         onion_client.add_path_node(node).await;
     }
 
-    let tcp_connections_c = tcp_connections.clone();
-    let net_crypto_tcp_future = async move {
+    let net_crypto_tcp_future = async {
         while let Some((packet, pk)) = net_crypto_tcp_rx.next().await {
-            tcp_connections_c.send_data(pk, packet).await?;
+            tcp_connections.send_data(pk, packet).await?;
         }
         Result::<(), Error>::Ok(())
     };

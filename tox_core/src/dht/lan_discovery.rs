@@ -140,7 +140,7 @@ impl LanDiscoverySender {
 
     /// Run LAN discovery periodically. Result future will never be completed
     /// successfully.
-    pub async fn run(mut self) -> Result<(), LanDiscoveryError> {
+    pub async fn run(&mut self) -> Result<(), LanDiscoveryError> {
         let interval = LAN_DISCOVERY_INTERVAL;
         let mut wakeups = tokio::time::interval(interval);
 

@@ -33,7 +33,7 @@ fn main() {
     let server = Server::new();
 
     let stats = Stats::new();
-    let future = async move {
+    let future = async {
         let listener = TcpListener::bind(&addr).await.unwrap();
         drop(tcp_run(&server, listener, server_sk, stats, TCP_CONNECTIONS_LIMIT).await);
     };

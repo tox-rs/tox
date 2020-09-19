@@ -4,8 +4,8 @@ extern crate log;
 use std::net::{SocketAddr, IpAddr};
 
 use failure::Error;
-use futures::future::{FutureExt};
-use futures::stream::{StreamExt};
+use futures::future::FutureExt;
+use futures::stream::StreamExt;
 use futures::sink::SinkExt;
 use futures::channel::mpsc;
 use tokio_util::udp::UdpFramed;
@@ -84,8 +84,7 @@ async fn main() -> Result<(), Error> {
 
     let (mut sink, mut stream) = UdpFramed::new(socket, codec).split();
 
-    let client = onion_client.clone();
-    let network_reader = async move {
+    let network_reader = async {
         while let Some(event) = stream.next().await {
             let (packet, addr) = match event {
                 Ok(ev) => ev,
@@ -103,11 +102,11 @@ async fn main() -> Result<(), Error> {
                 Packet::OnionAnnounceResponse(packet) => {
                     let is_global = IsGlobal::is_global(&addr.ip());
 
-                    client.handle_announce_response(&packet, is_global).await
+                    onion_client.handle_announce_response(&packet, is_global).await
                         .map_err(Error::from)
                 },
                 Packet::OnionDataResponse(packet) =>
-                    client.handle_data_response(&packet).await
+                    onion_client.handle_data_response(&packet).await
                         .map_err(Error::from),
                 _ => Ok(()),
             };
@@ -122,7 +121,7 @@ async fn main() -> Result<(), Error> {
         Ok(())
     };
 
-    let network_writer = async move {
+    let network_writer = async {
         while let Some((packet, mut addr)) = rx.next().await {
             if is_ipv4 && addr.is_ipv6() { continue }
 
