@@ -907,7 +907,7 @@ impl OnionClient {
     }
 
     /// Run periodical announcements and friends searching.
-    pub async fn run(self) -> Result<(), RunError> {
+    pub async fn run(&self) -> Result<(), RunError> {
         let interval = Duration::from_secs(1);
         let mut wakeups = tokio::time::interval(interval);
 

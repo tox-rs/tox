@@ -187,7 +187,7 @@ impl FriendConnections {
     }
 
     /// Handle the stream of found DHT `PublicKey`s.
-    async fn handle_dht_pk(&self, mut dht_pk_rx: mpsc::UnboundedReceiver<(PublicKey, PublicKey)>) -> Result<(), RunError> {
+    async fn handle_dht_pk(&self, dht_pk_rx: &mut mpsc::UnboundedReceiver<(PublicKey, PublicKey)>) -> Result<(), RunError> {
         let dht = self.dht.clone();
         let net_crypto = self.net_crypto.clone();
         let onion_client = self.onion_client.clone();
@@ -230,7 +230,7 @@ impl FriendConnections {
     }
 
     /// Handle the stream of found IP addresses.
-    async fn handle_friend_saddr(&self, mut friend_saddr_rx: mpsc::UnboundedReceiver<PackedNode>) -> Result<(), RunError> {
+    async fn handle_friend_saddr(&self, friend_saddr_rx: &mut mpsc::UnboundedReceiver<PackedNode>) -> Result<(), RunError> {
         let net_crypto = self.net_crypto.clone();
         let friends = self.friends.clone();
         while let Some(node) = friend_saddr_rx.next().await {
@@ -255,7 +255,7 @@ impl FriendConnections {
     }
 
     /// Handle the stream of connection statuses.
-    async fn handle_connection_status(&self, mut connnection_status_rx: mpsc::UnboundedReceiver<(PublicKey, bool)>) -> Result<(), RunError> {
+    async fn handle_connection_status(&self, connnection_status_rx: &mut mpsc::UnboundedReceiver<(PublicKey, bool)>) -> Result<(), RunError> {
         let onion_client = self.onion_client.clone();
         let friends = self.friends.clone();
         let connection_status_tx = self.connection_status_tx.clone();
@@ -388,19 +388,19 @@ impl FriendConnections {
     /// `PublicKey`, IP address and connection status updates to appropriate
     /// modules.
     pub async fn run(&self) -> Result<(), RunError> {
-        let (dht_pk_tx, dht_pk_rx) = mpsc::unbounded();
+        let (dht_pk_tx, mut dht_pk_rx) = mpsc::unbounded();
         self.onion_client.set_dht_pk_sink(dht_pk_tx.clone()).await;
         self.net_crypto.set_dht_pk_sink(dht_pk_tx).await;
 
-        let (friend_saddr_tx, friend_saddr_rx) = mpsc::unbounded();
+        let (friend_saddr_tx, mut friend_saddr_rx) = mpsc::unbounded();
         self.dht.set_friend_saddr_sink(friend_saddr_tx).await;
 
-        let (connection_status_tx, connection_status_rx) = mpsc::unbounded();
+        let (connection_status_tx, mut connection_status_rx) = mpsc::unbounded();
         self.net_crypto.set_connection_status_sink(connection_status_tx).await;
 
-        let dht_pk_future = self.handle_dht_pk(dht_pk_rx);
-        let friend_saddr_future = self.handle_friend_saddr(friend_saddr_rx);
-        let connection_status_future = self.handle_connection_status(connection_status_rx);
+        let dht_pk_future = self.handle_dht_pk(&mut dht_pk_rx);
+        let friend_saddr_future = self.handle_friend_saddr(&mut friend_saddr_rx);
+        let connection_status_future = self.handle_connection_status(&mut connection_status_rx);
         let main_loop_future = self.run_main_loop();
 
         futures::select! {
@@ -554,14 +554,14 @@ mod tests {
         friend_connections.net_crypto.set_friend_udp_addr(friend_pk, saddr).await;
 
         let (new_friend_dht_pk, _new_friend_dht_sk) = gen_keypair();
-        let (mut dht_pk_tx, dht_pk_rx) = mpsc::unbounded();
+        let (mut dht_pk_tx, mut dht_pk_rx) = mpsc::unbounded();
         dht_pk_tx.send((friend_pk, new_friend_dht_pk)).await.unwrap();
         drop(dht_pk_tx);
 
         let delay = Duration::from_secs(1);
         tokio::time::advance(delay).await;
 
-        friend_connections.handle_dht_pk(dht_pk_rx).await.unwrap();
+        friend_connections.handle_dht_pk(&mut dht_pk_rx).await.unwrap();
 
         assert!(!friend_connections.dht.has_friend(&friend_dht_pk).await);
         assert!(friend_connections.dht.has_friend(&new_friend_dht_pk).await);
@@ -598,14 +598,14 @@ mod tests {
         friend_connections.friends.write().await.insert(friend_pk, friend);
 
         let saddr = "127.0.0.1:12345".parse().unwrap();
-        let (mut friend_saddr_tx, friend_saddr_rx) = mpsc::unbounded();
+        let (mut friend_saddr_tx, mut friend_saddr_rx) = mpsc::unbounded();
         friend_saddr_tx.send(PackedNode::new(saddr, &friend_dht_pk)).await.unwrap();
         drop(friend_saddr_tx);
 
         let delay = Duration::from_secs(1);
         tokio::time::advance(delay).await;
 
-        friend_connections.handle_friend_saddr(friend_saddr_rx).await.unwrap();
+        friend_connections.handle_friend_saddr(&mut friend_saddr_rx).await.unwrap();
         assert_eq!(friend_connections.net_crypto.connection_saddr(&friend_pk).await, Some(saddr));
 
         let friend = &friend_connections.friends.read().await[&friend_pk];
@@ -631,11 +631,11 @@ mod tests {
         friend_connections.friends.write().await.insert(friend_pk, friend);
         friend_connections.onion_client.add_friend(friend_pk).await;
 
-        let (mut connnection_status_tx, connnection_status_rx) = mpsc::unbounded();
+        let (mut connnection_status_tx, mut connnection_status_rx) = mpsc::unbounded();
         connnection_status_tx.send((friend_pk, true)).await.unwrap();
         drop(connnection_status_tx);
 
-        friend_connections.handle_connection_status(connnection_status_rx).await.unwrap();
+        friend_connections.handle_connection_status(&mut connnection_status_rx).await.unwrap();
 
         let friend = &friend_connections.friends.read().await[&friend_pk];
         assert!(friend.connected);
@@ -662,11 +662,11 @@ mod tests {
         friend_connections.onion_client.add_friend(friend_pk).await;
         friend_connections.onion_client.set_friend_connected(friend_pk, true).await;
 
-        let (mut connnection_status_tx, connnection_status_rx) = mpsc::unbounded();
+        let (mut connnection_status_tx, mut connnection_status_rx) = mpsc::unbounded();
         connnection_status_tx.send((friend_pk, false)).await.unwrap();
         drop(connnection_status_tx);
 
-        friend_connections.handle_connection_status(connnection_status_rx).await.unwrap();
+        friend_connections.handle_connection_status(&mut connnection_status_rx).await.unwrap();
 
         let friend = &friend_connections.friends.read().await[&friend_pk];
         assert!(!friend.connected);
@@ -963,7 +963,7 @@ mod tests {
 
         let net_crypto = friend_connections.net_crypto.clone();
         let dht = friend_connections.dht.clone();
-        let packets_future = async move {
+        let packets_future = async {
             dht.handle_packet(DhtPacket::CryptoHandshake(handshake), friend_saddr).await.unwrap();
 
             let session_pk = net_crypto.get_session_pk(&friend_pk).await.unwrap();
@@ -984,7 +984,7 @@ mod tests {
             assert_eq!(received_data, vec![PACKET_ID_ALIVE]);
         };
 
-        let connection_status_future = async move {
+        let connection_status_future = async {
             let packet = connection_status_rx.next().await;
             let (pk, status) = packet.unwrap();
             assert_eq!(pk, friend_pk);

@@ -382,7 +382,7 @@ impl Connections {
 
     /// Run TCP periodical tasks. Result future will never be completed
     /// successfully.
-    pub async fn run(self) -> Result<(), ConnectionError> {
+    pub async fn run(&self) -> Result<(), ConnectionError> {
         let mut wakeups = tokio::time::interval(CONNECTIONS_INTERVAL);
 
         while wakeups.next().await.is_some() {

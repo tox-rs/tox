@@ -46,7 +46,7 @@ async fn main() -> Result<(), Error> {
 
     let stats = Stats::new();
 
-    let lan_discovery_sender =
+    let mut lan_discovery_sender =
         LanDiscoverySender::new(tx.clone(), server_pk, local_addr.is_ipv6());
 
     let mut server = Server::new(tx, server_pk, server_sk);
