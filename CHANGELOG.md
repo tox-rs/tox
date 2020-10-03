@@ -1,3 +1,22 @@
+# 0.1.0 (Oct 7, 2020)
+
+* Replace `parking_lot` mutex with `futures` mutex (#434)
+* Send userstatus from echo server (#431)
+* Drop MIT license (#428)
+* Use idiomatic sodiumoxide API for password KDF (#425)
+* Split toxcore into separate crates (#420)
+* Migrate to the new tokio (#419)
+* Move to nom5 (#418)
+* Replace intervals as bare `u64`s with `Duration`s (#407)
+* Use AtomicU64 instead of locks (#406)
+* Handle TCP `net_crypto` packets (#392)
+* Use correct key for tcp connection (#391)
+* Add TCP support for onion client (#389)
+* Send net crypto packets via TCP (#386)
+* Handle friend requests inside onion client (#380)
+* Friends connection (#367)
+
+
 # 0.0.10 (May 27, 2019)
 
 * Do not store peer_session_pk in net crypto status (#373)
