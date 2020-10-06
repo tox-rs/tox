@@ -31,11 +31,10 @@ impl Decoder for ClientHandshakeCodec {
     }
 }
 
-impl Encoder for ClientHandshakeCodec {
-    type Item = ClientHandshake;
+impl Encoder<ClientHandshake> for ClientHandshakeCodec {
     type Error = Error;
 
-    fn encode(&mut self, handshake: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, handshake: ClientHandshake, buf: &mut BytesMut) -> Result<(), Self::Error> {
         let mut handshake_buf = [0; CLIENT_HANDSHAKE_SIZE];
         handshake.to_bytes((&mut handshake_buf, 0))
             .map(|(handshake_buf, handshake_size)|
@@ -70,11 +69,10 @@ impl Decoder for ServerHandshakeCodec {
     }
 }
 
-impl Encoder for ServerHandshakeCodec {
-    type Item = ServerHandshake;
+impl Encoder<ServerHandshake> for ServerHandshakeCodec {
     type Error = Error;
 
-    fn encode(&mut self, handshake: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, handshake: ServerHandshake, buf: &mut BytesMut) -> Result<(), Self::Error> {
         let mut handshake_buf = [0; SERVER_HANDSHAKE_SIZE];
         handshake.to_bytes((&mut handshake_buf, 0))
             .map(|(handshake_buf, handshake_size)|
