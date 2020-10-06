@@ -22,7 +22,7 @@ default-features = false
 features = ["macros", "test-util", "net", "rt-core", "rt-threaded", "sync", "stream", "time"]
 
 [dev-dependencies.tokio-util]
-version = "0.2"
+version = "0.3"
 features = ["codec", "udp"]
 
 [[example]]

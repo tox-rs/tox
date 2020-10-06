@@ -133,11 +133,10 @@ impl Decoder for DhtCodec {
     }
 }
 
-impl Encoder for DhtCodec {
-    type Item = Packet;
+impl Encoder<Packet> for DhtCodec {
     type Error = EncodeError;
 
-    fn encode(&mut self, packet: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, packet: Packet, buf: &mut BytesMut) -> Result<(), Self::Error> {
         let mut packet_buf = [0; MAX_DHT_PACKET_SIZE];
         packet.to_bytes((&mut packet_buf, 0))
             .map(|(packet_buf, size)| {

@@ -151,11 +151,10 @@ impl Decoder for Codec {
     }
 }
 
-impl Encoder for Codec {
-    type Item = Packet;
+impl Encoder<Packet> for Codec {
     type Error = EncodeError;
 
-    fn encode(&mut self, packet: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, packet: Packet, buf: &mut BytesMut) -> Result<(), Self::Error> {
         // Add 1 to outgoing counter
         self.stats.counters.increase_outgoing();
 
