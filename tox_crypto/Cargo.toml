@@ -11,6 +11,9 @@ authors = [
 description = "Cryptography used by tox"
 documentation = "https://docs.rs/tox_crypto/"
 repository = "https://github.com/tox-rs/tox/"
+keywords = ["tox", "toxcore", "crypto"]
+categories = ["multimedia"]
+license = "GPL-3.0+"
 edition = "2018"
 
 [dependencies]
