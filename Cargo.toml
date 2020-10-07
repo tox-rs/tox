@@ -12,7 +12,7 @@ documentation = "https://docs.rs/crate/tox-node/"
 repository = "https://github.com/tox-rs/tox-node/"
 keywords = ["p2p", "instant-messaging", "tox", "toxcore", "networking"]
 categories = ["multimedia"]
-license = "GPLv3"
+license = "GPL-3.0+"
 edition = "2018"
 
 
