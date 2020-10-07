@@ -4,7 +4,7 @@ use chrono::offset::Local;
 use regex::Regex;
 use std::u64;
 
-use tox::toxcore::stats::Stats;
+use tox::core::stats::Stats;
 
 struct RegexMatches {
     regex: Regex,

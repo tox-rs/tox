@@ -1,3 +1,5 @@
+#![type_length_limit="65995950"]
+
 #[macro_use]
 extern crate clap;
 #[macro_use]
@@ -6,28 +8,24 @@ extern crate log;
 mod node_config;
 mod motd;
 
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::{ErrorKind, Read, Write};
 use std::net::SocketAddr;
-#[cfg(unix)]
-use std::os::unix::fs::OpenOptionsExt;
 
 use failure::Error;
-use futures::sync::mpsc;
-use futures::{future, Future, Stream};
-use futures::future::Either;
+use futures::{channel::mpsc, StreamExt};
+use futures::{future, Future, TryFutureExt, FutureExt};
 use itertools::Itertools;
-use log::LevelFilter;
 use tokio::net::{TcpListener, UdpSocket};
 use tokio::runtime;
-use tox::toxcore::crypto_core::*;
-use tox::toxcore::dht::server::{Server as UdpServer};
-use tox::toxcore::dht::server_ext::{ServerExt as UdpServerExt};
-use tox::toxcore::dht::lan_discovery::LanDiscoverySender;
-use tox::toxcore::onion::packet::InnerOnionResponse;
-use tox::toxcore::tcp::packet::OnionRequest;
-use tox::toxcore::tcp::server::{Server as TcpServer, ServerExt as TcpServerExt};
-use tox::toxcore::stats::Stats;
+use tox_crypto::*;
+use tox::core::dht::server::{Server as UdpServer};
+use tox::core::dht::server_ext::dht_run_socket;
+use tox::core::dht::lan_discovery::LanDiscoverySender;
+use tox::packet::onion::InnerOnionResponse;
+use tox::packet::relay::OnionRequest;
+use tox::core::relay::server::{Server as TcpServer, tcp_run};
+use tox::core::stats::Stats;
 #[cfg(unix)]
 use syslog::Facility;
 
@@ -54,8 +52,8 @@ fn version() -> u32 {
 }
 
 /// Bind a UDP listener to the socket address.
-fn bind_socket(addr: SocketAddr) -> UdpSocket {
-    let socket = UdpSocket::bind(&addr).expect("Failed to bind UDP socket");
+async fn bind_socket(addr: SocketAddr) -> UdpSocket {
+    let socket = UdpSocket::bind(&addr).await.expect("Failed to bind UDP socket");
     socket.set_broadcast(true).expect("set_broadcast call failed");
     if addr.is_ipv6() {
         socket.set_multicast_loop_v6(true).expect("set_multicast_loop_v6 call failed");
@@ -65,11 +63,14 @@ fn bind_socket(addr: SocketAddr) -> UdpSocket {
 
 /// Save DHT keys to a binary file.
 fn save_keys(keys_file: &str, pk: PublicKey, sk: &SecretKey) {
+    #[cfg(unix)]
+    use std::os::unix::fs::OpenOptionsExt;
+
     #[cfg(not(unix))]
     let mut file = File::create(keys_file).expect("Failed to create the keys file");
 
     #[cfg(unix)]
-    let mut file = OpenOptions::new()
+    let mut file = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
         .mode(0o600)
@@ -107,14 +108,13 @@ fn load_or_gen_keys(keys_file: &str) -> (PublicKey, SecretKey) {
 
 /// Run a future with the runtime specified by config.
 fn run<F>(future: F, threads: Threads)
-    where F: Future<Item = (), Error = Error> + Send + 'static
+    where F: Future<Output = Result<(), Error>> + Send + 'static
 {
     if threads == Threads::N(1) {
-        let mut runtime = runtime::current_thread::Runtime::new().expect("Failed to create runtime");
+        let mut runtime = runtime::Runtime::new().expect("Failed to create runtime");
         runtime.block_on(future).expect("Execution was terminated with error");
     } else {
         let mut builder = runtime::Builder::new();
-        builder.name_prefix("tox-node-");
         match threads {
             Threads::N(n) => { builder.core_threads(n as usize); },
             Threads::Auto => { }, // builder will detect number of cores automatically
@@ -157,91 +157,114 @@ fn create_onion_streams() -> (TcpOnion, UdpOnion) {
     (tcp_onion, udp_onion)
 }
 
-fn run_tcp(config: &NodeConfig, dht_sk: SecretKey, tcp_onion: TcpOnion, stats: Stats) -> impl Future<Item = (), Error = Error> {
+async fn run_tcp(config: &NodeConfig, dht_sk: SecretKey, mut tcp_onion: TcpOnion, stats: Stats) -> Result<(), Error> {
     if config.tcp_addrs.is_empty() {
         // If TCP address is not specified don't start TCP server and only drop
         // all onion packets from DHT server
-        let tcp_onion_future = tcp_onion.rx
-            .map_err(|()| unreachable!("rx can't fail"))
-            .for_each(|_| future::ok(()));
-        return Either::A(tcp_onion_future)
+        while let Some(_) = tcp_onion.rx.next().await {}
+
+        return Ok(())
     }
 
+    let onion_tx = tcp_onion.tx;
+    let mut onion_rx = tcp_onion.rx;
+
     let mut tcp_server = TcpServer::new();
-    tcp_server.set_udp_onion_sink(tcp_onion.tx);
+    tcp_server.set_udp_onion_sink(onion_tx);
 
     let tcp_server_c = tcp_server.clone();
     let tcp_server_futures = config.tcp_addrs.iter().map(move |&addr| {
         let tcp_server_c = tcp_server_c.clone();
+        let stats = stats.clone();
         let dht_sk = dht_sk.clone();
-        let listener = TcpListener::bind(&addr).expect("Failed to bind TCP listener");
-        tcp_server_c.run(listener, dht_sk, stats.clone(), config.tcp_connections_limit)
-            .map_err(Error::from)
+        async move {
+            let listener = TcpListener::bind(&addr).await.expect("Failed to bind TCP listener");
+            tcp_run(&tcp_server_c, listener, dht_sk, stats.clone(), config.tcp_connections_limit)
+                .await
+                .map_err(Error::from)
+        }.boxed()
     });
 
-    let tcp_server_future = future::select_all(tcp_server_futures)
-        .map(|_| ())
-        .map_err(|(e, _, _)| e);
+    let tcp_server_future = async {
+        future::select_all(tcp_server_futures)
+            .await
+            .0
+    };
 
-    let tcp_onion_future = tcp_onion.rx
-        .map_err(|()| unreachable!("rx can't fail"))
-        .for_each(move |(onion_response, addr)|
-            tcp_server.handle_udp_onion_response(addr.ip(), addr.port(), onion_response).or_else(|err| {
+    // let tcp_onion_rx = tcp_onion.rx.clone()
+    let tcp_onion_future = async {
+        while let Some((onion_response, addr)) = onion_rx.next().await {
+            let res = tcp_server
+                .handle_udp_onion_response(addr.ip(), addr.port(), onion_response)
+                .await;
+
+            if let Err(err) = res {
                 warn!("Failed to handle UDP onion response: {:?}", err);
-                future::ok(())
-            })
-        );
+            }
+        }
+
+        Ok(())
+    };
 
     info!("Running TCP relay on {}", config.tcp_addrs.iter().format(","));
 
-    Either::B(tcp_server_future
-        .join(tcp_onion_future)
-        .map(|_| ()))
+    futures::try_join!(tcp_server_future, tcp_onion_future)?;
+
+    Ok(())
 }
 
-fn run_udp(config: &NodeConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_onion: UdpOnion, tcp_stats: Stats) -> impl Future<Item = (), Error = Error> {
+async fn run_udp(config: &NodeConfig, dht_pk: PublicKey, dht_sk: &SecretKey, mut udp_onion: UdpOnion, tcp_stats: Stats) -> Result<(), Error> {
     let udp_addr = if let Some(udp_addr) = config.udp_addr {
         udp_addr
     } else {
         // If UDP address is not specified don't start DHT server and only drop
         // all onion packets from TCP server
-        let udp_onion_future = udp_onion.rx
-            .map_err(|()| unreachable!("rx can't fail"))
-            .for_each(|_| future::ok(()));
-        return Either::A(udp_onion_future)
+        while let Some(_) = udp_onion.rx.next().await {}
+
+        return Ok(())
     };
 
-    let socket = bind_socket(udp_addr);
+    let socket = bind_socket(udp_addr).await;
     let udp_stats = Stats::new();
 
     // Create a channel for server to communicate with network
     let (tx, rx) = mpsc::channel(DHT_CHANNEL_SIZE);
 
-    let lan_discovery_future = if config.lan_discovery_enabled {
-        Either::A(LanDiscoverySender::new(tx.clone(), dht_pk, udp_addr.is_ipv6())
-            .run()
-            .map_err(Error::from))
-    } else {
-        Either::B(future::empty())
+    let tx_clone = tx.clone();
+    let lan_discovery_future = async move {
+        if config.lan_discovery_enabled {
+            LanDiscoverySender::new(tx_clone, dht_pk, udp_addr.is_ipv6())
+                .run()
+                .map_err(Error::from)
+                .await
+        }
+        else { Ok(()) }
     };
+
+    let (onion_tx, mut onion_rx) = (udp_onion.tx, udp_onion.rx);
 
     let mut udp_server = UdpServer::new(tx, dht_pk, dht_sk.clone());
     let counters = Counters::new(tcp_stats, udp_stats.clone());
     let motd = Motd::new(config.motd.clone(), counters);
     udp_server.set_bootstrap_info(version(), Box::new(move |_| motd.format().as_bytes().to_owned()));
     udp_server.enable_lan_discovery(config.lan_discovery_enabled);
-    udp_server.set_tcp_onion_sink(udp_onion.tx);
+    udp_server.set_tcp_onion_sink(onion_tx);
     udp_server.enable_ipv6_mode(udp_addr.is_ipv6());
 
     let udp_server_c = udp_server.clone();
-    let udp_onion_future = udp_onion.rx
-        .map_err(|()| unreachable!("rx can't fail"))
-        .for_each(move |(onion_request, addr)|
-            udp_server_c.handle_tcp_onion_request(onion_request, addr).or_else(|err| {
+    let udp_onion_future = async move {
+        while let Some((onion_request, addr)) = onion_rx.next().await {
+            let res = udp_server_c
+                .handle_tcp_onion_request(onion_request, addr)
+                .await;
+
+            if let Err(err) = res {
                 warn!("Failed to handle TCP onion request: {:?}", err);
-                future::ok(())
-            })
-        );
+            }
+        }
+
+        Ok(())
+    };
 
     if config.bootstrap_nodes.is_empty() {
         warn!("No bootstrap nodes!");
@@ -253,9 +276,18 @@ fn run_udp(config: &NodeConfig, dht_pk: PublicKey, dht_sk: &SecretKey, udp_onion
 
     info!("Running DHT server on {}", udp_addr);
 
-    Either::B(udp_server.run_socket(socket, rx, udp_stats).map_err(Error::from)
-        .select(lan_discovery_future).map(|_| ()).map_err(|(e, _)| e)
-        .join(udp_onion_future).map(|_| ()))
+    let udp_server_future = dht_run_socket(&udp_server, socket, rx, udp_stats).map_err(Error::from);
+
+    let future = async move {
+        futures::select! {
+            res = udp_server_future.fuse() => res,
+            res = lan_discovery_future.fuse() => res,
+        }
+    };
+
+    futures::try_join!(future, udp_onion_future)?;
+
+    Ok(())
 }
 
 fn main() {
@@ -281,7 +313,7 @@ fn main() {
         },
         #[cfg(unix)]
         LogType::Syslog => {
-            syslog::init(Facility::LOG_USER, LevelFilter::Info, None)
+            syslog::init(Facility::LOG_USER, log::LevelFilter::Info, None)
                 .expect("Failed to initialize syslog backend.");
         },
         LogType::None => { },
@@ -312,11 +344,27 @@ fn main() {
 
     let (tcp_onion, udp_onion) = create_onion_streams();
 
-    let tcp_stats = Stats::new();
-    let udp_server_future = run_udp(&config, dht_pk, &dht_sk, udp_onion, tcp_stats.clone());
-    let tcp_server_future = run_tcp(&config, dht_sk, tcp_onion, tcp_stats);
+    let udp_tcp_stats = Stats::new();
+    let tcp_tcp_stats = udp_tcp_stats.clone();
 
-    let future = udp_server_future.select(tcp_server_future).map(|_| ()).map_err(|(e, _)| e);
+    let udp_config = config.clone();
+    let udp_dht_sk = dht_sk.clone();
+    let udp_server_future = async move {
+        run_udp(&udp_config, dht_pk, &udp_dht_sk, udp_onion, udp_tcp_stats.clone()).await
+    };
+
+    let tcp_config = config.clone();
+    let tcp_dht_sk = dht_sk.clone();
+    let tcp_server_future = async move {
+        run_tcp(&tcp_config, tcp_dht_sk, tcp_onion, tcp_tcp_stats).await
+    };
+
+    let future = async move {
+        futures::select! {
+            res = udp_server_future.fuse() => res,
+            res = tcp_server_future.fuse() => res,
+        }
+    };
 
     run(future, config.threads);
 }

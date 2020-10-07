@@ -10,10 +10,9 @@ use serde_yaml::Value;
 use clap::{App, AppSettings, Arg, SubCommand, ArgMatches};
 use hex::FromHex;
 use itertools::Itertools;
-use regex::Regex;
-use tox::toxcore::crypto_core::*;
-use tox::toxcore::dht::packed_node::PackedNode;
-use tox::toxcore::dht::packet::BOOSTRAP_SERVER_MAX_MOTD_LENGTH;
+use tox_crypto::*;
+use tox::packet::dht::packed_node::PackedNode;
+use tox::packet::dht::BOOSTRAP_SERVER_MAX_MOTD_LENGTH;
 
 /// Config for threading.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize)]
@@ -174,7 +173,6 @@ fn create_keys_file_arg() -> Arg<'static, 'static> {
 fn app() -> App<'static, 'static> {
     App::new(crate_name!())
         .version(crate_version!())
-        .author(crate_authors!("\n"))
         .about(crate_description!())
         .setting(AppSettings::ColoredHelp)
         .setting(AppSettings::SubcommandsNegateReqs)
