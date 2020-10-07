@@ -8,7 +8,7 @@ authors = [
     "Evgeny Kurnevsky <kurnevsky@gmail.com>",
     "Сухарик <65870+suhr@users.noreply.github.com>"
 ]
-readme = "README.md"
+readme = "../README.md"
 description = '''
 Implementation of toxcore in pure Rust -
 P2P, distributed, encrypted, easy
