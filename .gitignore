@@ -9,6 +9,9 @@ Cargo.lock
 # git
 *.orig
 
+#vscode
+.idea
+
 # other
 *.patch
 master.zip
