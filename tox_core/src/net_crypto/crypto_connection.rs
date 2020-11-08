@@ -638,18 +638,12 @@ impl CryptoConnection {
 
     /// Check if the connection is established.
     pub fn is_established(&self) -> bool {
-        match self.status {
-            ConnectionStatus::Established { .. } => true,
-            _ => false,
-        }
+        matches!(self.status, ConnectionStatus::Established { .. })
     }
 
     /// Check if the connection is not confirmed.
     pub fn is_not_confirmed(&self) -> bool {
-        match self.status {
-            ConnectionStatus::NotConfirmed { .. } => true,
-            _ => false,
-        }
+        matches!(self.status, ConnectionStatus::NotConfirmed { .. })
     }
 }
 

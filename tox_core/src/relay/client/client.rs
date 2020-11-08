@@ -433,26 +433,17 @@ impl Client {
 
     /// Check if TCP connection to the relay is established.
     pub async fn is_connected(&self) -> bool {
-        match *self.status.read().await {
-            ClientStatus::Connected(_) => true,
-            _ => false,
-        }
+        matches!(*self.status.read().await, ClientStatus::Connected(_))
     }
 
     /// Check if TCP connection to the relay is not established.
     pub async fn is_disconnected(&self) -> bool {
-        match *self.status.read().await {
-            ClientStatus::Disconnected => true,
-            _ => false,
-        }
+        matches!(*self.status.read().await, ClientStatus::Disconnected)
     }
 
     /// Check if TCP connection to the relay is sleeping.
     pub async fn is_sleeping(&self) -> bool {
-        match *self.status.read().await {
-            ClientStatus::Sleeping => true,
-            _ => false,
-        }
+        matches!(*self.status.read().await, ClientStatus::Sleeping)
     }
 
     /// Number of unsuccessful attempts to establish connection to the relay.
