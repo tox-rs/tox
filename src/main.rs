@@ -278,14 +278,7 @@ async fn run_udp(config: &NodeConfig, dht_pk: PublicKey, dht_sk: &SecretKey, mut
 
     let udp_server_future = dht_run_socket(&udp_server, socket, rx, udp_stats).map_err(Error::from);
 
-    let future = async move {
-        futures::select! {
-            res = udp_server_future.fuse() => res,
-            res = lan_discovery_future.fuse() => res,
-        }
-    };
-
-    futures::try_join!(future, udp_onion_future)?;
+    futures::try_join!(udp_server_future, lan_discovery_future, udp_onion_future)?;
 
     Ok(())
 }
