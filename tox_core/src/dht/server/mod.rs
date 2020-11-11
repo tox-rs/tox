@@ -23,6 +23,7 @@ use tox_packet::dht::*;
 use tox_packet::dht::packed_node::*;
 use crate::dht::kbucket::*;
 use crate::dht::ktree::*;
+use crate::dht::forced_ktree::*;
 use crate::dht::precomputed_cache::*;
 use crate::onion::client::*;
 use tox_packet::onion::*;
@@ -88,12 +89,12 @@ Contains:
 
 - DHT public key
 - DHT secret key
-- Close List ([`Ktree`] with nodes close to own DHT public key)
+- Close List ([`ForcedKtree`] with nodes close to own DHT public key)
 
 Before a [`PackedNode`] is added to the Close List, it needs to be
 checked whether:
 
-- it can be added to [`Ktree`] \(using [`Ktree::can_add()`])
+- it can be added to [`ForcedKtree`] \(using [`ForcedKtree::can_add()`])
 - [`PackedNode`] is actually online
 
 Once the first check passes node is added to the temporary list, and
@@ -102,8 +103,8 @@ online. If the node responds correctly within [`PING_TIMEOUT`], it's
 removed from temporary list and added to the Close List.
 
 [`NodesRequest`]: ../dht/struct.NodesRequest.html
-[`Ktree`]: ../dht/struct.Ktree.html
-[`Ktree::can_add()`]: ../dht/struct.Ktree.html#method.can_add
+[`ForcedKtree`]: ../dht/struct.ForcedKtree.html
+[`ForcedKtree::can_add()`]: ../dht/struct.ForcedKtree.html#method.can_add
 [`PackedNode`]: ../dht/struct.PackedNode.html
 */
 #[derive(Clone)]
@@ -119,7 +120,7 @@ pub struct Server {
     /// Struct that stores and manages requests IDs and timeouts.
     request_queue: Arc<RwLock<RequestQueue<PublicKey>>>,
     /// Close nodes list which contains nodes close to own DHT `PublicKey`.
-    pub close_nodes: Arc<RwLock<Ktree>>,
+    pub close_nodes: Arc<RwLock<ForcedKtree>>,
     /// Symmetric key used for onion return encryption.
     onion_symmetric_key: Arc<RwLock<secretbox::Key>>,
     /// Onion announce struct to handle `OnionAnnounce` and `OnionData` packets.
@@ -210,7 +211,7 @@ impl Server {
             tx,
             friend_saddr_sink: Default::default(),
             request_queue: Arc::new(RwLock::new(RequestQueue::new(PING_TIMEOUT))),
-            close_nodes: Arc::new(RwLock::new(Ktree::new(&pk))),
+            close_nodes: Arc::new(RwLock::new(ForcedKtree::new(&pk))),
             onion_symmetric_key: Arc::new(RwLock::new(secretbox::gen_key())),
             onion_announce: Arc::new(RwLock::new(OnionAnnounce::new(pk))),
             fake_friends_keys,
@@ -255,7 +256,7 @@ impl Server {
 
     /// Get closest nodes from both close_nodes and friend's close_nodes
     fn get_closest_inner(
-        close_nodes: &Ktree,
+        close_nodes: &ForcedKtree,
         friends: &HashMap<PublicKey, DhtFriend>,
         base_pk: &PublicKey,
         count: u8,
@@ -936,7 +937,7 @@ impl Server {
     }
 
     /// Update returned socket address and time of receiving packet
-    fn update_returned_addr(&self, node: &PackedNode, packet_pk: &PublicKey, close_nodes: &mut Ktree, friends: &mut HashMap<PublicKey, DhtFriend>) {
+    fn update_returned_addr(&self, node: &PackedNode, packet_pk: &PublicKey, close_nodes: &mut ForcedKtree, friends: &mut HashMap<PublicKey, DhtFriend>) {
         if self.pk == node.pk {
             if let Some(node_to_update) = close_nodes.get_node_mut(packet_pk) {
                 node_to_update.update_returned_addr(node.saddr);

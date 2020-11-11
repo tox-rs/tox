@@ -3,6 +3,7 @@
 
 pub mod kbucket;
 pub mod ktree;
+pub mod forced_ktree;
 pub mod codec;
 pub mod server;
 pub mod dht_friend;
