@@ -21,7 +21,7 @@ pub const PING_INTERVAL: Duration = Duration::from_secs(60);
 pub const BAD_NODE_TIMEOUT: Duration = Duration::from_secs(PING_INTERVAL.as_secs() * 2 + 2);
 
 /// The timeout after which a node is discarded completely.
-pub const KILL_NODE_TIMEOUT: Duration = 
+pub const KILL_NODE_TIMEOUT: Duration =
     Duration::from_secs(BAD_NODE_TIMEOUT.as_secs() + PING_INTERVAL.as_secs());
 
 /// Struct conatains SocketAddrs and timestamps for sending and receiving packet
