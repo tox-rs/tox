@@ -125,18 +125,23 @@ pub struct Server {
     onion_symmetric_key: Arc<RwLock<secretbox::Key>>,
     /// Onion announce struct to handle `OnionAnnounce` and `OnionData` packets.
     onion_announce: Arc<RwLock<OnionAnnounce>>,
-
+    /// `PublicKey`s of fake friends. They serve two purposes:
+    /// - server will send NodesRequest packets with these 2 random keys
+    ///   periodically thereby it will fill Ktree with farther nodes and speed
+    ///   up bootstrap process.
+    /// - close nodes of these two friends can be used as pool of random nodes
+    /// for onion client.
     fake_friends_keys: Vec<PublicKey>,
     /// Friends list used to store friends related data like close nodes per
     /// friend, hole punching status, etc. First FAKE_FRIENDS_NUMBER friends
     /// are fake with random public key.
     friends: Arc<RwLock<HashMap<PublicKey, DhtFriend>>>,
-    /// List of nodes to send `NodesRequest` packet. When we `NodesResponse`
-    /// packet we should send `NodesRequest` to all nodes from the response to
-    /// check if they are capable of handling our requests and to continue
-    /// bootstrapping. But instead of instant sending `NodesRequest` we will add
-    /// the node to this list which is processed every second. The purpose of
-    /// this is to prevent amplification attacks.
+    /// List of nodes to send `NodesRequest` packet. When we receive
+    /// `NodesResponse` packet we should send `NodesRequest` to all nodes from
+    /// the response to check if they are capable of handling our requests and
+    /// to continue bootstrapping. But instead of instant sending `NodesRequest`
+    /// we will add the node to this list which is processed every second. The
+    /// purpose of this is to prevent amplification attacks.
     nodes_to_bootstrap: Arc<RwLock<Kbucket<PackedNode>>>,
     /// How many times we sent `NodesRequest` packet to a random node from close
     /// nodes list.
@@ -186,16 +191,6 @@ impl Server {
     pub fn new(tx: Tx, pk: PublicKey, sk: SecretKey) -> Server {
         debug!("Created new Server instance");
 
-        // Adding 2 fake friends with random public key. It serves two purposes:
-        // - server will send NodesRequest packets with these 2 random keys
-        //   periodically thereby it will fill Ktree with farther nodes and
-        //   speed up bootstrap process.
-        // - close nodes of these two friends can be used as pool of random
-        //   nodes for onion client.
-        // It's the same way as c-toxcore acts but it's not the best way. So it
-        // has to be rewritten in a cleaner and safer manner. Most likely onion
-        // will be replaced by DHT announcements:
-        // https://github.com/zugz/tox-DHTAnnouncements/blob/master/DHTAnnouncements.md
         let fake_friends_keys = iter::repeat_with(|| gen_keypair().0)
             .take(FAKE_FRIENDS_NUMBER)
             .collect::<Vec<_>>();
