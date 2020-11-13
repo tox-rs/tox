@@ -225,20 +225,18 @@ where
                 // we are not going to evict the farthest node or the current
                 // node is the farthest one
                 if self.is_full() {
-                    match Node::eviction_index(&self.nodes) {
-                        Some(index) => {
-                            debug!(target: "Kbucket",
-                                "No free space left in the kbucket, the last bad node removed.");
-                            // replace the farthest bad node
-                            self.nodes.remove(index);
-                            self.nodes.push(new_node.into());
-                            true
-                        },
-                        None => {
-                            debug!(target: "Kbucket",
-                                "Node can't be added to the kbucket.");
-                            false
-                        },
+                    if let Some(eviction_index) = Node::eviction_index(&self.nodes) {
+                        debug!(target: "Kbucket",
+                            "No free space left in the kbucket, the last bad node removed.");
+                        // replace the farthest bad node
+                        self.nodes.remove(eviction_index);
+                        let index = index - if eviction_index < index { 1 } else { 0 };
+                        self.nodes.insert(index, new_node.into());
+                        true
+                    } else {
+                        debug!(target: "Kbucket",
+                            "Node can't be added to the kbucket.");
+                        false
                     }
                 } else {
                     // distance to the PK was bigger than the other keys, but
@@ -254,11 +252,15 @@ where
                 // we are going to evict the farthest node if the kbucket is full
                 if self.is_full() {
                     debug!(target: "Kbucket",
-                        "No free space left in the kbucket, the last node removed.");
-                    self.nodes.pop();
+                        "No free space left in the kbucket, the last (bad) node removed.");
+                    let eviction_index = Node::eviction_index(&self.nodes).unwrap_or_else(|| self.nodes.len() - 1);
+                    self.nodes.remove(eviction_index);
+                    let index = index - if eviction_index < index { 1 } else { 0 };
+                    self.nodes.insert(index, new_node.into());
+                } else {
+                    self.nodes.insert(index, new_node.into());
+                    debug!(target: "Kbucket", "Node inserted inside the kbucket.");
                 }
-                debug!(target: "Kbucket", "Node inserted inside the kbucket.");
-                self.nodes.insert(index, new_node.into());
                 true
             },
         }
@@ -469,6 +471,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn kbucket_try_add_should_replace_bad_nodes_in_the_middle() {
+        let pk = PublicKey([0; PUBLICKEYBYTES]);
+        let mut kbucket = Kbucket::<DhtNode>::new(3);
+
+        let pk_1 = PublicKey([1; PUBLICKEYBYTES]);
+        let pk_2 = PublicKey([2; PUBLICKEYBYTES]);
+        let pk_3 = PublicKey([3; PUBLICKEYBYTES]);
+        let pk_4 = PublicKey([4; PUBLICKEYBYTES]);
+
+        let node_1 = PackedNode::new(
+            "1.2.3.4:12345".parse().unwrap(),
+            &pk_1,
+        );
+        let node_2 = PackedNode::new(
+            "1.2.3.4:12346".parse().unwrap(),
+            &pk_2,
+        );
+        let node_3 = PackedNode::new(
+            "1.2.3.4:12346".parse().unwrap(),
+            &pk_3,
+        );
+        let node_4 = PackedNode::new(
+            "1.2.3.4:12346".parse().unwrap(),
+            &pk_4,
+        );
+
+        assert!(kbucket.try_add(&pk, node_2, /* evict */ false));
+
+        tokio::time::pause();
+        tokio::time::advance(BAD_NODE_TIMEOUT + Duration::from_secs(1)).await;
+
+        assert!(kbucket.try_add(&pk, node_3, /* evict */ false));
+        assert!(kbucket.try_add(&pk, node_4, /* evict */ false));
+        assert!(kbucket.try_add(&pk, node_1, /* evict */ false));
+
+        assert!(!kbucket.contains(&pk, &pk_2));
+        assert!(kbucket.contains(&pk, &pk_1));
+        assert!(kbucket.contains(&pk, &pk_3));
+        assert!(kbucket.contains(&pk, &pk_4));
+    }
+
+    #[tokio::test]
     async fn kbucket_try_add_evict_should_replace_bad_nodes() {
         let pk = PublicKey([0; PUBLICKEYBYTES]);
         let mut kbucket = Kbucket::<DhtNode>::new(1);
@@ -490,6 +534,41 @@ mod tests {
 
         // replacing bad node
         assert!(kbucket.try_add(&pk, node_2, /* evict */ true));
+    }
+
+    #[tokio::test]
+    async fn kbucket_try_add_evict_should_replace_bad_nodes_first() {
+        let pk = PublicKey([0; PUBLICKEYBYTES]);
+        let mut kbucket = Kbucket::<DhtNode>::new(2);
+
+        let pk_1 = PublicKey([1; PUBLICKEYBYTES]);
+        let pk_2 = PublicKey([2; PUBLICKEYBYTES]);
+        let pk_3 = PublicKey([3; PUBLICKEYBYTES]);
+
+        let node_1 = PackedNode::new(
+            "1.2.3.4:12345".parse().unwrap(),
+            &pk_1,
+        );
+        let node_2 = PackedNode::new(
+            "1.2.3.4:12346".parse().unwrap(),
+            &pk_2,
+        );
+        let node_3 = PackedNode::new(
+            "1.2.3.4:12346".parse().unwrap(),
+            &pk_3,
+        );
+
+        assert!(kbucket.try_add(&pk, node_1, /* evict */ true));
+
+        tokio::time::pause();
+        tokio::time::advance(BAD_NODE_TIMEOUT + Duration::from_secs(1)).await;
+
+        assert!(kbucket.try_add(&pk, node_3, /* evict */ true));
+        assert!(kbucket.try_add(&pk, node_2, /* evict */ true));
+
+        assert!(!kbucket.contains(&pk, &pk_1));
+        assert!(kbucket.contains(&pk, &pk_2));
+        assert!(kbucket.contains(&pk, &pk_3));
     }
 
     #[test]
