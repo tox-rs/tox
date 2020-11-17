@@ -436,7 +436,7 @@ mod tests {
         let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
         let (lossless_tx, lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let mut dht = DhtServer::new(udp_tx.clone(), dht_pk, dht_sk.clone());
+        let dht = DhtServer::new(udp_tx.clone(), dht_pk, dht_sk.clone());
         let tcp_connections = TcpConnections::new(dht_pk, dht_sk.clone(), tcp_incoming_tx);
         let onion_client = OnionClient::new(dht.clone(), tcp_connections.clone(), real_sk.clone(), real_pk);
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
@@ -450,8 +450,6 @@ mod tests {
             real_sk: real_sk.clone(),
             precomputed_keys,
         });
-        dht.set_onion_client(onion_client.clone());
-        dht.set_net_crypto(net_crypto.clone());
         let friend_connections = FriendConnections::new(
             real_sk,
             real_pk,
@@ -962,9 +960,8 @@ mod tests {
         let handshake = CryptoHandshake::new(&precomputed_key, &handshake_payload, cookie);
 
         let net_crypto = friend_connections.net_crypto.clone();
-        let dht = friend_connections.dht.clone();
         let packets_future = async {
-            dht.handle_packet(DhtPacket::CryptoHandshake(handshake), friend_saddr).await.unwrap();
+            net_crypto.handle_udp_crypto_handshake(&handshake, friend_saddr).await.unwrap();
 
             let session_pk = net_crypto.get_session_pk(&friend_pk).await.unwrap();
             let session_precomputed_key = precompute(&session_pk, &friend_session_sk);
@@ -976,7 +973,7 @@ mod tests {
             };
             let crypto_data = CryptoData::new(&session_precomputed_key, sent_nonce, &crypto_data_payload);
 
-            dht.handle_packet(DhtPacket::CryptoData(crypto_data), friend_saddr).await.unwrap();
+            net_crypto.handle_udp_crypto_data(&crypto_data, friend_saddr).await.unwrap();
 
             let (received, _lossless_rx) = lossless_rx.into_future().await;
             let (received_pk, received_data) = received.unwrap();

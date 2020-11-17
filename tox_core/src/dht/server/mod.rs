@@ -4,7 +4,7 @@ This module works on top of other modules.
 */
 
 pub mod hole_punching;
-mod errors;
+pub mod errors;
 
 use failure::Fail;
 use futures::{TryFutureExt, StreamExt, SinkExt, future};
@@ -26,7 +26,6 @@ use crate::dht::kbucket::*;
 use crate::dht::ktree::*;
 use crate::dht::forced_ktree::*;
 use crate::dht::precomputed_cache::*;
-use crate::onion::client::*;
 use tox_packet::onion::*;
 use crate::onion::onion_announce::*;
 use crate::dht::request_queue::*;
@@ -35,7 +34,6 @@ use crate::dht::dht_friend::*;
 use crate::dht::dht_node::*;
 use crate::dht::server::hole_punching::*;
 use tox_packet::relay::OnionRequest;
-use crate::net_crypto::*;
 use crate::dht::ip_port::IsGlobal;
 use crate::utils::*;
 use crate::dht::server::errors::*;
@@ -163,15 +161,6 @@ pub struct Server {
     /// should be redirected to TCP sender trough this sink
     /// None if there is no TCP relay
     tcp_onion_sink: Option<TcpOnionTx>,
-    /// Net crypto module that handles `CookieRequest`, `CookieResponse`,
-    /// `CryptoHandshake` and `CryptoData` packets. It can be `None` in case of
-    /// pure bootstrap server when we don't have friends and therefore don't
-    /// have to handle related packets.
-    net_crypto: Option<NetCrypto>,
-    /// Onion client that handles `OnionDataResponse` and
-    /// `OnionAnnounceResponse` packets. It can be `None` in case of pure
-    /// bootstrap server.
-    onion_client: Option<Box<OnionClient>>,
     /// If LAN discovery is enabled `Server` will handle `LanDiscovery` packets
     /// and send `NodesRequest` packets in reply.
     lan_discovery_enabled: bool,
@@ -219,8 +208,6 @@ impl Server {
             nodes_to_ping: Arc::new(RwLock::new(Kbucket::new(MAX_TO_PING))),
             bootstrap_info: None,
             tcp_onion_sink: None,
-            net_crypto: None,
-            onion_client: None,
             lan_discovery_enabled: true,
             is_ipv6_enabled: false,
             initial_bootstrap: Vec::new(),
@@ -718,54 +705,6 @@ impl Server {
         Ok(())
     }
 
-    /// Function to handle incoming packets and send responses if necessary.
-    pub async fn handle_packet(&self, packet: Packet, addr: SocketAddr) -> Result<(), HandlePacketError> {
-        match packet {
-            Packet::PingRequest(packet) =>
-                self.handle_ping_req(packet, addr).await,
-            Packet::PingResponse(packet) =>
-                self.handle_ping_resp(packet, addr).await,
-            Packet::NodesRequest(packet) =>
-                self.handle_nodes_req(packet, addr).await,
-            Packet::NodesResponse(packet) =>
-                self.handle_nodes_resp(packet, addr).await,
-            Packet::CookieRequest(packet) =>
-                self.handle_cookie_request(&packet, addr).await,
-            Packet::CookieResponse(packet) =>
-                self.handle_cookie_response(&packet, addr).await,
-            Packet::CryptoHandshake(packet) =>
-                self.handle_crypto_handshake(&packet, addr).await,
-            Packet::DhtRequest(packet) =>
-                self.handle_dht_req(packet, addr).await,
-            Packet::LanDiscovery(packet) =>
-                self.handle_lan_discovery(&packet, addr).await,
-            Packet::OnionRequest0(packet) =>
-                self.handle_onion_request_0(packet, addr).await,
-            Packet::OnionRequest1(packet) =>
-                self.handle_onion_request_1(packet, addr).await,
-            Packet::OnionRequest2(packet) =>
-                self.handle_onion_request_2(packet, addr).await,
-            Packet::OnionAnnounceRequest(packet) =>
-                self.handle_onion_announce_request(packet, addr).await,
-            Packet::OnionDataRequest(packet) =>
-                self.handle_onion_data_request(packet).await,
-            Packet::OnionResponse3(packet) =>
-                self.handle_onion_response_3(packet).await,
-            Packet::OnionResponse2(packet) =>
-                self.handle_onion_response_2(packet).await,
-            Packet::OnionResponse1(packet) =>
-                self.handle_onion_response_1(packet).await,
-            Packet::BootstrapInfo(packet) =>
-                self.handle_bootstrap_info(&packet, addr).await,
-            Packet::CryptoData(packet) =>
-                self.handle_crypto_data(&packet, addr).await,
-            Packet::OnionDataResponse(packet) =>
-                self.handle_onion_data_response(&packet).await,
-            Packet::OnionAnnounceResponse(packet) =>
-                self.handle_onion_announce_response(&packet, addr).await,
-        }
-    }
-
     /// Send UDP packet to specified address.
     async fn send_to(&self, addr: SocketAddr, packet: Packet) -> Result<(), mpsc::SendError> {
         self.tx.clone().send((packet, addr)).await
@@ -774,7 +713,7 @@ impl Server {
     /// Handle received `PingRequest` packet and response with `PingResponse`
     /// packet. If node that sent this packet is not present in close nodes list
     /// and can be added there then it will be added to ping list.
-    async fn handle_ping_req(&self, packet: PingRequest, addr: SocketAddr)
+    pub async fn handle_ping_req(&self, packet: PingRequest, addr: SocketAddr)
         -> Result<(), HandlePacketError> {
         let precomputed_key = self.precomputed_keys.get(packet.pk).await;
         let payload = match packet.get_payload(&precomputed_key) {
@@ -830,7 +769,7 @@ impl Server {
 
     /// Handle received `PingResponse` packet and if it's correct add the node
     /// that sent this packet to close nodes lists.
-    async fn handle_ping_resp(&self, packet: PingResponse, addr: SocketAddr) -> Result<(), HandlePacketError> {
+    pub async fn handle_ping_resp(&self, packet: PingResponse, addr: SocketAddr) -> Result<(), HandlePacketError> {
         let precomputed_key = self.precomputed_keys.get(packet.pk).await;
         let payload = match packet.get_payload(&precomputed_key) {
             Err(e) => return Err(e.context(HandlePacketErrorKind::GetPayload).into()),
@@ -849,7 +788,7 @@ impl Server {
     /// Handle received `NodesRequest` packet and respond with `NodesResponse`
     /// packet. If node that sent this packet is not present in close nodes list
     /// and can be added there then it will be added to ping list.
-    async fn handle_nodes_req(&self, packet: NodesRequest, addr: SocketAddr)
+    pub async fn handle_nodes_req(&self, packet: NodesRequest, addr: SocketAddr)
         -> Result<(), HandlePacketError> {
         let precomputed_key = self.precomputed_keys.get(packet.pk).await;
         let payload = match packet.get_payload(&precomputed_key) {
@@ -909,7 +848,7 @@ impl Server {
     /// that sent this packet to close nodes lists. Nodes from response will be
     /// added to bootstrap nodes list to send `NodesRequest` packet to them
     /// later.
-    async fn handle_nodes_resp(&self, packet: NodesResponse, addr: SocketAddr)
+    pub async fn handle_nodes_resp(&self, packet: NodesResponse, addr: SocketAddr)
         -> Result<(), HandlePacketError> {
         let precomputed_key = self.precomputed_keys.get(packet.pk).await;
 
@@ -949,77 +888,9 @@ impl Server {
         }
     }
 
-    /// Handle received `CookieRequest` packet and pass it to `net_crypto`
-    /// module.
-    async fn handle_cookie_request(&self, packet: &CookieRequest, addr: SocketAddr)
-        -> Result<(), HandlePacketError> {
-        if let Some(ref net_crypto) = self.net_crypto {
-            net_crypto.handle_udp_cookie_request(packet, addr).await
-                .map_err(|e| e.context(HandlePacketErrorKind::HandleNetCrypto).into())
-        } else {
-            Err(
-                HandlePacketError::from(HandlePacketErrorKind::NetCrypto)
-            )
-        }
-    }
-
-    /// Handle received `CookieResponse` packet and pass it to `net_crypto`
-    /// module.
-    async fn handle_cookie_response(&self, packet: &CookieResponse, addr: SocketAddr)
-        -> Result<(), HandlePacketError> {
-        if let Some(ref net_crypto) = self.net_crypto {
-            net_crypto.handle_udp_cookie_response(packet, addr).await
-                .map_err(|e| e.context(HandlePacketErrorKind::HandleNetCrypto).into())
-        } else {
-            Err(HandlePacketError::from(HandlePacketErrorKind::NetCrypto))
-        }
-    }
-
-    /// Handle received `CryptoHandshake` packet and pass it to `net_crypto`
-    /// module.
-    async fn handle_crypto_handshake(&self, packet: &CryptoHandshake, addr: SocketAddr)
-        -> Result<(), HandlePacketError> {
-        if let Some(ref net_crypto) = self.net_crypto {
-            net_crypto.handle_udp_crypto_handshake(packet, addr).await
-                .map_err(|e| e.context(HandlePacketErrorKind::HandleNetCrypto).into())
-        } else {
-            Err(HandlePacketError::from(HandlePacketErrorKind::NetCrypto))
-        }
-    }
-
-    /// Handle received `CryptoData` packet and pass it to `net_crypto` module.
-    async fn handle_crypto_data(&self, packet: &CryptoData, addr: SocketAddr) -> Result<(), HandlePacketError> {
-        if let Some(ref net_crypto) = self.net_crypto {
-            net_crypto.handle_udp_crypto_data(packet, addr).await
-                .map_err(|e| e.context(HandlePacketErrorKind::HandleNetCrypto).into())
-        } else {
-            Err(HandlePacketError::from(HandlePacketErrorKind::NetCrypto))
-        }
-    }
-
-    /// Handle received `OnionDataResponse` packet and pass it to `onion_client` module.
-    async fn handle_onion_data_response(&self, packet: &OnionDataResponse) -> Result<(), HandlePacketError> {
-        if let Some(ref onion_client) = self.onion_client {
-            onion_client.handle_data_response(packet).await
-                .map_err(|e| e.context(HandlePacketErrorKind::HandleOnionClient).into())
-        } else {
-            Err(HandlePacketError::from(HandlePacketErrorKind::OnionClient))
-        }
-    }
-
-    /// Handle received `OnionAnnounceResponse` packet and pass it to `onion_client` module.
-    async fn handle_onion_announce_response(&self, packet: &OnionAnnounceResponse, addr: SocketAddr) -> Result<(), HandlePacketError> {
-        if let Some(ref onion_client) = self.onion_client {
-            onion_client.handle_announce_response(packet, IsGlobal::is_global(&addr.ip())).await
-                .map_err(|e| e.context(HandlePacketErrorKind::HandleOnionClient).into())
-        } else {
-            Err(HandlePacketError::from(HandlePacketErrorKind::OnionClient))
-        }
-    }
-
     /// Handle received `DhtRequest` packet, redirect it if it's sent for
     /// someone else or parse it and handle the payload if it's sent for us.
-    async fn handle_dht_req(&self, packet: DhtRequest, addr: SocketAddr)
+    pub async fn handle_dht_req(&self, packet: DhtRequest, addr: SocketAddr)
         -> Result<(), HandlePacketError> { // TODO: split to functions
         if packet.rpk == self.pk { // the target peer is me
             self.handle_dht_req_for_us(packet, addr).await
@@ -1137,7 +1008,7 @@ impl Server {
 
     /// Handle received `LanDiscovery` packet and response with `NodesRequest`
     /// packet.
-    async fn handle_lan_discovery(&self, packet: &LanDiscovery, addr: SocketAddr)
+    pub async fn handle_lan_discovery(&self, packet: &LanDiscovery, addr: SocketAddr)
         -> Result<(), HandlePacketError> {
         // LanDiscovery is optional
         if !self.lan_discovery_enabled {
@@ -1156,7 +1027,7 @@ impl Server {
 
     /// Handle received `OnionRequest0` packet and send `OnionRequest1` packet
     /// to the next peer.
-    async fn handle_onion_request_0(&self, packet: OnionRequest0, addr: SocketAddr) -> Result<(), HandlePacketError> {
+    pub async fn handle_onion_request_0(&self, packet: OnionRequest0, addr: SocketAddr) -> Result<(), HandlePacketError> {
         let onion_symmetric_key = self.onion_symmetric_key.read().await;
         let onion_return = OnionReturn::new(
             &onion_symmetric_key,
@@ -1182,7 +1053,7 @@ impl Server {
 
     /// Handle received `OnionRequest1` packet and send `OnionRequest2` packet
     /// to the next peer.
-    async fn handle_onion_request_1(&self, packet: OnionRequest1, addr: SocketAddr) -> Result<(), HandlePacketError> {
+    pub async fn handle_onion_request_1(&self, packet: OnionRequest1, addr: SocketAddr) -> Result<(), HandlePacketError> {
         let onion_symmetric_key = self.onion_symmetric_key.read().await;
         let onion_return = OnionReturn::new(
             &onion_symmetric_key,
@@ -1207,7 +1078,7 @@ impl Server {
 
     /// Handle received `OnionRequest2` packet and send `OnionAnnounceRequest`
     /// or `OnionDataRequest` packet to the next peer.
-    async fn handle_onion_request_2(&self, packet: OnionRequest2, addr: SocketAddr) -> Result<(), HandlePacketError> {
+    pub async fn handle_onion_request_2(&self, packet: OnionRequest2, addr: SocketAddr) -> Result<(), HandlePacketError> {
         let onion_symmetric_key = self.onion_symmetric_key.read().await;
         let onion_return = OnionReturn::new(
             &onion_symmetric_key,
@@ -1257,7 +1128,7 @@ impl Server {
     /// The response packet will contain up to 4 closest to `search_pk` nodes
     /// from ktree. They are used to search closest to long term `PublicKey`
     /// nodes to announce.
-    async fn handle_onion_announce_request(&self, packet: OnionAnnounceRequest, addr: SocketAddr) -> Result<(), HandlePacketError> {
+    pub async fn handle_onion_announce_request(&self, packet: OnionAnnounceRequest, addr: SocketAddr) -> Result<(), HandlePacketError> {
         let shared_secret = self.precomputed_keys.get(packet.inner.pk).await;
         let payload = match packet.inner.get_payload(&shared_secret) {
             Err(e) => return Err(e.context(HandlePacketErrorKind::GetPayload).into()),
@@ -1290,7 +1161,7 @@ impl Server {
     /// Handle received `OnionDataRequest` packet and send `OnionResponse3`
     /// packet with inner `OnionDataResponse` to destination node through its
     /// onion path.
-    async fn handle_onion_data_request(&self, packet: OnionDataRequest)
+    pub async fn handle_onion_data_request(&self, packet: OnionDataRequest)
         -> Result<(), HandlePacketError> {
         let onion_announce = self.onion_announce.read().await;
         match onion_announce.handle_data_request(packet) {
@@ -1302,7 +1173,7 @@ impl Server {
 
     /// Handle received `OnionResponse3` packet and send `OnionResponse2` packet
     /// to the next peer which address is stored in encrypted onion return.
-    async fn handle_onion_response_3(&self, packet: OnionResponse3) -> Result<(), HandlePacketError> {
+    pub async fn handle_onion_response_3(&self, packet: OnionResponse3) -> Result<(), HandlePacketError> {
         let onion_symmetric_key = self.onion_symmetric_key.read().await;
         let payload = packet.onion_return.get_payload(&onion_symmetric_key);
         let payload = match payload {
@@ -1330,7 +1201,7 @@ impl Server {
 
     /// Handle received `OnionResponse2` packet and send `OnionResponse1` packet
     /// to the next peer which address is stored in encrypted onion return.
-    async fn handle_onion_response_2(&self, packet: OnionResponse2) -> Result<(), HandlePacketError> {
+    pub async fn handle_onion_response_2(&self, packet: OnionResponse2) -> Result<(), HandlePacketError> {
         let onion_symmetric_key = self.onion_symmetric_key.read().await;
         let payload = packet.onion_return.get_payload(&onion_symmetric_key);
         let payload = match payload {
@@ -1359,7 +1230,7 @@ impl Server {
     /// Handle received `OnionResponse1` packet and send `OnionAnnounceResponse`
     /// or `OnionDataResponse` packet to the next peer which address is stored
     /// in encrypted onion return.
-    async fn handle_onion_response_1(&self, packet: OnionResponse1) -> Result<(), HandlePacketError> {
+    pub async fn handle_onion_response_1(&self, packet: OnionResponse1) -> Result<(), HandlePacketError> {
         let onion_symmetric_key = self.onion_symmetric_key.read().await;
         let payload = packet.onion_return.get_payload(&onion_symmetric_key);
         let payload = match payload {
@@ -1423,7 +1294,7 @@ impl Server {
     }
 
     /// Handle `BootstrapInfo` packet and response with `BootstrapInfo` packet.
-    async fn handle_bootstrap_info(&self, packet: &BootstrapInfo, addr: SocketAddr) -> Result<(), HandlePacketError> {
+    pub async fn handle_bootstrap_info(&self, packet: &BootstrapInfo, addr: SocketAddr) -> Result<(), HandlePacketError> {
         if packet.motd.len() != BOOSTRAP_CLIENT_MAX_MOTD_LENGTH {
             return Err(HandlePacketError::from(HandlePacketErrorKind::BootstrapInfoLength))
         }
@@ -1482,16 +1353,6 @@ impl Server {
     /// Set TCP sink for onion packets.
     pub fn set_tcp_onion_sink(&mut self, tcp_onion_sink: TcpOnionTx) {
         self.tcp_onion_sink = Some(tcp_onion_sink)
-    }
-
-    /// Set `net_crypto` module.
-    pub fn set_net_crypto(&mut self, net_crypto: NetCrypto) {
-        self.net_crypto = Some(net_crypto);
-    }
-
-    /// Set `onion_client` module.
-    pub fn set_onion_client(&mut self, onion_client: OnionClient) {
-        self.onion_client = Some(Box::new(onion_client));
     }
 
     /// Set sink to send friend's `SocketAddr` when it gets known.
@@ -1595,12 +1456,12 @@ mod tests {
 
         alice.set_bootstrap_info(version, Box::new(move |_| motd_c.clone()));
 
-        let packet = Packet::BootstrapInfo(BootstrapInfo {
+        let packet = BootstrapInfo {
             version: 00,
             motd: vec![0; BOOSTRAP_CLIENT_MAX_MOTD_LENGTH],
-        });
+        };
 
-        alice.handle_packet(packet, addr).await.unwrap();
+        alice.handle_bootstrap_info(&packet, addr).await.unwrap();
 
         let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
@@ -1622,12 +1483,12 @@ mod tests {
 
         alice.set_bootstrap_info(version, Box::new(move |_| motd.clone()));
 
-        let packet = Packet::BootstrapInfo(BootstrapInfo {
+        let packet = BootstrapInfo {
             version: 00,
             motd: Vec::new(),
-        });
+        };
 
-        let res = alice.handle_packet(packet, addr).await;
+        let res = alice.handle_bootstrap_info(&packet, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::BootstrapInfoLength);
 
@@ -1643,9 +1504,9 @@ mod tests {
         let (alice, precomp, bob_pk, bob_sk, rx, addr) = create_node();
 
         let req_payload = PingRequestPayload { id: 42 };
-        let ping_req = Packet::PingRequest(PingRequest::new(&precomp, &bob_pk, &req_payload));
+        let ping_req = PingRequest::new(&precomp, &bob_pk, &req_payload);
 
-        alice.handle_packet(ping_req, addr).await.unwrap();
+        alice.handle_ping_req(ping_req, addr).await.unwrap();
 
         let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
@@ -1668,9 +1529,9 @@ mod tests {
         alice.add_friend(bob_pk).await;
 
         let req_payload = PingRequestPayload { id: 42 };
-        let ping_req = Packet::PingRequest(PingRequest::new(&precomp, &bob_pk, &req_payload));
+        let ping_req = PingRequest::new(&precomp, &bob_pk, &req_payload);
 
-        alice.handle_packet(ping_req, addr).await.unwrap();
+        alice.handle_ping_req(ping_req, addr).await.unwrap();
 
         let mut request_queue = alice.request_queue.write().await;
 
@@ -1700,9 +1561,9 @@ mod tests {
 
         // can't be decrypted payload since packet contains wrong key
         let req_payload = PingRequestPayload { id: 42 };
-        let ping_req = Packet::PingRequest(PingRequest::new(&precomp, &alice.pk, &req_payload));
+        let ping_req = PingRequest::new(&precomp, &alice.pk, &req_payload);
 
-        let res = alice.handle_packet(ping_req, addr).await;
+        let res = alice.handle_ping_req(ping_req, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
     }
@@ -1720,12 +1581,12 @@ mod tests {
         let ping_id = alice.request_queue.write().await.new_ping_id(&mut thread_rng(), bob_pk);
 
         let resp_payload = PingResponsePayload { id: ping_id };
-        let ping_resp = Packet::PingResponse(PingResponse::new(&precomp, &bob_pk, &resp_payload));
+        let ping_resp = PingResponse::new(&precomp, &bob_pk, &resp_payload);
 
         tokio::time::pause();
         tokio::time::advance(Duration::from_secs(1)).await;
 
-        alice.handle_packet(ping_resp, addr).await.unwrap();
+        alice.handle_ping_resp(ping_resp, addr).await.unwrap();
 
         let friends = alice.friends.read().await;
         let friend = friends.values().next().unwrap();
@@ -1756,9 +1617,9 @@ mod tests {
         let ping_id = alice.request_queue.write().await.new_ping_id(&mut thread_rng(), bob_pk);
 
         let resp_payload = PingResponsePayload { id: ping_id };
-        let ping_resp = Packet::PingResponse(PingResponse::new(&precomp, &bob_pk, &resp_payload));
+        let ping_resp = PingResponse::new(&precomp, &bob_pk, &resp_payload);
 
-        alice.handle_packet(ping_resp, addr).await.unwrap();
+        alice.handle_ping_resp(ping_resp, addr).await.unwrap();
 
         // Necessary to drop tx so that rx.collect::<Vec<_>>() can be finished
         drop(alice);
@@ -1781,9 +1642,9 @@ mod tests {
         let ping_id = alice.request_queue.write().await.new_ping_id(&mut thread_rng(), bob_pk);
 
         let resp_payload = PingResponsePayload { id: ping_id };
-        let ping_resp = Packet::PingResponse(PingResponse::new(&precomp, &bob_pk, &resp_payload));
+        let ping_resp = PingResponse::new(&precomp, &bob_pk, &resp_payload);
 
-        alice.handle_packet(ping_resp, addr).await.unwrap();
+        alice.handle_ping_resp(ping_resp, addr).await.unwrap();
 
         let (received_node, _friend_saddr_rx) = friend_saddr_rx.into_future().await;
         let received_node = received_node.unwrap();
@@ -1803,9 +1664,9 @@ mod tests {
 
         // can't be decrypted payload since packet contains wrong key
         let payload = PingResponsePayload { id: ping_id };
-        let ping_resp = Packet::PingResponse(PingResponse::new(&precomp, &alice.pk, &payload));
+        let ping_resp = PingResponse::new(&precomp, &alice.pk, &payload);
 
-        let res = alice.handle_packet(ping_resp, addr).await;
+        let res = alice.handle_ping_resp(ping_resp, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
     }
@@ -1818,9 +1679,9 @@ mod tests {
         assert!(alice.close_nodes.write().await.try_add(packed_node));
 
         let payload = PingResponsePayload { id: 0 };
-        let ping_resp = Packet::PingResponse(PingResponse::new(&precomp, &bob_pk, &payload));
+        let ping_resp = PingResponse::new(&precomp, &bob_pk, &payload);
 
-        let res = alice.handle_packet(ping_resp, addr).await;
+        let res = alice.handle_ping_resp(ping_resp, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::ZeroPingId);
     }
@@ -1835,9 +1696,9 @@ mod tests {
         let ping_id = alice.request_queue.write().await.new_ping_id(&mut thread_rng(), bob_pk);
 
         let payload = PingResponsePayload { id: ping_id + 1 };
-        let ping_resp = Packet::PingResponse(PingResponse::new(&precomp, &bob_pk, &payload));
+        let ping_resp = PingResponse::new(&precomp, &bob_pk, &payload);
 
-        let res = alice.handle_packet(ping_resp, addr).await;
+        let res = alice.handle_ping_resp(ping_resp, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::PingIdMismatch);
     }
@@ -1852,9 +1713,9 @@ mod tests {
         assert!(alice.close_nodes.write().await.try_add(packed_node));
 
         let req_payload = NodesRequestPayload { pk: bob_pk, id: 42 };
-        let nodes_req = Packet::NodesRequest(NodesRequest::new(&precomp, &bob_pk, &req_payload));
+        let nodes_req = NodesRequest::new(&precomp, &bob_pk, &req_payload);
 
-        alice.handle_packet(nodes_req, addr).await.unwrap();
+        alice.handle_nodes_req(nodes_req, addr).await.unwrap();
 
         let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
@@ -1881,9 +1742,9 @@ mod tests {
         assert!(alice.friends.write().await.get_mut(&bob_pk).unwrap().try_add_to_close(packed_node));
 
         let req_payload = NodesRequestPayload { pk: bob_pk, id: 42 };
-        let nodes_req = Packet::NodesRequest(NodesRequest::new(&precomp, &bob_pk, &req_payload));
+        let nodes_req = NodesRequest::new(&precomp, &bob_pk, &req_payload);
 
-        alice.handle_packet(nodes_req, addr).await.unwrap();
+        alice.handle_nodes_req(nodes_req, addr).await.unwrap();
 
         let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
@@ -1909,14 +1770,14 @@ mod tests {
         assert!(alice.close_nodes.write().await.try_add(packed_node));
 
         let req_payload = NodesRequestPayload { pk: bob_pk, id: 42 };
-        let nodes_req = Packet::NodesRequest(NodesRequest::new(&precomp, &bob_pk, &req_payload));
+        let nodes_req = NodesRequest::new(&precomp, &bob_pk, &req_payload);
 
         let delay = BAD_NODE_TIMEOUT + Duration::from_secs(1);
 
         tokio::time::pause();
         tokio::time::advance(delay).await;
 
-        alice.handle_packet(nodes_req, addr).await.unwrap();
+        alice.handle_nodes_req(nodes_req, addr).await.unwrap();
 
         let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
@@ -1943,9 +1804,9 @@ mod tests {
         assert!(alice.close_nodes.write().await.try_add(packed_node));
 
         let req_payload = NodesRequestPayload { pk: bob_pk, id: 42 };
-        let nodes_req = Packet::NodesRequest(NodesRequest::new(&precomp, &bob_pk, &req_payload));
+        let nodes_req = NodesRequest::new(&precomp, &bob_pk, &req_payload);
 
-        alice.handle_packet(nodes_req, addr).await.unwrap();
+        alice.handle_nodes_req(nodes_req, addr).await.unwrap();
 
         let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
@@ -1968,9 +1829,9 @@ mod tests {
 
         // can't be decrypted payload since packet contains wrong key
         let req_payload = NodesRequestPayload { pk: bob_pk, id: 42 };
-        let nodes_req = Packet::NodesRequest(NodesRequest::new(&precomp, &alice.pk, &req_payload));
+        let nodes_req = NodesRequest::new(&precomp, &alice.pk, &req_payload);
 
-        let res = alice.handle_packet(nodes_req, addr).await;
+        let res = alice.handle_nodes_req(nodes_req, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
     }
@@ -1987,12 +1848,12 @@ mod tests {
         let ping_id = alice.request_queue.write().await.new_ping_id(&mut thread_rng(), bob_pk);
 
         let resp_payload = NodesResponsePayload { nodes: vec![node], id: ping_id };
-        let nodes_resp = Packet::NodesResponse(NodesResponse::new(&precomp, &bob_pk, &resp_payload));
+        let nodes_resp = NodesResponse::new(&precomp, &bob_pk, &resp_payload);
 
         tokio::time::pause();
         tokio::time::advance(Duration::from_secs(1)).await;
 
-        alice.handle_packet(nodes_resp, addr).await.unwrap();
+        alice.handle_nodes_resp(nodes_resp, addr).await.unwrap();
 
         // All nodes from NodesResponse should be added to bootstrap nodes list
         assert!(alice.nodes_to_bootstrap.read().await.contains(&alice.pk, &node.pk));
@@ -2033,9 +1894,9 @@ mod tests {
         let ping_id = alice.request_queue.write().await.new_ping_id(&mut thread_rng(), bob_pk);
 
         let resp_payload = NodesResponsePayload { nodes: vec![node], id: ping_id };
-        let nodes_resp = Packet::NodesResponse(NodesResponse::new(&precomp, &bob_pk, &resp_payload));
+        let nodes_resp = NodesResponse::new(&precomp, &bob_pk, &resp_payload);
 
-        alice.handle_packet(nodes_resp, addr).await.unwrap();
+        alice.handle_nodes_resp(nodes_resp, addr).await.unwrap();
 
         let (received_node, _friend_saddr_rx) = friend_saddr_rx.into_future().await;
         let received_node = received_node.unwrap();
@@ -2052,9 +1913,9 @@ mod tests {
         let resp_payload = NodesResponsePayload { nodes: vec![
             PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0)
         ], id: 38 };
-        let nodes_resp = Packet::NodesResponse(NodesResponse::new(&precomp, &alice.pk, &resp_payload));
+        let nodes_resp = NodesResponse::new(&precomp, &alice.pk, &resp_payload);
 
-        let res = alice.handle_packet(nodes_resp, addr).await;
+        let res = alice.handle_nodes_resp(nodes_resp, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
     }
@@ -2066,9 +1927,9 @@ mod tests {
         let resp_payload = NodesResponsePayload { nodes: vec![
             PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0)
         ], id: 0 };
-        let nodes_resp = Packet::NodesResponse(NodesResponse::new(&precomp, &bob_pk, &resp_payload));
+        let nodes_resp = NodesResponse::new(&precomp, &bob_pk, &resp_payload);
 
-        alice.handle_packet(nodes_resp, addr).await.unwrap();
+        alice.handle_nodes_resp(nodes_resp, addr).await.unwrap();
 
         // Necessary to drop tx so that rx.collect::<Vec<_>>() can be finished
         drop(alice);
@@ -2088,122 +1949,14 @@ mod tests {
             ],
             id: ping_id + 1
         };
-        let nodes_resp = Packet::NodesResponse(NodesResponse::new(&precomp, &bob_pk, &resp_payload));
+        let nodes_resp = NodesResponse::new(&precomp, &bob_pk, &resp_payload);
 
-        alice.handle_packet(nodes_resp, addr).await.unwrap();
+        alice.handle_nodes_resp(nodes_resp, addr).await.unwrap();
 
         // Necessary to drop tx so that rx.collect::<Vec<_>>() can be finished
         drop(alice);
 
         assert!(rx.collect::<Vec<_>>().await.is_empty());
-    }
-
-    // handle_cookie_request
-    #[tokio::test]
-    async fn handle_cookie_request() {
-        crypto_init().unwrap();
-        let (udp_tx, udp_rx) = mpsc::channel(1);
-        let (dht_pk, dht_sk) = gen_keypair();
-        let mut alice = Server::new(udp_tx.clone(), dht_pk, dht_sk.clone());
-
-        let (lossless_tx, _lossless_rx) = mpsc::unbounded();
-        let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (real_pk, real_sk) = gen_keypair();
-        let (bob_pk, bob_sk) = gen_keypair();
-        let (bob_real_pk, _bob_real_sk) = gen_keypair();
-        let precomp = precompute(&alice.pk, &bob_sk);
-        let net_crypto = NetCrypto::new(NetCryptoNewArgs {
-            udp_tx,
-            lossless_tx,
-            lossy_tx,
-            dht_pk,
-            dht_sk,
-            real_pk,
-            real_sk,
-            precomputed_keys: alice.get_precomputed_keys(),
-        });
-
-        alice.set_net_crypto(net_crypto);
-
-        let addr = "127.0.0.1:12346".parse().unwrap();
-
-        let cookie_request_id = 12345;
-        let cookie_request_payload = CookieRequestPayload {
-            pk: bob_real_pk,
-            id: cookie_request_id,
-        };
-        let cookie_request = Packet::CookieRequest(CookieRequest::new(&precomp, &bob_pk, &cookie_request_payload));
-
-        alice.handle_packet(cookie_request, addr).await.unwrap();
-
-        let (received, _udp_rx) = udp_rx.into_future().await;
-        let (packet, addr_to_send) = received.unwrap();
-
-        assert_eq!(addr_to_send, addr);
-
-        let packet = unpack!(packet, Packet::CookieResponse);
-        let payload = packet.get_payload(&precomp).unwrap();
-
-        assert_eq!(payload.id, cookie_request_id);
-    }
-
-    #[tokio::test]
-    async fn handle_cookie_request_uninitialized() {
-        let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
-
-        let (bob_real_pk, _bob_real_sk) = gen_keypair();
-
-        let cookie_request_payload = CookieRequestPayload {
-            pk: bob_real_pk,
-            id: 12345,
-        };
-        let cookie_request = Packet::CookieRequest(CookieRequest::new(&precomp, &bob_pk, &cookie_request_payload));
-
-        let res = alice.handle_packet(cookie_request, addr).await;
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::NetCrypto);
-    }
-
-    // handle_cookie_response
-    #[tokio::test]
-    async fn handle_cookie_response_uninitialized() {
-        let (alice, precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
-
-        let cookie = EncryptedCookie {
-            nonce: secretbox::gen_nonce(),
-            payload: vec![43; 88]
-        };
-        let cookie_response_payload = CookieResponsePayload {
-            cookie: cookie.clone(),
-            id: 12345
-        };
-        let cookie_response = Packet::CookieResponse(CookieResponse::new(&precomp, &cookie_response_payload));
-
-        let res = alice.handle_packet(cookie_response, addr).await;
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::NetCrypto);
-    }
-
-    // handle_crypto_handshake
-    #[tokio::test]
-    async fn handle_crypto_handshake_uninitialized() {
-        let (alice, precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
-
-        let cookie = EncryptedCookie {
-            nonce: secretbox::gen_nonce(),
-            payload: vec![43; 88]
-        };
-        let crypto_handshake_payload = CryptoHandshakePayload {
-            base_nonce: gen_nonce(),
-            session_pk: gen_keypair().0,
-            cookie_hash: cookie.hash(),
-            cookie: cookie.clone()
-        };
-        let crypto_handshake = Packet::CryptoHandshake(CryptoHandshake::new(&precomp, &crypto_handshake_payload, cookie));
-
-        let res = alice.handle_packet(crypto_handshake, addr).await;
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::NetCrypto);
     }
 
     // handle_dht_req
@@ -2217,9 +1970,9 @@ mod tests {
         // if receiver' pk != node's pk just returns ok()
         let nat_req = NatPingRequest { id: 42 };
         let nat_payload = DhtRequestPayload::NatPingRequest(nat_req);
-        let dht_req = Packet::DhtRequest(DhtRequest::new(&precomp, &charlie_pk, &bob_pk, &nat_payload));
+        let dht_req = DhtRequest::new(&precomp, &charlie_pk, &bob_pk, &nat_payload);
 
-        alice.handle_packet(dht_req, addr).await.unwrap();
+        alice.handle_dht_req(dht_req, addr).await.unwrap();
 
         // Necessary to drop tx so that rx.collect::<Vec<_>>() can be finished
         drop(alice);
@@ -2241,29 +1994,29 @@ mod tests {
 
         let nat_req = NatPingRequest { id: 42 };
         let nat_payload = DhtRequestPayload::NatPingRequest(nat_req);
-        let dht_req = Packet::DhtRequest(DhtRequest::new(&precomp, &charlie_pk, &bob_pk, &nat_payload));
+        let dht_req = DhtRequest::new(&precomp, &charlie_pk, &bob_pk, &nat_payload);
 
-        alice.handle_packet(dht_req.clone(), addr).await.unwrap();
+        alice.handle_dht_req(dht_req.clone(), addr).await.unwrap();
 
         let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
 
         assert_eq!(addr_to_send, charlie_addr);
-        assert_eq!(packet, dht_req);
+        assert_eq!(packet, Packet::DhtRequest(dht_req));
     }
 
     #[tokio::test]
     async fn handle_dht_req_invalid_payload() {
         let (alice, _precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
-        let dht_req = Packet::DhtRequest(DhtRequest {
+        let dht_req = DhtRequest {
             rpk: alice.pk,
             spk: bob_pk,
             nonce: gen_nonce(),
             payload: vec![42; 123]
-        });
+        };
 
-        let res = alice.handle_packet(dht_req, addr).await;
+        let res = alice.handle_dht_req(dht_req, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
     }
@@ -2277,12 +2030,12 @@ mod tests {
 
         let nat_req = NatPingRequest { id: 42 };
         let nat_payload = DhtRequestPayload::NatPingRequest(nat_req);
-        let dht_req = Packet::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, &nat_payload));
+        let dht_req = DhtRequest::new(&precomp, &alice.pk, &bob_pk, &nat_payload);
 
         tokio::time::pause();
         tokio::time::advance(Duration::from_secs(1)).await;
 
-        alice.handle_packet(dht_req, addr).await.unwrap();
+        alice.handle_dht_req(dht_req, addr).await.unwrap();
 
         let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
@@ -2312,9 +2065,9 @@ mod tests {
 
         let nat_res = NatPingResponse { id: ping_id };
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
-        let dht_req = Packet::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, &nat_payload));
+        let dht_req = DhtRequest::new(&precomp, &alice.pk, &bob_pk, &nat_payload);
 
-        alice.handle_packet(dht_req, addr).await.unwrap();
+        alice.handle_dht_req(dht_req, addr).await.unwrap();
 
         let friends = alice.friends.read().await;
 
@@ -2328,9 +2081,9 @@ mod tests {
         // error case, ping_id = 0
         let nat_res = NatPingResponse { id: 0 };
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
-        let dht_req = Packet::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, &nat_payload));
+        let dht_req = DhtRequest::new(&precomp, &alice.pk, &bob_pk, &nat_payload);
 
-        let res = alice.handle_packet(dht_req, addr).await;
+        let res = alice.handle_dht_req(dht_req, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::ZeroPingId);
     }
@@ -2344,9 +2097,9 @@ mod tests {
 
         let nat_res = NatPingResponse { id: ping_id + 1 };
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
-        let dht_req = Packet::DhtRequest(DhtRequest::new(&precomp, &alice.pk, &bob_pk, &nat_payload));
+        let dht_req = DhtRequest::new(&precomp, &alice.pk, &bob_pk, &nat_payload);
 
-        let res = alice.handle_packet(dht_req, addr).await;
+        let res = alice.handle_dht_req(dht_req, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::NoFriend);
     }
@@ -2368,9 +2121,9 @@ mod tests {
             temporary_pk,
             inner: inner.clone()
         };
-        let packet = Packet::OnionRequest0(OnionRequest0::new(&precomp, &bob_pk, &payload));
+        let packet = OnionRequest0::new(&precomp, &bob_pk, &payload);
 
-        alice.handle_packet(packet, addr).await.unwrap();
+        alice.handle_onion_request_0(packet, addr).await.unwrap();
 
         let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
@@ -2392,13 +2145,13 @@ mod tests {
     async fn handle_onion_request_0_invalid_payload() {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
-        let packet = Packet::OnionRequest0(OnionRequest0 {
+        let packet = OnionRequest0 {
             nonce: gen_nonce(),
             temporary_pk: gen_keypair().0,
             payload: vec![42; 123] // not encrypted with dht pk
-        });
+        };
 
-        let res = alice.handle_packet(packet, addr).await;
+        let res = alice.handle_onion_request_0(packet, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
     }
@@ -2424,9 +2177,9 @@ mod tests {
             nonce: secretbox::gen_nonce(),
             payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
         };
-        let packet = Packet::OnionRequest1(OnionRequest1::new(&precomp, &bob_pk, &payload, onion_return));
+        let packet = OnionRequest1::new(&precomp, &bob_pk, &payload, onion_return);
 
-        alice.handle_packet(packet, addr).await.unwrap();
+        alice.handle_onion_request_1(packet, addr).await.unwrap();
 
         let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
@@ -2448,7 +2201,7 @@ mod tests {
     async fn handle_onion_request_1_invalid_payload() {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
-        let packet = Packet::OnionRequest1(OnionRequest1 {
+        let packet = OnionRequest1 {
             nonce: gen_nonce(),
             temporary_pk: gen_keypair().0,
             payload: vec![42; 123], // not encrypted with dht pk
@@ -2456,9 +2209,9 @@ mod tests {
                 nonce: secretbox::gen_nonce(),
                 payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
             }
-        });
+        };
 
-        let res = alice.handle_packet(packet, addr).await;
+        let res = alice.handle_onion_request_1(packet, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
     }
@@ -2486,9 +2239,9 @@ mod tests {
             nonce: secretbox::gen_nonce(),
             payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
         };
-        let packet = Packet::OnionRequest2(OnionRequest2::new(&precomp, &bob_pk, &payload, onion_return));
+        let packet = OnionRequest2::new(&precomp, &bob_pk, &payload, onion_return);
 
-        alice.handle_packet(packet, addr).await.unwrap();
+        alice.handle_onion_request_2(packet, addr).await.unwrap();
 
         let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
@@ -2528,9 +2281,9 @@ mod tests {
             nonce: secretbox::gen_nonce(),
             payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
         };
-        let packet = Packet::OnionRequest2(OnionRequest2::new(&precomp, &bob_pk, &payload, onion_return));
+        let packet = OnionRequest2::new(&precomp, &bob_pk, &payload, onion_return);
 
-        alice.handle_packet(packet, addr).await.unwrap();
+        alice.handle_onion_request_2(packet, addr).await.unwrap();
 
         let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
@@ -2551,7 +2304,7 @@ mod tests {
     async fn handle_onion_request_2_invalid_payload() {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
-        let packet = Packet::OnionRequest2(OnionRequest2 {
+        let packet = OnionRequest2 {
             nonce: gen_nonce(),
             temporary_pk: gen_keypair().0,
             payload: vec![42; 123], // not encrypted with dht pk
@@ -2559,9 +2312,9 @@ mod tests {
                 nonce: secretbox::gen_nonce(),
                 payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
             }
-        });
+        };
 
-        let res = alice.handle_packet(packet, addr).await;
+        let res = alice.handle_onion_request_2(packet, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
     }
@@ -2583,12 +2336,12 @@ mod tests {
             nonce: secretbox::gen_nonce(),
             payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
         };
-        let packet = Packet::OnionAnnounceRequest(OnionAnnounceRequest {
+        let packet = OnionAnnounceRequest {
             inner,
             onion_return: onion_return.clone()
-        });
+        };
 
-        alice.handle_packet(packet, addr).await.unwrap();
+        alice.handle_onion_announce_request(packet, addr).await.unwrap();
 
         let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
@@ -2621,12 +2374,12 @@ mod tests {
             nonce: secretbox::gen_nonce(),
             payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
         };
-        let packet = Packet::OnionAnnounceRequest(OnionAnnounceRequest {
+        let packet = OnionAnnounceRequest {
             inner,
             onion_return: onion_return.clone()
-        });
+        };
 
-        let res = alice.handle_packet(packet, addr).await;
+        let res = alice.handle_onion_announce_request(packet, addr).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
     }
@@ -2649,12 +2402,12 @@ mod tests {
             nonce: secretbox::gen_nonce(),
             payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
         };
-        let packet = Packet::OnionAnnounceRequest(OnionAnnounceRequest {
+        let packet = OnionAnnounceRequest {
             inner,
             onion_return: onion_return.clone()
-        });
+        };
 
-        alice.handle_packet(packet, addr).await.unwrap();
+        alice.handle_onion_announce_request(packet, addr).await.unwrap();
 
         let (received, rx) = rx.into_future().await;
         let (packet, _addr_to_send) = received.unwrap();
@@ -2672,12 +2425,12 @@ mod tests {
             sendback_data: 42
         };
         let inner = InnerOnionAnnounceRequest::new(&precomp, &bob_pk, &payload);
-        let packet = Packet::OnionAnnounceRequest(OnionAnnounceRequest {
+        let packet = OnionAnnounceRequest {
             inner,
             onion_return: onion_return.clone()
-        });
+        };
 
-        alice.handle_packet(packet, addr).await.unwrap();
+        alice.handle_onion_announce_request(packet, addr).await.unwrap();
 
         // send onion data request
 
@@ -2690,12 +2443,12 @@ mod tests {
             temporary_pk,
             payload: payload.clone()
         };
-        let packet = Packet::OnionDataRequest(OnionDataRequest {
+        let packet = OnionDataRequest {
             inner,
             onion_return: onion_return.clone()
-        });
+        };
 
-        alice.handle_packet(packet, addr).await.unwrap();
+        alice.handle_onion_data_request(packet).await.unwrap();
 
         let (received, _rx) = rx.skip(1).into_future().await;
         let (packet, addr_to_send) = received.unwrap();
@@ -2716,7 +2469,7 @@ mod tests {
     // handle_onion_response_3
     #[tokio::test]
     async fn handle_onion_response_3() {
-        let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
+        let (alice, _precomp, _bob_pk, _bob_sk, rx, _addr) = create_node();
 
         let onion_symmetric_key = alice.onion_symmetric_key.read().await;
 
@@ -2735,12 +2488,12 @@ mod tests {
             nonce: gen_nonce(),
             payload: vec![42; 123]
         });
-        let packet = Packet::OnionResponse3(OnionResponse3 {
+        let packet = OnionResponse3 {
             onion_return,
             payload: payload.clone()
-        });
+        };
 
-        alice.handle_packet(packet, addr).await.unwrap();
+        alice.handle_onion_response_3(packet).await.unwrap();
 
         let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
@@ -2755,7 +2508,7 @@ mod tests {
 
     #[tokio::test]
     async fn handle_onion_response_3_invalid_onion_return() {
-        let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
+        let (alice, _precomp, _bob_pk, _bob_sk, rx, _addr) = create_node();
 
         let onion_return = OnionReturn {
             nonce: secretbox::gen_nonce(),
@@ -2766,12 +2519,12 @@ mod tests {
             nonce: gen_nonce(),
             payload: vec![42; 123]
         });
-        let packet = Packet::OnionResponse3(OnionResponse3 {
+        let packet = OnionResponse3 {
             onion_return,
             payload
-        });
+        };
 
-        alice.handle_packet(packet, addr).await.unwrap();
+        alice.handle_onion_response_3(packet).await.unwrap();
 
         // Necessary to drop tx so that rx.collect::<Vec<_>>() can be finished
         drop(alice);
@@ -2781,7 +2534,7 @@ mod tests {
 
     #[tokio::test]
     async fn handle_onion_response_3_invalid_next_onion_return() {
-        let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
+        let (alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
 
         let onion_symmetric_key = alice.onion_symmetric_key.read().await;
 
@@ -2796,12 +2549,12 @@ mod tests {
             temporary_pk: gen_keypair().0,
             payload: vec![42; 123]
         };
-        let packet = Packet::OnionResponse3(OnionResponse3 {
+        let packet = OnionResponse3 {
             onion_return,
             payload: InnerOnionResponse::OnionDataResponse(inner.clone())
-        });
+        };
 
-        let res = alice.handle_packet(packet, addr).await;
+        let res = alice.handle_onion_response_3(packet).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::OnionResponseNext);
     }
@@ -2809,7 +2562,7 @@ mod tests {
     // handle_onion_response_2
     #[tokio::test]
     async fn handle_onion_response_2() {
-        let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
+        let (alice, _precomp, _bob_pk, _bob_sk, rx, _addr) = create_node();
 
         let onion_symmetric_key = alice.onion_symmetric_key.read().await;
 
@@ -2828,12 +2581,12 @@ mod tests {
             nonce: gen_nonce(),
             payload: vec![42; 123]
         });
-        let packet = Packet::OnionResponse2(OnionResponse2 {
+        let packet = OnionResponse2 {
             onion_return,
             payload: payload.clone()
-        });
+        };
 
-        alice.handle_packet(packet, addr).await.unwrap();
+        alice.handle_onion_response_2(packet).await.unwrap();
 
         let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
@@ -2848,7 +2601,7 @@ mod tests {
 
     #[tokio::test]
     async fn handle_onion_response_2_invalid_onion_return() {
-        let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
+        let (alice, _precomp, _bob_pk, _bob_sk, rx, _addr) = create_node();
 
         let onion_return = OnionReturn {
             nonce: secretbox::gen_nonce(),
@@ -2859,12 +2612,12 @@ mod tests {
             nonce: gen_nonce(),
             payload: vec![42; 123]
         });
-        let packet = Packet::OnionResponse2(OnionResponse2 {
+        let packet = OnionResponse2 {
             onion_return,
             payload
-        });
+        };
 
-        alice.handle_packet(packet, addr).await.unwrap();
+        alice.handle_onion_response_2(packet).await.unwrap();
 
         // Necessary to drop tx so that rx.collect::<Vec<_>>() can be finished
         drop(alice);
@@ -2874,7 +2627,7 @@ mod tests {
 
     #[tokio::test]
     async fn handle_onion_response_2_invalid_next_onion_return() {
-        let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
+        let (alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
 
         let onion_symmetric_key = alice.onion_symmetric_key.read().await;
 
@@ -2889,12 +2642,12 @@ mod tests {
             temporary_pk: gen_keypair().0,
             payload: vec![42; 123]
         };
-        let packet = Packet::OnionResponse2(OnionResponse2 {
+        let packet = OnionResponse2 {
             onion_return,
             payload: InnerOnionResponse::OnionDataResponse(inner.clone())
-        });
+        };
 
-        let res = alice.handle_packet(packet, addr).await;
+        let res = alice.handle_onion_response_2(packet).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::OnionResponseNext);
     }
@@ -2902,7 +2655,7 @@ mod tests {
     // handle_onion_response_1
     #[tokio::test]
     async fn handle_onion_response_1_with_onion_announce_response() {
-        let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
+        let (alice, _precomp, _bob_pk, _bob_sk, rx, _addr) = create_node();
 
         let onion_symmetric_key = alice.onion_symmetric_key.read().await;
 
@@ -2917,12 +2670,12 @@ mod tests {
             nonce: gen_nonce(),
             payload: vec![42; 123]
         };
-        let packet = Packet::OnionResponse1(OnionResponse1 {
+        let packet = OnionResponse1 {
             onion_return,
             payload: InnerOnionResponse::OnionAnnounceResponse(inner.clone())
-        });
+        };
 
-        alice.handle_packet(packet, addr).await.unwrap();
+        alice.handle_onion_response_1(packet).await.unwrap();
 
         let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
@@ -2936,7 +2689,7 @@ mod tests {
 
     #[tokio::test]
     async fn server_handle_onion_response_1_with_onion_data_response_test() {
-        let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
+        let (alice, _precomp, _bob_pk, _bob_sk, rx, _addr) = create_node();
 
         let onion_symmetric_key = alice.onion_symmetric_key.read().await;
 
@@ -2951,12 +2704,12 @@ mod tests {
             temporary_pk: gen_keypair().0,
             payload: vec![42; 123]
         };
-        let packet = Packet::OnionResponse1(OnionResponse1 {
+        let packet = OnionResponse1 {
             onion_return,
             payload: InnerOnionResponse::OnionDataResponse(inner.clone())
-        });
+        };
 
-        alice.handle_packet(packet, addr).await.unwrap();
+        alice.handle_onion_response_1(packet).await.unwrap();
 
         let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
@@ -2974,8 +2727,6 @@ mod tests {
         let (tcp_onion_tx, tcp_onion_rx) = mpsc::channel(1);
         alice.set_tcp_onion_sink(tcp_onion_tx);
 
-        let addr: SocketAddr = "127.0.0.1:12346".parse().unwrap();
-
         let onion_symmetric_key = alice.onion_symmetric_key.read().await;
 
         let ip_port = IpPort {
@@ -2989,12 +2740,12 @@ mod tests {
             nonce: gen_nonce(),
             payload: vec![42; 123]
         });
-        let packet = Packet::OnionResponse1(OnionResponse1 {
+        let packet = OnionResponse1 {
             onion_return,
             payload: inner.clone()
-        });
+        };
 
-        alice.handle_packet(packet, addr).await.unwrap();
+        alice.handle_onion_response_1(packet).await.unwrap();
 
         let (received, _tcp_onion_rx) = tcp_onion_rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
@@ -3005,7 +2756,7 @@ mod tests {
 
     #[tokio::test]
     async fn handle_onion_response_1_can_not_redirect_to_tcp() {
-        let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
+        let (alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
 
         let onion_symmetric_key = alice.onion_symmetric_key.read().await;
 
@@ -3020,19 +2771,19 @@ mod tests {
             nonce: gen_nonce(),
             payload: vec![42; 123]
         };
-        let packet = Packet::OnionResponse1(OnionResponse1 {
+        let packet = OnionResponse1 {
             onion_return,
             payload: InnerOnionResponse::OnionAnnounceResponse(inner.clone())
-        });
+        };
 
-        let res = alice.handle_packet(packet, addr).await;
+        let res = alice.handle_onion_response_1(packet).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::OnionResponseRedirect);
     }
 
     #[tokio::test]
     async fn handle_onion_response_1_invalid_onion_return() {
-        let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
+        let (alice, _precomp, _bob_pk, _bob_sk, rx, _addr) = create_node();
 
         let onion_return = OnionReturn {
             nonce: secretbox::gen_nonce(),
@@ -3043,12 +2794,12 @@ mod tests {
             nonce: gen_nonce(),
             payload: vec![42; 123]
         });
-        let packet = Packet::OnionResponse1(OnionResponse1 {
+        let packet = OnionResponse1 {
             onion_return,
             payload
-        });
+        };
 
-        alice.handle_packet(packet, addr).await.unwrap();
+        alice.handle_onion_response_1(packet).await.unwrap();
 
         // Necessary to drop tx so that rx.collect::<Vec<_>>() can be finished
         drop(alice);
@@ -3058,7 +2809,7 @@ mod tests {
 
     #[tokio::test]
     async fn handle_onion_response_1_invalid_next_onion_return() {
-        let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
+        let (alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
 
         let onion_symmetric_key = alice.onion_symmetric_key.read().await;
 
@@ -3077,12 +2828,12 @@ mod tests {
             temporary_pk: gen_keypair().0,
             payload: vec![42; 123]
         };
-        let packet = Packet::OnionResponse1(OnionResponse1 {
+        let packet = OnionResponse1 {
             onion_return,
             payload: InnerOnionResponse::OnionDataResponse(inner.clone())
-        });
+        };
 
-        let res = alice.handle_packet(packet, addr).await;
+        let res = alice.handle_onion_response_1(packet).await;
         assert!(res.is_err());
         assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::OnionResponseNext);
     }
@@ -3134,9 +2885,9 @@ mod tests {
     async fn handle_lan_discovery() {
         let (alice, _precomp, bob_pk, bob_sk, rx, addr) = create_node();
 
-        let lan = Packet::LanDiscovery(LanDiscovery { pk: bob_pk });
+        let lan = LanDiscovery { pk: bob_pk };
 
-        alice.handle_packet(lan, addr).await.unwrap();
+        alice.handle_lan_discovery(&lan, addr).await.unwrap();
 
         let (received, _rx) = rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
@@ -3154,9 +2905,9 @@ mod tests {
     async fn handle_lan_discovery_for_ourselves() {
         let (alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
 
-        let lan = Packet::LanDiscovery(LanDiscovery { pk: alice.pk });
+        let lan = LanDiscovery { pk: alice.pk };
 
-        alice.handle_packet(lan, addr).await.unwrap();
+        alice.handle_lan_discovery(&lan, addr).await.unwrap();
 
         // Necessary to drop tx so that rx.collect::<Vec<_>>() can be finished
         drop(alice);
@@ -3171,9 +2922,9 @@ mod tests {
         alice.enable_lan_discovery(false);
         assert_eq!(alice.lan_discovery_enabled, false);
 
-        let lan = Packet::LanDiscovery(LanDiscovery { pk: alice.pk });
+        let lan = LanDiscovery { pk: alice.pk };
 
-        alice.handle_packet(lan, addr).await.unwrap();
+        alice.handle_lan_discovery(&lan, addr).await.unwrap();
 
         // Necessary to drop tx so that rx.collect::<Vec<_>>() can be finished
         drop(alice);
@@ -3626,57 +3377,6 @@ mod tests {
                 assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == node_pk).is_some());
             }
         }).collect::<Vec<_>>().await;
-    }
-
-    #[tokio::test]
-    async fn handle_crypto_data_uninitialized() {
-        let (alice, precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
-
-        let data_payload = CryptoDataPayload {
-            buffer_start: 1,
-            packet_number: 0,
-            data: vec![1, 2, 3, 4]
-        };
-
-        let data = Packet::CryptoData(CryptoData::new(&precomp, gen_nonce(), &data_payload));
-
-        let res = alice.handle_packet(data, addr).await;
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::NetCrypto);
-    }
-
-    #[tokio::test]
-    async fn handle_onion_data_response_uninitialized() {
-        let (alice, _precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
-
-        let data = Packet::OnionDataResponse(OnionDataResponse {
-            nonce: gen_nonce(),
-            temporary_pk: gen_keypair().0,
-            payload: vec![42; 123]
-        });
-
-        let res = alice.handle_packet(data, addr).await;
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::OnionClient);
-    }
-
-    #[tokio::test]
-    async fn handle_onion_announce_response_uninitialized() {
-        let (alice, precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
-
-        let payload = OnionAnnounceResponsePayload {
-            announce_status: AnnounceStatus::Found,
-            ping_id_or_pk: [42; 32],
-            nodes: vec![
-                PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
-            ]
-        };
-
-        let data = Packet::OnionAnnounceResponse(OnionAnnounceResponse::new(&precomp, 12345, &payload));
-
-        let res = alice.handle_packet(data, addr).await;
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::OnionClient);
     }
 
     #[tokio::test]

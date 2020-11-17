@@ -2323,7 +2323,7 @@ mod tests {
             id: request_payload.id,
         };
         let response_packet = NodesResponse::new(&shared_secret, &node_pk, &response_payload);
-        onion_client.dht.handle_packet(Packet::NodesResponse(response_packet), node.saddr).await.unwrap();
+        onion_client.dht.handle_nodes_resp(response_packet, node.saddr).await.unwrap();
 
         let mut state = onion_client.state.lock().await;
 

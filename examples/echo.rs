@@ -20,9 +20,10 @@ use tox_packet::friend_connection::*;
 use tox_packet::onion::InnerOnionResponse;
 use tox_packet::relay::DataPayload;
 use tox_packet::toxid::ToxId;
-use tox_core::dht::server::Server;
+use tox_core::dht::server::Server as DhtServer;
 use tox_core::dht::server_ext::dht_run_socket;
 use tox_core::dht::lan_discovery::LanDiscoverySender;
+use tox_core::udp::Server as UdpServer;
 use tox_core::friend_connection::FriendConnections;
 use tox_core::net_crypto::{NetCrypto, NetCryptoNewArgs};
 use tox_core::onion::client::OnionClient;
@@ -70,7 +71,7 @@ async fn main() -> Result<(), Error> {
 
     let (tcp_incoming_tx, mut tcp_incoming_rx) = mpsc::unbounded();
 
-    let mut dht_server = Server::new(tx.clone(), dht_pk, dht_sk.clone());
+    let mut dht_server = DhtServer::new(tx.clone(), dht_pk, dht_sk.clone());
     dht_server.enable_lan_discovery(true);
     dht_server.enable_ipv6_mode(local_addr.is_ipv6());
 
@@ -97,9 +98,6 @@ async fn main() -> Result<(), Error> {
     let (net_crypto_tcp_tx, mut net_crypto_tcp_rx) = mpsc::channel(32);
     net_crypto.set_tcp_sink(net_crypto_tcp_tx).await;
 
-    dht_server.set_net_crypto(net_crypto.clone());
-    dht_server.set_onion_client(onion_client.clone());
-
     let friend_connections = FriendConnections::new(
         real_sk,
         real_pk,
@@ -121,6 +119,10 @@ async fn main() -> Result<(), Error> {
         dht_server.add_initial_bootstrap(node);
         onion_client.add_path_node(node).await;
     }
+
+    let mut udp_server = UdpServer::new(dht_server);
+    udp_server.set_net_crypto(net_crypto.clone());
+    udp_server.set_onion_client(onion_client.clone());
 
     let net_crypto_tcp_future = async {
         while let Some((packet, pk)) = net_crypto_tcp_rx.next().await {
@@ -211,7 +213,7 @@ async fn main() -> Result<(), Error> {
     }
 
     futures::select!(
-        res = dht_run_socket(&dht_server, socket, rx, stats).fuse() => res.map_err(Error::from),
+        res = dht_run_socket(&udp_server, socket, rx, stats).fuse() => res.map_err(Error::from),
         res = lan_discovery_sender.run().fuse() => res.map_err(Error::from),
         res = tcp_connections.run().fuse() => res.map_err(Error::from),
         res = onion_client.run().fuse() => res.map_err(Error::from),

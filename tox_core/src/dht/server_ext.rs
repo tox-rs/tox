@@ -10,12 +10,12 @@ use failure::Fail;
 
 use crate::dht::codec::*;
 use tox_packet::dht::Packet;
-use crate::dht::server::Server;
+use crate::udp::Server;
 use crate::stats::Stats;
 
 /// Run DHT server on `UdpSocket`.
 pub async fn dht_run_socket(
-    dht: &Server,
+    udp: &Server,
     socket: UdpSocket,
     mut rx: Receiver<(Packet, SocketAddr)>,
     stats: Stats
@@ -32,7 +32,7 @@ pub async fn dht_run_socket(
             match event {
                 Ok((packet, addr)) => {
                     trace!("Received packet {:?}", packet);
-                    let res = dht.handle_packet(packet, addr).await;
+                    let res = udp.handle_packet(packet, addr).await;
 
                     if let Err(ref err) = res {
                         error!("Failed to handle packet: {:?}", err);
@@ -74,7 +74,7 @@ pub async fn dht_run_socket(
     futures::select! {
         read = network_reader.fuse() => read,
         write = network_writer.fuse() => write,
-        run = dht.run().fuse() => {
+        run = udp.dht.run().fuse() => { // TODO: should we run it here?
             let res: Result<_, _> = run;
             res.map_err(|e| Error::new(ErrorKind::Other, e.compat()))
         }
@@ -90,6 +90,7 @@ mod tests {
 
     use tox_crypto::*;
     use tox_packet::dht::*;
+    use crate::dht::server::Server as DhtServer;
 
     #[tokio::test]
     async fn run_socket() {
@@ -100,7 +101,7 @@ mod tests {
 
         let (tx, rx) = mpsc::channel(32);
 
-        let server = Server::new(tx, server_pk, server_sk);
+        let server = Server::new(DhtServer::new(tx, server_pk, server_sk));
 
         // Bind server socket
         let server_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
