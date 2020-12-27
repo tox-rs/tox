@@ -10,7 +10,7 @@ use serde_yaml::Value;
 use clap::{App, AppSettings, Arg, SubCommand, ArgMatches};
 use hex::FromHex;
 use itertools::Itertools;
-use tox_crypto::*;
+use tox::crypto::*;
 use tox::packet::dht::packed_node::PackedNode;
 use tox::packet::dht::BOOSTRAP_SERVER_MAX_MOTD_LENGTH;
 

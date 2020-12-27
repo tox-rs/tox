@@ -1,3 +1,8 @@
+# 0.1.1 (Dec 27, 2020)
+
+* Update tox to 0.1.1 (#71)
+* Fix bug in lan discovery usage (#70)
+
 # 0.1.0 (Oct 7, 2020)
 
 * Update tox to 0.1.0 (#68)
