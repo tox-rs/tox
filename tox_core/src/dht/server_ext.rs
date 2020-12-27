@@ -159,7 +159,7 @@ mod tests {
 
         futures::select! {
             res = client_future.fuse() => res.unwrap(),
-            res = server_future.fuse() => (),
+            res = server_future.fuse() => res.unwrap(),
         };
     }
 }
