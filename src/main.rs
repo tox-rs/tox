@@ -18,7 +18,7 @@ use futures::{future, Future, TryFutureExt, FutureExt};
 use itertools::Itertools;
 use tokio::net::{TcpListener, UdpSocket};
 use tokio::runtime;
-use tox_crypto::*;
+use tox::crypto::*;
 use tox::core::dht::server::{Server as UdpServer};
 use tox::core::dht::server_ext::dht_run_socket;
 use tox::core::dht::lan_discovery::LanDiscoverySender;
