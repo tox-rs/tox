@@ -1,3 +1,9 @@
+# 0.1.1 (Dec 27, 2020)
+
+* Fix bug in k-bucket eviction (#443)
+* Code cleanup (#441, #442)
+* Implement k-tree with force-k modification (#436)
+
 # 0.1.0 (Oct 7, 2020)
 
 * Replace `parking_lot` mutex with `futures` mutex (#434)

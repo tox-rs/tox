@@ -1,6 +1,6 @@
 [package]
 name = "tox"
-version = "0.1.0"
+version = "0.1.1"
 authors = [
     "Zetok Zalbavar <zetok@openmailbox.org>",
     "Roman Proskuryakov <humbug@deeptown.org>",
@@ -33,3 +33,4 @@ maintenance = { status = "actively-developed" }
 tox_packet = { version = "0.1.0", path = "../tox_packet" }
 tox_core = { version = "0.1.0", path = "../tox_core" }
 tox_encryptsave = { version = "0.1.0", path = "../tox_encryptsave" }
+tox_crypto = { version = "0.1.1", path = "../tox_crypto" }

@@ -5,10 +5,10 @@ publish = false
 edition = "2018"
 
 [dev-dependencies]
-tox_binary_io = { version = "0.1.0", path = "../tox_binary_io", features = ["sodium"] }
-tox_crypto = { version = "0.1.0", path = "../tox_crypto" }
-tox_packet = { version = "0.1.0", path = "../tox_packet" }
-tox_core = { version = "0.1.0", path = "../tox_core" }
+tox_binary_io = { version = "0.1.1", path = "../tox_binary_io", features = ["sodium"] }
+tox_crypto = { version = "0.1.1", path = "../tox_crypto" }
+tox_packet = { version = "0.1.1", path = "../tox_packet" }
+tox_core = { version = "0.1.1", path = "../tox_core" }
 
 log = "0.4"
 futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
