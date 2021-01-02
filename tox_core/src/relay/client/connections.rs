@@ -18,7 +18,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::{TryFutureExt, StreamExt};
+use futures::TryFutureExt;
 use futures::channel::mpsc;
 
 use tox_crypto::*;
@@ -385,19 +385,19 @@ impl Connections {
     pub async fn run(&self) -> Result<(), ConnectionError> {
         let mut wakeups = tokio::time::interval(CONNECTIONS_INTERVAL);
 
-        while wakeups.next().await.is_some() {
+        loop {
+            wakeups.tick().await;
+
             self.main_loop().await?
         }
-
-        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::StreamExt;
     use tox_binary_io::*;
-
     use tox_packet::dht::CryptoData;
     use tox_packet::ip_port::*;
     use crate::relay::client::client::tests::*;

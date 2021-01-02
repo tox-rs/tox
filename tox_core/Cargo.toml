@@ -21,7 +21,7 @@ tox_binary_io = { version = "0.1.1", path = "../tox_binary_io" }
 tox_crypto = { version = "0.1.1", path = "../tox_crypto" }
 tox_packet = { version = "0.1.1", path = "../tox_packet" }
 
-bytes = "0.5"
+bytes = "1.0"
 futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
 log = "0.4"
 nom = "5.1"
@@ -33,15 +33,15 @@ bitflags = "1.0"
 itertools = "0.9"
 
 [dependencies.tokio]
-version = "0.2"
+version = "1.0"
 default-features = false
-features = ["net", "sync", "stream", "time"]
+features = ["net", "sync", "time"]
 
 [dependencies.tokio-util]
-version = "0.3"
-features = ["codec", "udp"]
+version = "0.6"
+features = ["codec", "net"]
 
 [dev-dependencies.tokio]
-version = "0.2"
+version = "1.0"
 default-features = false
-features = ["macros", "test-util", "net", "rt-core", "rt-threaded", "sync", "stream", "time"]
+features = ["macros", "test-util", "net", "rt", "rt-multi-thread", "sync", "time"]

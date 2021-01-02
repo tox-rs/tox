@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 use std::u16;
 
 use failure::Fail;
-use futures::{TryFutureExt, StreamExt, SinkExt};
+use futures::{TryFutureExt, SinkExt};
 use futures::future;
 use futures::channel::mpsc;
 use tokio::sync::RwLock;
@@ -1091,7 +1091,9 @@ impl NetCrypto {
     pub async fn run(&self) -> Result<(), RunError> {
         let mut wakeups = tokio::time::interval(PACKET_COUNTER_AVERAGE_INTERVAL);
 
-        while wakeups.next().await.is_some() {
+        loop {
+            wakeups.tick().await;
+
             let fut = tokio::time::timeout(
                 PACKET_COUNTER_AVERAGE_INTERVAL, self.main_loop()
             );
@@ -1108,8 +1110,6 @@ impl NetCrypto {
                 return res
             }
         }
-
-        Ok(())
     }
 
     /// Set sink to send DHT `PublicKey` when it gets known.
@@ -1133,7 +1133,7 @@ impl NetCrypto {
 mod tests {
     // https://github.com/rust-lang/rust/issues/61520
     use super::{*, Packet};
-    use futures::Future;
+    use futures::{Future, StreamExt};
 
     impl NetCrypto {
         pub async fn has_friend(&self, pk: &PublicKey) -> bool {

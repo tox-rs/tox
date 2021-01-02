@@ -383,7 +383,9 @@ impl Server {
         let interval = BOOTSTRAP_INTERVAL;
         let mut wakeups = tokio::time::interval(interval);
 
-        while wakeups.next().await.is_some() {
+        loop {
+            wakeups.tick().await;
+
             trace!("Bootstrap wake up");
             let send_res = tokio::time::timeout(
                 interval,
@@ -405,8 +407,6 @@ impl Server {
                 return res
             }
         }
-
-        Ok(())
     }
 
     /// Check if all nodes in Ktree are discarded (including the case when
@@ -438,7 +438,9 @@ impl Server {
         let interval = Duration::from_secs(MAIN_LOOP_INTERVAL);
         let mut wakeups = tokio::time::interval(interval);
 
-        while wakeups.next().await.is_some() {
+        loop {
+            wakeups.tick().await;
+
             trace!("DHT server wake up");
 
             let loop_res =
@@ -457,8 +459,6 @@ impl Server {
                 return res
             }
         }
-
-        Ok(())
     }
 
     /// Refresh onion symmetric key periodically. Result future will never be
@@ -467,12 +467,12 @@ impl Server {
         let interval = ONION_REFRESH_KEY_INTERVAL;
         let mut wakeups = tokio::time::interval_at(tokio::time::Instant::now() + interval, interval);
 
-        while wakeups.next().await.is_some() {
+        loop {
+            wakeups.tick().await;
+
             trace!("Refreshing onion key");
             self.refresh_onion_key().await;
         }
-
-        Ok(())
     }
 
     /// Run ping sending periodically. Result future will never be completed
@@ -481,12 +481,12 @@ impl Server {
         let interval = TIME_TO_PING;
         let mut wakeups = tokio::time::interval_at(tokio::time::Instant::now() + interval, interval);
 
-        while wakeups.next().await.is_some() {
+        loop {
+            wakeups.tick().await;
+
             self.send_pings().await
                 .map_err(|e| e.context(RunErrorKind::SendTo))?;
         }
-
-        Ok(())
     }
 
     /// Send `PingRequest` packets to nodes from `nodes_to_ping` list.

@@ -367,7 +367,9 @@ impl FriendConnections {
     async fn run_main_loop(&self) -> Result<(), RunError> {
         let mut wakeups = tokio::time::interval(MAIN_LOOP_INTERVAL);
 
-        while wakeups.next().await.is_some() {
+        loop {
+            wakeups.tick().await;
+
             let fut = tokio::time::timeout(MAIN_LOOP_INTERVAL, self.main_loop());
             let res = match fut.await {
                 Err(e) => Err(e.context(RunErrorKind::Timeout).into()),
@@ -380,8 +382,6 @@ impl FriendConnections {
                 return res
             }
         }
-
-        Ok(())
     }
 
     /// Run friends connection module. This will add handlers for DHT

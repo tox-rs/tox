@@ -177,7 +177,7 @@ impl Client {
             return Err(HandlePacketErrorKind::InvalidConnectionId.into())
         };
 
-        if self.links.write().await.downgrade(index) {
+        if (*self.links.write().await).downgrade(index) {
             Ok(())
         } else {
             Err(HandlePacketErrorKind::AlreadyLinked.into())
@@ -1112,30 +1112,30 @@ pub mod tests {
         async fn on_connected(client: Client) -> Result<(), Error> {
             let mut interval = tokio::time::interval(Duration::from_millis(10));
 
-            while interval.next().await.is_some() {
+            loop {
+                interval.tick().await;
+
                 match *client.status.read().await {
                     ClientStatus::Connecting => continue,
                     ClientStatus::Connected(_) => return Ok(()),
                     ref other => return Err(Error::from(IoError::new(IoErrorKind::Other, format!("Invalid status: {:?}", other)))),
                 }
             }
-
-            Ok(())
         }
 
         // waits until link with PublicKey becomes online
         async fn on_online(client: Client, pk: PublicKey) -> Result<(), Error> {
             let mut interval = tokio::time::interval(Duration::from_millis(10));
 
-            while interval.next().await.is_some() {
+            loop {
+                interval.tick().await;
+
                 let links = client.links.read().await;
                 if let Some(index) = links.id_by_pk(&pk) {
                     let status = links.by_id(index).map(|link| link.status);
                     if status == Some(LinkStatus::Online) { return Ok(()) }
                 }
             }
-
-            Ok(())
         }
 
         crypto_init().unwrap();
@@ -1224,13 +1224,13 @@ pub mod tests {
         let (_server_pk, server_sk) = gen_keypair();
 
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let mut listener = TcpListener::bind(&addr).await.unwrap();
+        let listener = TcpListener::bind(&addr).await.unwrap();
         let addr = listener.local_addr().unwrap();
 
         let server = Server::new();
         let stats = Stats::new();
         let server_future = async {
-            let connection = listener.incoming().next().await.unwrap().unwrap();
+            let (connection, _) = listener.accept().await.unwrap();
             tcp_run_connection(&server, connection, server_sk, stats)
                 .map_err(Error::from).await
         };

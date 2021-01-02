@@ -1,6 +1,7 @@
 #[macro_use]
 extern crate log;
 
+use failure::Error;
 use tox_crypto::*;
 use tox_core::relay::server::{Server, tcp_run};
 use tox_core::stats::Stats;
@@ -9,7 +10,8 @@ use tokio::net::TcpListener;
 
 const TCP_CONNECTIONS_LIMIT: usize = 1024;
 
-fn main() {
+#[tokio::main]
+async fn main() -> Result<(), Error> {
     env_logger::init();
     // Server constant PK for examples/tests
     // Use `gen_keypair` to generate random keys
@@ -33,11 +35,6 @@ fn main() {
     let server = Server::new();
 
     let stats = Stats::new();
-    let future = async {
-        let listener = TcpListener::bind(&addr).await.unwrap();
-        drop(tcp_run(&server, listener, server_sk, stats, TCP_CONNECTIONS_LIMIT).await);
-    };
-
-    let mut runtime = tokio::runtime::Runtime::new().unwrap();
-    runtime.block_on(future)
+    let listener = TcpListener::bind(&addr).await.unwrap();
+    tcp_run(&server, listener, server_sk, stats, TCP_CONNECTIONS_LIMIT).await.map_err(Error::from)
 }

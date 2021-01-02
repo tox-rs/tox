@@ -293,7 +293,6 @@ mod tests {
     }
     #[tokio::test]
     async fn network_handshake() {
-        use futures::{StreamExt};
         use tokio::net::{TcpListener, TcpStream};
 
         crypto_init().unwrap();
@@ -301,12 +300,11 @@ mod tests {
         let (server_pk, server_sk) = gen_keypair();
 
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let mut listener = TcpListener::bind(&addr).await.unwrap();
+        let listener = TcpListener::bind(&addr).await.unwrap();
         let addr = listener.local_addr().unwrap();
 
         let server = async {
-            // take the first connection
-            let connection = listener.incoming().next().await.unwrap().unwrap();
+            let (connection, _) = listener.accept().await.unwrap();
             make_server_handshake(connection, server_sk.clone()).await
         };
 

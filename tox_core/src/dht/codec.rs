@@ -114,12 +114,16 @@ impl Decoder for DhtCodec {
     type Error = DecodeError;
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        if buf.is_empty() {
+            return Ok(None);
+        }
+
         let len = buf.len();
         if len > MAX_DHT_PACKET_SIZE {
             return Err(DecodeError::too_big_packet(len))
         }
 
-        match Packet::from_bytes(buf) {
+        let result = match Packet::from_bytes(buf) {
             Err(error) => {
                 Err(DecodeError::deserialize(error, buf.to_vec()))
             },
@@ -129,7 +133,11 @@ impl Decoder for DhtCodec {
 
                 Ok(Some(packet))
             }
-        }
+        };
+
+        buf.clear();
+
+        result
     }
 }
 
@@ -154,7 +162,6 @@ impl Encoder<Packet> for DhtCodec {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nom::Needed;
     use tox_packet::onion::*;
     use tox_crypto::*;
 
@@ -347,10 +354,8 @@ mod tests {
         let mut codec = DhtCodec::new(stats);
         let mut buf = BytesMut::new();
 
-        // not enought bytes to decode EncryptedPacket
-        let res = codec.decode(&mut buf);
-        let error = res.err().unwrap();
-        assert_eq!(*error.kind(), DecodeErrorKind::Deserialize { error: Err::Incomplete(Needed::Size(1)), packet: Vec::new() });
+        // we can't distinguish 0-length UDP packets from completely consumed packets
+        assert!(codec.decode(&mut buf).unwrap().is_none());
     }
 
     #[test]

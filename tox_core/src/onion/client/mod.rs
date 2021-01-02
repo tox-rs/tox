@@ -911,7 +911,9 @@ impl OnionClient {
         let interval = Duration::from_secs(1);
         let mut wakeups = tokio::time::interval(interval);
 
-        while wakeups.next().await.is_some() {
+        loop {
+            wakeups.tick().await;
+
             trace!("Onion client sender wake up");
 
             let mut state = self.state.lock().await;
@@ -920,8 +922,6 @@ impl OnionClient {
             self.announce_loop(&mut state).await?;
             self.friends_loop(&mut state).await?;
         }
-
-        Ok(())
     }
 }
 
