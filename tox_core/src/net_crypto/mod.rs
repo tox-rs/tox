@@ -885,7 +885,7 @@ impl NetCrypto {
             connection.packets_received += 1;
             self.process_ready_lossless_packets(&mut connection.recv_array, connection.peer_real_pk).await
                 .map_err(|e| e.context(HandlePacketErrorKind::SendToLossless))?;
-        } else if packet_id >= PACKET_ID_LOSSY_RANGE_START && packet_id <= PACKET_ID_LOSSY_RANGE_END {
+        } else if (PACKET_ID_LOSSY_RANGE_START..=PACKET_ID_LOSSY_RANGE_END).contains(&packet_id) {
             // Update end index of received buffer ignoring the error - we still
             // want to handle this packet even if connection is too slow
             connection.recv_array.set_buffer_end(payload.packet_number).ok();

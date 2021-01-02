@@ -102,8 +102,8 @@ impl PassKey {
 
     ## Fails when:
 
-      * passphrase is empty
-      * deriving key failed (can happen due to OOM)
+    * passphrase is empty
+    * deriving key failed (can happen due to OOM)
 
     E.g.
 

@@ -633,12 +633,12 @@ impl OnionClient {
     }
 
     /// Generic function for sending search and announce requests to close nodes.
-    async fn ping_close_nodes<'a>(
+    async fn ping_close_nodes(
         &self,
         close_nodes: &mut Kbucket<OnionNode>,
         paths_pool: &mut PathsPool,
         announce_requests: &mut RequestQueue<AnnounceRequestData>,
-        announce_packet_data: AnnouncePacketData<'a>,
+        announce_packet_data: AnnouncePacketData<'_>,
         friend_pk: Option<PublicKey>,
         interval: Option<Duration>
     ) -> Result<bool, mpsc::SendError> {

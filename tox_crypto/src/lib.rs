@@ -1,5 +1,7 @@
 //! Functions for the core crypto.
 
+#![allow(clippy::result_unit_err)]
+
 pub use sodiumoxide::randombytes::randombytes_into;
 pub use sodiumoxide::crypto::box_::*;
 pub use sodiumoxide::crypto::hash::{sha256, sha512};
