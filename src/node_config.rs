@@ -363,7 +363,7 @@ fn run_args(matches: &ArgMatches) -> NodeConfig {
     let bootstrap_nodes = matches
         .values_of("bootstrap-node")
         .into_iter()
-        .flat_map(|values| values)
+        .flatten()
         .tuples()
         .map(|(pk, addr)| {
             // get PK bytes of the bootstrap node
