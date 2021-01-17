@@ -633,12 +633,12 @@ impl OnionClient {
     }
 
     /// Generic function for sending search and announce requests to close nodes.
-    async fn ping_close_nodes<'a>(
+    async fn ping_close_nodes(
         &self,
         close_nodes: &mut Kbucket<OnionNode>,
         paths_pool: &mut PathsPool,
         announce_requests: &mut RequestQueue<AnnounceRequestData>,
-        announce_packet_data: AnnouncePacketData<'a>,
+        announce_packet_data: AnnouncePacketData<'_>,
         friend_pk: Option<PublicKey>,
         interval: Option<Duration>
     ) -> Result<bool, mpsc::SendError> {
@@ -911,7 +911,9 @@ impl OnionClient {
         let interval = Duration::from_secs(1);
         let mut wakeups = tokio::time::interval(interval);
 
-        while wakeups.next().await.is_some() {
+        loop {
+            wakeups.tick().await;
+
             trace!("Onion client sender wake up");
 
             let mut state = self.state.lock().await;
@@ -920,8 +922,6 @@ impl OnionClient {
             self.announce_loop(&mut state).await?;
             self.friends_loop(&mut state).await?;
         }
-
-        Ok(())
     }
 }
 

@@ -12,18 +12,18 @@ tox_core = { version = "0.1.1", path = "../tox_core" }
 
 log = "0.4"
 futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
-env_logger = "0.7"
+env_logger = "0.8"
 hex = "0.4"
 failure = "0.1"
 
 [dev-dependencies.tokio]
-version = "0.2"
+version = "1.0"
 default-features = false
-features = ["macros", "test-util", "net", "rt-core", "rt-threaded", "sync", "stream", "time"]
+features = ["macros", "test-util", "net", "rt", "rt-multi-thread", "sync", "time"]
 
 [dev-dependencies.tokio-util]
-version = "0.3"
-features = ["codec", "udp"]
+version = "0.6"
+features = ["codec", "net"]
 
 [[example]]
 name = "dht_server"

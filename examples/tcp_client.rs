@@ -14,7 +14,6 @@ use failure::{Error, err_msg};
 use hex::FromHex;
 
 use futures::prelude::*;
-use futures::future;
 use futures::channel::mpsc;
 
 use tokio_util::codec::Framed;
@@ -103,7 +102,8 @@ async fn create_client(mut rx: mpsc::Receiver<Packet>, tx: mpsc::Sender<Packet>)
     futures::try_join!(reader, writer).map(drop)
 }
 
-fn main() {
+#[tokio::main]
+async fn main() -> Result<(), Error> {
     env_logger::init();
 
     let (mut tx, rx) = mpsc::channel(1);
@@ -138,8 +138,8 @@ fn main() {
         Result::<(), Error>::Ok(())
     };
 
-    let client = future::try_select(client.boxed(), packet_sender.boxed());
-
-    let mut runtime = tokio::runtime::Runtime::new().unwrap();
-    runtime.block_on(client).map_err(|e| e.into_inner().0).unwrap();
+    futures::select! {
+        res = client.fuse() => res,
+        res = packet_sender.fuse() => res,
+    }
 }

@@ -5,7 +5,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration};
 
 use failure::Fail;
-use futures::{stream, StreamExt, SinkExt};
+use futures::{stream, SinkExt};
 use futures::channel::mpsc;
 use get_if_addrs::IfAddr;
 
@@ -144,21 +144,22 @@ impl LanDiscoverySender {
         let interval = LAN_DISCOVERY_INTERVAL;
         let mut wakeups = tokio::time::interval(interval);
 
-        while wakeups.next().await.is_some() {
+        loop {
+            wakeups.tick().await;
+
             if let Err(e) = tokio::time::timeout(interval, self.send()).await {
                 warn!("Failed to send LAN discovery packets: {}", e);
 
                 return Err(e.context(LanDiscoveryErrorKind::SendTo).into())
             }
         }
-
-        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::StreamExt;
     use tox_binary_io::*;
 
     fn broadcast_addrs_count() -> usize {

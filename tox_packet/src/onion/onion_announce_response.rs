@@ -140,7 +140,7 @@ impl FromBytes for OnionAnnounceResponsePayload {
         announce_status: call!(AnnounceStatus::from_bytes) >>
         ping_id_or_pk: call!(sha256::Digest::from_bytes) >>
         nodes: many0!(PackedNode::from_bytes) >>
-        _len: verify!(value!(nodes.len()), |len| *len <= 4 as usize) >>
+        _len: verify!(value!(nodes.len()), |len| *len <= 4_usize) >>
         eof!() >>
         (OnionAnnounceResponsePayload {
             announce_status,

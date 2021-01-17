@@ -116,7 +116,6 @@ mod tests {
 
         let client_future = async {
             // Send invalid request first to ensure that the server won't crash
-            let mut client_socket = client_socket;
             client_socket.send_to(&[42; 123][..], &server_addr)
                 .await
                 .map_err(|e| Error::new(ErrorKind::Other, e.compat()))?;

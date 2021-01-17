@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 use std::u16;
 
 use failure::Fail;
-use futures::{TryFutureExt, StreamExt, SinkExt};
+use futures::{TryFutureExt, SinkExt};
 use futures::future;
 use futures::channel::mpsc;
 use tokio::sync::RwLock;
@@ -885,7 +885,7 @@ impl NetCrypto {
             connection.packets_received += 1;
             self.process_ready_lossless_packets(&mut connection.recv_array, connection.peer_real_pk).await
                 .map_err(|e| e.context(HandlePacketErrorKind::SendToLossless))?;
-        } else if packet_id >= PACKET_ID_LOSSY_RANGE_START && packet_id <= PACKET_ID_LOSSY_RANGE_END {
+        } else if (PACKET_ID_LOSSY_RANGE_START..=PACKET_ID_LOSSY_RANGE_END).contains(&packet_id) {
             // Update end index of received buffer ignoring the error - we still
             // want to handle this packet even if connection is too slow
             connection.recv_array.set_buffer_end(payload.packet_number).ok();
@@ -1091,7 +1091,9 @@ impl NetCrypto {
     pub async fn run(&self) -> Result<(), RunError> {
         let mut wakeups = tokio::time::interval(PACKET_COUNTER_AVERAGE_INTERVAL);
 
-        while wakeups.next().await.is_some() {
+        loop {
+            wakeups.tick().await;
+
             let fut = tokio::time::timeout(
                 PACKET_COUNTER_AVERAGE_INTERVAL, self.main_loop()
             );
@@ -1108,8 +1110,6 @@ impl NetCrypto {
                 return res
             }
         }
-
-        Ok(())
     }
 
     /// Set sink to send DHT `PublicKey` when it gets known.
@@ -1133,7 +1133,7 @@ impl NetCrypto {
 mod tests {
     // https://github.com/rust-lang/rust/issues/61520
     use super::{*, Packet};
-    use futures::Future;
+    use futures::{Future, StreamExt};
 
     impl NetCrypto {
         pub async fn has_friend(&self, pk: &PublicKey) -> bool {
