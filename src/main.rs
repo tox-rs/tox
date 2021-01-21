@@ -161,7 +161,7 @@ async fn run_tcp(config: &NodeConfig, dht_sk: SecretKey, mut tcp_onion: TcpOnion
     if config.tcp_addrs.is_empty() {
         // If TCP address is not specified don't start TCP server and only drop
         // all onion packets from DHT server
-        while let Some(_) = tcp_onion.rx.next().await {}
+        while tcp_onion.rx.next().await.is_some() {}
 
         return Ok(())
     }
@@ -219,7 +219,7 @@ async fn run_udp(config: &NodeConfig, dht_pk: PublicKey, dht_sk: &SecretKey, mut
     } else {
         // If UDP address is not specified don't start DHT server and only drop
         // all onion packets from TCP server
-        while let Some(_) = udp_onion.rx.next().await {}
+        while udp_onion.rx.next().await.is_some() {}
 
         return Ok(())
     };
@@ -347,7 +347,7 @@ fn main() {
     };
 
     let tcp_config = config.clone();
-    let tcp_dht_sk = dht_sk.clone();
+    let tcp_dht_sk = dht_sk;
     let tcp_server_future = async move {
         run_tcp(&tcp_config, tcp_dht_sk, tcp_onion, tcp_tcp_stats).await
     };
