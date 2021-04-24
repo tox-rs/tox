@@ -839,7 +839,7 @@ pub mod tests {
         let onion_request = Packet::OnionRequest(OnionRequest {
             nonce: gen_nonce(),
             ip_port: IpPort {
-                protocol: ProtocolType::TCP,
+                protocol: ProtocolType::Tcp,
                 ip_addr: "5.6.7.8".parse().unwrap(),
                 port: 12345,
             },
@@ -958,7 +958,7 @@ pub mod tests {
         let onion_request = OnionRequest {
             nonce: gen_nonce(),
             ip_port: IpPort {
-                protocol: ProtocolType::TCP,
+                protocol: ProtocolType::Tcp,
                 ip_addr: "5.6.7.8".parse().unwrap(),
                 port: 12345,
             },

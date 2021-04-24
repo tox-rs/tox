@@ -171,7 +171,7 @@ mod tests {
         onion_request_0_payload_encode_decode,
         OnionRequest0Payload {
             ip_port: IpPort {
-                protocol: ProtocolType::UDP,
+                protocol: ProtocolType::Udp,
                 ip_addr: "5.6.7.8".parse().unwrap(),
                 port: 12345
             },
@@ -188,7 +188,7 @@ mod tests {
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
         let payload = OnionRequest0Payload {
             ip_port: IpPort {
-                protocol: ProtocolType::UDP,
+                protocol: ProtocolType::Udp,
                 ip_addr: "5.6.7.8".parse().unwrap(),
                 port: 12345
             },
@@ -212,7 +212,7 @@ mod tests {
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
         let payload = OnionRequest0Payload {
             ip_port: IpPort {
-                protocol: ProtocolType::UDP,
+                protocol: ProtocolType::Udp,
                 ip_addr: "5.6.7.8".parse().unwrap(),
                 port: 12345
             },

@@ -117,9 +117,9 @@ impl From<StatusPacket> for Packet {
     }
 }
 
-impl Into<DhtPacket> for Packet {
-    fn into(self) -> DhtPacket {
-        match self {
+impl From<Packet> for DhtPacket {
+    fn from(packet: Packet) -> Self {
+        match packet {
             Packet::CookieRequest(packet) => DhtPacket::CookieRequest(packet),
             Packet::CryptoHandshake(packet) => DhtPacket::CryptoHandshake(packet),
             Packet::CryptoData(packet) => DhtPacket::CryptoData(packet),
@@ -127,9 +127,9 @@ impl Into<DhtPacket> for Packet {
     }
 }
 
-impl Into<TcpDataPayload> for Packet {
-    fn into(self) -> TcpDataPayload {
-        match self {
+impl From<Packet> for TcpDataPayload {
+    fn from(packet: Packet) -> Self {
+        match packet {
             Packet::CookieRequest(packet) => TcpDataPayload::CookieRequest(packet),
             Packet::CryptoHandshake(packet) => TcpDataPayload::CryptoHandshake(packet),
             Packet::CryptoData(packet) => TcpDataPayload::CryptoData(packet),

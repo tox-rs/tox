@@ -1375,7 +1375,7 @@ impl Server {
 
         if let (ip_port, None) = payload {
             match ip_port.protocol {
-                ProtocolType::UDP => {
+                ProtocolType::Udp => {
                     let next_packet = match packet.payload {
                         InnerOnionResponse::OnionAnnounceResponse(inner) => Packet::OnionAnnounceResponse(inner),
                         InnerOnionResponse::OnionDataResponse(inner) => Packet::OnionDataResponse(inner),
@@ -1383,7 +1383,7 @@ impl Server {
                     self.send_to(ip_port.to_saddr(), next_packet).await
                         .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
                 },
-                ProtocolType::TCP => {
+                ProtocolType::Tcp => {
                     if let Some(ref tcp_onion_sink) = self.tcp_onion_sink {
                         tcp_onion_sink.clone().send((packet.payload, ip_port.to_saddr())).await
                             .map_err(|e| e.context(HandlePacketErrorKind::OnionResponseRedirect).into())
@@ -2359,7 +2359,7 @@ mod tests {
         let temporary_pk = gen_keypair().0;
         let inner = vec![42; 123];
         let ip_port = IpPort {
-            protocol: ProtocolType::UDP,
+            protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
             port: 12345
         };
@@ -2411,7 +2411,7 @@ mod tests {
         let temporary_pk = gen_keypair().0;
         let inner = vec![42; 123];
         let ip_port = IpPort {
-            protocol: ProtocolType::UDP,
+            protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
             port: 12345
         };
@@ -2474,7 +2474,7 @@ mod tests {
             payload: vec![42; 123]
         };
         let ip_port = IpPort {
-            protocol: ProtocolType::UDP,
+            protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
             port: 12345
         };
@@ -2516,7 +2516,7 @@ mod tests {
             payload: vec![42; 123]
         };
         let ip_port = IpPort {
-            protocol: ProtocolType::UDP,
+            protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
             port: 12345
         };
@@ -2721,7 +2721,7 @@ mod tests {
         let onion_symmetric_key = alice.onion_symmetric_key.read().await;
 
         let ip_port = IpPort {
-            protocol: ProtocolType::UDP,
+            protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
             port: 12345
         };
@@ -2786,7 +2786,7 @@ mod tests {
         let onion_symmetric_key = alice.onion_symmetric_key.read().await;
 
         let ip_port = IpPort {
-            protocol: ProtocolType::UDP,
+            protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
             port: 12345
         };
@@ -2814,7 +2814,7 @@ mod tests {
         let onion_symmetric_key = alice.onion_symmetric_key.read().await;
 
         let ip_port = IpPort {
-            protocol: ProtocolType::UDP,
+            protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
             port: 12345
         };
@@ -2879,7 +2879,7 @@ mod tests {
         let onion_symmetric_key = alice.onion_symmetric_key.read().await;
 
         let ip_port = IpPort {
-            protocol: ProtocolType::UDP,
+            protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
             port: 12345
         };
@@ -2907,7 +2907,7 @@ mod tests {
         let onion_symmetric_key = alice.onion_symmetric_key.read().await;
 
         let ip_port = IpPort {
-            protocol: ProtocolType::UDP,
+            protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
             port: 12345
         };
@@ -2941,7 +2941,7 @@ mod tests {
         let onion_symmetric_key = alice.onion_symmetric_key.read().await;
 
         let ip_port = IpPort {
-            protocol: ProtocolType::UDP,
+            protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
             port: 12345
         };
@@ -2979,7 +2979,7 @@ mod tests {
         let onion_symmetric_key = alice.onion_symmetric_key.read().await;
 
         let ip_port = IpPort {
-            protocol: ProtocolType::TCP,
+            protocol: ProtocolType::Tcp,
             ip_addr: "5.6.7.8".parse().unwrap(),
             port: 12345
         };
@@ -3010,7 +3010,7 @@ mod tests {
         let onion_symmetric_key = alice.onion_symmetric_key.read().await;
 
         let ip_port = IpPort {
-            protocol: ProtocolType::TCP,
+            protocol: ProtocolType::Tcp,
             ip_addr: "5.6.7.8".parse().unwrap(),
             port: 12345
         };
@@ -3063,7 +3063,7 @@ mod tests {
         let onion_symmetric_key = alice.onion_symmetric_key.read().await;
 
         let ip_port = IpPort {
-            protocol: ProtocolType::UDP,
+            protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
             port: 12345
         };
@@ -3201,7 +3201,7 @@ mod tests {
         let temporary_pk = gen_keypair().0;
         let payload = vec![42; 123];
         let ip_port = IpPort {
-            protocol: ProtocolType::UDP,
+            protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
             port: 12345
         };

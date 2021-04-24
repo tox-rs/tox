@@ -51,10 +51,10 @@ const CONNECTIONS_INTERVAL: Duration = Duration::from_secs(1);
 pub enum NodeConnectionStatus {
     /// We are not connected to the node directly and need active relays to send
     /// packets to this node.
-    TCP,
+    Tcp,
     /// We are connected to the node directly via UDP so all relays used only
     /// for this node connection can go to sleep.
-    UDP,
+    Udp,
 }
 
 /// Contains info about connection to a node via TCP relays.
@@ -70,7 +70,7 @@ impl NodeConnection {
     /// Create new `NodeConnection` struct.
     fn new() -> NodeConnection {
         NodeConnection {
-            status: NodeConnectionStatus::TCP,
+            status: NodeConnectionStatus::Tcp,
             connections: HashSet::new(),
         }
     }
@@ -197,7 +197,7 @@ impl Connections {
         let connection = connections.entry(node_pk).or_insert_with(NodeConnection::new);
         connection.connections.insert(client.pk);
 
-        if connection.status == NodeConnectionStatus::TCP && client.is_sleeping().await {
+        if connection.status == NodeConnectionStatus::Tcp && client.is_sleeping().await {
             // unsleep relay
             client.clone().spawn(self.dht_sk.clone(), self.dht_pk).await
                 .map_err(|e| ConnectionError::from(e.context(ConnectionErrorKind::Spawn)))?;
@@ -255,7 +255,7 @@ impl Connections {
     /// whether connection is used to be able to put to sleep relay connections.
     pub async fn set_connection_status(&self, node_pk: PublicKey, status: NodeConnectionStatus) -> Result<(), ConnectionError> {
         if let Some(connection) = self.connections.write().await.get_mut(&node_pk) {
-            if status == NodeConnectionStatus::TCP && connection.status == NodeConnectionStatus::UDP {
+            if status == NodeConnectionStatus::Tcp && connection.status == NodeConnectionStatus::Udp {
                 // unsleep clients
                 let clients = self.clients.read().await;
                 for client in connection.clients(&clients) {
@@ -339,7 +339,7 @@ impl Connections {
 
         // find out which relays are used right now
         let used_relays = connections.values()
-            .filter(|connection| connection.status == NodeConnectionStatus::TCP)
+            .filter(|connection| connection.status == NodeConnectionStatus::Tcp)
             .flat_map(|connection| connection.connections.iter().cloned())
             .collect::<HashSet<_>>();
 
@@ -471,7 +471,7 @@ mod tests {
         assert!(clients.get(&relay_pk).unwrap().has_connection(node_pk).await);
 
         assert!(connections.contains_key(&node_pk));
-        assert_eq!(connections.get(&node_pk).unwrap().status, NodeConnectionStatus::TCP);
+        assert_eq!(connections.get(&node_pk).unwrap().status, NodeConnectionStatus::Tcp);
         assert!(connections.get(&node_pk).unwrap().connections.contains(&relay_pk));
     }
 
@@ -500,7 +500,7 @@ mod tests {
         assert!(clients.get(&relay_pk).unwrap().has_connection(node_pk).await);
 
         assert!(connections.contains_key(&node_pk));
-        assert_eq!(connections.get(&node_pk).unwrap().status, NodeConnectionStatus::TCP);
+        assert_eq!(connections.get(&node_pk).unwrap().status, NodeConnectionStatus::Tcp);
         assert!(connections.get(&node_pk).unwrap().connections.contains(&relay_pk));
     }
 
@@ -528,7 +528,7 @@ mod tests {
         assert!(clients.get(&relay_pk).unwrap().has_connection(node_pk).await);
 
         assert!(connections.contains_key(&node_pk));
-        assert_eq!(connections.get(&node_pk).unwrap().status, NodeConnectionStatus::TCP);
+        assert_eq!(connections.get(&node_pk).unwrap().status, NodeConnectionStatus::Tcp);
         assert!(connections.get(&node_pk).unwrap().connections.contains(&relay_pk));
     }
 
@@ -627,7 +627,7 @@ mod tests {
         })).await.unwrap();
 
         connections.connections.write().await.insert(destination_pk, NodeConnection {
-            status: NodeConnectionStatus::TCP,
+            status: NodeConnectionStatus::Tcp,
             connections: [relay_0.pk, relay_1.pk, relay_2.pk].iter().cloned().collect(),
         });
         connections.clients.write().await.insert(relay_0.pk, relay_0);
@@ -720,7 +720,7 @@ mod tests {
         let onion_request = OnionRequest {
             nonce: gen_nonce(),
             ip_port: IpPort {
-                protocol: ProtocolType::TCP,
+                protocol: ProtocolType::Tcp,
                 ip_addr: "5.6.7.8".parse().unwrap(),
                 port: 12345,
             },
@@ -747,7 +747,7 @@ mod tests {
         let onion_request = OnionRequest {
             nonce: gen_nonce(),
             ip_port: IpPort {
-                protocol: ProtocolType::TCP,
+                protocol: ProtocolType::Tcp,
                 ip_addr: "5.6.7.8".parse().unwrap(),
                 port: 12345,
             },
@@ -769,13 +769,13 @@ mod tests {
         let (node_pk, _node_sk) = gen_keypair();
 
         connections.connections.write().await.insert(node_pk, NodeConnection {
-            status: NodeConnectionStatus::TCP,
+            status: NodeConnectionStatus::Tcp,
             connections: HashSet::new(),
         });
 
-        connections.set_connection_status(node_pk, NodeConnectionStatus::UDP).await.unwrap();
+        connections.set_connection_status(node_pk, NodeConnectionStatus::Udp).await.unwrap();
 
-        assert_eq!(connections.connections.read().await.get(&node_pk).unwrap().status, NodeConnectionStatus::UDP);
+        assert_eq!(connections.connections.read().await.get(&node_pk).unwrap().status, NodeConnectionStatus::Udp);
     }
 
     #[tokio::test]
@@ -787,7 +787,7 @@ mod tests {
 
         let (node_pk, _node_sk) = gen_keypair();
 
-        let error = connections.set_connection_status(node_pk, NodeConnectionStatus::UDP).await.err().unwrap();
+        let error = connections.set_connection_status(node_pk, NodeConnectionStatus::Udp).await.err().unwrap();
         assert_eq!(*error.kind(), ConnectionErrorKind::NoSuchRelay);
     }
 
@@ -870,11 +870,11 @@ mod tests {
         let (node_pk_2, _node_sk_2) = gen_keypair();
 
         connections.connections.write().await.insert(node_pk_1, NodeConnection {
-            status: NodeConnectionStatus::TCP,
+            status: NodeConnectionStatus::Tcp,
             connections: [relay_pk_1].iter().cloned().collect(),
         });
         connections.connections.write().await.insert(node_pk_2, NodeConnection {
-            status: NodeConnectionStatus::UDP,
+            status: NodeConnectionStatus::Udp,
             connections: [relay_pk_2].iter().cloned().collect(),
         });
 
@@ -915,7 +915,7 @@ mod tests {
         let (node_pk, _node_sk) = gen_keypair();
 
         connections.connections.write().await.insert(node_pk, NodeConnection {
-            status: NodeConnectionStatus::TCP,
+            status: NodeConnectionStatus::Tcp,
             connections: [relay_pk_0, relay_pk_1, relay_pk_2].iter().cloned().collect(),
         });
 
@@ -963,7 +963,7 @@ mod tests {
         relay_3.add_connection(node_pk).await;
 
         connections.connections.write().await.insert(node_pk, NodeConnection {
-            status: NodeConnectionStatus::TCP,
+            status: NodeConnectionStatus::Tcp,
             connections: [relay_pk_1, relay_pk_2, relay_pk_3].iter().cloned().collect(),
         });
 

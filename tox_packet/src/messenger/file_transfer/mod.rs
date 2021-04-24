@@ -124,36 +124,36 @@ const FILE_UID_BYTES: usize = 32;
 
 /// A type for random 32 bytes which is used as file unique id.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct FileUID([u8; FILE_UID_BYTES]);
+pub struct FileUid([u8; FILE_UID_BYTES]);
 
-impl Default for FileUID {
+impl Default for FileUid {
     fn default() -> Self {
         let mut array = [0; FILE_UID_BYTES];
         randombytes_into(&mut array);
-        
-        FileUID(array)
+
+        FileUid(array)
     }
 }
 
-impl FileUID {
+impl FileUid {
     /// Create new object
-    pub fn new() -> FileUID {
+    pub fn new() -> FileUid {
         Default::default()
     }
 
-    fn from_slice(bs: &[u8]) -> Option<FileUID> {
+    fn from_slice(bs: &[u8]) -> Option<FileUid> {
         if bs.len() != FILE_UID_BYTES {
             return None
         }
         let mut n = [0; FILE_UID_BYTES];
         n.clone_from_slice(bs);
 
-        Some(FileUID(n))
+        Some(FileUid(n))
     }
 }
 
-impl FromBytes for FileUID {
-    named!(from_bytes<FileUID>, map_opt!(take!(FILE_UID_BYTES), FileUID::from_slice));
+impl FromBytes for FileUid {
+    named!(from_bytes<FileUid>, map_opt!(take!(FILE_UID_BYTES), FileUid::from_slice));
 }
 
 /** FileTransfer packet enum that encapsulates all types of FileTransfer packets.
@@ -205,6 +205,6 @@ mod tests {
     encode_decode_test!(
         tox_crypto::crypto_init().unwrap(),
         packet_file_send_request_encode_decode,
-        Packet::FileSendRequest(FileSendRequest::new(1, FileType::Avatar, 4, FileUID::new(), "data".to_string()))
+        Packet::FileSendRequest(FileSendRequest::new(1, FileType::Avatar, 4, FileUid::new(), "data".to_string()))
     );
 }

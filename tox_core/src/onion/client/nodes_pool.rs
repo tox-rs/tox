@@ -78,7 +78,7 @@ impl NodesPool {
                 break;
             }
         }
-        Some(OnionPath::new([node_1, node_2, node_3], OnionPathType::UDP))
+        Some(OnionPath::new([node_1, node_2, node_3], OnionPathType::Udp))
     }
 
     /// Build new random onion path with first TCP node.
@@ -95,7 +95,7 @@ impl NodesPool {
                 break;
             }
         }
-        Some(OnionPath::new([node_1, node_2, node_3], OnionPathType::TCP))
+        Some(OnionPath::new([node_1, node_2, node_3], OnionPathType::Tcp))
     }
 }
 

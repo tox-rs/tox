@@ -186,7 +186,7 @@ struct OnionNode {
     announce_status: AnnounceStatus,
 }
 
-impl HasPK for OnionNode {
+impl HasPk for OnionNode {
     fn pk(&self) -> PublicKey {
         self.pk
     }
@@ -393,14 +393,14 @@ impl OnionClient {
     async fn send_onion_request(&self, path: OnionPath, inner_onion_request: InnerOnionRequest, saddr: SocketAddr)
         -> Result<(), mpsc::SendError> {
         match path.path_type {
-            OnionPathType::TCP => {
+            OnionPathType::Tcp => {
                 let onion_request = path.create_tcp_onion_request(saddr, inner_onion_request);
                 // TODO: can we handle errors better? Right now we can try send a
                 // request to a non-existent or suspended node which returns an error
                 self.tcp_connections.send_onion(path.nodes[0].public_key, onion_request).await.ok();
                 Ok(())
             },
-            OnionPathType::UDP => {
+            OnionPathType::Udp => {
                 let onion_request =
                     path.create_udp_onion_request(saddr, inner_onion_request);
                 let mut tx = self.dht.tx.clone();
@@ -549,12 +549,12 @@ impl OnionClient {
 
         for node in dht_pk_announce.nodes.into_iter() {
             match node.ip_port.protocol {
-                ProtocolType::UDP => {
+                ProtocolType::Udp => {
                     let packed_node = PackedNode::new(node.ip_port.to_saddr(), &node.pk);
                     self.dht.ping_node(&packed_node).await
                         .map_err(|e| e.context(HandleDhtPkAnnounceErrorKind::PingNode))?;
                 },
-                ProtocolType::TCP => {
+                ProtocolType::Tcp => {
                     self.tcp_connections.add_relay_connection(node.ip_port.to_saddr(), node.pk, dht_pk_announce.dht_pk).await
                         .map_err(|e| e.context(HandleDhtPkAnnounceErrorKind::AddRelay))?;
                 }
@@ -979,7 +979,7 @@ mod tests {
             saddr,
             path_id: OnionPathId {
                 keys: [gen_keypair().0, gen_keypair().0, gen_keypair().0],
-                path_type: OnionPathType::UDP,
+                path_type: OnionPathType::Udp,
             },
             ping_id: None,
             data_pk: None,
@@ -1005,7 +1005,7 @@ mod tests {
             saddr: "127.0.0.1:12345".parse().unwrap(),
             path_id: OnionPathId {
                 keys: [gen_keypair().0, gen_keypair().0, gen_keypair().0],
-                path_type: OnionPathType::UDP,
+                path_type: OnionPathType::Udp,
             },
             ping_id: None,
             data_pk: None,
@@ -1019,7 +1019,7 @@ mod tests {
         let saddr = "127.0.0.1:12346".parse().unwrap();
         let path_id = OnionPathId {
             keys: [gen_keypair().0, gen_keypair().0, gen_keypair().0],
-            path_type: OnionPathType::UDP,
+            path_type: OnionPathType::Udp,
         };
         let ping_id = sha256::hash(&[1, 2, 3]);
         let data_pk = gen_keypair().0;
@@ -1060,7 +1060,7 @@ mod tests {
             saddr: "127.0.0.1:12345".parse().unwrap(),
             path_id: OnionPathId {
                 keys: [gen_keypair().0, gen_keypair().0, gen_keypair().0],
-                path_type: OnionPathType::UDP,
+                path_type: OnionPathType::Udp,
             },
             ping_id: None,
             data_pk: None,
@@ -1509,7 +1509,7 @@ mod tests {
             saddr,
             path_id: OnionPathId {
                 keys: [gen_keypair().0, gen_keypair().0, gen_keypair().0],
-                path_type: OnionPathType::UDP,
+                path_type: OnionPathType::Udp,
             },
             friend_pk: Some(friend_pk),
         };
@@ -1553,7 +1553,7 @@ mod tests {
             saddr,
             path_id: OnionPathId {
                 keys: [gen_keypair().0, gen_keypair().0, gen_keypair().0],
-                path_type: OnionPathType::UDP,
+                path_type: OnionPathType::Udp,
             },
             friend_pk: Some(friend_pk),
         };
@@ -1661,7 +1661,7 @@ mod tests {
         let dht_pk_announce_payload = DhtPkAnnouncePayload::new(friend_dht_pk, vec![
             TcpUdpPackedNode {
                 ip_port: IpPort {
-                    protocol: ProtocolType::UDP,
+                    protocol: ProtocolType::Udp,
                     ip_addr: saddr.ip(),
                     port: saddr.port(),
                 },
@@ -1723,7 +1723,7 @@ mod tests {
         let dht_pk_announce_payload = DhtPkAnnouncePayload::new(friend_dht_pk, vec![
             TcpUdpPackedNode {
                 ip_port: IpPort {
-                    protocol: ProtocolType::TCP,
+                    protocol: ProtocolType::Tcp,
                     ip_addr: "127.0.0.2".parse().unwrap(),
                     port: 12346,
                 },
@@ -2353,7 +2353,7 @@ mod tests {
             PackedNode::new("127.0.0.1:12346".parse().unwrap(), &gen_keypair().0),
             PackedNode::new("127.0.0.1:12347".parse().unwrap(), &gen_keypair().0),
             PackedNode::new("127.0.0.1:12348".parse().unwrap(), &gen_keypair().0),
-        ], OnionPathType::UDP);
+        ], OnionPathType::Udp);
         let saddr = "127.0.0.1:12345".parse().unwrap();
         onion_client.send_onion_request(path, inner_onion_request, saddr).await.unwrap();
 
@@ -2381,7 +2381,7 @@ mod tests {
             PackedNode::new("127.0.0.1:12346".parse().unwrap(), &relay_pk),
             PackedNode::new("127.0.0.1:12347".parse().unwrap(), &gen_keypair().0),
             PackedNode::new("127.0.0.1:12348".parse().unwrap(), &gen_keypair().0),
-        ], OnionPathType::TCP);
+        ], OnionPathType::Tcp);
         let saddr = "127.0.0.1:12345".parse().unwrap();
         onion_client.send_onion_request(path, inner_onion_request, saddr).await.unwrap();
 

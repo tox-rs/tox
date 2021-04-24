@@ -195,7 +195,7 @@ impl From<PackedNode> for DhtNode {
     }
 }
 
-impl HasPK for DhtNode {
+impl HasPk for DhtNode {
     fn pk(&self) -> PublicKey {
         self.pk
     }

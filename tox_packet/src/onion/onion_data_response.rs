@@ -298,7 +298,7 @@ mod tests {
             nodes: vec![
                 TcpUdpPackedNode {
                     ip_port: IpPort {
-                        protocol: ProtocolType::UDP,
+                        protocol: ProtocolType::Udp,
                         ip_addr: "127.0.0.1".parse().unwrap(),
                         port: 12345
                     },
@@ -329,7 +329,7 @@ mod tests {
             nodes: vec![
                 TcpUdpPackedNode {
                     ip_port: IpPort {
-                        protocol: ProtocolType::UDP,
+                        protocol: ProtocolType::Udp,
                         ip_addr: "127.0.0.1".parse().unwrap(),
                         port: 12345
                     },

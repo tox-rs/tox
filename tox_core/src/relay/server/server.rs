@@ -939,7 +939,7 @@ mod tests {
         let request = OnionRequest {
             nonce: gen_nonce(),
             ip_port: IpPort {
-                protocol: ProtocolType::TCP,
+                protocol: ProtocolType::Tcp,
                 ip_addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                 port: 12345,
             },
@@ -1254,7 +1254,7 @@ mod tests {
         let request = OnionRequest {
             nonce: gen_nonce(),
             ip_port: IpPort {
-                protocol: ProtocolType::TCP,
+                protocol: ProtocolType::Tcp,
                 ip_addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                 port: 12345,
             },
@@ -1552,7 +1552,7 @@ mod tests {
         let request = OnionRequest {
             nonce: gen_nonce(),
             ip_port: IpPort {
-                protocol: ProtocolType::TCP,
+                protocol: ProtocolType::Tcp,
                 ip_addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                 port: 12345,
             },

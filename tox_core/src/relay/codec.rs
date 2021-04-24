@@ -251,7 +251,7 @@ mod tests {
             Packet::OnionRequest( OnionRequest {
                 nonce: gen_nonce(),
                 ip_port: IpPort {
-                    protocol: ProtocolType::TCP,
+                    protocol: ProtocolType::Tcp,
                     ip_addr: IpAddr::V4(Ipv4Addr::new(5, 6, 7, 8)),
                     port: 12345,
                 },
@@ -261,7 +261,7 @@ mod tests {
             Packet::OnionRequest( OnionRequest {
                 nonce: gen_nonce(),
                 ip_port: IpPort {
-                    protocol: ProtocolType::TCP,
+                    protocol: ProtocolType::Tcp,
                     ip_addr: IpAddr::V6(Ipv6Addr::new(5, 6, 7, 8, 5, 6, 7, 8)),
                     port: 54321,
                 },

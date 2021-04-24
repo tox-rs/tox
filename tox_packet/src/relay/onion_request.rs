@@ -95,7 +95,7 @@ mod test {
         OnionRequest {
             nonce: gen_nonce(),
             ip_port: IpPort {
-                protocol: ProtocolType::TCP,
+                protocol: ProtocolType::Tcp,
                 ip_addr: "5.6.7.8".parse().unwrap(),
                 port: 12345,
             },

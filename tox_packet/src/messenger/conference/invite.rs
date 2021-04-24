@@ -25,7 +25,7 @@ pub struct Invite {
     /// Type of conference
     pub conference_type: ConferenceType,
     /// Unique id of conference
-    pub unique_id: ConferenceUID,
+    pub unique_id: ConferenceUid,
 }
 
 impl FromBytes for Invite {
@@ -34,7 +34,7 @@ impl FromBytes for Invite {
         tag!("\x00") >>
         conference_id: be_u16 >>
         conference_type: call!(ConferenceType::from_bytes) >>
-        unique_id: call!(ConferenceUID::from_bytes) >>
+        unique_id: call!(ConferenceUid::from_bytes) >>
         (Invite {
             conference_id,
             conference_type,
@@ -57,7 +57,7 @@ impl ToBytes for Invite {
 
 impl Invite {
     /// Create new Invite object.
-    pub fn new(conference_id: u16, conference_type: ConferenceType, unique_id: ConferenceUID) -> Self {
+    pub fn new(conference_id: u16, conference_type: ConferenceType, unique_id: ConferenceUid) -> Self {
         Invite {
             conference_id,
             conference_type,
@@ -73,6 +73,6 @@ mod tests {
     encode_decode_test!(
         tox_crypto::crypto_init().unwrap(),
         invite_encode_decode,
-        Invite::new(1, ConferenceType::Text, ConferenceUID::random())
+        Invite::new(1, ConferenceType::Text, ConferenceUid::random())
     );
 }

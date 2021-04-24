@@ -264,14 +264,14 @@ mod tests {
         let bob_symmetric_key = secretbox::gen_key();
         // alice encrypt
         let ip_port_1 = IpPort {
-            protocol: ProtocolType::UDP,
+            protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
             port: 12345
         };
         let onion_return_1 = OnionReturn::new(&alice_symmetric_key, &ip_port_1, None);
         // bob encrypt
         let ip_port_2 = IpPort {
-            protocol: ProtocolType::UDP,
+            protocol: ProtocolType::Udp,
             ip_addr: "7.8.5.6".parse().unwrap(),
             port: 54321
         };
@@ -294,14 +294,14 @@ mod tests {
         let eve_symmetric_key = secretbox::gen_key();
         // alice encrypt
         let ip_port_1 = IpPort {
-            protocol: ProtocolType::UDP,
+            protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
             port: 12345
         };
         let onion_return_1 = OnionReturn::new(&alice_symmetric_key, &ip_port_1, None);
         // bob encrypt
         let ip_port_2 = IpPort {
-            protocol: ProtocolType::UDP,
+            protocol: ProtocolType::Udp,
             ip_addr: "7.8.5.6".parse().unwrap(),
             port: 54321
         };
