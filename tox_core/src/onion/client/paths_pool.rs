@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use tox_crypto::*;
+use rand::{thread_rng, Rng};
 use tox_packet::dht::packed_node::PackedNode;
 use crate::dht::server::Server as DhtServer;
 use crate::onion::client::nodes_pool::*;
@@ -126,7 +126,7 @@ impl PathsPool {
 
         paths.retain(|stored_path| !stored_path.is_timed_out());
 
-        let path_number = random_limit_usize(NUMBER_ONION_PATHS);
+        let path_number = thread_rng().gen_range(0 .. NUMBER_ONION_PATHS);
         if let Some(stored_path) = paths.get_mut(path_number) {
             stored_path.use_path();
             return Some(stored_path.path.clone());
@@ -219,6 +219,7 @@ mod tests {
     use super::*;
 
     use futures::channel::mpsc;
+    use tox_crypto::*;
 
     macro_rules! paths_pool_tests {
         ($mod:ident, $friends:expr, $paths:ident) => {

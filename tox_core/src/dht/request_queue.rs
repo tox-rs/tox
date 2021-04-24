@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::time::{Duration, Instant};
+use rand::Rng;
 
 use crate::utils::gen_ping_id;
 use crate::time::*;
@@ -28,9 +29,9 @@ impl<T> RequestQueue<T> {
     }
 
     /// Generate unique non zero request ID.
-    fn generate_ping_id(&self) -> u64 {
+    fn generate_ping_id<R: Rng>(&self, rng: &mut R) -> u64 {
         loop {
-            let ping_id = gen_ping_id();
+            let ping_id = gen_ping_id(rng);
             if !self.ping_map.contains_key(&ping_id) {
                 return ping_id;
             }
@@ -39,8 +40,8 @@ impl<T> RequestQueue<T> {
 
     /// Generate and store unique non zero request ID. Later this request ID can
     /// be verified with `check_ping_id` function.
-    pub fn new_ping_id(&mut self, data: T) -> u64 {
-        let ping_id = self.generate_ping_id();
+    pub fn new_ping_id<R: Rng>(&mut self, rng: &mut R, data: T) -> u64 {
+        let ping_id = self.generate_ping_id(rng);
         self.ping_map.insert(ping_id, (clock_now(), data));
         ping_id
     }
@@ -87,26 +88,22 @@ impl<T> RequestQueue<T> {
 mod tests {
     use super::*;
 
-    use tox_crypto::*;
+    use rand::thread_rng;
 
     #[test]
     fn insert_new_ping_id() {
-        crypto_init().unwrap();
-
         let mut queue = RequestQueue::new(Duration::from_secs(42));
 
-        let ping_id = queue.new_ping_id(7);
+        let ping_id = queue.new_ping_id(&mut thread_rng(), 7);
 
         assert_eq!(queue.ping_map[&ping_id].1, 7);
     }
 
     #[test]
     fn check_ping_id() {
-        crypto_init().unwrap();
-
         let mut queue = RequestQueue::new(Duration::from_secs(42));
 
-        let ping_id = queue.new_ping_id(7);
+        let ping_id = queue.new_ping_id(&mut thread_rng(), 7);
         assert_eq!(queue.check_ping_id(ping_id, |&data| data == 6), None);
         assert_eq!(queue.check_ping_id(ping_id, |&data| data == 7), Some(7));
         assert_eq!(queue.check_ping_id(ping_id, |&data| data == 7), None);
@@ -121,21 +118,17 @@ mod tests {
 
     #[test]
     fn check_ping_id_nonexistent() {
-        crypto_init().unwrap();
-
         let mut queue = RequestQueue::new(Duration::from_secs(42));
 
-        let ping_id = queue.new_ping_id(());
+        let ping_id = queue.new_ping_id(&mut thread_rng(), ());
         assert_eq!(queue.check_ping_id(ping_id.overflowing_add(1).0, |_| true), None);
         assert_eq!(queue.check_ping_id(ping_id.overflowing_sub(1).0, |_| true), None);
     }
 
     #[tokio::test]
     async fn check_ping_id_timed_out() {
-        crypto_init().unwrap();
-
         let mut queue = RequestQueue::new(Duration::from_secs(42));
-        let ping_id = queue.new_ping_id(());
+        let ping_id = queue.new_ping_id(&mut thread_rng(), ());
 
         tokio::time::pause();
 
@@ -148,10 +141,8 @@ mod tests {
 
     #[tokio::test]
     async fn clear_timed_out() {
-        crypto_init().unwrap();
-
         let mut queue = RequestQueue::new(Duration::from_secs(42));
-        let ping_id_1 = queue.new_ping_id(());
+        let ping_id_1 = queue.new_ping_id(&mut thread_rng(), ());
 
         tokio::time::pause();
 
@@ -159,7 +150,7 @@ mod tests {
         let time = queue.ping_map[&ping_id_1].0;
 
         tokio::time::advance((time + Duration::from_secs(21)) - now).await;
-        let ping_id_2 = queue.new_ping_id(());
+        let ping_id_2 = queue.new_ping_id(&mut thread_rng(), ());
 
         tokio::time::advance(Duration::from_secs(43 - 21)).await;
         queue.clear_timed_out();
@@ -171,13 +162,12 @@ mod tests {
 
     #[test]
     fn get_values() {
-        crypto_init().unwrap();
-
         let mut queue = RequestQueue::new(Duration::from_secs(42));
+        let mut rng = &mut thread_rng();
 
-        let _ping_id_1 = queue.new_ping_id(1);
-        let _ping_id_2 = queue.new_ping_id(2);
-        let _ping_id_3 = queue.new_ping_id(3);
+        let _ping_id_1 = queue.new_ping_id(&mut rng, 1);
+        let _ping_id_2 = queue.new_ping_id(&mut rng, 2);
+        let _ping_id_3 = queue.new_ping_id(&mut rng, 3);
 
         let values = queue.get_values().map(|(_, &data)| data).collect::<Vec<_>>();
 

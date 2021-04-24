@@ -10,6 +10,7 @@ use failure::Fail;
 use futures::{TryFutureExt, StreamExt, SinkExt, future};
 use futures::channel::mpsc;
 use tokio::sync::RwLock;
+use rand::{Rng, prelude::SliceRandom, thread_rng};
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -191,11 +192,12 @@ impl Server {
     pub fn new(tx: Tx, pk: PublicKey, sk: SecretKey) -> Server {
         debug!("Created new Server instance");
 
+        let mut rng = thread_rng();
         let fake_friends_keys = iter::repeat_with(|| gen_keypair().0)
             .take(FAKE_FRIENDS_NUMBER)
             .collect::<Vec<_>>();
         let friends = fake_friends_keys.iter()
-            .map(|&pk| (pk, DhtFriend::new(pk)))
+            .map(|&pk| (pk, DhtFriend::new(&mut rng, pk)))
             .collect();
 
         let precomputed_keys = PrecomputedCache::new(sk.clone(), PRECOMPUTED_LRU_CACHE_SIZE);
@@ -289,7 +291,7 @@ impl Server {
 
         let close_nodes = self.close_nodes.read().await;
 
-        let mut friend = DhtFriend::new(friend_pk);
+        let mut friend = DhtFriend::new(&mut thread_rng(), friend_pk);
         let close_nodes = Server::get_closest_inner(&close_nodes, &friends, &friend.pk, 4, true);
 
         for &node in close_nodes.iter() {
@@ -589,10 +591,11 @@ impl Server {
             return Ok(());
         }
 
-        let mut random_node_idx = random_limit_usize(good_nodes.len());
+        let rng = &mut thread_rng();
+        let mut random_node_idx = rng.gen_range(0 .. good_nodes.len());
         // Increase probability of sending packet to a close node (has lower index)
         if random_node_idx != 0 {
-            random_node_idx -= random_limit_usize(random_node_idx + 1);
+            random_node_idx -= rng.gen_range(0 ..= random_node_idx);
         }
 
         let random_node = &good_nodes[random_node_idx];
@@ -612,7 +615,7 @@ impl Server {
     async fn send_ping_req(&self, node: &PackedNode, request_queue: &mut RequestQueue<PublicKey>)
         -> Result<(), mpsc::SendError> {
         let payload = PingRequestPayload {
-            id: request_queue.new_ping_id(node.pk),
+            id: request_queue.new_ping_id(&mut thread_rng(), node.pk),
         };
         let ping_req = Packet::PingRequest(PingRequest::new(
             &self.precomputed_keys.get(node.pk).await,
@@ -633,7 +636,7 @@ impl Server {
 
         let payload = NodesRequestPayload {
             pk: search_pk,
-            id: request_queue.new_ping_id(node.pk),
+            id: request_queue.new_ping_id(&mut thread_rng(), node.pk),
         };
         let nodes_req = Packet::NodesRequest(NodesRequest::new(
             &self.precomputed_keys.get(node.pk).await,
@@ -683,7 +686,7 @@ impl Server {
         let punch_addrs = friend.hole_punch.next_punch_addrs(returned_addrs);
         let mut tx = self.tx.clone();
         let payload = PingRequestPayload {
-            id: request_queue.new_ping_id(friend.pk),
+            id: request_queue.new_ping_id(&mut thread_rng(), friend.pk),
         };
         let packet = Packet::PingRequest(PingRequest::new(
             &self.precomputed_keys.get(friend.pk).await,
@@ -1120,7 +1123,7 @@ impl Server {
 
         if friend.hole_punch.ping_id == payload.id {
             // Refresh ping id for the next NatPingRequest
-            friend.hole_punch.ping_id = gen_ping_id();
+            friend.hole_punch.ping_id = gen_ping_id(&mut thread_rng());
             // We send NatPingRequest packet only if we are not directly
             // connected to a friend but we have several nodes that connected
             // to him. If we received NatPingResponse that means that this
@@ -1449,21 +1452,18 @@ impl Server {
     /// Get up to `count` random nodes stored in fake friends.
     pub async fn random_friend_nodes(&self, count: u8) -> Vec<PackedNode> {
         let friends = self.friends.read().await;
-        // TODO: use shuffle instead
         let mut nodes = Vec::new();
-        let skip = random_limit_usize(FAKE_FRIENDS_NUMBER as usize);
-        for pk in self.fake_friends_keys.iter().cycle().skip(skip).take(FAKE_FRIENDS_NUMBER) {
-            let friend = &friends[pk];
-            let skip = random_limit_usize(FRIEND_CLOSE_NODES_COUNT as usize);
-            let take = (count as usize - nodes.len()).min(friend.close_nodes.len());
-            nodes.extend(
-                friend.close_nodes
-                    .iter()
-                    .flat_map(|node| node.to_packed_node())
-                    .cycle()
-                    .skip(skip)
-                    .take(take)
-            );
+        let mut rng = thread_rng();
+        let mut fake_friends_keys = self.fake_friends_keys.clone();
+        fake_friends_keys.shuffle(&mut rng);
+        for pk in fake_friends_keys {
+            let mut close_nodes: Vec<_> = friends[&pk]
+                .close_nodes
+                .iter()
+                .flat_map(|node| node.to_packed_node())
+                .collect();
+            close_nodes.shuffle(&mut rng);
+            nodes.extend(close_nodes.iter().take(count as usize - nodes.len()));
             if nodes.len() == count as usize {
                 break;
             }
@@ -1717,7 +1717,7 @@ mod tests {
         let packed_node = PackedNode::new(addr, &bob_pk);
         assert!(alice.close_nodes.write().await.try_add(packed_node));
 
-        let ping_id = alice.request_queue.write().await.new_ping_id(bob_pk);
+        let ping_id = alice.request_queue.write().await.new_ping_id(&mut thread_rng(), bob_pk);
 
         let resp_payload = PingResponsePayload { id: ping_id };
         let ping_resp = Packet::PingResponse(PingResponse::new(&precomp, &bob_pk, &resp_payload));
@@ -1753,7 +1753,7 @@ mod tests {
         let packed_node = PackedNode::new(addr, &bob_pk);
         assert!(alice.close_nodes.write().await.try_add(packed_node));
 
-        let ping_id = alice.request_queue.write().await.new_ping_id(bob_pk);
+        let ping_id = alice.request_queue.write().await.new_ping_id(&mut thread_rng(), bob_pk);
 
         let resp_payload = PingResponsePayload { id: ping_id };
         let ping_resp = Packet::PingResponse(PingResponse::new(&precomp, &bob_pk, &resp_payload));
@@ -1778,7 +1778,7 @@ mod tests {
         let packed_node = PackedNode::new(addr, &bob_pk);
         assert!(alice.close_nodes.write().await.try_add(packed_node));
 
-        let ping_id = alice.request_queue.write().await.new_ping_id(bob_pk);
+        let ping_id = alice.request_queue.write().await.new_ping_id(&mut thread_rng(), bob_pk);
 
         let resp_payload = PingResponsePayload { id: ping_id };
         let ping_resp = Packet::PingResponse(PingResponse::new(&precomp, &bob_pk, &resp_payload));
@@ -1799,7 +1799,7 @@ mod tests {
         let packed_node = PackedNode::new(addr, &bob_pk);
         assert!(alice.close_nodes.write().await.try_add(packed_node));
 
-        let ping_id = alice.request_queue.write().await.new_ping_id(bob_pk);
+        let ping_id = alice.request_queue.write().await.new_ping_id(&mut thread_rng(), bob_pk);
 
         // can't be decrypted payload since packet contains wrong key
         let payload = PingResponsePayload { id: ping_id };
@@ -1832,7 +1832,7 @@ mod tests {
         let packed_node = PackedNode::new(addr, &bob_pk);
         assert!(alice.close_nodes.write().await.try_add(packed_node));
 
-        let ping_id = alice.request_queue.write().await.new_ping_id(bob_pk);
+        let ping_id = alice.request_queue.write().await.new_ping_id(&mut thread_rng(), bob_pk);
 
         let payload = PingResponsePayload { id: ping_id + 1 };
         let ping_resp = Packet::PingResponse(PingResponse::new(&precomp, &bob_pk, &payload));
@@ -1984,7 +1984,7 @@ mod tests {
 
         let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
 
-        let ping_id = alice.request_queue.write().await.new_ping_id(bob_pk);
+        let ping_id = alice.request_queue.write().await.new_ping_id(&mut thread_rng(), bob_pk);
 
         let resp_payload = NodesResponsePayload { nodes: vec![node], id: ping_id };
         let nodes_resp = Packet::NodesResponse(NodesResponse::new(&precomp, &bob_pk, &resp_payload));
@@ -2030,7 +2030,7 @@ mod tests {
 
         let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
 
-        let ping_id = alice.request_queue.write().await.new_ping_id(bob_pk);
+        let ping_id = alice.request_queue.write().await.new_ping_id(&mut thread_rng(), bob_pk);
 
         let resp_payload = NodesResponsePayload { nodes: vec![node], id: ping_id };
         let nodes_resp = Packet::NodesResponse(NodesResponse::new(&precomp, &bob_pk, &resp_payload));
@@ -2080,7 +2080,7 @@ mod tests {
     async fn handle_nodes_resp_invalid_ping_id() {
         let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
 
-        let ping_id = alice.request_queue.write().await.new_ping_id(bob_pk);
+        let ping_id = alice.request_queue.write().await.new_ping_id(&mut thread_rng(), bob_pk);
 
         let resp_payload = NodesResponsePayload {
             nodes: vec![
@@ -2340,7 +2340,7 @@ mod tests {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         // error case, incorrect ping_id
-        let ping_id = alice.request_queue.write().await.new_ping_id(bob_pk);
+        let ping_id = alice.request_queue.write().await.new_ping_id(&mut thread_rng(), bob_pk);
 
         let nat_res = NatPingResponse { id: ping_id + 1 };
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);

@@ -20,6 +20,7 @@ use std::time::Duration;
 
 use futures::TryFutureExt;
 use futures::channel::mpsc;
+use rand::{Rng, prelude::SliceRandom, thread_rng};
 
 use tox_crypto::*;
 use tox_packet::dht::packed_node::PackedNode;
@@ -281,7 +282,7 @@ impl Connections {
         if relays.is_empty() {
             None
         } else {
-            Some(relays[random_limit_usize(relays.len())])
+            Some(relays[thread_rng().gen_range(0 .. relays.len())])
         }
     }
 
@@ -298,10 +299,8 @@ impl Connections {
             return Vec::new();
         }
 
-        // TODO: shuffle relays instead
-        let skip = random_limit_usize(relays.len());
-        let take = (count as usize).min(relays.len());
-        relays.into_iter().cycle().skip(skip).take(take).collect()
+        relays.shuffle(&mut thread_rng());
+        relays.into_iter().take(count as usize).collect()
     }
 
     /// Main loop that should be run periodically. It removes unreachable and

@@ -1,8 +1,8 @@
 //! Nodes pool.
 
 use std::collections::VecDeque;
+use rand::{thread_rng, Rng};
 
-use tox_crypto::*;
 use tox_packet::dht::packed_node::PackedNode;
 use crate::onion::client::onion_path::{OnionPath, OnionPathType};
 
@@ -46,7 +46,7 @@ impl NodesPool {
     pub fn rand(&self) -> Option<PackedNode> {
         let len = self.nodes.len();
         if len > 0 {
-            Some(self.nodes[random_limit_usize(len)])
+            Some(self.nodes[thread_rng().gen_range(0 .. len)])
         } else {
             None
         }
@@ -110,6 +110,7 @@ mod tests {
     use super::*;
 
     use std::net::SocketAddr;
+    use tox_crypto::*;
 
     #[test]
     fn new() {

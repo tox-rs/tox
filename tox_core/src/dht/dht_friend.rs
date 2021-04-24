@@ -4,6 +4,7 @@ Module for friend.
 
 use std::time::Instant;
 use std::net::SocketAddr;
+use rand::Rng;
 
 use crate::time::*;
 use crate::dht::kbucket::*;
@@ -40,14 +41,14 @@ pub struct DhtFriend {
 
 impl DhtFriend {
     /// Create new `DhtFriend`.
-    pub fn new(pk: PublicKey) -> Self {
+    pub fn new<R: Rng>(rng: &mut R, pk: PublicKey) -> Self {
         DhtFriend {
             pk,
             close_nodes: Kbucket::new(FRIEND_CLOSE_NODES_COUNT),
             last_nodes_req_time: clock_now(),
             random_requests_count: 0,
             nodes_to_bootstrap: Kbucket::new(FRIEND_BOOTSTRAP_NODES_COUNT),
-            hole_punch: HolePunching::new(),
+            hole_punch: HolePunching::new(rng),
         }
     }
 
@@ -98,12 +99,13 @@ mod tests {
     use super::*;
 
     use std::time::Duration;
+    use rand::thread_rng;
 
     #[test]
     fn addr_is_unknown() {
         crypto_init().unwrap();
         let pk = gen_keypair().0;
-        let mut friend = DhtFriend::new(pk);
+        let mut friend = DhtFriend::new(&mut thread_rng(), pk);
 
         assert!(friend.try_add_to_close(PackedNode::new("192.168.1.1:12345".parse().unwrap(), &gen_keypair().0)));
         assert!(friend.try_add_to_close(PackedNode::new("192.168.1.2:12345".parse().unwrap(), &gen_keypair().0)));
@@ -115,7 +117,7 @@ mod tests {
     fn addr_is_known() {
         crypto_init().unwrap();
         let pk = gen_keypair().0;
-        let mut friend = DhtFriend::new(pk);
+        let mut friend = DhtFriend::new(&mut thread_rng(), pk);
 
         assert!(friend.try_add_to_close(PackedNode::new("192.168.1.1:12345".parse().unwrap(), &gen_keypair().0)));
         assert!(friend.try_add_to_close(PackedNode::new("192.168.1.2:12345".parse().unwrap(), &gen_keypair().0)));
@@ -129,7 +131,7 @@ mod tests {
     fn get_returned_addrs() {
         crypto_init().unwrap();
         let pk = gen_keypair().0;
-        let mut friend = DhtFriend::new(pk);
+        let mut friend = DhtFriend::new(&mut thread_rng(), pk);
 
         let nodes = [
             PackedNode::new("192.168.1.1:12345".parse().unwrap(), &gen_keypair().0),
@@ -162,7 +164,7 @@ mod tests {
     async fn get_returned_addrs_timed_out() {
         crypto_init().unwrap();
         let pk = gen_keypair().0;
-        let mut friend = DhtFriend::new(pk);
+        let mut friend = DhtFriend::new(&mut thread_rng(), pk);
 
         let nodes = [
             PackedNode::new("192.168.1.1:12345".parse().unwrap(), &gen_keypair().0),
@@ -191,7 +193,7 @@ mod tests {
     fn can_and_try_add_to_close() {
         crypto_init().unwrap();
         let pk = PublicKey([0; PUBLICKEYBYTES]);
-        let mut friend = DhtFriend::new(pk);
+        let mut friend = DhtFriend::new(&mut thread_rng(), pk);
 
         for i in 0 .. 8 {
             let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + u16::from(i));

@@ -14,6 +14,7 @@ use failure::Fail;
 use futures::{StreamExt, SinkExt};
 use futures::channel::mpsc;
 use futures::lock::Mutex;
+use rand::{thread_rng, Rng};
 
 use tox_crypto::*;
 use crate::dht::ip_port::IsGlobal;
@@ -508,7 +509,7 @@ impl OnionClient {
                 continue
             };
 
-            let request_id = state.announce_requests.new_ping_id(AnnounceRequestData {
+            let request_id = state.announce_requests.new_ping_id(&mut thread_rng(), AnnounceRequestData {
                 pk: node.pk,
                 saddr: node.saddr,
                 path_id: path.id(),
@@ -675,7 +676,7 @@ impl OnionClient {
                 ANNOUNCE_INTERVAL_NOT_ANNOUNCED
             };
 
-            if clock_elapsed(node.ping_time) >= interval || ping_random && random_limit_usize(capacity) == 0 {
+            if clock_elapsed(node.ping_time) >= interval || ping_random && thread_rng().gen_range(0 .. capacity) == 0 {
                 // Last chance for a long-lived node
                 let path = if node.is_last_ping_attempt() && node.is_stable() {
                     paths_pool.random_path(&self.dht, &self.tcp_connections, friend_pk.is_some()).await
@@ -692,7 +693,7 @@ impl OnionClient {
                 node.unsuccessful_pings += 1;
                 node.ping_time = clock_now();
 
-                let request_id = announce_requests.new_ping_id(AnnounceRequestData {
+                let request_id = announce_requests.new_ping_id(&mut thread_rng(), AnnounceRequestData {
                     pk: node.pk,
                     saddr: node.saddr,
                     path_id: path.id(),
@@ -708,7 +709,7 @@ impl OnionClient {
             }
         }
 
-        if good_nodes_count <= random_limit_usize(close_nodes.capacity()) {
+        if good_nodes_count <= thread_rng().gen_range(0 .. close_nodes.capacity()) {
             for _ in 0 .. close_nodes.capacity() / 2 {
                 let node = if let Some(node) = paths_pool.path_nodes.rand() {
                     node
@@ -722,7 +723,7 @@ impl OnionClient {
                     break
                 };
 
-                let request_id = announce_requests.new_ping_id(AnnounceRequestData {
+                let request_id = announce_requests.new_ping_id(&mut thread_rng(), AnnounceRequestData {
                     pk: node.pk,
                     saddr: node.saddr,
                     path_id: path.id(),
@@ -1206,7 +1207,7 @@ mod tests {
             path_id: path.id(),
             friend_pk: None,
         };
-        let request_id = state.announce_requests.new_ping_id(request_data);
+        let request_id = state.announce_requests.new_ping_id(&mut thread_rng(), request_data);
 
         drop(state);
 
@@ -1279,7 +1280,7 @@ mod tests {
             path_id: path.id(),
             friend_pk: Some(friend_pk),
         };
-        let request_id = state.announce_requests.new_ping_id(request_data);
+        let request_id = state.announce_requests.new_ping_id(&mut thread_rng(), request_data);
 
         drop(state);
 
@@ -1327,7 +1328,7 @@ mod tests {
             path_id: path.id(),
             friend_pk: None,
         };
-        let request_id = state.announce_requests.new_ping_id(request_data);
+        let request_id = state.announce_requests.new_ping_id(&mut thread_rng(), request_data);
 
         // insert request to a node to announce_requests so that it won't be pinged again
         let (node_pk, _node_sk) = gen_keypair();
@@ -1338,7 +1339,7 @@ mod tests {
             path_id: path.id(),
             friend_pk: None,
         };
-        let _node_request_id = state.announce_requests.new_ping_id(node_request_data);
+        let _node_request_id = state.announce_requests.new_ping_id(&mut thread_rng(), node_request_data);
 
         drop(state);
 
@@ -1400,7 +1401,7 @@ mod tests {
             path_id: path.id(),
             friend_pk: Some(friend_pk),
         };
-        let request_id = state.announce_requests.new_ping_id(request_data);
+        let request_id = state.announce_requests.new_ping_id(&mut thread_rng(), request_data);
 
         drop(state);
 
@@ -1468,7 +1469,7 @@ mod tests {
             path_id: path.id(),
             friend_pk: None,
         };
-        let request_id = state.announce_requests.new_ping_id(request_data);
+        let request_id = state.announce_requests.new_ping_id(&mut thread_rng(), request_data);
 
         drop(state);
 
@@ -1512,7 +1513,7 @@ mod tests {
             },
             friend_pk: Some(friend_pk),
         };
-        let request_id = state.announce_requests.new_ping_id(request_data);
+        let request_id = state.announce_requests.new_ping_id(&mut thread_rng(), request_data);
 
         drop(state);
 
@@ -1556,7 +1557,7 @@ mod tests {
             },
             friend_pk: Some(friend_pk),
         };
-        let request_id = state.announce_requests.new_ping_id(request_data);
+        let request_id = state.announce_requests.new_ping_id(&mut thread_rng(), request_data);
 
         drop(state);
 
@@ -1605,7 +1606,7 @@ mod tests {
             path_id: path.id(),
             friend_pk: Some(friend_pk),
         };
-        let request_id = state.announce_requests.new_ping_id(request_data);
+        let request_id = state.announce_requests.new_ping_id(&mut thread_rng(), request_data);
 
         // insert request to a node to announce_requests so that it won't be pinged again
         let (node_pk, _node_sk) = gen_keypair();
@@ -1616,7 +1617,7 @@ mod tests {
             path_id: path.id(),
             friend_pk: Some(friend_pk),
         };
-        let _node_request_id = state.announce_requests.new_ping_id(node_request_data);
+        let _node_request_id = state.announce_requests.new_ping_id(&mut thread_rng(), node_request_data);
 
         drop(state);
 

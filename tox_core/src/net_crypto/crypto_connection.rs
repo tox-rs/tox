@@ -3,6 +3,7 @@
 use std::convert::Into;
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::time::{Duration, Instant};
+use rand::{thread_rng, Rng};
 
 use super::packets_array::*;
 
@@ -323,7 +324,7 @@ impl CryptoConnection {
     pub fn new(dht_precomputed_key: &PrecomputedKey, dht_pk: PublicKey, real_pk: PublicKey, peer_real_pk: PublicKey, peer_dht_pk: PublicKey) -> CryptoConnection {
         let (session_pk, session_sk) = gen_keypair();
 
-        let cookie_request_id = random_u64();
+        let cookie_request_id = thread_rng().gen();
         let cookie_request_payload = CookieRequestPayload {
             pk: real_pk,
             id: cookie_request_id
