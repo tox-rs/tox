@@ -28,10 +28,7 @@ pub const PING_ID_TIMEOUT: Duration = Duration::from_secs(300);
 pub const ONION_ANNOUNCE_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Create onion ping id filled with zeros.
-pub fn initial_ping_id() -> sha256::Digest {
-    // can not fail since slice has enough length
-    sha256::Digest::from_slice(&[0; sha256::DIGESTBYTES]).unwrap()
-}
+pub const INITIAL_PING_ID: sha256::Digest = sha256::Digest([0; sha256::DIGESTBYTES]);
 
 /** Entry that corresponds to announced onion node.
 
@@ -262,7 +259,7 @@ impl OnionAnnounce {
         request_pk: PublicKey,
         onion_return: OnionReturn,
         addr: SocketAddr
-    ) -> (AnnounceStatus, sha256::Digest) {
+    ) -> (AnnounceStatus, [u8; 32]) {
         let time = SystemTime::now();
         let ping_id_1 = self.ping_id(
             time,
@@ -289,18 +286,18 @@ impl OnionAnnounce {
                 if entry.data_pk != payload.data_pk {
                     // failed to find ourselves with same long term pk but different data pk
                     // weird case, should we remove it?
-                    (AnnounceStatus::Failed, ping_id_2)
+                    (AnnounceStatus::Failed, ping_id_2.0)
                 } else {
                     // successfully announced ourselves
-                    (AnnounceStatus::Announced, ping_id_2)
+                    (AnnounceStatus::Announced, ping_id_2.0)
                 }
             } else {
                 // requested node is found by its long term pk
-                (AnnounceStatus::Found, pk_as_digest(entry.data_pk))
+                (AnnounceStatus::Found, entry.data_pk.0)
             }
         } else {
             // requested node not found or failed to announce
-            (AnnounceStatus::Failed, ping_id_2)
+            (AnnounceStatus::Failed, ping_id_2.0)
         }
     }
 
@@ -656,7 +653,7 @@ mod tests {
 
         // create request packet
         let payload = OnionAnnounceRequestPayload {
-            ping_id: initial_ping_id(),
+            ping_id: INITIAL_PING_ID,
             search_pk,
             data_pk,
             sendback_data: 42
@@ -695,7 +692,7 @@ mod tests {
 
         // create request packet
         let payload = OnionAnnounceRequestPayload {
-            ping_id: initial_ping_id(),
+            ping_id: INITIAL_PING_ID,
             search_pk,
             data_pk,
             sendback_data: 42
@@ -715,7 +712,7 @@ mod tests {
         );
 
         assert_eq!(announce_status, AnnounceStatus::Found);
-        assert_eq!(digest_as_pk(ping_id_or_pk), entry_data_pk);
+        assert_eq!(ping_id_or_pk, entry_data_pk.0);
     }
 
     #[test]
@@ -776,7 +773,7 @@ mod tests {
         // create request packet
         let sendback_data = 42;
         let payload = OnionAnnounceRequestPayload {
-            ping_id: initial_ping_id(),
+            ping_id: INITIAL_PING_ID,
             search_pk: packet_pk,
             data_pk,
             sendback_data
