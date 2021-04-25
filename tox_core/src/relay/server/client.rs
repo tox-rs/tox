@@ -15,6 +15,7 @@ use std::time::{Instant, Duration};
 
 use futures::channel::mpsc;
 use futures::SinkExt;
+use rand::thread_rng;
 
 /// Interval of time for sending TCP PingRequest
 pub const TCP_PING_FREQUENCY: Duration = Duration::from_secs(30);
@@ -204,7 +205,7 @@ impl Client {
     /** Construct PingRequest and send it to Client
     */
     pub async fn send_ping_request(&mut self) -> Result<(), Error> {
-        let ping_id = gen_ping_id();
+        let ping_id = gen_ping_id(&mut thread_rng());
 
         self.last_pinged = Instant::now();
         self.ping_id = ping_id;

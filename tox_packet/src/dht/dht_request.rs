@@ -486,7 +486,7 @@ mod tests {
             nodes: vec![
                 TcpUdpPackedNode {
                     ip_port: IpPort {
-                        protocol: ProtocolType::UDP,
+                        protocol: ProtocolType::Udp,
                         ip_addr: "127.0.0.1".parse().unwrap(),
                         port: 12345,
                     },
@@ -494,7 +494,7 @@ mod tests {
                 },
                 TcpUdpPackedNode {
                     ip_port: IpPort {
-                        protocol: ProtocolType::UDP,
+                        protocol: ProtocolType::Udp,
                         ip_addr: "127.0.0.1".parse().unwrap(),
                         port: 12346,
                     },
@@ -502,7 +502,7 @@ mod tests {
                 },
                 TcpUdpPackedNode {
                     ip_port: IpPort {
-                        protocol: ProtocolType::TCP,
+                        protocol: ProtocolType::Tcp,
                         ip_addr: "127.0.0.2".parse().unwrap(),
                         port: 12345,
                     },
@@ -510,7 +510,7 @@ mod tests {
                 },
                 TcpUdpPackedNode {
                     ip_port: IpPort {
-                        protocol: ProtocolType::TCP,
+                        protocol: ProtocolType::Tcp,
                         ip_addr: "127.0.0.2".parse().unwrap(),
                         port: 12346,
                     },
@@ -623,7 +623,7 @@ mod tests {
             vec![
                 TcpUdpPackedNode {
                     ip_port: IpPort {
-                        protocol: ProtocolType::UDP,
+                        protocol: ProtocolType::Udp,
                         ip_addr: "127.0.0.1".parse().unwrap(),
                         port: 12345,
                     },
@@ -652,7 +652,7 @@ mod tests {
             vec![
                 TcpUdpPackedNode {
                     ip_port: IpPort {
-                        protocol: ProtocolType::UDP,
+                        protocol: ProtocolType::Udp,
                         ip_addr: "127.0.0.1".parse().unwrap(),
                         port: 12345,
                     },

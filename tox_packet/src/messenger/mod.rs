@@ -117,7 +117,7 @@ impl FromBytes for Packet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messenger::conference::{ConferenceType, ConferenceUID, Invite};
+    use crate::messenger::conference::{ConferenceType, ConferenceUid, Invite};
     use crate::messenger::file_transfer::{FileControl, TransferDirection, ControlType};
 
     encode_decode_test!(
@@ -177,7 +177,7 @@ mod tests {
     encode_decode_test!(
         tox_crypto::crypto_init().unwrap(),
         packet_conference_encode_decode,
-        Packet::Conference(ConferencePacket::Invite(Invite::new(1, ConferenceType::Text, ConferenceUID::random())))
+        Packet::Conference(ConferencePacket::Invite(Invite::new(1, ConferenceType::Text, ConferenceUid::random())))
     );
 
     encode_decode_test!(

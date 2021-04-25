@@ -43,9 +43,9 @@ significant bit of a byte.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum ProtocolType {
     /// `UDP` type if the least significant bit is 0.
-    UDP,
+    Udp,
     /// `TCP` type if the least significant bit is 1.
-    TCP
+    Tcp
 }
 
 /** `IpAddr` with a port number. IPv4 can be padded with 12 bytes of zeros
@@ -88,13 +88,13 @@ impl IpPort {
     fn ip_type(&self) -> u8 {
         if self.ip_addr.is_ipv4() {
             match self.protocol {
-                ProtocolType::UDP => 2,
-                ProtocolType::TCP => 130,
+                ProtocolType::Udp => 2,
+                ProtocolType::Tcp => 130,
             }
         } else {
             match self.protocol {
-                ProtocolType::UDP => 10,
-                ProtocolType::TCP => 138,
+                ProtocolType::Udp => 10,
+                ProtocolType::Tcp => 138,
             }
         }
     }
@@ -110,7 +110,7 @@ impl IpPort {
                 10 => map!(Ipv6Addr::from_bytes, IpAddr::V6)
             ) >>
             port: be_u16 >>
-            (IpPort { protocol: ProtocolType::UDP, ip_addr, port })
+            (IpPort { protocol: ProtocolType::Udp, ip_addr, port })
         )
     }
 
@@ -125,7 +125,7 @@ impl IpPort {
                 138 => map!(Ipv6Addr::from_bytes, IpAddr::V6)
             ) >>
             port: be_u16 >>
-            (IpPort { protocol: ProtocolType::TCP, ip_addr, port })
+            (IpPort { protocol: ProtocolType::Tcp, ip_addr, port })
         )
     }
 
@@ -137,7 +137,7 @@ impl IpPort {
     /// Write `IpPort` with UDP protocol type with optional padding.
     pub fn to_udp_bytes<'a>(&self, buf: (&'a mut [u8], usize), padding: IpPortPadding) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
-            gen_cond!(self.protocol == ProtocolType::TCP, |buf| gen_error(buf, 0)) >>
+            gen_cond!(self.protocol == ProtocolType::Tcp, |buf| gen_error(buf, 0)) >>
             gen_call!(|buf, ip_port| IpPort::to_bytes(ip_port, buf, padding), self)
         )
     }
@@ -145,7 +145,7 @@ impl IpPort {
     /// Write `IpPort` with TCP protocol type with optional padding.
     pub fn to_tcp_bytes<'a>(&self, buf: (&'a mut [u8], usize), padding: IpPortPadding) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
-            gen_cond!(self.protocol == ProtocolType::UDP, |buf| gen_error(buf, 0)) >>
+            gen_cond!(self.protocol == ProtocolType::Udp, |buf| gen_error(buf, 0)) >>
             gen_call!(|buf, ip_port| IpPort::to_bytes(ip_port, buf, padding), self)
         )
     }
@@ -163,7 +163,7 @@ impl IpPort {
     /// Create new `IpPort` from `SocketAddr` with UDP type.
     pub fn from_udp_saddr(saddr: SocketAddr) -> IpPort {
         IpPort {
-            protocol: ProtocolType::UDP,
+            protocol: ProtocolType::Udp,
             ip_addr: saddr.ip(),
             port: saddr.port()
         }
@@ -172,7 +172,7 @@ impl IpPort {
     /// Create new `IpPort` from `SocketAddr` with TCP type.
     pub fn from_tcp_saddr(saddr: SocketAddr) -> IpPort {
         IpPort {
-            protocol: ProtocolType::TCP,
+            protocol: ProtocolType::Tcp,
             ip_addr: saddr.ip(),
             port: saddr.port()
         }
@@ -207,8 +207,8 @@ mod tests {
         )
     );
 
-    ip_port_with_padding_encode_decode_test!(ip_port_udp_with_padding_encode_decode, ProtocolType::UDP);
-    ip_port_with_padding_encode_decode_test!(ip_port_tcp_with_padding_encode_decode, ProtocolType::TCP);
+    ip_port_with_padding_encode_decode_test!(ip_port_udp_with_padding_encode_decode, ProtocolType::Udp);
+    ip_port_with_padding_encode_decode_test!(ip_port_tcp_with_padding_encode_decode, ProtocolType::Tcp);
 
     macro_rules! ip_port_without_padding_encode_decode_test (
         ($test:ident, $protocol:expr) => (
@@ -229,13 +229,13 @@ mod tests {
         )
     );
 
-    ip_port_without_padding_encode_decode_test!(ip_port_udp_without_padding_encode_decode, ProtocolType::UDP);
-    ip_port_without_padding_encode_decode_test!(ip_port_tcp_without_padding_encode_decode, ProtocolType::TCP);
+    ip_port_without_padding_encode_decode_test!(ip_port_udp_without_padding_encode_decode, ProtocolType::Udp);
+    ip_port_without_padding_encode_decode_test!(ip_port_tcp_without_padding_encode_decode, ProtocolType::Tcp);
 
     #[test]
     fn ip_port_from_to_udp_saddr() {
         let ip_port_1 = IpPort {
-            protocol: ProtocolType::UDP,
+            protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
             port: 12345
         };
@@ -246,7 +246,7 @@ mod tests {
     #[test]
     fn ip_port_from_to_tcp_saddr() {
         let ip_port_1 = IpPort {
-            protocol: ProtocolType::TCP,
+            protocol: ProtocolType::Tcp,
             ip_addr: "5.6.7.8".parse().unwrap(),
             port: 12345
         };

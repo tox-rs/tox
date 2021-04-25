@@ -28,7 +28,7 @@ pub struct InviteResponse {
     /// Type of conference
     pub conference_type: ConferenceType,
     /// Unique id of conference
-    pub unique_id: ConferenceUID,
+    pub unique_id: ConferenceUid,
 }
 
 impl FromBytes for InviteResponse {
@@ -38,7 +38,7 @@ impl FromBytes for InviteResponse {
         conference_id_local: be_u16 >>
         conference_id_join: be_u16 >>
         conference_type: call!(ConferenceType::from_bytes) >>
-        unique_id: call!(ConferenceUID::from_bytes) >>
+        unique_id: call!(ConferenceUid::from_bytes) >>
         (InviteResponse {
             conference_id_local,
             conference_id_join,
@@ -63,7 +63,7 @@ impl ToBytes for InviteResponse {
 
 impl InviteResponse {
     /// Create new InviteResponse object.
-    pub fn new(conference_id_local: u16, conference_id_join: u16, conference_type: ConferenceType, unique_id: ConferenceUID) -> Self {
+    pub fn new(conference_id_local: u16, conference_id_join: u16, conference_type: ConferenceType, unique_id: ConferenceUid) -> Self {
         InviteResponse {
             conference_id_local,
             conference_id_join,
@@ -80,6 +80,6 @@ mod tests {
     encode_decode_test!(
         tox_crypto::crypto_init().unwrap(),
         invite_response_encode_decode,
-        InviteResponse::new(1, 2, ConferenceType::Audio, ConferenceUID::random())
+        InviteResponse::new(1, 2, ConferenceType::Audio, ConferenceUid::random())
     );
 }

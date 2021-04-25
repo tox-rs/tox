@@ -7,6 +7,7 @@ https://zetok.github.io/tox-spec/#hole-punching
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
 use std::collections::HashMap;
+use rand::Rng;
 
 use crate::dht::dht_friend::*;
 use crate::dht::server::*;
@@ -55,15 +56,9 @@ pub struct HolePunching {
     pub ping_id: u64,
 }
 
-impl Default for HolePunching {
-    fn default() -> Self {
-        HolePunching::new()
-    }
-}
-
 impl HolePunching {
     /// Create new `HolePunching` object.
-    pub fn new() -> Self {
+    pub fn new<R: Rng>(rng: &mut R) -> Self {
         HolePunching {
             is_punching_done: true,
             num_punch_tries: 0,
@@ -72,7 +67,7 @@ impl HolePunching {
             last_punching_time: None,
             first_punching_index: 0,
             last_punching_index: 0,
-            ping_id: gen_ping_id(),
+            ping_id: gen_ping_id(rng),
         }
     }
 
@@ -216,21 +211,11 @@ impl HolePunching {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::thread_rng;
 
     #[test]
     fn hole_punch_new() {
-        let hole_punch = HolePunching::new();
-        assert!(hole_punch.is_punching_done);
-        assert_eq!(hole_punch.num_punch_tries, 0);
-        assert!(hole_punch.last_send_ping_time.is_none());
-        assert!(hole_punch.last_punching_time.is_none());
-        assert_eq!(hole_punch.first_punching_index, 0);
-        assert_eq!(hole_punch.last_punching_index, 0);
-    }
-
-    #[test]
-    fn hole_punch_default() {
-        let hole_punch = HolePunching::default();
+        let hole_punch = HolePunching::new(&mut thread_rng());
         assert!(hole_punch.is_punching_done);
         assert_eq!(hole_punch.num_punch_tries, 0);
         assert!(hole_punch.last_send_ping_time.is_none());
@@ -243,7 +228,7 @@ mod tests {
     fn hole_punch_get_common_ip_with_null_addrs() {
         let addrs = vec![];
 
-        let mut hole_punch = HolePunching::new();
+        let mut hole_punch = HolePunching::new(&mut thread_rng());
         hole_punch.is_punching_done = false;
 
         assert!(hole_punch.next_punch_addrs(&addrs).is_empty());
@@ -257,7 +242,7 @@ mod tests {
             "127.0.0.2:33333".parse().unwrap(),
         ];
 
-        let mut hole_punch = HolePunching::new();
+        let mut hole_punch = HolePunching::new(&mut thread_rng());
         hole_punch.is_punching_done = false;
 
         assert!(hole_punch.next_punch_addrs(&addrs).is_empty());
@@ -277,7 +262,7 @@ mod tests {
             "127.0.0.2:55559".parse().unwrap(),
         ];
 
-        let mut hole_punch = HolePunching::new();
+        let mut hole_punch = HolePunching::new(&mut thread_rng());
         hole_punch.is_punching_done = false;
 
         assert!(!hole_punch.next_punch_addrs(&addrs).is_empty());
@@ -297,7 +282,7 @@ mod tests {
             "127.0.0.2:55559".parse().unwrap(),
         ];
 
-        let mut hole_punch = HolePunching::new();
+        let mut hole_punch = HolePunching::new(&mut thread_rng());
         hole_punch.is_punching_done = false;
         hole_punch.num_punch_tries = MAX_NORMAL_PUNCHING_TRIES + 1;
 

@@ -32,47 +32,6 @@ pub fn crypto_init() -> Result<(), ()> {
 }
 
 
-/// Return a random number.
-pub fn random_u32() -> u32 {
-    let mut array = [0; 4];
-    randombytes_into(&mut array);
-    // The order we use here doesn't matter, we just want random bytes.
-    u32::from_be_bytes(array)
-}
-
-/// Return a random number.
-pub fn random_u64() -> u64 {
-    let mut array = [0; 8];
-    randombytes_into(&mut array);
-    // The order we use here doesn't matter, we just want random bytes.
-    u64::from_be_bytes(array)
-}
-
-/// Return a random number.
-#[cfg(target_pointer_width = "32")]
-pub fn random_usize() -> usize {
-    random_u32() as usize
-}
-
-/// Return a random number.
-#[cfg(target_pointer_width = "64")]
-pub fn random_usize() -> usize {
-    random_u64() as usize
-}
-
-/// Return unbiased random number from `[0, limit)` interval.
-pub fn random_limit_usize(limit: usize) -> usize {
-    // TODO: possibly migrate to rand crate, it has more performant version
-    // of this algorithm implemented with UniformSampler trait
-    let cap = usize::max_value() - usize::max_value() % limit;
-    loop {
-        let n = random_usize();
-        if n < cap {
-            return n % limit;
-        }
-    }
-}
-
 /** Check if Tox public key `PUBLICKEYBYTES` is valid. Should be used only for
     input validation.
 
@@ -222,47 +181,6 @@ pub mod tests {
         assert_eq!(bob_publickey.eq(&bob_publickey), true);
     }
 
-
-    #[test]
-    fn random_u32_test() {
-        crypto_init().unwrap();
-        let a = random_u32();
-        let b = random_u32();
-        assert_ne!(a, 0);
-        assert_ne!(b, 0);
-        // The probability to fail equals 5.4*10^-20
-        assert_ne!(a, b);
-    }
-
-
-    #[test]
-    fn random_u64_test() {
-        crypto_init().unwrap();
-        let a = random_u64();
-        let b = random_u64();
-        assert_ne!(a, 0);
-        assert_ne!(b, 0);
-        // The probability to fail equals 2.9*10^-39
-        assert_ne!(a, b);
-    }
-
-    #[test]
-    fn random_usize_test() {
-        crypto_init().unwrap();
-        let a = random_usize();
-        let b = random_usize();
-        assert_ne!(a, 0);
-        assert_ne!(b, 0);
-        // The probability to fail equals 2.9*10^-39
-        assert_ne!(a, b);
-    }
-
-    #[test]
-    fn random_limit_usize_test() {
-        crypto_init().unwrap();
-        let n = random_limit_usize(7);
-        assert!(n < 7);
-    }
 
     #[test]
     fn public_key_valid_test() {

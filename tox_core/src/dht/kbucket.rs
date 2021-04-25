@@ -66,24 +66,24 @@ impl Distance for PublicKey {
 }
 
 /// Anything that has `PublicKey`.
-pub trait HasPK {
+pub trait HasPk {
     /// `PublicKey`.
     fn pk(&self) -> PublicKey;
 }
 
-impl HasPK for PackedNode {
+impl HasPk for PackedNode {
     fn pk(&self) -> PublicKey {
         self.pk
     }
 }
 
 /// Node that can be stored in a `Kbucket`.
-pub trait KbucketNode : Sized + HasPK {
+pub trait KbucketNode : Sized + HasPk {
     /// The type of nodes that can be added to a `Kbucket`.
-    type NewNode: HasPK;
+    type NewNode: HasPk;
     /// The type of nodes that can be checked if they can be added to a
     /// `Kbucket`.
-    type CheckNode: HasPK;
+    type CheckNode: HasPk;
 
     /// Check if the node can be updated with a new one.
     fn is_outdated(&self, other: &Self::CheckNode) -> bool;
@@ -143,9 +143,9 @@ pub struct Kbucket<Node> {
     pub nodes: Vec<Node>,
 }
 
-impl<Node> Into<Vec<Node>> for Kbucket<Node> {
-    fn into(self) -> Vec<Node> {
-        self.nodes
+impl<Node> From<Kbucket<Node>> for Vec<Node> {
+    fn from(kbucket: Kbucket<Node>) -> Self {
+        kbucket.nodes
     }
 }
 
@@ -154,8 +154,8 @@ pub const KBUCKET_DEFAULT_SIZE: u8 = 8;
 
 impl<NewNode, CheckNode, Node> Kbucket<Node>
 where
-    NewNode: HasPK,
-    CheckNode: HasPK,
+    NewNode: HasPk,
+    CheckNode: HasPk,
     Node: KbucketNode<NewNode = NewNode, CheckNode = CheckNode> + From<NewNode>
 {
     /** Create a new `Kbucket` to store nodes close to the `PublicKey`.

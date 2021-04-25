@@ -711,7 +711,7 @@ mod tests {
             TcpUdpPackedNode {
                 pk: gen_keypair().0,
                 ip_port: IpPort {
-                    protocol: ProtocolType::TCP,
+                    protocol: ProtocolType::Tcp,
                     ip_addr: "1.2.3.4".parse().unwrap(),
                     port: 1234,
                 },
@@ -719,7 +719,7 @@ mod tests {
             TcpUdpPackedNode {
                 pk: gen_keypair().0,
                 ip_port: IpPort {
-                    protocol: ProtocolType::UDP,
+                    protocol: ProtocolType::Udp,
                     ip_addr: "1.2.3.5".parse().unwrap(),
                     port: 12345,
                 },
@@ -734,7 +734,7 @@ mod tests {
             TcpUdpPackedNode {
                 pk: gen_keypair().0,
                 ip_port: IpPort {
-                    protocol: ProtocolType::TCP,
+                    protocol: ProtocolType::Tcp,
                     ip_addr: "1.2.3.4".parse().unwrap(),
                     port: 1234,
                 },
@@ -742,7 +742,7 @@ mod tests {
             TcpUdpPackedNode {
                 pk: gen_keypair().0,
                 ip_port: IpPort {
-                    protocol: ProtocolType::UDP,
+                    protocol: ProtocolType::Udp,
                     ip_addr: "1.2.3.5".parse().unwrap(),
                     port: 12345,
                 },
@@ -795,7 +795,7 @@ mod tests {
                     TcpUdpPackedNode {
                         pk: gen_keypair().0,
                         ip_port: IpPort {
-                            protocol: ProtocolType::TCP,
+                            protocol: ProtocolType::Tcp,
                             ip_addr: "1.2.3.4".parse().unwrap(),
                             port: 1234,
                         },
@@ -803,7 +803,7 @@ mod tests {
                     TcpUdpPackedNode {
                         pk: gen_keypair().0,
                         ip_port: IpPort {
-                            protocol: ProtocolType::UDP,
+                            protocol: ProtocolType::Udp,
                             ip_addr: "1.2.3.5".parse().unwrap(),
                             port: 12345,
                         },
@@ -813,7 +813,7 @@ mod tests {
                     TcpUdpPackedNode {
                         pk: gen_keypair().0,
                         ip_port: IpPort {
-                            protocol: ProtocolType::TCP,
+                            protocol: ProtocolType::Tcp,
                             ip_addr: "1.2.3.4".parse().unwrap(),
                             port: 1234,
                         },
@@ -821,7 +821,7 @@ mod tests {
                     TcpUdpPackedNode {
                         pk: gen_keypair().0,
                         ip_port: IpPort {
-                            protocol: ProtocolType::UDP,
+                            protocol: ProtocolType::Udp,
                             ip_addr: "1.2.3.5".parse().unwrap(),
                             port: 12345,
                         },

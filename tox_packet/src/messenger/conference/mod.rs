@@ -73,22 +73,22 @@ pub const MAX_NAME_LENGTH_IN_CONFERENCE: usize = 128;
 
 /// Unique id used in conference
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ConferenceUID([u8; CONFERENCE_UID_BYTES]);
+pub struct ConferenceUid([u8; CONFERENCE_UID_BYTES]);
 
-impl ConferenceUID {
+impl ConferenceUid {
     /// Create new object
-    pub fn random() -> ConferenceUID {
+    pub fn random() -> ConferenceUid {
         let mut array = [0; CONFERENCE_UID_BYTES];
         randombytes_into(&mut array);
-        ConferenceUID(array)
+        ConferenceUid(array)
     }
 
     /// Custom from_slice function of ConferenceUID
-    pub fn from_slice(bs: &[u8]) -> Option<ConferenceUID> {
+    pub fn from_slice(bs: &[u8]) -> Option<ConferenceUid> {
         if bs.len() != CONFERENCE_UID_BYTES {
             return None
         }
-        let mut n = ConferenceUID([0; CONFERENCE_UID_BYTES]);
+        let mut n = ConferenceUid([0; CONFERENCE_UID_BYTES]);
         for (ni, &bsi) in n.0.iter_mut().zip(bs.iter()) {
             *ni = bsi
         }
@@ -96,11 +96,11 @@ impl ConferenceUID {
     }
 }
 
-impl FromBytes for ConferenceUID {
-    named!(from_bytes<ConferenceUID>, map_opt!(take!(CONFERENCE_UID_BYTES), ConferenceUID::from_slice));
+impl FromBytes for ConferenceUid {
+    named!(from_bytes<ConferenceUid>, map_opt!(take!(CONFERENCE_UID_BYTES), ConferenceUid::from_slice));
 }
 
-impl ToBytes for ConferenceUID {
+impl ToBytes for ConferenceUid {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_slice!(self.0)
@@ -211,7 +211,7 @@ mod tests {
     encode_decode_test!(
         tox_crypto::crypto_init().unwrap(),
         conference_uid_encode_decode,
-        ConferenceUID::random()
+        ConferenceUid::random()
     );
 
     #[test]
@@ -224,19 +224,19 @@ mod tests {
     encode_decode_test!(
         tox_crypto::crypto_init().unwrap(),
         packet_invite_encode_decode,
-        Packet::Invite(Invite::new(1, ConferenceType::Audio, ConferenceUID::random()))
+        Packet::Invite(Invite::new(1, ConferenceType::Audio, ConferenceUid::random()))
     );
 
     encode_decode_test!(
         tox_crypto::crypto_init().unwrap(),
         packet_invite_response_encode_decode,
-        Packet::InviteResponse(InviteResponse::new(1, 2, ConferenceType::Text, ConferenceUID::random()))
+        Packet::InviteResponse(InviteResponse::new(1, 2, ConferenceType::Text, ConferenceUid::random()))
     );
 
     encode_decode_test!(
         tox_crypto::crypto_init().unwrap(),
         packet_peer_noline_encode_decode,
-        Packet::PeerOnline(PeerOnline::new(1, ConferenceType::Text, ConferenceUID::random()))
+        Packet::PeerOnline(PeerOnline::new(1, ConferenceType::Text, ConferenceUid::random()))
     );
 
     encode_decode_test!(

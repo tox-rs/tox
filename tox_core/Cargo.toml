@@ -31,6 +31,7 @@ failure = "0.1"
 lru = "0.6"
 bitflags = "1.0"
 itertools = "0.10"
+rand = "0.8"
 
 [dependencies.tokio]
 version = "1.0"

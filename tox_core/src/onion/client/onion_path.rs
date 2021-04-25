@@ -13,9 +13,9 @@ use tox_packet::relay::OnionRequest;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OnionPathType {
     /// The first node of onion path is a TCP relay.
-    TCP,
+    Tcp,
     /// The first node of onion path is a DHT node.
-    UDP
+    Udp
 }
 
 /// Onion path is identified by 3 public keys of nodes it consists of.
@@ -184,10 +184,10 @@ mod tests {
             PackedNode::new(saddr_1, &pk_1),
             PackedNode::new(saddr_2, &pk_2),
             PackedNode::new(saddr_3, &pk_3),
-        ], OnionPathType::UDP);
+        ], OnionPathType::Udp);
         assert_eq!(path.id(), OnionPathId {
             keys: [pk_1, pk_2, pk_3],
-            path_type: OnionPathType::UDP,
+            path_type: OnionPathType::Udp,
         });
     }
 
@@ -203,7 +203,7 @@ mod tests {
             PackedNode::new(saddr_1, &pk_1),
             PackedNode::new(saddr_2, &pk_2),
             PackedNode::new(saddr_3, &pk_3),
-        ], OnionPathType::UDP);
+        ], OnionPathType::Udp);
         let inner_onion_request = InnerOnionRequest::InnerOnionAnnounceRequest(InnerOnionAnnounceRequest {
             nonce: gen_nonce(),
             pk: gen_keypair().0,
@@ -238,7 +238,7 @@ mod tests {
             PackedNode::new(saddr_1, &pk_1),
             PackedNode::new(saddr_2, &pk_2),
             PackedNode::new(saddr_3, &pk_3),
-        ], OnionPathType::UDP);
+        ], OnionPathType::Udp);
         let inner_onion_request = InnerOnionRequest::InnerOnionAnnounceRequest(InnerOnionAnnounceRequest {
             nonce: gen_nonce(),
             pk: gen_keypair().0,
