@@ -1241,7 +1241,7 @@ impl Server {
         payload: &OnionAnnounceRequestPayload,
         packet: &OnionAnnounceRequest,
         addr: SocketAddr
-    ) -> (AnnounceStatus, sha256::Digest) {
+    ) -> (AnnounceStatus, [u8; 32]) {
         let mut onion_announce = self.onion_announce.write().await;
         onion_announce.handle_onion_announce_request(
             &payload,
@@ -2573,7 +2573,7 @@ mod tests {
 
         let sendback_data = 42;
         let payload = OnionAnnounceRequestPayload {
-            ping_id: initial_ping_id(),
+            ping_id: INITIAL_PING_ID,
             search_pk: gen_keypair().0,
             data_pk: gen_keypair().0,
             sendback_data
@@ -2639,7 +2639,7 @@ mod tests {
         // get ping id
 
         let payload = OnionAnnounceRequestPayload {
-            ping_id: initial_ping_id(),
+            ping_id: INITIAL_PING_ID,
             search_pk: gen_keypair().0,
             data_pk: gen_keypair().0,
             sendback_data: 42
@@ -2661,7 +2661,7 @@ mod tests {
         let response = unpack!(packet, Packet::OnionResponse3);
         let response = unpack!(response.payload, InnerOnionResponse::OnionAnnounceResponse);
         let payload = response.get_payload(&precomp).unwrap();
-        let ping_id = payload.ping_id_or_pk;
+        let ping_id = sha256::Digest(payload.ping_id_or_pk);
 
         // announce node
 
@@ -3666,7 +3666,7 @@ mod tests {
 
         let payload = OnionAnnounceResponsePayload {
             announce_status: AnnounceStatus::Found,
-            ping_id_or_pk: sha256::hash(&[1, 2, 3]),
+            ping_id_or_pk: [42; 32],
             nodes: vec![
                 PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
             ]

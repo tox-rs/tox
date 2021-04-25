@@ -139,18 +139,6 @@ pub fn increment_nonce_number(nonce: &mut Nonce, num: u64) {
     bytes.reverse(); // treat nonce as BE number again
 }
 
-/// Convert `PublicKey` to sha256 `Digest` type.
-pub fn pk_as_digest(pk: PublicKey) -> sha256::Digest {
-    // can not fail since PublicKey has the same length as sha256 Digest
-    sha256::Digest::from_slice(pk.as_ref()).unwrap()
-}
-
-/// Convert sha256 `Digest` to `PublicKey` type.
-pub fn digest_as_pk(d: sha256::Digest) -> PublicKey {
-    // can not fail since sha256 Digest has the same length as PublicKey
-    PublicKey::from_slice(d.as_ref()).unwrap()
-}
-
 #[cfg(test)]
 pub mod tests {
     use super::*;

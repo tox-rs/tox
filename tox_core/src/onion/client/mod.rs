@@ -27,7 +27,7 @@ use tox_packet::ip_port::*;
 use crate::onion::client::errors::*;
 use crate::onion::client::onion_path::*;
 use crate::onion::client::paths_pool::*;
-use crate::onion::onion_announce::initial_ping_id;
+use crate::onion::onion_announce::INITIAL_PING_ID;
 use tox_packet::onion::*;
 use tox_packet::packed_node::*;
 use crate::relay::client::Connections as TcpConnections;
@@ -270,7 +270,7 @@ impl<'a> AnnouncePacketData<'a> {
     /// pind_id is 0 and an announce request otherwise.
     fn request(&self, node_pk: &PublicKey, ping_id: Option<sha256::Digest>, request_id: u64) -> InnerOnionAnnounceRequest {
         let payload = OnionAnnounceRequestPayload {
-            ping_id: ping_id.unwrap_or_else(initial_ping_id),
+            ping_id: ping_id.unwrap_or(INITIAL_PING_ID),
             search_pk: self.search_pk,
             data_pk: self.data_pk.unwrap_or(PublicKey([0; 32])),
             sendback_data: request_id,
@@ -467,9 +467,9 @@ impl OnionClient {
         }
 
         let (ping_id, data_pk) = if payload.announce_status == AnnounceStatus::Found {
-            (None, Some(digest_as_pk(payload.ping_id_or_pk)))
+            (None, Some(PublicKey(payload.ping_id_or_pk)))
         } else {
-            (Some(payload.ping_id_or_pk), None)
+            (Some(sha256::Digest(payload.ping_id_or_pk)), None)
         };
 
         let now = clock_now();
@@ -1211,7 +1211,7 @@ mod tests {
 
         drop(state);
 
-        let ping_id = sha256::hash(&[1, 2, 3]);
+        let ping_id = [42; 32];
         let (node_pk, node_sk) = gen_keypair();
         let node = PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &node_pk);
         let payload = OnionAnnounceResponsePayload {
@@ -1228,7 +1228,7 @@ mod tests {
         // The sender should be added to close nodes
         let onion_node = state.announce_list.get_node(&real_pk, &sender_pk).unwrap();
         assert_eq!(onion_node.path_id, path.id());
-        assert_eq!(onion_node.ping_id, Some(ping_id));
+        assert_eq!(onion_node.ping_id, Some(sha256::Digest(ping_id)));
         assert_eq!(onion_node.data_pk, None);
         assert_eq!(onion_node.announce_status, AnnounceStatus::Announced);
 
@@ -1240,7 +1240,7 @@ mod tests {
         let payload = unpack_onion_packet(packet, addr_to_send, &key_by_addr);
         let packet = unpack!(payload.inner, InnerOnionRequest::InnerOnionAnnounceRequest);
         let payload = packet.get_payload(&precompute(&real_pk, &node_sk)).unwrap();
-        assert_eq!(payload.ping_id, initial_ping_id());
+        assert_eq!(payload.ping_id, INITIAL_PING_ID);
         assert_eq!(payload.search_pk, real_pk);
         assert_eq!(payload.data_pk, onion_client.data_pk);
     }
@@ -1284,12 +1284,11 @@ mod tests {
 
         drop(state);
 
-        let ping_id = sha256::hash(&[1, 2, 3]);
         let (node_pk, _node_sk) = gen_keypair();
         let node = PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &node_pk);
         let payload = OnionAnnounceResponsePayload {
             announce_status: AnnounceStatus::Announced,
-            ping_id_or_pk: ping_id,
+            ping_id_or_pk: [42; 32],
             nodes: vec![node]
         };
         let packet = OnionAnnounceResponse::new(&precompute(&friend_temporary_pk, &sender_sk), request_id, &payload);
@@ -1345,7 +1344,7 @@ mod tests {
 
         let payload = OnionAnnounceResponsePayload {
             announce_status: AnnounceStatus::Announced,
-            ping_id_or_pk: sha256::hash(&[1, 2, 3]),
+            ping_id_or_pk: [42; 32],
             nodes: vec![node]
         };
         let packet = OnionAnnounceResponse::new(&precompute(&real_pk, &sender_sk), request_id, &payload);
@@ -1410,7 +1409,7 @@ mod tests {
         let node = PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &node_pk);
         let payload = OnionAnnounceResponsePayload {
             announce_status: AnnounceStatus::Found,
-            ping_id_or_pk: pk_as_digest(friend_data_pk),
+            ping_id_or_pk: friend_data_pk.0,
             nodes: vec![node]
         };
         let packet = OnionAnnounceResponse::new(&precompute(&friend_temporary_pk, &sender_sk), request_id, &payload);
@@ -1434,7 +1433,7 @@ mod tests {
         let payload = unpack_onion_packet(packet, addr_to_send, &key_by_addr);
         let packet = unpack!(payload.inner, InnerOnionRequest::InnerOnionAnnounceRequest);
         let payload = packet.get_payload(&precompute(&friend_temporary_pk, &node_sk)).unwrap();
-        assert_eq!(payload.ping_id, initial_ping_id());
+        assert_eq!(payload.ping_id, INITIAL_PING_ID);
         assert_eq!(payload.search_pk, friend_pk);
         assert_eq!(payload.data_pk, PublicKey([0; 32]));
     }
@@ -1478,7 +1477,7 @@ mod tests {
         let node = PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &node_pk);
         let payload = OnionAnnounceResponsePayload {
             announce_status: AnnounceStatus::Found,
-            ping_id_or_pk: pk_as_digest(friend_data_pk),
+            ping_id_or_pk: friend_data_pk.0,
             nodes: vec![node]
         };
         let packet = OnionAnnounceResponse::new(&precompute(&real_pk, &sender_sk), request_id, &payload);
@@ -1520,7 +1519,7 @@ mod tests {
         let (friend_data_pk, _friend_data_sk) = gen_keypair();
         let payload = OnionAnnounceResponsePayload {
             announce_status: AnnounceStatus::Found,
-            ping_id_or_pk: pk_as_digest(friend_data_pk),
+            ping_id_or_pk: friend_data_pk.0,
             nodes: vec![]
         };
         let packet = OnionAnnounceResponse::new(&precompute(&friend_temporary_pk, &sender_sk), request_id, &payload);
@@ -1625,7 +1624,7 @@ mod tests {
         let node = PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &node_pk);
         let payload = OnionAnnounceResponsePayload {
             announce_status: AnnounceStatus::Found,
-            ping_id_or_pk: pk_as_digest(friend_data_pk),
+            ping_id_or_pk: friend_data_pk.0,
             nodes: vec![node]
         };
         let packet = OnionAnnounceResponse::new(&precompute(&friend_temporary_pk, &sender_sk), request_id, &payload);
@@ -1890,7 +1889,7 @@ mod tests {
             let payload = unpack_onion_packet(packet, addr_to_send, &key_by_addr);
             let packet = unpack!(payload.inner, InnerOnionRequest::InnerOnionAnnounceRequest);
             let payload = packet.get_payload(&precompute(&real_pk, &key_by_addr[&payload.ip_port.to_saddr()])).unwrap();
-            assert_eq!(payload.ping_id, initial_ping_id());
+            assert_eq!(payload.ping_id, INITIAL_PING_ID);
             assert_eq!(payload.search_pk, real_pk);
             assert_eq!(payload.data_pk, data_pk);
         }
@@ -2017,7 +2016,7 @@ mod tests {
             let payload = unpack_onion_packet(packet, addr_to_send, &key_by_addr);
             let packet = unpack!(payload.inner, InnerOnionRequest::InnerOnionAnnounceRequest);
             let payload = packet.get_payload(&precompute(&friend_temporary_pk, &key_by_addr[&payload.ip_port.to_saddr()])).unwrap();
-            assert_eq!(payload.ping_id, initial_ping_id());
+            assert_eq!(payload.ping_id, INITIAL_PING_ID);
             assert_eq!(payload.search_pk, friend_pk);
             assert_eq!(payload.data_pk, PublicKey([0; 32]));
         }
@@ -2097,7 +2096,7 @@ mod tests {
             let payload = unpack_onion_packet(packet, addr_to_send, &key_by_addr);
             let packet = unpack!(payload.inner, InnerOnionRequest::InnerOnionAnnounceRequest);
             let payload = packet.get_payload(&precompute(&friend_temporary_pk, &nodes_key_by_addr[&payload.ip_port.to_saddr()])).unwrap();
-            assert_eq!(payload.ping_id, initial_ping_id());
+            assert_eq!(payload.ping_id, INITIAL_PING_ID);
             assert_eq!(payload.search_pk, friend_pk);
             assert_eq!(payload.data_pk, PublicKey([0; 32]));
         }

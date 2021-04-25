@@ -7,8 +7,10 @@ use tox_binary_io::*;
 use tox_crypto::*;
 use crate::dht::*;
 
+use std::convert::TryInto;
 use nom::{
     many0,
+    map_opt,
     number::complete::le_u64,
     combinator::{rest, rest_len},
 };
@@ -130,7 +132,7 @@ pub struct OnionAnnounceResponsePayload {
     /// as `is_stored` variable
     pub announce_status: AnnounceStatus,
     /// Onion ping id or PublicKey that should be used to send data packets
-    pub ping_id_or_pk: sha256::Digest,
+    pub ping_id_or_pk: [u8; 32],
     /// Up to 4 closest to the requested PublicKey DHT nodes
     pub nodes: Vec<PackedNode>
 }
@@ -138,7 +140,7 @@ pub struct OnionAnnounceResponsePayload {
 impl FromBytes for OnionAnnounceResponsePayload {
     named!(from_bytes<OnionAnnounceResponsePayload>, do_parse!(
         announce_status: call!(AnnounceStatus::from_bytes) >>
-        ping_id_or_pk: call!(sha256::Digest::from_bytes) >>
+        ping_id_or_pk: map_opt!(take!(32), |bytes: &[u8]| bytes.try_into().ok()) >>
         nodes: many0!(PackedNode::from_bytes) >>
         _len: verify!(value!(nodes.len()), |len| *len <= 4_usize) >>
         eof!() >>
@@ -184,7 +186,7 @@ mod tests {
         onion_announce_response_payload_encode_decode,
         OnionAnnounceResponsePayload {
             announce_status: AnnounceStatus::Found,
-            ping_id_or_pk: sha256::hash(&[1, 2, 3]),
+            ping_id_or_pk: [42; 32],
             nodes: vec![
                 PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
             ]
@@ -199,7 +201,7 @@ mod tests {
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
         let payload = OnionAnnounceResponsePayload {
             announce_status: AnnounceStatus::Found,
-            ping_id_or_pk: sha256::hash(&[1, 2, 3]),
+            ping_id_or_pk: [42; 32],
             nodes: vec![
                 PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
             ]
@@ -221,7 +223,7 @@ mod tests {
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
         let payload = OnionAnnounceResponsePayload {
             announce_status: AnnounceStatus::Found,
-            ping_id_or_pk: sha256::hash(&[1, 2, 3]),
+            ping_id_or_pk: [42; 32],
             nodes: vec![
                 PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
             ]
