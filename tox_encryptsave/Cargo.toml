@@ -21,3 +21,4 @@ edition = "2018"
 [dependencies]
 tox_crypto = { version = "0.1.0", path = "../tox_crypto" }
 failure = "0.1"
+sha2 = "0.9"

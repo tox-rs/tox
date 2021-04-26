@@ -2414,12 +2414,11 @@ mod tests {
         let response = unpack!(packet, Packet::OnionResponse3);
         let response = unpack!(response.payload, InnerOnionResponse::OnionAnnounceResponse);
         let payload = response.get_payload(&precomp).unwrap();
-        let ping_id = sha256::Digest(payload.ping_id_or_pk);
 
         // announce node
 
         let payload = OnionAnnounceRequestPayload {
-            ping_id,
+            ping_id: payload.ping_id_or_pk,
             search_pk: gen_keypair().0,
             data_pk: gen_keypair().0,
             sendback_data: 42

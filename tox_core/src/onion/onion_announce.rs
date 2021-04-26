@@ -4,12 +4,17 @@
 use std::io::{ErrorKind, Error};
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant, SystemTime};
+use sha2::{Digest, Sha256};
+use sha2::digest::generic_array::typenum::marker_traits::Unsigned;
 
 use tox_binary_io::*;
 use tox_crypto::*;
 use crate::time::*;
 use tox_packet::onion::*;
 use crate::dht::kbucket::Distance;
+
+/// The type of onion ping ID which is SHA256 hash.
+pub type PingId = [u8; <Sha256 as Digest>::OutputSize::USIZE];
 
 /// Number of secret random bytes to make onion ping id unique for each node.
 pub const SECRET_BYTES_SIZE: usize = 32;
@@ -28,7 +33,7 @@ pub const PING_ID_TIMEOUT: Duration = Duration::from_secs(300);
 pub const ONION_ANNOUNCE_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Create onion ping id filled with zeros.
-pub const INITIAL_PING_ID: sha256::Digest = sha256::Digest([0; sha256::DIGESTBYTES]);
+pub const INITIAL_PING_ID: PingId = [0; <Sha256 as Digest>::OutputSize::USIZE];
 
 /** Entry that corresponds to announced onion node.
 
@@ -137,11 +142,11 @@ impl OnionPingData {
     so this hash remains unchanged for `PING_ID_TIMEOUT`.
 
     */
-    pub fn ping_id(&self) -> sha256::Digest {
+    pub fn ping_id(&self) -> PingId {
         let mut buf = [0; ONION_PING_DATA_SIZE];
         // can not fail since buf has enough length
         self.to_bytes((&mut buf, 0)).unwrap();
-        sha256::hash(&buf)
+        Sha256::digest(&buf).into()
     }
 }
 
@@ -176,7 +181,7 @@ impl OnionAnnounce {
     so this hash remains unchanged for `PING_ID_TIMEOUT`.
 
     */
-    fn ping_id(&self, time: SystemTime, pk: PublicKey, ip_addr: IpAddr, port: u16) -> sha256::Digest {
+    fn ping_id(&self, time: SystemTime, pk: PublicKey, ip_addr: IpAddr, port: u16) -> PingId {
         let data = OnionPingData {
             secret_bytes: self.secret_bytes,
             time,
@@ -286,10 +291,10 @@ impl OnionAnnounce {
                 if entry.data_pk != payload.data_pk {
                     // failed to find ourselves with same long term pk but different data pk
                     // weird case, should we remove it?
-                    (AnnounceStatus::Failed, ping_id_2.0)
+                    (AnnounceStatus::Failed, ping_id_2)
                 } else {
                     // successfully announced ourselves
-                    (AnnounceStatus::Announced, ping_id_2.0)
+                    (AnnounceStatus::Announced, ping_id_2)
                 }
             } else {
                 // requested node is found by its long term pk
@@ -297,7 +302,7 @@ impl OnionAnnounce {
             }
         } else {
             // requested node not found or failed to announce
-            (AnnounceStatus::Failed, ping_id_2.0)
+            (AnnounceStatus::Failed, ping_id_2)
         }
     }
 

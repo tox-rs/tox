@@ -3,6 +3,10 @@
 
 use super::*;
 
+use std::convert::TryInto;
+use nom::map_opt;
+use sha2::{Digest, Sha512};
+use sha2::digest::generic_array::typenum::marker_traits::Unsigned;
 use tox_binary_io::*;
 use tox_crypto::*;
 use crate::dht::cookie::EncryptedCookie;
@@ -126,7 +130,7 @@ pub struct CryptoHandshakePayload {
     /// used to make sure that possible attacker can't combine payload from old
     /// `CryptoHandshake` with new `Cookie` and try to do mess sending such
     /// packets.
-    pub cookie_hash: sha512::Digest,
+    pub cookie_hash: [u8; <Sha512 as Digest>::OutputSize::USIZE],
     /// Encrypted cookie of sender of `CryptoHandshake` packet. When node
     /// receives `CryptoHandshake` it can take this cookie instead of sending
     /// `CookieRequest` to obtain one.
@@ -137,7 +141,7 @@ impl FromBytes for CryptoHandshakePayload {
     named!(from_bytes<CryptoHandshakePayload>, do_parse!(
         base_nonce: call!(Nonce::from_bytes) >>
         session_pk: call!(PublicKey::from_bytes) >>
-        cookie_hash: call!(sha512::Digest::from_bytes) >>
+        cookie_hash: map_opt!(take!(<Sha512 as Digest>::OutputSize::USIZE), |bytes: &[u8]| bytes.try_into().ok()) >>
         cookie: call!(EncryptedCookie::from_bytes) >>
         eof!() >>
         (CryptoHandshakePayload {
@@ -184,7 +188,7 @@ mod tests {
         CryptoHandshakePayload {
             base_nonce: gen_nonce(),
             session_pk: gen_keypair().0,
-            cookie_hash: sha512::hash(&[1, 2, 3]),
+            cookie_hash: [42; 64],
             cookie: EncryptedCookie {
                 nonce: secretbox::gen_nonce(),
                 payload: vec![42; 88],
@@ -205,7 +209,7 @@ mod tests {
         let payload = CryptoHandshakePayload {
             base_nonce: gen_nonce(),
             session_pk: gen_keypair().0,
-            cookie_hash: sha512::hash(&[1, 2, 3]),
+            cookie_hash: [42; 64],
             cookie: EncryptedCookie {
                 nonce: secretbox::gen_nonce(),
                 payload: vec![42; 88],
@@ -234,7 +238,7 @@ mod tests {
         let payload = CryptoHandshakePayload {
             base_nonce: gen_nonce(),
             session_pk: gen_keypair().0,
-            cookie_hash: sha512::hash(&[1, 2, 3]),
+            cookie_hash: [42; 64],
             cookie: EncryptedCookie {
                 nonce: secretbox::gen_nonce(),
                 payload: vec![42; 88],

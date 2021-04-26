@@ -1,6 +1,4 @@
-use nom::named;
-
-use nom::{map_opt, take};
+use nom::{map_opt, named, take};
 
 use sodiumoxide::crypto::box_::{
     PublicKey,
@@ -11,7 +9,6 @@ use sodiumoxide::crypto::box_::{
     NONCEBYTES
 };
 
-use sodiumoxide::crypto::hash::{sha256, sha512};
 use sodiumoxide::crypto::secretbox;
 
 use super::FromBytes;
@@ -46,18 +43,10 @@ impl FromBytes for secretbox::Nonce {
     named!(from_bytes<secretbox::Nonce>, map_opt!(take!(secretbox::NONCEBYTES), secretbox::Nonce::from_slice));
 }
 
-impl FromBytes for sha256::Digest {
-    named!(from_bytes<sha256::Digest>, map_opt!(take!(sha256::DIGESTBYTES), sha256::Digest::from_slice));
-}
-
-impl FromBytes for sha512::Digest {
-    named!(from_bytes<sha512::Digest>, map_opt!(take!(sha512::DIGESTBYTES), sha512::Digest::from_slice));
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn public_key_parse_bytes_test() {
         let bytes = [42; PUBLICKEYBYTES];

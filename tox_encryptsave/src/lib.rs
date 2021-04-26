@@ -22,6 +22,7 @@ assert_eq!(plaintext,
 */
 
 use failure::Fail;
+use sha2::{Digest, Sha256};
 
 use tox_crypto::pwhash::{
     MEMLIMIT_INTERACTIVE, OPSLIMIT_INTERACTIVE,
@@ -33,7 +34,7 @@ use tox_crypto::{
     NONCEBYTES, MACBYTES,
     Nonce, PrecomputedKey,
     gen_nonce,
-    secretbox, sha256
+    secretbox
 };
 
 /// Length in bytes of the salt used to encrypt/decrypt data.
@@ -117,7 +118,7 @@ impl PassKey {
     pub fn with_salt(passphrase: &[u8], salt: Salt) -> Result<PassKey, KeyDerivationError> {
         if passphrase.is_empty() { return Err(KeyDerivationError::Null) };
 
-        let sha256::Digest(passhash) = sha256::hash(passphrase);
+        let passhash = Sha256::digest(passphrase);
         let OpsLimit(ops) = OPSLIMIT_INTERACTIVE;
         let mut key = secretbox::Key([0; secretbox::KEYBYTES]);
 
