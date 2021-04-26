@@ -13,9 +13,10 @@ use std::net::SocketAddr;
 
 use tox_crypto::*;
 use tox_packet::dht::packed_node::PackedNode;
-use tox_core::dht::server::*;
+use tox_core::dht::server::Server as DhtServer;
 use tox_core::dht::server_ext::dht_run_socket;
 use tox_core::dht::lan_discovery::*;
+use tox_core::udp::Server as UdpServer;
 use tox_core::stats::Stats;
 
 mod common;
@@ -49,24 +50,26 @@ async fn main() -> Result<(), Error> {
     let mut lan_discovery_sender =
         LanDiscoverySender::new(tx.clone(), server_pk, local_addr.is_ipv6());
 
-    let mut server = Server::new(tx, server_pk, server_sk);
-    server.set_bootstrap_info(3_000_000_000, Box::new(|_| b"This is tox-rs".to_vec()));
-    server.enable_lan_discovery(true);
-    server.enable_ipv6_mode(local_addr.is_ipv6());
+    let mut dht_server = DhtServer::new(tx, server_pk, server_sk);
+    dht_server.set_bootstrap_info(3_000_000_000, Box::new(|_| b"This is tox-rs".to_vec()));
+    dht_server.enable_lan_discovery(true);
+    dht_server.enable_ipv6_mode(local_addr.is_ipv6());
 
     // Bootstrap from nodes
     for &(pk, saddr) in &common::BOOTSTRAP_NODES {
         let bootstrap_pn = as_packed_node(pk, saddr);
 
-        server.add_initial_bootstrap(bootstrap_pn);
+        dht_server.add_initial_bootstrap(bootstrap_pn);
     }
+
+    let udp_server = UdpServer::new(dht_server);
 
     let socket = common::bind_socket(local_addr).await;
 
     info!("Running DHT server on {}", local_addr);
 
     futures::select! {
-        res = dht_run_socket(&server, socket, rx, stats).fuse() => res.map_err(Error::from),
+        res = dht_run_socket(&udp_server, socket, rx, stats).fuse() => res.map_err(Error::from),
         res = lan_discovery_sender.run().fuse() => res.map_err(Error::from),
     }
 }
