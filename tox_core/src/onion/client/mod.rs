@@ -27,7 +27,7 @@ use tox_packet::ip_port::*;
 use crate::onion::client::errors::*;
 use crate::onion::client::onion_path::*;
 use crate::onion::client::paths_pool::*;
-use crate::onion::onion_announce::INITIAL_PING_ID;
+use crate::onion::onion_announce::{PingId, INITIAL_PING_ID};
 use tox_packet::onion::*;
 use tox_packet::packed_node::*;
 use crate::relay::client::Connections as TcpConnections;
@@ -169,7 +169,7 @@ struct OnionNode {
     /// Path used to send packets to this node.
     path_id: OnionPathId,
     /// Ping id that should be used to announce to this node.
-    ping_id: Option<sha256::Digest>,
+    ping_id: Option<PingId>,
     /// Data `PublicKey` that should be used to send data packets to our friend
     /// through this node.
     data_pk: Option<PublicKey>,
@@ -268,7 +268,7 @@ struct AnnouncePacketData<'a> {
 impl<'a> AnnouncePacketData<'a> {
     /// Create `InnerOnionAnnounceRequest`. The request is a search request if
     /// pind_id is 0 and an announce request otherwise.
-    fn request(&self, node_pk: &PublicKey, ping_id: Option<sha256::Digest>, request_id: u64) -> InnerOnionAnnounceRequest {
+    fn request(&self, node_pk: &PublicKey, ping_id: Option<PingId>, request_id: u64) -> InnerOnionAnnounceRequest {
         let payload = OnionAnnounceRequestPayload {
             ping_id: ping_id.unwrap_or(INITIAL_PING_ID),
             search_pk: self.search_pk,
@@ -286,7 +286,7 @@ impl<'a> AnnouncePacketData<'a> {
         self.request(node_pk, None, request_id)
     }
     /// Create `InnerOnionAnnounceRequest` for an announce request.
-    pub fn announce_request(&self, node_pk: &PublicKey, ping_id: sha256::Digest, request_id: u64) -> InnerOnionAnnounceRequest {
+    pub fn announce_request(&self, node_pk: &PublicKey, ping_id: PingId, request_id: u64) -> InnerOnionAnnounceRequest {
         self.request(node_pk, Some(ping_id), request_id)
     }
 }
@@ -469,7 +469,7 @@ impl OnionClient {
         let (ping_id, data_pk) = if payload.announce_status == AnnounceStatus::Found {
             (None, Some(PublicKey(payload.ping_id_or_pk)))
         } else {
-            (Some(sha256::Digest(payload.ping_id_or_pk)), None)
+            (Some(payload.ping_id_or_pk), None)
         };
 
         let now = clock_now();
@@ -1021,7 +1021,7 @@ mod tests {
             keys: [gen_keypair().0, gen_keypair().0, gen_keypair().0],
             path_type: OnionPathType::Udp,
         };
-        let ping_id = sha256::hash(&[1, 2, 3]);
+        let ping_id = [42; 32];
         let data_pk = gen_keypair().0;
         let new_now = now + Duration::from_secs(1);
         let other_onion_node = OnionNode {
@@ -1228,7 +1228,7 @@ mod tests {
         // The sender should be added to close nodes
         let onion_node = state.announce_list.get_node(&real_pk, &sender_pk).unwrap();
         assert_eq!(onion_node.path_id, path.id());
-        assert_eq!(onion_node.ping_id, Some(sha256::Digest(ping_id)));
+        assert_eq!(onion_node.ping_id, Some(ping_id));
         assert_eq!(onion_node.data_pk, None);
         assert_eq!(onion_node.announce_status, AnnounceStatus::Announced);
 
@@ -1920,7 +1920,7 @@ mod tests {
             state.paths_pool.path_nodes.put(node);
         }
 
-        let ping_id = sha256::hash(&[1, 2, 3]);
+        let ping_id = [42; 32];
         let now = Instant::now();
 
         let mut nodes_key_by_addr = HashMap::new();
@@ -2064,7 +2064,7 @@ mod tests {
                 saddr,
                 path_id: path.id(),
                 // regardless of this ping_id search requests should contain 0
-                ping_id: Some(sha256::hash(&[1, 2, 3])),
+                ping_id: Some([42; 32]),
                 data_pk: None,
                 unsuccessful_pings: 0,
                 added_time: now,

@@ -4,7 +4,6 @@
 
 pub use sodiumoxide::randombytes::randombytes_into;
 pub use sodiumoxide::crypto::box_::*;
-pub use sodiumoxide::crypto::hash::{sha256, sha512};
 pub use sodiumoxide::crypto::secretbox;
 
 pub use sodiumoxide::crypto::pwhash;

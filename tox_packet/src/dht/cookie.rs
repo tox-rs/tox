@@ -3,8 +3,10 @@
 
 use super::*;
 use nom::number::complete::be_u64;
+use sha2::{Digest, Sha512};
+use sha2::digest::generic_array::typenum::marker_traits::Unsigned;
 
-use std::time::SystemTime;
+use std::{convert::TryInto, time::SystemTime};
 
 use tox_binary_io::*;
 use tox_crypto::*;
@@ -160,10 +162,11 @@ impl EncryptedCookie {
         }
     }
     /// Calculate SHA512 hash of encrypted cookie together with nonce
-    pub fn hash(&self) -> sha512::Digest {
+    pub fn hash(&self) -> [u8; <Sha512 as Digest>::OutputSize::USIZE] {
         let mut buf = [0; 112];
         let (_, size) = self.to_bytes((&mut buf, 0)).unwrap();
-        sha512::hash(&buf[..size])
+        // TODO: use `Into` directly when GenericArray supports it
+        Sha512::digest(&buf[..size]).as_slice().try_into().unwrap()
     }
 }
 
