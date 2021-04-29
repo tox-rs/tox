@@ -165,9 +165,9 @@ mod tests {
     use tox_packet::onion::*;
     use tox_crypto::*;
 
-    const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - secretbox::NONCEBYTES;
-    const ONION_RETURN_2_PAYLOAD_SIZE: usize = ONION_RETURN_2_SIZE - secretbox::NONCEBYTES;
-    const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - secretbox::NONCEBYTES;
+    const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - xsalsa20poly1305::NONCE_SIZE;
+    const ONION_RETURN_2_PAYLOAD_SIZE: usize = ONION_RETURN_2_SIZE - xsalsa20poly1305::NONCE_SIZE;
+    const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - xsalsa20poly1305::NONCE_SIZE;
 
     #[test]
     fn encode_decode() {
@@ -217,7 +217,7 @@ mod tests {
                 temporary_pk: gen_keypair().0,
                 payload: vec![42; 123],
                 onion_return: OnionReturn {
-                    nonce: secretbox::gen_nonce(),
+                    nonce: [42; xsalsa20poly1305::NONCE_SIZE],
                     payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
                 }
             }),
@@ -226,7 +226,7 @@ mod tests {
                 temporary_pk: gen_keypair().0,
                 payload: vec![42; 123],
                 onion_return: OnionReturn {
-                    nonce: secretbox::gen_nonce(),
+                    nonce: [42; xsalsa20poly1305::NONCE_SIZE],
                     payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
                 }
             }),
@@ -237,7 +237,7 @@ mod tests {
                     payload: vec![42; 123]
                 },
                 onion_return: OnionReturn {
-                    nonce: secretbox::gen_nonce(),
+                    nonce: [42; xsalsa20poly1305::NONCE_SIZE],
                     payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
                 }
             }),
@@ -249,7 +249,7 @@ mod tests {
                     payload: vec![42; 123]
                 },
                 onion_return: OnionReturn {
-                    nonce: secretbox::gen_nonce(),
+                    nonce: [42; xsalsa20poly1305::NONCE_SIZE],
                     payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
                 }
             }),
@@ -265,7 +265,7 @@ mod tests {
             }),
             Packet::OnionResponse3(OnionResponse3 {
                 onion_return: OnionReturn {
-                    nonce: secretbox::gen_nonce(),
+                    nonce: [42; xsalsa20poly1305::NONCE_SIZE],
                     payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
                 },
                 payload: InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
@@ -276,7 +276,7 @@ mod tests {
             }),
             Packet::OnionResponse2(OnionResponse2 {
                 onion_return: OnionReturn {
-                    nonce: secretbox::gen_nonce(),
+                    nonce: [42; xsalsa20poly1305::NONCE_SIZE],
                     payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
                 },
                 payload: InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
@@ -287,7 +287,7 @@ mod tests {
             }),
             Packet::OnionResponse1(OnionResponse1 {
                 onion_return: OnionReturn {
-                    nonce: secretbox::gen_nonce(),
+                    nonce: [42; xsalsa20poly1305::NONCE_SIZE],
                     payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
                 },
                 payload: InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {

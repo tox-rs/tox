@@ -340,7 +340,7 @@ impl OnionAnnounce {
 mod tests {
     use super::*;
 
-    const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - secretbox::NONCEBYTES;
+    const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - xsalsa20poly1305::NONCE_SIZE;
 
     #[test]
     fn announce_entry_valid() {
@@ -350,7 +350,7 @@ mod tests {
             "1.2.3.4".parse().unwrap(),
             12345,
             OnionReturn {
-                nonce: secretbox::gen_nonce(),
+                nonce: [42; xsalsa20poly1305::NONCE_SIZE],
                 payload: vec![42; 42]
             },
             gen_keypair().0
@@ -366,7 +366,7 @@ mod tests {
             "1.2.3.4".parse().unwrap(),
             12345,
             OnionReturn {
-                nonce: secretbox::gen_nonce(),
+                nonce: [42; xsalsa20poly1305::NONCE_SIZE],
                 payload: vec![42; 42]
             },
             gen_keypair().0
@@ -435,7 +435,7 @@ mod tests {
             saddr.ip(),
             saddr.port(),
             OnionReturn {
-                nonce: secretbox::gen_nonce(),
+                nonce: [42; xsalsa20poly1305::NONCE_SIZE],
                 payload: vec![42; 42]
             },
             gen_keypair().0
@@ -664,7 +664,7 @@ mod tests {
             sendback_data: 42
         };
         let onion_return = OnionReturn {
-            nonce: secretbox::gen_nonce(),
+            nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
         };
 
@@ -703,7 +703,7 @@ mod tests {
             sendback_data: 42
         };
         let onion_return = OnionReturn {
-            nonce: secretbox::gen_nonce(),
+            nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
         };
 
@@ -746,7 +746,7 @@ mod tests {
             sendback_data: 42
         };
         let onion_return = OnionReturn {
-            nonce: secretbox::gen_nonce(),
+            nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
         };
 
@@ -784,7 +784,7 @@ mod tests {
             sendback_data
         };
         let onion_return = OnionReturn {
-            nonce: secretbox::gen_nonce(),
+            nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
         };
 
@@ -821,7 +821,7 @@ mod tests {
         let temporary_pk = gen_keypair().0;
         let payload = vec![42; 123];
         let onion_return = OnionReturn {
-            nonce: secretbox::gen_nonce(),
+            nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
         };
         let inner = InnerOnionDataRequest {
@@ -855,7 +855,7 @@ mod tests {
         let onion_announce = OnionAnnounce::new(dht_pk);
 
         let onion_return = OnionReturn {
-            nonce: secretbox::gen_nonce(),
+            nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
         };
         let inner = InnerOnionDataRequest {

@@ -4,9 +4,6 @@
 
 pub use sodiumoxide::randombytes::randombytes_into;
 pub use sodiumoxide::crypto::box_::*;
-pub use sodiumoxide::crypto::secretbox;
-
-pub use sodiumoxide::crypto::pwhash;
 
 // TODO: check if `#[inline]` is actually useful
 

@@ -952,7 +952,7 @@ mod tests {
             temporary_pk: payload.temporary_pk,
             payload: payload.inner,
             onion_return: OnionReturn {
-                nonce: secretbox::gen_nonce(),
+                nonce: [42; xsalsa20poly1305::NONCE_SIZE],
                 payload: vec![42; 123],
             }
         };
@@ -962,7 +962,7 @@ mod tests {
             temporary_pk: payload.temporary_pk,
             payload: payload.inner,
             onion_return: OnionReturn {
-                nonce: secretbox::gen_nonce(),
+                nonce: [42; xsalsa20poly1305::NONCE_SIZE],
                 payload: vec![42; 123],
             }
         };

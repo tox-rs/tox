@@ -21,50 +21,42 @@ assert_eq!(plaintext,
 ```
 */
 
+use std::{convert::TryInto, ops::Deref};
+
 use failure::Fail;
+use rand::{Rng, thread_rng};
 use sha2::{Digest, Sha256};
-
-use tox_crypto::pwhash::{
-    MEMLIMIT_INTERACTIVE, OPSLIMIT_INTERACTIVE,
-    Salt, OpsLimit,
-    gen_salt, derive_key
-};
-
-use tox_crypto::{
-    NONCEBYTES, MACBYTES,
-    Nonce, PrecomputedKey,
-    gen_nonce,
-    secretbox
-};
-
-/// Length in bytes of the salt used to encrypt/decrypt data.
-pub use tox_crypto::pwhash::SALTBYTES as SALT_LENGTH;
-/// Length in bytes of the key used to encrypt/decrypt data.
-pub use tox_crypto::PRECOMPUTEDKEYBYTES as KEY_LENGTH;
+use xsalsa20poly1305::{XSalsa20Poly1305, aead::{Aead, NewAead}};
+use zeroize::Zeroizing;
 
 /// Length (in bytes) of [`MAGIC_NUMBER`](./constant.MAGIC_NUMBER.html).
 pub const MAGIC_LENGTH: usize = 8;
+
 /** Bytes used to verify whether given data has been encrypted using **TES**.
 
     Located at the beginning of the encrypted data.
 */
 pub const MAGIC_NUMBER: &[u8; MAGIC_LENGTH] = b"toxEsave";
+
+/// Length in bytes of the salt used to encrypt/decrypt data.
+pub const SALT_LENGTH: usize = 32;
+
 /** Minimal size in bytes of an encrypted file.
 
 I.e. the amount of bytes that data will "gain" after encryption.
 */
-pub const EXTRA_LENGTH: usize = MAGIC_LENGTH + SALT_LENGTH + NONCEBYTES + MACBYTES;
+pub const EXTRA_LENGTH: usize = MAGIC_LENGTH + SALT_LENGTH + xsalsa20poly1305::NONCE_SIZE + xsalsa20poly1305::TAG_SIZE;
 
 /** Key and `Salt` that are used to encrypt/decrypt data.
 */
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone)]
 pub struct PassKey {
+    /// Salt is saved along with encrypted data and used to decrypt it.
+    salt: [u8; SALT_LENGTH],
     // allocate stuff on heap to make sure that sensitive data is not moved
     // around on stack
-    /// Salt is saved along with encrypted data and used to decrypt it.
-    salt: Box<Salt>,
     /// Key used to encrypt/decrypt data. **DO NOT SAVE**.
-    key: Box<PrecomputedKey>
+    key: Box<XSalsa20Poly1305>
 }
 
 impl PassKey {
@@ -87,11 +79,11 @@ impl PassKey {
     use tox_encryptsave::*;
 
     // fails with an empty passphrase
-    assert_eq!(PassKey::from_passphrase(&[]), Err(KeyDerivationError::Null));
+    assert_eq!(PassKey::from_passphrase(&[]).err(), Some(KeyDerivationError::Null));
     ```
     */
     pub fn from_passphrase(passphrase: &[u8]) -> Result<PassKey, KeyDerivationError> {
-        PassKey::with_salt(passphrase, gen_salt())
+        PassKey::with_salt(passphrase, thread_rng().gen())
     }
 
     /** Create a new `PassKey` with provided `Salt`, rather than using a random
@@ -109,35 +101,32 @@ impl PassKey {
     E.g.
 
     ```
-    use tox_crypto::pwhash::gen_salt;
     use tox_encryptsave::*;
 
-    assert_eq!(PassKey::with_salt(&[], gen_salt()), Err(KeyDerivationError::Null));
+    assert_eq!(PassKey::with_salt(&[], [42; SALT_LENGTH]).err(), Some(KeyDerivationError::Null));
     ```
     */
-    pub fn with_salt(passphrase: &[u8], salt: Salt) -> Result<PassKey, KeyDerivationError> {
+    pub fn with_salt(passphrase: &[u8], salt: [u8; SALT_LENGTH]) -> Result<PassKey, KeyDerivationError> {
         if passphrase.is_empty() { return Err(KeyDerivationError::Null) };
 
         let passhash = Sha256::digest(passphrase);
-        let OpsLimit(ops) = OPSLIMIT_INTERACTIVE;
-        let mut key = secretbox::Key([0; secretbox::KEYBYTES]);
+        let mut key = Zeroizing::new([0; xsalsa20poly1305::KEY_SIZE]);
+        // predefined params for tox encryptsave format
+        let params = scrypt::Params::new(14, 8, 2).unwrap();
 
-        let maybe_key = PrecomputedKey::from_slice({
-            // securely zeroes the key when `kb` goes out of scope
-            let secretbox::Key(ref mut kb) = key;
-            derive_key(
-                kb,
-                &passhash,
-                &salt,
-                OpsLimit(ops * 2),
-                MEMLIMIT_INTERACTIVE
-            ).or(Err(KeyDerivationError::Failed))?
-        });
+        scrypt::scrypt(
+            &passhash,
+            &salt,
+            &params,
+            &mut key[..],
+        ).or(Err(KeyDerivationError::Failed))?;
 
-        let salt = Box::new(salt);
-        let key = Box::new(maybe_key.ok_or(KeyDerivationError::Failed)?);
+        let pass_key = PassKey {
+            salt,
+            key: Box::new(XSalsa20Poly1305::new(key.deref().into())),
+        };
 
-        Ok(PassKey { salt, key })
+        Ok(pass_key)
     }
 
     /**
@@ -165,16 +154,15 @@ impl PassKey {
         if data.is_empty() { return Err(EncryptionError::Null) };
 
         let mut output = Vec::with_capacity(EXTRA_LENGTH + data.len());
-        let nonce = gen_nonce();
+        let nonce = thread_rng().gen::<[u8; xsalsa20poly1305::NONCE_SIZE]>();
 
         output.extend_from_slice(MAGIC_NUMBER);
-        output.extend_from_slice(&self.salt.0);
-        output.extend_from_slice(&nonce.0);
-        output.append(&mut tox_crypto::encrypt_data_symmetric(
-            &self.key,
-            &nonce,
+        output.extend_from_slice(&self.salt);
+        output.extend_from_slice(&nonce);
+        output.append(&mut self.key.encrypt(
+            &nonce.into(),
             data
-        ));
+        ).or(Err(EncryptionError::Null))?);
 
         Ok(output)
     }
@@ -211,14 +199,9 @@ impl PassKey {
         if data.len() <= EXTRA_LENGTH { return Err(DecryptionError::InvalidLength) };
         if !is_encrypted(data) { return Err(DecryptionError::BadFormat) };
 
-        let nonce = Nonce::from_slice(&data[
-            MAGIC_LENGTH+SALT_LENGTH..MAGIC_LENGTH+SALT_LENGTH+NONCEBYTES
-        ]).ok_or(DecryptionError::BadFormat)?;
-
-        let output = tox_crypto::decrypt_data_symmetric(
-            &self.key,
-            &nonce,
-            &data[MAGIC_LENGTH+SALT_LENGTH+NONCEBYTES..]
+        let output = self.key.decrypt(
+            (&data[MAGIC_LENGTH+SALT_LENGTH..MAGIC_LENGTH+SALT_LENGTH+xsalsa20poly1305::NONCE_SIZE]).into(),
+            &data[MAGIC_LENGTH+SALT_LENGTH+xsalsa20poly1305::NONCE_SIZE..]
         ).or(Err(DecryptionError::Failed))?;
 
         Ok(output)
@@ -337,11 +320,11 @@ use tox_encryptsave::*;
 assert_eq!(get_salt(&[]), None);
 ```
 */
-pub fn get_salt(data: &[u8]) -> Option<Salt> {
+pub fn get_salt(data: &[u8]) -> Option<[u8; SALT_LENGTH]> {
     if is_encrypted(data)
         && data.len() >= MAGIC_LENGTH + SALT_LENGTH
     {
-        Salt::from_slice(&data[MAGIC_LENGTH..MAGIC_LENGTH+SALT_LENGTH])
+        data[MAGIC_LENGTH..MAGIC_LENGTH+SALT_LENGTH].try_into().ok()
     } else {
         None
     }
@@ -354,7 +337,6 @@ pub enum KeyDerivationError {
     #[fail(display = "Provided passphrase is empty")]
     Null,
     /// Failed to derive key, most likely due to OOM.
-    // TODO: ↑ link to the used sodium memory constant * 2
     #[fail(display = "Failed to derive key, most likely due to OOM")]
     Failed
 }
@@ -423,10 +405,8 @@ fn pass_key_new_test() {
     let passwd = [42; 123];
     let pk = PassKey::from_passphrase(&passwd).expect("Failed to unwrap PassKey!");
 
-    assert_ne!(pk.salt.0.as_ref(), &passwd as &[u8]);
-    assert_ne!(pk.salt.0.as_ref(), [0; SALT_LENGTH].as_ref());
-    assert_ne!(pk.key.0.as_ref(), &passwd as &[u8]);
-    assert_ne!(pk.key.0, [0; KEY_LENGTH]);
+    assert_ne!(pk.salt.as_ref(), &passwd as &[u8]);
+    assert_ne!(pk.salt.as_ref(), [0; SALT_LENGTH].as_ref());
 }
 
 // PassKey::with_salt()
@@ -434,10 +414,8 @@ fn pass_key_new_test() {
 #[test]
 fn pass_key_with_salt_test() {
     let passwd = [42; 123];
-    let salt = gen_salt();
+    let salt = thread_rng().gen();
     let pk = PassKey::with_salt(&passwd, salt).unwrap();
 
-    assert_eq!(&*pk.salt, &salt);
-    assert_ne!(pk.key.0.as_ref(), &passwd as &[u8]);
-    assert_ne!(pk.key.0, [0; KEY_LENGTH]);
+    assert_eq!(&pk.salt, &salt);
 }

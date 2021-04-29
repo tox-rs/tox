@@ -152,7 +152,7 @@ impl ToBytes for OnionRequest2Payload {
 mod tests {
     use super::*;
 
-    const ONION_RETURN_2_PAYLOAD_SIZE: usize = ONION_RETURN_2_SIZE - secretbox::NONCEBYTES;
+    const ONION_RETURN_2_PAYLOAD_SIZE: usize = ONION_RETURN_2_SIZE - xsalsa20poly1305::NONCE_SIZE;
 
     encode_decode_test!(
         tox_crypto::crypto_init().unwrap(),
@@ -162,7 +162,7 @@ mod tests {
             temporary_pk: gen_keypair().0,
             payload: vec![42; 123],
             onion_return: OnionReturn {
-                nonce: secretbox::gen_nonce(),
+                nonce: [42; xsalsa20poly1305::NONCE_SIZE],
                 payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
             }
         }
@@ -206,7 +206,7 @@ mod tests {
             })
         };
         let onion_return = OnionReturn {
-            nonce: secretbox::gen_nonce(),
+            nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
         };
         // encode payload with shared secret
@@ -238,7 +238,7 @@ mod tests {
             })
         };
         let onion_return = OnionReturn {
-            nonce: secretbox::gen_nonce(),
+            nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
         };
         // encode payload with shared secret
@@ -265,7 +265,7 @@ mod tests {
             temporary_pk,
             payload: invalid_payload_encoded,
             onion_return: OnionReturn {
-                nonce: secretbox::gen_nonce(),
+                nonce: [42; xsalsa20poly1305::NONCE_SIZE],
                 payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
             }
         };
@@ -278,7 +278,7 @@ mod tests {
             temporary_pk,
             payload: invalid_payload_encoded,
             onion_return: OnionReturn {
-                nonce: secretbox::gen_nonce(),
+                nonce: [42; xsalsa20poly1305::NONCE_SIZE],
                 payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
             }
         };

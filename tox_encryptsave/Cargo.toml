@@ -19,6 +19,9 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tox_crypto = { version = "0.1.0", path = "../tox_crypto" }
 failure = "0.1"
+rand = "0.8"
 sha2 = "0.9"
+xsalsa20poly1305 = "0.6"
+scrypt = "0.6"
+zeroize = "1.3"

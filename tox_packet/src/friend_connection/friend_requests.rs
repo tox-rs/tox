@@ -9,9 +9,9 @@ use crate::ip_port::SIZE_IPPORT;
 use crate::toxid::NoSpam;
 
 const ONION_SEND_BASE: usize =  PUBLICKEYBYTES + SIZE_IPPORT + MACBYTES;
-const ONION_SEND_1: usize = secretbox::NONCEBYTES + ONION_SEND_BASE * 3;
+const ONION_SEND_1: usize = xsalsa20poly1305::NONCE_SIZE + ONION_SEND_BASE * 3;
 const MAX_ONION_DATA_SIZE: usize = ONION_MAX_PACKET_SIZE - (ONION_SEND_1 + 1); // 1 is for packet_id
-const MIN_ONION_DATA_REQUEST_SIZE: usize = 1 + PUBLICKEYBYTES + secretbox::NONCEBYTES + PUBLICKEYBYTES + MACBYTES; // 1 is for packet_id
+const MIN_ONION_DATA_REQUEST_SIZE: usize = 1 + PUBLICKEYBYTES + xsalsa20poly1305::NONCE_SIZE + PUBLICKEYBYTES + MACBYTES; // 1 is for packet_id
 /// Maximum size in butes of Onion Data Request packet
 pub const MAX_DATA_REQUEST_SIZE: usize = MAX_ONION_DATA_SIZE - MIN_ONION_DATA_REQUEST_SIZE;
 /// Minimum size in bytes of Onion Data Response packet

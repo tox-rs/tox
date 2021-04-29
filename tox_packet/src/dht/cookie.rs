@@ -2,9 +2,11 @@
 */
 
 use super::*;
-use nom::number::complete::be_u64;
+use nom::{AsBytes, map_opt, number::complete::be_u64};
 use sha2::{Digest, Sha512};
 use sha2::digest::generic_array::typenum::marker_traits::Unsigned;
+use xsalsa20poly1305::{XSalsa20Poly1305, aead::{Aead, Error as AeadError}};
+use rand::Rng;
 
 use std::{convert::TryInto, time::SystemTime};
 
@@ -105,14 +107,14 @@ Length | Content
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EncryptedCookie {
     /// Nonce for the current encrypted payload
-    pub nonce: secretbox::Nonce,
+    pub nonce: [u8; xsalsa20poly1305::NONCE_SIZE],
     /// Encrypted payload
     pub payload: Vec<u8>,
 }
 
 impl FromBytes for EncryptedCookie {
     named!(from_bytes<EncryptedCookie>, do_parse!(
-        nonce: call!(secretbox::Nonce::from_bytes) >>
+        nonce: map_opt!(take!(xsalsa20poly1305::NONCE_SIZE), |bytes: &[u8]| bytes.try_into().ok()) >>
         payload: take!(88) >>
         (EncryptedCookie { nonce, payload: payload.to_vec() })
     ));
@@ -129,14 +131,14 @@ impl ToBytes for EncryptedCookie {
 
 impl EncryptedCookie {
     /// Create `EncryptedCookie` from `Cookie` encrypting it with `symmetric_key`
-    pub fn new(symmetric_key: &secretbox::Key, payload: &Cookie) -> EncryptedCookie {
-        let nonce = secretbox::gen_nonce();
+    pub fn new<R: Rng>(rng: &mut R, symmetric_key: &XSalsa20Poly1305, payload: &Cookie) -> EncryptedCookie {
+        let nonce = rng.gen::<[u8; xsalsa20poly1305::NONCE_SIZE]>().into();
         let mut buf = [0; 72];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
-        let payload = secretbox::seal(&buf[..size], &nonce, symmetric_key);
+        let payload = symmetric_key.encrypt(&nonce, &buf[..size]).unwrap();
 
         EncryptedCookie {
-            nonce,
+            nonce: nonce.into(),
             payload,
         }
     }
@@ -147,9 +149,9 @@ impl EncryptedCookie {
     - fails to decrypt
     - fails to parse `Cookie`
     */
-    pub fn get_payload(&self, symmetric_key: &secretbox::Key) -> Result<Cookie, GetPayloadError> {
-        let decrypted = secretbox::open(&self.payload, &self.nonce, symmetric_key)
-            .map_err(|()| {
+    pub fn get_payload(&self, symmetric_key: &XSalsa20Poly1305) -> Result<Cookie, GetPayloadError> {
+        let decrypted = symmetric_key.decrypt(&self.nonce.into(), self.payload.as_bytes())
+            .map_err(|AeadError| {
                 GetPayloadError::decrypt()
             })?;
         match Cookie::from_bytes(&decrypted) {
@@ -173,7 +175,9 @@ impl EncryptedCookie {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::thread_rng;
     use nom::{Err, error::ErrorKind};
+    use xsalsa20poly1305::aead::NewAead;
 
     encode_decode_test!(
         tox_crypto::crypto_init().unwrap(),
@@ -189,7 +193,7 @@ mod tests {
         tox_crypto::crypto_init().unwrap(),
         encrypted_cookie_encode_decode,
         EncryptedCookie {
-            nonce: secretbox::gen_nonce(),
+            nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![42; 88],
         }
     );
@@ -197,10 +201,11 @@ mod tests {
     #[test]
     fn cookie_encrypt_decrypt() {
         crypto_init().unwrap();
-        let symmetric_key = secretbox::gen_key();
+        let mut rng = thread_rng();
+        let symmetric_key = XSalsa20Poly1305::new(&rng.gen::<[u8; xsalsa20poly1305::KEY_SIZE]>().into());
         let payload = Cookie::new(gen_keypair().0, gen_keypair().0);
         // encode payload with symmetric key
-        let encrypted_cookie = EncryptedCookie::new(&symmetric_key, &payload);
+        let encrypted_cookie = EncryptedCookie::new(&mut rng, &symmetric_key, &payload);
         // decode payload with symmetric key
         let decoded_payload = encrypted_cookie.get_payload(&symmetric_key).unwrap();
         // payloads should be equal
@@ -210,11 +215,12 @@ mod tests {
     #[test]
     fn cookie_encrypt_decrypt_invalid_key() {
         crypto_init().unwrap();
-        let symmetric_key = secretbox::gen_key();
-        let eve_symmetric_key = secretbox::gen_key();
+        let mut rng = thread_rng();
+        let symmetric_key = XSalsa20Poly1305::new(&rng.gen::<[u8; xsalsa20poly1305::KEY_SIZE]>().into());
+        let eve_symmetric_key = XSalsa20Poly1305::new(&rng.gen::<[u8; xsalsa20poly1305::KEY_SIZE]>().into());
         let payload = Cookie::new(gen_keypair().0, gen_keypair().0);
         // encode payload with symmetric key
-        let encrypted_cookie = EncryptedCookie::new(&symmetric_key, &payload);
+        let encrypted_cookie = EncryptedCookie::new(&mut rng, &symmetric_key, &payload);
         // try to decode payload with eve's symmetric key
         let decoded_payload = encrypted_cookie.get_payload(&eve_symmetric_key);
         assert!(decoded_payload.is_err());
@@ -223,14 +229,14 @@ mod tests {
 
     #[test]
     fn cookie_encrypt_decrypt_invalid() {
-        crypto_init().unwrap();
-        let symmetric_key = secretbox::gen_key();
-        let nonce = secretbox::gen_nonce();
+        let mut rng = thread_rng();
+        let symmetric_key = XSalsa20Poly1305::new(&rng.gen::<[u8; xsalsa20poly1305::KEY_SIZE]>().into());
+        let nonce = rng.gen::<[u8; xsalsa20poly1305::NONCE_SIZE]>().into();
         // Try long invalid array
         let invalid_payload = [42; 123];
-        let invalid_payload_encoded = secretbox::seal(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_payload_encoded = symmetric_key.encrypt(&nonce, &invalid_payload[..]).unwrap();
         let invalid_encrypted_cookie = EncryptedCookie {
-            nonce,
+            nonce: nonce.into(),
             payload: invalid_payload_encoded
         };
         let decoded_payload = invalid_encrypted_cookie.get_payload(&symmetric_key);
@@ -241,9 +247,9 @@ mod tests {
         });
         // Try short incomplete array
         let invalid_payload = [];
-        let invalid_payload_encoded = secretbox::seal(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_payload_encoded = symmetric_key.encrypt(&nonce, &invalid_payload[..]).unwrap();
         let invalid_encrypted_cookie = EncryptedCookie {
-            nonce,
+            nonce: nonce.into(),
             payload: invalid_payload_encoded
         };
         let decoded_payload = invalid_encrypted_cookie.get_payload(&symmetric_key);
@@ -265,8 +271,7 @@ mod tests {
 
     #[test]
     fn hash_depends_on_all_fields() {
-        crypto_init().unwrap();
-        let nonce = secretbox::gen_nonce();
+        let nonce = [42; xsalsa20poly1305::NONCE_SIZE];
         let payload = vec![42; 88];
         let cookie = EncryptedCookie {
             nonce,
@@ -278,7 +283,7 @@ mod tests {
             payload: vec![43; 88]
         };
         let cookie_2 = EncryptedCookie {
-            nonce: secretbox::gen_nonce(),
+            nonce: [43; xsalsa20poly1305::NONCE_SIZE],
             payload
         };
 

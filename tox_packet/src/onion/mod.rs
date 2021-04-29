@@ -29,27 +29,15 @@ pub use self::onion_response_2::*;
 pub use self::onion_response_3::*;
 pub use self::friend_request::*;
 
+use std::convert::TryInto;
 use tox_binary_io::*;
 use tox_crypto::*;
+use xsalsa20poly1305::{XSalsa20Poly1305, aead::{Aead, Error as AeadError}};
 use crate::dht::packed_node::PackedNode;
 use crate::ip_port::*;
 
-use nom::{
-    named,
-    do_parse,
-    tag,
-    call,
-    alt,
-    map,
-    map_res,
-    flat_map,
-    cond,
-    switch,
-    take,
-    value,
-    verify,
-    eof
-};
+use rand::{Rng, thread_rng};
+use nom::{AsBytes, alt, call, cond, do_parse, eof, flat_map, map, map_opt, map_res, named, switch, tag, take, value, verify};
 
 use cookie_factory::{
     do_gen,
@@ -69,9 +57,9 @@ use nom::{
 use std::io::{Error, ErrorKind};
 
 const ONION_SEND_BASE: usize = PUBLICKEYBYTES + SIZE_IPPORT + MACBYTES;
-const ONION_SEND_1: usize = secretbox::NONCEBYTES + ONION_SEND_BASE * 3;
+const ONION_SEND_1: usize = xsalsa20poly1305::NONCE_SIZE + ONION_SEND_BASE * 3;
 const MAX_ONION_DATA_SIZE: usize = ONION_MAX_PACKET_SIZE - (ONION_SEND_1 + 1); // 1 is for packet_id
-const MIN_ONION_DATA_REQUEST_SIZE: usize = 1 + PUBLICKEYBYTES + secretbox::NONCEBYTES + PUBLICKEYBYTES + MACBYTES; // 1 is for packet_id
+const MIN_ONION_DATA_REQUEST_SIZE: usize = 1 + PUBLICKEYBYTES + xsalsa20poly1305::NONCE_SIZE + PUBLICKEYBYTES + MACBYTES; // 1 is for packet_id
 /// Maximum size in butes of Onion Data Request packet
 pub const MAX_DATA_REQUEST_SIZE: usize = MAX_ONION_DATA_SIZE - MIN_ONION_DATA_REQUEST_SIZE;
 /// Minimum size in bytes of Onion Data Response packet
@@ -80,11 +68,11 @@ pub const MIN_ONION_DATA_RESPONSE_SIZE: usize = PUBLICKEYBYTES + MACBYTES;
 pub const MAX_ONION_CLIENT_DATA_SIZE: usize = MAX_DATA_REQUEST_SIZE - MIN_ONION_DATA_RESPONSE_SIZE;
 
 /// Size of first `OnionReturn` struct with no inner `OnionReturn`s.
-pub const ONION_RETURN_1_SIZE: usize = secretbox::NONCEBYTES + SIZE_IPPORT + MACBYTES; // 59
+pub const ONION_RETURN_1_SIZE: usize = xsalsa20poly1305::NONCE_SIZE + SIZE_IPPORT + MACBYTES; // 59
 /// Size of second `OnionReturn` struct with one inner `OnionReturn`.
-pub const ONION_RETURN_2_SIZE: usize = secretbox::NONCEBYTES + SIZE_IPPORT + MACBYTES + ONION_RETURN_1_SIZE; // 118
+pub const ONION_RETURN_2_SIZE: usize = xsalsa20poly1305::NONCE_SIZE + SIZE_IPPORT + MACBYTES + ONION_RETURN_1_SIZE; // 118
 /// Size of third `OnionReturn` struct with two inner `OnionReturn`s.
-pub const ONION_RETURN_3_SIZE: usize = secretbox::NONCEBYTES + SIZE_IPPORT + MACBYTES + ONION_RETURN_2_SIZE; // 177
+pub const ONION_RETURN_3_SIZE: usize = xsalsa20poly1305::NONCE_SIZE + SIZE_IPPORT + MACBYTES + ONION_RETURN_2_SIZE; // 177
 
 /// The maximum size of onion packet including public key, nonce, packet kind
 /// byte, onion return.
@@ -112,14 +100,14 @@ where payload is encrypted inner `OnionReturn`
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OnionReturn {
     /// Nonce for the current encrypted payload
-    pub nonce: secretbox::Nonce,
+    pub nonce: [u8; xsalsa20poly1305::NONCE_SIZE],
     /// Encrypted payload
     pub payload: Vec<u8>
 }
 
 impl FromBytes for OnionReturn {
     named!(from_bytes<OnionReturn>, do_parse!(
-        nonce: call!(secretbox::Nonce::from_bytes) >>
+        nonce: map_opt!(take!(xsalsa20poly1305::NONCE_SIZE), |bytes: &[u8]| bytes.try_into().ok()) >>
         payload: rest >>
         (OnionReturn { nonce, payload: payload.to_vec() })
     ));
@@ -154,13 +142,16 @@ impl OnionReturn {
     ));
 
     /// Create new `OnionReturn` object using symmetric key for encryption.
-    pub fn new(symmetric_key: &secretbox::Key, ip_port: &IpPort, inner: Option<&OnionReturn>) -> OnionReturn {
-        let nonce = secretbox::gen_nonce();
+    pub fn new(symmetric_key: &XSalsa20Poly1305, ip_port: &IpPort, inner: Option<&OnionReturn>) -> OnionReturn {
+        let nonce = thread_rng().gen::<[u8; xsalsa20poly1305::NONCE_SIZE]>().into();
         let mut buf = [0; ONION_RETURN_2_SIZE + SIZE_IPPORT];
         let (_, size) = OnionReturn::inner_to_bytes(ip_port, inner, (&mut buf, 0)).unwrap();
-        let payload = secretbox::seal(&buf[..size], &nonce, symmetric_key);
+        let payload = symmetric_key.encrypt(&nonce, &buf[..size]).unwrap();
 
-        OnionReturn { nonce, payload }
+        OnionReturn {
+            nonce: nonce.into(),
+            payload
+        }
     }
 
     /** Decrypt payload with symmetric key and try to parse it as `IpPort` with possibly inner `OnionReturn`.
@@ -170,9 +161,9 @@ impl OnionReturn {
     - fails to decrypt
     - fails to parse as `IpPort` with possibly inner `OnionReturn`
     */
-    pub fn get_payload(&self, symmetric_key: &secretbox::Key) -> Result<(IpPort, Option<OnionReturn>), Error> {
-        let decrypted = secretbox::open(&self.payload, &self.nonce, symmetric_key)
-            .map_err(|()| {
+    pub fn get_payload(&self, symmetric_key: &XSalsa20Poly1305) -> Result<(IpPort, Option<OnionReturn>), Error> {
+        let decrypted = symmetric_key.decrypt(&self.nonce.into(), self.payload.as_bytes())
+            .map_err(|AeadError| {
                 Error::new(ErrorKind::Other, "OnionReturn decrypt error.")
             })?;
         match OnionReturn::inner_from_bytes(&decrypted) {
@@ -228,13 +219,15 @@ impl ToBytes for AnnounceStatus {
 mod tests {
     use super::*;
 
-    const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - secretbox::NONCEBYTES;
+    use xsalsa20poly1305::aead::NewAead;
+
+    const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - xsalsa20poly1305::NONCE_SIZE;
 
     encode_decode_test!(
         tox_crypto::crypto_init().unwrap(),
         onion_return_encode_decode,
         OnionReturn {
-            nonce: secretbox::gen_nonce(),
+            nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
         }
     );
@@ -259,9 +252,9 @@ mod tests {
 
     #[test]
     fn onion_return_encrypt_decrypt() {
-        crypto_init().unwrap();
-        let alice_symmetric_key = secretbox::gen_key();
-        let bob_symmetric_key = secretbox::gen_key();
+        let mut rng = thread_rng();
+        let alice_symmetric_key = XSalsa20Poly1305::new(&rng.gen::<[u8; xsalsa20poly1305::KEY_SIZE]>().into());
+        let bob_symmetric_key = XSalsa20Poly1305::new(&rng.gen::<[u8; xsalsa20poly1305::KEY_SIZE]>().into());
         // alice encrypt
         let ip_port_1 = IpPort {
             protocol: ProtocolType::Udp,
@@ -288,10 +281,10 @@ mod tests {
 
     #[test]
     fn onion_return_encrypt_decrypt_invalid_key() {
-        crypto_init().unwrap();
-        let alice_symmetric_key = secretbox::gen_key();
-        let bob_symmetric_key = secretbox::gen_key();
-        let eve_symmetric_key = secretbox::gen_key();
+        let mut rng = thread_rng();
+        let alice_symmetric_key = XSalsa20Poly1305::new(&rng.gen::<[u8; xsalsa20poly1305::KEY_SIZE]>().into());
+        let bob_symmetric_key = XSalsa20Poly1305::new(&rng.gen::<[u8; xsalsa20poly1305::KEY_SIZE]>().into());
+        let eve_symmetric_key = XSalsa20Poly1305::new(&rng.gen::<[u8; xsalsa20poly1305::KEY_SIZE]>().into());
         // alice encrypt
         let ip_port_1 = IpPort {
             protocol: ProtocolType::Udp,
@@ -313,22 +306,22 @@ mod tests {
 
     #[test]
     fn onion_return_decrypt_invalid() {
-        crypto_init().unwrap();
-        let symmetric_key = secretbox::gen_key();
-        let nonce = secretbox::gen_nonce();
+        let mut rng = thread_rng();
+        let symmetric_key = XSalsa20Poly1305::new(&rng.gen::<[u8; xsalsa20poly1305::KEY_SIZE]>().into());
+        let nonce = rng.gen::<[u8; xsalsa20poly1305::NONCE_SIZE]>().into();
         // Try long invalid array
         let invalid_payload = [42; 123];
-        let invalid_payload_encoded = secretbox::seal(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_payload_encoded = symmetric_key.encrypt(&nonce, &invalid_payload[..]).unwrap();
         let invalid_onion_return = OnionReturn {
-            nonce,
-            payload: invalid_payload_encoded
+            nonce: nonce.into(),
+            payload: invalid_payload_encoded,
         };
         assert!(invalid_onion_return.get_payload(&symmetric_key).is_err());
         // Try short incomplete array
         let invalid_payload = [];
-        let invalid_payload_encoded = secretbox::seal(&invalid_payload, &nonce, &symmetric_key);
+        let invalid_payload_encoded = symmetric_key.encrypt(&nonce, &invalid_payload[..]).unwrap();
         let invalid_onion_return = OnionReturn {
-            nonce,
+            nonce: nonce.into(),
             payload: invalid_payload_encoded
         };
         assert!(invalid_onion_return.get_payload(&symmetric_key).is_err());
