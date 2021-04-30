@@ -148,7 +148,6 @@ mod tests {
     use crate::dht::cookie_request::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         cookie_request_encode_decode,
         CookieRequest {
             pk: gen_keypair().0,
@@ -158,7 +157,6 @@ mod tests {
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         cookie_request_payload_encode_decode,
         CookieRequestPayload {
             pk: gen_keypair().0,

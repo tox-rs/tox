@@ -70,7 +70,6 @@ mod tests {
     use crate::dht::bootstrap_info::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         bootstrap_info_encode_decode,
         BootstrapInfo {
             version: 1717,

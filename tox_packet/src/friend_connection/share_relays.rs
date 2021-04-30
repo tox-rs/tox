@@ -61,7 +61,6 @@ mod tests {
     use super::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         share_relays_encode_decode,
         ShareRelays::new(vec![
             PackedNode {

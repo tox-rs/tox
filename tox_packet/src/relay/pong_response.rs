@@ -48,7 +48,6 @@ mod test {
     use super::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         pong_response_encode_decode,
         PongResponse {
             ping_id: 12345

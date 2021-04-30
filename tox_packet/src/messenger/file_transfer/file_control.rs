@@ -69,7 +69,6 @@ mod tests {
     use super::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         file_control_encode_decode,
         FileControl::new(TransferDirection::Send, 1, ControlType::Seek(100))
     );

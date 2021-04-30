@@ -65,7 +65,6 @@ mod tests {
     use super::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         file_data_encode_decode,
         FileData::new(1, vec![1,2,3,4])
     );

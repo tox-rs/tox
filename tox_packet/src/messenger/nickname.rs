@@ -59,7 +59,6 @@ mod tests {
     use super::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         nickname_encode_decode,
         Nickname::new("1234".to_string())
     );

@@ -166,7 +166,6 @@ mod tests {
     const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - xsalsa20poly1305::NONCE_SIZE;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         inner_onion_data_request_encode_decode,
         InnerOnionDataRequest {
             destination_pk: gen_keypair().0,
@@ -177,7 +176,6 @@ mod tests {
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         onion_data_request_encode_decode,
         OnionDataRequest {
             inner: InnerOnionDataRequest {
@@ -195,7 +193,6 @@ mod tests {
 
     #[test]
     fn inner_onion_data_request_encrypt_decrypt() {
-        crypto_init().unwrap();
         let (real_pk, _real_sk) = gen_keypair();
         let (data_pk, _data_sk) = gen_keypair();
         let (temporary_pk, temporary_sk) = gen_keypair();
@@ -215,7 +212,6 @@ mod tests {
 
     #[test]
     fn inner_onion_data_request_encrypt_decrypt_invalid_key() {
-        crypto_init().unwrap();
         let (real_pk, _real_sk) = gen_keypair();
         let (data_pk, _data_sk) = gen_keypair();
         let (temporary_pk, temporary_sk) = gen_keypair();
@@ -236,7 +232,6 @@ mod tests {
 
     #[test]
     fn inner_onion_data_request_encrypt_decrypt_invalid() {
-        crypto_init().unwrap();
         let (real_pk, _real_sk) = gen_keypair();
         let (data_pk, _data_sk) = gen_keypair();
         let (temporary_pk, temporary_sk) = gen_keypair();

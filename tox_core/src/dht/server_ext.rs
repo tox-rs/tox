@@ -94,7 +94,6 @@ mod tests {
 
     #[tokio::test]
     async fn run_socket() {
-        crypto_init().unwrap();
         let (client_pk, client_sk) = gen_keypair();
         let (server_pk, server_sk) = gen_keypair();
         let shared_secret = precompute(&server_pk, &client_sk);

@@ -72,7 +72,6 @@ mod tests {
     use super::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         user_status_encode_decode,
         UserStatus::new(PeerStatus::Online)
     );

@@ -97,7 +97,6 @@ mod tests {
     use super::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         new_peer_encode_decode,
         NewPeer::new(1, 2, 3, 4, gen_keypair().0, gen_keypair().0)
     );

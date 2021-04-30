@@ -170,7 +170,6 @@ mod tests {
     use nom::{Needed, Err};
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         crypto_handshake_encode_decode,
         CryptoHandshake {
             cookie: EncryptedCookie {
@@ -183,7 +182,6 @@ mod tests {
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         crypto_handshake_payload_encode_decode,
         CryptoHandshakePayload {
             base_nonce: gen_nonce(),
@@ -198,7 +196,6 @@ mod tests {
 
     #[test]
     fn crypto_handshake_encrypt_decrypt() {
-        crypto_init().unwrap();
         let (_alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
@@ -225,7 +222,6 @@ mod tests {
 
     #[test]
     fn crypto_handshake_encrypt_decrypt_invalid_key() {
-        crypto_init().unwrap();
         let (_alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let (_eve_pk, eve_sk) = gen_keypair();
@@ -254,7 +250,6 @@ mod tests {
 
     #[test]
     fn crypto_handshake_encrypt_decrypt_invalid() {
-        crypto_init().unwrap();
         let (_alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);

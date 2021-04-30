@@ -62,7 +62,6 @@ mod tests {
     use crate::toxid::NOSPAMBYTES;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         friend_req_encode_decode,
         FriendRequest {
             nospam: NoSpam([42; NOSPAMBYTES]),

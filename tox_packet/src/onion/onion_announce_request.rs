@@ -210,7 +210,6 @@ mod tests {
     const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - xsalsa20poly1305::NONCE_SIZE;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         inner_onion_announce_request_encode_decode,
         InnerOnionAnnounceRequest {
             nonce: gen_nonce(),
@@ -220,7 +219,6 @@ mod tests {
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         onion_announce_request_encode_decode,
         OnionAnnounceRequest {
             inner: InnerOnionAnnounceRequest {
@@ -236,7 +234,6 @@ mod tests {
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         onion_announce_request_payload_encode_decode,
         OnionAnnounceRequestPayload {
             ping_id: [42; 32],
@@ -248,7 +245,6 @@ mod tests {
 
     #[test]
     fn onion_announce_request_payload_encrypt_decrypt() {
-        crypto_init().unwrap();
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
@@ -268,7 +264,6 @@ mod tests {
 
     #[test]
     fn onion_announce_request_payload_encrypt_decrypt_invalid_key() {
-        crypto_init().unwrap();
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let (_eve_pk, eve_sk) = gen_keypair();
@@ -289,7 +284,6 @@ mod tests {
 
     #[test]
     fn onion_announce_request_decrypt_invalid() {
-        crypto_init().unwrap();
         let (_alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let shared_secret = precompute(&bob_pk, &alice_sk);

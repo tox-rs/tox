@@ -174,7 +174,6 @@ mod tests {
 
     #[test]
     fn link_new() {
-        crypto_init().unwrap();
         let (pk, _) = gen_keypair();
         let link = Link::new(pk);
         assert_eq!(LinkStatus::Registered, link.status);
@@ -183,7 +182,6 @@ mod tests {
 
     #[test]
     fn link_upgrade() {
-        crypto_init().unwrap();
         let (pk, _) = gen_keypair();
         let mut link = Link::new(pk);
         link.upgrade();
@@ -192,7 +190,6 @@ mod tests {
 
     #[test]
     fn link_downgrade() {
-        crypto_init().unwrap();
         let (pk, _) = gen_keypair();
         let mut link = Link::new(pk);
         link.upgrade();
@@ -216,7 +213,6 @@ mod tests {
 
     #[test]
     fn links_insert_240() {
-        crypto_init().unwrap();
         let mut links = Links::new();
         for _ in 0..240 {
             // The first 240 must be inserted successfully
@@ -231,7 +227,6 @@ mod tests {
 
     #[test]
     fn links_insert_same_pk() {
-        crypto_init().unwrap();
         let mut links = Links::new();
 
         let (pk, _) = gen_keypair();
@@ -244,7 +239,6 @@ mod tests {
 
     #[test]
     fn links_insert_alloc_order() {
-        crypto_init().unwrap();
         let mut links = Links::new();
 
         let (pk1, _) = gen_keypair();
@@ -270,7 +264,6 @@ mod tests {
 
     #[test]
     fn links_insert_by_id() {
-        crypto_init().unwrap();
         let mut links = Links::new();
 
         let (pk1, _) = gen_keypair();
@@ -288,7 +281,6 @@ mod tests {
 
     #[test]
     fn links_by_id() {
-        crypto_init().unwrap();
         let mut links = Links::new();
 
         let (pk, _) = gen_keypair();
@@ -299,7 +291,6 @@ mod tests {
 
     #[test]
     fn links_by_id_nonexistent() {
-        crypto_init().unwrap();
         let links = Links::new();
 
         assert!(links.by_id(MAX_LINKS_N as u8 + 1).is_none());
@@ -307,7 +298,6 @@ mod tests {
 
     #[test]
     fn links_by_pk() {
-        crypto_init().unwrap();
         let mut links = Links::new();
 
         let (pk, _) = gen_keypair();
@@ -318,7 +308,6 @@ mod tests {
 
     #[test]
     fn links_upgrade() {
-        crypto_init().unwrap();
         let mut links = Links::new();
 
         let (pk, _) = gen_keypair();
@@ -335,7 +324,6 @@ mod tests {
 
     #[test]
     fn links_downgrade() {
-        crypto_init().unwrap();
         let mut links = Links::new();
 
         let (pk, _) = gen_keypair();
@@ -353,7 +341,6 @@ mod tests {
 
     #[test]
     fn links_take() {
-        crypto_init().unwrap();
         let mut links = Links::new();
 
         let (pk, _) = gen_keypair();
@@ -369,7 +356,6 @@ mod tests {
 
     #[test]
     fn links_take_nonexistent() {
-        crypto_init().unwrap();
         let mut links = Links::new();
 
         assert!(links.take(MAX_LINKS_N as u8 + 1).is_none());
@@ -377,7 +363,6 @@ mod tests {
 
     #[test]
     fn links_clear() {
-        crypto_init().unwrap();
         let mut links = Links::new();
         for _ in 0..240 {
             // The first 240 must be inserted successfully

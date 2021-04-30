@@ -148,7 +148,6 @@ mod tests {
     use crate::dht::Packet;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         ping_response_payload_encode_decode,
         PingResponsePayload { id: 42 }
     );

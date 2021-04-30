@@ -70,19 +70,16 @@ mod tests {
     use crate::dht::packed_node::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_alive_encode_decode,
         Packet::Alive(Alive)
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_friend_requests_encode_decode,
         Packet::FriendRequests(FriendRequests::new(NoSpam([42; NOSPAMBYTES]), vec![1,2,3,4]))
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_share_relays_encode_decode,
         Packet::ShareRelays(ShareRelays::new(vec![
             PackedNode {

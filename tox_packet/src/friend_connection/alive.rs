@@ -35,7 +35,6 @@ mod tests {
     use super::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         alive_encode_decode,
         Alive
     );

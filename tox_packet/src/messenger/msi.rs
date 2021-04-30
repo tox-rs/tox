@@ -282,7 +282,6 @@ mod tests {
     use super::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         msi_encode_decode,
         Msi::new(RequestKind::Init, Some(MsiErrorKind::MsiNone), CapabilitiesKind::SEND_AUDIO)
     );

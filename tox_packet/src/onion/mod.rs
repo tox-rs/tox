@@ -224,7 +224,6 @@ mod tests {
     const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - xsalsa20poly1305::NONCE_SIZE;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         onion_return_encode_decode,
         OnionReturn {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
@@ -233,19 +232,16 @@ mod tests {
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         announce_status_failed,
         AnnounceStatus::Failed
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         announce_status_found,
         AnnounceStatus::Found
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         announce_status_accounced,
         AnnounceStatus::Announced
     );

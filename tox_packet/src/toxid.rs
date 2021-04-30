@@ -323,7 +323,6 @@ mod tests {
 
     #[test]
     fn no_spam_fmt() {
-        crypto_init().unwrap();
         // check if formatted NoSpam is always upper-case hexadecimal with matching
         // length
         assert!(!test_is_hexdump_uppercase("Not HexDump"));
@@ -338,7 +337,6 @@ mod tests {
     // NoSpam::from_bytes()
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         no_spam_encode_decode,
         NoSpam([42; NOSPAMBYTES])
     );
@@ -349,8 +347,6 @@ mod tests {
 
     #[test]
     fn tox_id_new_nospam() {
-        crypto_init().unwrap();
-
         let mut rng = thread_rng();
 
         let (pk, _) = gen_keypair();
@@ -374,7 +370,6 @@ mod tests {
 
     #[test]
     fn tox_id_fmt() {
-        crypto_init().unwrap();
         // check if formatted ToxId is always upper-case hexadecimal with matching
         // length
         let (pk, _) = gen_keypair();
@@ -384,7 +379,6 @@ mod tests {
     }
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         toxid_encode_decode,
         ToxId::new(&mut thread_rng(), gen_keypair().0)
     );

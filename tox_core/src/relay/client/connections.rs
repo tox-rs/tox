@@ -421,7 +421,6 @@ mod tests {
 
     #[tokio::test]
     async fn add_relay_global() {
-        crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
         let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
@@ -436,7 +435,6 @@ mod tests {
 
     #[tokio::test]
     async fn add_relay_global_exists() {
-        crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
         let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
@@ -453,7 +451,6 @@ mod tests {
 
     #[tokio::test]
     async fn add_relay_connection() {
-        crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
         let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
@@ -477,7 +474,6 @@ mod tests {
 
     #[tokio::test]
     async fn add_relay_connection_relay_exists() {
-        crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
         let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
@@ -506,7 +502,6 @@ mod tests {
 
     #[tokio::test]
     async fn add_connection() {
-        crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
         let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
@@ -534,7 +529,6 @@ mod tests {
 
     #[tokio::test]
     async fn add_connection_no_relay() {
-        crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
         let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
@@ -548,7 +542,6 @@ mod tests {
 
     #[tokio::test]
     async fn remove_connection() {
-        crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
         let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
@@ -578,7 +571,6 @@ mod tests {
 
     #[tokio::test]
     async fn remove_connection_no_connection() {
-        crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
         let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
@@ -591,7 +583,6 @@ mod tests {
 
     #[tokio::test]
     async fn send_data() {
-        crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
         let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
@@ -654,7 +645,6 @@ mod tests {
 
     #[tokio::test]
     async fn send_data_no_connection() {
-        crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
         let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
@@ -670,7 +660,6 @@ mod tests {
 
     #[tokio::test]
     async fn send_oob() {
-        crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
         let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
@@ -693,7 +682,6 @@ mod tests {
 
     #[tokio::test]
     async fn send_oob_no_relay() {
-        crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
         let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
@@ -707,7 +695,6 @@ mod tests {
 
     #[tokio::test]
     async fn send_onion() {
-        crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
         let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
@@ -737,7 +724,6 @@ mod tests {
 
     #[tokio::test]
     async fn send_onion_no_relay() {
-        crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
         let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
@@ -761,7 +747,6 @@ mod tests {
 
     #[tokio::test]
     async fn set_connection_status() {
-        crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
         let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
@@ -780,7 +765,6 @@ mod tests {
 
     #[tokio::test]
     async fn set_connection_status_no_connection() {
-        crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
         let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
@@ -856,7 +840,6 @@ mod tests {
 
     #[tokio::test]
     async fn main_loop_put_to_sleep() {
-        crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
         let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
@@ -895,7 +878,6 @@ mod tests {
 
     #[tokio::test]
     async fn main_loop_remove_unsuccessful() {
-        crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
         let connections = Connections::new(dht_pk, dht_sk, incoming_tx);
@@ -941,7 +923,6 @@ mod tests {
 
     #[tokio::test]
     async fn main_loop_remove_not_used() {
-        crypto_init().unwrap();
         let (dht_pk, dht_sk) = gen_keypair();
         let (incoming_tx, _incoming_rx) = mpsc::unbounded();
         let connections = Connections::new(dht_pk, dht_sk, incoming_tx);

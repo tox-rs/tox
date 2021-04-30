@@ -132,7 +132,6 @@ mod tests {
     use super::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         query_response_encode_decode,
         QueryResponse::new(1, vec![
             PeerInfo {

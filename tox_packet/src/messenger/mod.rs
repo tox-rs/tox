@@ -123,43 +123,36 @@ mod tests {
     use crate::messenger::file_transfer::{FileControl, TransferDirection, ControlType};
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_online_encode_decode,
         Packet::Online(Online)
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_action_encode_decode,
         Packet::Action(Action::new("1234".to_string()))
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_offline_encode_decode,
         Packet::Offline(Offline)
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_message_encode_decode,
         Packet::Message(Message::new("1234".to_string()))
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_nickname_encode_decode,
         Packet::Nickname(Nickname::new("1234".to_string()))
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_user_status_encode_decode,
         Packet::UserStatus(UserStatus::new(PeerStatus::Busy))
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_typing_encode_decode,
         Packet::Typing(Typing::new(TypingStatus::NotTyping))
     );
@@ -171,19 +164,16 @@ mod tests {
     // );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_status_message_encode_decode,
         Packet::StatusMessage(StatusMessage::new("1234".to_string()))
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_conference_encode_decode,
         Packet::Conference(ConferencePacket::Invite(Invite::new(1, ConferenceType::Text, thread_rng().gen())))
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_file_transfer_encode_decode,
         Packet::FileTransfer(FileTransferPacket::FileControl(FileControl::new(TransferDirection::Send, 1, ControlType::Seek(100))))
     );

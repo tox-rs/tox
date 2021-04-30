@@ -345,7 +345,6 @@ mod tests {
 
     #[test]
     fn announce_entry_valid() {
-        crypto_init().unwrap();
         let entry = OnionAnnounceEntry::new(
             PublicKey::from_slice(&[1; 32]).unwrap(),
             "1.2.3.4".parse().unwrap(),
@@ -361,7 +360,6 @@ mod tests {
 
     #[tokio::test]
     async fn announce_entry_expired() {
-        crypto_init().unwrap();
         let entry = OnionAnnounceEntry::new(
             PublicKey::from_slice(&[1; 32]).unwrap(),
             "1.2.3.4".parse().unwrap(),
@@ -381,7 +379,6 @@ mod tests {
 
     #[test]
     fn ping_id_respects_timeout_gap() {
-        crypto_init().unwrap();
         let onion_announce = OnionAnnounce::new(&mut thread_rng(), gen_keypair().0);
 
         let time = SystemTime::now();
@@ -399,7 +396,6 @@ mod tests {
 
     #[test]
     fn ping_id_depends_on_all_args() {
-        crypto_init().unwrap();
         let onion_announce = OnionAnnounce::new(&mut thread_rng(), gen_keypair().0);
 
         let time_1 = SystemTime::now();
@@ -430,7 +426,6 @@ mod tests {
     }
 
     fn create_random_entry(saddr: SocketAddr) -> OnionAnnounceEntry {
-        crypto_init().unwrap();
         OnionAnnounceEntry::new(
             gen_keypair().0,
             saddr.ip(),
@@ -445,7 +440,6 @@ mod tests {
 
     #[tokio::test]
     async fn expired_entry_not_in_entries() {
-        crypto_init().unwrap();
         let dht_pk = gen_keypair().0;
         let mut onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);
 
@@ -468,7 +462,6 @@ mod tests {
     // Tests for OnionAnnounce::add_to_entries
     #[test]
     fn add_to_entries_when_limit_is_not_reached() {
-        crypto_init().unwrap();
         let dht_pk = gen_keypair().0;
         let mut onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);
 
@@ -491,7 +484,6 @@ mod tests {
 
     #[tokio::test]
     async fn add_to_entries_should_update_existent_entry() {
-        crypto_init().unwrap();
         let dht_pk = gen_keypair().0;
         let mut onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);
 
@@ -532,7 +524,6 @@ mod tests {
 
     #[tokio::test]
     async fn add_to_entries_should_replace_timed_out_entries() {
-        crypto_init().unwrap();
         let dht_pk = gen_keypair().0;
         let mut onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);
 
@@ -575,7 +566,6 @@ mod tests {
 
     #[test]
     fn add_to_entries_should_replace_the_farthest_entry() {
-        crypto_init().unwrap();
         let dht_pk = PublicKey::from_slice(&[0; 32]).unwrap();
         let mut onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);
 
@@ -611,7 +601,6 @@ mod tests {
 
     #[test]
     fn add_to_entries_should_should_not_add_the_farthest_entry() {
-        crypto_init().unwrap();
         let dht_pk = PublicKey::from_slice(&[0; 32]).unwrap();
         let mut onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);
 
@@ -645,7 +634,6 @@ mod tests {
     // Tests for OnionAnnounce::handle_onion_announce_request
     #[test]
     fn handle_announce_failed_to_find_node() {
-        crypto_init().unwrap();
         let dht_pk = gen_keypair().0;
         let search_pk = gen_keypair().0;
         let data_pk = gen_keypair().0;
@@ -683,7 +671,6 @@ mod tests {
 
     #[test]
     fn handle_announce_node_is_found() {
-        crypto_init().unwrap();
         let dht_pk = gen_keypair().0;
         let data_pk = gen_keypair().0;
         let packet_pk = gen_keypair().0;
@@ -723,7 +710,6 @@ mod tests {
 
     #[test]
     fn handle_announce_successfully_announced() {
-        crypto_init().unwrap();
         let dht_pk = gen_keypair().0;
         let search_pk = gen_keypair().0;
         let data_pk = gen_keypair().0;
@@ -764,7 +750,6 @@ mod tests {
 
     #[test]
     fn handle_announce_failed_to_find_ourselves_with_different_data_pk() { // weird case, should we remove it?
-        crypto_init().unwrap();
         let dht_pk = gen_keypair().0;
         let data_pk = gen_keypair().0;
         let packet_pk = gen_keypair().0;
@@ -805,7 +790,6 @@ mod tests {
     // Tests for OnionAnnounce::handle_onion_announce_request
     #[test]
     fn handle_data_request() {
-        crypto_init().unwrap();
         let (dht_pk, _dht_sk) = gen_keypair();
 
         let mut onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);
@@ -850,7 +834,6 @@ mod tests {
 
     #[test]
     fn handle_data_request_unknown_destination() {
-        crypto_init().unwrap();
         let (dht_pk, _dht_sk) = gen_keypair();
 
         let onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);

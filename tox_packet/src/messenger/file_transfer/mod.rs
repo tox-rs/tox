@@ -183,19 +183,16 @@ mod tests {
     use super::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_file_control_encode_decode,
         Packet::FileControl(FileControl::new(TransferDirection::Send, 1, ControlType::Seek(100)))
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_file_data_encode_decode,
         Packet::FileData(FileData::new(1, vec![1,2,3,4]))
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_file_send_request_encode_decode,
         Packet::FileSendRequest(FileSendRequest::new(1, FileType::Avatar, 4, FileUid([42; FILE_UID_BYTES]), "data".to_string()))
     );
