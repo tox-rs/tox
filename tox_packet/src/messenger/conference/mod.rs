@@ -208,7 +208,6 @@ mod tests {
     use tox_crypto::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         conference_uid_encode_decode,
         ConferenceUid([42; CONFERENCE_UID_BYTES])
     );
@@ -221,37 +220,31 @@ mod tests {
     }
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_invite_encode_decode,
         Packet::Invite(Invite::new(1, ConferenceType::Audio, ConferenceUid([42; CONFERENCE_UID_BYTES])))
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_invite_response_encode_decode,
         Packet::InviteResponse(InviteResponse::new(1, 2, ConferenceType::Text, ConferenceUid([42; CONFERENCE_UID_BYTES])))
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_peer_noline_encode_decode,
         Packet::PeerOnline(PeerOnline::new(1, ConferenceType::Text, ConferenceUid([42; CONFERENCE_UID_BYTES])))
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_peer_leave_encode_decode,
         Packet::PeerLeave(PeerLeave::new(1))
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_query_encode_decode,
         Packet::Query(Query::new(1))
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_query_response_encode_decode,
         Packet::QueryResponse(QueryResponse::new(1, vec![
             PeerInfo::new(1, gen_keypair().0, gen_keypair().0, "1234".to_owned()),
@@ -260,55 +253,46 @@ mod tests {
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_title_encode_decode,
         Packet::Title(Title::new(1, "1234".to_owned()))
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_ping_encode_decode,
         Packet::Ping(Ping::new(1, 2, 3))
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_new_peer_encode_decode,
         Packet::NewPeer(NewPeer::new(1, 2, 3, 4, gen_keypair().0, gen_keypair().0))
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_kill_peer_encode_decode,
         Packet::KillPeer(KillPeer::new(1, 2, 3, 4))
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_freeze_peer_encode_decode,
         Packet::FreezePeer(FreezePeer::new(1, 2, 3, 4))
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_hange_name_encode_decode,
         Packet::ChangeName(ChangeName::new(1, 2, 3, "1234".to_owned()))
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_hange_title_encode_decode,
         Packet::ChangeTitle(ChangeTitle::new(1, 2, 3, "1234".to_owned()))
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_conference_message_encode_decode,
         Packet::Message(Message::new(1, 2, 3, "1234".to_owned()))
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_conference_action_encode_decode,
         Packet::Action(Action::new(1, 2, 3, "1234".to_owned()))
     );

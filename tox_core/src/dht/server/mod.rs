@@ -1396,8 +1396,6 @@ mod tests {
 
     fn create_node() -> (Server, PrecomputedKey, PublicKey, SecretKey,
             mpsc::Receiver<(Packet, SocketAddr)>, SocketAddr) {
-        crypto_init().unwrap();
-
         let (pk, sk) = gen_keypair();
         let (tx, rx) = mpsc::channel(32);
         let alice = Server::new(tx, pk, sk);

@@ -180,7 +180,6 @@ mod tests {
     use xsalsa20poly1305::aead::NewAead;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         cookie_encode_decode,
         Cookie {
             time: 12345,
@@ -190,7 +189,6 @@ mod tests {
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         encrypted_cookie_encode_decode,
         EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
@@ -200,7 +198,6 @@ mod tests {
 
     #[test]
     fn cookie_encrypt_decrypt() {
-        crypto_init().unwrap();
         let mut rng = thread_rng();
         let symmetric_key = XSalsa20Poly1305::new(&XSalsa20Poly1305::generate_key(&mut rng));
         let payload = Cookie::new(gen_keypair().0, gen_keypair().0);
@@ -214,7 +211,6 @@ mod tests {
 
     #[test]
     fn cookie_encrypt_decrypt_invalid_key() {
-        crypto_init().unwrap();
         let mut rng = thread_rng();
         let symmetric_key = XSalsa20Poly1305::new(&XSalsa20Poly1305::generate_key(&mut rng));
         let eve_symmetric_key = XSalsa20Poly1305::new(&XSalsa20Poly1305::generate_key(&mut rng));
@@ -262,7 +258,6 @@ mod tests {
 
     #[test]
     fn cookie_timed_out() {
-        crypto_init().unwrap();
         let mut cookie = Cookie::new(gen_keypair().0, gen_keypair().0);
         assert!(!cookie.is_timed_out());
         cookie.time -= COOKIE_TIMEOUT + 1;

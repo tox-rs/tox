@@ -49,7 +49,6 @@ mod tests {
     use crate::dht::lan_discovery::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         lan_discovery_encode_decode,
         LanDiscovery {
             pk: gen_keypair().0

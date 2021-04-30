@@ -167,7 +167,6 @@ mod tests {
     const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - xsalsa20poly1305::NONCE_SIZE;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         onion_request_1_encode_decode,
         OnionRequest1 {
             nonce: gen_nonce(),
@@ -181,7 +180,6 @@ mod tests {
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         onion_request_1_payload_encode_decode,
         OnionRequest1Payload {
             ip_port: IpPort {
@@ -196,7 +194,6 @@ mod tests {
 
     #[test]
     fn onion_request_1_payload_encrypt_decrypt() {
-        crypto_init().unwrap();
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
@@ -223,7 +220,6 @@ mod tests {
 
     #[test]
     fn onion_request_1_payload_encrypt_decrypt_invalid_key() {
-        crypto_init().unwrap();
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let (_eve_pk, eve_sk) = gen_keypair();
@@ -251,7 +247,6 @@ mod tests {
 
     #[test]
     fn onion_request_1_decrypt_invalid() {
-        crypto_init().unwrap();
         let (_alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let shared_secret = precompute(&bob_pk, &alice_sk);

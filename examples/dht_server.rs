@@ -33,10 +33,6 @@ fn as_packed_node(pk: &str, saddr: &str) -> PackedNode {
 async fn main() -> Result<(), Error> {
     env_logger::init();
 
-    if crypto_init().is_err() {
-        panic!("Crypto initialization failed.");
-    }
-
     let (server_pk, server_sk) = gen_keypair();
 
     // Create a channel for server to communicate with network

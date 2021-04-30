@@ -63,7 +63,6 @@ mod test {
     use super::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         oob_send_encode_decode,
         OobSend {
             destination_pk: gen_keypair().0,

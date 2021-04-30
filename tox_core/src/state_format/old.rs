@@ -618,13 +618,11 @@ mod tests {
     use tox_packet::ip_port::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         no_spam_keys_encode_decode,
         thread_rng().gen::<NospamKeys>()
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         dht_state_encode_decode,
         DhtState(vec![
             PackedNode {
@@ -639,7 +637,6 @@ mod tests {
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         friends_encode_decode,
         Friends(vec![
             FriendState {
@@ -666,7 +663,6 @@ mod tests {
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         friend_state_encode_decode,
         FriendState {
             friend_status: FriendStatus::Added,
@@ -681,31 +677,26 @@ mod tests {
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         name_encode_decode,
         Name(vec![0,1,2,3,4])
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         status_msg_encode_decode,
         StatusMsg(vec![0,1,2,3,4,5])
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         eof_encode_decode,
         Eof
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         user_status_encode_decode,
         UserStatus(UserWorkingStatus::Online)
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         tcp_relays_encode_decode,
         TcpRelays(vec![
             TcpUdpPackedNode {
@@ -728,7 +719,6 @@ mod tests {
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         path_nodes_encode_decode,
         PathNodes(vec![
             TcpUdpPackedNode {
@@ -751,7 +741,6 @@ mod tests {
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         state_encode_decode,
         State {
             sections: vec![

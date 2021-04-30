@@ -40,7 +40,6 @@ mod tests {
     use super::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         inner_onion_announce_response_encode_decode,
         InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
             sendback_data: 12345,
@@ -50,7 +49,6 @@ mod tests {
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         inner_onion_data_response_encode_decode,
         InnerOnionResponse::OnionDataResponse(OnionDataResponse {
             nonce: gen_nonce(),

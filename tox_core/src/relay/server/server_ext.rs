@@ -256,7 +256,6 @@ mod tests {
 
     #[tokio::test]
     async fn run_connection() {
-        crypto_init().unwrap();
         let (client_pk, client_sk) = gen_keypair();
         let (server_pk, server_sk) = gen_keypair();
 
@@ -304,7 +303,6 @@ mod tests {
     #[tokio::test]
     async fn run() {
         tokio::time::pause();
-        crypto_init().unwrap();
 
         let (client_pk, client_sk) = gen_keypair();
         let (server_pk, server_sk) = gen_keypair();

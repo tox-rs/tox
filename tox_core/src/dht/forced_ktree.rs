@@ -279,7 +279,6 @@ mod tests {
 
     #[test]
     fn forced_ktree_contains() {
-        crypto_init().unwrap();
         let (pk, _) = gen_keypair();
         let mut ktree = ForcedKtree::new(&pk);
 
@@ -309,7 +308,6 @@ mod tests {
 
     #[test]
     fn forced_ktree_can_add() {
-        crypto_init().unwrap();
         let pk = PublicKey([0; PUBLICKEYBYTES]);
         let mut ktree = ForcedKtree::new(&pk);
 
@@ -412,7 +410,6 @@ mod tests {
 
     #[tokio::test]
     async fn forced_ktree_is_all_discarded() {
-        crypto_init().unwrap();
         let (pk, _) = gen_keypair();
         let mut ktree = ForcedKtree::new(&pk);
 

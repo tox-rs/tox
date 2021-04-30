@@ -108,11 +108,9 @@ equals original value. Type of this value should implement `ToBytes`,
 */
 #[macro_export]
 macro_rules! encode_decode_test (
-    ($init:expr, $test:ident, $value:expr) => (
+    ($test:ident, $value:expr) => (
         #[test]
         fn $test() {
-            $init;
-
             let value = $value;
             let mut buf = [0; 1024 * 1024];
             let (_, size) = value.to_bytes((&mut buf, 0)).unwrap();

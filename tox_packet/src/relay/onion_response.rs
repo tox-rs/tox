@@ -48,7 +48,6 @@ mod test {
     use crate::onion::{OnionAnnounceResponse, OnionDataResponse};
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         onion_response_with_announce_encode_decode,
         OnionResponse {
             payload: InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
@@ -60,7 +59,6 @@ mod test {
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         onion_response_with_data_encode_decode,
         OnionResponse {
             payload: InnerOnionResponse::OnionDataResponse(OnionDataResponse {

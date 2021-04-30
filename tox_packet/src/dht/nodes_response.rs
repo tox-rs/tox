@@ -155,7 +155,6 @@ mod tests {
     use std::net::SocketAddr;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         nodes_response_payload_encode_decode,
         NodesResponsePayload { nodes: vec![
             PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)

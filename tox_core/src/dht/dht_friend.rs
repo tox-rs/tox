@@ -103,7 +103,6 @@ mod tests {
 
     #[test]
     fn addr_is_unknown() {
-        crypto_init().unwrap();
         let pk = gen_keypair().0;
         let mut friend = DhtFriend::new(&mut thread_rng(), pk);
 
@@ -115,7 +114,6 @@ mod tests {
 
     #[test]
     fn addr_is_known() {
-        crypto_init().unwrap();
         let pk = gen_keypair().0;
         let mut friend = DhtFriend::new(&mut thread_rng(), pk);
 
@@ -129,7 +127,6 @@ mod tests {
 
     #[test]
     fn get_returned_addrs() {
-        crypto_init().unwrap();
         let pk = gen_keypair().0;
         let mut friend = DhtFriend::new(&mut thread_rng(), pk);
 
@@ -162,7 +159,6 @@ mod tests {
 
     #[tokio::test]
     async fn get_returned_addrs_timed_out() {
-        crypto_init().unwrap();
         let pk = gen_keypair().0;
         let mut friend = DhtFriend::new(&mut thread_rng(), pk);
 
@@ -191,7 +187,6 @@ mod tests {
 
     #[test]
     fn can_and_try_add_to_close() {
-        crypto_init().unwrap();
         let pk = PublicKey([0; PUBLICKEYBYTES]);
         let mut friend = DhtFriend::new(&mut thread_rng(), pk);
 

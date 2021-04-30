@@ -58,7 +58,6 @@ mod tests {
     const ONION_RETURN_2_PAYLOAD_SIZE: usize = ONION_RETURN_2_SIZE - xsalsa20poly1305::NONCE_SIZE;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         onion_response_2_encode_decode,
         OnionResponse2 {
             onion_return: OnionReturn {

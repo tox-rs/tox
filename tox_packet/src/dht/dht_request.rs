@@ -444,19 +444,16 @@ mod tests {
     use crate::ip_port::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         nat_ping_request_encode_decode,
         DhtRequestPayload::NatPingRequest(NatPingRequest { id: 42 })
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         nat_ping_response_encode_decode,
         DhtRequestPayload::NatPingResponse(NatPingResponse { id: 42 })
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         dht_pk_announce_encode_decode,
         DhtRequestPayload::DhtPkAnnounce(DhtPkAnnounce {
             real_pk: gen_keypair().0,
@@ -466,19 +463,16 @@ mod tests {
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         hardening_request_encode_decode,
         DhtRequestPayload::HardeningRequest(HardeningRequest)
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         hardening_response_encode_decode,
         DhtRequestPayload::HardeningResponse(HardeningResponse)
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         dht_pk_announce_payload_encode_decode,
         DhtPkAnnouncePayload {
             no_reply: 42,
@@ -522,7 +516,6 @@ mod tests {
 
     #[test]
     fn dht_request_payload_encrypt_decrypt() {
-        crypto_init().unwrap();
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, bob_sk) = gen_keypair();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
@@ -547,7 +540,6 @@ mod tests {
 
     #[test]
     fn dht_request_payload_encrypt_decrypt_invalid_key() {
-        crypto_init().unwrap();
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let (_eve_pk, eve_sk) = gen_keypair();
@@ -572,7 +564,6 @@ mod tests {
 
     #[test]
     fn dht_request_decode_invalid() {
-        crypto_init().unwrap();
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, bob_sk) = gen_keypair();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
@@ -614,7 +605,6 @@ mod tests {
 
     #[test]
     fn dht_pk_announce_payload_encrypt_decrypt() {
-        crypto_init().unwrap();
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
@@ -641,7 +631,6 @@ mod tests {
 
     #[test]
     fn dht_pk_announce_payload_encrypt_decrypt_invalid_key() {
-        crypto_init().unwrap();
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let (_eve_pk, eve_sk) = gen_keypair();
@@ -669,7 +658,6 @@ mod tests {
 
     #[test]
     fn dht_pk_announce_payload_encrypt_decrypt_invalid() {
-        crypto_init().unwrap();
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);

@@ -58,7 +58,6 @@ mod tests {
     use super::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         action_encode_decode,
         Action::new("1234".to_string())
     );

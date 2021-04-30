@@ -40,7 +40,6 @@ mod tests {
     use super::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         inner_onion_announce_request_encode_decode,
         InnerOnionRequest::InnerOnionAnnounceRequest(InnerOnionAnnounceRequest {
             nonce: gen_nonce(),
@@ -50,7 +49,6 @@ mod tests {
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         inner_onion_data_request_encode_decode,
         InnerOnionRequest::InnerOnionDataRequest(InnerOnionDataRequest {
             destination_pk: gen_keypair().0,

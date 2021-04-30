@@ -140,7 +140,6 @@ mod tests {
     use crate::dht::Packet;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         nodes_request_payload_encode_decode,
         NodesRequestPayload { pk: gen_keypair().0, id: 42 }
     );

@@ -153,7 +153,6 @@ mod tests {
     use nom::{Err, error::ErrorKind};
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         crypto_data_encode_decode,
         CryptoData {
             nonce_last_bytes: 42,
@@ -162,7 +161,6 @@ mod tests {
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         crypto_data_payload_encode_decode,
         CryptoDataPayload {
             buffer_start: 12345,
@@ -172,7 +170,6 @@ mod tests {
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         crypto_data_payload_encode_decode_empty,
         CryptoDataPayload {
             buffer_start: 0,
@@ -183,7 +180,6 @@ mod tests {
 
     #[test]
     fn crypto_data_encrypt_decrypt() {
-        crypto_init().unwrap();
         let (_alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
@@ -208,7 +204,6 @@ mod tests {
 
     #[test]
     fn crypto_data_encrypt_decrypt_invalid_key() {
-        crypto_init().unwrap();
         let (_alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let (_eve_pk, eve_sk) = gen_keypair();
@@ -235,7 +230,6 @@ mod tests {
 
     #[test]
     fn crypto_data_encrypt_decrypt_invalid() {
-        crypto_init().unwrap();
         let (_alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);

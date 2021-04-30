@@ -82,7 +82,6 @@ mod test {
     use super::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         data_encode_decode,
         Data {
             connection_id: ConnectionId::from_index(1),
