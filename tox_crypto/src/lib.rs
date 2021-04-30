@@ -115,23 +115,20 @@ pub fn decrypt_data_symmetric(precomputed_key: &PrecomputedKey,
 
     Spec: https://zetok.github.io/tox-spec#nonce-2
 */
-// TODO: needs to be tested on BE arch
 #[inline]
 pub fn increment_nonce(nonce: &mut Nonce) {
-    let Nonce(ref mut bytes) = *nonce;
-    bytes.reverse(); // treat nonce as LE number
-    ::sodiumoxide::utils::increment_le(bytes);
-    bytes.reverse(); // treat nonce as BE number again
+    increment_nonce_number(nonce, 1)
 }
 
 /// Inrement given nonce by number `num`.
-pub fn increment_nonce_number(nonce: &mut Nonce, num: u64) {
-    let Nonce(ref mut bytes) = *nonce;
-    bytes.reverse(); // treat nonce as LE number
-    let mut num_bytes = [0; NONCEBYTES];
-    num_bytes[..8].copy_from_slice(&u64::to_le_bytes(num));
-    ::sodiumoxide::utils::add_le(bytes, &num_bytes).unwrap(); // sizes are equal
-    bytes.reverse(); // treat nonce as BE number again
+pub fn increment_nonce_number(nonce: &mut Nonce, num: u16) {
+    let ref mut bytes = &mut nonce.0;
+    let mut c = num as u32;
+    for i in (0 .. NONCEBYTES).rev() {
+        c += bytes[i] as u32;
+        bytes[i] = c as u8;
+        c >>= 8;
+    }
 }
 
 #[cfg(test)]
@@ -324,17 +321,17 @@ pub mod tests {
     }
 
     #[test]
-    fn increment_nonce_number_test_0xff0000_plus_0x011000() {
+    fn increment_nonce_number_test_0xff00_plus_0x0110() {
         crypto_init().unwrap();
         let cmp_nonce = Nonce([0, 0, 0, 0, 0, 0, 0, 0,
                                0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 1, 0, 0x10, 0]);
+                               0, 0, 0, 0, 0, 1, 0, 0x10]);
 
         let mut nonce = Nonce([0, 0, 0, 0, 0, 0, 0, 0,
                                0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 0, 0xff, 0, 0]);
+                               0, 0, 0, 0, 0, 0, 0xff, 0]);
 
-        increment_nonce_number(&mut nonce, 0x01_10_00);
+        increment_nonce_number(&mut nonce, 0x01_10);
         assert_eq!(nonce, cmp_nonce);
     }
 }
