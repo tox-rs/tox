@@ -12,7 +12,7 @@ use nom::{
     named,
     do_parse, map, call, take,
 };
-use rand::{Rng, distributions::{Distribution, Standard}};
+use rand::{CryptoRng, Rng, distributions::{Distribution, Standard}};
 use cookie_factory::{do_gen, gen_slice};
 
 use tox_binary_io::*;
@@ -178,7 +178,7 @@ impl ToxId {
     let _toxid = ToxId::new(&mut rng, pk);
     ```
     */
-    pub fn new<R: Rng>(rng: &mut R, pk: PublicKey) -> Self {
+    pub fn new<R: Rng + CryptoRng>(rng: &mut R, pk: PublicKey) -> Self {
         let nospam = rng.gen();
         let checksum = Self::checksum(&pk, nospam);
         ToxId { pk, nospam, checksum }
@@ -215,7 +215,7 @@ impl ToxId {
     */
     // TODO: more tests
     // TODO: ↓ split into `new_nospam()` and `set_nospam(NoSpam)` ?
-    pub fn new_nospam<R: Rng>(&mut self, rng: &mut R, nospam: Option<NoSpam>) {
+    pub fn new_nospam<R: Rng + CryptoRng>(&mut self, rng: &mut R, nospam: Option<NoSpam>) {
         if let Some(nospam) = nospam {
             self.nospam = nospam;
         } else {

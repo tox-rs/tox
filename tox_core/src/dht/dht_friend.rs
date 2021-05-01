@@ -4,7 +4,7 @@ Module for friend.
 
 use std::time::Instant;
 use std::net::SocketAddr;
-use rand::Rng;
+use rand::{CryptoRng, Rng};
 
 use crate::time::*;
 use crate::dht::kbucket::*;
@@ -41,7 +41,7 @@ pub struct DhtFriend {
 
 impl DhtFriend {
     /// Create new `DhtFriend`.
-    pub fn new<R: Rng>(rng: &mut R, pk: PublicKey) -> Self {
+    pub fn new<R: Rng + CryptoRng>(rng: &mut R, pk: PublicKey) -> Self {
         DhtFriend {
             pk,
             close_nodes: Kbucket::new(FRIEND_CLOSE_NODES_COUNT),

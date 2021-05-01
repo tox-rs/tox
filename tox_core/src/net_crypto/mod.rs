@@ -1137,6 +1137,7 @@ mod tests {
     // https://github.com/rust-lang/rust/issues/61520
     use super::{*, Packet};
     use futures::{Future, StreamExt};
+    use rand::CryptoRng;
 
     impl NetCrypto {
         pub async fn has_friend(&self, pk: &PublicKey) -> bool {
@@ -1177,7 +1178,7 @@ mod tests {
             self.connections.write().await.insert(peer_real_pk, Arc::new(RwLock::new(connection)));
         }
 
-        pub fn get_cookie<R: Rng>(&self, rng: &mut R, real_pk: PublicKey, dht_pk: PublicKey) -> EncryptedCookie {
+        pub fn get_cookie<R: Rng + CryptoRng>(&self, rng: &mut R, real_pk: PublicKey, dht_pk: PublicKey) -> EncryptedCookie {
             let cookie = Cookie::new(real_pk, dht_pk);
             EncryptedCookie::new(rng, &self.symmetric_key, &cookie)
         }

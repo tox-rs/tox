@@ -7,7 +7,7 @@ https://zetok.github.io/tox-spec/#hole-punching
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
 use std::collections::HashMap;
-use rand::Rng;
+use rand::{CryptoRng, Rng};
 
 use crate::dht::dht_friend::*;
 use crate::dht::server::*;
@@ -58,7 +58,7 @@ pub struct HolePunching {
 
 impl HolePunching {
     /// Create new `HolePunching` object.
-    pub fn new<R: Rng>(rng: &mut R) -> Self {
+    pub fn new<R: Rng + CryptoRng>(rng: &mut R) -> Self {
         HolePunching {
             is_punching_done: true,
             num_punch_tries: 0,

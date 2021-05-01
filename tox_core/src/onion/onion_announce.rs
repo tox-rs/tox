@@ -6,7 +6,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant, SystemTime};
 use sha2::{Digest, Sha256};
 use sha2::digest::generic_array::typenum::marker_traits::Unsigned;
-use rand::Rng;
+use rand::{CryptoRng, Rng};
 
 use tox_binary_io::*;
 use tox_crypto::*;
@@ -165,7 +165,7 @@ pub struct OnionAnnounce {
 
 impl OnionAnnounce {
     /// Create new `OnionAnnounce` instance.
-    pub fn new<R: Rng>(rng: &mut R, dht_pk: PublicKey) -> OnionAnnounce {
+    pub fn new<R: Rng + CryptoRng>(rng: &mut R, dht_pk: PublicKey) -> OnionAnnounce {
         OnionAnnounce {
             secret_bytes: rng.gen(),
             entries: Vec::with_capacity(ONION_ANNOUNCE_MAX_ENTRIES),

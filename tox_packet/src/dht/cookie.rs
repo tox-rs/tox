@@ -6,7 +6,7 @@ use nom::{AsBytes, map_opt, number::complete::be_u64};
 use sha2::{Digest, Sha512};
 use sha2::digest::generic_array::typenum::marker_traits::Unsigned;
 use xsalsa20poly1305::{XSalsa20Poly1305, aead::{Aead, Error as AeadError}};
-use rand::Rng;
+use rand::{CryptoRng, Rng};
 
 use std::{convert::TryInto, time::SystemTime};
 
@@ -131,7 +131,7 @@ impl ToBytes for EncryptedCookie {
 
 impl EncryptedCookie {
     /// Create `EncryptedCookie` from `Cookie` encrypting it with `symmetric_key`
-    pub fn new<R: Rng>(rng: &mut R, symmetric_key: &XSalsa20Poly1305, payload: &Cookie) -> EncryptedCookie {
+    pub fn new<R: Rng + CryptoRng>(rng: &mut R, symmetric_key: &XSalsa20Poly1305, payload: &Cookie) -> EncryptedCookie {
         let nonce = rng.gen::<[u8; xsalsa20poly1305::NONCE_SIZE]>().into();
         let mut buf = [0; 72];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
