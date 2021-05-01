@@ -89,13 +89,13 @@ mod tests {
     encode_decode_test!(
         tox_crypto::crypto_init().unwrap(),
         file_send_request_encode_decode,
-        FileSendRequest::new(1, FileType::Data, 4, FileUid::new(), "data".to_string())
+        FileSendRequest::new(1, FileType::Data, 4, FileUid([42; FILE_UID_BYTES]), "data".to_string())
     );
 
     #[test]
     fn file_send_request_from_bytes_encoding_error() {
         let mut packet = vec![0x50, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff];
-        packet.extend_from_slice(&FileUid::new().0);
+        packet.extend_from_slice(&[42; FILE_UID_BYTES]);
         let err_string = vec![0, 159, 146, 150]; // not UTF8 bytes.
         packet.extend_from_slice(&err_string);
         assert!(FileSendRequest::from_bytes(&packet).is_err());
@@ -104,7 +104,7 @@ mod tests {
     #[test]
     fn file_send_request_from_bytes_overflow() {
         let mut packet = vec![0x50, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff];
-        packet.extend_from_slice(&FileUid::new().0);
+        packet.extend_from_slice(&[42; FILE_UID_BYTES]);
         let large_string = vec![32; MAX_FILESEND_FILENAME_LENGTH + 1];
         packet.extend_from_slice(&large_string);
         assert!(FileSendRequest::from_bytes(&packet).is_err());
@@ -113,7 +113,7 @@ mod tests {
     #[test]
     fn file_send_request_to_bytes_overflow() {
         let large_string = String::from_utf8(vec![32u8; MAX_FILESEND_FILENAME_LENGTH + 1]).unwrap();
-        let large_msg = FileSendRequest::new(1,FileType::Data,0xff00, FileUid::new(), large_string);
+        let large_msg = FileSendRequest::new(1,FileType::Data,0xff00, FileUid([42; FILE_UID_BYTES]), large_string);
         let mut buf = [0; MAX_FILESEND_FILENAME_LENGTH + 1 + 4 + 8 + FILE_UID_BYTES]; // provide needed space for serialize.
         assert!(large_msg.to_bytes((&mut buf, 0)).is_err());
     }

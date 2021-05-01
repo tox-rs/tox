@@ -215,7 +215,7 @@ mod tests {
     use super::*;
 
     use crate::packed_node::*;
-    use crate::toxid::NoSpam;
+    use crate::toxid::{NoSpam, NOSPAMBYTES};
 
     encode_decode_test!(
         tox_crypto::crypto_init().unwrap(),
@@ -378,7 +378,7 @@ mod tests {
         let (bob_pk, _bob_sk) = gen_keypair();
         let nonce = gen_nonce();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
-        let friend_request = FriendRequest::new(NoSpam::random(), "1234".to_owned());
+        let friend_request = FriendRequest::new(NoSpam([42; NOSPAMBYTES]), "1234".to_owned());
         let payload = OnionDataResponseInnerPayload::FriendRequest(friend_request);
         // encode payload
         let packet = OnionDataResponsePayload::new(&shared_secret, alice_pk, &nonce, &payload);

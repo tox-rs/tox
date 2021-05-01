@@ -2,7 +2,6 @@
 
 #![allow(clippy::result_unit_err)]
 
-pub use sodiumoxide::randombytes::randombytes_into;
 pub use sodiumoxide::crypto::box_::*;
 
 // TODO: check if `#[inline]` is actually useful

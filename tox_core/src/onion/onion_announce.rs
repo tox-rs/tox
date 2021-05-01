@@ -6,6 +6,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant, SystemTime};
 use sha2::{Digest, Sha256};
 use sha2::digest::generic_array::typenum::marker_traits::Unsigned;
+use rand::Rng;
 
 use tox_binary_io::*;
 use tox_crypto::*;
@@ -164,11 +165,9 @@ pub struct OnionAnnounce {
 
 impl OnionAnnounce {
     /// Create new `OnionAnnounce` instance.
-    pub fn new(dht_pk: PublicKey) -> OnionAnnounce {
-        let mut secret_bytes = [0; SECRET_BYTES_SIZE];
-        randombytes_into(&mut secret_bytes);
+    pub fn new<R: Rng>(rng: &mut R, dht_pk: PublicKey) -> OnionAnnounce {
         OnionAnnounce {
-            secret_bytes,
+            secret_bytes: rng.gen(),
             entries: Vec::with_capacity(ONION_ANNOUNCE_MAX_ENTRIES),
             dht_pk
         }
@@ -338,6 +337,8 @@ impl OnionAnnounce {
 
 #[cfg(test)]
 mod tests {
+    use rand::thread_rng;
+
     use super::*;
 
     const ONION_RETURN_3_PAYLOAD_SIZE: usize = ONION_RETURN_3_SIZE - xsalsa20poly1305::NONCE_SIZE;
@@ -381,7 +382,7 @@ mod tests {
     #[test]
     fn ping_id_respects_timeout_gap() {
         crypto_init().unwrap();
-        let onion_announce = OnionAnnounce::new(gen_keypair().0);
+        let onion_announce = OnionAnnounce::new(&mut thread_rng(), gen_keypair().0);
 
         let time = SystemTime::now();
         let time_1 = time - Duration::from_secs(unix_time(time) % PING_ID_TIMEOUT.as_secs());
@@ -399,7 +400,7 @@ mod tests {
     #[test]
     fn ping_id_depends_on_all_args() {
         crypto_init().unwrap();
-        let onion_announce = OnionAnnounce::new(gen_keypair().0);
+        let onion_announce = OnionAnnounce::new(&mut thread_rng(), gen_keypair().0);
 
         let time_1 = SystemTime::now();
         let time_2 = time_1 + PING_ID_TIMEOUT;
@@ -446,7 +447,7 @@ mod tests {
     async fn expired_entry_not_in_entries() {
         crypto_init().unwrap();
         let dht_pk = gen_keypair().0;
-        let mut onion_announce = OnionAnnounce::new(dht_pk);
+        let mut onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);
 
         let entry = create_random_entry("1.2.3.4:12345".parse().unwrap());
         let entry_pk = entry.pk;
@@ -469,7 +470,7 @@ mod tests {
     fn add_to_entries_when_limit_is_not_reached() {
         crypto_init().unwrap();
         let dht_pk = gen_keypair().0;
-        let mut onion_announce = OnionAnnounce::new(dht_pk);
+        let mut onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);
 
         let mut pks = Vec::new();
 
@@ -492,7 +493,7 @@ mod tests {
     async fn add_to_entries_should_update_existent_entry() {
         crypto_init().unwrap();
         let dht_pk = gen_keypair().0;
-        let mut onion_announce = OnionAnnounce::new(dht_pk);
+        let mut onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);
 
         let mut pks = Vec::new();
 
@@ -533,7 +534,7 @@ mod tests {
     async fn add_to_entries_should_replace_timed_out_entries() {
         crypto_init().unwrap();
         let dht_pk = gen_keypair().0;
-        let mut onion_announce = OnionAnnounce::new(dht_pk);
+        let mut onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);
 
         let mut pks = Vec::new();
 
@@ -576,7 +577,7 @@ mod tests {
     fn add_to_entries_should_replace_the_farthest_entry() {
         crypto_init().unwrap();
         let dht_pk = PublicKey::from_slice(&[0; 32]).unwrap();
-        let mut onion_announce = OnionAnnounce::new(dht_pk);
+        let mut onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);
 
         // add one entry with farthest pk
         let mut entry = create_random_entry("1.2.3.4:12345".parse().unwrap());
@@ -612,7 +613,7 @@ mod tests {
     fn add_to_entries_should_should_not_add_the_farthest_entry() {
         crypto_init().unwrap();
         let dht_pk = PublicKey::from_slice(&[0; 32]).unwrap();
-        let mut onion_announce = OnionAnnounce::new(dht_pk);
+        let mut onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);
 
         let mut pks = Vec::new();
 
@@ -650,7 +651,7 @@ mod tests {
         let data_pk = gen_keypair().0;
         let packet_pk = gen_keypair().0;
 
-        let mut onion_announce = OnionAnnounce::new(dht_pk);
+        let mut onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);
 
         // insert random entry
         let entry = create_random_entry("1.2.3.4:12345".parse().unwrap());
@@ -687,7 +688,7 @@ mod tests {
         let data_pk = gen_keypair().0;
         let packet_pk = gen_keypair().0;
 
-        let mut onion_announce = OnionAnnounce::new(dht_pk);
+        let mut onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);
 
         // insert random entry
         let entry = create_random_entry("1.2.3.4:12345".parse().unwrap());
@@ -728,7 +729,7 @@ mod tests {
         let data_pk = gen_keypair().0;
         let packet_pk = gen_keypair().0;
 
-        let mut onion_announce = OnionAnnounce::new(dht_pk);
+        let mut onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);
 
         // insert random entry
         let entry = create_random_entry("1.2.3.4:12345".parse().unwrap());
@@ -768,7 +769,7 @@ mod tests {
         let data_pk = gen_keypair().0;
         let packet_pk = gen_keypair().0;
 
-        let mut onion_announce = OnionAnnounce::new(dht_pk);
+        let mut onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);
 
         // insert ourselves
         let mut entry = create_random_entry("1.2.3.4:12345".parse().unwrap());
@@ -807,7 +808,7 @@ mod tests {
         crypto_init().unwrap();
         let (dht_pk, _dht_sk) = gen_keypair();
 
-        let mut onion_announce = OnionAnnounce::new(dht_pk);
+        let mut onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);
 
         // insert random entry
         let entry = create_random_entry("1.2.3.4:12345".parse().unwrap());
@@ -852,7 +853,7 @@ mod tests {
         crypto_init().unwrap();
         let (dht_pk, _dht_sk) = gen_keypair();
 
-        let onion_announce = OnionAnnounce::new(dht_pk);
+        let onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);
 
         let onion_return = OnionReturn {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],

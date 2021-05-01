@@ -71,6 +71,6 @@ mod tests {
     encode_decode_test!(
         tox_crypto::crypto_init().unwrap(),
         peer_noline_encode_decode,
-        PeerOnline::new(1, ConferenceType::Text, ConferenceUid::random())
+        PeerOnline::new(1, ConferenceType::Text, ConferenceUid([42; CONFERENCE_UID_BYTES]))
     );
 }

@@ -73,6 +73,6 @@ mod tests {
     encode_decode_test!(
         tox_crypto::crypto_init().unwrap(),
         invite_encode_decode,
-        Invite::new(1, ConferenceType::Text, ConferenceUid::random())
+        Invite::new(1, ConferenceType::Text, ConferenceUid([42; CONFERENCE_UID_BYTES]))
     );
 }

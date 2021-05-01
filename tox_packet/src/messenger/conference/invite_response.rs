@@ -80,6 +80,6 @@ mod tests {
     encode_decode_test!(
         tox_crypto::crypto_init().unwrap(),
         invite_response_encode_decode,
-        InviteResponse::new(1, 2, ConferenceType::Audio, ConferenceUid::random())
+        InviteResponse::new(1, 2, ConferenceType::Audio, ConferenceUid([42; CONFERENCE_UID_BYTES]))
     );
 }

@@ -2,8 +2,8 @@
 */
 
 use nom::number::complete::{le_u8, be_u32, be_u64};
+use rand::{Rng, distributions::{Distribution, Standard}};
 
-use tox_crypto::*;
 use tox_binary_io::*;
 
 mod file_control;
@@ -126,21 +126,13 @@ const FILE_UID_BYTES: usize = 32;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FileUid([u8; FILE_UID_BYTES]);
 
-impl Default for FileUid {
-    fn default() -> Self {
-        let mut array = [0; FILE_UID_BYTES];
-        randombytes_into(&mut array);
-
-        FileUid(array)
+impl Distribution<FileUid> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> FileUid {
+        FileUid(rng.gen())
     }
 }
 
 impl FileUid {
-    /// Create new object
-    pub fn new() -> FileUid {
-        Default::default()
-    }
-
     fn from_slice(bs: &[u8]) -> Option<FileUid> {
         if bs.len() != FILE_UID_BYTES {
             return None
@@ -205,6 +197,6 @@ mod tests {
     encode_decode_test!(
         tox_crypto::crypto_init().unwrap(),
         packet_file_send_request_encode_decode,
-        Packet::FileSendRequest(FileSendRequest::new(1, FileType::Avatar, 4, FileUid::new(), "data".to_string()))
+        Packet::FileSendRequest(FileSendRequest::new(1, FileType::Avatar, 4, FileUid([42; FILE_UID_BYTES]), "data".to_string()))
     );
 }
