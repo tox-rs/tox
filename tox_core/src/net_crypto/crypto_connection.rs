@@ -4,6 +4,7 @@ use std::convert::Into;
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::time::{Duration, Instant};
 use rand::{thread_rng, Rng};
+use xsalsa20poly1305::XSalsa20Poly1305;
 
 use super::packets_array::*;
 
@@ -373,13 +374,13 @@ impl CryptoConnection {
         received_nonce: Nonce,
         peer_session_pk: PublicKey,
         cookie: EncryptedCookie,
-        symmetric_key: &secretbox::Key
+        symmetric_key: &XSalsa20Poly1305,
     ) -> CryptoConnection {
         let (session_pk, session_sk) = gen_keypair();
         let sent_nonce = gen_nonce();
 
         let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(symmetric_key, &our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), symmetric_key, &our_cookie);
         let handshake_payload = CryptoHandshakePayload {
             base_nonce: sent_nonce,
             session_pk,
@@ -736,7 +737,7 @@ mod tests {
 
         let crypto_handshake = CryptoHandshake {
             cookie: EncryptedCookie {
-                nonce: secretbox::gen_nonce(),
+                nonce: [42; xsalsa20poly1305::NONCE_SIZE],
                 payload: vec![42; 88]
             },
             nonce: gen_nonce(),
@@ -863,7 +864,7 @@ mod tests {
 
         let crypto_handshake = CryptoHandshake {
             cookie: EncryptedCookie {
-                nonce: secretbox::gen_nonce(),
+                nonce: [42; xsalsa20poly1305::NONCE_SIZE],
                 payload: vec![42; 88]
             },
             nonce: gen_nonce(),

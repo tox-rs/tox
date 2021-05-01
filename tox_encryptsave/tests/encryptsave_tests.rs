@@ -1,9 +1,7 @@
 use tox_encryptsave::*;
-use tox_crypto::*;
 
 #[test]
 fn is_encrypted_test() {
-    crypto_init().unwrap();
     assert!(!is_encrypted(b"Hello world.\n"));
     assert!(is_encrypted(MAGIC_NUMBER));
     assert!(is_encrypted(include_bytes!("ciphertext")));
@@ -12,7 +10,6 @@ fn is_encrypted_test() {
 
 #[test]
 fn pass_encrypt_error_test() {
-    crypto_init().unwrap();
     // empty data
     assert_eq!(pass_encrypt(&[], &[0]), Err(EncryptionError::Null));
 
@@ -22,7 +19,6 @@ fn pass_encrypt_error_test() {
 
 #[test]
 fn pass_encrypt_test() {
-    crypto_init().unwrap();
     let plaintext = [42; 16];
     let passphrase = [53; 16];
 
@@ -38,21 +34,18 @@ fn pass_encrypt_test() {
 
 #[test]
 fn pass_decrypt_error_null_test() {
-    crypto_init().unwrap();
     // empty data
     assert_eq!(pass_decrypt(&[], &[0]), Err(DecryptionError::Null));
 }
 
 #[test]
 fn pass_decrypt_error_invalid_length_test() {
-    crypto_init().unwrap();
     // not enough data
     assert_eq!(pass_decrypt(&[0], &[]), Err(DecryptionError::InvalidLength));
 }
 
 #[test]
 fn pass_decrypt_error_key_derivation_test() {
-    crypto_init().unwrap();
     // empty passphrase
     let ciphertext = include_bytes!("ciphertext");
     assert_eq!(pass_decrypt(ciphertext, &[]), Err(KeyDerivationError::Null.into()));
@@ -60,7 +53,6 @@ fn pass_decrypt_error_key_derivation_test() {
 
 #[test]
 fn pass_decrypt_error_bad_format_test() {
-    crypto_init().unwrap();
     // one of `MAGIC_NUMBER` bytes is wrong
     let ciphertext = include_bytes!("ciphertext");
     let mut bad_ciphertext = Vec::with_capacity(MAGIC_LENGTH + SALT_LENGTH);
@@ -71,7 +63,6 @@ fn pass_decrypt_error_bad_format_test() {
 
 #[test]
 fn pass_decrypt_error_failed_test() {
-    crypto_init().unwrap();
     // a data byte is wrong
     let ciphertext = include_bytes!("ciphertext");
     let mut bad_ciphertext = Vec::with_capacity(EXTRA_LENGTH + 123);
@@ -82,7 +73,6 @@ fn pass_decrypt_error_failed_test() {
 
 #[test]
 fn pass_decrypt_test() {
-    crypto_init().unwrap();
     let passphrase = b"encryptsave";
     let plaintext = b"Hello world.\n";
     let ciphertext = include_bytes!("ciphertext");
@@ -95,16 +85,14 @@ fn pass_decrypt_test() {
 
 #[test]
 fn get_salt_test() {
-    crypto_init().unwrap();
     let ciphertext = include_bytes!("ciphertext");
     let salt = &ciphertext[MAGIC_LENGTH .. MAGIC_LENGTH + SALT_LENGTH];
 
-    assert_eq!(get_salt(ciphertext).unwrap().0, salt);
+    assert_eq!(get_salt(ciphertext).unwrap(), salt);
 }
 
 #[test]
 fn get_salt_wrong_magic_test() {
-    crypto_init().unwrap();
     let ciphertext = include_bytes!("ciphertext");
 
     let mut bad_ciphertext = Vec::with_capacity(MAGIC_LENGTH + SALT_LENGTH);

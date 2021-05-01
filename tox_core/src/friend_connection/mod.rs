@@ -421,6 +421,7 @@ impl FriendConnections {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::thread_rng;
 
     use tox_packet::dht::{Packet as DhtPacket, *};
     use crate::dht::precomputed_cache::*;
@@ -944,11 +945,11 @@ mod tests {
             .map(Result::unwrap);
 
         let precomputed_key = precompute(&friend_connections.real_pk, &friend_sk);
-        let cookie = friend_connections.net_crypto.get_cookie(friend_pk, friend_dht_pk);
+        let cookie = friend_connections.net_crypto.get_cookie(&mut thread_rng(), friend_pk, friend_dht_pk);
         let sent_nonce = gen_nonce();
         let (friend_session_pk, friend_session_sk) = gen_keypair();
         let our_cookie = EncryptedCookie {
-            nonce: secretbox::gen_nonce(),
+            nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![42; 88]
         };
         let handshake_payload = CryptoHandshakePayload {

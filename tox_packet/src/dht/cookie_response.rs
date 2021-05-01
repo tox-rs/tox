@@ -151,7 +151,7 @@ mod tests {
         cookie_response_payload_encode_decode,
         CookieResponsePayload {
             cookie: EncryptedCookie {
-                nonce: secretbox::gen_nonce(),
+                nonce: [42; xsalsa20poly1305::NONCE_SIZE],
                 payload: vec![42; 88],
             },
             id: 12345,
@@ -166,7 +166,7 @@ mod tests {
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
         let payload = CookieResponsePayload {
             cookie: EncryptedCookie {
-                nonce: secretbox::gen_nonce(),
+                nonce: [42; xsalsa20poly1305::NONCE_SIZE],
                 payload: vec![42; 88],
             },
             id: 12345,
@@ -189,7 +189,7 @@ mod tests {
         let eve_shared_secret = encrypt_precompute(&bob_pk, &eve_sk);
         let payload = CookieResponsePayload {
             cookie: EncryptedCookie {
-                nonce: secretbox::gen_nonce(),
+                nonce: [42; xsalsa20poly1305::NONCE_SIZE],
                 payload: vec![42; 88],
             },
             id: 12345,

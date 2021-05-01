@@ -174,7 +174,7 @@ mod tests {
         crypto_handshake_encode_decode,
         CryptoHandshake {
             cookie: EncryptedCookie {
-                nonce: secretbox::gen_nonce(),
+                nonce: [42; xsalsa20poly1305::NONCE_SIZE],
                 payload: vec![42; 88],
             },
             nonce: gen_nonce(),
@@ -190,7 +190,7 @@ mod tests {
             session_pk: gen_keypair().0,
             cookie_hash: [42; 64],
             cookie: EncryptedCookie {
-                nonce: secretbox::gen_nonce(),
+                nonce: [42; xsalsa20poly1305::NONCE_SIZE],
                 payload: vec![42; 88],
             },
         }
@@ -203,7 +203,7 @@ mod tests {
         let (bob_pk, _bob_sk) = gen_keypair();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
         let cookie = EncryptedCookie {
-            nonce: secretbox::gen_nonce(),
+            nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![42; 88],
         };
         let payload = CryptoHandshakePayload {
@@ -211,7 +211,7 @@ mod tests {
             session_pk: gen_keypair().0,
             cookie_hash: [42; 64],
             cookie: EncryptedCookie {
-                nonce: secretbox::gen_nonce(),
+                nonce: [42; xsalsa20poly1305::NONCE_SIZE],
                 payload: vec![42; 88],
             },
         };
@@ -232,7 +232,7 @@ mod tests {
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
         let eve_shared_secret = encrypt_precompute(&bob_pk, &eve_sk);
         let cookie = EncryptedCookie {
-            nonce: secretbox::gen_nonce(),
+            nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![42; 88],
         };
         let payload = CryptoHandshakePayload {
@@ -240,7 +240,7 @@ mod tests {
             session_pk: gen_keypair().0,
             cookie_hash: [42; 64],
             cookie: EncryptedCookie {
-                nonce: secretbox::gen_nonce(),
+                nonce: [42; xsalsa20poly1305::NONCE_SIZE],
                 payload: vec![42; 88],
             },
         };
@@ -260,7 +260,7 @@ mod tests {
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
         let nonce = gen_nonce();
         let cookie = EncryptedCookie {
-            nonce: secretbox::gen_nonce(),
+            nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![42; 88],
         };
         // Try long invalid array

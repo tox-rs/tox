@@ -9,8 +9,6 @@ use sodiumoxide::crypto::box_::{
     NONCEBYTES
 };
 
-use sodiumoxide::crypto::secretbox;
-
 use super::FromBytes;
 
 
@@ -37,10 +35,6 @@ impl FromBytes for SecretKey {
 
 impl FromBytes for Nonce {
     named!(from_bytes<Nonce>, map_opt!(take!(NONCEBYTES), Nonce::from_slice));
-}
-
-impl FromBytes for secretbox::Nonce {
-    named!(from_bytes<secretbox::Nonce>, map_opt!(take!(secretbox::NONCEBYTES), secretbox::Nonce::from_slice));
 }
 
 #[cfg(test)]

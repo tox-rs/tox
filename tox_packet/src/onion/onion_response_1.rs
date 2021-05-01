@@ -55,14 +55,14 @@ impl ToBytes for OnionResponse1 {
 mod tests {
     use super::*;
 
-    const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - secretbox::NONCEBYTES;
+    const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - xsalsa20poly1305::NONCE_SIZE;
 
     encode_decode_test!(
         tox_crypto::crypto_init().unwrap(),
         onion_response_1_encode_decode,
         OnionResponse1 {
             onion_return: OnionReturn {
-                nonce: secretbox::gen_nonce(),
+                nonce: [42; xsalsa20poly1305::NONCE_SIZE],
                 payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
             },
             payload: InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
