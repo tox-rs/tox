@@ -27,7 +27,7 @@ use tox_packet::ip_port::*;
 use crate::onion::client::errors::*;
 use crate::onion::client::onion_path::*;
 use crate::onion::client::paths_pool::*;
-use crate::onion::onion_announce::{PingId, INITIAL_PING_ID};
+use crate::onion::onion_announce::INITIAL_PING_ID;
 use tox_packet::onion::*;
 use tox_packet::packed_node::*;
 use crate::relay::client::Connections as TcpConnections;
