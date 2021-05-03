@@ -154,7 +154,7 @@ impl PassKey {
         if data.is_empty() { return Err(EncryptionError::Null) };
 
         let mut output = Vec::with_capacity(EXTRA_LENGTH + data.len());
-        let nonce = thread_rng().gen::<[u8; xsalsa20poly1305::NONCE_SIZE]>();
+        let nonce = xsalsa20poly1305::generate_nonce(&mut thread_rng());
 
         output.extend_from_slice(MAGIC_NUMBER);
         output.extend_from_slice(&self.salt);

@@ -132,7 +132,7 @@ impl ToBytes for EncryptedCookie {
 impl EncryptedCookie {
     /// Create `EncryptedCookie` from `Cookie` encrypting it with `symmetric_key`
     pub fn new<R: Rng + CryptoRng>(rng: &mut R, symmetric_key: &XSalsa20Poly1305, payload: &Cookie) -> EncryptedCookie {
-        let nonce = rng.gen::<[u8; xsalsa20poly1305::NONCE_SIZE]>().into();
+        let nonce = xsalsa20poly1305::generate_nonce(rng);
         let mut buf = [0; 72];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
         let payload = symmetric_key.encrypt(&nonce, &buf[..size]).unwrap();
@@ -202,7 +202,7 @@ mod tests {
     fn cookie_encrypt_decrypt() {
         crypto_init().unwrap();
         let mut rng = thread_rng();
-        let symmetric_key = XSalsa20Poly1305::new(&rng.gen::<[u8; xsalsa20poly1305::KEY_SIZE]>().into());
+        let symmetric_key = XSalsa20Poly1305::new(&XSalsa20Poly1305::generate_key(&mut rng));
         let payload = Cookie::new(gen_keypair().0, gen_keypair().0);
         // encode payload with symmetric key
         let encrypted_cookie = EncryptedCookie::new(&mut rng, &symmetric_key, &payload);
@@ -216,8 +216,8 @@ mod tests {
     fn cookie_encrypt_decrypt_invalid_key() {
         crypto_init().unwrap();
         let mut rng = thread_rng();
-        let symmetric_key = XSalsa20Poly1305::new(&rng.gen::<[u8; xsalsa20poly1305::KEY_SIZE]>().into());
-        let eve_symmetric_key = XSalsa20Poly1305::new(&rng.gen::<[u8; xsalsa20poly1305::KEY_SIZE]>().into());
+        let symmetric_key = XSalsa20Poly1305::new(&XSalsa20Poly1305::generate_key(&mut rng));
+        let eve_symmetric_key = XSalsa20Poly1305::new(&XSalsa20Poly1305::generate_key(&mut rng));
         let payload = Cookie::new(gen_keypair().0, gen_keypair().0);
         // encode payload with symmetric key
         let encrypted_cookie = EncryptedCookie::new(&mut rng, &symmetric_key, &payload);
@@ -230,8 +230,8 @@ mod tests {
     #[test]
     fn cookie_encrypt_decrypt_invalid() {
         let mut rng = thread_rng();
-        let symmetric_key = XSalsa20Poly1305::new(&rng.gen::<[u8; xsalsa20poly1305::KEY_SIZE]>().into());
-        let nonce = rng.gen::<[u8; xsalsa20poly1305::NONCE_SIZE]>().into();
+        let symmetric_key = XSalsa20Poly1305::new(&XSalsa20Poly1305::generate_key(&mut rng));
+        let nonce = xsalsa20poly1305::generate_nonce(&mut rng);
         // Try long invalid array
         let invalid_payload = [42; 123];
         let invalid_payload_encoded = symmetric_key.encrypt(&nonce, &invalid_payload[..]).unwrap();
