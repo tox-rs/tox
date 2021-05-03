@@ -3,8 +3,6 @@
 
 use super::*;
 
-use std::convert::TryInto;
-use nom::map_opt;
 use sha2::{Digest, Sha512};
 use sha2::digest::generic_array::typenum::marker_traits::Unsigned;
 use tox_binary_io::*;
@@ -141,7 +139,7 @@ impl FromBytes for CryptoHandshakePayload {
     named!(from_bytes<CryptoHandshakePayload>, do_parse!(
         base_nonce: call!(Nonce::from_bytes) >>
         session_pk: call!(PublicKey::from_bytes) >>
-        cookie_hash: map_opt!(take!(<Sha512 as Digest>::OutputSize::USIZE), |bytes: &[u8]| bytes.try_into().ok()) >>
+        cookie_hash: call!(<[u8; <Sha512 as Digest>::OutputSize::USIZE]>::from_bytes) >>
         cookie: call!(EncryptedCookie::from_bytes) >>
         eof!() >>
         (CryptoHandshakePayload {

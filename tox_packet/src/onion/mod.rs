@@ -29,7 +29,6 @@ pub use self::onion_response_2::*;
 pub use self::onion_response_3::*;
 pub use self::friend_request::*;
 
-use std::convert::TryInto;
 use tox_binary_io::*;
 use tox_crypto::*;
 use xsalsa20poly1305::{XSalsa20Poly1305, aead::{Aead, Error as AeadError}};
@@ -37,7 +36,7 @@ use crate::dht::packed_node::PackedNode;
 use crate::ip_port::*;
 
 use rand::{Rng, thread_rng};
-use nom::{AsBytes, alt, call, cond, do_parse, eof, flat_map, map, map_opt, map_res, named, switch, tag, take, value, verify};
+use nom::{alt, call, cond, do_parse, eof, flat_map, map, map_res, named, switch, tag, take, value, verify};
 
 use cookie_factory::{
     do_gen,
@@ -107,7 +106,7 @@ pub struct OnionReturn {
 
 impl FromBytes for OnionReturn {
     named!(from_bytes<OnionReturn>, do_parse!(
-        nonce: map_opt!(take!(xsalsa20poly1305::NONCE_SIZE), |bytes: &[u8]| bytes.try_into().ok()) >>
+        nonce: call!(<[u8; xsalsa20poly1305::NONCE_SIZE]>::from_bytes) >>
         payload: rest >>
         (OnionReturn { nonce, payload: payload.to_vec() })
     ));
@@ -162,7 +161,7 @@ impl OnionReturn {
     - fails to parse as `IpPort` with possibly inner `OnionReturn`
     */
     pub fn get_payload(&self, symmetric_key: &XSalsa20Poly1305) -> Result<(IpPort, Option<OnionReturn>), Error> {
-        let decrypted = symmetric_key.decrypt(&self.nonce.into(), self.payload.as_bytes())
+        let decrypted = symmetric_key.decrypt(&self.nonce.into(), self.payload.as_slice())
             .map_err(|AeadError| {
                 Error::new(ErrorKind::Other, "OnionReturn decrypt error.")
             })?;

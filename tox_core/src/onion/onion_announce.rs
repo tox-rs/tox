@@ -14,9 +14,6 @@ use crate::time::*;
 use tox_packet::onion::*;
 use crate::dht::kbucket::Distance;
 
-/// The type of onion ping ID which is SHA256 hash.
-pub type PingId = [u8; <Sha256 as Digest>::OutputSize::USIZE];
-
 /// Number of secret random bytes to make onion ping id unique for each node.
 pub const SECRET_BYTES_SIZE: usize = 32;
 
