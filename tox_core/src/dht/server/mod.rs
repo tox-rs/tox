@@ -192,7 +192,7 @@ impl Server {
 
         let precomputed_keys = PrecomputedCache::new(sk.clone(), PRECOMPUTED_LRU_CACHE_SIZE);
 
-        let onion_symmetric_key = XSalsa20Poly1305::new(&rng.gen::<[u8; xsalsa20poly1305::KEY_SIZE]>().into());
+        let onion_symmetric_key = XSalsa20Poly1305::new(&XSalsa20Poly1305::generate_key(&mut rng));
         Server {
             sk,
             pk,
@@ -1032,6 +1032,7 @@ impl Server {
     pub async fn handle_onion_request_0(&self, packet: OnionRequest0, addr: SocketAddr) -> Result<(), HandlePacketError> {
         let onion_symmetric_key = self.onion_symmetric_key.read().await;
         let onion_return = OnionReturn::new(
+            &mut thread_rng(),
             &onion_symmetric_key,
             &IpPort::from_udp_saddr(addr),
             None, // no previous onion return
@@ -1058,6 +1059,7 @@ impl Server {
     pub async fn handle_onion_request_1(&self, packet: OnionRequest1, addr: SocketAddr) -> Result<(), HandlePacketError> {
         let onion_symmetric_key = self.onion_symmetric_key.read().await;
         let onion_return = OnionReturn::new(
+            &mut thread_rng(),
             &onion_symmetric_key,
             &IpPort::from_udp_saddr(addr),
             Some(&packet.onion_return)
@@ -1083,6 +1085,7 @@ impl Server {
     pub async fn handle_onion_request_2(&self, packet: OnionRequest2, addr: SocketAddr) -> Result<(), HandlePacketError> {
         let onion_symmetric_key = self.onion_symmetric_key.read().await;
         let onion_return = OnionReturn::new(
+            &mut thread_rng(),
             &onion_symmetric_key,
             &IpPort::from_udp_saddr(addr),
             Some(&packet.onion_return),
@@ -1273,7 +1276,7 @@ impl Server {
     /// Refresh onion symmetric key to enforce onion paths expiration.
     async fn refresh_onion_key(&self) {
         *self.onion_symmetric_key.write().await =
-            XSalsa20Poly1305::new(&thread_rng().gen::<[u8; xsalsa20poly1305::KEY_SIZE]>().into());
+            XSalsa20Poly1305::new(&XSalsa20Poly1305::generate_key(&mut thread_rng()));
     }
 
     /// Handle `OnionRequest` from TCP relay and send `OnionRequest1` packet
@@ -1283,6 +1286,7 @@ impl Server {
         let onion_symmetric_key = self.onion_symmetric_key.read().await;
 
         let onion_return = OnionReturn::new(
+            &mut thread_rng(),
             &onion_symmetric_key,
             &IpPort::from_tcp_saddr(addr),
             None // no previous onion return
@@ -2482,7 +2486,7 @@ mod tests {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
         };
-        let onion_return = OnionReturn::new(&onion_symmetric_key, &ip_port, Some(&next_onion_return));
+        let onion_return = OnionReturn::new(&mut thread_rng(), &onion_symmetric_key, &ip_port, Some(&next_onion_return));
         let payload = InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
             sendback_data: 12345,
             nonce: gen_nonce(),
@@ -2543,7 +2547,7 @@ mod tests {
             ip_addr: "5.6.7.8".parse().unwrap(),
             port: 12345
         };
-        let onion_return = OnionReturn::new(&onion_symmetric_key, &ip_port, None);
+        let onion_return = OnionReturn::new(&mut thread_rng(), &onion_symmetric_key, &ip_port, None);
         let inner = OnionDataResponse {
             nonce: gen_nonce(),
             temporary_pk: gen_keypair().0,
@@ -2575,7 +2579,7 @@ mod tests {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
         };
-        let onion_return = OnionReturn::new(&onion_symmetric_key, &ip_port, Some(&next_onion_return));
+        let onion_return = OnionReturn::new(&mut thread_rng(), &onion_symmetric_key, &ip_port, Some(&next_onion_return));
         let payload = InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
             sendback_data: 12345,
             nonce: gen_nonce(),
@@ -2636,7 +2640,7 @@ mod tests {
             ip_addr: "5.6.7.8".parse().unwrap(),
             port: 12345
         };
-        let onion_return = OnionReturn::new(&onion_symmetric_key, &ip_port, None);
+        let onion_return = OnionReturn::new(&mut thread_rng(), &onion_symmetric_key, &ip_port, None);
         let inner = OnionDataResponse {
             nonce: gen_nonce(),
             temporary_pk: gen_keypair().0,
@@ -2664,7 +2668,7 @@ mod tests {
             ip_addr: "5.6.7.8".parse().unwrap(),
             port: 12345
         };
-        let onion_return = OnionReturn::new(&onion_symmetric_key, &ip_port, None);
+        let onion_return = OnionReturn::new(&mut thread_rng(), &onion_symmetric_key, &ip_port, None);
         let inner = OnionAnnounceResponse {
             sendback_data: 12345,
             nonce: gen_nonce(),
@@ -2698,7 +2702,7 @@ mod tests {
             ip_addr: "5.6.7.8".parse().unwrap(),
             port: 12345
         };
-        let onion_return = OnionReturn::new(&onion_symmetric_key, &ip_port, None);
+        let onion_return = OnionReturn::new(&mut thread_rng(), &onion_symmetric_key, &ip_port, None);
         let inner = OnionDataResponse {
             nonce: gen_nonce(),
             temporary_pk: gen_keypair().0,
@@ -2734,7 +2738,7 @@ mod tests {
             ip_addr: "5.6.7.8".parse().unwrap(),
             port: 12345
         };
-        let onion_return = OnionReturn::new(&onion_symmetric_key, &ip_port, None);
+        let onion_return = OnionReturn::new(&mut thread_rng(), &onion_symmetric_key, &ip_port, None);
         let inner = InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
             sendback_data: 12345,
             nonce: gen_nonce(),
@@ -2765,7 +2769,7 @@ mod tests {
             ip_addr: "5.6.7.8".parse().unwrap(),
             port: 12345
         };
-        let onion_return = OnionReturn::new(&onion_symmetric_key, &ip_port, None);
+        let onion_return = OnionReturn::new(&mut thread_rng(), &onion_symmetric_key, &ip_port, None);
         let inner = OnionAnnounceResponse {
             sendback_data: 12345,
             nonce: gen_nonce(),
@@ -2822,7 +2826,7 @@ mod tests {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
         };
-        let onion_return = OnionReturn::new(&onion_symmetric_key, &ip_port, Some(&next_onion_return));
+        let onion_return = OnionReturn::new(&mut thread_rng(), &onion_symmetric_key, &ip_port, Some(&next_onion_return));
         let inner = OnionDataResponse {
             nonce: gen_nonce(),
             temporary_pk: gen_keypair().0,

@@ -28,7 +28,7 @@ use failure::Fail;
 use futures::{TryFutureExt, SinkExt};
 use futures::future;
 use futures::channel::mpsc;
-use rand::{Rng, thread_rng};
+use rand::thread_rng;
 use tokio::sync::RwLock;
 
 use tox_binary_io::*;
@@ -213,7 +213,7 @@ pub struct NetCrypto {
 impl NetCrypto {
     /// Create new `NetCrypto` object
     pub fn new(args: NetCryptoNewArgs) -> NetCrypto {
-        let symmetric_key = XSalsa20Poly1305::new(&thread_rng().gen::<[u8; xsalsa20poly1305::KEY_SIZE]>().into());
+        let symmetric_key = XSalsa20Poly1305::new(&XSalsa20Poly1305::generate_key(&mut thread_rng()));
         NetCrypto {
             udp_tx: args.udp_tx,
             tcp_tx: Default::default(),
@@ -1137,7 +1137,7 @@ mod tests {
     // https://github.com/rust-lang/rust/issues/61520
     use super::{*, Packet};
     use futures::{Future, StreamExt};
-    use rand::CryptoRng;
+    use rand::{CryptoRng, Rng};
 
     impl NetCrypto {
         pub async fn has_friend(&self, pk: &PublicKey) -> bool {

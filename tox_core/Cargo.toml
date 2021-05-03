@@ -33,7 +33,7 @@ bitflags = "1.0"
 itertools = "0.10"
 rand = "0.8"
 sha2 = "0.9"
-xsalsa20poly1305 = "0.6"
+xsalsa20poly1305 = "0.7"
 
 [dependencies.tokio]
 version = "1.0"
