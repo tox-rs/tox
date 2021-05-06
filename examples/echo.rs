@@ -10,6 +10,7 @@ use futures::{*, future::TryFutureExt};
 use futures::channel::mpsc;
 use hex::FromHex;
 use failure::{err_msg, Error};
+use rand::thread_rng;
 
 use std::net::SocketAddr;
 
@@ -49,11 +50,13 @@ const TCP_RELAYS: [(&str, &str); 5] = [
 async fn main() -> Result<(), Error> {
     env_logger::init();
 
+    let mut rng = thread_rng();
+
     let (dht_pk, dht_sk) = gen_keypair();
 
     // create random tox id and print it
     let (real_pk, real_sk) = gen_keypair();
-    let id = ToxId::new(real_pk);
+    let id = ToxId::new(&mut rng, real_pk);
     println!("your tox id is: {:X}",id);
 
     // Create a channel for server to communicate with network

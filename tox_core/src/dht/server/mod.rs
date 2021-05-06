@@ -201,7 +201,7 @@ impl Server {
             request_queue: Arc::new(RwLock::new(RequestQueue::new(PING_TIMEOUT))),
             close_nodes: Arc::new(RwLock::new(ForcedKtree::new(&pk))),
             onion_symmetric_key: Arc::new(RwLock::new(onion_symmetric_key)),
-            onion_announce: Arc::new(RwLock::new(OnionAnnounce::new(pk))),
+            onion_announce: Arc::new(RwLock::new(OnionAnnounce::new(&mut rng, pk))),
             fake_friends_keys,
             friends: Arc::new(RwLock::new(friends)),
             nodes_to_bootstrap: Arc::new(RwLock::new(Kbucket::new(MAX_TO_BOOTSTRAP))),

@@ -59,12 +59,13 @@ impl FromBytes for FriendRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::toxid::NOSPAMBYTES;
 
     encode_decode_test!(
         tox_crypto::crypto_init().unwrap(),
         friend_req_encode_decode,
         FriendRequest {
-            nospam: NoSpam::random(),
+            nospam: NoSpam([42; NOSPAMBYTES]),
             msg: "1234".to_owned(),
         }
     );
@@ -72,10 +73,10 @@ mod tests {
     #[test]
     fn friend_request_from_bytes_encoding_error() {
         let err_string = vec![0, 159, 146, 150]; // not UTF8 bytes.
-        let nospam = NoSpam::random();
+        let nospam = [42; NOSPAMBYTES];
 
         let mut friend_req = vec![0x20];
-        friend_req.extend_from_slice(&nospam.0);
+        friend_req.extend_from_slice(&nospam);
         friend_req.extend(err_string);
         assert!(FriendRequest::from_bytes(&friend_req).is_err());
     }
@@ -83,10 +84,10 @@ mod tests {
     #[test]
     fn friend_request_from_bytes_overflow() {
         let large_string = vec![32; MAX_FRIEND_REQUEST_MSG_SIZE + 1];
-        let nospam = NoSpam::random();
+        let nospam = [42; NOSPAMBYTES];
 
         let mut friend_req = vec![0x20];
-        friend_req.extend_from_slice(&nospam.0);
+        friend_req.extend_from_slice(&nospam);
         friend_req.extend(large_string);
         assert!(FriendRequest::from_bytes(&friend_req).is_err());
     }
@@ -95,7 +96,7 @@ mod tests {
     fn friend_request_to_bytes_overflow() {
         let large_string = String::from_utf8(vec![32u8; MAX_FRIEND_REQUEST_MSG_SIZE + 1]).unwrap();
         let friend_req = FriendRequest {
-            nospam: NoSpam::random(),
+            nospam: NoSpam([42; NOSPAMBYTES]),
             msg: large_string
         };
         let mut buf = [0; MAX_ONION_CLIENT_DATA_SIZE + 1]; // `1` is to provide enough space for success of serializing
@@ -104,17 +105,17 @@ mod tests {
 
     #[test]
     fn friend_request_from_bytes_underflow() {
-        let nospam = NoSpam::random();
+        let nospam = [42; NOSPAMBYTES];
 
         let mut friend_req = vec![0x20];
-        friend_req.extend_from_slice(&nospam.0);
+        friend_req.extend_from_slice(&nospam);
         assert!(FriendRequest::from_bytes(&friend_req).is_err());
     }
 
     #[test]
     fn friend_request_to_bytes_underflow() {
         let friend_req = FriendRequest {
-            nospam: NoSpam::random(),
+            nospam: NoSpam([42; NOSPAMBYTES]),
             msg: "".to_string(),
         };
         let mut buf = [0; MAX_ONION_CLIENT_DATA_SIZE]; // `1` is to provide enough space for success of serializing

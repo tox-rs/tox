@@ -7,6 +7,7 @@ use nom::{
     combinator::rest,
     bytes::complete::take,
 };
+use rand::{Rng, distributions::{Distribution, Standard}};
 
 use tox_binary_io::*;
 use tox_crypto::*;
@@ -36,13 +37,11 @@ pub struct NospamKeys {
 /// Number of bytes of serialized [`NospamKeys`](./struct.NospamKeys.html).
 pub const NOSPAMKEYSBYTES: usize = NOSPAMBYTES + PUBLICKEYBYTES + SECRETKEYBYTES;
 
-impl NospamKeys {
-    /// Generates random `NospamKeys`.
-    pub fn random() -> Self {
-        let nospam = NoSpam::random();
+impl Distribution<NospamKeys> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> NospamKeys {
         let (pk, sk) = gen_keypair();
         NospamKeys {
-            nospam,
+            nospam: rng.gen(),
             pk,
             sk
         }
@@ -615,12 +614,13 @@ impl ToBytes for State {
 mod tests {
     use super::*;
 
+    use rand::thread_rng;
     use tox_packet::ip_port::*;
 
     encode_decode_test!(
         tox_crypto::crypto_init().unwrap(),
         no_spam_keys_encode_decode,
-        NospamKeys::random()
+        thread_rng().gen::<NospamKeys>()
     );
 
     encode_decode_test!(
@@ -755,7 +755,7 @@ mod tests {
         state_encode_decode,
         State {
             sections: vec![
-                Section::NospamKeys(NospamKeys::random()),
+                Section::NospamKeys(thread_rng().gen()),
                 Section::DhtState(DhtState(vec![
                     PackedNode {
                         pk: gen_keypair().0,

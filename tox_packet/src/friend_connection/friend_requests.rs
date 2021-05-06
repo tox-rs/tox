@@ -65,10 +65,11 @@ impl FriendRequests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::toxid::NOSPAMBYTES;
 
     encode_decode_test!(
         tox_crypto::crypto_init().unwrap(),
         friend_requests_encode_decode,
-        FriendRequests::new(NoSpam::random(), vec![1,2,3,4])
+        FriendRequests::new(NoSpam([42; NOSPAMBYTES]), vec![1,2,3,4])
     );
 }

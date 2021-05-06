@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::time::{Duration, Instant};
-use rand::Rng;
+use rand::{CryptoRng, Rng};
 
 use crate::utils::gen_ping_id;
 use crate::time::*;
@@ -29,7 +29,7 @@ impl<T> RequestQueue<T> {
     }
 
     /// Generate unique non zero request ID.
-    fn generate_ping_id<R: Rng>(&self, rng: &mut R) -> u64 {
+    fn generate_ping_id<R: Rng + CryptoRng>(&self, rng: &mut R) -> u64 {
         loop {
             let ping_id = gen_ping_id(rng);
             if !self.ping_map.contains_key(&ping_id) {
@@ -40,7 +40,7 @@ impl<T> RequestQueue<T> {
 
     /// Generate and store unique non zero request ID. Later this request ID can
     /// be verified with `check_ping_id` function.
-    pub fn new_ping_id<R: Rng>(&mut self, rng: &mut R, data: T) -> u64 {
+    pub fn new_ping_id<R: Rng + CryptoRng>(&mut self, rng: &mut R, data: T) -> u64 {
         let ping_id = self.generate_ping_id(rng);
         self.ping_map.insert(ping_id, (clock_now(), data));
         ping_id

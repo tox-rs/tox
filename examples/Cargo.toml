@@ -15,6 +15,7 @@ futures = { version = "0.3", default-features = false, features = ["std", "async
 env_logger = "0.8"
 hex = "0.4"
 failure = "0.1"
+rand = "0.8"
 
 [dev-dependencies.tokio]
 version = "1.0"

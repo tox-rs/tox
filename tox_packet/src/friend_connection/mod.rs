@@ -66,7 +66,7 @@ impl FromBytes for Packet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::toxid::NoSpam;
+    use crate::toxid::{NoSpam, NOSPAMBYTES};
     use crate::dht::packed_node::*;
 
     encode_decode_test!(
@@ -78,7 +78,7 @@ mod tests {
     encode_decode_test!(
         tox_crypto::crypto_init().unwrap(),
         packet_friend_requests_encode_decode,
-        Packet::FriendRequests(FriendRequests::new(NoSpam::random(), vec![1,2,3,4]))
+        Packet::FriendRequests(FriendRequests::new(NoSpam([42; NOSPAMBYTES]), vec![1,2,3,4]))
     );
 
     encode_decode_test!(

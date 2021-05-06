@@ -12,6 +12,7 @@ use nom::{
     named,
     do_parse, map, call, take,
 };
+use rand::{CryptoRng, Rng, distributions::{Distribution, Standard}};
 use cookie_factory::{do_gen, gen_slice};
 
 use tox_binary_io::*;
@@ -41,26 +42,14 @@ https://zetok.github.io/tox-spec/#tox-id
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NoSpam(pub [u8; NOSPAMBYTES]);
 
-/// Number of bytes that [`NoSpam`](./struct.NoSpam.html) has.
-pub const NOSPAMBYTES: usize = 4;
-
-impl NoSpam {
-    /** Create new `NoSpam` with random bytes.
-
-    Two `random()` `NoSpam`s will always be different:
-
-    ```
-    use tox_packet::toxid::NoSpam;
-
-    assert_ne!(NoSpam::random(), NoSpam::random());
-    ```
-    */
-    pub fn random() -> Self {
-        let mut nospam = [0; NOSPAMBYTES];
-        randombytes_into(&mut nospam);
-        NoSpam(nospam)
+impl Distribution<NoSpam> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> NoSpam {
+        NoSpam(rng.gen())
     }
 }
+
+/// Number of bytes that [`NoSpam`](./struct.NoSpam.html) has.
+pub const NOSPAMBYTES: usize = 4;
 
 /** The default formatting of `NoSpam`.
 
@@ -85,7 +74,7 @@ impl fmt::UpperHex for NoSpam {
 ```
 use tox_packet::toxid::NoSpam;
 
-let nospam = NoSpam::random();
+let nospam = NoSpam([255, 255, 255, 255]);
 assert_eq!(format!("{}", nospam), format!("{:X}", nospam));
 ```
 */
@@ -142,6 +131,7 @@ impl ToxId {
     E.g.
 
     ```
+    use rand::{Rng, thread_rng};
     use tox_crypto::{
             gen_keypair,
             PublicKey,
@@ -149,8 +139,9 @@ impl ToxId {
     };
     use tox_packet::toxid::{NoSpam, NOSPAMBYTES, ToxId};
 
+    let mut rng = thread_rng();
     let (pk, _) = gen_keypair();
-    let nospam = NoSpam::random();
+    let nospam = rng.gen();
 
     let _checksum = ToxId::checksum(&pk, nospam);
 
@@ -178,15 +169,17 @@ impl ToxId {
     E.g.
 
     ```
+    use rand::thread_rng;
     use tox_crypto::gen_keypair;
     use tox_packet::toxid::ToxId;
 
+    let mut rng = thread_rng();
     let (pk, _) = gen_keypair();
-    let _toxid = ToxId::new(pk);
+    let _toxid = ToxId::new(&mut rng, pk);
     ```
     */
-    pub fn new(pk: PublicKey) -> Self {
-        let nospam = NoSpam::random();
+    pub fn new<R: Rng + CryptoRng>(rng: &mut R, pk: PublicKey) -> Self {
+        let nospam = rng.gen();
         let checksum = Self::checksum(&pk, nospam);
         ToxId { pk, nospam, checksum }
     }
@@ -198,13 +191,15 @@ impl ToxId {
     `checksum` differ:
 
     ```
+    use rand::{Rng, thread_rng};
     use tox_crypto::gen_keypair;
     use tox_packet::toxid::{NoSpam, ToxId};
 
+    let mut rng = thread_rng();
     let (pk, _) = gen_keypair();
-    let toxid = ToxId::new(pk);
+    let toxid = ToxId::new(&mut rng, pk);
     let mut toxid2 = toxid;
-    toxid2.new_nospam(None);
+    toxid2.new_nospam(&mut rng, None);
 
     assert_ne!(toxid, toxid2);
     assert_eq!(toxid.pk, toxid2.pk);
@@ -212,19 +207,19 @@ impl ToxId {
     let mut toxid3 = toxid;
 
     // with same `NoSpam` IDs are identical
-    let nospam = NoSpam::random();
-    toxid2.new_nospam(Some(nospam));
-    toxid3.new_nospam(Some(nospam));
+    let nospam = rng.gen();
+    toxid2.new_nospam(&mut rng, Some(nospam));
+    toxid3.new_nospam(&mut rng, Some(nospam));
     assert_eq!(toxid2, toxid3);
     ```
     */
     // TODO: more tests
     // TODO: ↓ split into `new_nospam()` and `set_nospam(NoSpam)` ?
-    pub fn new_nospam(&mut self, nospam: Option<NoSpam>) {
+    pub fn new_nospam<R: Rng + CryptoRng>(&mut self, rng: &mut R, nospam: Option<NoSpam>) {
         if let Some(nospam) = nospam {
             self.nospam = nospam;
         } else {
-            self.nospam = NoSpam::random();
+            self.nospam = rng.gen();
         }
         self.checksum = Self::checksum(&self.pk, self.nospam);
     }
@@ -254,17 +249,19 @@ impl ToBytes for ToxId {
 E.g.
 
 ```
+use rand::thread_rng;
 use tox_crypto::{PublicKey, PUBLICKEYBYTES};
 use tox_packet::toxid::{NoSpam, NOSPAMBYTES, ToxId};
 
-let mut toxid = ToxId::new(PublicKey([0; PUBLICKEYBYTES]));
-toxid.new_nospam(Some(NoSpam([0; NOSPAMBYTES])));
+let mut rng = thread_rng();
+let mut toxid = ToxId::new(&mut rng, PublicKey([0; PUBLICKEYBYTES]));
+toxid.new_nospam(&mut rng, Some(NoSpam([0; NOSPAMBYTES])));
 // 76 `0`s
 assert_eq!(&format!("{:X}", toxid),
     "0000000000000000000000000000000000000000000000000000000000000000000000000000");
 
-let mut toxid = ToxId::new(PublicKey([255; PUBLICKEYBYTES]));
-toxid.new_nospam(Some(NoSpam([255; NOSPAMBYTES])));
+let mut toxid = ToxId::new(&mut rng, PublicKey([255; PUBLICKEYBYTES]));
+toxid.new_nospam(&mut rng, Some(NoSpam([255; NOSPAMBYTES])));
 // 72 `F`s + 4 `0`s
 assert_eq!(&format!("{:X}", toxid),
     "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF0000");
@@ -291,11 +288,13 @@ impl fmt::UpperHex for ToxId {
 E.g.
 
 ```
+use rand::thread_rng;
 use tox_crypto::gen_keypair;
 use tox_packet::toxid::ToxId;
 
+let mut rng = thread_rng();
 let (pk, _) = gen_keypair();
-let toxid = ToxId::new(pk);
+let toxid = ToxId::new(&mut rng, pk);
 assert_eq!(format!("{}", toxid), format!("{:X}", toxid));
 ```
 */
@@ -309,6 +308,7 @@ impl fmt::Display for ToxId {
 mod tests {
     use tox_crypto::*;
     use crate::toxid::*;
+    use rand::thread_rng;
 
     fn test_is_hexdump_uppercase(s: &str) -> bool {
         fn test_is_hexdump_uppercase_b(b: u8) -> bool {
@@ -319,16 +319,6 @@ mod tests {
 
     // NoSpam::
 
-    // NoSpam::new()
-
-    #[test]
-    fn no_spam_new_test() {
-        crypto_init().unwrap();
-        let ns = NoSpam::random();
-        // shouldn't be empty, unless your PRNG is crappy
-        assert_ne!(ns.0, [0; NOSPAMBYTES])
-    }
-
     // NoSpam::fmt()
 
     #[test]
@@ -336,10 +326,9 @@ mod tests {
         crypto_init().unwrap();
         // check if formatted NoSpam is always upper-case hexadecimal with matching
         // length
-        let nospam = NoSpam::random();
         assert!(!test_is_hexdump_uppercase("Not HexDump"));
-        assert!(test_is_hexdump_uppercase(&format!("{:X}", nospam)));
-        assert!(test_is_hexdump_uppercase(&format!("{}", nospam)));
+        assert!(test_is_hexdump_uppercase(&format!("{:X}", NoSpam([42; NOSPAMBYTES]))));
+        assert!(test_is_hexdump_uppercase(&format!("{}", NoSpam([42; NOSPAMBYTES]))));
         assert!(test_is_hexdump_uppercase(&format!("{:X}", NoSpam([0, 0, 0, 0]))));
         assert!(test_is_hexdump_uppercase(&format!("{}", NoSpam([0, 0, 0, 0]))));
         assert!(test_is_hexdump_uppercase(&format!("{:X}", NoSpam([15, 15, 15, 15]))));
@@ -351,7 +340,7 @@ mod tests {
     encode_decode_test!(
         tox_crypto::crypto_init().unwrap(),
         no_spam_encode_decode,
-        NoSpam::random()
+        NoSpam([42; NOSPAMBYTES])
     );
 
     // ToxId::
@@ -361,10 +350,13 @@ mod tests {
     #[test]
     fn tox_id_new_nospam() {
         crypto_init().unwrap();
+
+        let mut rng = thread_rng();
+
         let (pk, _) = gen_keypair();
-        let toxid = ToxId::new(pk);
+        let toxid = ToxId::new(&mut rng, pk);
         let mut toxid2 = toxid;
-        toxid2.new_nospam(None);
+        toxid2.new_nospam(&mut rng, None);
 
         assert_ne!(toxid, toxid2);
         assert_eq!(toxid.pk, toxid2.pk);
@@ -372,9 +364,9 @@ mod tests {
         let mut toxid3 = toxid;
 
         // with same `NoSpam` IDs are identical
-        let nospam = NoSpam::random();
-        toxid2.new_nospam(Some(nospam));
-        toxid3.new_nospam(Some(nospam));
+        let nospam = rng.gen();
+        toxid2.new_nospam(&mut rng, Some(nospam));
+        toxid3.new_nospam(&mut rng, Some(nospam));
         assert_eq!(toxid2, toxid3);
     }
 
@@ -386,7 +378,7 @@ mod tests {
         // check if formatted ToxId is always upper-case hexadecimal with matching
         // length
         let (pk, _) = gen_keypair();
-        let toxid = ToxId::new(pk);
+        let toxid = ToxId::new(&mut thread_rng(), pk);
         assert!(test_is_hexdump_uppercase(&format!("{:X}", toxid)));
         assert!(test_is_hexdump_uppercase(&format!("{}", toxid)));
     }
@@ -394,6 +386,6 @@ mod tests {
     encode_decode_test!(
         tox_crypto::crypto_init().unwrap(),
         toxid_encode_decode,
-        ToxId::new(gen_keypair().0)
+        ToxId::new(&mut thread_rng(), gen_keypair().0)
     );
 }
