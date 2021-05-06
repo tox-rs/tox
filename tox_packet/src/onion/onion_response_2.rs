@@ -54,6 +54,8 @@ impl ToBytes for OnionResponse2 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crypto_box::{SalsaBox, aead::generic_array::typenum::marker_traits::Unsigned};
+    use crypto_box::aead::AeadCore;
 
     const ONION_RETURN_2_PAYLOAD_SIZE: usize = ONION_RETURN_2_SIZE - xsalsa20poly1305::NONCE_SIZE;
 
@@ -66,7 +68,7 @@ mod tests {
             },
             payload: InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
                 sendback_data: 12345,
-                nonce: gen_nonce(),
+                nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
                 payload: vec![42; 123]
             })
         }

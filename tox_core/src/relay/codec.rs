@@ -182,6 +182,7 @@ impl Encoder<Packet> for Codec {
 
 #[cfg(test)]
 mod tests {
+    use crypto_box::{SalsaBox, aead::Aead};
     use tox_crypto::*;
     use tox_packet::dht::CryptoData;
     use tox_packet::onion::*;
@@ -366,7 +367,8 @@ mod tests {
         let mut alice_codec = Codec::new(alice_channel, stats);
 
         // packet with invalid id
-        let payload = seal(&[0x0F], &bob_nonce, &alice_pk, &bob_sk);
+        let precomputed_key = SalsaBox::new(&alice_pk, &bob_sk);
+        let payload = precomputed_key.encrypt(&bob_nonce, &[0x0F]).unwrap();
         let packet = EncryptedPacket {
             payload,
         };

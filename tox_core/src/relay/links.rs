@@ -21,7 +21,7 @@ pub enum LinkStatus {
     Online,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Link {
     /// The link is linked with the given PK
     pub pk: PublicKey,
@@ -56,7 +56,7 @@ pub struct Links {
     */
     links: [Option<Link>; MAX_LINKS_N as usize],
     /// Map PK -> id to index links with O(1)
-    pk_to_id: HashMap<PublicKey, u8>,
+    pk_to_id: HashMap<[u8; crypto_box::KEY_SIZE], u8>,
 }
 
 impl Default for Links {
@@ -77,15 +77,16 @@ impl Links {
     Return `Some(id)` if there was a `Link` or if there is a room for a new `Link`
     Return `None` if there is no room for a new `Link`
     */
-    pub fn insert(&mut self, pk: &PublicKey) -> Option<u8> {
-        let possible_index = { self.pk_to_id.get(pk).cloned() };
+    pub fn insert(&mut self, pk: PublicKey) -> Option<u8> {
+        let possible_index = { self.pk_to_id.get(pk.as_bytes()).cloned() };
         match possible_index {
             Some(index) => Some(index), // already inserted
             None => {
                 if let Some(index) = self.links.iter().position(|link| link.is_none()) {
-                    let link = Link::new(*pk);
+                    let pk_bytes = pk.as_bytes().clone();
+                    let link = Link::new(pk);
                     self.links[index] = Some(link);
-                    self.pk_to_id.insert(*pk, index as u8);
+                    self.pk_to_id.insert(pk_bytes, index as u8);
                     Some(index as u8)
                 } else {
                     // no enough room for a link
@@ -98,12 +99,13 @@ impl Links {
     Return true if succeeded to insert a new `Link`
     Return false if there is a `Link` with such PK or there is no hole at links[id]
     */
-    pub fn insert_by_id(&mut self, pk: &PublicKey, index: u8) -> bool {
+    pub fn insert_by_id(&mut self, pk: PublicKey, index: u8) -> bool {
         assert!(index < MAX_LINKS_N, "The index {} must be lower than {}", index, MAX_LINKS_N);
-        if !self.pk_to_id.contains_key(pk) && self.links[index as usize].is_none() {
-            let link = Link::new(*pk);
+        if !self.pk_to_id.contains_key(pk.as_bytes()) && self.links[index as usize].is_none() {
+            let pk_bytes = pk.as_bytes().clone();
+            let link = Link::new(pk);
             self.links[index as usize] = Some(link);
-            self.pk_to_id.insert(*pk, index);
+            self.pk_to_id.insert(pk_bytes, index);
             true
         } else {
             false
@@ -119,13 +121,13 @@ impl Links {
     }
     /// Get index of the link by PK
     pub fn id_by_pk(&self, pk: &PublicKey) -> Option<u8> {
-        self.pk_to_id.get(pk).cloned()
+        self.pk_to_id.get(pk.as_bytes()).cloned()
     }
     /// Takes the link out of the links, leaving a None in its place
     pub fn take(&mut self, index: u8) -> Option<Link> {
         if index < MAX_LINKS_N {
             if let Some(link) = self.links[index as usize].take() {
-                self.pk_to_id.remove(&link.pk);
+                self.pk_to_id.remove(link.pk.as_bytes());
                 Some(link)
             } else {
                 None
@@ -158,7 +160,7 @@ impl Links {
     }
     /// Iter over each non-empty link in self.links
     pub fn iter_links(&self) -> impl Iterator<Item = Link> + '_ {
-        self.links.iter().filter_map(|&link| link)
+        self.links.iter().filter_map(|link| link.clone())
     }
     /// Clear links
     pub fn clear(&mut self) {

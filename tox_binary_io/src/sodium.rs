@@ -1,20 +1,15 @@
-use nom::{map_opt, named, take};
+use std::convert::TryInto;
 
-use sodiumoxide::crypto::box_::{
-    PublicKey,
-    SecretKey,
-    Nonce,
-    PUBLICKEYBYTES,
-    SECRETKEYBYTES,
-    NONCEBYTES
-};
+use nom::{map, map_opt, named, take};
+
+use crypto_box::{PublicKey, SecretKey, KEY_SIZE};
 
 use super::FromBytes;
 
 
-#[cfg(feature = "sodiumoxide")]
 impl FromBytes for PublicKey {
-    named!(from_bytes<PublicKey>, map_opt!(take!(PUBLICKEYBYTES), PublicKey::from_slice));
+    // TODO: use map_from with new nom version
+    named!(from_bytes<PublicKey>, map!(map_opt!(take!(KEY_SIZE), |pk: &[u8]| pk.try_into().ok()), |pk: [u8; KEY_SIZE]| pk.into()));
 }
 
 /* TODO
@@ -23,18 +18,16 @@ And when most of tox network will send valid PK for fake friends.
 
 impl FromBytes for PublicKey {
     named!(from_bytes<PublicKey>, verify!(
-        map_opt!(take!(PUBLICKEYBYTES), PublicKey::from_slice),
+        // TODO: use map_from with new nom version
+        map!(map_opt!(take!(KEY_SIZE), |pk: &[u8]| pk.try_into().ok()), |pk: [u8; KEY_SIZE]| pk.into()),
         |pk| public_key_valid(&pk)
     ));
 }
 */
 
 impl FromBytes for SecretKey {
-    named!(from_bytes<SecretKey>, map_opt!(take!(SECRETKEYBYTES), SecretKey::from_slice));
-}
-
-impl FromBytes for Nonce {
-    named!(from_bytes<Nonce>, map_opt!(take!(NONCEBYTES), Nonce::from_slice));
+    // TODO: use map_from with new nom version
+    named!(from_bytes<SecretKey>, map!(map_opt!(take!(KEY_SIZE), |sk: &[u8]| sk.try_into().ok()), |sk: [u8; KEY_SIZE]| sk.into()));
 }
 
 #[cfg(test)]
@@ -43,25 +36,17 @@ mod tests {
 
     #[test]
     fn public_key_parse_bytes_test() {
-        let bytes = [42; PUBLICKEYBYTES];
-        let (_rest, PublicKey(pk_bytes)) = PublicKey::from_bytes(&bytes).unwrap();
+        let bytes = [42; KEY_SIZE];
+        let (_rest, pk) = PublicKey::from_bytes(&bytes).unwrap();
 
-        assert_eq!(pk_bytes, &bytes as &[u8]);
+        assert_eq!(pk.as_bytes(), &bytes as &[u8]);
     }
 
     #[test]
     fn secret_key_parse_bytes_test() {
-        let bytes = [42; SECRETKEYBYTES];
-        let (_rest, SecretKey(sk_bytes)) = SecretKey::from_bytes(&bytes).unwrap();
+        let bytes = [42; KEY_SIZE];
+        let (_rest, sk) = SecretKey::from_bytes(&bytes).unwrap();
 
-        assert_eq!(sk_bytes, &bytes as &[u8]);
-    }
-
-    #[test]
-    fn nonce_parse_bytes_test() {
-        let bytes = [42; NONCEBYTES];
-        let (_rest, Nonce(nonce_bytes)) = Nonce::from_bytes(&bytes).unwrap();
-
-        assert_eq!(nonce_bytes, &bytes as &[u8]);
+        assert_eq!(&sk.to_bytes()[..], &bytes as &[u8]);
     }
 }

@@ -75,7 +75,7 @@ impl ToBytes for InnerOnionAnnounceRequest {
         do_gen!(buf,
             gen_be_u8!(0x83) >>
             gen_slice!(self.nonce.as_ref()) >>
-            gen_slice!(self.pk.as_ref()) >>
+            gen_slice!(self.pk.as_bytes()) >>
             gen_slice!(self.payload.as_slice())
         )
     }
@@ -83,13 +83,13 @@ impl ToBytes for InnerOnionAnnounceRequest {
 
 impl InnerOnionAnnounceRequest {
     /// Create new `InnerOnionAnnounceRequest` object.
-    pub fn new(shared_secret: &PrecomputedKey, pk: &PublicKey, payload: &OnionAnnounceRequestPayload) -> InnerOnionAnnounceRequest {
+    pub fn new(shared_secret: &SalsaBox, pk: PublicKey, payload: &OnionAnnounceRequestPayload) -> InnerOnionAnnounceRequest {
         let nonce = gen_nonce();
         let mut buf = [0; ONION_MAX_PACKET_SIZE];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
-        let payload = seal_precomputed(&buf[..size], &nonce, shared_secret);
+        let payload = shared_secret.encrypt(&nonce, &buf[..size]).unwrap();
 
-        InnerOnionAnnounceRequest { nonce, pk: *pk, payload }
+        InnerOnionAnnounceRequest { nonce: nonce.into(), pk, payload }
     }
 
     /** Decrypt payload and try to parse it as `OnionAnnounceRequestPayload`.
@@ -99,9 +99,9 @@ impl InnerOnionAnnounceRequest {
     - fails to decrypt
     - fails to parse as `OnionAnnounceRequestPayload`
     */
-    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<OnionAnnounceRequestPayload, GetPayloadError> {
-        let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
-            .map_err(|()| {
+    pub fn get_payload(&self, shared_secret: &SalsaBox) -> Result<OnionAnnounceRequestPayload, GetPayloadError> {
+        let decrypted = shared_secret.decrypt((&self.nonce).into(), self.payload.as_slice())
+            .map_err(|AeadError| {
                 GetPayloadError::decrypt()
             })?;
         match OnionAnnounceRequestPayload::from_bytes(&decrypted) {
@@ -215,7 +215,7 @@ mod tests {
     encode_decode_test!(
         inner_onion_announce_request_encode_decode,
         InnerOnionAnnounceRequest {
-            nonce: gen_nonce(),
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             pk: gen_keypair().0,
             payload: vec![42; 123]
         }
@@ -225,7 +225,7 @@ mod tests {
         onion_announce_request_encode_decode,
         OnionAnnounceRequest {
             inner: InnerOnionAnnounceRequest {
-                nonce: gen_nonce(),
+                nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
                 pk: gen_keypair().0,
                 payload: vec![42; 123]
             },
@@ -250,7 +250,7 @@ mod tests {
     fn onion_announce_request_payload_encrypt_decrypt() {
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
-        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
+        let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
         let payload = OnionAnnounceRequestPayload {
             ping_id: [42; <Sha256 as Digest>::OutputSize::USIZE],
             search_pk: gen_keypair().0,
@@ -258,7 +258,7 @@ mod tests {
             sendback_data: 12345
         };
         // encode payload with shared secret
-        let onion_packet = InnerOnionAnnounceRequest::new(&shared_secret, &alice_pk, &payload);
+        let onion_packet = InnerOnionAnnounceRequest::new(&shared_secret, alice_pk, &payload);
         // decode payload with bob's secret key
         let decoded_payload = onion_packet.get_payload(&shared_secret).unwrap();
         // payloads should be equal
@@ -270,7 +270,7 @@ mod tests {
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let (_eve_pk, eve_sk) = gen_keypair();
-        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
+        let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
         let payload = OnionAnnounceRequestPayload {
             ping_id: [42; <Sha256 as Digest>::OutputSize::USIZE],
             search_pk: gen_keypair().0,
@@ -278,9 +278,9 @@ mod tests {
             sendback_data: 12345
         };
         // encode payload with shared secret
-        let onion_packet = InnerOnionAnnounceRequest::new(&shared_secret, &alice_pk, &payload);
+        let onion_packet = InnerOnionAnnounceRequest::new(&shared_secret, alice_pk, &payload);
         // try to decode payload with eve's secret key
-        let eve_shared_secret = encrypt_precompute(&bob_pk, &eve_sk);
+        let eve_shared_secret = SalsaBox::new(&bob_pk, &eve_sk);
         let decoded_payload = onion_packet.get_payload(&eve_shared_secret);
         assert!(decoded_payload.is_err());
     }
@@ -289,23 +289,23 @@ mod tests {
     fn onion_announce_request_decrypt_invalid() {
         let (_alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
-        let shared_secret = precompute(&bob_pk, &alice_sk);
+        let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
         let nonce = gen_nonce();
         let pk = gen_keypair().0;
         // Try long invalid array
         let invalid_payload = [42; 123];
-        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
+        let invalid_payload_encoded = shared_secret.encrypt(&nonce, &invalid_payload[..]).unwrap();
         let invalid_onion_announce_request = InnerOnionAnnounceRequest {
-            nonce,
+            nonce: nonce.into(),
             pk,
             payload: invalid_payload_encoded
         };
         assert!(invalid_onion_announce_request.get_payload(&shared_secret).is_err());
         // Try short incomplete array
         let invalid_payload = [];
-        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
+        let invalid_payload_encoded = shared_secret.encrypt(&nonce, &invalid_payload[..]).unwrap();
         let invalid_onion_announce_request = InnerOnionAnnounceRequest {
-            nonce,
+            nonce: nonce.into(),
             pk,
             payload: invalid_payload_encoded
         };

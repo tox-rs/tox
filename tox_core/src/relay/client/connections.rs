@@ -63,7 +63,7 @@ struct NodeConnection {
     /// Connection status shows whether a connection used or not.
     status: NodeConnectionStatus,
     /// List of relays we are connected to the node through.
-    connections: HashSet<PublicKey>,
+    connections: HashSet<[u8; crypto_box::KEY_SIZE]>,
 }
 
 impl NodeConnection {
@@ -76,7 +76,7 @@ impl NodeConnection {
     }
 
     /// Get an iterator over connected relays.
-    fn clients<'c, 'a: 'c, 'b: 'c>(&'a self, clients: &'b HashMap<PublicKey, Client>) -> impl Iterator<Item = &'b Client> + 'c {
+    fn clients<'c, 'a: 'c, 'b: 'c>(&'a self, clients: &'b HashMap<[u8; crypto_box::KEY_SIZE], Client>) -> impl Iterator<Item = &'b Client> + 'c {
         self.connections
             .iter()
             .flat_map(move |relay_pk| clients.get(relay_pk).into_iter())

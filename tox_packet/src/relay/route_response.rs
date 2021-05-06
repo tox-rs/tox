@@ -46,7 +46,7 @@ impl ToBytes for RouteResponse {
         do_gen!(buf,
             gen_be_u8!(0x01) >>
             gen_call!(|buf, connection_id| ConnectionId::to_bytes(connection_id, buf), &self.connection_id) >>
-            gen_slice!(self.pk.as_ref())
+            gen_slice!(self.pk.as_bytes())
         )
     }
 }

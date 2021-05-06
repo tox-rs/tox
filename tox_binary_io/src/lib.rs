@@ -11,9 +11,9 @@ use std::{convert::TryInto, net::{
     Ipv6Addr,
 }};
 
-#[cfg(feature = "sodiumoxide")]
+#[cfg(feature = "crypto")]
 pub use sodium::*;
-#[cfg(feature = "sodiumoxide")]
+#[cfg(feature = "crypto")]
 mod sodium;
 
 /// The trait provides method to deserialize struct from raw bytes

@@ -3,6 +3,8 @@
 
 use super::*;
 
+use aead::{Aead, Error as AeadError};
+use crypto_box::SalsaBox;
 use nom::number::complete::be_u64;
 
 use tox_binary_io::*;
@@ -68,15 +70,15 @@ impl FromBytes for CookieRequest {
 
 impl CookieRequest {
     /// Create `CookieRequest` from `CookieRequestPayload` encrypting it with `shared_key`
-    pub fn new(shared_secret: &PrecomputedKey, pk: &PublicKey, payload: &CookieRequestPayload) -> CookieRequest {
+    pub fn new(shared_secret: &SalsaBox, pk: PublicKey, payload: &CookieRequestPayload) -> CookieRequest {
         let nonce = gen_nonce();
         let mut buf = [0; 72];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
-        let payload = seal_precomputed(&buf[..size], &nonce, shared_secret);
+        let payload = shared_secret.encrypt(&nonce, &buf[..size]).unwrap();
 
         CookieRequest {
-            pk: *pk,
-            nonce,
+            pk,
+            nonce: nonce.into(),
             payload,
         }
     }
@@ -87,9 +89,9 @@ impl CookieRequest {
     - fails to decrypt
     - fails to parse `CookieRequestPayload`
     */
-    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<CookieRequestPayload, GetPayloadError> {
-        let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
-            .map_err(|()| {
+    pub fn get_payload(&self, shared_secret: &SalsaBox) -> Result<CookieRequestPayload, GetPayloadError> {
+        let decrypted = shared_secret.decrypt((&self.nonce).into(), self.payload.as_slice())
+            .map_err(|AeadError| {
                 GetPayloadError::decrypt()
             })?;
         match CookieRequestPayload::from_bytes(&decrypted) {
@@ -146,12 +148,13 @@ impl FromBytes for CookieRequestPayload {
 #[cfg(test)]
 mod tests {
     use crate::dht::cookie_request::*;
+    use crypto_box::aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned};
 
     encode_decode_test!(
         cookie_request_encode_decode,
         CookieRequest {
             pk: gen_keypair().0,
-            nonce: gen_nonce(),
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             payload: vec![42; 88],
         }
     );

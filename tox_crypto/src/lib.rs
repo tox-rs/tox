@@ -1,40 +1,25 @@
 //! Functions for the core crypto.
 
-pub use sodiumoxide::crypto::box_::*;
+use crypto_box::{SalsaBox, aead::generic_array::typenum::marker_traits::Unsigned};
+use crypto_box::aead::{Aead, AeadCore};
+pub use crypto_box::{PublicKey, SecretKey};
+
+pub type Nonce2 = crypto_box::aead::Nonce<SalsaBox>;
+pub type Nonce = [u8; <SalsaBox as AeadCore>::NonceSize::USIZE];
+
+pub const PUBLICKEYBYTES: usize = crypto_box::KEY_SIZE;
+pub const NONCEBYTES: usize = <SalsaBox as AeadCore>::NonceSize::USIZE;
 
 // TODO: check if `#[inline]` is actually useful
 
-/** Check if Tox public key `PUBLICKEYBYTES` is valid. Should be used only for
-    input validation.
+/** Check if Tox public key is valid. Should be used only for input
+    validation.
 
     Returns `true` if valid, `false` otherwise.
 */
-pub fn public_key_valid(&PublicKey(ref pk): &PublicKey) -> bool {
-    pk[PUBLICKEYBYTES - 1] <= 127 // Last bit of key is always zero.
+pub fn public_key_valid(pk: &PublicKey) -> bool {
+    pk.as_bytes()[PUBLICKEYBYTES - 1] <= 127 // Last bit of key is always zero.
 }
-
-
-/** Precomputes the shared key from `their_public_key` and `our_secret_key`.
-
-    For fast encrypt/decrypt - this way we can avoid an expensive elliptic
-    curve scalar multiply for each encrypt/decrypt operation.
-
-    Use if communication is not one-time.
-
-    `encrypt_precompute` does the shared-key generation once, so that it does
-    not have to be performed on every encrypt/decrypt.
-
-    This a wrapper for the
-    [`precompute()`](../../../sodiumoxide/crypto/box_/curve25519xsalsa20poly1305/fn.precompute.html)
-    function from `sodiumoxide` crate.
-*/
-#[inline]
-pub fn encrypt_precompute(their_public_key: &PublicKey,
-                          our_secret_key: &SecretKey) -> PrecomputedKey {
-    precompute(their_public_key, our_secret_key)
-}
-// ↓ can't use, since there's no way to add additional docs
-//pub use sodiumoxide::crypto::box_::precompute as encrypt_precompute;
 
 
 /** Returns encrypted data from `plain`, with length of `plain + 16` due to
@@ -51,10 +36,10 @@ pub fn encrypt_precompute(their_public_key: &PublicKey,
     function from `sodiumoxide`.
 */
 #[inline]
-pub fn encrypt_data_symmetric(precomputed_key: &PrecomputedKey,
+pub fn encrypt_data_symmetric(precomputed_key: &SalsaBox,
                               nonce: &Nonce,
                               plain: &[u8]) -> Vec<u8> {
-    seal_precomputed(plain, nonce, precomputed_key)
+    precomputed_key.encrypt(nonce.into(), plain).unwrap()
 }
 // not using ↓ since it doesn't allow to add additional documentation
 //pub use sodiumoxide::crypto::box_::seal_precomputed as encrypt_data_symmetric;
@@ -74,10 +59,10 @@ pub fn encrypt_data_symmetric(precomputed_key: &PrecomputedKey,
     function from `sodiumoxide`.
 */
 #[inline]
-pub fn decrypt_data_symmetric(precomputed_key: &PrecomputedKey,
+pub fn decrypt_data_symmetric(precomputed_key: &SalsaBox,
                               nonce: &Nonce,
                               encrypted: &[u8]) -> Result<Vec<u8>, ()> {
-    open_precomputed(encrypted, nonce, precomputed_key)
+    precomputed_key.decrypt(nonce.into(), encrypted).map_err(|_| ())
 }
 
 
@@ -99,13 +84,23 @@ pub fn increment_nonce(nonce: &mut Nonce) {
 
 /// Inrement given nonce by number `num`.
 pub fn increment_nonce_number(nonce: &mut Nonce, num: u16) {
-    let ref mut bytes = &mut nonce.0;
     let mut c = num as u32;
     for i in (0 .. NONCEBYTES).rev() {
-        c += bytes[i] as u32;
-        bytes[i] = c as u8;
+        c += nonce[i] as u32;
+        nonce[i] = c as u8;
         c >>= 8;
     }
+}
+
+pub fn gen_keypair() -> (PublicKey, SecretKey) {
+    // let sk = SecretKey::generate(&mut rand::thread_rng());
+    // let pk = sk.public_key();
+    // (pk, sk)
+    unimplemented!()
+}
+
+pub fn gen_nonce() -> Nonce2 {
+    unimplemented!()
 }
 
 #[cfg(test)]
@@ -116,8 +111,8 @@ pub mod tests {
     // test comparing empty keys
     // testing since it would appear that sodiumoxide doesn't do testing for it
     fn public_key_cmp_test_empty() {
-        let alice_publickey = PublicKey([0; PUBLICKEYBYTES]);
-        let bob_publickey = PublicKey([0; PUBLICKEYBYTES]);
+        let alice_publickey = PublicKey::from([0; PUBLICKEYBYTES]);
+        let bob_publickey = PublicKey::from([0; PUBLICKEYBYTES]);
 
         assert_eq!(alice_publickey.eq(&bob_publickey), true);
         assert_eq!(bob_publickey.eq(&alice_publickey), true);
@@ -143,131 +138,61 @@ pub mod tests {
         let (pk, _) = gen_keypair();
         assert!(public_key_valid(&pk));
 
-        assert!(public_key_valid(&PublicKey([0; PUBLICKEYBYTES]))); // 0
-        assert!(public_key_valid(&PublicKey([0b01_11_11_11; PUBLICKEYBYTES]))); // 127
-        assert!(!public_key_valid(&PublicKey([0b10_00_00_00; PUBLICKEYBYTES]))); // 128
-        assert!(!public_key_valid(&PublicKey([0b11_11_11_11; PUBLICKEYBYTES]))); // 255
+        assert!(public_key_valid(&PublicKey::from([0; PUBLICKEYBYTES]))); // 0
+        assert!(public_key_valid(&PublicKey::from([0b01_11_11_11; PUBLICKEYBYTES]))); // 127
+        assert!(!public_key_valid(&PublicKey::from([0b10_00_00_00; PUBLICKEYBYTES]))); // 128
+        assert!(!public_key_valid(&PublicKey::from([0b11_11_11_11; PUBLICKEYBYTES]))); // 255
     }
 
-
-    #[test]
-    // test uses "bare" functions provided by `sodiumoxide`, with an exception
-    // of the tested function
-    fn encrypt_precompute_test() {
-        let (alice_pk, alice_sk) = gen_keypair();
-        let (bob_pk, bob_sk) = gen_keypair();
-
-        let alice_plaintext = b"Hi, Bob.";
-        let alice_precomputed_key = encrypt_precompute(&bob_pk, &alice_sk);
-
-        let nonce = gen_nonce();
-
-        let ciphertext = seal_precomputed(alice_plaintext, &nonce, &alice_precomputed_key);
-
-        let bob_precomputed_key = encrypt_precompute(&alice_pk, &bob_sk);
-        let bob_plaintext = open_precomputed(&ciphertext, &nonce, &bob_precomputed_key).unwrap();
-
-        assert_eq!(alice_plaintext, &bob_plaintext[..]);
-    }
-
-
-    #[test]
-    // test uses "bare" functions provided by `sodiumoxide`, with an "exception"
-    // of the tested function
-    fn encrypt_data_symmetric_test() {
-        let (alice_pk, alice_sk) = gen_keypair();
-        let (bob_pk, bob_sk) = gen_keypair();
-
-        let alice_plain = b"Hi, Bob.";
-
-        let precomputed_key = precompute(&bob_pk, &alice_sk);
-        let nonce = gen_nonce();
-
-        let ciphertext = encrypt_data_symmetric(&precomputed_key, &nonce, alice_plain);
-
-        let bob_plain = open(&ciphertext, &nonce, &alice_pk, &bob_sk).unwrap();
-
-        assert_eq!(alice_plain, &bob_plain[..]);
-    }
-
-    /* TODO: test for pubkey/skey/nonce being all `0`s, which would produce
-       ciphertext that should be compared to already known result of this
-       computation. This way it would be ensured that cipher algorithm is
-       actually working as it should.
-       There should be also some additional variations of this test, with different
-       pkey/skey/nonce values that would produce known ciphertext.
-
-       Also, similar test for decrypting.
-    */
-
-
-    #[test]
-    // test uses "bare" functions provided by `sodiumoxide`, with an exception
-    // of the tested function
-    fn decrypt_data_symmetric_test() {
-        let (alice_pk, alice_sk) = gen_keypair();
-        let (bob_pk, bob_sk) = gen_keypair();
-
-        let alice_plain = b"Hi, Bob.";
-
-        let precomputed_key = precompute(&alice_pk, &bob_sk);
-        let nonce = gen_nonce();
-
-        let ciphertext = seal(alice_plain, &nonce, &bob_pk, &alice_sk);
-
-        let bob_plain = decrypt_data_symmetric(&precomputed_key, &nonce, &ciphertext).unwrap();
-
-        assert_eq!(alice_plain, &bob_plain[..]);
-    }
 
     #[test]
     fn increment_nonce_test_zero_plus_one() {
-        let cmp_nonce = Nonce([0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 0, 0, 0, 1]);
+        let cmp_nonce = [0, 0, 0, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0, 0, 0, 1];
 
-        let mut nonce = Nonce([0; NONCEBYTES]);
+        let mut nonce = [0; NONCEBYTES];
         increment_nonce(&mut nonce);
         assert_eq!(nonce, cmp_nonce);
     }
 
     #[test]
     fn increment_nonce_test_0xf_plus_one() {
-        let cmp_nonce = Nonce([0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 0, 0, 0, 0x10]);
+        let cmp_nonce = [0, 0, 0, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0, 0, 0, 0x10];
 
-        let mut nonce = Nonce([0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 0, 0, 0, 0xf]);
+        let mut nonce = [0, 0, 0, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0, 0, 0, 0xf];
         increment_nonce(&mut nonce);
         assert_eq!(nonce, cmp_nonce);
     }
 
     #[test]
     fn increment_nonce_test_0xff_plus_one() {
-        let cmp_nonce = Nonce([0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 0, 0, 1, 0]);
+        let cmp_nonce = [0, 0, 0, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0, 0, 1, 0];
 
-        let mut nonce = Nonce([0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 0, 0, 0, 0xff]);
+        let mut nonce = [0, 0, 0, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0, 0, 0, 0xff];
         increment_nonce(&mut nonce);
         assert_eq!(nonce, cmp_nonce);
     }
 
     #[test]
     fn increment_nonce_test_0xff_max() {
-        let cmp_nonce = Nonce([0; NONCEBYTES]);
-        let mut nonce = Nonce([0xff; NONCEBYTES]);
+        let cmp_nonce = [0; NONCEBYTES];
+        let mut nonce = [0xff; NONCEBYTES];
         increment_nonce(&mut nonce);
         assert_eq!(cmp_nonce, nonce);
     }
 
     #[test]
     fn increment_nonce_test_random() {
-        let mut nonce = gen_nonce();
+        let mut nonce = gen_nonce().into();
         let cmp_nonce = nonce;
         increment_nonce(&mut nonce);
         assert_ne!(nonce, cmp_nonce);
@@ -277,10 +202,10 @@ pub mod tests {
 
     #[test]
     fn increment_nonce_number_test_zero_plus_0xff00() {
-        let cmp_nonce = Nonce([0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 0, 0, 0xff, 0]);
-        let mut nonce = Nonce([0; NONCEBYTES]);
+        let cmp_nonce = [0, 0, 0, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0, 0, 0xff, 0];
+        let mut nonce = [0; NONCEBYTES];
 
         increment_nonce_number(&mut nonce, 0xff00);
         assert_eq!(nonce, cmp_nonce);
@@ -288,13 +213,13 @@ pub mod tests {
 
     #[test]
     fn increment_nonce_number_test_0xff00_plus_0x0110() {
-        let cmp_nonce = Nonce([0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 0, 1, 0, 0x10]);
+        let cmp_nonce = [0, 0, 0, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0, 1, 0, 0x10];
 
-        let mut nonce = Nonce([0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 0, 0, 0xff, 0]);
+        let mut nonce = [0, 0, 0, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0, 0, 0xff, 0];
 
         increment_nonce_number(&mut nonce, 0x01_10);
         assert_eq!(nonce, cmp_nonce);

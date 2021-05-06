@@ -43,7 +43,7 @@ mod tests {
         inner_onion_announce_response_encode_decode,
         InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
             sendback_data: 12345,
-            nonce: gen_nonce(),
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             payload: vec![42; 123]
         })
     );
@@ -51,7 +51,7 @@ mod tests {
     encode_decode_test!(
         inner_onion_data_response_encode_decode,
         InnerOnionResponse::OnionDataResponse(OnionDataResponse {
-            nonce: gen_nonce(),
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             temporary_pk: gen_keypair().0,
             payload: vec![42; 123]
         })

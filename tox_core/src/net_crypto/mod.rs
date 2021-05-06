@@ -24,6 +24,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::u16;
 
+use crypto_box::SalsaBox;
 use failure::Fail;
 use futures::{TryFutureExt, SinkExt};
 use futures::future;
@@ -251,7 +252,7 @@ impl NetCrypto {
             return;
         }
 
-        let dht_precomputed_key = precompute(&peer_dht_pk, &self.dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &self.dht_sk);
         let connection = CryptoConnection::new(
             &dht_precomputed_key,
             self.dht_pk,
@@ -407,7 +408,7 @@ impl NetCrypto {
             cookie: encrypted_cookie,
             id: payload.id,
         };
-        let precomputed_key = precompute(&packet.pk, &self.dht_sk);
+        let precomputed_key = SalsaBox::new(&packet.pk, &self.dht_sk);
         let response = CookieResponse::new(&precomputed_key, &response_payload);
 
         Ok(response)
@@ -461,7 +462,7 @@ impl NetCrypto {
             cookie_hash: payload.cookie.hash(),
             cookie: our_encrypted_cookie,
         };
-        let handshake = CryptoHandshake::new(&precompute(&connection.peer_real_pk, &self.real_sk), &handshake_payload, payload.cookie);
+        let handshake = CryptoHandshake::new(&SalsaBox::new(&connection.peer_real_pk, &self.real_sk), &handshake_payload, payload.cookie);
 
         connection.status = ConnectionStatus::HandshakeSending {
             sent_nonce,
@@ -500,7 +501,7 @@ impl NetCrypto {
     /// - cookie is not timed out
     /// - hash for the cookie inside the payload is correct
     fn validate_crypto_handshake(&self, packet: &CryptoHandshake)
-        -> Result<(Cookie, CryptoHandshakePayload, PrecomputedKey), HandlePacketError> {
+        -> Result<(Cookie, CryptoHandshakePayload, SalsaBox), HandlePacketError> {
         let cookie = match packet.cookie.get_payload(&self.symmetric_key) {
             Ok(cookie) => cookie,
             Err(e) => return Err(e.context(HandlePacketErrorKind::GetPayload).into()),
@@ -510,7 +511,7 @@ impl NetCrypto {
             return Err(HandlePacketErrorKind::CookieTimedOut.into());
         }
 
-        let real_precomputed_key = precompute(&cookie.real_pk, &self.real_sk);
+        let real_precomputed_key = SalsaBox::new(&cookie.real_pk, &self.real_sk);
 
         let payload = match packet.get_payload(&real_precomputed_key) {
             Ok(payload) => payload,
@@ -565,7 +566,7 @@ impl NetCrypto {
                 ConnectionStatus::NotConfirmed {
                     sent_nonce,
                     received_nonce: payload.base_nonce,
-                    session_precomputed_key: precompute(&payload.session_pk, &connection.session_sk),
+                    session_precomputed_key: SalsaBox::new(&payload.session_pk, &connection.session_sk),
                     packet: StatusPacketWithTime::new_crypto_handshake(handshake)
                 }
             },
@@ -573,7 +574,7 @@ impl NetCrypto {
             | ConnectionStatus::NotConfirmed { sent_nonce, ref packet, .. } => ConnectionStatus::NotConfirmed {
                 sent_nonce,
                 received_nonce: payload.base_nonce,
-                session_precomputed_key: precompute(&payload.session_pk, &connection.session_sk),
+                session_precomputed_key: SalsaBox::new(&payload.session_pk, &connection.session_sk),
                 packet: packet.clone()
             },
             ConnectionStatus::Established { .. } => unreachable!("Checked for Established status above"),
@@ -1166,9 +1167,9 @@ mod tests {
             peer_real_pk: PublicKey,
             sent_nonce: Nonce,
             received_nonce: Nonce,
-            session_precomputed_key: PrecomputedKey
+            session_precomputed_key: SalsaBox
         ) {
-            let dht_precomputed_key = precompute(&peer_dht_pk, &self.dht_sk);
+            let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &self.dht_sk);
             let mut connection = CryptoConnection::new(&dht_precomputed_key, self.dht_pk, self.real_pk, peer_real_pk, peer_dht_pk);
             connection.status = ConnectionStatus::Established {
                 sent_nonce,
@@ -1228,7 +1229,7 @@ mod tests {
         let (real_pk, real_sk) = gen_keypair();
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
@@ -1298,7 +1299,7 @@ mod tests {
         let (real_pk, real_sk) = gen_keypair();
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
@@ -1347,7 +1348,7 @@ mod tests {
         let (real_pk, real_sk) = gen_keypair();
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
@@ -1441,7 +1442,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let cookie_request_id = unpack!(connection.status, ConnectionStatus::CookieRequesting, cookie_request_id);
@@ -1462,7 +1463,7 @@ mod tests {
         let packet = unpack!(packet.packet, StatusPacket::CryptoHandshake);
         assert_eq!(packet.cookie, cookie);
 
-        let payload = packet.get_payload(&precompute(&real_pk, &peer_real_sk)).unwrap();
+        let payload = packet.get_payload(&SalsaBox::new(&real_pk, &peer_real_sk)).unwrap();
         assert_eq!(payload.cookie_hash, cookie.hash());
     }
 
@@ -1508,7 +1509,7 @@ mod tests {
             cookie,
             id: 12345
         };
-        let cookie_response = CookieResponse::new(&precompute(&peer_dht_pk, &dht_sk), &cookie_response_payload);
+        let cookie_response = CookieResponse::new(&SalsaBox::new(&peer_dht_pk, &dht_sk), &cookie_response_payload);
 
         let res = net_crypto.handle_cookie_response(&mut connection, &cookie_response).await;
         assert!(res.is_err());
@@ -1536,7 +1537,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let cookie_request_id = unpack!(connection.status, ConnectionStatus::CookieRequesting, cookie_request_id);
@@ -1578,7 +1579,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let cookie_request_id = unpack!(connection.status, ConnectionStatus::CookieRequesting, cookie_request_id);
@@ -1608,7 +1609,7 @@ mod tests {
         let packet = unpack!(packet.packet, StatusPacket::CryptoHandshake);
         assert_eq!(packet.cookie, cookie);
 
-        let payload = packet.get_payload(&precompute(&real_pk, &peer_real_sk)).unwrap();
+        let payload = packet.get_payload(&SalsaBox::new(&real_pk, &peer_real_sk)).unwrap();
         assert_eq!(payload.cookie_hash, cookie.hash());
     }
 
@@ -1652,7 +1653,7 @@ mod tests {
         });
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
 
@@ -1692,10 +1693,10 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
-        let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
+        let real_precomputed_key = SalsaBox::new(&real_pk, &peer_real_sk);
         let base_nonce = gen_nonce();
         let session_pk = gen_keypair().0;
         let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
@@ -1760,7 +1761,7 @@ mod tests {
             &net_crypto.symmetric_key
         );
 
-        let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
+        let real_precomputed_key = SalsaBox::new(&real_pk, &peer_real_sk);
         let base_nonce = gen_nonce();
         let session_pk = gen_keypair().0;
         let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
@@ -1813,12 +1814,12 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce: gen_nonce(),
@@ -1867,10 +1868,10 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
-        let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
+        let real_precomputed_key = SalsaBox::new(&real_pk, &peer_real_sk);
         let base_nonce = gen_nonce();
         let session_pk = gen_keypair().0;
         let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
@@ -1913,10 +1914,10 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
-        let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
+        let real_precomputed_key = SalsaBox::new(&real_pk, &peer_real_sk);
         let base_nonce = gen_nonce();
         let session_pk = gen_keypair().0;
         let mut our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
@@ -1961,10 +1962,10 @@ mod tests {
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
         let (another_peer_real_pk, another_peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
-        let real_precomputed_key = precompute(&real_pk, &another_peer_real_sk);
+        let real_precomputed_key = SalsaBox::new(&real_pk, &another_peer_real_sk);
         let base_nonce = gen_nonce();
         let session_pk = gen_keypair().0;
         let our_cookie = Cookie::new(another_peer_real_pk, peer_dht_pk);
@@ -2010,12 +2011,12 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let (new_dht_pk, _new_dht_sk) = gen_keypair();
 
-        let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
+        let real_precomputed_key = SalsaBox::new(&real_pk, &peer_real_sk);
         let base_nonce = gen_nonce();
         let session_pk = gen_keypair().0;
         let our_cookie = Cookie::new(peer_real_pk, new_dht_pk);
@@ -2067,7 +2068,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
@@ -2076,7 +2077,7 @@ mod tests {
         net_crypto.connections.write().await.insert(peer_real_pk, Arc::new(RwLock::new(connection)));
         net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk);
 
-        let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
+        let real_precomputed_key = SalsaBox::new(&real_pk, &peer_real_sk);
         let base_nonce = gen_nonce();
         let session_pk = gen_keypair().0;
         let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
@@ -2153,7 +2154,7 @@ mod tests {
 
         net_crypto.add_friend(peer_real_pk).await;
 
-        let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
+        let real_precomputed_key = SalsaBox::new(&real_pk, &peer_real_sk);
         let base_nonce = gen_nonce();
         let session_pk = gen_keypair().0;
         let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
@@ -2214,14 +2215,14 @@ mod tests {
 
         net_crypto.add_friend(peer_real_pk).await;
 
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let received_nonce = gen_nonce();
         let sent_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
@@ -2235,7 +2236,7 @@ mod tests {
         net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk);
 
         let (new_peer_dht_pk, _new_peer_dht_sk) = gen_keypair();
-        let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
+        let real_precomputed_key = SalsaBox::new(&real_pk, &peer_real_sk);
         let base_nonce = gen_nonce();
         let session_pk = gen_keypair().0;
         let our_cookie = Cookie::new(peer_real_pk, new_peer_dht_pk);
@@ -2314,7 +2315,7 @@ mod tests {
 
         net_crypto.add_friend(peer_real_pk).await;
 
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
@@ -2323,7 +2324,7 @@ mod tests {
         net_crypto.connections.write().await.insert(peer_real_pk, Arc::new(RwLock::new(connection)));
         net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk);
 
-        let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
+        let real_precomputed_key = SalsaBox::new(&real_pk, &peer_real_sk);
         let base_nonce = gen_nonce();
         let session_pk = gen_keypair().0;
         let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
@@ -2388,14 +2389,14 @@ mod tests {
 
         net_crypto.add_friend(peer_real_pk).await;
 
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let received_nonce = gen_nonce();
         let sent_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
@@ -2408,7 +2409,7 @@ mod tests {
         net_crypto.connections.write().await.insert(peer_real_pk, Arc::new(RwLock::new(connection)));
         net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk);
 
-        let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
+        let real_precomputed_key = SalsaBox::new(&real_pk, &peer_real_sk);
         let base_nonce = gen_nonce();
         let session_pk = gen_keypair().0;
         let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
@@ -2452,7 +2453,7 @@ mod tests {
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, peer_real_sk) = gen_keypair();
 
-        let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
+        let real_precomputed_key = SalsaBox::new(&real_pk, &peer_real_sk);
         let base_nonce = gen_nonce();
         let session_pk = gen_keypair().0;
         let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
@@ -2497,13 +2498,13 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let received_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce,
@@ -2555,13 +2556,13 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let received_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce,
@@ -2619,7 +2620,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         tokio::time::pause();
@@ -2637,7 +2638,7 @@ mod tests {
         let received_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce,
@@ -2698,13 +2699,13 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let received_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce,
@@ -2751,13 +2752,13 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let received_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce,
@@ -2838,13 +2839,13 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let received_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce,
@@ -2891,7 +2892,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
@@ -2900,7 +2901,7 @@ mod tests {
         let received_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce,
@@ -2945,7 +2946,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         tokio::time::pause();
@@ -2975,7 +2976,7 @@ mod tests {
         let received_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce,
@@ -3027,7 +3028,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         assert!(connection.send_array.insert(0, SentPacket::new(vec![42; 123])).is_ok());
@@ -3039,7 +3040,7 @@ mod tests {
         let received_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce,
@@ -3083,13 +3084,13 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let received_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce,
@@ -3136,13 +3137,13 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let received_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce,
@@ -3189,13 +3190,13 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let received_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         let crypto_data_payload = CryptoDataPayload {
             buffer_start: 0,
             packet_number: 0,
@@ -3232,13 +3233,13 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let received_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce,
@@ -3319,7 +3320,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
@@ -3368,7 +3369,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
@@ -3412,7 +3413,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
@@ -3465,7 +3466,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
@@ -3509,7 +3510,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let packet = Packet::CryptoData(CryptoData {
@@ -3543,7 +3544,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let packet = unpack!(connection.status.clone(), ConnectionStatus::CookieRequesting, packet);
@@ -3586,7 +3587,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
@@ -3634,7 +3635,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
@@ -3644,7 +3645,7 @@ mod tests {
         let sent_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
@@ -3689,7 +3690,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
@@ -3699,7 +3700,7 @@ mod tests {
         let sent_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
@@ -3757,13 +3758,13 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let received_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce: gen_nonce(),
             received_nonce,
@@ -3800,7 +3801,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
@@ -3810,7 +3811,7 @@ mod tests {
         let mut sent_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
@@ -3860,7 +3861,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
@@ -3870,7 +3871,7 @@ mod tests {
         let sent_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
@@ -3929,7 +3930,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
@@ -3939,7 +3940,7 @@ mod tests {
         let sent_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
@@ -3986,7 +3987,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
@@ -3996,7 +3997,7 @@ mod tests {
         let sent_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
@@ -4059,7 +4060,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
@@ -4069,7 +4070,7 @@ mod tests {
         let sent_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
@@ -4187,7 +4188,7 @@ mod tests {
 
         let status_packet = unpack!(connection.status.clone(), ConnectionStatus::CookieRequesting, packet);
         let cookie_request = unpack!(status_packet.packet, StatusPacket::CookieRequest);
-        let cookie_request_payload = cookie_request.get_payload(&precompute(&dht_pk, &peer_dht_sk)).unwrap();
+        let cookie_request_payload = cookie_request.get_payload(&SalsaBox::new(&dht_pk, &peer_dht_sk)).unwrap();
 
         assert_eq!(cookie_request_payload.pk, real_pk);
     }
@@ -4353,14 +4354,14 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let received_nonce = gen_nonce();
         let sent_nonce = gen_nonce();
         let (peer_session_pk, _peer_session_sk) = gen_keypair();
         let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
@@ -4436,7 +4437,7 @@ mod tests {
 
         let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
         let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();

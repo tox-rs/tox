@@ -25,8 +25,7 @@ According to the [spec](https://zetok.github.io/tox-spec#bucket-index).
 
 Fails (returns `None`) only if supplied keys are the same.
 */
-pub fn kbucket_index(&PublicKey(ref own_pk): &PublicKey,
-                     &PublicKey(ref other_pk): &PublicKey) -> Option<u8> {
+pub fn kbucket_index(own_pk: &PublicKey, other_pk: &PublicKey) -> Option<u8> {
 
     debug!(target: "KBucketIndex", "Calculating KBucketIndex for PKs.");
     trace!(target: "KBucketIndex", "With PK1: {:?}; PK2: {:?}", own_pk, other_pk);
@@ -50,15 +49,12 @@ pub trait Distance {
 }
 
 impl Distance for PublicKey {
-    fn distance(&self,
-                &PublicKey(ref pk1): &PublicKey,
-                &PublicKey(ref pk2): &PublicKey) -> Ordering {
+    fn distance(&self, pk1: &PublicKey, pk2: &PublicKey) -> Ordering {
 
         trace!(target: "Distance", "Comparing distance between PKs.");
-        let &PublicKey(own) = self;
         for i in 0..PUBLICKEYBYTES {
             if pk1[i] != pk2[i] {
-                return Ord::cmp(&(own[i] ^ pk1[i]), &(own[i] ^ pk2[i]))
+                return Ord::cmp(&(self[i] ^ pk1[i]), &(self[i] ^ pk2[i]))
             }
         }
         Ordering::Equal
@@ -386,11 +382,11 @@ mod tests {
 
     #[test]
     fn public_key_distance() {
-        let pk_0 = PublicKey([0; PUBLICKEYBYTES]);
-        let pk_1 = PublicKey([1; PUBLICKEYBYTES]);
-        let pk_2 = PublicKey([2; PUBLICKEYBYTES]);
-        let pk_ff = PublicKey([0xff; PUBLICKEYBYTES]);
-        let pk_fe = PublicKey([0xfe; PUBLICKEYBYTES]);
+        let pk_0 = PublicKey::from([0; PUBLICKEYBYTES]);
+        let pk_1 = PublicKey::from([1; PUBLICKEYBYTES]);
+        let pk_2 = PublicKey::from([2; PUBLICKEYBYTES]);
+        let pk_ff = PublicKey::from([0xff; PUBLICKEYBYTES]);
+        let pk_fe = PublicKey::from([0xfe; PUBLICKEYBYTES]);
 
         assert_eq!(Ordering::Less, pk_0.distance(&pk_1, &pk_2));
         assert_eq!(Ordering::Equal, pk_2.distance(&pk_2, &pk_2));
@@ -402,9 +398,9 @@ mod tests {
 
     #[test]
     fn kbucket_index_test() {
-        let pk1 = PublicKey([0b10_10_10_10; PUBLICKEYBYTES]);
-        let pk2 = PublicKey([0; PUBLICKEYBYTES]);
-        let pk3 = PublicKey([0b00_10_10_10; PUBLICKEYBYTES]);
+        let pk1 = PublicKey::from([0b10_10_10_10; PUBLICKEYBYTES]);
+        let pk2 = PublicKey::from([0; PUBLICKEYBYTES]);
+        let pk3 = PublicKey::from([0b00_10_10_10; PUBLICKEYBYTES]);
         assert_eq!(None, kbucket_index(&pk1, &pk1));
         assert_eq!(Some(0), kbucket_index(&pk1, &pk2));
         assert_eq!(Some(2), kbucket_index(&pk2, &pk3));
@@ -412,26 +408,26 @@ mod tests {
 
     #[test]
     fn kbucket_try_add() {
-        let pk = PublicKey([0; PUBLICKEYBYTES]);
+        let pk = PublicKey::from([0; PUBLICKEYBYTES]);
         let mut kbucket = Kbucket::<DhtNode>::new(KBUCKET_DEFAULT_SIZE);
 
         for i in 0 .. 8 {
             let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + u16::from(i));
-            let node = PackedNode::new(addr, &PublicKey([i + 2; PUBLICKEYBYTES]));
+            let node = PackedNode::new(addr, PublicKey::from([i + 2; PUBLICKEYBYTES]));
             assert!(kbucket.try_add(&pk, node, /* evict */ false));
         }
 
         let closer_node = PackedNode::new(
             "1.2.3.5:12345".parse().unwrap(),
-            &PublicKey([1; PUBLICKEYBYTES])
+            PublicKey::from([1; PUBLICKEYBYTES])
         );
         let farther_node = PackedNode::new(
             "1.2.3.5:12346".parse().unwrap(),
-            &PublicKey([10; PUBLICKEYBYTES])
+            PublicKey::from([10; PUBLICKEYBYTES])
         );
         let existing_node = PackedNode::new(
             "1.2.3.5:12347".parse().unwrap(),
-            &PublicKey([2; PUBLICKEYBYTES])
+            PublicKey::from([2; PUBLICKEYBYTES])
         );
 
         // can't add a new farther node
@@ -448,16 +444,16 @@ mod tests {
 
     #[tokio::test]
     async fn kbucket_try_add_should_replace_bad_nodes() {
-        let pk = PublicKey([0; PUBLICKEYBYTES]);
+        let pk = PublicKey::from([0; PUBLICKEYBYTES]);
         let mut kbucket = Kbucket::<DhtNode>::new(1);
 
         let node_1 = PackedNode::new(
             "1.2.3.4:12345".parse().unwrap(),
-            &PublicKey([1; PUBLICKEYBYTES])
+            PublicKey::from([1; PUBLICKEYBYTES])
         );
         let node_2 = PackedNode::new(
             "1.2.3.4:12346".parse().unwrap(),
-            &PublicKey([2; PUBLICKEYBYTES])
+            PublicKey::from([2; PUBLICKEYBYTES])
         );
 
         assert!(kbucket.try_add(&pk, node_2, /* evict */ false));
@@ -472,13 +468,13 @@ mod tests {
 
     #[tokio::test]
     async fn kbucket_try_add_should_replace_bad_nodes_in_the_middle() {
-        let pk = PublicKey([0; PUBLICKEYBYTES]);
+        let pk = PublicKey::from([0; PUBLICKEYBYTES]);
         let mut kbucket = Kbucket::<DhtNode>::new(3);
 
-        let pk_1 = PublicKey([1; PUBLICKEYBYTES]);
-        let pk_2 = PublicKey([2; PUBLICKEYBYTES]);
-        let pk_3 = PublicKey([3; PUBLICKEYBYTES]);
-        let pk_4 = PublicKey([4; PUBLICKEYBYTES]);
+        let pk_1 = PublicKey::from([1; PUBLICKEYBYTES]);
+        let pk_2 = PublicKey::from([2; PUBLICKEYBYTES]);
+        let pk_3 = PublicKey::from([3; PUBLICKEYBYTES]);
+        let pk_4 = PublicKey::from([4; PUBLICKEYBYTES]);
 
         let node_1 = PackedNode::new(
             "1.2.3.4:12345".parse().unwrap(),
@@ -514,16 +510,16 @@ mod tests {
 
     #[tokio::test]
     async fn kbucket_try_add_evict_should_replace_bad_nodes() {
-        let pk = PublicKey([0; PUBLICKEYBYTES]);
+        let pk = PublicKey::from([0; PUBLICKEYBYTES]);
         let mut kbucket = Kbucket::<DhtNode>::new(1);
 
         let node_1 = PackedNode::new(
             "1.2.3.4:12345".parse().unwrap(),
-            &PublicKey([1; PUBLICKEYBYTES])
+            PublicKey::from([1; PUBLICKEYBYTES])
         );
         let node_2 = PackedNode::new(
             "1.2.3.4:12346".parse().unwrap(),
-            &PublicKey([2; PUBLICKEYBYTES])
+            PublicKey::from([2; PUBLICKEYBYTES])
         );
 
         assert!(kbucket.try_add(&pk, node_1, /* evict */ true));
@@ -538,24 +534,24 @@ mod tests {
 
     #[tokio::test]
     async fn kbucket_try_add_evict_should_replace_bad_nodes_first() {
-        let pk = PublicKey([0; PUBLICKEYBYTES]);
+        let pk = PublicKey::from([0; PUBLICKEYBYTES]);
         let mut kbucket = Kbucket::<DhtNode>::new(2);
 
-        let pk_1 = PublicKey([1; PUBLICKEYBYTES]);
-        let pk_2 = PublicKey([2; PUBLICKEYBYTES]);
-        let pk_3 = PublicKey([3; PUBLICKEYBYTES]);
+        let pk_1 = PublicKey::from([1; PUBLICKEYBYTES]);
+        let pk_2 = PublicKey::from([2; PUBLICKEYBYTES]);
+        let pk_3 = PublicKey::from([3; PUBLICKEYBYTES]);
 
         let node_1 = PackedNode::new(
             "1.2.3.4:12345".parse().unwrap(),
-            &pk_1,
+            pk_1,
         );
         let node_2 = PackedNode::new(
             "1.2.3.4:12346".parse().unwrap(),
-            &pk_2,
+            pk_2,
         );
         let node_3 = PackedNode::new(
             "1.2.3.4:12346".parse().unwrap(),
-            &pk_3,
+            pk_3,
         );
 
         assert!(kbucket.try_add(&pk, node_1, /* evict */ true));
@@ -573,12 +569,12 @@ mod tests {
 
     #[test]
     fn kbucket_remove() {
-        let pk = PublicKey([0; PUBLICKEYBYTES]);
+        let pk = PublicKey::from([0; PUBLICKEYBYTES]);
         let mut kbucket = Kbucket::<DhtNode>::new(KBUCKET_DEFAULT_SIZE);
 
         let node = PackedNode::new(
             "1.2.3.4:12345".parse().unwrap(),
-            &PublicKey([1; PUBLICKEYBYTES])
+            PublicKey::from([1; PUBLICKEYBYTES])
         );
 
         // "removing" non-existent node
@@ -596,14 +592,14 @@ mod tests {
 
     #[test]
     fn kbucket_is_empty() {
-        let pk = PublicKey([0; PUBLICKEYBYTES]);
+        let pk = PublicKey::from([0; PUBLICKEYBYTES]);
         let mut kbucket = Kbucket::<DhtNode>::new(KBUCKET_DEFAULT_SIZE);
 
         assert!(kbucket.is_empty());
 
         let node = PackedNode::new(
             "1.2.3.4:12345".parse().unwrap(),
-            &PublicKey([1; PUBLICKEYBYTES])
+            PublicKey::from([1; PUBLICKEYBYTES])
         );
 
         assert!(kbucket.try_add(&pk, node, /* evict */ true));
@@ -647,21 +643,21 @@ mod tests {
         let mut pk_bytes = [3; PUBLICKEYBYTES];
 
         pk_bytes[0] = 1;
-        let base_pk = PublicKey(pk_bytes);
+        let base_pk = PublicKey::from(pk_bytes);
 
         let addr = Ipv4Addr::new(0, 0, 0, 0);
         let saddr = SocketAddrV4::new(addr, 0);
 
         pk_bytes[5] = 1;
-        let pk1 = PublicKey(pk_bytes);
+        let pk1 = PublicKey::from(pk_bytes);
         let n1 = PackedNode::new(SocketAddr::V4(saddr), &pk1);
 
         pk_bytes[10] = 2;
-        let pk2 = PublicKey(pk_bytes);
+        let pk2 = PublicKey::from(pk_bytes);
         let n2 = PackedNode::new(SocketAddr::V4(saddr), &pk2);
 
         pk_bytes[14] = 4;
-        let pk3 = PublicKey(pk_bytes);
+        let pk3 = PublicKey::from(pk_bytes);
         let n3 = PackedNode::new(SocketAddr::V4(saddr), &pk3);
 
         assert!(pk1 > pk2);
@@ -752,14 +748,14 @@ mod tests {
 
     #[test]
     fn kbucket_len() {
-        let pk = PublicKey([0; PUBLICKEYBYTES]);
+        let pk = PublicKey::from([0; PUBLICKEYBYTES]);
         let mut kbucket = Kbucket::<DhtNode>::new(KBUCKET_DEFAULT_SIZE);
 
         assert_eq!(kbucket.len(), 0);
 
         let node = PackedNode::new(
             "1.2.3.4:12345".parse().unwrap(),
-            &PublicKey([1; PUBLICKEYBYTES])
+            PublicKey::from([1; PUBLICKEYBYTES])
         );
 
         assert!(kbucket.try_add(&pk, node, /* evict */ true));

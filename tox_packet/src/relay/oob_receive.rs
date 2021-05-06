@@ -42,7 +42,7 @@ impl ToBytes for OobReceive {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x07) >>
-            gen_slice!(self.sender_pk.as_ref()) >>
+            gen_slice!(self.sender_pk.as_bytes()) >>
             gen_slice!(self.data.as_slice())
         )
     }

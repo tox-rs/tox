@@ -2,6 +2,8 @@
 */
 use super::*;
 
+use aead::{Aead, Error as AeadError};
+use crypto_box::SalsaBox;
 use nom::{
     number::complete::be_u64,
     combinator::rest,
@@ -41,7 +43,7 @@ impl ToBytes for NodesRequest {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x02) >>
-            gen_slice!(self.pk.as_ref()) >>
+            gen_slice!(self.pk.as_bytes()) >>
             gen_slice!(self.nonce.as_ref()) >>
             gen_slice!(self.payload.as_slice())
         )
@@ -60,15 +62,15 @@ impl FromBytes for NodesRequest {
 
 impl NodesRequest {
     /// create new NodesRequest object
-    pub fn new(shared_secret: &PrecomputedKey, pk: &PublicKey, payload: &NodesRequestPayload) -> NodesRequest {
+    pub fn new(shared_secret: &SalsaBox, pk: PublicKey, payload: &NodesRequestPayload) -> NodesRequest {
         let nonce = gen_nonce();
         let mut buf = [0; MAX_DHT_PACKET_SIZE];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
-        let payload = seal_precomputed(&buf[..size], &nonce, shared_secret);
+        let payload = shared_secret.encrypt(&nonce, &buf[..size]).unwrap();
 
         NodesRequest {
-            pk: *pk,
-            nonce,
+            pk,
+            nonce: nonce.into(),
             payload,
         }
     }
@@ -79,9 +81,9 @@ impl NodesRequest {
     - fails to decrypt
     - fails to parse as given packet type
     */
-    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<NodesRequestPayload, GetPayloadError> {
-        let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
-            .map_err(|()| {
+    pub fn get_payload(&self, shared_secret: &SalsaBox) -> Result<NodesRequestPayload, GetPayloadError> {
+        let decrypted = shared_secret.decrypt((&self.nonce).into(), self.payload.as_slice())
+            .map_err(|AeadError| {
                 GetPayloadError::decrypt()
             })?;
 
@@ -108,7 +110,7 @@ Length | Content
 
 Serialized form should be put in the encrypted part of `NodesRequest` packet.
 */
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NodesRequestPayload {
     /// Public Key of the DHT node `NodesRequestPayload` is supposed to get address of.
     pub pk: PublicKey,

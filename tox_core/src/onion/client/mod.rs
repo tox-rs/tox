@@ -10,6 +10,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crypto_box::SalsaBox;
 use failure::Fail;
 use futures::{StreamExt, SinkExt};
 use futures::channel::mpsc;
@@ -272,11 +273,11 @@ impl<'a> AnnouncePacketData<'a> {
         let payload = OnionAnnounceRequestPayload {
             ping_id: ping_id.unwrap_or(INITIAL_PING_ID),
             search_pk: self.search_pk,
-            data_pk: self.data_pk.unwrap_or(PublicKey([0; 32])),
+            data_pk: self.data_pk.unwrap_or(PublicKey::from([0; 32])),
             sendback_data: request_id,
         };
         InnerOnionAnnounceRequest::new(
-            &precompute(node_pk, &self.packet_sk),
+            &SalsaBox::new(node_pk, &self.packet_sk),
             &self.packet_pk,
             &payload
         )
@@ -446,7 +447,7 @@ impl OnionClient {
             (&mut state.announce_list, None, announce_packet_data)
         };
 
-        let payload = match packet.get_payload(&precompute(&announce_data.pk, &announce_packet_data.packet_sk)) {
+        let payload = match packet.get_payload(&SalsaBox::new(&announce_data.pk, &announce_packet_data.packet_sk)) {
             Ok(payload) => payload,
             Err(e) => return Err(e.context(HandleAnnounceResponseErrorKind::InvalidPayload).into())
         };
@@ -467,7 +468,7 @@ impl OnionClient {
         }
 
         let (ping_id, data_pk) = if payload.announce_status == AnnounceStatus::Found {
-            (None, Some(PublicKey(payload.ping_id_or_pk)))
+            (None, Some(PublicKey::from(payload.ping_id_or_pk)))
         } else {
             (Some(payload.ping_id_or_pk), None)
         };
@@ -566,11 +567,11 @@ impl OnionClient {
 
     /// Handle `OnionDataResponse` packet.
     pub async fn handle_data_response(&self, packet: &OnionDataResponse) -> Result<(), HandleDataResponseError> {
-        let payload = match packet.get_payload(&precompute(&packet.temporary_pk, &self.data_sk)) {
+        let payload = match packet.get_payload(&SalsaBox::new(&packet.temporary_pk, &self.data_sk)) {
             Ok(payload) => payload,
             Err(e) => return Err(e.context(HandleDataResponseErrorKind::InvalidPayload).into())
         };
-        let iner_payload = match payload.get_payload(&packet.nonce, &precompute(&payload.real_pk, &self.real_sk)) {
+        let iner_payload = match payload.get_payload(&packet.nonce, &SalsaBox::new(&payload.real_pk, &self.real_sk)) {
             Ok(payload) => payload,
             Err(e) => return Err(e.context(HandleDataResponseErrorKind::InvalidInnerPayload).into())
         };
@@ -776,7 +777,7 @@ impl OnionClient {
         let dht_pk_announce = DhtPkAnnouncePayload::new(self.dht.pk, self.dht_pk_nodes().await);
         let inner_payload = OnionDataResponseInnerPayload::DhtPkAnnounce(dht_pk_announce);
         let nonce = gen_nonce();
-        let payload = OnionDataResponsePayload::new(&precompute(&friend.real_pk, &self.real_sk), self.real_pk, &nonce, &inner_payload);
+        let payload = OnionDataResponsePayload::new(&SalsaBox::new(&friend.real_pk, &self.real_sk), self.real_pk, &nonce, &inner_payload);
 
         let mut packets_sent = false;
 
@@ -798,7 +799,7 @@ impl OnionClient {
             };
 
             let (temporary_pk, temporary_sk) = gen_keypair();
-            let inner_data_request = InnerOnionDataRequest::new(&precompute(&data_pk, &temporary_sk), friend.real_pk, temporary_pk, nonce, &payload);
+            let inner_data_request = InnerOnionDataRequest::new(&SalsaBox::new(&data_pk, &temporary_sk), friend.real_pk, temporary_pk, nonce, &payload);
 
             self.send_onion_request(path, InnerOnionRequest::InnerOnionDataRequest(inner_data_request), node.saddr).await?;
             packets_sent = true;
@@ -821,13 +822,13 @@ impl OnionClient {
 
         let dht_pk_announce_payload = DhtPkAnnouncePayload::new(self.dht.pk, self.dht_pk_nodes().await);
         let dht_pk_announce = DhtPkAnnounce::new(
-            &precompute(&friend.real_pk, &self.real_sk),
+            &SalsaBox::new(&friend.real_pk, &self.real_sk),
             self.real_pk,
             &dht_pk_announce_payload
         );
         let payload = DhtRequestPayload::DhtPkAnnounce(dht_pk_announce);
         let packet = DhtRequest::new(
-            &precompute(&friend_dht_pk, &self.dht.sk),
+            &SalsaBox::new(&friend_dht_pk, &self.dht.sk),
             &friend_dht_pk,
             &self.dht.pk,
             &payload
@@ -946,7 +947,7 @@ mod tests {
     }
 
     fn unpack_onion_packet(packet: OnionRequest0, saddr: SocketAddr, key_by_addr: &HashMap<SocketAddr, SecretKey>) -> OnionRequest2Payload {
-        let payload = packet.get_payload(&precompute(&packet.temporary_pk, &key_by_addr[&saddr])).unwrap();
+        let payload = packet.get_payload(&SalsaBox::new(&packet.temporary_pk, &key_by_addr[&saddr])).unwrap();
         let packet = OnionRequest1 {
             nonce: packet.nonce,
             temporary_pk: payload.temporary_pk,
@@ -956,7 +957,7 @@ mod tests {
                 payload: vec![42; 123],
             }
         };
-        let payload = packet.get_payload(&precompute(&packet.temporary_pk, &key_by_addr[&payload.ip_port.to_saddr()])).unwrap();
+        let payload = packet.get_payload(&SalsaBox::new(&packet.temporary_pk, &key_by_addr[&payload.ip_port.to_saddr()])).unwrap();
         let packet = OnionRequest2 {
             nonce: packet.nonce,
             temporary_pk: payload.temporary_pk,
@@ -966,7 +967,7 @@ mod tests {
                 payload: vec![42; 123],
             }
         };
-        packet.get_payload(&precompute(&packet.temporary_pk, &key_by_addr[&payload.ip_port.to_saddr()])).unwrap()
+        packet.get_payload(&SalsaBox::new(&packet.temporary_pk, &key_by_addr[&payload.ip_port.to_saddr()])).unwrap()
     }
 
     #[test]
@@ -1219,7 +1220,7 @@ mod tests {
             ping_id_or_pk: ping_id,
             nodes: vec![node]
         };
-        let packet = OnionAnnounceResponse::new(&precompute(&real_pk, &sender_sk), request_id, &payload);
+        let packet = OnionAnnounceResponse::new(&SalsaBox::new(&real_pk, &sender_sk), request_id, &payload);
 
         onion_client.handle_announce_response(&packet, true).await.unwrap();
 
@@ -1239,7 +1240,7 @@ mod tests {
         let packet = unpack!(packet, Packet::OnionRequest0);
         let payload = unpack_onion_packet(packet, addr_to_send, &key_by_addr);
         let packet = unpack!(payload.inner, InnerOnionRequest::InnerOnionAnnounceRequest);
-        let payload = packet.get_payload(&precompute(&real_pk, &node_sk)).unwrap();
+        let payload = packet.get_payload(&SalsaBox::new(&real_pk, &node_sk)).unwrap();
         assert_eq!(payload.ping_id, INITIAL_PING_ID);
         assert_eq!(payload.search_pk, real_pk);
         assert_eq!(payload.data_pk, onion_client.data_pk);
@@ -1291,7 +1292,7 @@ mod tests {
             ping_id_or_pk: [42; 32],
             nodes: vec![node]
         };
-        let packet = OnionAnnounceResponse::new(&precompute(&friend_temporary_pk, &sender_sk), request_id, &payload);
+        let packet = OnionAnnounceResponse::new(&SalsaBox::new(&friend_temporary_pk, &sender_sk), request_id, &payload);
 
         let error = onion_client.handle_announce_response(&packet, true).await.err().unwrap();
         assert_eq!(error.kind(), &HandleAnnounceResponseErrorKind::InvalidAnnounceStatus);
@@ -1347,7 +1348,7 @@ mod tests {
             ping_id_or_pk: [42; 32],
             nodes: vec![node]
         };
-        let packet = OnionAnnounceResponse::new(&precompute(&real_pk, &sender_sk), request_id, &payload);
+        let packet = OnionAnnounceResponse::new(&SalsaBox::new(&real_pk, &sender_sk), request_id, &payload);
 
         onion_client.handle_announce_response(&packet, true).await.unwrap();
 
@@ -1412,7 +1413,7 @@ mod tests {
             ping_id_or_pk: friend_data_pk.0,
             nodes: vec![node]
         };
-        let packet = OnionAnnounceResponse::new(&precompute(&friend_temporary_pk, &sender_sk), request_id, &payload);
+        let packet = OnionAnnounceResponse::new(&SalsaBox::new(&friend_temporary_pk, &sender_sk), request_id, &payload);
 
         onion_client.handle_announce_response(&packet, true).await.unwrap();
 
@@ -1432,10 +1433,10 @@ mod tests {
         let packet = unpack!(packet, Packet::OnionRequest0);
         let payload = unpack_onion_packet(packet, addr_to_send, &key_by_addr);
         let packet = unpack!(payload.inner, InnerOnionRequest::InnerOnionAnnounceRequest);
-        let payload = packet.get_payload(&precompute(&friend_temporary_pk, &node_sk)).unwrap();
+        let payload = packet.get_payload(&SalsaBox::new(&friend_temporary_pk, &node_sk)).unwrap();
         assert_eq!(payload.ping_id, INITIAL_PING_ID);
         assert_eq!(payload.search_pk, friend_pk);
-        assert_eq!(payload.data_pk, PublicKey([0; 32]));
+        assert_eq!(payload.data_pk, PublicKey::from([0; 32]));
     }
 
     #[tokio::test]
@@ -1480,7 +1481,7 @@ mod tests {
             ping_id_or_pk: friend_data_pk.0,
             nodes: vec![node]
         };
-        let packet = OnionAnnounceResponse::new(&precompute(&real_pk, &sender_sk), request_id, &payload);
+        let packet = OnionAnnounceResponse::new(&SalsaBox::new(&real_pk, &sender_sk), request_id, &payload);
 
         let error = onion_client.handle_announce_response(&packet, true).await.err().unwrap();
         assert_eq!(error.kind(), &HandleAnnounceResponseErrorKind::InvalidAnnounceStatus);
@@ -1522,7 +1523,7 @@ mod tests {
             ping_id_or_pk: friend_data_pk.0,
             nodes: vec![]
         };
-        let packet = OnionAnnounceResponse::new(&precompute(&friend_temporary_pk, &sender_sk), request_id, &payload);
+        let packet = OnionAnnounceResponse::new(&SalsaBox::new(&friend_temporary_pk, &sender_sk), request_id, &payload);
 
         let error = onion_client.handle_announce_response(&packet, true).await.err().unwrap();
         assert_eq!(error.kind(), &HandleAnnounceResponseErrorKind::NoFriendWithPk);
@@ -1627,7 +1628,7 @@ mod tests {
             ping_id_or_pk: friend_data_pk.0,
             nodes: vec![node]
         };
-        let packet = OnionAnnounceResponse::new(&precompute(&friend_temporary_pk, &sender_sk), request_id, &payload);
+        let packet = OnionAnnounceResponse::new(&SalsaBox::new(&friend_temporary_pk, &sender_sk), request_id, &payload);
 
         onion_client.handle_announce_response(&packet, true).await.unwrap();
 
@@ -1670,9 +1671,9 @@ mod tests {
         let no_reply = dht_pk_announce_payload.no_reply;
         let onion_data_response_inner_payload = OnionDataResponseInnerPayload::DhtPkAnnounce(dht_pk_announce_payload);
         let nonce = gen_nonce();
-        let onion_data_response_payload = OnionDataResponsePayload::new(&precompute(&real_pk, &friend_real_sk), friend_real_pk, &nonce, &onion_data_response_inner_payload);
+        let onion_data_response_payload = OnionDataResponsePayload::new(&SalsaBox::new(&real_pk, &friend_real_sk), friend_real_pk, &nonce, &onion_data_response_inner_payload);
         let (temporary_pk, temporary_sk) = gen_keypair();
-        let onion_data_response = OnionDataResponse::new(&precompute(&onion_client.data_pk, &temporary_sk), temporary_pk, nonce, &onion_data_response_payload);
+        let onion_data_response = OnionDataResponse::new(&SalsaBox::new(&onion_client.data_pk, &temporary_sk), temporary_pk, nonce, &onion_data_response_payload);
 
         onion_client.handle_data_response(&onion_data_response).await.unwrap();
 
@@ -1695,7 +1696,7 @@ mod tests {
 
         assert_eq!(addr_to_send, saddr);
         let packet = unpack!(packet, Packet::NodesRequest);
-        let payload = packet.get_payload(&precompute(&dht_pk, &node_sk)).unwrap();
+        let payload = packet.get_payload(&SalsaBox::new(&dht_pk, &node_sk)).unwrap();
 
         assert_eq!(payload.pk, dht_pk);
     }
@@ -1732,9 +1733,9 @@ mod tests {
         let no_reply = dht_pk_announce_payload.no_reply;
         let onion_data_response_inner_payload = OnionDataResponseInnerPayload::DhtPkAnnounce(dht_pk_announce_payload);
         let nonce = gen_nonce();
-        let onion_data_response_payload = OnionDataResponsePayload::new(&precompute(&real_pk, &friend_real_sk), friend_real_pk, &nonce, &onion_data_response_inner_payload);
+        let onion_data_response_payload = OnionDataResponsePayload::new(&SalsaBox::new(&real_pk, &friend_real_sk), friend_real_pk, &nonce, &onion_data_response_inner_payload);
         let (temporary_pk, temporary_sk) = gen_keypair();
-        let onion_data_response = OnionDataResponse::new(&precompute(&onion_client.data_pk, &temporary_sk), temporary_pk, nonce, &onion_data_response_payload);
+        let onion_data_response = OnionDataResponse::new(&SalsaBox::new(&onion_client.data_pk, &temporary_sk), temporary_pk, nonce, &onion_data_response_payload);
 
         onion_client.handle_data_response(&onion_data_response).await.unwrap();
 
@@ -1765,9 +1766,9 @@ mod tests {
         let dht_pk_announce_payload = DhtPkAnnouncePayload::new(friend_dht_pk, vec![]);
         let onion_data_response_inner_payload = OnionDataResponseInnerPayload::DhtPkAnnounce(dht_pk_announce_payload);
         let nonce = gen_nonce();
-        let onion_data_response_payload = OnionDataResponsePayload::new(&precompute(&real_pk, &friend_real_sk), friend_real_pk, &nonce, &onion_data_response_inner_payload);
+        let onion_data_response_payload = OnionDataResponsePayload::new(&SalsaBox::new(&real_pk, &friend_real_sk), friend_real_pk, &nonce, &onion_data_response_inner_payload);
         let (temporary_pk, temporary_sk) = gen_keypair();
-        let onion_data_response = OnionDataResponse::new(&precompute(&onion_client.data_pk, &temporary_sk), temporary_pk, nonce, &onion_data_response_payload);
+        let onion_data_response = OnionDataResponse::new(&SalsaBox::new(&onion_client.data_pk, &temporary_sk), temporary_pk, nonce, &onion_data_response_payload);
 
         let error = onion_client.handle_data_response(&onion_data_response).await.err().unwrap();
         assert_eq!(error.kind(), &HandleDataResponseErrorKind::DhtPkAnnounce);
@@ -1793,9 +1794,9 @@ mod tests {
         let dht_pk_announce_payload = DhtPkAnnouncePayload::new(friend_dht_pk, vec![]);
         let onion_data_response_inner_payload = OnionDataResponseInnerPayload::DhtPkAnnounce(dht_pk_announce_payload);
         let nonce = gen_nonce();
-        let onion_data_response_payload = OnionDataResponsePayload::new(&precompute(&real_pk, &friend_real_sk), friend_real_pk, &nonce, &onion_data_response_inner_payload);
+        let onion_data_response_payload = OnionDataResponsePayload::new(&SalsaBox::new(&real_pk, &friend_real_sk), friend_real_pk, &nonce, &onion_data_response_inner_payload);
         let (temporary_pk, temporary_sk) = gen_keypair();
-        let onion_data_response = OnionDataResponse::new(&precompute(&onion_client.data_pk, &temporary_sk), temporary_pk, nonce, &onion_data_response_payload);
+        let onion_data_response = OnionDataResponse::new(&SalsaBox::new(&onion_client.data_pk, &temporary_sk), temporary_pk, nonce, &onion_data_response_payload);
 
         onion_client.handle_data_response(&onion_data_response).await.unwrap();
 
@@ -1841,7 +1842,7 @@ mod tests {
             payload: vec![42; 123],
         };
         let (temporary_pk, temporary_sk) = gen_keypair();
-        let onion_data_response = OnionDataResponse::new(&precompute(&onion_client.data_pk, &temporary_sk), temporary_pk, gen_nonce(), &onion_data_response_payload);
+        let onion_data_response = OnionDataResponse::new(&SalsaBox::new(&onion_client.data_pk, &temporary_sk), temporary_pk, gen_nonce(), &onion_data_response_payload);
 
         let error = onion_client.handle_data_response(&onion_data_response).await.err().unwrap();
         assert_eq!(error.kind(), &HandleDataResponseErrorKind::InvalidInnerPayload);
@@ -1888,7 +1889,7 @@ mod tests {
             let packet = unpack!(packet, Packet::OnionRequest0);
             let payload = unpack_onion_packet(packet, addr_to_send, &key_by_addr);
             let packet = unpack!(payload.inner, InnerOnionRequest::InnerOnionAnnounceRequest);
-            let payload = packet.get_payload(&precompute(&real_pk, &key_by_addr[&payload.ip_port.to_saddr()])).unwrap();
+            let payload = packet.get_payload(&SalsaBox::new(&real_pk, &key_by_addr[&payload.ip_port.to_saddr()])).unwrap();
             assert_eq!(payload.ping_id, INITIAL_PING_ID);
             assert_eq!(payload.search_pk, real_pk);
             assert_eq!(payload.data_pk, data_pk);
@@ -1964,7 +1965,7 @@ mod tests {
             let packet = unpack!(packet, Packet::OnionRequest0);
             let payload = unpack_onion_packet(packet, addr_to_send, &key_by_addr);
             let packet = unpack!(payload.inner, InnerOnionRequest::InnerOnionAnnounceRequest);
-            let payload = packet.get_payload(&precompute(&real_pk, &nodes_key_by_addr[&payload.ip_port.to_saddr()])).unwrap();
+            let payload = packet.get_payload(&SalsaBox::new(&real_pk, &nodes_key_by_addr[&payload.ip_port.to_saddr()])).unwrap();
             assert_eq!(payload.ping_id, ping_id);
             assert_eq!(payload.search_pk, real_pk);
             assert_eq!(payload.data_pk, data_pk);
@@ -2015,10 +2016,10 @@ mod tests {
             let packet = unpack!(packet, Packet::OnionRequest0);
             let payload = unpack_onion_packet(packet, addr_to_send, &key_by_addr);
             let packet = unpack!(payload.inner, InnerOnionRequest::InnerOnionAnnounceRequest);
-            let payload = packet.get_payload(&precompute(&friend_temporary_pk, &key_by_addr[&payload.ip_port.to_saddr()])).unwrap();
+            let payload = packet.get_payload(&SalsaBox::new(&friend_temporary_pk, &key_by_addr[&payload.ip_port.to_saddr()])).unwrap();
             assert_eq!(payload.ping_id, INITIAL_PING_ID);
             assert_eq!(payload.search_pk, friend_pk);
-            assert_eq!(payload.data_pk, PublicKey([0; 32]));
+            assert_eq!(payload.data_pk, PublicKey::from([0; 32]));
         }
     }
 
@@ -2095,10 +2096,10 @@ mod tests {
             let packet = unpack!(packet, Packet::OnionRequest0);
             let payload = unpack_onion_packet(packet, addr_to_send, &key_by_addr);
             let packet = unpack!(payload.inner, InnerOnionRequest::InnerOnionAnnounceRequest);
-            let payload = packet.get_payload(&precompute(&friend_temporary_pk, &nodes_key_by_addr[&payload.ip_port.to_saddr()])).unwrap();
+            let payload = packet.get_payload(&SalsaBox::new(&friend_temporary_pk, &nodes_key_by_addr[&payload.ip_port.to_saddr()])).unwrap();
             assert_eq!(payload.ping_id, INITIAL_PING_ID);
             assert_eq!(payload.search_pk, friend_pk);
-            assert_eq!(payload.data_pk, PublicKey([0; 32]));
+            assert_eq!(payload.data_pk, PublicKey::from([0; 32]));
         }
     }
 
@@ -2238,9 +2239,9 @@ mod tests {
             let payload = unpack_onion_packet(packet, addr_to_send, &key_by_addr);
             let packet = unpack!(payload.inner, InnerOnionRequest::InnerOnionDataRequest);
             assert_eq!(packet.destination_pk, friend_pk);
-            let payload = packet.get_payload(&precompute(&packet.temporary_pk, &data_sk)).unwrap();
+            let payload = packet.get_payload(&SalsaBox::new(&packet.temporary_pk, &data_sk)).unwrap();
             assert_eq!(payload.real_pk, real_pk);
-            let payload = payload.get_payload(&packet.nonce, &precompute(&real_pk, &friend_sk)).unwrap();
+            let payload = payload.get_payload(&packet.nonce, &SalsaBox::new(&real_pk, &friend_sk)).unwrap();
             let payload = unpack!(payload, OnionDataResponseInnerPayload::DhtPkAnnounce);
             assert_eq!(payload.dht_pk, dht_pk);
             assert_eq!(payload.nodes.len(), 4);
@@ -2289,10 +2290,10 @@ mod tests {
             let packet = unpack!(packet, Packet::DhtRequest);
             assert_eq!(packet.rpk, friend_dht_pk);
             assert_eq!(packet.spk, dht_pk);
-            let payload = packet.get_payload(&precompute(&dht_pk, &friend_dht_sk)).unwrap();
+            let payload = packet.get_payload(&SalsaBox::new(&dht_pk, &friend_dht_sk)).unwrap();
             let packet = unpack!(payload, DhtRequestPayload::DhtPkAnnounce);
             assert_eq!(packet.real_pk, real_pk);
-            let payload = packet.get_payload(&precompute(&real_pk, &friend_sk)).unwrap();
+            let payload = packet.get_payload(&SalsaBox::new(&real_pk, &friend_sk)).unwrap();
             assert_eq!(payload.dht_pk, dht_pk);
         }
     }
@@ -2315,7 +2316,7 @@ mod tests {
         let (received, _udp_rx) = udp_rx.into_future().await;
         let (packet, addr_to_send) = received.unwrap();
         assert_eq!(addr_to_send, node.saddr);
-        let shared_secret = precompute(&dht_pk, &node_sk);
+        let shared_secret = SalsaBox::new(&dht_pk, &node_sk);
         let request_packet = unpack!(packet, Packet::NodesRequest);
         let request_payload = request_packet.get_payload(&shared_secret).unwrap();
         let response_payload = NodesResponsePayload {

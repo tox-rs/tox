@@ -186,7 +186,7 @@ mod tests {
 
     #[test]
     fn forced_ktree_try_add() {
-        let pk = PublicKey([0; PUBLICKEYBYTES]);
+        let pk = PublicKey::from([0; PUBLICKEYBYTES]);
         let mut ktree = ForcedKtree::new(&pk);
 
         for i in 0 .. 8 {
@@ -194,7 +194,7 @@ mod tests {
             // make first bit differ from base pk so all these nodes will get
             // into the first kbucket
             pk[0] = 255;
-            let pk = PublicKey(pk);
+            let pk = PublicKey::from(pk);
             let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + u16::from(i));
             let node = PackedNode::new(addr, &pk);
             assert!(ktree.try_add(node));
@@ -204,7 +204,7 @@ mod tests {
         // it has closer key
         let mut pk = [1; PUBLICKEYBYTES];
         pk[0] = 255;
-        let pk = PublicKey(pk);
+        let pk = PublicKey::from(pk);
         let node = PackedNode::new(
             "1.2.3.5:12345".parse().unwrap(),
             &pk
@@ -216,16 +216,16 @@ mod tests {
 
     #[test]
     fn forced_ktree_remove() {
-        let pk = PublicKey([0; PUBLICKEYBYTES]);
+        let pk = PublicKey::from([0; PUBLICKEYBYTES]);
         let mut ktree = ForcedKtree::new(&pk);
 
         let node1 = PackedNode::new(
             "1.2.3.4:12345".parse().unwrap(),
-            &PublicKey([1; PUBLICKEYBYTES])
+            PublicKey::from([1; PUBLICKEYBYTES])
         );
         let node2 = PackedNode::new(
             "1.2.3.4:12345".parse().unwrap(),
-            &PublicKey([2; PUBLICKEYBYTES])
+            PublicKey::from([2; PUBLICKEYBYTES])
         );
 
         // "removing" non-existent node
@@ -249,12 +249,12 @@ mod tests {
 
     #[test]
     fn forced_ktree_get_closest() {
-        let pk = PublicKey([0; PUBLICKEYBYTES]);
+        let pk = PublicKey::from([0; PUBLICKEYBYTES]);
         let mut ktree = ForcedKtree::new(&pk);
 
         fn node_by_idx(i: u8) -> PackedNode {
             let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + u16::from(i));
-            PackedNode::new(addr, &PublicKey([i + 1; PUBLICKEYBYTES]))
+            PackedNode::new(addr, PublicKey::from([i + 1; PUBLICKEYBYTES]))
         }
 
         for i in 0 .. 4 {
@@ -265,11 +265,11 @@ mod tests {
         }
 
         for count in 1 ..= 4 {
-            let closest: Vec<_> = ktree.get_closest(&PublicKey([0; PUBLICKEYBYTES]), count, true).into();
+            let closest: Vec<_> = ktree.get_closest(PublicKey::from([0; PUBLICKEYBYTES]), count, true).into();
             let should_be = (0 .. count).map(node_by_idx).collect::<Vec<_>>();
             assert_eq!(closest, should_be);
 
-            let closest: Vec<_> = ktree.get_closest(&PublicKey([255; PUBLICKEYBYTES]), count, true).into();
+            let closest: Vec<_> = ktree.get_closest(PublicKey::from([255; PUBLICKEYBYTES]), count, true).into();
             let should_be = (8 - count .. 8).rev().map(node_by_idx).collect::<Vec<_>>();
             assert_eq!(closest, should_be);
         }
@@ -296,7 +296,7 @@ mod tests {
 
         let node = PackedNode::new(
             "1.2.3.4:12345".parse().unwrap(),
-            &PublicKey([1; PUBLICKEYBYTES])
+            PublicKey::from([1; PUBLICKEYBYTES])
         );
 
         assert!(!ktree.contains(&node.pk));
@@ -308,7 +308,7 @@ mod tests {
 
     #[test]
     fn forced_ktree_can_add() {
-        let pk = PublicKey([0; PUBLICKEYBYTES]);
+        let pk = PublicKey::from([0; PUBLICKEYBYTES]);
         let mut ktree = ForcedKtree::new(&pk);
 
         for i in 0 .. 16 {
@@ -316,7 +316,7 @@ mod tests {
             // make first bit differ from base pk so all these nodes will get
             // into the first kbucket
             pk[0] = 255;
-            let pk = PublicKey(pk);
+            let pk = PublicKey::from(pk);
             let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + u16::from(i));
             let node = PackedNode::new(addr, &pk);
 
@@ -327,7 +327,7 @@ mod tests {
 
         let mut pk = [1; PUBLICKEYBYTES];
         pk[0] = 255;
-        let pk = PublicKey(pk);
+        let pk = PublicKey::from(pk);
         let node = PackedNode::new(
             "1.2.3.5:12345".parse().unwrap(),
             &pk
@@ -337,7 +337,7 @@ mod tests {
 
         let mut pk = [18; PUBLICKEYBYTES];
         pk[0] = 255;
-        let pk = PublicKey(pk);
+        let pk = PublicKey::from(pk);
         let node = PackedNode::new(
             "1.2.3.5:12345".parse().unwrap(),
             &pk
@@ -350,7 +350,7 @@ mod tests {
 
     #[test]
     fn forced_ktree_iter() {
-        let pk = PublicKey([0; PUBLICKEYBYTES]);
+        let pk = PublicKey::from([0; PUBLICKEYBYTES]);
         let mut ktree = ForcedKtree::new(&pk);
 
         // empty always returns None
@@ -358,7 +358,7 @@ mod tests {
 
         fn node_by_idx(i: u8) -> PackedNode {
             let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + u16::from(i));
-            PackedNode::new(addr, &PublicKey([i + 1; PUBLICKEYBYTES]))
+            PackedNode::new(addr, PublicKey::from([i + 1; PUBLICKEYBYTES]))
         }
 
         for i in 0 .. 4 {
@@ -372,7 +372,7 @@ mod tests {
 
         // iterator should produce sorted nodes
         for (i, node) in ktree.iter().enumerate() {
-            assert_eq!(node.pk, PublicKey([i as u8 + 1; PUBLICKEYBYTES]));
+            assert_eq!(node.pk, PublicKey::from([i as u8 + 1; PUBLICKEYBYTES]));
         }
     }
 
@@ -380,7 +380,7 @@ mod tests {
 
     #[test]
     fn forced_ktree_iter_mut() {
-        let pk = PublicKey([0; PUBLICKEYBYTES]);
+        let pk = PublicKey::from([0; PUBLICKEYBYTES]);
         let mut ktree = ForcedKtree::new(&pk);
 
         // empty always returns None
@@ -388,7 +388,7 @@ mod tests {
 
         fn node_by_idx(i: u8) -> PackedNode {
             let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + u16::from(i));
-            PackedNode::new(addr, &PublicKey([i + 1; PUBLICKEYBYTES]))
+            PackedNode::new(addr, PublicKey::from([i + 1; PUBLICKEYBYTES]))
         }
 
         for i in 0 .. 4 {
@@ -402,7 +402,7 @@ mod tests {
 
         // iterator should produce sorted nodes
         for (i, node) in ktree.iter_mut().enumerate() {
-            assert_eq!(node.pk, PublicKey([i as u8 + 1; PUBLICKEYBYTES]));
+            assert_eq!(node.pk, PublicKey::from([i as u8 + 1; PUBLICKEYBYTES]));
         }
     }
 

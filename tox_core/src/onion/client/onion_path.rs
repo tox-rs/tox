@@ -2,6 +2,7 @@
 
 use std::net::SocketAddr;
 
+use crypto_box::{SalsaBox, aead::Aead};
 use tox_binary_io::*;
 use tox_crypto::*;
 use tox_packet::dht::packed_node::*;
@@ -19,7 +20,7 @@ pub enum OnionPathType {
 }
 
 /// Onion path is identified by 3 public keys of nodes it consists of.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OnionPathId {
     /// Public keys of nodes the path consists of.
     pub keys: [PublicKey; 3],
@@ -34,8 +35,8 @@ pub struct OnionPathNode {
     pub public_key: PublicKey,
     /// Temporary `PublicKey` for this node.
     pub temporary_public_key: PublicKey,
-    /// Temporary `PrecomputedKey` to encrypt packets for this node.
-    pub temporary_precomputed_key: PrecomputedKey,
+    /// Temporary `SalsaBox` to encrypt packets for this node.
+    pub temporary_precomputed_key: SalsaBox,
     /// Node's IP address.
     pub saddr: SocketAddr,
 }
@@ -45,7 +46,7 @@ impl OnionPathNode {
     /// to encrypt packets intended for this node.
     pub fn new(node: PackedNode) -> Self {
         let (temporary_public_key, temporary_secret_key) = gen_keypair();
-        let temporary_precomputed_key = precompute(&node.pk, &temporary_secret_key);
+        let temporary_precomputed_key = SalsaBox::new(&node.pk, &temporary_secret_key);
         OnionPathNode {
             public_key: node.pk,
             temporary_public_key,
@@ -102,7 +103,7 @@ impl OnionPath {
             inner: inner_onion_request,
         };
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
-        let encrypted = seal_precomputed(&buf[..size], &nonce, &self.nodes[2].temporary_precomputed_key);
+        let encrypted = self.nodes[2].temporary_precomputed_key.encrypt(&nonce, &buf[..size]).unwrap();
 
         let payload = OnionRequest1Payload {
             ip_port: IpPort::from_udp_saddr(self.nodes[2].saddr),
@@ -110,7 +111,7 @@ impl OnionPath {
             inner: encrypted,
         };
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
-        let encrypted = seal_precomputed(&buf[..size], &nonce, &self.nodes[1].temporary_precomputed_key);
+        let encrypted = self.nodes[1].temporary_precomputed_key.encrypt(&nonce, &buf[..size]).unwrap();
 
         let payload = OnionRequest0Payload {
             ip_port: IpPort::from_udp_saddr(self.nodes[1].saddr),
@@ -118,7 +119,7 @@ impl OnionPath {
             inner: encrypted,
         };
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
-        let encrypted = seal_precomputed(&buf[..size], &nonce, &self.nodes[0].temporary_precomputed_key);
+        let encrypted = self.nodes[0].temporary_precomputed_key.encrypt(&nonce, &buf[..size]).unwrap();
 
         OnionRequest0 {
             nonce,
@@ -138,7 +139,7 @@ impl OnionPath {
             inner: inner_onion_request,
         };
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
-        let encrypted = seal_precomputed(&buf[..size], &nonce, &self.nodes[2].temporary_precomputed_key);
+        let encrypted = self.nodes[2].temporary_precomputed_key.encrypt(&nonce, &buf[..size]).unwrap();
 
         let payload = OnionRequest1Payload {
             ip_port: IpPort::from_udp_saddr(self.nodes[2].saddr),
@@ -146,7 +147,7 @@ impl OnionPath {
             inner: encrypted,
         };
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
-        let encrypted = seal_precomputed(&buf[..size], &nonce, &self.nodes[1].temporary_precomputed_key);
+        let encrypted = self.nodes[1].temporary_precomputed_key.encrypt(&nonce, &buf[..size]).unwrap();
 
         OnionRequest {
             nonce,
@@ -166,7 +167,7 @@ mod tests {
         let saddr = "127.0.0.1:12345".parse().unwrap();
         let (pk, sk) = gen_keypair();
         let node = OnionPathNode::new(PackedNode::new(saddr, &pk));
-        let precomputed = precompute(&node.temporary_public_key, &sk);
+        let precomputed = SalsaBox::new(&node.temporary_public_key, &sk);
         assert_eq!(node.saddr, saddr);
         assert_eq!(node.public_key, pk);
         assert_eq!(node.temporary_precomputed_key, precomputed);
@@ -216,11 +217,11 @@ mod tests {
         let payload = onion_request.get_payload(&path.nodes[0].temporary_precomputed_key).unwrap();
         assert_eq!(payload.ip_port, IpPort::from_udp_saddr(saddr_2));
         assert_eq!(payload.temporary_pk, path.nodes[1].temporary_public_key);
-        let payload = open_precomputed(&payload.inner, &onion_request.nonce, &path.nodes[1].temporary_precomputed_key).unwrap();
+        let payload = path.nodes[1].temporary_precomputed_key.decrypt(&onion_request.nonce, &payload.inner).unwrap();
         let payload = OnionRequest1Payload::from_bytes(&payload).unwrap().1;
         assert_eq!(payload.ip_port, IpPort::from_udp_saddr(saddr_3));
         assert_eq!(payload.temporary_pk, path.nodes[2].temporary_public_key);
-        let payload = open_precomputed(&payload.inner, &onion_request.nonce, &path.nodes[2].temporary_precomputed_key).unwrap();
+        let payload = path.nodes[2].temporary_precomputed_key.decrypt(&onion_request.nonce, &payload.inner).unwrap();
         let payload = OnionRequest2Payload::from_bytes(&payload).unwrap().1;
         assert_eq!(payload.ip_port, IpPort::from_udp_saddr(destination));
         assert_eq!(payload.inner, inner_onion_request);
@@ -249,11 +250,11 @@ mod tests {
 
         assert_eq!(onion_request.temporary_pk, path.nodes[1].temporary_public_key);
         assert_eq!(onion_request.ip_port, IpPort::from_udp_saddr(saddr_2));
-        let payload = open_precomputed(&onion_request.payload, &onion_request.nonce, &path.nodes[1].temporary_precomputed_key).unwrap();
+        let payload = path.nodes[1].temporary_precomputed_key.decrypt(&onion_request.nonce, &onion_request.payload).unwrap();
         let payload = OnionRequest1Payload::from_bytes(&payload).unwrap().1;
         assert_eq!(payload.ip_port, IpPort::from_udp_saddr(saddr_3));
         assert_eq!(payload.temporary_pk, path.nodes[2].temporary_public_key);
-        let payload = open_precomputed(&payload.inner, &onion_request.nonce, &path.nodes[2].temporary_precomputed_key).unwrap();
+        let payload = path.nodes[2].temporary_precomputed_key.decrypt(&onion_request.nonce, &payload.inner).unwrap();
         let payload = OnionRequest2Payload::from_bytes(&payload).unwrap().1;
         assert_eq!(payload.ip_port, IpPort::from_udp_saddr(destination));
         assert_eq!(payload.inner, inner_onion_request);

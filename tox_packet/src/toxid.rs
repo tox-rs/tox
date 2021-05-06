@@ -108,7 +108,7 @@ Length | Contents
 
 https://zetok.github.io/tox-spec/#tox-id
 */
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToxId {
     /// Long-term `PublicKey`.
     pub pk: PublicKey,
@@ -151,9 +151,9 @@ impl ToxId {
                NoSpam([0xff; NOSPAMBYTES])), [0; 2]);
     ```
     */
-    pub fn checksum(&PublicKey(ref pk): &PublicKey, nospam: NoSpam) -> [u8; 2] {
+    pub fn checksum(pk: &PublicKey, nospam: NoSpam) -> [u8; 2] {
         let mut bytes = Vec::with_capacity(TOXIDBYTES - 2);
-        bytes.extend_from_slice(pk);
+        bytes.extend_from_slice(pk.as_bytes());
         bytes.extend_from_slice(nospam.0.as_ref());
 
         let mut checksum = [0; 2];
@@ -270,8 +270,7 @@ assert_eq!(&format!("{:X}", toxid),
 impl fmt::UpperHex for ToxId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut string = String::with_capacity(TOXIDBYTES * 2);
-        let PublicKey(ref pk_bytes) = self.pk;
-        for byte in pk_bytes {
+        for byte in self.pk.as_bytes() {
             string.push_str(&format!("{:02X}", byte));
         }
         for byte in &self.nospam.0 {

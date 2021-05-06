@@ -3,6 +3,7 @@
 
 use super::*;
 
+use crypto_box::SalsaBox;
 use tox_binary_io::*;
 use tox_crypto::*;
 use crate::dht::*;
@@ -70,13 +71,13 @@ impl ToBytes for OnionAnnounceResponse {
 
 impl OnionAnnounceResponse {
     /// Create new `OnionAnnounceResponse` object.
-    pub fn new(shared_secret: &PrecomputedKey, sendback_data: u64, payload: &OnionAnnounceResponsePayload) -> OnionAnnounceResponse {
+    pub fn new(shared_secret: &SalsaBox, sendback_data: u64, payload: &OnionAnnounceResponsePayload) -> OnionAnnounceResponse {
         let nonce = gen_nonce();
         let mut buf = [0; ONION_MAX_PACKET_SIZE];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
-        let payload = seal_precomputed(&buf[..size], &nonce, shared_secret);
+        let payload = shared_secret.encrypt(&nonce, &buf[..size]).unwrap();
 
-        OnionAnnounceResponse { sendback_data, nonce, payload }
+        OnionAnnounceResponse { sendback_data, nonce: nonce.into(), payload }
     }
 
     /** Decrypt payload and try to parse it as `OnionAnnounceResponsePayload`.
@@ -86,9 +87,9 @@ impl OnionAnnounceResponse {
     - fails to decrypt
     - fails to parse as `OnionAnnounceResponsePayload`
     */
-    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<OnionAnnounceResponsePayload, GetPayloadError> {
-        let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
-            .map_err(|()| {
+    pub fn get_payload(&self, shared_secret: &SalsaBox) -> Result<OnionAnnounceResponsePayload, GetPayloadError> {
+        let decrypted = shared_secret.decrypt((&self.nonce).into(), self.payload.as_slice())
+            .map_err(|AeadError| {
                 GetPayloadError::decrypt()
             })?;
         match OnionAnnounceResponsePayload::from_bytes(&decrypted) {
@@ -173,7 +174,7 @@ mod tests {
         onion_announce_response_encode_decode,
         OnionAnnounceResponse {
             sendback_data: 12345,
-            nonce: gen_nonce(),
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             payload: vec![42; 123]
         }
     );
@@ -184,7 +185,7 @@ mod tests {
             announce_status: AnnounceStatus::Found,
             ping_id_or_pk: [42; 32],
             nodes: vec![
-                PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
+                PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), gen_keypair().0)
             ]
         }
     );
@@ -193,12 +194,12 @@ mod tests {
     fn onion_announce_response_payload_encrypt_decrypt() {
         let (_alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
-        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
+        let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
         let payload = OnionAnnounceResponsePayload {
             announce_status: AnnounceStatus::Found,
             ping_id_or_pk: [42; 32],
             nodes: vec![
-                PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
+                PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), gen_keypair().0)
             ]
         };
         // encode payload with shared secret
@@ -214,18 +215,18 @@ mod tests {
         let (_alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let (_eve_pk, eve_sk) = gen_keypair();
-        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
+        let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
         let payload = OnionAnnounceResponsePayload {
             announce_status: AnnounceStatus::Found,
             ping_id_or_pk: [42; 32],
             nodes: vec![
-                PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), &gen_keypair().0)
+                PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), gen_keypair().0)
             ]
         };
         // encode payload with shared secret
         let onion_packet = OnionAnnounceResponse::new(&shared_secret, 12345, &payload);
         // try to decode payload with eve's secret key
-        let eve_shared_secret = encrypt_precompute(&bob_pk, &eve_sk);
+        let eve_shared_secret = SalsaBox::new(&bob_pk, &eve_sk);
         let decoded_payload = onion_packet.get_payload(&eve_shared_secret);
         assert!(decoded_payload.is_err());
     }
@@ -234,23 +235,23 @@ mod tests {
     fn onion_announce_response_decrypt_invalid() {
         let (_alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
-        let shared_secret = precompute(&bob_pk, &alice_sk);
+        let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
         let nonce = gen_nonce();
         // Try long invalid array
         let invalid_payload = [42; 123];
-        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
+        let invalid_payload_encoded = shared_secret.encrypt(&nonce, &invalid_payload[..]).unwrap();
         let invalid_onion_announce_response = OnionAnnounceResponse {
             sendback_data: 12345,
-            nonce,
+            nonce: nonce.into(),
             payload: invalid_payload_encoded
         };
         assert!(invalid_onion_announce_response.get_payload(&shared_secret).is_err());
         // Try short incomplete array
         let invalid_payload = [];
-        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
+        let invalid_payload_encoded = shared_secret.encrypt(&nonce, &invalid_payload[..]).unwrap();
         let invalid_onion_announce_response = OnionAnnounceResponse {
             sendback_data: 12345,
-            nonce,
+            nonce: nonce.into(),
             payload: invalid_payload_encoded
         };
         assert!(invalid_onion_announce_response.get_payload(&shared_secret).is_err());

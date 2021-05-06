@@ -3,6 +3,8 @@
 
 use super::*;
 
+use aead::AeadCore;
+use crypto_box::SalsaBox;
 use tox_binary_io::*;
 use tox_crypto::*;
 use crate::dht::*;
@@ -11,7 +13,7 @@ use nom::combinator::{rest, rest_len};
 
 /// Encrypted payload should contain `IpPort`, `PublicKey` and inner encrypted
 /// payload that should contain at least `IpPort` struct.
-const ONION_REQUEST_0_MIN_PAYLOAD_SIZE: usize = (SIZE_IPPORT + MACBYTES) * 2 + PUBLICKEYBYTES;
+const ONION_REQUEST_0_MIN_PAYLOAD_SIZE: usize = (SIZE_IPPORT + <SalsaBox as AeadCore>::TagSize::USIZE) * 2 + PUBLICKEYBYTES;
 
 /** First onion request packet. It's sent from DHT node to the first node from
 onion chain. Payload can be encrypted with either temporary generated
@@ -72,13 +74,13 @@ impl ToBytes for OnionRequest0 {
 
 impl OnionRequest0 {
     /// Create new `OnionRequest0` object.
-    pub fn new(shared_secret: &PrecomputedKey, temporary_pk: &PublicKey, payload: &OnionRequest0Payload) -> OnionRequest0 {
+    pub fn new(shared_secret: &SalsaBox, temporary_pk: PublicKey, payload: &OnionRequest0Payload) -> OnionRequest0 {
         let nonce = gen_nonce();
         let mut buf = [0; ONION_MAX_PACKET_SIZE];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
-        let payload = seal_precomputed(&buf[..size], &nonce, shared_secret);
+        let payload = shared_secret.encrypt(&nonce, &buf[..size]).unwrap();
 
-        OnionRequest0 { nonce, temporary_pk: *temporary_pk, payload }
+        OnionRequest0 { nonce: nonce.into(), temporary_pk, payload }
     }
 
     /** Decrypt payload and try to parse it as `OnionRequest0Payload`.
@@ -88,9 +90,9 @@ impl OnionRequest0 {
     - fails to decrypt
     - fails to parse as `OnionRequest0Payload`
     */
-    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<OnionRequest0Payload, GetPayloadError> {
-        let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
-            .map_err(|()| {
+    pub fn get_payload(&self, shared_secret: &SalsaBox) -> Result<OnionRequest0Payload, GetPayloadError> {
+        let decrypted = shared_secret.decrypt((&self.nonce).into(), self.payload.as_slice())
+            .map_err(|AeadError| {
                 GetPayloadError::decrypt()
             })?;
         match OnionRequest0Payload::from_bytes(&decrypted) {
@@ -159,7 +161,7 @@ mod tests {
     encode_decode_test!(
         onion_request_0_encode_decode,
         OnionRequest0 {
-            nonce: gen_nonce(),
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             temporary_pk: gen_keypair().0,
             payload: vec![42; ONION_REQUEST_0_MIN_PAYLOAD_SIZE]
         }
@@ -182,7 +184,7 @@ mod tests {
     fn onion_request_0_payload_encrypt_decrypt() {
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
-        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
+        let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
         let payload = OnionRequest0Payload {
             ip_port: IpPort {
                 protocol: ProtocolType::Udp,
@@ -193,7 +195,7 @@ mod tests {
             inner: vec![42; ONION_REQUEST_0_MIN_PAYLOAD_SIZE]
         };
         // encode payload with shared secret
-        let onion_packet = OnionRequest0::new(&shared_secret, &alice_pk, &payload);
+        let onion_packet = OnionRequest0::new(&shared_secret, alice_pk, &payload);
         // decode payload with bob's secret key
         let decoded_payload = onion_packet.get_payload(&shared_secret).unwrap();
         // payloads should be equal
@@ -205,7 +207,7 @@ mod tests {
         let (alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
         let (_eve_pk, eve_sk) = gen_keypair();
-        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
+        let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
         let payload = OnionRequest0Payload {
             ip_port: IpPort {
                 protocol: ProtocolType::Udp,
@@ -216,9 +218,9 @@ mod tests {
             inner: vec![42; ONION_REQUEST_0_MIN_PAYLOAD_SIZE]
         };
         // encode payload with shared secret
-        let onion_packet = OnionRequest0::new(&shared_secret, &alice_pk, &payload);
+        let onion_packet = OnionRequest0::new(&shared_secret, alice_pk, &payload);
         // try to decode payload with eve's secret key
-        let eve_shared_secret = encrypt_precompute(&bob_pk, &eve_sk);
+        let eve_shared_secret = SalsaBox::new(&bob_pk, &eve_sk);
         let decoded_payload = onion_packet.get_payload(&eve_shared_secret);
         assert!(decoded_payload.is_err());
     }
@@ -227,23 +229,23 @@ mod tests {
     fn onion_request_0_decrypt_invalid() {
         let (_alice_pk, alice_sk) = gen_keypair();
         let (bob_pk, _bob_sk) = gen_keypair();
-        let shared_secret = precompute(&bob_pk, &alice_sk);
+        let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
         let nonce = gen_nonce();
         let temporary_pk = gen_keypair().0;
         // Try long invalid array
         let invalid_payload = [42; 123];
-        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
+        let invalid_payload_encoded = shared_secret.encrypt(&nonce, &invalid_payload[..]).unwrap();
         let invalid_onion_request_0 = OnionRequest0 {
-            nonce,
+            nonce: nonce.into(),
             temporary_pk,
             payload: invalid_payload_encoded
         };
         assert!(invalid_onion_request_0.get_payload(&shared_secret).is_err());
         // Try short incomplete array
         let invalid_payload = [];
-        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
+        let invalid_payload_encoded = shared_secret.encrypt(&nonce, &invalid_payload[..]).unwrap();
         let invalid_onion_request_0 = OnionRequest0 {
-            nonce,
+            nonce: nonce.into(),
             temporary_pk,
             payload: invalid_payload_encoded
         };

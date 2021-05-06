@@ -2,6 +2,8 @@
 */
 use super::*;
 
+use aead::{Aead, Error as AeadError};
+use crypto_box::SalsaBox;
 use nom::{
     count,
     number::complete::{le_u8, be_u64},
@@ -63,15 +65,15 @@ impl FromBytes for NodesResponse {
 
 impl NodesResponse {
     /// create new NodesResponse object
-    pub fn new(shared_secret: &PrecomputedKey, pk: &PublicKey, payload: &NodesResponsePayload) -> NodesResponse {
+    pub fn new(shared_secret: &SalsaBox, pk: PublicKey, payload: &NodesResponsePayload) -> NodesResponse {
         let nonce = gen_nonce();
         let mut buf = [0; MAX_DHT_PACKET_SIZE];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
-        let payload = seal_precomputed(&buf[..size], &nonce, shared_secret);
+        let payload = shared_secret.encrypt(&nonce, &buf[..size]).unwrap();
 
         NodesResponse {
-            pk: *pk,
-            nonce,
+            pk,
+            nonce: nonce.into(),
             payload,
         }
     }
@@ -82,9 +84,9 @@ impl NodesResponse {
     - fails to decrypt
     - fails to parse as given packet type
     */
-    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<NodesResponsePayload, GetPayloadError> {
-        let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
-            .map_err(|()| {
+    pub fn get_payload(&self, shared_secret: &SalsaBox) -> Result<NodesResponsePayload, GetPayloadError> {
+        let decrypted = shared_secret.decrypt((&self.nonce).into(), self.payload.as_slice())
+            .map_err(|AeadError| {
                 GetPayloadError::decrypt()
             })?;
 

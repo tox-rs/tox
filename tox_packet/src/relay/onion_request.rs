@@ -3,6 +3,7 @@
 
 use super::*;
 
+use crypto_box::{SalsaBox, aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned}};
 use tox_binary_io::*;
 use tox_crypto::*;
 use crate::ip_port::*;
@@ -15,7 +16,7 @@ use nom::combinator::rest;
 
 /// Encrypted payload should contain `IpPort`, `PublicKey` and inner encrypted
 /// payload that should contain at least `IpPort` struct.
-const ONION_MIN_PAYLOAD_SIZE: usize = (SIZE_IPPORT + MACBYTES) * 2 + PUBLICKEYBYTES;
+const ONION_MIN_PAYLOAD_SIZE: usize = (SIZE_IPPORT + <SalsaBox as AeadCore>::TagSize::USIZE) * 2 + PUBLICKEYBYTES;
 
 /// `OnionRequest1` packet with encrypted payload from `OnionRequest` packet
 /// shouldn't be bigger than `ONION_MAX_PACKET_SIZE`.
@@ -92,7 +93,7 @@ mod test {
     encode_decode_test!(
         onion_request_encode_decode,
         OnionRequest {
-            nonce: gen_nonce(),
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             ip_port: IpPort {
                 protocol: ProtocolType::Tcp,
                 ip_addr: "5.6.7.8".parse().unwrap(),

@@ -187,18 +187,18 @@ mod tests {
 
     #[test]
     fn can_and_try_add_to_close() {
-        let pk = PublicKey([0; PUBLICKEYBYTES]);
+        let pk = PublicKey::from([0; PUBLICKEYBYTES]);
         let mut friend = DhtFriend::new(&mut thread_rng(), pk);
 
         for i in 0 .. 8 {
             let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + u16::from(i));
-            let node = PackedNode::new(addr, &PublicKey([i + 2; PUBLICKEYBYTES]));
+            let node = PackedNode::new(addr, PublicKey::from([i + 2; PUBLICKEYBYTES]));
             assert!(friend.try_add_to_close(node));
         }
 
         let closer_node = PackedNode::new(
             "1.2.3.5:12345".parse().unwrap(),
-            &PublicKey([1; PUBLICKEYBYTES])
+            PublicKey::from([1; PUBLICKEYBYTES])
         );
 
         // should add a new closer node with eviction

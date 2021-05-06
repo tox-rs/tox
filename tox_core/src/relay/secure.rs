@@ -45,6 +45,7 @@ assert_eq!( bob_msg.as_bytes().to_vec(), alice_channel.decrypt(bob_msg_encrypted
 
 */
 
+use crypto_box::SalsaBox;
 use tox_crypto::*;
 
 use std::cell::RefCell;
@@ -61,7 +62,7 @@ their `Channel`s.
 pub struct Session {
     /// pk must be sent to another person
     pk: PublicKey,
-    /// sk is used with `other_pk` to create a `PrecomputedKey`
+    /// sk is used with `other_pk` to create a `SalsaBox`
     /// to establish a secure [`Channel`](./struct.Channel.html)
     sk: SecretKey,
     /// nonce must be sent to another person
@@ -88,11 +89,11 @@ impl Session {
         &self.nonce
     }
 
-    /** Create `PrecomputedKey` to encrypt/decrypt data
+    /** Create `SalsaBox` to encrypt/decrypt data
     using secure [`Channel`](./struct.Channel.html)
     */
-    pub fn create_precomputed_key(&self, other_pk: &PublicKey) -> PrecomputedKey {
-        encrypt_precompute(other_pk, &self.sk)
+    pub fn create_precomputed_key(&self, other_pk: &PublicKey) -> SalsaBox {
+        SalsaBox::new(other_pk, &self.sk)
     }
 }
 
@@ -103,7 +104,7 @@ increment `recv_nonce` after data was decrypted.
 */
 
 pub struct Channel {
-    precomputed_key: PrecomputedKey,
+    precomputed_key: SalsaBox,
     sent_nonce: RefCell<Nonce>,
     recv_nonce: RefCell<Nonce>
 }

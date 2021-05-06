@@ -421,6 +421,7 @@ impl FriendConnections {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crypto_box::SalsaBox;
     use rand::thread_rng;
 
     use tox_packet::dht::{Packet as DhtPacket, *};
@@ -489,7 +490,7 @@ mod tests {
         // executed inside tokio context
         let _ = friend_connections.tcp_connections.add_connection(relay_pk, friend_dht_pk);
 
-        let session_precomputed_key = precompute(&gen_keypair().0, &gen_keypair().1);
+        let session_precomputed_key = SalsaBox::new(&gen_keypair().0, &gen_keypair().1);
         let sent_nonce = gen_nonce();
         friend_connections.net_crypto.add_established_connection(
             gen_keypair().0,
@@ -541,7 +542,7 @@ mod tests {
         // executed inside tokio context
         let _ = friend_connections.tcp_connections.add_connection(relay_pk, friend_dht_pk);
 
-        let session_precomputed_key = precompute(&gen_keypair().0, &gen_keypair().1);
+        let session_precomputed_key = SalsaBox::new(&gen_keypair().0, &gen_keypair().1);
         let sent_nonce = gen_nonce();
         friend_connections.net_crypto.add_established_connection(
             gen_keypair().0,
@@ -693,7 +694,7 @@ mod tests {
         friend.connected = true;
         friend_connections.friends.write().await.insert(friend_pk, friend);
 
-        let session_precomputed_key = precompute(&gen_keypair().0, &gen_keypair().1);
+        let session_precomputed_key = SalsaBox::new(&gen_keypair().0, &gen_keypair().1);
         let sent_nonce = gen_nonce();
         friend_connections.net_crypto.add_established_connection(
             gen_keypair().0,
@@ -739,7 +740,7 @@ mod tests {
         friend.connected = true;
         friend_connections.friends.write().await.insert(friend_pk, friend);
 
-        let session_precomputed_key = precompute(&gen_keypair().0, &gen_keypair().1);
+        let session_precomputed_key = SalsaBox::new(&gen_keypair().0, &gen_keypair().1);
         let sent_nonce = gen_nonce();
         friend_connections.net_crypto.add_established_connection(
             gen_keypair().0,
@@ -788,7 +789,7 @@ mod tests {
         friend.connected = true;
         friend_connections.friends.write().await.insert(friend_pk, friend);
 
-        let session_precomputed_key = precompute(&gen_keypair().0, &gen_keypair().1);
+        let session_precomputed_key = SalsaBox::new(&gen_keypair().0, &gen_keypair().1);
         let sent_nonce = gen_nonce();
         friend_connections.net_crypto.add_established_connection(
             gen_keypair().0,
@@ -944,7 +945,7 @@ mod tests {
         let run_future = friend_connections.run()
             .map(Result::unwrap);
 
-        let precomputed_key = precompute(&friend_connections.real_pk, &friend_sk);
+        let precomputed_key = SalsaBox::new(&friend_connections.real_pk, &friend_sk);
         let cookie = friend_connections.net_crypto.get_cookie(&mut thread_rng(), friend_pk, friend_dht_pk);
         let sent_nonce = gen_nonce();
         let (friend_session_pk, friend_session_sk) = gen_keypair();
@@ -965,7 +966,7 @@ mod tests {
             net_crypto.handle_udp_crypto_handshake(&handshake, friend_saddr).await.unwrap();
 
             let session_pk = net_crypto.get_session_pk(&friend_pk).await.unwrap();
-            let session_precomputed_key = precompute(&session_pk, &friend_session_sk);
+            let session_precomputed_key = SalsaBox::new(&session_pk, &friend_session_sk);
 
             let crypto_data_payload = CryptoDataPayload {
                 buffer_start: 0,

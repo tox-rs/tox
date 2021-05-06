@@ -72,8 +72,8 @@ impl ToBytes for NewPeer {
             gen_be_u32!(self.message_id) >>
             gen_be_u8!(0x10) >>
             gen_be_u16!(self.new_peer_id) >>
-            gen_slice!(self.long_term_pk.as_ref()) >>
-            gen_slice!(self.dht_pk.as_ref())
+            gen_slice!(self.long_term_pk.as_bytes()) >>
+            gen_slice!(self.dht_pk.as_bytes())
         )
     }
 }

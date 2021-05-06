@@ -85,6 +85,7 @@ pub async fn dht_run_socket(
 mod tests {
     use super::*;
 
+    use crypto_box::SalsaBox;
     use futures::channel::mpsc;
     use futures::TryStreamExt;
 
@@ -96,7 +97,7 @@ mod tests {
     async fn run_socket() {
         let (client_pk, client_sk) = gen_keypair();
         let (server_pk, server_sk) = gen_keypair();
-        let shared_secret = precompute(&server_pk, &client_sk);
+        let shared_secret = SalsaBox::new(&server_pk, &client_sk);
 
         let (tx, rx) = mpsc::channel(32);
 

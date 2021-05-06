@@ -45,6 +45,7 @@ impl ToBytes for OnionResponse {
 mod test {
     use super::*;
 
+    use crypto_box::{SalsaBox, aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned}};
     use crate::onion::{OnionAnnounceResponse, OnionDataResponse};
 
     encode_decode_test!(
@@ -52,7 +53,7 @@ mod test {
         OnionResponse {
             payload: InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
                 sendback_data: 12345,
-                nonce: tox_crypto::gen_nonce(),
+                nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
                 payload: vec![42; 123]
             })
         }
@@ -62,7 +63,7 @@ mod test {
         onion_response_with_data_encode_decode,
         OnionResponse {
             payload: InnerOnionResponse::OnionDataResponse(OnionDataResponse {
-                nonce: tox_crypto::gen_nonce(),
+                nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
                 temporary_pk: tox_crypto::gen_keypair().0,
                 payload: vec![42; 123]
             })

@@ -35,7 +35,7 @@ pub struct NospamKeys {
 }
 
 /// Number of bytes of serialized [`NospamKeys`](./struct.NospamKeys.html).
-pub const NOSPAMKEYSBYTES: usize = NOSPAMBYTES + PUBLICKEYBYTES + SECRETKEYBYTES;
+pub const NOSPAMKEYSBYTES: usize = NOSPAMBYTES + PUBLICKEYBYTES + crypto_box::KEY_SIZE;
 
 impl Distribution<NospamKeys> for Standard {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> NospamKeys {

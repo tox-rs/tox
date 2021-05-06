@@ -155,8 +155,8 @@ mod tests {
         let temp_pk = gen_keypair().0;
         let mut buf = vec![0x00, 0x01];
         let length = vec![0x04];
-        buf.extend_from_slice(&real_pk.0);
-        buf.extend_from_slice(&temp_pk.0);
+        buf.extend_from_slice(real_pk.as_bytes());
+        buf.extend_from_slice(temp_pk.as_bytes());
         buf.extend_from_slice(&length);
         buf.extend_from_slice(&err_string);
         assert!(PeerInfo::from_bytes(&buf).is_err());

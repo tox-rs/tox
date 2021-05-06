@@ -1367,7 +1367,7 @@ impl Server {
         *self.friend_saddr_sink.write().await = Some(friend_saddr_sink);
     }
 
-    /// Get `PrecomputedKey`s cache.
+    /// Get `SalsaBox`s cache.
     pub fn get_precomputed_keys(&self) -> PrecomputedCache {
         self.precomputed_keys.clone()
     }
@@ -1376,6 +1376,7 @@ impl Server {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crypto_box::SalsaBox;
     use tox_binary_io::*;
 
     use std::net::SocketAddr;
@@ -1394,13 +1395,13 @@ mod tests {
         }
     }
 
-    fn create_node() -> (Server, PrecomputedKey, PublicKey, SecretKey,
+    fn create_node() -> (Server, SalsaBox, PublicKey, SecretKey,
             mpsc::Receiver<(Packet, SocketAddr)>, SocketAddr) {
         let (pk, sk) = gen_keypair();
         let (tx, rx) = mpsc::channel(32);
         let alice = Server::new(tx, pk, sk);
         let (bob_pk, bob_sk) = gen_keypair();
-        let precomp = precompute(&alice.pk, &bob_sk);
+        let precomp = SalsaBox::new(&alice.pk, &bob_sk);
 
         let addr: SocketAddr = "127.0.0.1:12346".parse().unwrap();
         (alice, precomp, bob_pk, bob_sk, rx, addr)
@@ -1519,7 +1520,7 @@ mod tests {
         assert_eq!(addr_to_send, addr);
 
         let ping_resp = unpack!(packet, Packet::PingResponse);
-        let precomputed_key = precompute(&ping_resp.pk, &bob_sk);
+        let precomputed_key = SalsaBox::new(&ping_resp.pk, &bob_sk);
         let ping_resp_payload = ping_resp.get_payload(&precomputed_key).unwrap();
 
         assert_eq!(ping_resp_payload.id, req_payload.id);
@@ -1544,12 +1545,12 @@ mod tests {
             assert_eq!(addr_to_send, addr);
 
             if let Packet::PingResponse(ping_resp) = packet {
-                let precomputed_key = precompute(&ping_resp.pk, &bob_sk);
+                let precomputed_key = SalsaBox::new(&ping_resp.pk, &bob_sk);
                 let ping_resp_payload = ping_resp.get_payload(&precomputed_key).unwrap();
                 assert_eq!(ping_resp_payload.id, req_payload.id);
             } else {
                 let ping_req = unpack!(packet, Packet::PingRequest);
-                let precomputed_key = precompute(&ping_req.pk, &bob_sk);
+                let precomputed_key = SalsaBox::new(&ping_req.pk, &bob_sk);
                 let ping_req_payload = ping_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(ping_req_payload.id, |&pk| pk == bob_pk).is_some());
             }
@@ -1728,7 +1729,7 @@ mod tests {
         assert_eq!(addr_to_send, addr);
 
         let nodes_resp = unpack!(packet, Packet::NodesResponse);
-        let precomputed_key = precompute(&nodes_resp.pk, &bob_sk);
+        let precomputed_key = SalsaBox::new(&nodes_resp.pk, &bob_sk);
         let nodes_resp_payload = nodes_resp.get_payload(&precomputed_key).unwrap();
 
         assert_eq!(nodes_resp_payload.id, req_payload.id);
@@ -1757,7 +1758,7 @@ mod tests {
         assert_eq!(addr_to_send, addr);
 
         let nodes_resp = unpack!(packet, Packet::NodesResponse);
-        let precomputed_key = precompute(&nodes_resp.pk, &bob_sk);
+        let precomputed_key = SalsaBox::new(&nodes_resp.pk, &bob_sk);
         let nodes_resp_payload = nodes_resp.get_payload(&precomputed_key).unwrap();
 
         assert_eq!(nodes_resp_payload.id, req_payload.id);
@@ -1790,7 +1791,7 @@ mod tests {
         assert_eq!(addr_to_send, addr);
 
         let nodes_resp = unpack!(packet, Packet::NodesResponse);
-        let precomputed_key = precompute(&nodes_resp.pk, &bob_sk);
+        let precomputed_key = SalsaBox::new(&nodes_resp.pk, &bob_sk);
         let nodes_resp_payload = nodes_resp.get_payload(&precomputed_key).unwrap();
 
         assert_eq!(nodes_resp_payload.id, req_payload.id);
@@ -1819,7 +1820,7 @@ mod tests {
         assert_eq!(addr_to_send, addr);
 
         let nodes_resp = unpack!(packet, Packet::NodesResponse);
-        let precomputed_key = precompute(&nodes_resp.pk, &bob_sk);
+        let precomputed_key = SalsaBox::new(&nodes_resp.pk, &bob_sk);
         let nodes_resp_payload = nodes_resp.get_payload(&precomputed_key).unwrap();
 
         assert_eq!(nodes_resp_payload.id, req_payload.id);
@@ -1970,7 +1971,7 @@ mod tests {
         let (alice, _precomp, bob_pk, bob_sk, rx, addr) = create_node();
 
         let (charlie_pk, _charlie_sk) = gen_keypair();
-        let precomp = precompute(&charlie_pk, &bob_sk);
+        let precomp = SalsaBox::new(&charlie_pk, &bob_sk);
 
         // if receiver' pk != node's pk just returns ok()
         let nat_req = NatPingRequest { id: 42 };
@@ -1991,7 +1992,7 @@ mod tests {
 
         let charlie_addr = "1.2.3.4:12345".parse().unwrap();
         let (charlie_pk, _charlie_sk) = gen_keypair();
-        let precomp = precompute(&charlie_pk, &bob_sk);
+        let precomp = SalsaBox::new(&charlie_pk, &bob_sk);
 
         // if receiver' pk != node's pk and receiver's pk exists in close_nodes, returns ok()
         let pn = PackedNode::new(charlie_addr, &charlie_pk);
@@ -2048,7 +2049,7 @@ mod tests {
         assert_eq!(addr_to_send, addr);
 
         let dht_req = unpack!(packet, Packet::DhtRequest);
-        let precomputed_key = precompute(&dht_req.spk, &bob_sk);
+        let precomputed_key = SalsaBox::new(&dht_req.spk, &bob_sk);
         let dht_payload = dht_req.get_payload(&precomputed_key).unwrap();
         let nat_ping_resp_payload = unpack!(dht_payload, DhtRequestPayload::NatPingResponse);
 
@@ -2873,7 +2874,7 @@ mod tests {
             let (packet, _addr_to_send) = received.unwrap();
 
             if let Packet::DhtRequest(nat_ping_req) = packet {
-                let precomputed_key = precompute(&nat_ping_req.spk, &friend_sk);
+                let precomputed_key = SalsaBox::new(&nat_ping_req.spk, &friend_sk);
                 let nat_ping_req_payload = nat_ping_req.get_payload(&precomputed_key).unwrap();
                 let nat_ping_req_payload = unpack!(nat_ping_req_payload, DhtRequestPayload::NatPingRequest);
 
@@ -2899,7 +2900,7 @@ mod tests {
         assert_eq!(addr_to_send, addr);
 
         let nodes_req = unpack!(packet, Packet::NodesRequest);
-        let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
+        let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
         let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
 
         assert_eq!(nodes_req_payload.pk, alice.pk);
@@ -2990,12 +2991,12 @@ mod tests {
         rx.take(2).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, Packet::NodesRequest);
             if addr == "127.0.0.1:33445".parse().unwrap() {
-                let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
+                let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == bob_pk).is_some());
                 assert_eq!(nodes_req_payload.pk, alice.pk);
             } else {
-                let precomputed_key = precompute(&nodes_req.pk, &node_sk);
+                let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == node_pk).is_some());
                 assert_eq!(nodes_req_payload.pk, alice.pk);
@@ -3021,11 +3022,11 @@ mod tests {
         rx.take(2).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, Packet::PingRequest);
             if addr == "127.0.0.1:33445".parse().unwrap() {
-                let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
+                let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
                 let ping_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(ping_req_payload.id, |&pk| pk == bob_pk).is_some());
             } else {
-                let precomputed_key = precompute(&nodes_req.pk, &node_sk);
+                let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
                 let ping_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(ping_req_payload.id, |&pk| pk == node_pk).is_some());
             }
@@ -3063,12 +3064,12 @@ mod tests {
         rx.take(3).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, Packet::NodesRequest);
             if addr == "127.0.0.1:33445".parse().unwrap() {
-                let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
+                let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == bob_pk).is_some());
                 assert_eq!(nodes_req_payload.pk, alice.pk);
             } else {
-                let precomputed_key = precompute(&nodes_req.pk, &node_sk);
+                let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == node_pk).is_some());
                 assert_eq!(nodes_req_payload.pk, alice.pk);
@@ -3142,12 +3143,12 @@ mod tests {
         rx.take(2).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, Packet::NodesRequest);
             if addr == "127.0.0.1:33445".parse().unwrap() {
-                let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
+                let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == bob_pk).is_some());
                 assert_eq!(nodes_req_payload.pk, friend_pk);
             } else {
-                let precomputed_key = precompute(&nodes_req.pk, &node_sk);
+                let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == node_pk).is_some());
                 assert_eq!(nodes_req_payload.pk, friend_pk);
@@ -3183,12 +3184,12 @@ mod tests {
         rx.take(3).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, Packet::NodesRequest);
             if addr == "127.0.0.1:33445".parse().unwrap() {
-                let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
+                let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == bob_pk).is_some());
                 assert_eq!(nodes_req_payload.pk, friend_pk);
             } else {
-                let precomputed_key = precompute(&nodes_req.pk, &node_sk);
+                let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == node_pk).is_some());
                 assert_eq!(nodes_req_payload.pk, friend_pk);
@@ -3269,11 +3270,11 @@ mod tests {
         rx.take(2).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, Packet::NodesRequest);
             if addr == "[FF::01]:33445".parse().unwrap() {
-                let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
+                let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == bob_pk).is_some());
             } else {
-                let precomputed_key = precompute(&nodes_req.pk, &node_sk);
+                let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == node_pk).is_some());
             }
@@ -3300,11 +3301,11 @@ mod tests {
         rx.take(2).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, Packet::NodesRequest);
             if addr == "[FF::01]:33445".parse().unwrap() {
-                let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
+                let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == bob_pk).is_some());
             } else {
-                let precomputed_key = precompute(&nodes_req.pk, &node_sk);
+                let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == node_pk).is_some());
             }
@@ -3359,11 +3360,11 @@ mod tests {
         rx.take(2).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, Packet::NodesRequest);
             if addr == "[FF::01]:33445".parse().unwrap() {
-                let precomputed_key = precompute(&nodes_req.pk, &bob_sk);
+                let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == bob_pk).is_some());
             } else {
-                let precomputed_key = precompute(&nodes_req.pk, &node_sk);
+                let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
                 assert!(request_queue.check_ping_id(nodes_req_payload.id, |&pk| pk == node_pk).is_some());
             }
