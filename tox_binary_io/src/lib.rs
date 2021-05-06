@@ -2,14 +2,14 @@ pub use nom::IResult;
 pub use cookie_factory::GenError;
 
 use nom::number::streaming::{le_u8, le_u16};
-use nom::{named, map, count};
-use cookie_factory::{do_gen, gen_be_u8, gen_le_u16};
+use nom::{named, map, map_opt, take, count};
+use cookie_factory::{do_gen, gen_be_u8, gen_le_u16, gen_slice};
 
-use std::net::{
+use std::{convert::TryInto, net::{
     IpAddr,
     Ipv4Addr,
     Ipv6Addr,
-};
+}};
 
 #[cfg(feature = "sodiumoxide")]
 pub use sodium::*;
@@ -41,6 +41,16 @@ impl FromBytes for Ipv4Addr {
     named!(from_bytes<Ipv4Addr>, map!(count!(le_u8, 4),
         |v| Ipv4Addr::new(v[0], v[1], v[2], v[3])
     ));
+}
+
+impl<const N: usize> ToBytes for [u8; N] {
+    fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
+        gen_slice!(buf, &self[..])
+    }
+}
+
+impl <const N: usize> FromBytes for [u8; N] {
+    named!(from_bytes<[u8; N]>, map_opt!(take!(N), |bytes: &[u8]| bytes.try_into().ok()));
 }
 
 impl ToBytes for Ipv4Addr {

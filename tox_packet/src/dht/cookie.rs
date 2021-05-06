@@ -2,7 +2,7 @@
 */
 
 use super::*;
-use nom::{AsBytes, map_opt, number::complete::be_u64};
+use nom::number::complete::be_u64;
 use sha2::{Digest, Sha512};
 use sha2::digest::generic_array::typenum::marker_traits::Unsigned;
 use xsalsa20poly1305::{XSalsa20Poly1305, aead::{Aead, Error as AeadError}};
@@ -114,7 +114,7 @@ pub struct EncryptedCookie {
 
 impl FromBytes for EncryptedCookie {
     named!(from_bytes<EncryptedCookie>, do_parse!(
-        nonce: map_opt!(take!(xsalsa20poly1305::NONCE_SIZE), |bytes: &[u8]| bytes.try_into().ok()) >>
+        nonce: call!(<[u8; xsalsa20poly1305::NONCE_SIZE]>::from_bytes) >>
         payload: take!(88) >>
         (EncryptedCookie { nonce, payload: payload.to_vec() })
     ));
@@ -150,7 +150,7 @@ impl EncryptedCookie {
     - fails to parse `Cookie`
     */
     pub fn get_payload(&self, symmetric_key: &XSalsa20Poly1305) -> Result<Cookie, GetPayloadError> {
-        let decrypted = symmetric_key.decrypt(&self.nonce.into(), self.payload.as_bytes())
+        let decrypted = symmetric_key.decrypt(&self.nonce.into(), self.payload.as_slice())
             .map_err(|AeadError| {
                 GetPayloadError::decrypt()
             })?;

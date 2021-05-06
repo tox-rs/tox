@@ -3,18 +3,21 @@
 
 use super::*;
 
-use std::convert::TryInto;
 use tox_binary_io::*;
 use tox_crypto::*;
 use crate::dht::*;
 
 use nom::{
     flat_map,
-    map_opt,
     number::complete::le_u64,
     combinator::{rest, rest_len},
     bytes::complete::take
 };
+use sha2::{Digest, Sha256};
+use sha2::digest::generic_array::typenum::marker_traits::Unsigned;
+
+/// The type of onion ping ID which is SHA256 hash.
+pub type PingId = [u8; <Sha256 as Digest>::OutputSize::USIZE];
 
 /** It's used for announcing ourselves to onion node and for looking for other
 announced nodes.
@@ -172,7 +175,7 @@ Length   | Content
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OnionAnnounceRequestPayload {
     /// Onion ping id
-    pub ping_id: [u8; 32],
+    pub ping_id: PingId,
     /// `PublicKey` we are searching for
     pub search_pk: PublicKey,
     /// `PublicKey` that should be used for sending data packets
@@ -183,7 +186,7 @@ pub struct OnionAnnounceRequestPayload {
 
 impl FromBytes for OnionAnnounceRequestPayload {
     named!(from_bytes<OnionAnnounceRequestPayload>, do_parse!(
-        ping_id: map_opt!(take!(32), |bytes: &[u8]| bytes.try_into().ok()) >>
+        ping_id: call!(PingId::from_bytes) >>
         search_pk: call!(PublicKey::from_bytes) >>
         data_pk: call!(PublicKey::from_bytes) >>
         sendback_data: le_u64 >>
@@ -239,7 +242,7 @@ mod tests {
         tox_crypto::crypto_init().unwrap(),
         onion_announce_request_payload_encode_decode,
         OnionAnnounceRequestPayload {
-            ping_id: [42; 32],
+            ping_id: [42; <Sha256 as Digest>::OutputSize::USIZE],
             search_pk: gen_keypair().0,
             data_pk: gen_keypair().0,
             sendback_data: 12345
@@ -253,7 +256,7 @@ mod tests {
         let (bob_pk, _bob_sk) = gen_keypair();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
         let payload = OnionAnnounceRequestPayload {
-            ping_id: [42; 32],
+            ping_id: [42; <Sha256 as Digest>::OutputSize::USIZE],
             search_pk: gen_keypair().0,
             data_pk: gen_keypair().0,
             sendback_data: 12345
@@ -274,7 +277,7 @@ mod tests {
         let (_eve_pk, eve_sk) = gen_keypair();
         let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
         let payload = OnionAnnounceRequestPayload {
-            ping_id: [42; 32],
+            ping_id: [42; <Sha256 as Digest>::OutputSize::USIZE],
             search_pk: gen_keypair().0,
             data_pk: gen_keypair().0,
             sendback_data: 12345
