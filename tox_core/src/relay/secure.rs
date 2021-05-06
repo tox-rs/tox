@@ -12,11 +12,11 @@ let alice_session = Session::random();
 let bob_session = Session::random();
 
 // assume we got Alice's PK & Nonce via handshake
-let alice_pk = *alice_session.pk();
+let alice_pk = alice_session.pk().clone();
 let alice_nonce = *alice_session.nonce();
 
 // assume we got Bob's PK & Nonce via handshake
-let bob_pk = *bob_session.pk();
+let bob_pk = bob_session.pk().clone();
 let bob_nonce = *bob_session.nonce();
 
 // Now both Alice and Bob may create secure Channels
@@ -45,6 +45,8 @@ assert_eq!( bob_msg.as_bytes().to_vec(), alice_channel.decrypt(bob_msg_encrypted
 
 */
 
+use crypto_box::{SalsaBox, aead::{Aead, Error as AeadError}};
+use rand::thread_rng;
 use tox_crypto::*;
 
 use std::cell::RefCell;
@@ -61,7 +63,7 @@ their `Channel`s.
 pub struct Session {
     /// pk must be sent to another person
     pk: PublicKey,
-    /// sk is used with `other_pk` to create a `PrecomputedKey`
+    /// sk is used with `other_pk` to create a `SalsaBox`
     /// to establish a secure [`Channel`](./struct.Channel.html)
     sk: SecretKey,
     /// nonce must be sent to another person
@@ -73,8 +75,9 @@ impl Session {
     You should send it to establish a secure [`Channel`](./struct.Channel.html)
     */
     pub fn random() -> Session {
-        let (pk, sk) = gen_keypair();
-        let nonce = gen_nonce();
+        let sk = SecretKey::generate(&mut thread_rng());
+        let pk = sk.public_key();
+        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng()).into();
         Session { pk, sk, nonce }
     }
 
@@ -88,11 +91,11 @@ impl Session {
         &self.nonce
     }
 
-    /** Create `PrecomputedKey` to encrypt/decrypt data
+    /** Create `SalsaBox` to encrypt/decrypt data
     using secure [`Channel`](./struct.Channel.html)
     */
-    pub fn create_precomputed_key(&self, other_pk: &PublicKey) -> PrecomputedKey {
-        encrypt_precompute(other_pk, &self.sk)
+    pub fn create_precomputed_key(&self, other_pk: &PublicKey) -> SalsaBox {
+        SalsaBox::new(other_pk, &self.sk)
     }
 }
 
@@ -103,7 +106,7 @@ increment `recv_nonce` after data was decrypted.
 */
 
 pub struct Channel {
-    precomputed_key: PrecomputedKey,
+    precomputed_key: SalsaBox,
     sent_nonce: RefCell<Nonce>,
     recv_nonce: RefCell<Nonce>
 }
@@ -121,7 +124,7 @@ impl Channel {
     */
     pub fn encrypt(&self, plain: &[u8]) -> Vec<u8> {
         let mut nonce = self.sent_nonce.borrow_mut();
-        let encrypted = encrypt_data_symmetric(&self.precomputed_key, &nonce, plain);
+        let encrypted = self.precomputed_key.encrypt((&nonce[..]).into(), plain).unwrap();
         increment_nonce( &mut nonce );
         encrypted
     }
@@ -129,7 +132,7 @@ impl Channel {
     */
     pub fn decrypt(&self, encrypted: &[u8]) -> Result<Vec<u8>, ()> {
         let mut nonce = self.recv_nonce.borrow_mut();
-        let decrypted = decrypt_data_symmetric(&self.precomputed_key, &nonce, encrypted);
+        let decrypted = self.precomputed_key.decrypt((&nonce[..]).into(), encrypted).map_err(|AeadError| ());
         increment_nonce( &mut nonce );
         decrypted
     }
@@ -144,11 +147,11 @@ mod tests {
         let bob_session = Session::random();
 
         // assume we got Alice's PK & Nonce via handshake
-        let alice_pk = *alice_session.pk();
+        let alice_pk = alice_session.pk().clone();
         let alice_nonce = *alice_session.nonce();
 
         // assume we got Bob's PK & Nonce via handshake
-        let bob_pk = *bob_session.pk();
+        let bob_pk = bob_session.pk().clone();
         let bob_nonce = *bob_session.nonce();
 
         // Now both Alice and Bob may create secure Channels

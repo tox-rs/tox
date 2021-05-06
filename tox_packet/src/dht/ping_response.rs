@@ -6,6 +6,7 @@ use nom::{
     number::complete::be_u64,
     combinator::rest,
 };
+use crypto_box::{SalsaBox, aead::{Aead, Error as AeadError}};
 
 use tox_binary_io::*;
 use tox_crypto::*;
@@ -41,7 +42,7 @@ impl ToBytes for PingResponse {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x01) >>
-            gen_slice!(self.pk.as_ref()) >>
+            gen_slice!(self.pk.as_bytes()) >>
             gen_slice!(self.nonce.as_ref()) >>
             gen_slice!(self.payload.as_slice())
         )
@@ -60,15 +61,15 @@ impl FromBytes for PingResponse {
 
 impl PingResponse {
     /// create new PingResponse object
-    pub fn new(shared_secret: &PrecomputedKey, pk: &PublicKey, payload: &PingResponsePayload) -> PingResponse {
-        let nonce = gen_nonce();
+    pub fn new(shared_secret: &SalsaBox, pk: PublicKey, payload: &PingResponsePayload) -> PingResponse {
+        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
         let mut buf = [0; MAX_DHT_PACKET_SIZE];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
-        let payload = seal_precomputed(&buf[..size], &nonce, shared_secret);
+        let payload = shared_secret.encrypt(&nonce, &buf[..size]).unwrap();
 
         PingResponse {
-            pk: *pk,
-            nonce,
+            pk,
+            nonce: nonce.into(),
             payload,
         }
     }
@@ -79,9 +80,9 @@ impl PingResponse {
     - fails to decrypt
     - fails to parse as given packet type
     */
-    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<PingResponsePayload, GetPayloadError> {
-        let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
-            .map_err(|()| {
+    pub fn get_payload(&self, shared_secret: &SalsaBox) -> Result<PingResponsePayload, GetPayloadError> {
+        let decrypted = shared_secret.decrypt((&self.nonce).into(), self.payload.as_slice())
+            .map_err(|AeadError| {
                 GetPayloadError::decrypt()
             })?;
 

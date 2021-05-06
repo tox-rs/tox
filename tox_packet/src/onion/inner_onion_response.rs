@@ -37,13 +37,15 @@ impl FromBytes for InnerOnionResponse {
 
 #[cfg(test)]
 mod tests {
+    use rand::thread_rng;
+
     use super::*;
 
     encode_decode_test!(
         inner_onion_announce_response_encode_decode,
         InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
             sendback_data: 12345,
-            nonce: gen_nonce(),
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             payload: vec![42; 123]
         })
     );
@@ -51,8 +53,8 @@ mod tests {
     encode_decode_test!(
         inner_onion_data_response_encode_decode,
         InnerOnionResponse::OnionDataResponse(OnionDataResponse {
-            nonce: gen_nonce(),
-            temporary_pk: gen_keypair().0,
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
+            temporary_pk: SecretKey::generate(&mut thread_rng()).public_key(),
             payload: vec![42; 123]
         })
     );

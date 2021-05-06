@@ -204,8 +204,10 @@ impl FromBytes for Packet {
 
 #[cfg(test)]
 mod tests {
+    use crypto_box::SecretKey;
+    use rand::thread_rng;
+
     use super::*;
-    use tox_crypto::*;
 
     encode_decode_test!(
         conference_uid_encode_decode,
@@ -247,8 +249,8 @@ mod tests {
     encode_decode_test!(
         packet_query_response_encode_decode,
         Packet::QueryResponse(QueryResponse::new(1, vec![
-            PeerInfo::new(1, gen_keypair().0, gen_keypair().0, "1234".to_owned()),
-            PeerInfo::new(2, gen_keypair().0, gen_keypair().0, "56789".to_owned()),
+            PeerInfo::new(1, SecretKey::generate(&mut thread_rng()).public_key(), SecretKey::generate(&mut thread_rng()).public_key(), "1234".to_owned()),
+            PeerInfo::new(2, SecretKey::generate(&mut thread_rng()).public_key(), SecretKey::generate(&mut thread_rng()).public_key(), "56789".to_owned()),
             ]))
     );
 
@@ -264,7 +266,7 @@ mod tests {
 
     encode_decode_test!(
         packet_new_peer_encode_decode,
-        Packet::NewPeer(NewPeer::new(1, 2, 3, 4, gen_keypair().0, gen_keypair().0))
+        Packet::NewPeer(NewPeer::new(1, 2, 3, 4, SecretKey::generate(&mut thread_rng()).public_key(), SecretKey::generate(&mut thread_rng()).public_key()))
     );
 
     encode_decode_test!(

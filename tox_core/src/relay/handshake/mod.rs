@@ -9,6 +9,7 @@ pub mod codec;
 pub use self::packet::*;
 pub use self::codec::*;
 
+use crypto_box::{SalsaBox, aead::{Aead, Error as AeadError}};
 use tox_binary_io::*;
 use tox_crypto::*;
 use crate::relay::secure;
@@ -22,19 +23,23 @@ use tokio::net::TcpStream;
 pub fn create_client_handshake(client_pk: &PublicKey,
                            client_sk: &SecretKey,
                            server_pk: &PublicKey)
-    -> Result<(secure::Session, PrecomputedKey, ClientHandshake), Error> {
+    -> Result<(secure::Session, SalsaBox, ClientHandshake), Error> {
     let session = secure::Session::random();
-    let payload = HandshakePayload { session_pk: *session.pk(), session_nonce: *session.nonce() };
+    let payload = HandshakePayload { session_pk: session.pk().clone(), session_nonce: *session.nonce() };
 
     let mut serialized_payload = [0; PAYLOAD_SIZE];
     // HandshakePayload::to_bytes may not fail because we created buffer with enough size
     let (serialized_payload, _) = payload.to_bytes((&mut serialized_payload, 0)).unwrap();
 
-    let common_key = encrypt_precompute(server_pk, client_sk);
-    let nonce = gen_nonce();
-    let encrypted_payload = encrypt_data_symmetric(&common_key, &nonce, serialized_payload);
+    let common_key = SalsaBox::new(server_pk, client_sk);
+    let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
+    let encrypted_payload = common_key.encrypt(&nonce, &serialized_payload[..]).unwrap();
 
-    let handshake = ClientHandshake { pk: *client_pk, nonce, payload: encrypted_payload };
+    let handshake = ClientHandshake {
+        pk: client_pk.clone(),
+        nonce: nonce.into(),
+        payload: encrypted_payload,
+    };
     Ok((session, common_key, handshake))
 }
 
@@ -43,10 +48,10 @@ pub fn create_client_handshake(client_pk: &PublicKey,
 pub fn handle_client_handshake(server_sk: &SecretKey,
                            client_handshake: &ClientHandshake)
     -> Result<(secure::Channel, PublicKey, ServerHandshake), Error> {
-    let common_key = encrypt_precompute(&client_handshake.pk, server_sk);
-    let payload_bytes = decrypt_data_symmetric(&common_key, &client_handshake.nonce, &client_handshake.payload)
+    let common_key = SalsaBox::new(&client_handshake.pk, server_sk);
+    let payload_bytes = common_key.decrypt((&client_handshake.nonce).into(), &client_handshake.payload[..])
         .map_err(
-            |_| Error::new(ErrorKind::Other, "Failed to decrypt ClientHandshake payload")
+            |AeadError| Error::new(ErrorKind::Other, "Failed to decrypt ClientHandshake payload")
         )?;
 
     let (_, payload) = HandshakePayload::from_bytes(&payload_bytes)
@@ -58,28 +63,31 @@ pub fn handle_client_handshake(server_sk: &SecretKey,
     let client_nonce = payload.session_nonce;
 
     let session = secure::Session::random();
-    let server_payload = HandshakePayload { session_pk: *session.pk(), session_nonce: *session.nonce() };
+    let server_payload = HandshakePayload { session_pk: session.pk().clone(), session_nonce: *session.nonce() };
 
     let mut serialized_payload = [0; PAYLOAD_SIZE];
     // HandshakePayload::to_bytes may not fail because we created buffer with enough size
     let (serialized_payload, _) = server_payload.to_bytes((&mut serialized_payload, 0)).unwrap();
 
-    let nonce = gen_nonce();
-    let server_encrypted_payload = encrypt_data_symmetric(&common_key, &nonce, serialized_payload);
+    let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
+    let server_encrypted_payload = common_key.encrypt(&nonce, &serialized_payload[..]).unwrap();
 
-    let server_handshake = ServerHandshake { nonce, payload: server_encrypted_payload };
+    let server_handshake = ServerHandshake {
+        nonce: nonce.into(),
+        payload: server_encrypted_payload,
+    };
     let channel = secure::Channel::new(&session, &client_pk, &client_nonce);
-    Ok((channel, client_handshake.pk, server_handshake))
+    Ok((channel, client_handshake.pk.clone(), server_handshake))
 }
 
 /// Handle received server handshake on the client side.
-pub fn handle_server_handshake(common_key: &PrecomputedKey,
+pub fn handle_server_handshake(common_key: &SalsaBox,
                            client_session: &secure::Session,
                            server_handshake: &ServerHandshake)
     -> Result<secure::Channel, Error> {
-    let payload_bytes = decrypt_data_symmetric(common_key, &server_handshake.nonce, &server_handshake.payload)
+    let payload_bytes = common_key.decrypt((&server_handshake.nonce).into(), &server_handshake.payload[..])
         .map_err(
-            |_| Error::new(ErrorKind::Other, "Failed to decrypt ServerHandshake payload")
+            |AeadError| Error::new(ErrorKind::Other, "Failed to decrypt ServerHandshake payload")
         )?;
     let (_, payload) = HandshakePayload::from_bytes(&payload_bytes)
         .map_err(
@@ -173,13 +181,17 @@ pub async fn make_server_handshake(
 mod tests {
     use std::net::SocketAddr;
 
+    use rand::thread_rng;
     use tox_crypto::*;
     use crate::relay::*;
     use crate::relay::handshake::*;
 
     fn create_channels_with_handshake() -> (secure::Channel, secure::Channel) {
-        let (client_pk, client_sk) = gen_keypair();
-        let (server_pk, server_sk) = gen_keypair();
+        let mut rng = thread_rng();
+        let client_sk = SecretKey::generate(&mut rng);
+        let client_pk = client_sk.public_key();
+        let server_sk = SecretKey::generate(&mut rng);
+        let server_pk = server_sk.public_key();
 
         // client creates a handshake packet
         let (client_session, common_key, client_handshake) = create_client_handshake(&client_pk, &client_sk, &server_pk).unwrap();
@@ -227,71 +239,74 @@ mod tests {
     }
     #[test]
     fn client_handshake_with_different_keypair() {
-        let (client_pk, client_sk) = gen_keypair();
-        let (server_pk, _) = gen_keypair();
-        let (_, mallory_sk) = gen_keypair();
+        let mut rng = thread_rng();
+        let client_sk = SecretKey::generate(&mut rng);
+        let client_pk = client_sk.public_key();
+        let server_pk = SecretKey::generate(&mut rng).public_key();
+        let mallory_sk = SecretKey::generate(&mut rng);
 
         let (_client_session, _common_key, client_handshake) = create_client_handshake(&client_pk, &client_sk, &server_pk).unwrap();
         assert!(handle_client_handshake(&mallory_sk, &client_handshake).is_err());
     }
     #[test]
     fn server_handshake_with_different_keypair() {
-        let (client_pk, client_sk) = gen_keypair();
-        let (server_pk, server_sk) = gen_keypair();
-        let (_, mallory_sk) = gen_keypair();
+        let mut rng = thread_rng();
+        let client_sk = SecretKey::generate(&mut rng);
+        let client_pk = client_sk.public_key();
+        let server_sk = SecretKey::generate(&mut rng);
+        let server_pk = server_sk.public_key();
+        let mallory_sk = SecretKey::generate(&mut rng);
 
         let (client_session, _common_key, client_handshake) = create_client_handshake(&client_pk, &client_sk, &server_pk).unwrap();
         let (_server_channel, _client_pk, server_handshake) = handle_client_handshake(&server_sk, &client_handshake).unwrap();
-        let common_key = encrypt_precompute(&client_pk, &mallory_sk);
+        let common_key = SalsaBox::new(&client_pk, &mallory_sk);
         assert!(handle_server_handshake(&common_key, &client_session, &server_handshake).is_err());
     }
     #[test]
     fn client_handshake_with_bad_payload() {
-        let (client_pk, client_sk) = gen_keypair();
-        let (server_pk, server_sk) = gen_keypair();
-        fn create_bad_client_handshake(client_pk: &PublicKey,
-                                   client_sk: &SecretKey,
-                                   server_pk: &PublicKey)
-            -> ClientHandshake
-        {
-            let common_key = encrypt_precompute(server_pk, client_sk);
-            let nonce = gen_nonce();
+        let mut rng = thread_rng();
+        let client_sk = SecretKey::generate(&mut rng);
+        let client_pk = client_sk.public_key();
+        let server_sk = SecretKey::generate(&mut rng);
+        let server_pk = server_sk.public_key();
+
+        let client_handshake = {
+            let common_key = SalsaBox::new(&server_pk, &client_sk);
+            let nonce = crypto_box::generate_nonce(&mut rng);
             // bad payload [1,2,3]
-            let encrypted_payload = encrypt_data_symmetric(&common_key, &nonce, &[1, 2, 3]);
+            let encrypted_payload = common_key.encrypt(&nonce, &[1, 2, 3][..]).unwrap();
 
-            ClientHandshake { pk: *client_pk, nonce, payload: encrypted_payload }
-        }
-
-        let client_handshake = create_bad_client_handshake(&client_pk, &client_sk, &server_pk);
+            ClientHandshake { pk: client_pk.clone(), nonce: nonce.into(), payload: encrypted_payload }
+        };
         assert!(handle_client_handshake(&server_sk, &client_handshake).is_err());
     }
     #[test]
     fn server_handshake_with_bad_payload() {
         use self::secure::*;
-        let (client_pk, _) = gen_keypair();
-        let (_, server_sk) = gen_keypair();
-        let common_key = encrypt_precompute(&client_pk, &server_sk);
+        let mut rng = thread_rng();
+        let client_pk = SecretKey::generate(&mut rng).public_key();
+        let server_sk = SecretKey::generate(&mut rng);
+        let common_key = SalsaBox::new(&client_pk, &server_sk);
         let client_session = Session::random();
 
-        fn create_bad_server_handshake(common_key: &PrecomputedKey)
-            -> ServerHandshake
-        {
-            let nonce = gen_nonce();
+        let server_handshake = {
+            let nonce = crypto_box::generate_nonce(&mut rng);
             // bad payload [1,2,3]
-            let server_encrypted_payload = encrypt_data_symmetric(common_key, &nonce, &[1, 2, 3]);
+            let server_encrypted_payload = common_key.encrypt(&nonce, &[1, 2, 3][..]).unwrap();
 
-            ServerHandshake { nonce, payload: server_encrypted_payload }
-        }
-
-        let server_handshake = create_bad_server_handshake(&common_key);
+            ServerHandshake { nonce: nonce.into(), payload: server_encrypted_payload }
+        };
         assert!(handle_server_handshake(&common_key, &client_session, &server_handshake).is_err());
     }
     #[tokio::test]
     async fn network_handshake() {
         use tokio::net::{TcpListener, TcpStream};
 
-        let (client_pk, client_sk) = gen_keypair();
-        let (server_pk, server_sk) = gen_keypair();
+        let mut rng = thread_rng();
+        let client_sk = SecretKey::generate(&mut rng);
+        let client_pk = client_sk.public_key();
+        let server_sk = SecretKey::generate(&mut rng);
+        let server_pk = server_sk.public_key();
 
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
         let listener = TcpListener::bind(&addr).await.unwrap();

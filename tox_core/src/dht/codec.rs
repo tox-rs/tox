@@ -162,8 +162,9 @@ impl Encoder<Packet> for DhtCodec {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::thread_rng;
     use tox_packet::onion::*;
-    use tox_crypto::*;
+    use crypto_box::{SalsaBox, SecretKey, aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned}};
 
     const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - xsalsa20poly1305::NONCE_SIZE;
     const ONION_RETURN_2_PAYLOAD_SIZE: usize = ONION_RETURN_2_SIZE - xsalsa20poly1305::NONCE_SIZE;
@@ -173,47 +174,47 @@ mod tests {
     fn encode_decode() {
         let test_packets = vec![
             Packet::PingRequest(PingRequest {
-                pk: gen_keypair().0,
-                nonce: gen_nonce(),
+                pk: SecretKey::generate(&mut thread_rng()).public_key(),
+                nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
                 payload: vec![42; 88],
             }),
             Packet::PingResponse(PingResponse {
-                pk: gen_keypair().0,
-                nonce: gen_nonce(),
+                pk: SecretKey::generate(&mut thread_rng()).public_key(),
+                nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
                 payload: vec![42; 88],
             }),
             Packet::NodesRequest(NodesRequest {
-                pk: gen_keypair().0,
-                nonce: gen_nonce(),
+                pk: SecretKey::generate(&mut thread_rng()).public_key(),
+                nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
                 payload: vec![42; 88],
             }),
             Packet::NodesResponse(NodesResponse {
-                pk: gen_keypair().0,
-                nonce: gen_nonce(),
+                pk: SecretKey::generate(&mut thread_rng()).public_key(),
+                nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
                 payload: vec![42; 188],
             }),
             Packet::DhtRequest(DhtRequest {
-                rpk: gen_keypair().0,
-                spk: gen_keypair().0,
-                nonce: gen_nonce(),
+                rpk: SecretKey::generate(&mut thread_rng()).public_key(),
+                spk: SecretKey::generate(&mut thread_rng()).public_key(),
+                nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
                 payload: vec![42; 123],
             }),
             Packet::CookieRequest(CookieRequest {
-                pk: gen_keypair().0,
-                nonce: gen_nonce(),
+                pk: SecretKey::generate(&mut thread_rng()).public_key(),
+                nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
                 payload: vec![42; 88],
             }),
             Packet::LanDiscovery(LanDiscovery {
-                pk: gen_keypair().0
+                pk: SecretKey::generate(&mut thread_rng()).public_key(),
             }),
             Packet::OnionRequest0(OnionRequest0 {
-                nonce: gen_nonce(),
-                temporary_pk: gen_keypair().0,
+                nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
+                temporary_pk: SecretKey::generate(&mut thread_rng()).public_key(),
                 payload: vec![42; 123]
             }),
             Packet::OnionRequest1(OnionRequest1 {
-                nonce: gen_nonce(),
-                temporary_pk: gen_keypair().0,
+                nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
+                temporary_pk: SecretKey::generate(&mut thread_rng()).public_key(),
                 payload: vec![42; 123],
                 onion_return: OnionReturn {
                     nonce: [42; xsalsa20poly1305::NONCE_SIZE],
@@ -221,8 +222,8 @@ mod tests {
                 }
             }),
             Packet::OnionRequest2(OnionRequest2 {
-                nonce: gen_nonce(),
-                temporary_pk: gen_keypair().0,
+                nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
+                temporary_pk: SecretKey::generate(&mut thread_rng()).public_key(),
                 payload: vec![42; 123],
                 onion_return: OnionReturn {
                     nonce: [42; xsalsa20poly1305::NONCE_SIZE],
@@ -231,8 +232,8 @@ mod tests {
             }),
             Packet::OnionAnnounceRequest(OnionAnnounceRequest {
                 inner: InnerOnionAnnounceRequest {
-                    nonce: gen_nonce(),
-                    pk: gen_keypair().0,
+                    nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
+                    pk: SecretKey::generate(&mut thread_rng()).public_key(),
                     payload: vec![42; 123]
                 },
                 onion_return: OnionReturn {
@@ -242,9 +243,9 @@ mod tests {
             }),
             Packet::OnionDataRequest(OnionDataRequest {
                 inner: InnerOnionDataRequest {
-                    destination_pk: gen_keypair().0,
-                    nonce: gen_nonce(),
-                    temporary_pk: gen_keypair().0,
+                    destination_pk: SecretKey::generate(&mut thread_rng()).public_key(),
+                    nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
+                    temporary_pk: SecretKey::generate(&mut thread_rng()).public_key(),
                     payload: vec![42; 123]
                 },
                 onion_return: OnionReturn {
@@ -253,13 +254,13 @@ mod tests {
                 }
             }),
             Packet::OnionDataResponse(OnionDataResponse {
-                nonce: gen_nonce(),
-                temporary_pk: gen_keypair().0,
+                nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
+                temporary_pk: SecretKey::generate(&mut thread_rng()).public_key(),
                 payload: vec![42; 123]
             }),
             Packet::OnionAnnounceResponse(OnionAnnounceResponse {
                 sendback_data: 12345,
-                nonce: gen_nonce(),
+                nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
                 payload: vec![42; 123]
             }),
             Packet::OnionResponse3(OnionResponse3 {
@@ -269,7 +270,7 @@ mod tests {
                 },
                 payload: InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
                     sendback_data: 12345,
-                    nonce: gen_nonce(),
+                    nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
                     payload: vec![42; 123]
                 })
             }),
@@ -280,7 +281,7 @@ mod tests {
                 },
                 payload: InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
                     sendback_data: 12345,
-                    nonce: gen_nonce(),
+                    nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
                     payload: vec![42; 123]
                 })
             }),
@@ -291,7 +292,7 @@ mod tests {
                 },
                 payload: InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
                     sendback_data: 12345,
-                    nonce: gen_nonce(),
+                    nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
                     payload: vec![42; 123]
                 })
             }),
@@ -318,8 +319,8 @@ mod tests {
         let mut codec = DhtCodec::new(stats);
         let mut buf = BytesMut::new();
         let packet = Packet::PingRequest(PingRequest {
-                pk: gen_keypair().0,
-                nonce: gen_nonce(),
+                pk: SecretKey::generate(&mut thread_rng()).public_key(),
+                nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
                 payload: vec![42; 88],
             });
         let mut packet_buf = [0;256];
@@ -359,10 +360,13 @@ mod tests {
         let stats = Stats::new();
         let mut codec = DhtCodec::new(stats);
         let mut buf = BytesMut::new();
-        let (pk, _) = gen_keypair();
-        let nonce = gen_nonce();
+        let pk = SecretKey::generate(&mut thread_rng()).public_key();
         let payload = [0x01; MAX_DHT_PACKET_SIZE + 1].to_vec();
-        let packet = Packet::PingRequest( PingRequest { pk, nonce, payload } );
+        let packet = Packet::PingRequest(PingRequest {
+            pk,
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
+            payload,
+        });
 
         // Codec cannot serialize Packet because it is too long
         let res = codec.encode(packet, &mut buf);

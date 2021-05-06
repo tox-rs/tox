@@ -72,8 +72,8 @@ impl ToBytes for NewPeer {
             gen_be_u32!(self.message_id) >>
             gen_be_u8!(0x10) >>
             gen_be_u16!(self.new_peer_id) >>
-            gen_slice!(self.long_term_pk.as_ref()) >>
-            gen_slice!(self.dht_pk.as_ref())
+            gen_slice!(self.long_term_pk.as_bytes()) >>
+            gen_slice!(self.dht_pk.as_bytes())
         )
     }
 }
@@ -94,10 +94,12 @@ impl NewPeer {
 
 #[cfg(test)]
 mod tests {
+    use rand::thread_rng;
+
     use super::*;
 
     encode_decode_test!(
         new_peer_encode_decode,
-        NewPeer::new(1, 2, 3, 4, gen_keypair().0, gen_keypair().0)
+        NewPeer::new(1, 2, 3, 4, SecretKey::generate(&mut thread_rng()).public_key(), SecretKey::generate(&mut thread_rng()).public_key())
     );
 }

@@ -143,7 +143,7 @@ impl Client {
         };
 
         if self.connections.read().await.contains(&packet.pk) {
-            if self.links.write().await.insert_by_id(&packet.pk, index) {
+            if self.links.write().await.insert_by_id(packet.pk.clone(), index) {
                 Ok(())
             } else {
                 Err(HandlePacketErrorKind::AlreadyLinked.into())
@@ -202,7 +202,7 @@ impl Client {
     async fn handle_oob_receive(&self, packet: OobReceive) -> Result<(), HandlePacketError> {
         let mut tx = self.incoming_tx.clone();
         let msg = (
-            self.pk,
+            self.pk.clone(),
             IncomingPacket::Oob(packet.sender_pk, packet.data)
         );
 
@@ -221,8 +221,8 @@ impl Client {
         if let Some(link) = links.by_id(index) {
             let mut tx = self.incoming_tx.clone();
             let msg = (
-                self.pk,
-                IncomingPacket::Data(link.pk, packet.data)
+                self.pk.clone(),
+                IncomingPacket::Data(link.pk.clone(), packet.data)
             );
 
             tx.send(msg).await
@@ -239,7 +239,7 @@ impl Client {
     async fn handle_onion_response(&self, packet: OnionResponse) -> Result<(), HandlePacketError> {
         let mut tx = self.incoming_tx.clone();
         let msg = (
-            self.pk,
+            self.pk.clone(),
             IncomingPacket::Onion(packet.payload)
         );
 
@@ -251,7 +251,7 @@ impl Client {
     /// connection is spawned via `tokio::spawn` so the result future will be
     /// completed after first poll.
     async fn spawn_inner(&self, dht_sk: SecretKey, dht_pk: PublicKey) -> Result<(), SpawnError> { // TODO: send pings periodically
-        let relay_pk = self.pk;
+        let relay_pk = self.pk.clone();
         match *self.status.write().await {
             ref mut status @ ClientStatus::Disconnected
             | ref mut status @ ClientStatus::Sleeping =>
@@ -349,8 +349,8 @@ impl Client {
     /// the relay. It should be done for every fresh connection to the relay.
     async fn send_route_requests(&self) -> Result<(), SendPacketError> {
         let connections = self.connections.read().await;
-        for &pk in connections.iter() {
-            self.send_route_request(pk).await?;
+        for pk in connections.iter() {
+            self.send_route_request(pk.clone()).await?;
         }
         Ok(())
     }
@@ -392,7 +392,7 @@ impl Client {
     /// relay `RouteRequest` packet will be sent. Also this packet will be sent
     /// when fresh connection is established.
     pub async fn add_connection(&self, pk: PublicKey) {
-        if self.connections.write().await.insert(pk) {
+        if self.connections.write().await.insert(pk.clone()) {
             // ignore sending errors if we are not connected to the relay
             // in this case RouteRequest will be sent after connection
             self.send_route_request(pk).await.ok();
@@ -486,6 +486,7 @@ impl Client {
 #[cfg(test)]
 pub mod tests {
     use super::*;
+    use rand::thread_rng;
     use tox_binary_io::*;
 
     use std::time::{Duration, Instant};
@@ -498,10 +499,12 @@ pub mod tests {
     use tox_packet::ip_port::*;
     use tox_packet::onion::*;
     use crate::relay::server::{Server, tcp_run, tcp_run_connection};
+    use crypto_box::{SalsaBox, aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned}};
 
     pub async fn create_client() -> (mpsc::UnboundedReceiver<(PublicKey, IncomingPacket)>, mpsc::Receiver<Packet>, Client) {
+        let mut rng = thread_rng();
         let relay_addr = "127.0.0.1:12345".parse().unwrap();
-        let (relay_pk, _relay_sk) = gen_keypair();
+        let relay_pk = SecretKey::generate(&mut rng).public_key();
         let (incoming_tx, incoming_rx) = mpsc::unbounded();
         let (outgoing_tx, outgoing_rx) = mpsc::channel(CLIENT_CHANNEL_SIZE);
         let client = Client::new(relay_pk, relay_addr, incoming_tx);
@@ -516,10 +519,11 @@ pub mod tests {
 
     #[tokio::test]
     async fn handle_route_request() {
+        let mut rng = thread_rng();
         let (_incoming_rx, _outgoing_rx, client) = create_client().await;
 
         let route_request = Packet::RouteRequest(RouteRequest {
-            pk: gen_keypair().0,
+            pk: SecretKey::generate(&mut rng).public_key(),
         });
 
         let error = client.handle_packet(route_request).await.err().unwrap();
@@ -528,16 +532,17 @@ pub mod tests {
 
     #[tokio::test]
     async fn handle_route_response() {
+        let mut rng = thread_rng();
         let (_incoming_rx, _outgoing_rx, client) = create_client().await;
 
-        let (new_pk, _new_sk) = gen_keypair();
+        let new_pk = SecretKey::generate(&mut rng).public_key();
         let index = 42;
 
-        client.connections.write().await.insert(new_pk);
+        client.connections.write().await.insert(new_pk.clone());
 
         let route_response = Packet::RouteResponse(RouteResponse {
             connection_id: ConnectionId::from_index(index),
-            pk: new_pk,
+            pk: new_pk.clone(),
         });
 
         client.handle_packet(route_response).await.unwrap();
@@ -550,14 +555,15 @@ pub mod tests {
 
     #[tokio::test]
     async fn handle_route_response_occupied() {
+        let mut rng = thread_rng();
         let (_incoming_rx, _outgoing_rx, client) = create_client().await;
 
-        let (existing_pk, _existing_sk) = gen_keypair();
-        let (new_pk, _new_sk) = gen_keypair();
+        let existing_pk = SecretKey::generate(&mut rng).public_key();
+        let new_pk = SecretKey::generate(&mut rng).public_key();
         let index = 42;
 
-        client.connections.write().await.insert(new_pk);
-        client.links.write().await.insert_by_id(&existing_pk, index);
+        client.connections.write().await.insert(new_pk.clone());
+        client.links.write().await.insert_by_id(existing_pk.clone(), index);
 
         let route_response = Packet::RouteResponse(RouteResponse {
             connection_id: ConnectionId::from_index(index),
@@ -574,12 +580,13 @@ pub mod tests {
 
     #[tokio::test]
     async fn handle_route_response_unexpected() {
+        let mut rng = thread_rng();
         let (_incoming_rx, _outgoing_rx, client) = create_client().await;
 
         let index = 42;
         let route_response = Packet::RouteResponse(RouteResponse {
             connection_id: ConnectionId::from_index(index),
-            pk: gen_keypair().0,
+            pk: SecretKey::generate(&mut rng).public_key(),
         });
 
         let error = client.handle_packet(route_response).await.err().unwrap();
@@ -590,11 +597,12 @@ pub mod tests {
 
     #[tokio::test]
     async fn handle_route_response_0() {
+        let mut rng = thread_rng();
         let (_incoming_rx, _outgoing_rx, client) = create_client().await;
 
         let route_response = Packet::RouteResponse(RouteResponse {
             connection_id: ConnectionId::zero(),
-            pk: gen_keypair().0,
+            pk: SecretKey::generate(&mut rng).public_key(),
         });
 
         let error = client.handle_packet(route_response).await.err().unwrap();
@@ -603,12 +611,13 @@ pub mod tests {
 
     #[tokio::test]
     async fn handle_connect_notification() {
+        let mut rng = thread_rng();
         let (_incoming_rx, _outgoing_rx, client) = create_client().await;
 
-        let (existing_pk, _existing_sk) = gen_keypair();
+        let existing_pk = SecretKey::generate(&mut rng).public_key();
         let index = 42;
 
-        client.links.write().await.insert_by_id(&existing_pk, index);
+        client.links.write().await.insert_by_id(existing_pk.clone(), index);
 
         let connect_notification = Packet::ConnectNotification(ConnectNotification {
             connection_id: ConnectionId::from_index(index),
@@ -651,12 +660,13 @@ pub mod tests {
 
     #[tokio::test]
     async fn handle_disconnect_notification() {
+        let mut rng = thread_rng();
         let (_incoming_rx, _outgoing_rx, client) = create_client().await;
 
-        let (existing_pk, _existing_sk) = gen_keypair();
+        let existing_pk = SecretKey::generate(&mut rng).public_key();
         let index = 42;
 
-        client.links.write().await.insert_by_id(&existing_pk, index);
+        client.links.write().await.insert_by_id(existing_pk.clone(), index);
         client.links.write().await.upgrade(index);
 
         let disconnect_notification = Packet::DisconnectNotification(DisconnectNotification {
@@ -728,10 +738,11 @@ pub mod tests {
 
     #[tokio::test]
     async fn handle_oob_send() {
+        let mut rng = thread_rng();
         let (_incoming_rx, _outgoing_rx, client) = create_client().await;
 
         let oob_send = Packet::OobSend(OobSend {
-            destination_pk: gen_keypair().0,
+            destination_pk: SecretKey::generate(&mut rng).public_key(),
             data: vec![42; 123],
         });
 
@@ -741,12 +752,13 @@ pub mod tests {
 
     #[tokio::test]
     async fn handle_oob_receive() {
+        let mut rng = thread_rng();
         let (incoming_rx, _outgoing_rx, client) = create_client().await;
 
-        let sender_pk = gen_keypair().0;
+        let sender_pk = SecretKey::generate(&mut rng).public_key();
         let data = vec![42; 123];
         let oob_receive = Packet::OobReceive(OobReceive {
-            sender_pk,
+            sender_pk: sender_pk.clone(),
             data: data.clone(),
         });
 
@@ -762,12 +774,13 @@ pub mod tests {
 
     #[tokio::test]
     async fn handle_data() {
+        let mut rng = thread_rng();
         let (incoming_rx, _outgoing_rx, client) = create_client().await;
 
-        let (sender_pk, _sender_sk) = gen_keypair();
+        let sender_pk = SecretKey::generate(&mut rng).public_key();
         let index = 42;
 
-        client.links.write().await.insert_by_id(&sender_pk, index);
+        client.links.write().await.insert_by_id(sender_pk.clone(), index);
         client.links.write().await.upgrade(index);
 
         let data = DataPayload::CryptoData(CryptoData {
@@ -833,16 +846,17 @@ pub mod tests {
 
     #[tokio::test]
     async fn handle_onion_request() {
+        let mut rng = thread_rng();
         let (_incoming_rx, _outgoing_rx, client) = create_client().await;
 
         let onion_request = Packet::OnionRequest(OnionRequest {
-            nonce: gen_nonce(),
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             ip_port: IpPort {
                 protocol: ProtocolType::Tcp,
                 ip_addr: "5.6.7.8".parse().unwrap(),
                 port: 12345,
             },
-            temporary_pk: gen_keypair().0,
+            temporary_pk: SecretKey::generate(&mut rng).public_key(),
             payload: vec![42; 123],
         });
 
@@ -852,11 +866,12 @@ pub mod tests {
 
     #[tokio::test]
     async fn handle_onion_response() {
+        let mut rng = thread_rng();
         let (incoming_rx, _outgoing_rx, client) = create_client().await;
 
         let payload = InnerOnionResponse::OnionDataResponse(OnionDataResponse {
-            nonce: gen_nonce(),
-            temporary_pk: gen_keypair().0,
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
+            temporary_pk: SecretKey::generate(&mut rng).public_key(),
             payload: vec![42; 123]
         });
         let onion_response = Packet::OnionResponse(OnionResponse {
@@ -874,16 +889,17 @@ pub mod tests {
 
     #[tokio::test]
     async fn send_data() {
+        let mut rng = thread_rng();
         let (_incoming_rx, outgoing_rx, client) = create_client().await;
 
-        let (destination_pk, _destination_sk) = gen_keypair();
+        let destination_pk = SecretKey::generate(&mut rng).public_key();
         let data = DataPayload::CryptoData(CryptoData {
             nonce_last_bytes: 42,
             payload: vec![42; 123],
         });
 
         let index = 42;
-        client.links.write().await.insert_by_id(&destination_pk, index);
+        client.links.write().await.insert_by_id(destination_pk.clone(), index);
         client.links.write().await.upgrade(index);
 
         client.send_data(destination_pk, data.clone()).await.unwrap();
@@ -896,9 +912,10 @@ pub mod tests {
 
     #[tokio::test]
     async fn send_data_not_linked() {
+        let mut rng = thread_rng();
         let (_incoming_rx, outgoing_rx, client) = create_client().await;
 
-        let (destination_pk, _destination_sk) = gen_keypair();
+        let destination_pk = SecretKey::generate(&mut rng).public_key();
         let data = DataPayload::CryptoData(CryptoData {
             nonce_last_bytes: 42,
             payload: vec![42; 123],
@@ -915,16 +932,17 @@ pub mod tests {
 
     #[tokio::test]
     async fn send_data_not_online() {
+        let mut rng = thread_rng();
         let (_incoming_rx, outgoing_rx, client) = create_client().await;
 
-        let (destination_pk, _destination_sk) = gen_keypair();
+        let destination_pk = SecretKey::generate(&mut rng).public_key();
         let data = DataPayload::CryptoData(CryptoData {
             nonce_last_bytes: 42,
             payload: vec![42; 123],
         });
 
         let connection_id = 42;
-        client.links.write().await.insert_by_id(&destination_pk, connection_id - 16);
+        client.links.write().await.insert_by_id(destination_pk.clone(), connection_id - 16);
 
         let error = client.send_data(destination_pk, data.clone()).await.err().unwrap();
         assert_eq!(*error.kind(), SendPacketErrorKind::NotOnline);
@@ -937,12 +955,13 @@ pub mod tests {
 
     #[tokio::test]
     async fn send_oob() {
+        let mut rng = thread_rng();
         let (_incoming_rx, outgoing_rx, client) = create_client().await;
 
-        let (destination_pk, _destination_sk) = gen_keypair();
+        let destination_pk = SecretKey::generate(&mut rng).public_key();
         let data = vec![42; 123];
 
-        client.send_oob(destination_pk, data.clone()).await.unwrap();
+        client.send_oob(destination_pk.clone(), data.clone()).await.unwrap();
 
         let packet = unpack!(outgoing_rx.into_future().await.0.unwrap(), Packet::OobSend);
 
@@ -952,16 +971,17 @@ pub mod tests {
 
     #[tokio::test]
     async fn send_onion() {
+        let mut rng = thread_rng();
         let (_incoming_rx, outgoing_rx, client) = create_client().await;
 
         let onion_request = OnionRequest {
-            nonce: gen_nonce(),
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             ip_port: IpPort {
                 protocol: ProtocolType::Tcp,
                 ip_addr: "5.6.7.8".parse().unwrap(),
                 port: 12345,
             },
-            temporary_pk: gen_keypair().0,
+            temporary_pk: SecretKey::generate(&mut rng).public_key(),
             payload: vec![42; 123],
         };
 
@@ -974,11 +994,12 @@ pub mod tests {
 
     #[tokio::test]
     async fn add_connection() {
+        let mut rng = thread_rng();
         let (_incoming_rx, outgoing_rx, client) = create_client().await;
 
-        let (connection_pk, _connection_sk) = gen_keypair();
+        let connection_pk = SecretKey::generate(&mut rng).public_key();
 
-        client.add_connection(connection_pk).await;
+        client.add_connection(connection_pk.clone()).await;
 
         let (packet, outgoing_rx) = outgoing_rx.into_future().await;
         let packet = unpack!(packet.unwrap(), Packet::RouteRequest);
@@ -996,13 +1017,14 @@ pub mod tests {
 
     #[tokio::test]
     async fn remove_connection() {
+        let mut rng = thread_rng();
         let (_incoming_rx, outgoing_rx, client) = create_client().await;
 
-        let (connection_pk, _connection_sk) = gen_keypair();
+        let connection_pk = SecretKey::generate(&mut rng).public_key();
         let index = 42;
 
-        client.connections.write().await.insert(connection_pk);
-        client.links.write().await.insert_by_id(&connection_pk, index);
+        client.connections.write().await.insert(connection_pk.clone());
+        client.links.write().await.insert_by_id(connection_pk.clone(), index);
 
         client.remove_connection(connection_pk).await.unwrap();
 
@@ -1013,9 +1035,10 @@ pub mod tests {
 
     #[tokio::test]
     async fn remove_connection_no_connection() {
+        let mut rng = thread_rng();
         let (_incoming_rx, _outgoing_rx, client) = create_client().await;
 
-        let (connection_pk, _connection_sk) = gen_keypair();
+        let connection_pk = SecretKey::generate(&mut rng).public_key();
 
         let error = client.remove_connection(connection_pk).await.err().unwrap();
         assert_eq!(*error.kind(), SendPacketErrorKind::NoSuchConnection);
@@ -1023,11 +1046,12 @@ pub mod tests {
 
     #[tokio::test]
     async fn remove_connection_no_link() {
+        let mut rng = thread_rng();
         let (_incoming_rx, outgoing_rx, client) = create_client().await;
 
-        let (connection_pk, _connection_sk) = gen_keypair();
+        let connection_pk = SecretKey::generate(&mut rng).public_key();
 
-        client.connections.write().await.insert(connection_pk);
+        client.connections.write().await.insert(connection_pk.clone());
 
         client.remove_connection(connection_pk).await.unwrap();
 
@@ -1069,14 +1093,15 @@ pub mod tests {
 
     #[tokio::test]
     async fn is_connection_online() {
+        let mut rng = thread_rng();
         let (_incoming_rx, _outgoing_rx, client) = create_client().await;
 
-        let (connection_pk, _connection_sk) = gen_keypair();
+        let connection_pk = SecretKey::generate(&mut rng).public_key();
         let connection_id = 42;
 
-        client.links.write().await.insert_by_id(&connection_pk, connection_id - 16);
+        client.links.write().await.insert_by_id(connection_pk.clone(), connection_id - 16);
 
-        assert!(!client.is_connection_online(connection_pk).await);
+        assert!(!client.is_connection_online(connection_pk.clone()).await);
 
         client.links.write().await.upgrade(connection_id - 16);
 
@@ -1085,11 +1110,12 @@ pub mod tests {
 
     #[tokio::test]
     async fn connections_count() {
+        let mut rng = thread_rng();
         let (_incoming_rx, _outgoing_rx, client) = create_client().await;
 
         assert_eq!(client.connections_count().await, 0);
 
-        let (connection_pk, _connection_sk) = gen_keypair();
+        let connection_pk = SecretKey::generate(&mut rng).public_key();
 
         client.connections.write().await.insert(connection_pk);
 
@@ -1098,9 +1124,10 @@ pub mod tests {
 
     #[tokio::test]
     async fn is_connection_online_no_connection() {
+        let mut rng = thread_rng();
         let (_incoming_rx, _outgoing_rx, client) = create_client().await;
 
-        let (connection_pk, _connection_sk) = gen_keypair();
+        let connection_pk = SecretKey::generate(&mut rng).public_key();
 
         assert!(!client.is_connection_online(connection_pk).await);
     }
@@ -1138,7 +1165,9 @@ pub mod tests {
         }
 
         // run server
-        let (server_pk, server_sk) = gen_keypair();
+        let mut rng = thread_rng();
+        let server_sk = SecretKey::generate(&mut rng);
+        let server_pk = server_sk.public_key();
 
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
         let listener = TcpListener::bind(&addr).await.unwrap();
@@ -1152,20 +1181,22 @@ pub mod tests {
         tokio::spawn(server_future);
 
         // run first client
-        let (client_pk_1, client_sk_1) = gen_keypair();
+        let client_sk_1 = SecretKey::generate(&mut rng);
+        let client_pk_1 = client_sk_1.public_key();
         let (incoming_tx_1, mut incoming_rx_1) = mpsc::unbounded();
-        let client_1 = Client::new(server_pk, addr, incoming_tx_1);
+        let client_1 = Client::new(server_pk.clone(), addr, incoming_tx_1);
         // connection attempts should be set to 0 after successful connection
         set_connection_attempts(&client_1, 3).await;
-        client_1.clone().spawn(client_sk_1, client_pk_1).await.unwrap();
+        client_1.clone().spawn(client_sk_1.clone(), client_pk_1.clone()).await.unwrap();
 
         // run second client
-        let (client_pk_2, client_sk_2) = gen_keypair();
+        let client_sk_2 = SecretKey::generate(&mut rng);
+        let client_pk_2 = client_sk_2.public_key();
         let (incoming_tx_2, mut incoming_rx_2) = mpsc::unbounded();
-        let client_2 = Client::new(server_pk, addr, incoming_tx_2);
+        let client_2 = Client::new(server_pk.clone(), addr, incoming_tx_2);
         // connection attempts should be set to 0 after successful connection
         set_connection_attempts(&client_2, 3).await;
-        client_2.clone().spawn(client_sk_2, client_pk_2).await.unwrap();
+        client_2.clone().spawn(client_sk_2, client_pk_2.clone()).await.unwrap();
 
         // wait until connections are established
         on_connected(client_1.clone()).await.unwrap();
@@ -1177,12 +1208,12 @@ pub mod tests {
         assert_eq!(client_2.connection_attempts().await, 0);
 
         // add connections when relay is connected
-        client_1.add_connection(client_pk_2).await;
-        client_2.add_connection(client_pk_1).await;
+        client_1.add_connection(client_pk_2.clone()).await;
+        client_2.add_connection(client_pk_1.clone()).await;
 
         // wait until links become online
-        on_online(client_1.clone(), client_pk_2).await.unwrap();
-        on_online(client_2.clone(), client_pk_1).await.unwrap();
+        on_online(client_1.clone(), client_pk_2.clone()).await.unwrap();
+        on_online(client_2.clone(), client_pk_1.clone()).await.unwrap();
 
         let data_1 = DataPayload::CryptoData(CryptoData {
             nonce_last_bytes: 42,
@@ -1192,8 +1223,8 @@ pub mod tests {
             nonce_last_bytes: 42,
             payload: vec![43; 123],
         });
-        client_1.send_data(client_pk_2, data_1.clone()).await.unwrap();
-        client_2.send_data(client_pk_1, data_2.clone()).await.unwrap();
+        client_1.send_data(client_pk_2.clone(), data_1.clone()).await.unwrap();
+        client_2.send_data(client_pk_1.clone(), data_2.clone()).await.unwrap();
 
         let packet1 = incoming_rx_1.next().await;
         let (relay_pk, packet) = packet1.unwrap();
@@ -1219,7 +1250,8 @@ pub mod tests {
     #[tokio::test]
     async fn run_unsuccessful() {
         // run server
-        let (_server_pk, server_sk) = gen_keypair();
+        let mut rng = thread_rng();
+        let server_sk = SecretKey::generate(&mut rng);
 
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
         let listener = TcpListener::bind(&addr).await.unwrap();
@@ -1234,8 +1266,9 @@ pub mod tests {
         };
 
         // run a client with invalid server's pk
-        let (client_pk_1, client_sk_1) = gen_keypair();
-        let (invalid_server_pk, _invalid_server_sk) = gen_keypair();
+        let client_sk_1 = SecretKey::generate(&mut rng);
+        let client_pk_1 = client_sk_1.public_key();
+        let invalid_server_pk = SecretKey::generate(&mut rng).public_key();
         let (incoming_tx_1, _incoming_rx_1) = mpsc::unbounded();
         let client = Client::new(invalid_server_pk, addr, incoming_tx_1);
         let client_future = client.run(client_sk_1, client_pk_1)

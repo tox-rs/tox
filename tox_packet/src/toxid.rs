@@ -108,7 +108,7 @@ Length | Contents
 
 https://zetok.github.io/tox-spec/#tox-id
 */
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToxId {
     /// Long-term `PublicKey`.
     pub pk: PublicKey,
@@ -121,7 +121,7 @@ pub struct ToxId {
 pub const CHECKSUMBYTES: usize = 2;
 
 /// Number of bytes of serialized [`ToxId`](./struct.ToxId.html).
-pub const TOXIDBYTES: usize = PUBLICKEYBYTES + NOSPAMBYTES + 2;
+pub const TOXIDBYTES: usize = crypto_box::KEY_SIZE + NOSPAMBYTES + 2;
 
 impl ToxId {
     /** Checksum of `PublicKey` and `NoSpam`.
@@ -131,29 +131,25 @@ impl ToxId {
     E.g.
 
     ```
+    use crypto_box::{PublicKey, SecretKey, KEY_SIZE};
     use rand::{Rng, thread_rng};
-    use tox_crypto::{
-            gen_keypair,
-            PublicKey,
-            PUBLICKEYBYTES,
-    };
     use tox_packet::toxid::{NoSpam, NOSPAMBYTES, ToxId};
 
     let mut rng = thread_rng();
-    let (pk, _) = gen_keypair();
+    let pk = SecretKey::generate(&mut rng).public_key();
     let nospam = rng.gen();
 
     let _checksum = ToxId::checksum(&pk, nospam);
 
-    assert_eq!(ToxId::checksum(&PublicKey([0; PUBLICKEYBYTES]),
+    assert_eq!(ToxId::checksum(&PublicKey::from([0; KEY_SIZE]),
                NoSpam([0; NOSPAMBYTES])), [0; 2]);
-    assert_eq!(ToxId::checksum(&PublicKey([0xff; PUBLICKEYBYTES]),
+    assert_eq!(ToxId::checksum(&PublicKey::from([0xff; KEY_SIZE]),
                NoSpam([0xff; NOSPAMBYTES])), [0; 2]);
     ```
     */
-    pub fn checksum(&PublicKey(ref pk): &PublicKey, nospam: NoSpam) -> [u8; 2] {
+    pub fn checksum(pk: &PublicKey, nospam: NoSpam) -> [u8; 2] {
         let mut bytes = Vec::with_capacity(TOXIDBYTES - 2);
-        bytes.extend_from_slice(pk);
+        bytes.extend_from_slice(pk.as_bytes());
         bytes.extend_from_slice(nospam.0.as_ref());
 
         let mut checksum = [0; 2];
@@ -169,12 +165,12 @@ impl ToxId {
     E.g.
 
     ```
+    use crypto_box::SecretKey;
     use rand::thread_rng;
-    use tox_crypto::gen_keypair;
     use tox_packet::toxid::ToxId;
 
     let mut rng = thread_rng();
-    let (pk, _) = gen_keypair();
+    let pk = SecretKey::generate(&mut rng).public_key();
     let _toxid = ToxId::new(&mut rng, pk);
     ```
     */
@@ -191,14 +187,14 @@ impl ToxId {
     `checksum` differ:
 
     ```
+    use crypto_box::SecretKey;
     use rand::{Rng, thread_rng};
-    use tox_crypto::gen_keypair;
     use tox_packet::toxid::{NoSpam, ToxId};
 
     let mut rng = thread_rng();
-    let (pk, _) = gen_keypair();
+    let pk = SecretKey::generate(&mut rng).public_key();
     let toxid = ToxId::new(&mut rng, pk);
-    let mut toxid2 = toxid;
+    let mut toxid2 = toxid.clone();
     toxid2.new_nospam(&mut rng, None);
 
     assert_ne!(toxid, toxid2);
@@ -250,17 +246,17 @@ E.g.
 
 ```
 use rand::thread_rng;
-use tox_crypto::{PublicKey, PUBLICKEYBYTES};
+use crypto_box::{PublicKey, KEY_SIZE};
 use tox_packet::toxid::{NoSpam, NOSPAMBYTES, ToxId};
 
 let mut rng = thread_rng();
-let mut toxid = ToxId::new(&mut rng, PublicKey([0; PUBLICKEYBYTES]));
+let mut toxid = ToxId::new(&mut rng, PublicKey::from([0; KEY_SIZE]));
 toxid.new_nospam(&mut rng, Some(NoSpam([0; NOSPAMBYTES])));
 // 76 `0`s
 assert_eq!(&format!("{:X}", toxid),
     "0000000000000000000000000000000000000000000000000000000000000000000000000000");
 
-let mut toxid = ToxId::new(&mut rng, PublicKey([255; PUBLICKEYBYTES]));
+let mut toxid = ToxId::new(&mut rng, PublicKey::from([255; KEY_SIZE]));
 toxid.new_nospam(&mut rng, Some(NoSpam([255; NOSPAMBYTES])));
 // 72 `F`s + 4 `0`s
 assert_eq!(&format!("{:X}", toxid),
@@ -270,8 +266,7 @@ assert_eq!(&format!("{:X}", toxid),
 impl fmt::UpperHex for ToxId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut string = String::with_capacity(TOXIDBYTES * 2);
-        let PublicKey(ref pk_bytes) = self.pk;
-        for byte in pk_bytes {
+        for byte in self.pk.as_bytes() {
             string.push_str(&format!("{:02X}", byte));
         }
         for byte in &self.nospam.0 {
@@ -288,12 +283,12 @@ impl fmt::UpperHex for ToxId {
 E.g.
 
 ```
+use crypto_box::SecretKey;
 use rand::thread_rng;
-use tox_crypto::gen_keypair;
 use tox_packet::toxid::ToxId;
 
 let mut rng = thread_rng();
-let (pk, _) = gen_keypair();
+let pk = SecretKey::generate(&mut rng).public_key();
 let toxid = ToxId::new(&mut rng, pk);
 assert_eq!(format!("{}", toxid), format!("{:X}", toxid));
 ```
@@ -306,7 +301,6 @@ impl fmt::Display for ToxId {
 
 #[cfg(test)]
 mod tests {
-    use tox_crypto::*;
     use crate::toxid::*;
     use rand::thread_rng;
 
@@ -349,9 +343,9 @@ mod tests {
     fn tox_id_new_nospam() {
         let mut rng = thread_rng();
 
-        let (pk, _) = gen_keypair();
+        let pk = SecretKey::generate(&mut rng).public_key();
         let toxid = ToxId::new(&mut rng, pk);
-        let mut toxid2 = toxid;
+        let mut toxid2 = toxid.clone();
         toxid2.new_nospam(&mut rng, None);
 
         assert_ne!(toxid, toxid2);
@@ -372,7 +366,7 @@ mod tests {
     fn tox_id_fmt() {
         // check if formatted ToxId is always upper-case hexadecimal with matching
         // length
-        let (pk, _) = gen_keypair();
+        let pk = SecretKey::generate(&mut thread_rng()).public_key();
         let toxid = ToxId::new(&mut thread_rng(), pk);
         assert!(test_is_hexdump_uppercase(&format!("{:X}", toxid)));
         assert!(test_is_hexdump_uppercase(&format!("{}", toxid)));
@@ -380,6 +374,6 @@ mod tests {
 
     encode_decode_test!(
         toxid_encode_decode,
-        ToxId::new(&mut thread_rng(), gen_keypair().0)
+        ToxId::new(&mut thread_rng(), SecretKey::generate(&mut thread_rng()).public_key())
     );
 }

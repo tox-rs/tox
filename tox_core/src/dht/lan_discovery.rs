@@ -126,7 +126,7 @@ impl LanDiscoverySender {
     async fn send(&mut self) -> Result<(), mpsc::SendError> {
         let addrs = self.get_broadcast_socket_addrs();
         let lan_packet = Packet::LanDiscovery(LanDiscovery {
-            pk: self.dht_pk,
+            pk: self.dht_pk.clone(),
         });
 
         let mut stream = stream::iter(
@@ -161,6 +161,7 @@ mod tests {
     use super::*;
     use futures::StreamExt;
     use tox_binary_io::*;
+    use rand::thread_rng;
 
     fn broadcast_addrs_count() -> usize {
         get_if_addrs::get_if_addrs().expect("no network interface").iter()
@@ -179,8 +180,8 @@ mod tests {
         let packets_count = (broadcast_addrs_count() + 1) * (PORTS_PER_DISCOVERY + 1) as usize;
 
         let (tx, mut rx) = mpsc::channel(packets_count);
-        let (dht_pk, _dht_sk) = gen_keypair();
-        let mut lan_discovery = LanDiscoverySender::new(tx, dht_pk, /* ipv6 */ false);
+        let dht_pk = SecretKey::generate(&mut thread_rng()).public_key();
+        let mut lan_discovery = LanDiscoverySender::new(tx, dht_pk.clone(), /* ipv6 */ false);
 
         assert!(lan_discovery.send().await.is_ok());
 
@@ -204,8 +205,8 @@ mod tests {
         let packets_count = (broadcast_addrs_count() + 2) * (PORTS_PER_DISCOVERY + 1) as usize;
 
         let (tx, mut rx) = mpsc::channel(packets_count);
-        let (dht_pk, _dht_sk) = gen_keypair();
-        let mut lan_discovery = LanDiscoverySender::new(tx, dht_pk, /* ipv6 */ true);
+        let dht_pk = SecretKey::generate(&mut thread_rng()).public_key();
+        let mut lan_discovery = LanDiscoverySender::new(tx, dht_pk.clone(), /* ipv6 */ true);
 
         assert!(lan_discovery.send().await.is_ok());
 
@@ -229,8 +230,8 @@ mod tests {
         let packets_count = (broadcast_addrs_count() + 1) * (PORTS_PER_DISCOVERY + 1) as usize;
 
         let (tx, mut rx) = mpsc::channel(packets_count);
-        let (dht_pk, _dht_sk) = gen_keypair();
-        let mut lan_discovery = LanDiscoverySender::new(tx, dht_pk, /* ipv6 */ false);
+        let dht_pk = SecretKey::generate(&mut thread_rng()).public_key();
+        let mut lan_discovery = LanDiscoverySender::new(tx, dht_pk.clone(), /* ipv6 */ false);
 
         lan_discovery.next_port = END_PORT - 1;
 

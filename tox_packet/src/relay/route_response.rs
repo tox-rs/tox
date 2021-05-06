@@ -46,20 +46,22 @@ impl ToBytes for RouteResponse {
         do_gen!(buf,
             gen_be_u8!(0x01) >>
             gen_call!(|buf, connection_id| ConnectionId::to_bytes(connection_id, buf), &self.connection_id) >>
-            gen_slice!(self.pk.as_ref())
+            gen_slice!(self.pk.as_bytes())
         )
     }
 }
 
 #[cfg(test)]
 mod test {
+    use rand::thread_rng;
+
     use super::*;
 
     encode_decode_test!(
         route_response_encode_decode,
         RouteResponse {
             connection_id: ConnectionId::from_index(1),
-            pk: gen_keypair().0
+            pk: SecretKey::generate(&mut thread_rng()).public_key()
         }
     );
 }

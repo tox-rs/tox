@@ -52,7 +52,7 @@ impl ToBytes for OobSend {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x06) >>
-            gen_slice!(self.destination_pk.as_ref()) >>
+            gen_slice!(self.destination_pk.as_bytes()) >>
             gen_slice!(self.data.as_slice())
         )
     }
@@ -60,12 +60,14 @@ impl ToBytes for OobSend {
 
 #[cfg(test)]
 mod test {
+    use rand::thread_rng;
+
     use super::*;
 
     encode_decode_test!(
         oob_send_encode_decode,
         OobSend {
-            destination_pk: gen_keypair().0,
+            destination_pk: SecretKey::generate(&mut thread_rng()).public_key(),
             data: vec![42; 123]
         }
     );

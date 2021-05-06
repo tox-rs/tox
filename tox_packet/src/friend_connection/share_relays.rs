@@ -58,6 +58,9 @@ impl ShareRelays {
 
 #[cfg(test)]
 mod tests {
+    use crypto_box::SecretKey;
+    use rand::thread_rng;
+
     use super::*;
 
     encode_decode_test!(
@@ -65,15 +68,15 @@ mod tests {
         ShareRelays::new(vec![
             PackedNode {
                 saddr: "1.1.1.1:33445".parse().unwrap(),
-                pk: tox_crypto::gen_keypair().0,
+                pk: SecretKey::generate(&mut thread_rng()).public_key(),
             },
             PackedNode {
                 saddr: "1.1.1.1:33446".parse().unwrap(),
-                pk: tox_crypto::gen_keypair().0,
+                pk: SecretKey::generate(&mut thread_rng()).public_key(),
             },
             PackedNode {
                 saddr: "1.1.1.1:33447".parse().unwrap(),
-                pk: tox_crypto::gen_keypair().0,
+                pk: SecretKey::generate(&mut thread_rng()).public_key(),
             },
         ])
     );

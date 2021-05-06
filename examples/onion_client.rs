@@ -8,6 +8,7 @@ use futures::future::FutureExt;
 use futures::stream::StreamExt;
 use futures::sink::SinkExt;
 use futures::channel::mpsc;
+use rand::thread_rng;
 use tokio_util::udp::UdpFramed;
 
 use tox_crypto::*;
@@ -27,17 +28,17 @@ const FRIEND_PK: &str = "3E6A06DA48D1AB98549AD76890770B704AE9116D8654FBCD35C9BF2
 
 fn as_packed_node(pk: &str, saddr: &str) -> PackedNode {
     let pk_bytes: [u8; 32] = hex::FromHex::from_hex(pk).unwrap();
-    let pk = PublicKey::from_slice(&pk_bytes).unwrap();
+    let pk = PublicKey::from(pk_bytes);
     let saddr: SocketAddr = saddr.parse().unwrap();
 
-    PackedNode::new(saddr, &pk)
+    PackedNode::new(saddr, pk)
 }
 
 fn load_keypair() -> (PublicKey, SecretKey) {
     use hex::FromHex;
 
     let real_sk_bytes: [u8; 32] = FromHex::from_hex(SELF_SK).unwrap();
-    let real_sk = SecretKey::from_slice(&real_sk_bytes).unwrap();
+    let real_sk = SecretKey::from(real_sk_bytes);
     let real_pk = real_sk.public_key();
 
     (real_pk, real_sk)
@@ -47,7 +48,9 @@ fn load_keypair() -> (PublicKey, SecretKey) {
 async fn main() -> Result<(), Error> {
     env_logger::init();
 
-    let (dht_pk, dht_sk) = gen_keypair();
+    let mut rng = thread_rng();
+    let dht_sk = SecretKey::generate(&mut rng);
+    let dht_pk = dht_sk.public_key();
     let (real_pk, real_sk) = load_keypair();
 
     // Create a channel for server to communicate with network
@@ -61,7 +64,7 @@ async fn main() -> Result<(), Error> {
     let (dht_pk_tx, dht_pk_rx) = mpsc::unbounded();
     let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
 
-    let dht_server = Server::new(tx, dht_pk, dht_sk.clone());
+    let dht_server = Server::new(tx, dht_pk.clone(), dht_sk.clone());
     let tcp_connections = Connections::new(dht_pk, dht_sk, tcp_incoming_tx);
     let onion_client = OnionClient::new(dht_server, tcp_connections, real_sk, real_pk);
 
@@ -74,7 +77,7 @@ async fn main() -> Result<(), Error> {
     }
 
     let friend_pk_bytes: [u8; 32] = hex::FromHex::from_hex(FRIEND_PK).unwrap();
-    let friend_pk = PublicKey::from_slice(&friend_pk_bytes).unwrap();
+    let friend_pk = PublicKey::from(friend_pk_bytes);
 
     onion_client.add_friend(friend_pk).await;
 

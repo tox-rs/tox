@@ -7,7 +7,7 @@ use nom::{
     value,
     number::complete::{le_u8, be_u16}
 };
-use cookie_factory::{gen_if_else};
+use cookie_factory::gen_if_else;
 
 use std::net::{
     IpAddr,
@@ -44,7 +44,7 @@ IPv6 node info.
 DHT module *should* use only UDP variants of Ip type, given that DHT runs
 solely on the UDP.
 */
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PackedNode {
     /// Socket addr of node.
     pub saddr: SocketAddr,
@@ -86,15 +86,15 @@ impl FromBytes for PackedNode {
         port: be_u16 >>
         saddr: value!(SocketAddr::new(addr, port)) >>
         pk: call!(PublicKey::from_bytes) >>
-        (PackedNode::new(saddr, &pk))
+        (PackedNode::new(saddr, pk))
     ));
 }
 
 impl PackedNode {
     /// Create new `PackedNode`. The IPv6 address will be converted to IPv4 if
     /// it's IPv4-compatible or IPv4-mapped.
-    pub fn new(saddr: SocketAddr, pk: &PublicKey) -> Self {
-        PackedNode { saddr: PackedNode::ipv6_to_ipv4(saddr), pk: *pk }
+    pub fn new(saddr: SocketAddr, pk: PublicKey) -> Self {
+        PackedNode { saddr: PackedNode::ipv6_to_ipv4(saddr), pk }
     }
 
     /// Convert IPv6 address to IPv4 if it's IPv4-compatible or IPv4-mapped.
@@ -134,7 +134,7 @@ impl PackedNode {
             port: be_u16 >>
             saddr: value!(SocketAddr::new(addr, port)) >>
             pk: call!(PublicKey::from_bytes) >>
-            (PackedNode::new(saddr, &pk))
+            (PackedNode::new(saddr, pk))
         ));
 
     /// Get an IP type from the `PackedNode`.
@@ -162,13 +162,14 @@ impl PackedNode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::thread_rng;
 
     #[test]
     fn packed_node_new() {
-        let (pk, _sk) = gen_keypair();
+        let pk = SecretKey::generate(&mut thread_rng()).public_key();
         let saddr = "1.2.3.4:12345".parse().unwrap();
 
-        let a = PackedNode::new(saddr, &pk);
+        let a = PackedNode::new(saddr, pk.clone());
         let b = PackedNode {
             saddr,
             pk,
@@ -178,11 +179,11 @@ mod tests {
 
     #[test]
     fn packed_node_new_ipv4_mapped() {
-        let (pk, _sk) = gen_keypair();
+        let pk = SecretKey::generate(&mut thread_rng()).public_key();
         let saddr_v6 = "[::ffff:1.2.3.4]:12345".parse().unwrap();
         let saddr_v4 = "1.2.3.4:12345".parse().unwrap();
 
-        let a = PackedNode::new(saddr_v6, &pk);
+        let a = PackedNode::new(saddr_v6, pk.clone());
         let b = PackedNode {
             saddr: saddr_v4,
             pk,
@@ -192,40 +193,40 @@ mod tests {
 
     #[test]
     fn packed_node_ip_type_2() {
-        let (pk, _sk) = gen_keypair();
+        let pk = SecretKey::generate(&mut thread_rng()).public_key();
         let saddr = "1.2.3.4:12345".parse().unwrap();
 
-        let node = PackedNode::new(saddr, &pk);
+        let node = PackedNode::new(saddr, pk);
 
         assert_eq!(node.ip_type(), 2);
     }
 
     #[test]
     fn packed_node_ip_type_10() {
-        let (pk, _sk) = gen_keypair();
+        let pk = SecretKey::generate(&mut thread_rng()).public_key();
         let saddr = "[::1234:4321]:12345".parse().unwrap();
 
-        let node = PackedNode::new(saddr, &pk);
+        let node = PackedNode::new(saddr, pk);
 
         assert_eq!(node.ip_type(), 2);
     }
 
     #[test]
     fn packed_node_ip() {
-        let (pk, _sk) = gen_keypair();
+        let pk = SecretKey::generate(&mut thread_rng()).public_key();
         let saddr = "1.2.3.4:12345".parse().unwrap();
 
-        let node = PackedNode::new(saddr, &pk);
+        let node = PackedNode::new(saddr, pk);
 
         assert_eq!(node.ip(), saddr.ip());
     }
 
     #[test]
     fn packed_node_socket_addr() {
-        let (pk, _sk) = gen_keypair();
+        let pk = SecretKey::generate(&mut thread_rng()).public_key();
         let saddr = "1.2.3.4:12345".parse().unwrap();
 
-        let node = PackedNode::new(saddr, &pk);
+        let node = PackedNode::new(saddr, pk);
 
         assert_eq!(node.socket_addr(), saddr);
     }

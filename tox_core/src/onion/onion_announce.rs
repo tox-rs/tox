@@ -83,7 +83,7 @@ impl OnionAnnounceEntry {
 const ONION_PING_DATA_SIZE: usize =
     SECRET_BYTES_SIZE +
     /* time */ 8 +
-    PUBLICKEYBYTES +
+    crypto_box::KEY_SIZE +
     /* ip_type */ 1 +
     /* ip_addr */ 16 +  // for IPv6
     /* port */ 2;
@@ -264,22 +264,22 @@ impl OnionAnnounce {
         let time = SystemTime::now();
         let ping_id_1 = self.ping_id(
             time,
-            request_pk,
+            request_pk.clone(),
             addr.ip(),
             addr.port()
         );
         let ping_id_2 = self.ping_id(
             time + PING_ID_TIMEOUT,
-            request_pk,
+            request_pk.clone(),
             addr.ip(),
             addr.port()
         );
 
         let entry_opt = if payload.ping_id == ping_id_1 || payload.ping_id == ping_id_2 {
-            let entry = OnionAnnounceEntry::new(request_pk, addr.ip(), addr.port(), onion_return, payload.data_pk);
+            let entry = OnionAnnounceEntry::new(request_pk.clone(), addr.ip(), addr.port(), onion_return, payload.data_pk.clone());
             self.add_to_entries(entry)
         } else {
-            self.find_in_entries(payload.search_pk)
+            self.find_in_entries(payload.search_pk.clone())
         };
 
         if let Some(entry) = entry_opt {
@@ -294,7 +294,7 @@ impl OnionAnnounce {
                 }
             } else {
                 // requested node is found by its long term pk
-                (AnnounceStatus::Found, entry.data_pk.0)
+                (AnnounceStatus::Found, *entry.data_pk.as_bytes())
             }
         } else {
             // requested node not found or failed to announce
@@ -311,7 +311,7 @@ impl OnionAnnounce {
 
     */
     pub fn handle_data_request(&self, request: OnionDataRequest) -> Result<(OnionResponse3, SocketAddr), Error> {
-        if let Some(entry) = self.find_in_entries(request.inner.destination_pk) {
+        if let Some(entry) = self.find_in_entries(request.inner.destination_pk.clone()) {
             let response_payload = OnionDataResponse {
                 nonce: request.inner.nonce,
                 temporary_pk: request.inner.temporary_pk,
@@ -335,6 +335,7 @@ impl OnionAnnounce {
 #[cfg(test)]
 mod tests {
     use rand::thread_rng;
+    use crypto_box::{SalsaBox, aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned}};
 
     use super::*;
 
@@ -343,14 +344,14 @@ mod tests {
     #[test]
     fn announce_entry_valid() {
         let entry = OnionAnnounceEntry::new(
-            PublicKey::from_slice(&[1; 32]).unwrap(),
+            PublicKey::from([1; 32]),
             "1.2.3.4".parse().unwrap(),
             12345,
             OnionReturn {
                 nonce: [42; xsalsa20poly1305::NONCE_SIZE],
                 payload: vec![42; 42]
             },
-            gen_keypair().0
+            SecretKey::generate(&mut thread_rng()).public_key()
         );
         assert!(!entry.is_timed_out());
     }
@@ -358,14 +359,14 @@ mod tests {
     #[tokio::test]
     async fn announce_entry_expired() {
         let entry = OnionAnnounceEntry::new(
-            PublicKey::from_slice(&[1; 32]).unwrap(),
+            PublicKey::from([1; 32]),
             "1.2.3.4".parse().unwrap(),
             12345,
             OnionReturn {
                 nonce: [42; xsalsa20poly1305::NONCE_SIZE],
                 payload: vec![42; 42]
             },
-            gen_keypair().0
+            SecretKey::generate(&mut thread_rng()).public_key()
         );
 
         tokio::time::pause();
@@ -376,16 +377,18 @@ mod tests {
 
     #[test]
     fn ping_id_respects_timeout_gap() {
-        let onion_announce = OnionAnnounce::new(&mut thread_rng(), gen_keypair().0);
+        let mut rng = thread_rng();
+        let dht_pk = SecretKey::generate(&mut rng).public_key();
+        let onion_announce = OnionAnnounce::new(&mut rng, dht_pk);
 
         let time = SystemTime::now();
         let time_1 = time - Duration::from_secs(unix_time(time) % PING_ID_TIMEOUT.as_secs());
         let time_2 = time_1 + Duration::from_secs(PING_ID_TIMEOUT.as_secs() - 1);
-        let pk = gen_keypair().0;
+        let pk = SecretKey::generate(&mut rng).public_key();
         let ip_addr = "1.2.3.4".parse().unwrap();
         let port = 12345;
 
-        let ping_id_1 = onion_announce.ping_id(time_1, pk, ip_addr, port);
+        let ping_id_1 = onion_announce.ping_id(time_1, pk.clone(), ip_addr, port);
         let ping_id_2 = onion_announce.ping_id(time_2, pk, ip_addr, port);
 
         assert_eq!(ping_id_1, ping_id_2);
@@ -393,13 +396,15 @@ mod tests {
 
     #[test]
     fn ping_id_depends_on_all_args() {
-        let onion_announce = OnionAnnounce::new(&mut thread_rng(), gen_keypair().0);
+        let mut rng = thread_rng();
+        let dht_pk = SecretKey::generate(&mut rng).public_key();
+        let onion_announce = OnionAnnounce::new(&mut rng, dht_pk);
 
         let time_1 = SystemTime::now();
         let time_2 = time_1 + PING_ID_TIMEOUT;
 
-        let pk_1 = gen_keypair().0;
-        let pk_2 = gen_keypair().0;
+        let pk_1 = SecretKey::generate(&mut rng).public_key();
+        let pk_2 = SecretKey::generate(&mut rng).public_key();
 
         let ip_addr_1 = "1.2.3.4".parse().unwrap();
         let ip_addr_2 = "3.4.5.6".parse().unwrap();
@@ -407,12 +412,12 @@ mod tests {
         let port_1 = 12345;
         let port_2 = 54321;
 
-        let ping_id = onion_announce.ping_id(time_1, pk_1, ip_addr_1, port_1);
+        let ping_id = onion_announce.ping_id(time_1, pk_1.clone(), ip_addr_1, port_1);
 
-        let ping_id_1 = onion_announce.ping_id(time_1, pk_1, ip_addr_1, port_1);
-        let ping_id_2 = onion_announce.ping_id(time_2, pk_1, ip_addr_1, port_1);
+        let ping_id_1 = onion_announce.ping_id(time_1, pk_1.clone(), ip_addr_1, port_1);
+        let ping_id_2 = onion_announce.ping_id(time_2, pk_1.clone(), ip_addr_1, port_1);
         let ping_id_3 = onion_announce.ping_id(time_1, pk_2, ip_addr_1, port_1);
-        let ping_id_4 = onion_announce.ping_id(time_1, pk_1, ip_addr_2, port_1);
+        let ping_id_4 = onion_announce.ping_id(time_1, pk_1.clone(), ip_addr_2, port_1);
         let ping_id_5 = onion_announce.ping_id(time_1, pk_1, ip_addr_1, port_2);
 
         assert_eq!(ping_id, ping_id_1);
@@ -423,25 +428,27 @@ mod tests {
     }
 
     fn create_random_entry(saddr: SocketAddr) -> OnionAnnounceEntry {
+        let mut rng = thread_rng();
         OnionAnnounceEntry::new(
-            gen_keypair().0,
+            SecretKey::generate(&mut rng).public_key(),
             saddr.ip(),
             saddr.port(),
             OnionReturn {
                 nonce: [42; xsalsa20poly1305::NONCE_SIZE],
                 payload: vec![42; 42]
             },
-            gen_keypair().0
+            SecretKey::generate(&mut rng).public_key()
         )
     }
 
     #[tokio::test]
     async fn expired_entry_not_in_entries() {
-        let dht_pk = gen_keypair().0;
-        let mut onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);
+        let mut rng = thread_rng();
+        let dht_pk = SecretKey::generate(&mut rng).public_key();
+        let mut onion_announce = OnionAnnounce::new(&mut rng, dht_pk);
 
         let entry = create_random_entry("1.2.3.4:12345".parse().unwrap());
-        let entry_pk = entry.pk;
+        let entry_pk = entry.pk.clone();
         let entry_time = entry.time;
 
         onion_announce.entries.push(entry);
@@ -459,15 +466,16 @@ mod tests {
     // Tests for OnionAnnounce::add_to_entries
     #[test]
     fn add_to_entries_when_limit_is_not_reached() {
-        let dht_pk = gen_keypair().0;
-        let mut onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);
+        let mut rng = thread_rng();
+        let dht_pk = SecretKey::generate(&mut rng).public_key();
+        let mut onion_announce = OnionAnnounce::new(&mut rng, dht_pk);
 
         let mut pks = Vec::new();
 
         for i in 0..ONION_ANNOUNCE_MAX_ENTRIES {
             let saddr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + i as u16);
             let entry = create_random_entry(saddr);
-            pks.push(entry.pk);
+            pks.push(entry.pk.clone());
             assert!(onion_announce.add_to_entries(entry).is_some());
         }
 
@@ -481,15 +489,16 @@ mod tests {
 
     #[tokio::test]
     async fn add_to_entries_should_update_existent_entry() {
-        let dht_pk = gen_keypair().0;
-        let mut onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);
+        let mut rng = thread_rng();
+        let dht_pk = SecretKey::generate(&mut rng).public_key();
+        let mut onion_announce = OnionAnnounce::new(&mut rng, dht_pk);
 
         let mut pks = Vec::new();
 
         for i in 0..ONION_ANNOUNCE_MAX_ENTRIES {
             let saddr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + i as u16);
             let entry = create_random_entry(saddr);
-            pks.push(entry.pk);
+            pks.push(entry.pk.clone());
             assert!(onion_announce.add_to_entries(entry).is_some());
         }
 
@@ -509,7 +518,7 @@ mod tests {
         // update entry
         assert!(onion_announce.add_to_entries(entry_to_update.clone()).is_some());
 
-        assert_eq!(onion_announce.find_in_entries(entry_to_update.pk), Some(&entry_to_update));
+        assert_eq!(onion_announce.find_in_entries(entry_to_update.pk.clone()), Some(&entry_to_update));
 
         // check that announce list contains all added entries
         for pk in pks {
@@ -521,8 +530,9 @@ mod tests {
 
     #[tokio::test]
     async fn add_to_entries_should_replace_timed_out_entries() {
-        let dht_pk = gen_keypair().0;
-        let mut onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);
+        let mut rng = thread_rng();
+        let dht_pk = SecretKey::generate(&mut rng).public_key();
+        let mut onion_announce = OnionAnnounce::new(&mut rng, dht_pk);
 
         let mut pks = Vec::new();
 
@@ -535,26 +545,26 @@ mod tests {
         for i in 0..ONION_ANNOUNCE_MAX_ENTRIES {
             let saddr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + i as u16);
             let entry = create_random_entry(saddr);
-            pks.push(entry.pk);
+            pks.push(entry.pk.clone());
             assert!(onion_announce.add_to_entries(entry).is_some());
         }
 
         // make one of entries timed out
-        let timed_out_pk = onion_announce.entries[ONION_ANNOUNCE_MAX_ENTRIES / 2].pk;
+        let timed_out_pk = onion_announce.entries[ONION_ANNOUNCE_MAX_ENTRIES / 2].pk.clone();
         onion_announce.entries[ONION_ANNOUNCE_MAX_ENTRIES / 2].time = now;
 
         // time when one entry will be timed out
         tokio::time::advance(Duration::from_secs(1)).await;
 
         let entry = create_random_entry("1.2.3.5:12345".parse().unwrap());
-        let entry_pk = entry.pk;
+        let entry_pk = entry.pk.clone();
         assert!(onion_announce.add_to_entries(entry).is_some());
 
         // check that announce list contains new entry
         assert!(onion_announce.find_in_entries(entry_pk).is_some());
 
         // check that announce list contains all old entries except timed out
-        for pk in pks.into_iter().filter(|&pk| pk != timed_out_pk) {
+        for pk in pks.into_iter().filter(|pk| pk != &timed_out_pk) {
             assert!(onion_announce.find_in_entries(pk).is_some());
         }
 
@@ -563,12 +573,12 @@ mod tests {
 
     #[test]
     fn add_to_entries_should_replace_the_farthest_entry() {
-        let dht_pk = PublicKey::from_slice(&[0; 32]).unwrap();
+        let dht_pk = PublicKey::from([0; 32]);
         let mut onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);
 
         // add one entry with farthest pk
         let mut entry = create_random_entry("1.2.3.4:12345".parse().unwrap());
-        entry.pk = PublicKey::from_slice(&[255; 32]).unwrap();
+        entry.pk = PublicKey::from([255; 32]);
         assert!(onion_announce.add_to_entries(entry).is_some());
 
         let mut pks = Vec::new();
@@ -576,13 +586,13 @@ mod tests {
         for i in 0..ONION_ANNOUNCE_MAX_ENTRIES - 1 {
             let saddr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12346 + i as u16);
             let entry = create_random_entry(saddr);
-            pks.push(entry.pk);
+            pks.push(entry.pk.clone());
             assert!(onion_announce.add_to_entries(entry).is_some());
         }
 
         // add new entry that should replace the farthest one
         let entry = create_random_entry("1.2.3.5:12345".parse().unwrap());
-        let entry_pk = entry.pk;
+        let entry_pk = entry.pk.clone();
         assert!(onion_announce.add_to_entries(entry).is_some());
 
         // check that announce list contains new entry
@@ -598,7 +608,7 @@ mod tests {
 
     #[test]
     fn add_to_entries_should_should_not_add_the_farthest_entry() {
-        let dht_pk = PublicKey::from_slice(&[0; 32]).unwrap();
+        let dht_pk = PublicKey::from([0; 32]);
         let mut onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);
 
         let mut pks = Vec::new();
@@ -606,14 +616,14 @@ mod tests {
         for i in 0..ONION_ANNOUNCE_MAX_ENTRIES {
             let saddr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + i as u16);
             let entry = create_random_entry(saddr);
-            pks.push(entry.pk);
+            pks.push(entry.pk.clone());
             assert!(onion_announce.add_to_entries(entry).is_some());
         }
 
         // try to add new farthest entry
         let mut entry = create_random_entry("1.2.3.5:12345".parse().unwrap());
-        let entry_pk = PublicKey::from_slice(&[255; 32]).unwrap();
-        entry.pk = entry_pk;
+        let entry_pk = PublicKey::from([255; 32]);
+        entry.pk = entry_pk.clone();
         assert!(onion_announce.add_to_entries(entry).is_none());
 
         // check that announce list does not contain new entry
@@ -631,12 +641,13 @@ mod tests {
     // Tests for OnionAnnounce::handle_onion_announce_request
     #[test]
     fn handle_announce_failed_to_find_node() {
-        let dht_pk = gen_keypair().0;
-        let search_pk = gen_keypair().0;
-        let data_pk = gen_keypair().0;
-        let packet_pk = gen_keypair().0;
+        let mut rng = thread_rng();
+        let dht_pk = SecretKey::generate(&mut rng).public_key();
+        let search_pk = SecretKey::generate(&mut rng).public_key();
+        let data_pk = SecretKey::generate(&mut rng).public_key();
+        let packet_pk = SecretKey::generate(&mut rng).public_key();
 
-        let mut onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);
+        let mut onion_announce = OnionAnnounce::new(&mut rng, dht_pk);
 
         // insert random entry
         let entry = create_random_entry("1.2.3.4:12345".parse().unwrap());
@@ -668,16 +679,17 @@ mod tests {
 
     #[test]
     fn handle_announce_node_is_found() {
-        let dht_pk = gen_keypair().0;
-        let data_pk = gen_keypair().0;
-        let packet_pk = gen_keypair().0;
+        let mut rng = thread_rng();
+        let dht_pk = SecretKey::generate(&mut rng).public_key();
+        let data_pk = SecretKey::generate(&mut rng).public_key();
+        let packet_pk = SecretKey::generate(&mut rng).public_key();
 
-        let mut onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);
+        let mut onion_announce = OnionAnnounce::new(&mut rng, dht_pk);
 
         // insert random entry
         let entry = create_random_entry("1.2.3.4:12345".parse().unwrap());
-        let search_pk = entry.pk;
-        let entry_data_pk = entry.data_pk;
+        let search_pk = entry.pk.clone();
+        let entry_data_pk = entry.data_pk.clone();
         assert!(onion_announce.add_to_entries(entry).is_some());
 
         // create request packet
@@ -702,17 +714,18 @@ mod tests {
         );
 
         assert_eq!(announce_status, AnnounceStatus::Found);
-        assert_eq!(ping_id_or_pk, entry_data_pk.0);
+        assert_eq!(ping_id_or_pk, *entry_data_pk.as_bytes());
     }
 
     #[test]
     fn handle_announce_successfully_announced() {
-        let dht_pk = gen_keypair().0;
-        let search_pk = gen_keypair().0;
-        let data_pk = gen_keypair().0;
-        let packet_pk = gen_keypair().0;
+        let mut rng = thread_rng();
+        let dht_pk = SecretKey::generate(&mut rng).public_key();
+        let search_pk = SecretKey::generate(&mut rng).public_key();
+        let data_pk = SecretKey::generate(&mut rng).public_key();
+        let packet_pk = SecretKey::generate(&mut rng).public_key();
 
-        let mut onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);
+        let mut onion_announce = OnionAnnounce::new(&mut rng, dht_pk);
 
         // insert random entry
         let entry = create_random_entry("1.2.3.4:12345".parse().unwrap());
@@ -720,7 +733,7 @@ mod tests {
 
         let addr: SocketAddr = "127.0.0.1:12345".parse().unwrap();
         let time = SystemTime::now();
-        let ping_id = onion_announce.ping_id(time, packet_pk, addr.ip(), addr.port());
+        let ping_id = onion_announce.ping_id(time, packet_pk.clone(), addr.ip(), addr.port());
 
         // create request packet
         let payload = OnionAnnounceRequestPayload {
@@ -736,7 +749,7 @@ mod tests {
 
         let (announce_status, _ping_id_or_pk) = onion_announce.handle_onion_announce_request(
             &payload,
-            packet_pk,
+            packet_pk.clone(),
             onion_return,
             addr
         );
@@ -747,22 +760,23 @@ mod tests {
 
     #[test]
     fn handle_announce_failed_to_find_ourselves_with_different_data_pk() { // weird case, should we remove it?
-        let dht_pk = gen_keypair().0;
-        let data_pk = gen_keypair().0;
-        let packet_pk = gen_keypair().0;
+        let mut rng = thread_rng();
+        let dht_pk = SecretKey::generate(&mut rng).public_key();
+        let data_pk = SecretKey::generate(&mut rng).public_key();
+        let packet_pk = SecretKey::generate(&mut rng).public_key();
 
-        let mut onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);
+        let mut onion_announce = OnionAnnounce::new(&mut rng, dht_pk);
 
         // insert ourselves
         let mut entry = create_random_entry("1.2.3.4:12345".parse().unwrap());
-        entry.pk = packet_pk;
+        entry.pk = packet_pk.clone();
         assert!(onion_announce.add_to_entries(entry).is_some());
 
         // create request packet
         let sendback_data = 42;
         let payload = OnionAnnounceRequestPayload {
             ping_id: INITIAL_PING_ID,
-            search_pk: packet_pk,
+            search_pk: packet_pk.clone(),
             data_pk,
             sendback_data
         };
@@ -787,20 +801,21 @@ mod tests {
     // Tests for OnionAnnounce::handle_onion_announce_request
     #[test]
     fn handle_data_request() {
-        let (dht_pk, _dht_sk) = gen_keypair();
+        let mut rng = thread_rng();
+        let dht_pk = SecretKey::generate(&mut rng).public_key();
 
-        let mut onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);
+        let mut onion_announce = OnionAnnounce::new(&mut rng, dht_pk);
 
         // insert random entry
         let entry = create_random_entry("1.2.3.4:12345".parse().unwrap());
-        let entry_pk = entry.pk;
+        let entry_pk = entry.pk.clone();
         let entry_addr = entry.ip_addr;
         let entry_port = entry.port;
         let entry_onion_return = entry.onion_return.clone();
         assert!(onion_announce.add_to_entries(entry).is_some());
 
-        let nonce = gen_nonce();
-        let temporary_pk = gen_keypair().0;
+        let nonce = [42; <SalsaBox as AeadCore>::NonceSize::USIZE];
+        let temporary_pk = SecretKey::generate(&mut rng).public_key();
         let payload = vec![42; 123];
         let onion_return = OnionReturn {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
@@ -809,7 +824,7 @@ mod tests {
         let inner = InnerOnionDataRequest {
             destination_pk: entry_pk,
             nonce,
-            temporary_pk,
+            temporary_pk: temporary_pk.clone(),
             payload: payload.clone()
         };
         let request = OnionDataRequest {
@@ -831,18 +846,19 @@ mod tests {
 
     #[test]
     fn handle_data_request_unknown_destination() {
-        let (dht_pk, _dht_sk) = gen_keypair();
+        let mut rng = thread_rng();
+        let dht_pk = SecretKey::generate(&mut rng).public_key();
 
-        let onion_announce = OnionAnnounce::new(&mut thread_rng(), dht_pk);
+        let onion_announce = OnionAnnounce::new(&mut rng, dht_pk);
 
         let onion_return = OnionReturn {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
         };
         let inner = InnerOnionDataRequest {
-            destination_pk: gen_keypair().0,
-            nonce: gen_nonce(),
-            temporary_pk: gen_keypair().0,
+            destination_pk: SecretKey::generate(&mut rng).public_key(),
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
+            temporary_pk: SecretKey::generate(&mut rng).public_key(),
             payload: vec![42; 123]
         };
         let request = OnionDataRequest {

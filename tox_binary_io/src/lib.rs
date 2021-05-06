@@ -11,9 +11,9 @@ use std::{convert::TryInto, net::{
     Ipv6Addr,
 }};
 
-#[cfg(feature = "sodiumoxide")]
+#[cfg(feature = "crypto")]
 pub use sodium::*;
-#[cfg(feature = "sodiumoxide")]
+#[cfg(feature = "crypto")]
 mod sodium;
 
 /// The trait provides method to deserialize struct from raw bytes
@@ -138,13 +138,13 @@ macro_rules! unpack {
     ($variable:expr, $variant:path [ $($inner:ident),* ]) => (
         match $variable {
             $variant( $($inner),* ) => ( $($inner),* ),
-            other => panic!("Expected {} but got {:?}", stringify!($variant), other),
+            other => panic!("Expected {}", stringify!($variant)),
         }
     );
     ($variable:expr, $variant:path { $($inner:ident),* }) => (
         match $variable {
             $variant { $($inner,)* .. } => ( $($inner),* ),
-            other => panic!("Expected {} but got {:?}", stringify!($variant), other),
+            other => panic!("Expected {}", stringify!($variant)),
         }
     );
 }

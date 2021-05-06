@@ -37,19 +37,21 @@ impl ToBytes for RouteRequest {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x00) >>
-            gen_slice!(self.pk.as_ref())
+            gen_slice!(self.pk.as_bytes())
         )
     }
 }
 
 #[cfg(test)]
 mod test {
+    use rand::thread_rng;
+
     use super::*;
 
     encode_decode_test!(
         route_request_encode_decode,
         RouteRequest {
-            pk: gen_keypair().0
+            pk: SecretKey::generate(&mut thread_rng()).public_key()
         }
     );
 }

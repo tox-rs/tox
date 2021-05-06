@@ -2,6 +2,7 @@
 */
 use super::*;
 
+use crypto_box::{SalsaBox, aead::{Aead, Error as AeadError}};
 use nom::{
     number::complete::be_u64,
     combinator::rest,
@@ -63,15 +64,15 @@ impl FromBytes for PingRequest {
 
 impl PingRequest {
     /// create new PingRequest object
-    pub fn new(shared_secret: &PrecomputedKey, pk: &PublicKey, payload: &PingRequestPayload) -> PingRequest {
-        let nonce = gen_nonce();
+    pub fn new(shared_secret: &SalsaBox, pk: PublicKey, payload: &PingRequestPayload) -> PingRequest {
+        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
         let mut buf = [0; MAX_DHT_PACKET_SIZE];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
-        let payload = seal_precomputed(&buf[..size], &nonce, shared_secret);
+        let payload = shared_secret.encrypt(&nonce, &buf[..size]).unwrap();
 
         PingRequest {
-            pk: *pk,
-            nonce,
+            pk,
+            nonce: nonce.into(),
             payload,
         }
     }
@@ -83,9 +84,9 @@ impl PingRequest {
     - fails to decrypt
     - fails to parse as given packet type
     */
-    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<PingRequestPayload, GetPayloadError> {
-        let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
-            .map_err(|()| {
+    pub fn get_payload(&self, shared_secret: &SalsaBox) -> Result<PingRequestPayload, GetPayloadError> {
+        let decrypted = shared_secret.decrypt((&self.nonce).into(), self.payload.as_slice())
+            .map_err(|AeadError| {
                 GetPayloadError::decrypt()
             })?;
 

@@ -247,6 +247,7 @@ mod tests {
     use tox_binary_io::*;
 
     use failure::Error;
+    use rand::thread_rng;
 
     use crate::relay::codec::Codec;
     use crate::relay::handshake::make_client_handshake;
@@ -256,8 +257,11 @@ mod tests {
 
     #[tokio::test]
     async fn run_connection() {
-        let (client_pk, client_sk) = gen_keypair();
-        let (server_pk, server_sk) = gen_keypair();
+        let mut rng = thread_rng();
+        let client_sk = SecretKey::generate(&mut rng);
+        let client_pk = client_sk.public_key();
+        let server_sk = SecretKey::generate(&mut rng);
+        let server_pk = server_sk.public_key();
 
         let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
         let listener = TcpListener::bind(&addr).await.unwrap();
@@ -304,8 +308,11 @@ mod tests {
     async fn run() {
         tokio::time::pause();
 
-        let (client_pk, client_sk) = gen_keypair();
-        let (server_pk, server_sk) = gen_keypair();
+        let mut rng = thread_rng();
+        let client_sk = SecretKey::generate(&mut rng);
+        let client_pk = client_sk.public_key();
+        let server_sk = SecretKey::generate(&mut rng);
+        let server_pk = server_sk.public_key();
 
         let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
         let listener = TcpListener::bind(&addr).await.unwrap();

@@ -66,7 +66,7 @@ mod tests {
             },
             payload: InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
                 sendback_data: 12345,
-                nonce: gen_nonce(),
+                nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
                 payload: vec![42; 123]
             })
         }

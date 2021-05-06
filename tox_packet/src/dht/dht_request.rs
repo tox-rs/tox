@@ -2,6 +2,7 @@
 */
 use super::*;
 
+use crypto_box::{SalsaBox, aead::{Aead, Error as AeadError}};
 use nom::{
     cond, many0,
     number::complete::be_u64,
@@ -49,8 +50,8 @@ impl ToBytes for DhtRequest {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x20) >>
-            gen_slice!(self.rpk.as_ref()) >>
-            gen_slice!(self.spk.as_ref()) >>
+            gen_slice!(self.rpk.as_bytes()) >>
+            gen_slice!(self.spk.as_bytes()) >>
             gen_slice!(self.nonce.as_ref()) >>
             gen_slice!(self.payload.as_slice())
         )
@@ -70,17 +71,17 @@ impl FromBytes for DhtRequest {
 
 impl DhtRequest {
     /// create new DhtRequest object
-    pub fn new(shared_secret: &PrecomputedKey, rpk: &PublicKey, spk: &PublicKey, dp: &DhtRequestPayload) -> DhtRequest {
-        let nonce = gen_nonce();
+    pub fn new(shared_secret: &SalsaBox, rpk: PublicKey, spk: PublicKey, dp: &DhtRequestPayload) -> DhtRequest {
+        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
 
         let mut buf = [0; MAX_DHT_PACKET_SIZE];
         let (_, size) = dp.to_bytes((&mut buf, 0)).unwrap();
-        let payload = seal_precomputed(&buf[..size], &nonce, shared_secret);
+        let payload = shared_secret.encrypt(&nonce, &buf[..size]).unwrap();
 
         DhtRequest {
-            rpk: *rpk,
-            spk: *spk,
-            nonce,
+            rpk,
+            spk,
+            nonce: nonce.into(),
             payload,
         }
     }
@@ -92,9 +93,9 @@ impl DhtRequest {
     - fails to decrypt
     - fails to parse as given packet type
     */
-    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<DhtRequestPayload, GetPayloadError> {
-        let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
-            .map_err(|()| {
+    pub fn get_payload(&self, shared_secret: &SalsaBox) -> Result<DhtRequestPayload, GetPayloadError> {
+        let decrypted = shared_secret.decrypt((&self.nonce).into(), self.payload.as_slice())
+            .map_err(|AeadError| {
                 GetPayloadError::decrypt()
             })?;
 
@@ -267,15 +268,15 @@ impl ToBytes for DhtPkAnnounce {
 impl DhtPkAnnounce {
     /// Create `DhtPkAnnounce` from `DhtPkAnnouncePayload` encrypting it with
     /// `shared_key`
-    pub fn new(shared_secret: &PrecomputedKey, real_pk: PublicKey, payload: &DhtPkAnnouncePayload) -> DhtPkAnnounce {
-        let nonce = gen_nonce();
+    pub fn new(shared_secret: &SalsaBox, real_pk: PublicKey, payload: &DhtPkAnnouncePayload) -> DhtPkAnnounce {
+        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
         let mut buf = [0; 245];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
-        let payload = seal_precomputed(&buf[..size], &nonce, shared_secret);
+        let payload = shared_secret.encrypt(&nonce, &buf[..size]).unwrap();
 
         DhtPkAnnounce {
             real_pk,
-            nonce,
+            nonce: nonce.into(),
             payload,
         }
     }
@@ -287,9 +288,9 @@ impl DhtPkAnnounce {
     - fails to decrypt
     - fails to parse as `DhtPkAnnouncePayload`
     */
-    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<DhtPkAnnouncePayload, GetPayloadError> {
-        let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
-            .map_err(|()| {
+    pub fn get_payload(&self, shared_secret: &SalsaBox) -> Result<DhtPkAnnouncePayload, GetPayloadError> {
+        let decrypted = shared_secret.decrypt((&self.nonce).into(), self.payload.as_slice())
+            .map_err(|AeadError| {
                 GetPayloadError::decrypt()
             })?;
         match DhtPkAnnouncePayload::from_bytes(&decrypted) {
@@ -440,6 +441,8 @@ mod tests {
     use super::*;
 
     use nom::{Needed, Err, error::ErrorKind};
+    use crypto_box::aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned};
+    use rand::thread_rng;
 
     use crate::ip_port::*;
 
@@ -456,8 +459,8 @@ mod tests {
     encode_decode_test!(
         dht_pk_announce_encode_decode,
         DhtRequestPayload::DhtPkAnnounce(DhtPkAnnounce {
-            real_pk: gen_keypair().0,
-            nonce: gen_nonce(),
+            real_pk: SecretKey::generate(&mut thread_rng()).public_key(),
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             payload: vec![42; 123]
         })
     );
@@ -476,7 +479,7 @@ mod tests {
         dht_pk_announce_payload_encode_decode,
         DhtPkAnnouncePayload {
             no_reply: 42,
-            dht_pk: gen_keypair().0,
+            dht_pk: SecretKey::generate(&mut thread_rng()).public_key(),
             nodes: vec![
                 TcpUdpPackedNode {
                     ip_port: IpPort {
@@ -484,7 +487,7 @@ mod tests {
                         ip_addr: "127.0.0.1".parse().unwrap(),
                         port: 12345,
                     },
-                    pk: gen_keypair().0,
+                    pk: SecretKey::generate(&mut thread_rng()).public_key(),
                 },
                 TcpUdpPackedNode {
                     ip_port: IpPort {
@@ -492,7 +495,7 @@ mod tests {
                         ip_addr: "127.0.0.1".parse().unwrap(),
                         port: 12346,
                     },
-                    pk: gen_keypair().0,
+                    pk: SecretKey::generate(&mut thread_rng()).public_key(),
                 },
                 TcpUdpPackedNode {
                     ip_port: IpPort {
@@ -500,7 +503,7 @@ mod tests {
                         ip_addr: "127.0.0.2".parse().unwrap(),
                         port: 12345,
                     },
-                    pk: gen_keypair().0,
+                    pk: SecretKey::generate(&mut thread_rng()).public_key(),
                 },
                 TcpUdpPackedNode {
                     ip_port: IpPort {
@@ -508,7 +511,7 @@ mod tests {
                         ip_addr: "127.0.0.2".parse().unwrap(),
                         port: 12346,
                     },
-                    pk: gen_keypair().0,
+                    pk: SecretKey::generate(&mut thread_rng()).public_key(),
                 },
             ],
         }
@@ -516,22 +519,29 @@ mod tests {
 
     #[test]
     fn dht_request_payload_encrypt_decrypt() {
-        let (alice_pk, alice_sk) = gen_keypair();
-        let (bob_pk, bob_sk) = gen_keypair();
-        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
+        let mut rng = thread_rng();
+        let alice_sk = SecretKey::generate(&mut rng);
+        let alice_pk = alice_sk.public_key();
+        let bob_sk = SecretKey::generate(&mut rng);
+        let bob_pk = bob_sk.public_key();
+        let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
         let test_payloads = vec![
             DhtRequestPayload::NatPingRequest(NatPingRequest { id: 42 }),
             DhtRequestPayload::NatPingResponse(NatPingResponse { id: 42 }),
-            DhtRequestPayload::DhtPkAnnounce(DhtPkAnnounce { real_pk: gen_keypair().0, nonce: gen_nonce(), payload: vec![42; 123] }),
+            DhtRequestPayload::DhtPkAnnounce(DhtPkAnnounce {
+                real_pk: SecretKey::generate(&mut rng).public_key(),
+                nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
+                payload: vec![42; 123],
+            }),
             DhtRequestPayload::HardeningRequest(HardeningRequest),
             DhtRequestPayload::HardeningResponse(HardeningResponse)
         ];
 
         for payload in test_payloads {
             // encode payload with shared secret
-            let dht_request = DhtRequest::new(&shared_secret, &bob_pk, &alice_pk, &payload);
+            let dht_request = DhtRequest::new(&shared_secret, bob_pk.clone(), alice_pk.clone(), &payload);
             // decode payload with bob's secret key & sender's public key
-            let precomputed_key = precompute(&dht_request.spk, &bob_sk);
+            let precomputed_key = SalsaBox::new(&dht_request.spk, &bob_sk);
             let decoded_payload = dht_request.get_payload(&precomputed_key).unwrap();
             // payloads should be equal
             assert_eq!(decoded_payload, payload);
@@ -540,22 +550,28 @@ mod tests {
 
     #[test]
     fn dht_request_payload_encrypt_decrypt_invalid_key() {
-        let (alice_pk, alice_sk) = gen_keypair();
-        let (bob_pk, _bob_sk) = gen_keypair();
-        let (_eve_pk, eve_sk) = gen_keypair();
-        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
+        let mut rng = thread_rng();
+        let alice_sk = SecretKey::generate(&mut rng);
+        let alice_pk = alice_sk.public_key();
+        let bob_pk = SecretKey::generate(&mut rng).public_key();
+        let eve_sk = SecretKey::generate(&mut rng);
+        let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
         let test_payloads = vec![
             DhtRequestPayload::NatPingRequest(NatPingRequest { id: 42 }),
             DhtRequestPayload::NatPingResponse(NatPingResponse { id: 42 }),
-            DhtRequestPayload::DhtPkAnnounce(DhtPkAnnounce { real_pk: gen_keypair().0, nonce: gen_nonce(), payload: vec![42; 123] }),
+            DhtRequestPayload::DhtPkAnnounce(DhtPkAnnounce {
+                real_pk: SecretKey::generate(&mut rng).public_key(),
+                nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
+                payload: vec![42; 123],
+            }),
             DhtRequestPayload::HardeningRequest(HardeningRequest),
             DhtRequestPayload::HardeningResponse(HardeningResponse)
         ];
         for payload in test_payloads {
             // encode payload with shared secret
-            let dht_request = DhtRequest::new(&shared_secret, &bob_pk, &alice_pk, &payload);
+            let dht_request = DhtRequest::new(&shared_secret, bob_pk.clone(), alice_pk.clone(), &payload);
             // try to decode payload with eve's secret key & sender's public key
-            let precomputed_key = precompute(&dht_request.spk, &eve_sk);
+            let precomputed_key = SalsaBox::new(&dht_request.spk, &eve_sk);
             let decoded_payload = dht_request.get_payload(&precomputed_key);
             let error = decoded_payload.err().unwrap();
             assert_eq!(*error.kind(), GetPayloadErrorKind::Decrypt);
@@ -564,21 +580,24 @@ mod tests {
 
     #[test]
     fn dht_request_decode_invalid() {
-        let (alice_pk, alice_sk) = gen_keypair();
-        let (bob_pk, bob_sk) = gen_keypair();
-        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
-        let nonce = gen_nonce();
+        let mut rng = thread_rng();
+        let alice_sk = SecretKey::generate(&mut rng);
+        let alice_pk = alice_sk.public_key();
+        let bob_sk = SecretKey::generate(&mut rng);
+        let bob_pk = bob_sk.public_key();
+        let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
+        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
         // Try long invalid array
         let invalid_payload = [42; 123];
-        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
+        let invalid_payload_encoded = shared_secret.encrypt(&nonce, &invalid_payload[..]).unwrap();
         let invalid_packet = DhtRequest {
-            rpk: bob_pk,
-            spk: alice_pk,
-            nonce,
+            rpk: bob_pk.clone(),
+            spk: alice_pk.clone(),
+            nonce: nonce.into(),
             payload: invalid_payload_encoded
         };
 
-        let precomputed_key = precompute(&alice_pk, &bob_sk);
+        let precomputed_key = SalsaBox::new(&alice_pk, &bob_sk);
 
         let decoded_payload = invalid_packet.get_payload(&precomputed_key);
         let error = decoded_payload.err().unwrap();
@@ -588,11 +607,11 @@ mod tests {
         });
         // Try short incomplete
         let invalid_payload = [0xfe];
-        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
+        let invalid_payload_encoded = shared_secret.encrypt(&nonce, &invalid_payload[..]).unwrap();
         let invalid_packet = DhtRequest {
             rpk: bob_pk,
             spk: alice_pk,
-            nonce,
+            nonce: nonce.into(),
             payload: invalid_payload_encoded
         };
         let decoded_payload = invalid_packet.get_payload(&precomputed_key);
@@ -605,11 +624,13 @@ mod tests {
 
     #[test]
     fn dht_pk_announce_payload_encrypt_decrypt() {
-        let (alice_pk, alice_sk) = gen_keypair();
-        let (bob_pk, _bob_sk) = gen_keypair();
-        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
+        let mut rng = thread_rng();
+        let alice_sk = SecretKey::generate(&mut rng);
+        let alice_pk = alice_sk.public_key();
+        let bob_pk = SecretKey::generate(&mut rng).public_key();
+        let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
         let payload = DhtPkAnnouncePayload::new(
-            gen_keypair().0,
+            SecretKey::generate(&mut rng).public_key(),
             vec![
                 TcpUdpPackedNode {
                     ip_port: IpPort {
@@ -617,7 +638,7 @@ mod tests {
                         ip_addr: "127.0.0.1".parse().unwrap(),
                         port: 12345,
                     },
-                    pk: gen_keypair().0,
+                    pk: SecretKey::generate(&mut rng).public_key(),
                 },
             ],
         );
@@ -631,13 +652,15 @@ mod tests {
 
     #[test]
     fn dht_pk_announce_payload_encrypt_decrypt_invalid_key() {
-        let (alice_pk, alice_sk) = gen_keypair();
-        let (bob_pk, _bob_sk) = gen_keypair();
-        let (_eve_pk, eve_sk) = gen_keypair();
-        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
-        let shared_secret_invalid = encrypt_precompute(&bob_pk, &eve_sk);
+        let mut rng = thread_rng();
+        let alice_sk = SecretKey::generate(&mut rng);
+        let alice_pk = alice_sk.public_key();
+        let bob_pk = SecretKey::generate(&mut rng).public_key();
+        let eve_sk = SecretKey::generate(&mut rng);
+        let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
+        let shared_secret_invalid = SalsaBox::new(&bob_pk, &eve_sk);
         let payload = DhtPkAnnouncePayload::new(
-            gen_keypair().0,
+            SecretKey::generate(&mut rng).public_key(),
             vec![
                 TcpUdpPackedNode {
                     ip_port: IpPort {
@@ -645,7 +668,7 @@ mod tests {
                         ip_addr: "127.0.0.1".parse().unwrap(),
                         port: 12345,
                     },
-                    pk: gen_keypair().0,
+                    pk: SecretKey::generate(&mut rng).public_key(),
                 },
             ],
         );
@@ -658,26 +681,28 @@ mod tests {
 
     #[test]
     fn dht_pk_announce_payload_encrypt_decrypt_invalid() {
-        let (alice_pk, alice_sk) = gen_keypair();
-        let (bob_pk, _bob_sk) = gen_keypair();
-        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
-        let nonce = gen_nonce();
+        let mut rng = thread_rng();
+        let alice_sk = SecretKey::generate(&mut rng);
+        let alice_pk = alice_sk.public_key();
+        let bob_pk = SecretKey::generate(&mut rng).public_key();
+        let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
+        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
         // Try long invalid array
         let invalid_payload = [42; 123];
-        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
+        let invalid_payload_encoded = shared_secret.encrypt(&nonce, &invalid_payload[..]).unwrap();
         let invalid_packet = DhtPkAnnounce {
-            real_pk: alice_pk,
-            nonce,
+            real_pk: alice_pk.clone(),
+            nonce: nonce.into(),
             payload: invalid_payload_encoded
         };
         let decoded_payload = invalid_packet.get_payload(&shared_secret);
         assert!(decoded_payload.is_err());
         // Try short incomplete array
         let invalid_payload = [];
-        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
+        let invalid_payload_encoded = shared_secret.encrypt(&nonce, &invalid_payload[..]).unwrap();
         let invalid_packet = DhtPkAnnounce {
             real_pk: alice_pk,
-            nonce,
+            nonce: nonce.into(),
             payload: invalid_payload_encoded
         };
         let decoded_payload = invalid_packet.get_payload(&shared_secret);

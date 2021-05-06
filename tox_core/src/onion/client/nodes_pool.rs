@@ -46,7 +46,7 @@ impl NodesPool {
     pub fn rand(&self) -> Option<PackedNode> {
         let len = self.nodes.len();
         if len > 0 {
-            Some(self.nodes[thread_rng().gen_range(0 .. len)])
+            Some(self.nodes[thread_rng().gen_range(0 .. len)].clone())
         } else {
             None
         }
@@ -107,10 +107,11 @@ impl Default for NodesPool {
 
 #[cfg(test)]
 mod tests {
+    use crypto_box::SecretKey;
+
     use super::*;
 
     use std::net::SocketAddr;
-    use tox_crypto::*;
 
     #[test]
     fn new() {
@@ -127,42 +128,44 @@ mod tests {
     #[test]
     fn put() {
         let mut nodes_pool = NodesPool::new();
-        let node = PackedNode::new("127.0.0.1:33445".parse().unwrap(), &gen_keypair().0);
-        nodes_pool.put(node);
+        let node = PackedNode::new("127.0.0.1:33445".parse().unwrap(), SecretKey::generate(&mut thread_rng()).public_key());
+        nodes_pool.put(node.clone());
         assert_eq!(nodes_pool.nodes[0], node);
     }
 
     #[test]
     fn put_already_exists() {
         let mut nodes_pool = NodesPool::new();
-        let node = PackedNode::new("127.0.0.1:33445".parse().unwrap(), &gen_keypair().0);
-        nodes_pool.put(node);
+        let node = PackedNode::new("127.0.0.1:33445".parse().unwrap(), SecretKey::generate(&mut thread_rng()).public_key());
+        nodes_pool.put(node.clone());
         nodes_pool.put(node);
         assert_eq!(nodes_pool.len(), 1);
     }
 
     #[test]
     fn put_max_nodes() {
+        let mut rng = thread_rng();
         let mut nodes_pool = NodesPool::new();
         let addr = "127.0.0.1".parse().unwrap();
         for i in 0 .. MAX_PATH_NODES {
             let saddr = SocketAddr::new(addr, 33446 + i as u16);
-            let node = PackedNode::new(saddr, &gen_keypair().0);
+            let node = PackedNode::new(saddr, SecretKey::generate(&mut rng).public_key());
             nodes_pool.put(node);
         }
         assert_eq!(nodes_pool.nodes.len(), MAX_PATH_NODES);
         // adding one more node should evict the oldest node
-        let node = PackedNode::new("127.0.0.1:33445".parse().unwrap(), &gen_keypair().0);
+        let node = PackedNode::new("127.0.0.1:33445".parse().unwrap(), SecretKey::generate(&mut rng).public_key());
         nodes_pool.put(node);
         assert_eq!(nodes_pool.nodes.len(), MAX_PATH_NODES);
     }
 
     #[test]
     fn rand() {
+        let mut rng = thread_rng();
         let mut nodes_pool = NodesPool::new();
-        let node = PackedNode::new("127.0.0.1:33445".parse().unwrap(), &gen_keypair().0);
+        let node = PackedNode::new("127.0.0.1:33445".parse().unwrap(), SecretKey::generate(&mut rng).public_key());
         nodes_pool.put(node);
-        let node = PackedNode::new("127.0.0.1:33446".parse().unwrap(), &gen_keypair().0);
+        let node = PackedNode::new("127.0.0.1:33446".parse().unwrap(), SecretKey::generate(&mut rng).public_key());
         nodes_pool.put(node);
         assert!(nodes_pool.rand().is_some());
     }

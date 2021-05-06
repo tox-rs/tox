@@ -21,7 +21,7 @@ pub enum LinkStatus {
     Online,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Link {
     /// The link is linked with the given PK
     pub pk: PublicKey,
@@ -68,8 +68,9 @@ impl Default for Links {
 impl Links {
     /// Create empty `Links`
     pub fn new() -> Links {
+        const LINK: Option<Link> = None;
         Links {
-            links: [None; 240],
+            links: [LINK; 240],
             pk_to_id: HashMap::new()
         }
     }
@@ -77,15 +78,15 @@ impl Links {
     Return `Some(id)` if there was a `Link` or if there is a room for a new `Link`
     Return `None` if there is no room for a new `Link`
     */
-    pub fn insert(&mut self, pk: &PublicKey) -> Option<u8> {
-        let possible_index = { self.pk_to_id.get(pk).cloned() };
+    pub fn insert(&mut self, pk: PublicKey) -> Option<u8> {
+        let possible_index = { self.pk_to_id.get(&pk).cloned() };
         match possible_index {
             Some(index) => Some(index), // already inserted
             None => {
                 if let Some(index) = self.links.iter().position(|link| link.is_none()) {
-                    let link = Link::new(*pk);
+                    let link = Link::new(pk.clone());
                     self.links[index] = Some(link);
-                    self.pk_to_id.insert(*pk, index as u8);
+                    self.pk_to_id.insert(pk, index as u8);
                     Some(index as u8)
                 } else {
                     // no enough room for a link
@@ -98,12 +99,12 @@ impl Links {
     Return true if succeeded to insert a new `Link`
     Return false if there is a `Link` with such PK or there is no hole at links[id]
     */
-    pub fn insert_by_id(&mut self, pk: &PublicKey, index: u8) -> bool {
+    pub fn insert_by_id(&mut self, pk: PublicKey, index: u8) -> bool {
         assert!(index < MAX_LINKS_N, "The index {} must be lower than {}", index, MAX_LINKS_N);
-        if !self.pk_to_id.contains_key(pk) && self.links[index as usize].is_none() {
-            let link = Link::new(*pk);
+        if !self.pk_to_id.contains_key(&pk) && self.links[index as usize].is_none() {
+            let link = Link::new(pk.clone());
             self.links[index as usize] = Some(link);
-            self.pk_to_id.insert(*pk, index);
+            self.pk_to_id.insert(pk, index);
             true
         } else {
             false
@@ -119,7 +120,7 @@ impl Links {
     }
     /// Get index of the link by PK
     pub fn id_by_pk(&self, pk: &PublicKey) -> Option<u8> {
-        self.pk_to_id.get(pk).cloned()
+        self.pk_to_id.get(&pk).cloned()
     }
     /// Takes the link out of the links, leaving a None in its place
     pub fn take(&mut self, index: u8) -> Option<Link> {
@@ -158,31 +159,33 @@ impl Links {
     }
     /// Iter over each non-empty link in self.links
     pub fn iter_links(&self) -> impl Iterator<Item = Link> + '_ {
-        self.links.iter().filter_map(|&link| link)
+        self.links.iter().filter_map(|link| link.clone())
     }
     /// Clear links
     pub fn clear(&mut self) {
-        self.links = [None; 240];
+        const LINK: Option<Link> = None;
+        self.links = [LINK; 240];
         self.pk_to_id.clear();
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use tox_crypto::*;
+    use rand::thread_rng;
+
     use crate::relay::links::*;
 
     #[test]
     fn link_new() {
-        let (pk, _) = gen_keypair();
-        let link = Link::new(pk);
+        let pk = SecretKey::generate(&mut thread_rng()).public_key();
+        let link = Link::new(pk.clone());
         assert_eq!(LinkStatus::Registered, link.status);
         assert_eq!(pk, link.pk);
     }
 
     #[test]
     fn link_upgrade() {
-        let (pk, _) = gen_keypair();
+        let pk = SecretKey::generate(&mut thread_rng()).public_key();
         let mut link = Link::new(pk);
         link.upgrade();
         assert_eq!(LinkStatus::Online, link.status);
@@ -190,7 +193,7 @@ mod tests {
 
     #[test]
     fn link_downgrade() {
-        let (pk, _) = gen_keypair();
+        let pk = SecretKey::generate(&mut thread_rng()).public_key();
         let mut link = Link::new(pk);
         link.upgrade();
         link.downgrade();
@@ -213,15 +216,16 @@ mod tests {
 
     #[test]
     fn links_insert_240() {
+        let mut rng = thread_rng();
         let mut links = Links::new();
         for _ in 0..240 {
             // The first 240 must be inserted successfully
-            let (pk, _) = gen_keypair();
-            let id = links.insert(&pk);
+            let pk = SecretKey::generate(&mut rng).public_key();
+            let id = links.insert(pk);
             assert!(id.is_some());
         }
-        let (pk, _) = gen_keypair();
-        let id = links.insert(&pk);
+        let pk = SecretKey::generate(&mut rng).public_key();
+        let id = links.insert(pk);
         assert!(id.is_none());
     }
 
@@ -229,9 +233,9 @@ mod tests {
     fn links_insert_same_pk() {
         let mut links = Links::new();
 
-        let (pk, _) = gen_keypair();
-        let id1 = links.insert(&pk);
-        let id2 = links.insert(&pk);
+        let pk = SecretKey::generate(&mut thread_rng()).public_key();
+        let id1 = links.insert(pk.clone());
+        let id2 = links.insert(pk);
 
         assert!(id1.is_some());
         assert_eq!(id1, id2);
@@ -239,13 +243,14 @@ mod tests {
 
     #[test]
     fn links_insert_alloc_order() {
+        let mut rng = thread_rng();
         let mut links = Links::new();
 
-        let (pk1, _) = gen_keypair();
-        let id1 = links.insert(&pk1).unwrap();
+        let pk1 = SecretKey::generate(&mut rng).public_key();
+        let id1 = links.insert(pk1).unwrap();
 
-        let (pk2, _) = gen_keypair();
-        let id2 = links.insert(&pk2).unwrap();
+        let pk2 = SecretKey::generate(&mut rng).public_key();
+        let id2 = links.insert(pk2).unwrap();
 
         // Two links inserted, the id of the 1st is 0, the id of the 2nd is 1
         assert_eq!(id1, 0);
@@ -255,8 +260,8 @@ mod tests {
         links.take(0);
 
         // Insert a third link
-        let (pk3, _) = gen_keypair();
-        let id3 = links.insert(&pk3).unwrap();
+        let pk3 = SecretKey::generate(&mut rng).public_key();
+        let id3 = links.insert(pk3).unwrap();
 
         // The id of the link must be 0
         assert_eq!(id3, 0);
@@ -264,16 +269,17 @@ mod tests {
 
     #[test]
     fn links_insert_by_id() {
+        let mut rng = thread_rng();
         let mut links = Links::new();
 
-        let (pk1, _) = gen_keypair();
-        let (pk2, _) = gen_keypair();
+        let pk1 = SecretKey::generate(&mut rng).public_key();
+        let pk2 = SecretKey::generate(&mut rng).public_key();
 
-        let id1 = links.insert(&pk1).unwrap();
+        let id1 = links.insert(pk1.clone()).unwrap();
 
-        assert_eq!(links.insert_by_id(&pk1, id1+1), false);
-        assert_eq!(links.insert_by_id(&pk2, id1), false);
-        assert_eq!(links.insert_by_id(&pk2, id1+1), true);
+        assert_eq!(links.insert_by_id(pk1, id1+1), false);
+        assert_eq!(links.insert_by_id(pk2.clone(), id1), false);
+        assert_eq!(links.insert_by_id(pk2.clone(), id1+1), true);
 
         assert_eq!(links.by_id(id1+1).unwrap().pk, pk2);
     }
@@ -283,8 +289,8 @@ mod tests {
     fn links_by_id() {
         let mut links = Links::new();
 
-        let (pk, _) = gen_keypair();
-        let id = links.insert(&pk).unwrap();
+        let pk = SecretKey::generate(&mut thread_rng()).public_key();
+        let id = links.insert(pk.clone()).unwrap();
 
         assert_eq!(pk, links.by_id(id).unwrap().pk);
     }
@@ -300,8 +306,8 @@ mod tests {
     fn links_by_pk() {
         let mut links = Links::new();
 
-        let (pk, _) = gen_keypair();
-        let id = links.insert(&pk);
+        let pk = SecretKey::generate(&mut thread_rng()).public_key();
+        let id = links.insert(pk.clone());
 
         assert_eq!(id, links.id_by_pk(&pk));
     }
@@ -310,8 +316,8 @@ mod tests {
     fn links_upgrade() {
         let mut links = Links::new();
 
-        let (pk, _) = gen_keypair();
-        let id = links.insert(&pk).unwrap();
+        let pk = SecretKey::generate(&mut thread_rng()).public_key();
+        let id = links.insert(pk).unwrap();
 
         assert_eq!(LinkStatus::Registered, links.by_id(id).unwrap().status);
 
@@ -326,8 +332,8 @@ mod tests {
     fn links_downgrade() {
         let mut links = Links::new();
 
-        let (pk, _) = gen_keypair();
-        let id = links.insert(&pk).unwrap();
+        let pk = SecretKey::generate(&mut thread_rng()).public_key();
+        let id = links.insert(pk).unwrap();
 
         assert_eq!(LinkStatus::Registered, links.by_id(id).unwrap().status);
 
@@ -343,8 +349,8 @@ mod tests {
     fn links_take() {
         let mut links = Links::new();
 
-        let (pk, _) = gen_keypair();
-        let id = links.insert(&pk).unwrap();
+        let pk = SecretKey::generate(&mut thread_rng()).public_key();
+        let id = links.insert(pk.clone()).unwrap();
 
         assert!(links.by_id(id).is_some());
 
@@ -363,11 +369,12 @@ mod tests {
 
     #[test]
     fn links_clear() {
+        let mut rng = thread_rng();
         let mut links = Links::new();
         for _ in 0..240 {
             // The first 240 must be inserted successfully
-            let (pk, _) = gen_keypair();
-            let id = links.insert(&pk);
+            let pk = SecretKey::generate(&mut rng).public_key();
+            let id = links.insert(pk);
             assert!(id.is_some());
         }
 

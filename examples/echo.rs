@@ -52,11 +52,13 @@ async fn main() -> Result<(), Error> {
 
     let mut rng = thread_rng();
 
-    let (dht_pk, dht_sk) = gen_keypair();
+    let dht_sk = SecretKey::generate(&mut rng);
+    let dht_pk = dht_sk.public_key();
 
     // create random tox id and print it
-    let (real_pk, real_sk) = gen_keypair();
-    let id = ToxId::new(&mut rng, real_pk);
+    let real_sk = SecretKey::generate(&mut rng);
+    let real_pk = real_sk.public_key();
+    let id = ToxId::new(&mut rng, real_pk.clone());
     println!("your tox id is: {:X}",id);
 
     // Create a channel for server to communicate with network
@@ -70,16 +72,16 @@ async fn main() -> Result<(), Error> {
     let socket = common::bind_socket(local_addr).await;
     let stats = Stats::new();
 
-    let mut lan_discovery_sender = LanDiscoverySender::new(tx.clone(), dht_pk, local_addr.is_ipv6());
+    let mut lan_discovery_sender = LanDiscoverySender::new(tx.clone(), dht_pk.clone(), local_addr.is_ipv6());
 
     let (tcp_incoming_tx, mut tcp_incoming_rx) = mpsc::unbounded();
 
-    let mut dht_server = DhtServer::new(tx.clone(), dht_pk, dht_sk.clone());
+    let mut dht_server = DhtServer::new(tx.clone(), dht_pk.clone(), dht_sk.clone());
     dht_server.enable_lan_discovery(true);
     dht_server.enable_ipv6_mode(local_addr.is_ipv6());
 
-    let tcp_connections = Connections::new(dht_pk, dht_sk.clone(), tcp_incoming_tx);
-    let onion_client = OnionClient::new(dht_server.clone(), tcp_connections.clone(), real_sk.clone(), real_pk);
+    let tcp_connections = Connections::new(dht_pk.clone(), dht_sk.clone(), tcp_incoming_tx);
+    let onion_client = OnionClient::new(dht_server.clone(), tcp_connections.clone(), real_sk.clone(), real_pk.clone());
 
     let (lossless_tx, mut lossless_rx) = mpsc::unbounded();
     let (lossy_tx, mut lossy_rx) = mpsc::unbounded();
@@ -93,7 +95,7 @@ async fn main() -> Result<(), Error> {
         lossy_tx,
         dht_pk,
         dht_sk,
-        real_pk,
+        real_pk: real_pk.clone(),
         real_sk: real_sk.clone(),
         precomputed_keys: dht_server.get_precomputed_keys(),
     });
@@ -115,11 +117,11 @@ async fn main() -> Result<(), Error> {
         // get PK bytes of the bootstrap node
         let bootstrap_pk_bytes: [u8; 32] = FromHex::from_hex(pk).unwrap();
         // create PK from bytes
-        let bootstrap_pk = PublicKey::from_slice(&bootstrap_pk_bytes).unwrap();
+        let bootstrap_pk = PublicKey::from(bootstrap_pk_bytes);
 
-        let node = PackedNode::new(saddr.parse().unwrap(), &bootstrap_pk);
+        let node = PackedNode::new(saddr.parse().unwrap(), bootstrap_pk);
 
-        dht_server.add_initial_bootstrap(node);
+        dht_server.add_initial_bootstrap(node.clone());
         onion_client.add_path_node(node).await;
     }
 
@@ -176,8 +178,8 @@ async fn main() -> Result<(), Error> {
                     }
                 },
                 0x18 => { // PACKET_ID_ONLINE
-                    net_crypto_c.send_lossless(pk, vec![0x18]).map_err(Error::from).await?;
-                    net_crypto_c.send_lossless(pk, vec![0x32, 0x00]).map_err(Error::from).await?; // PACKET_ID_USERSTATUS
+                    net_crypto_c.send_lossless(pk.clone(), vec![0x18]).map_err(Error::from).await?;
+                    net_crypto_c.send_lossless(pk.clone(), vec![0x32, 0x00]).map_err(Error::from).await?; // PACKET_ID_USERSTATUS
                     net_crypto_c.send_lossless(pk, b"\x30tox-rs".to_vec()).map_err(Error::from).await?;
                 },
                 0x40 => { // PACKET_ID_CHAT_MESSAGE
@@ -210,7 +212,7 @@ async fn main() -> Result<(), Error> {
         // get PK bytes of the relay
         let relay_pk_bytes: [u8; 32] = FromHex::from_hex(pk).unwrap();
         // create PK from bytes
-        let relay_pk = PublicKey::from_slice(&relay_pk_bytes).unwrap();
+        let relay_pk = PublicKey::from(relay_pk_bytes);
 
         tcp_connections.add_relay_global(saddr.parse().unwrap(), relay_pk).await.map_err(Error::from)?;
     }

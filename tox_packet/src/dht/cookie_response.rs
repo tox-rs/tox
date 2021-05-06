@@ -1,6 +1,7 @@
 /*! CookieResponse packet
 */
 
+use crypto_box::{SalsaBox, aead::{Aead, Error as AeadError}};
 use nom::{
     named, do_parse, tag, call, take, eof,
     number::complete::be_u64
@@ -59,14 +60,14 @@ impl ToBytes for CookieResponse {
 
 impl CookieResponse {
     /// Create `CookieResponse` from `CookieRequestPayload` encrypting it with `shared_key`
-    pub fn new(shared_secret: &PrecomputedKey, payload: &CookieResponsePayload) -> CookieResponse {
-        let nonce = gen_nonce();
+    pub fn new(shared_secret: &SalsaBox, payload: &CookieResponsePayload) -> CookieResponse {
+        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
         let mut buf = [0; 120];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
-        let payload = seal_precomputed(&buf[..size], &nonce, shared_secret);
+        let payload = shared_secret.encrypt(&nonce, &buf[..size]).unwrap();
 
         CookieResponse {
-            nonce,
+            nonce: nonce.into(),
             payload,
         }
     }
@@ -77,9 +78,9 @@ impl CookieResponse {
     - fails to decrypt
     - fails to parse `CookieResponsePayload`
     */
-    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<CookieResponsePayload, GetPayloadError> {
-        let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
-            .map_err(|()| {
+    pub fn get_payload(&self, shared_secret: &SalsaBox) -> Result<CookieResponsePayload, GetPayloadError> {
+        let decrypted = shared_secret.decrypt((&self.nonce).into(), self.payload.as_slice())
+            .map_err(|AeadError| {
                 GetPayloadError::decrypt()
             })?;
         match CookieResponsePayload::from_bytes(&decrypted) {
@@ -136,11 +137,13 @@ impl ToBytes for CookieResponsePayload {
 mod tests {
     use super::*;
     use nom::{Needed, Err, error::ErrorKind};
+    use crypto_box::aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned};
+    use rand::thread_rng;
 
     encode_decode_test!(
         cookie_response_encode_decode,
         CookieResponse {
-            nonce: gen_nonce(),
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             payload: vec![42; 136],
         }
     );
@@ -158,9 +161,10 @@ mod tests {
 
     #[test]
     fn cookie_response_encrypt_decrypt() {
-        let (_alice_pk, alice_sk) = gen_keypair();
-        let (bob_pk, _bob_sk) = gen_keypair();
-        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
+        let mut rng = thread_rng();
+        let alice_sk = SecretKey::generate(&mut rng);
+        let bob_pk = SecretKey::generate(&mut rng).public_key();
+        let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
         let payload = CookieResponsePayload {
             cookie: EncryptedCookie {
                 nonce: [42; xsalsa20poly1305::NONCE_SIZE],
@@ -178,11 +182,12 @@ mod tests {
 
     #[test]
     fn cookie_response_encrypt_decrypt_invalid_key() {
-        let (_alice_pk, alice_sk) = gen_keypair();
-        let (bob_pk, _bob_sk) = gen_keypair();
-        let (_eve_pk, eve_sk) = gen_keypair();
-        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
-        let eve_shared_secret = encrypt_precompute(&bob_pk, &eve_sk);
+        let mut rng = thread_rng();
+        let alice_sk = SecretKey::generate(&mut rng);
+        let bob_pk = SecretKey::generate(&mut rng).public_key();
+        let eve_sk = SecretKey::generate(&mut rng);
+        let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
+        let eve_shared_secret = SalsaBox::new(&bob_pk, &eve_sk);
         let payload = CookieResponsePayload {
             cookie: EncryptedCookie {
                 nonce: [42; xsalsa20poly1305::NONCE_SIZE],
@@ -200,15 +205,16 @@ mod tests {
 
     #[test]
     fn cookie_response_encrypt_decrypt_invalid() {
-        let (_alice_pk, alice_sk) = gen_keypair();
-        let (bob_pk, _bob_sk) = gen_keypair();
-        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
-        let nonce = gen_nonce();
+        let mut rng = thread_rng();
+        let alice_sk = SecretKey::generate(&mut rng);
+        let bob_pk = SecretKey::generate(&mut rng).public_key();
+        let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
+        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
         // Try long invalid array
         let invalid_payload = [42; 123];
-        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
+        let invalid_payload_encoded = shared_secret.encrypt(&nonce, &invalid_payload[..]).unwrap();
         let invalid_packet = CookieResponse {
-            nonce,
+            nonce: nonce.into(),
             payload: invalid_payload_encoded
         };
         let decoded_payload = invalid_packet.get_payload(&shared_secret);
@@ -219,9 +225,9 @@ mod tests {
         });
         // Try short incomplete array
         let invalid_payload = [];
-        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
+        let invalid_payload_encoded = shared_secret.encrypt(&nonce, &invalid_payload[..]).unwrap();
         let invalid_packet = CookieResponse {
-            nonce,
+            nonce: nonce.into(),
             payload: invalid_payload_encoded
         };
         let decoded_payload = invalid_packet.get_payload(&shared_secret);

@@ -60,7 +60,7 @@ impl Client {
     */
     pub fn new(tx: mpsc::Sender<Packet>, pk: &PublicKey, ip_addr: IpAddr, port: u16) -> Client {
         Client {
-            pk: *pk,
+            pk: pk.clone(),
             ip_addr,
             port,
             tx,
@@ -74,7 +74,7 @@ impl Client {
     /** PK of the `Client`
     */
     pub fn pk(&self) -> PublicKey {
-        self.pk
+        self.pk.clone()
     }
 
     /** `std::net::IpAddr` of the `Client`
@@ -155,9 +155,9 @@ impl Client {
     }
     /** Construct RouteResponse and send it to Client
     */
-    pub async fn send_route_response(&self, pk: &PublicKey, connection_id: ConnectionId) -> Result<(), Error> {
+    pub async fn send_route_response(&self, pk: PublicKey, connection_id: ConnectionId) -> Result<(), Error> {
         self.send(
-            Packet::RouteResponse(RouteResponse { connection_id, pk: *pk })
+            Packet::RouteResponse(RouteResponse { connection_id, pk })
         ).await
     }
     /** Construct ConnectNotification and send it to Client ignoring IO error
@@ -183,9 +183,9 @@ impl Client {
     }
     /** Construct OobReceive and send it to Client ignoring IO error
     */
-    pub async fn send_oob(&self, sender_pk: &PublicKey, data: Vec<u8>) {
+    pub async fn send_oob(&self, sender_pk: PublicKey, data: Vec<u8>) {
         self.send_ignore_error(
-            Packet::OobReceive(OobReceive { sender_pk: *sender_pk, data })
+            Packet::OobReceive(OobReceive { sender_pk, data })
         ).await;
     }
     /** Construct OnionResponse and send it to Client
