@@ -113,6 +113,7 @@ impl PackedNode {
     }
 
     /// to_bytes for TCP
+    #[allow(clippy::wrong_self_convention)]
     pub fn to_tcp_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_if_else!(self.saddr.is_ipv4(), gen_be_u8!(130), gen_be_u8!(138)) >>

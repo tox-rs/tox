@@ -160,7 +160,7 @@ impl PassKey {
         output.extend_from_slice(&self.salt);
         output.extend_from_slice(&nonce);
         output.append(&mut self.key.encrypt(
-            &nonce.into(),
+            &nonce,
             data
         ).or(Err(EncryptionError::Null))?);
 
