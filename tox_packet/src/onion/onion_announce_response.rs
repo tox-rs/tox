@@ -7,10 +7,8 @@ use tox_binary_io::*;
 use tox_crypto::*;
 use crate::dht::*;
 
-use std::convert::TryInto;
 use nom::{
     many0,
-    map_opt,
     number::complete::le_u64,
     combinator::{rest, rest_len},
 };
@@ -140,7 +138,7 @@ pub struct OnionAnnounceResponsePayload {
 impl FromBytes for OnionAnnounceResponsePayload {
     named!(from_bytes<OnionAnnounceResponsePayload>, do_parse!(
         announce_status: call!(AnnounceStatus::from_bytes) >>
-        ping_id_or_pk: map_opt!(take!(32), |bytes: &[u8]| bytes.try_into().ok()) >>
+        ping_id_or_pk: call!(<[u8; 32]>::from_bytes) >>
         nodes: many0!(PackedNode::from_bytes) >>
         _len: verify!(value!(nodes.len()), |len| *len <= 4_usize) >>
         eof!() >>
