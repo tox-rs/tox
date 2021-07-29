@@ -35,7 +35,7 @@ use xsalsa20poly1305::{XSalsa20Poly1305, aead::{Aead, Error as AeadError}};
 use crate::dht::packed_node::PackedNode;
 use crate::ip_port::*;
 
-use rand::{Rng, thread_rng};
+use rand::{CryptoRng, Rng};
 use nom::{alt, call, cond, do_parse, eof, flat_map, map, map_res, named, switch, tag, take, value, verify};
 
 use cookie_factory::{
@@ -141,8 +141,8 @@ impl OnionReturn {
     ));
 
     /// Create new `OnionReturn` object using symmetric key for encryption.
-    pub fn new(symmetric_key: &XSalsa20Poly1305, ip_port: &IpPort, inner: Option<&OnionReturn>) -> OnionReturn {
-        let nonce = thread_rng().gen::<[u8; xsalsa20poly1305::NONCE_SIZE]>().into();
+    pub fn new<R: Rng + CryptoRng>(rng: &mut R, symmetric_key: &XSalsa20Poly1305, ip_port: &IpPort, inner: Option<&OnionReturn>) -> OnionReturn {
+        let nonce = xsalsa20poly1305::generate_nonce(rng);
         let mut buf = [0; ONION_RETURN_2_SIZE + SIZE_IPPORT];
         let (_, size) = OnionReturn::inner_to_bytes(ip_port, inner, (&mut buf, 0)).unwrap();
         let payload = symmetric_key.encrypt(&nonce, &buf[..size]).unwrap();
@@ -218,6 +218,7 @@ impl ToBytes for AnnounceStatus {
 mod tests {
     use super::*;
 
+    use rand::thread_rng;
     use xsalsa20poly1305::aead::NewAead;
 
     const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - xsalsa20poly1305::NONCE_SIZE;
@@ -252,22 +253,22 @@ mod tests {
     #[test]
     fn onion_return_encrypt_decrypt() {
         let mut rng = thread_rng();
-        let alice_symmetric_key = XSalsa20Poly1305::new(&rng.gen::<[u8; xsalsa20poly1305::KEY_SIZE]>().into());
-        let bob_symmetric_key = XSalsa20Poly1305::new(&rng.gen::<[u8; xsalsa20poly1305::KEY_SIZE]>().into());
+        let alice_symmetric_key = XSalsa20Poly1305::new(&XSalsa20Poly1305::generate_key(&mut rng));
+        let bob_symmetric_key = XSalsa20Poly1305::new(&XSalsa20Poly1305::generate_key(&mut rng));
         // alice encrypt
         let ip_port_1 = IpPort {
             protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
             port: 12345
         };
-        let onion_return_1 = OnionReturn::new(&alice_symmetric_key, &ip_port_1, None);
+        let onion_return_1 = OnionReturn::new(&mut rng, &alice_symmetric_key, &ip_port_1, None);
         // bob encrypt
         let ip_port_2 = IpPort {
             protocol: ProtocolType::Udp,
             ip_addr: "7.8.5.6".parse().unwrap(),
             port: 54321
         };
-        let onion_return_2 = OnionReturn::new(&bob_symmetric_key, &ip_port_2, Some(&onion_return_1));
+        let onion_return_2 = OnionReturn::new(&mut rng, &bob_symmetric_key, &ip_port_2, Some(&onion_return_1));
         // bob can decrypt it's return address
         let (decrypted_ip_port_2, decrypted_onion_return_1) = onion_return_2.get_payload(&bob_symmetric_key).unwrap();
         assert_eq!(decrypted_ip_port_2, ip_port_2);
@@ -281,23 +282,23 @@ mod tests {
     #[test]
     fn onion_return_encrypt_decrypt_invalid_key() {
         let mut rng = thread_rng();
-        let alice_symmetric_key = XSalsa20Poly1305::new(&rng.gen::<[u8; xsalsa20poly1305::KEY_SIZE]>().into());
-        let bob_symmetric_key = XSalsa20Poly1305::new(&rng.gen::<[u8; xsalsa20poly1305::KEY_SIZE]>().into());
-        let eve_symmetric_key = XSalsa20Poly1305::new(&rng.gen::<[u8; xsalsa20poly1305::KEY_SIZE]>().into());
+        let alice_symmetric_key = XSalsa20Poly1305::new(&XSalsa20Poly1305::generate_key(&mut rng));
+        let bob_symmetric_key = XSalsa20Poly1305::new(&XSalsa20Poly1305::generate_key(&mut rng));
+        let eve_symmetric_key = XSalsa20Poly1305::new(&XSalsa20Poly1305::generate_key(&mut rng));
         // alice encrypt
         let ip_port_1 = IpPort {
             protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
             port: 12345
         };
-        let onion_return_1 = OnionReturn::new(&alice_symmetric_key, &ip_port_1, None);
+        let onion_return_1 = OnionReturn::new(&mut rng, &alice_symmetric_key, &ip_port_1, None);
         // bob encrypt
         let ip_port_2 = IpPort {
             protocol: ProtocolType::Udp,
             ip_addr: "7.8.5.6".parse().unwrap(),
             port: 54321
         };
-        let onion_return_2 = OnionReturn::new(&bob_symmetric_key, &ip_port_2, Some(&onion_return_1));
+        let onion_return_2 = OnionReturn::new(&mut rng, &bob_symmetric_key, &ip_port_2, Some(&onion_return_1));
         // eve can't decrypt return addresses
         assert!(onion_return_1.get_payload(&eve_symmetric_key).is_err());
         assert!(onion_return_2.get_payload(&eve_symmetric_key).is_err());
@@ -306,8 +307,8 @@ mod tests {
     #[test]
     fn onion_return_decrypt_invalid() {
         let mut rng = thread_rng();
-        let symmetric_key = XSalsa20Poly1305::new(&rng.gen::<[u8; xsalsa20poly1305::KEY_SIZE]>().into());
-        let nonce = rng.gen::<[u8; xsalsa20poly1305::NONCE_SIZE]>().into();
+        let symmetric_key = XSalsa20Poly1305::new(&XSalsa20Poly1305::generate_key(&mut rng));
+        let nonce = xsalsa20poly1305::generate_nonce(&mut rng);
         // Try long invalid array
         let invalid_payload = [42; 123];
         let invalid_payload_encoded = symmetric_key.encrypt(&nonce, &invalid_payload[..]).unwrap();
