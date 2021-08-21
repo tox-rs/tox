@@ -207,7 +207,7 @@ impl KbucketNode for OnionNode {
         self.saddr = other.saddr;
         self.path_id = other.path_id.clone();
         self.ping_id = other.ping_id.or(self.ping_id);
-        self.data_pk = other.data_pk.clone().or(self.data_pk.clone());
+        self.data_pk = other.data_pk.clone().or_else(|| self.data_pk.clone());
         self.unsuccessful_pings = 0;
         self.response_time = clock_now();
         self.announce_status = other.announce_status;
@@ -274,11 +274,11 @@ impl<'a> AnnouncePacketData<'a> {
         let payload = OnionAnnounceRequestPayload {
             ping_id: ping_id.unwrap_or(INITIAL_PING_ID),
             search_pk: self.search_pk.clone(),
-            data_pk: self.data_pk.clone().unwrap_or(PublicKey::from([0; 32])),
+            data_pk: self.data_pk.clone().unwrap_or_else(|| PublicKey::from([0; 32])),
             sendback_data: request_id,
         };
         InnerOnionAnnounceRequest::new(
-            &SalsaBox::new(node_pk, &self.packet_sk),
+            &SalsaBox::new(node_pk, self.packet_sk),
             self.packet_pk.clone(),
             &payload
         )
@@ -449,7 +449,7 @@ impl OnionClient {
             (&mut state.announce_list, None, announce_packet_data)
         };
 
-        let payload = match packet.get_payload(&SalsaBox::new(&announce_data.pk, &announce_packet_data.packet_sk)) {
+        let payload = match packet.get_payload(&SalsaBox::new(&announce_data.pk, announce_packet_data.packet_sk)) {
             Ok(payload) => payload,
             Err(e) => return Err(e.context(HandleAnnounceResponseErrorKind::InvalidPayload).into())
         };
@@ -502,7 +502,7 @@ impl OnionClient {
                 continue;
             }
 
-            if !nodes_list.can_add(&announce_packet_data.search_pk, &node, /* evict */ true) {
+            if !nodes_list.can_add(&announce_packet_data.search_pk, node, /* evict */ true) {
                 continue;
             }
 

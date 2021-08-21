@@ -120,7 +120,7 @@ impl Links {
     }
     /// Get index of the link by PK
     pub fn id_by_pk(&self, pk: &PublicKey) -> Option<u8> {
-        self.pk_to_id.get(&pk).cloned()
+        self.pk_to_id.get(pk).cloned()
     }
     /// Takes the link out of the links, leaving a None in its place
     pub fn take(&mut self, index: u8) -> Option<Link> {
@@ -277,9 +277,9 @@ mod tests {
 
         let id1 = links.insert(pk1.clone()).unwrap();
 
-        assert_eq!(links.insert_by_id(pk1, id1+1), false);
-        assert_eq!(links.insert_by_id(pk2.clone(), id1), false);
-        assert_eq!(links.insert_by_id(pk2.clone(), id1+1), true);
+        assert!(!links.insert_by_id(pk1, id1+1));
+        assert!(!links.insert_by_id(pk2.clone(), id1));
+        assert!(links.insert_by_id(pk2.clone(), id1+1));
 
         assert_eq!(links.by_id(id1+1).unwrap().pk, pk2);
     }
@@ -321,11 +321,11 @@ mod tests {
 
         assert_eq!(LinkStatus::Registered, links.by_id(id).unwrap().status);
 
-        assert_eq!(links.upgrade(id), true); // try to upgrade an existent link
+        assert!(links.upgrade(id)); // try to upgrade an existent link
 
         assert_eq!(LinkStatus::Online, links.by_id(id).unwrap().status);
 
-        assert_eq!(links.upgrade(id+1), false); // try to upgrade an nonexistent link
+        assert!(!links.upgrade(id+1)); // try to upgrade an nonexistent link
     }
 
     #[test]
@@ -338,11 +338,11 @@ mod tests {
         assert_eq!(LinkStatus::Registered, links.by_id(id).unwrap().status);
 
         links.upgrade(id);
-        assert_eq!(links.downgrade(id), true); // try to downgrade an existent link
+        assert!(links.downgrade(id)); // try to downgrade an existent link
 
         assert_eq!(LinkStatus::Registered, links.by_id(id).unwrap().status);
 
-        assert_eq!(links.downgrade(id+1), false); // try to downgrade an nonexistent link
+        assert!(!links.downgrade(id+1)); // try to downgrade an nonexistent link
     }
 
     #[test]

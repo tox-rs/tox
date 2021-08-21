@@ -662,7 +662,7 @@ impl Server {
                     self.pk.clone(),
                     &payload,
                 );
-                self.send_nat_ping_req_inner(&friend, nat_ping_req_packet).await?;
+                self.send_nat_ping_req_inner(friend, nat_ping_req_packet).await?;
             }
         }
 
@@ -832,7 +832,7 @@ impl Server {
                 continue;
             }
 
-            if close_nodes.can_add(&node) {
+            if close_nodes.can_add(node) {
                 nodes_to_bootstrap.try_add(&self.pk, node.clone(), /* evict */ true);
             }
 
@@ -842,7 +842,7 @@ impl Server {
                 }
             }
 
-            self.update_returned_addr(&node, packet_pk, &mut close_nodes, &mut friends);
+            self.update_returned_addr(node, packet_pk, &mut close_nodes, &mut friends);
         }
     }
 
@@ -1120,7 +1120,7 @@ impl Server {
     ) -> (AnnounceStatus, [u8; 32]) {
         let mut onion_announce = self.onion_announce.write().await;
         onion_announce.handle_onion_announce_request(
-            &payload,
+            payload,
             packet.inner.pk.clone(),
             packet.onion_return.clone(),
             addr
@@ -1307,7 +1307,7 @@ impl Server {
         }
 
         if let Some(ref bootstrap_info) = self.bootstrap_info {
-            let mut motd = (bootstrap_info.motd_cb)(&self);
+            let mut motd = (bootstrap_info.motd_cb)(self);
             if motd.len() > BOOSTRAP_SERVER_MAX_MOTD_LENGTH {
                 warn!(
                     "Too long MOTD: {} bytes. Truncating to {} bytes",
@@ -2953,7 +2953,7 @@ mod tests {
         let (mut alice, _precomp, _bob_pk, _bob_sk, rx, addr) = create_node();
 
         alice.enable_lan_discovery(false);
-        assert_eq!(alice.lan_discovery_enabled, false);
+        assert!(!alice.lan_discovery_enabled);
 
         let lan = LanDiscovery { pk: alice.pk.clone() };
 
@@ -3287,7 +3287,7 @@ mod tests {
         let (mut alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
 
         alice.enable_ipv6_mode(true);
-        assert_eq!(alice.is_ipv6_enabled, true);
+        assert!(alice.is_ipv6_enabled);
     }
 
     #[tokio::test]

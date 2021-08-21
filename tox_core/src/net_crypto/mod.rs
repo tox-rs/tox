@@ -852,8 +852,8 @@ impl NetCrypto {
         if packet_id == PACKET_ID_KILL {
             // Kill the connection
             self.connections.write().await.remove(&connection.peer_real_pk);
-            self.clear_keys_by_addr(&connection).await;
-            return self.send_connection_status(&connection, false)
+            self.clear_keys_by_addr(connection).await;
+            return self.send_connection_status(connection, false)
                 .map_err(|e| e.context(HandlePacketErrorKind::SendToConnectionStatus).into()).await;
         }
 
@@ -862,7 +862,7 @@ impl NetCrypto {
             increment_nonce_number(&mut received_nonce, NONCE_DIFF_THRESHOLD);
         }
 
-        self.send_connection_status(&connection, true).await
+        self.send_connection_status(connection, true).await
             .map_err(|e| e.context(HandlePacketErrorKind::SendToConnectionStatus))?;
 
         connection.status = ConnectionStatus::Established {
@@ -1983,7 +1983,7 @@ mod tests {
         let session_pk = SecretKey::generate(&mut rng).public_key();
         let mut our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
         our_cookie.time -= COOKIE_TIMEOUT + 1;
-        let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &&net_crypto.symmetric_key, &our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![43; 88]

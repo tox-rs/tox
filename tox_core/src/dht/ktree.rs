@@ -225,7 +225,7 @@ mod tests {
     #[test]
     fn ktree_try_add() {
         let pk = PublicKey::from([0; crypto_box::KEY_SIZE]);
-        let mut ktree = Ktree::new(pk.clone());
+        let mut ktree = Ktree::new(pk);
 
         for i in 0 .. 8 {
             let mut pk = [i + 2; crypto_box::KEY_SIZE];

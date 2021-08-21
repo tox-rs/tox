@@ -97,7 +97,7 @@ impl HolePunching {
                     self.last_punching_index = 0;
                 }
 
-                let ports_to_try = HolePunching::get_nat_ports(&addrs, ip);
+                let ports_to_try = HolePunching::get_nat_ports(addrs, ip);
 
                 let res = self.punch_addrs(&ports_to_try, ip);
 

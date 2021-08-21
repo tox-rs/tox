@@ -168,7 +168,7 @@ impl Server {
 
         // get client_a
         let client_a =
-            if let Some(client) = state.connected_clients.get_mut(&pk) {
+            if let Some(client) = state.connected_clients.get_mut(pk) {
                 client
             } else {
                 return Err(Error::new(ErrorKind::Other, "RouteRequest: no such PK"))
@@ -342,7 +342,7 @@ impl Server {
     async fn handle_onion_request(&self, pk: &PublicKey, packet: OnionRequest) -> Result<(), Error> {
         if let Some(ref onion_sink) = self.onion_sink {
             let state = self.state.read().await;
-            if let Some(client) = state.connected_clients.get(&pk) {
+            if let Some(client) = state.connected_clients.get(pk) {
                 let saddr = SocketAddr::new(client.ip_addr(), client.port());
                 let mut tx = onion_sink.clone();
                 tx // clone sink for 1 send only

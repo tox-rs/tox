@@ -276,7 +276,7 @@ mod tests {
             // bad payload [1,2,3]
             let encrypted_payload = common_key.encrypt(&nonce, &[1, 2, 3][..]).unwrap();
 
-            ClientHandshake { pk: client_pk.clone(), nonce: nonce.into(), payload: encrypted_payload }
+            ClientHandshake { pk: client_pk, nonce: nonce.into(), payload: encrypted_payload }
         };
         assert!(handle_client_handshake(&server_sk, &client_handshake).is_err());
     }

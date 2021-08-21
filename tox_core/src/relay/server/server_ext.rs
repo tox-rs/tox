@@ -32,20 +32,20 @@ const SERVER_CHANNEL_SIZE: usize = 64;
 pub enum ServerRunError {
     /// Incoming IO error
     #[fail(display = "Incoming IO error: {:?}", error)]
-    IncomingError {
+    Incoming {
         /// IO error
         #[fail(cause)]
         error: IoError
     },
     /// Ping wakeups timer error
     #[fail(display = "Ping wakeups timer error: {:?}", error)]
-    PingWakeupsError {
+    PingWakeups {
         /// Timer error
         error: TimerError
     },
     /// Send pings error
     #[fail(display = "Send pings error: {:?}", error)]
-    SendPingsError {
+    SendPings {
         /// Send pings error
         #[fail(cause)]
         error: IoError
@@ -57,58 +57,58 @@ pub enum ServerRunError {
 pub enum ConnectionError {
     /// Error indicates that we couldn't get peer address
     #[fail(display = "Failed to get peer address: {}", error)]
-    PeerAddrError {
+    PeerAddr {
         /// Peer address error
         #[fail(cause)]
         error: IoError,
     },
     /// Sending packet error
     #[fail(display = "Failed to send TCP packet: {}", error)]
-    SendPacketError {
+    SendPacket {
         error: EncodeError
     },
     /// Decode incoming packet error
     #[fail(display = "Failed to decode incoming packet: {}", error)]
-    DecodePacketError {
+    DecodePacket {
         error: DecodeError
     },
     /// Incoming IO error
     #[fail(display = "Incoming IO error: {:?}", error)]
-    IncomingError {
+    Incoming {
         /// IO error
         #[fail(cause)]
         error: IoError
     },
     /// Server handshake error
     #[fail(display = "Server handshake error: {:?}", error)]
-    ServerHandshakeTimeoutError {
+    ServerHandshakeTimeout {
         /// Server handshake error
         #[fail(cause)]
         error: tokio::time::error::Elapsed
     },
     #[fail(display = "Server handshake error: {:?}", error)]
-    ServerHandshakeIoError {
+    ServerHandshakeIo {
         /// Server handshake error
         #[fail(cause)]
         error: IoError,
     },
     /// Packet handling error
     #[fail(display = "Packet handling error: {:?}", error)]
-    PacketHandlingError {
+    PacketHandling {
         /// Packet handling error
         #[fail(cause)]
         error: IoError
     },
     /// Insert client error
     #[fail(display = "Packet handling error: {:?}", error)]
-    InsertClientError {
+    InsertClient {
         /// Insert client error
         #[fail(cause)]
         error: IoError
     },
 
     #[fail(display = "Packet handling error: {:?}", error)]
-    ShutdownError {
+    Shutdown {
         /// Insert client error
         #[fail(cause)]
         error: IoError
@@ -123,7 +123,7 @@ pub async fn tcp_run(server: &Server, listener: TcpListener, dht_sk: SecretKey, 
 
     let connections_future = async {
         loop {
-            let (stream, _) = listener.accept().await.map_err(|error| ServerRunError::IncomingError { error })?;
+            let (stream, _) = listener.accept().await.map_err(|error| ServerRunError::Incoming { error })?;
             if connections_count.load(Ordering::SeqCst) < connections_limit {
                 connections_count.fetch_add(1, Ordering::SeqCst);
                 let connections_count_c = connections_count.clone();
@@ -156,7 +156,7 @@ pub async fn tcp_run(server: &Server, listener: TcpListener, dht_sk: SecretKey, 
 
             trace!("Tcp server ping sender wake up");
             server.send_pings().await
-                .map_err(|error| ServerRunError::SendPingsError { error })?;
+                .map_err(|error| ServerRunError::SendPings { error })?;
         }
     };
 
@@ -170,7 +170,7 @@ pub async fn tcp_run(server: &Server, listener: TcpListener, dht_sk: SecretKey, 
 pub async fn tcp_run_connection(server: &Server, stream: TcpStream, dht_sk: SecretKey, stats: Stats) -> Result<(), ConnectionError> {
     let addr = match stream.peer_addr() {
         Ok(addr) => addr,
-        Err(error) => return Err(ConnectionError::PeerAddrError {
+        Err(error) => return Err(ConnectionError::PeerAddr {
             error
         }),
     };
@@ -183,10 +183,10 @@ pub async fn tcp_run_connection(server: &Server, stream: TcpStream, dht_sk: Secr
     );
     let (stream, channel, client_pk) = match fut.await {
         Err(error) => Err(
-            ConnectionError::ServerHandshakeTimeoutError { error }
+            ConnectionError::ServerHandshakeTimeout { error }
         ),
         Ok(Err(error)) => Err(
-            ConnectionError::ServerHandshakeIoError { error }
+            ConnectionError::ServerHandshakeIo { error }
         ),
         Ok(Ok(res)) => Ok(res)
     }?;
@@ -199,18 +199,18 @@ pub async fn tcp_run_connection(server: &Server, stream: TcpStream, dht_sk: Secr
 
     // processor = for each Packet from client process it
     let processor = from_client
-        .map_err(|error| ConnectionError::DecodePacketError { error })
+        .map_err(|error| ConnectionError::DecodePacket { error })
         .try_for_each(|packet| {
             debug!("Handle {:?} => {:?}", client_pk, packet);
             server.handle_packet(&client_pk, packet)
-                .map_err(|error| ConnectionError::PacketHandlingError { error } )
+                .map_err(|error| ConnectionError::PacketHandling { error } )
         });
 
     let writer = async {
         while let Some(packet) = to_client_rx.next().await {
             trace!("Sending TCP packet {:?} to {:?}", packet, client_pk);
             to_client.send(packet).await
-                .map_err(|error| ConnectionError::SendPacketError {
+                .map_err(|error| ConnectionError::SendPacket {
                     error
                 })?;
         }
@@ -225,7 +225,7 @@ pub async fn tcp_run_connection(server: &Server, stream: TcpStream, dht_sk: Secr
         addr.port()
     );
     server.insert(client).await
-        .map_err(|error| ConnectionError::InsertClientError { error })?;
+        .map_err(|error| ConnectionError::InsertClient { error })?;
 
     let r_processing = futures::select! {
         res = processor.fuse() => res,
@@ -236,7 +236,7 @@ pub async fn tcp_run_connection(server: &Server, stream: TcpStream, dht_sk: Secr
 
     server.shutdown_client(&client_pk, addr.ip(), addr.port())
         .await
-        .map_err(|error| ConnectionError::ShutdownError { error })?;
+        .map_err(|error| ConnectionError::Shutdown { error })?;
 
     r_processing
 }
