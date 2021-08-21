@@ -12,9 +12,9 @@ use std::{convert::TryInto, net::{
 }};
 
 #[cfg(feature = "crypto")]
-pub use sodium::*;
+pub use crypto::*;
 #[cfg(feature = "crypto")]
-mod sodium;
+mod crypto;
 
 /// The trait provides method to deserialize struct from raw bytes
 pub trait FromBytes: Sized {
