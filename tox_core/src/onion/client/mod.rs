@@ -491,6 +491,7 @@ impl OnionClient {
 
         state.paths_pool.path_nodes.put(PackedNode::new(announce_data.saddr, announce_data.pk.clone()));
 
+        let mut rng = thread_rng();
         for node in &payload.nodes {
             // skip LAN nodes if the packet wasn't received from LAN
             if !IsGlobal::is_global(&node.ip()) && is_global {
@@ -512,7 +513,7 @@ impl OnionClient {
                 continue
             };
 
-            let request_id = state.announce_requests.new_ping_id(&mut thread_rng(), AnnounceRequestData {
+            let request_id = state.announce_requests.new_ping_id(&mut rng, AnnounceRequestData {
                 pk: node.pk.clone(),
                 saddr: node.saddr,
                 path_id: path.id(),
@@ -654,6 +655,7 @@ impl OnionClient {
         );
         let mut packets_sent = false;
         let mut good_nodes_count = 0;
+        let mut rng = thread_rng();
         for node in close_nodes.iter_mut() {
             if !node.is_timed_out() {
                 good_nodes_count += 1;
@@ -696,7 +698,7 @@ impl OnionClient {
                 node.unsuccessful_pings += 1;
                 node.ping_time = clock_now();
 
-                let request_id = announce_requests.new_ping_id(&mut thread_rng(), AnnounceRequestData {
+                let request_id = announce_requests.new_ping_id(&mut rng, AnnounceRequestData {
                     pk: node.pk.clone(),
                     saddr: node.saddr,
                     path_id: path.id(),
@@ -726,7 +728,7 @@ impl OnionClient {
                     break
                 };
 
-                let request_id = announce_requests.new_ping_id(&mut thread_rng(), AnnounceRequestData {
+                let request_id = announce_requests.new_ping_id(&mut rng, AnnounceRequestData {
                     pk: node.pk.clone(),
                     saddr: node.saddr,
                     path_id: path.id(),
@@ -1254,7 +1256,7 @@ mod tests {
             path_id: path.id(),
             friend_pk: None,
         };
-        let request_id = state.announce_requests.new_ping_id(&mut thread_rng(), request_data);
+        let request_id = state.announce_requests.new_ping_id(&mut rng, request_data);
 
         drop(state);
 
@@ -1332,7 +1334,7 @@ mod tests {
             path_id: path.id(),
             friend_pk: Some(friend_pk),
         };
-        let request_id = state.announce_requests.new_ping_id(&mut thread_rng(), request_data);
+        let request_id = state.announce_requests.new_ping_id(&mut rng, request_data);
 
         drop(state);
 
@@ -1383,7 +1385,7 @@ mod tests {
             path_id: path.id(),
             friend_pk: None,
         };
-        let request_id = state.announce_requests.new_ping_id(&mut thread_rng(), request_data);
+        let request_id = state.announce_requests.new_ping_id(&mut rng, request_data);
 
         // insert request to a node to announce_requests so that it won't be pinged again
         let node_pk = SecretKey::generate(&mut rng).public_key();
@@ -1394,7 +1396,7 @@ mod tests {
             path_id: path.id(),
             friend_pk: None,
         };
-        let _node_request_id = state.announce_requests.new_ping_id(&mut thread_rng(), node_request_data);
+        let _node_request_id = state.announce_requests.new_ping_id(&mut rng, node_request_data);
 
         drop(state);
 
@@ -1461,7 +1463,7 @@ mod tests {
             path_id: path.id(),
             friend_pk: Some(friend_pk.clone()),
         };
-        let request_id = state.announce_requests.new_ping_id(&mut thread_rng(), request_data);
+        let request_id = state.announce_requests.new_ping_id(&mut rng, request_data);
 
         drop(state);
 
@@ -1534,7 +1536,7 @@ mod tests {
             path_id: path.id(),
             friend_pk: None,
         };
-        let request_id = state.announce_requests.new_ping_id(&mut thread_rng(), request_data);
+        let request_id = state.announce_requests.new_ping_id(&mut rng, request_data);
 
         drop(state);
 
@@ -1586,7 +1588,7 @@ mod tests {
             },
             friend_pk: Some(friend_pk),
         };
-        let request_id = state.announce_requests.new_ping_id(&mut thread_rng(), request_data);
+        let request_id = state.announce_requests.new_ping_id(&mut rng, request_data);
 
         drop(state);
 
@@ -1637,7 +1639,7 @@ mod tests {
             },
             friend_pk: Some(friend_pk),
         };
-        let request_id = state.announce_requests.new_ping_id(&mut thread_rng(), request_data);
+        let request_id = state.announce_requests.new_ping_id(&mut rng, request_data);
 
         drop(state);
 
@@ -1690,7 +1692,7 @@ mod tests {
             path_id: path.id(),
             friend_pk: Some(friend_pk.clone()),
         };
-        let request_id = state.announce_requests.new_ping_id(&mut thread_rng(), request_data);
+        let request_id = state.announce_requests.new_ping_id(&mut rng, request_data);
 
         // insert request to a node to announce_requests so that it won't be pinged again
         let node_pk = SecretKey::generate(&mut rng).public_key();
@@ -1701,7 +1703,7 @@ mod tests {
             path_id: path.id(),
             friend_pk: Some(friend_pk),
         };
-        let _node_request_id = state.announce_requests.new_ping_id(&mut thread_rng(), node_request_data);
+        let _node_request_id = state.announce_requests.new_ping_id(&mut rng, node_request_data);
 
         drop(state);
 

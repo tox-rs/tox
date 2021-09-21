@@ -453,9 +453,10 @@ impl NetCrypto {
             return Err(HandlePacketError::invalid_request_id(cookie_request_id, payload.id))
         }
 
-        let sent_nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
+        let mut rng = rand::thread_rng();
+        let sent_nonce = crypto_box::generate_nonce(&mut rng);
         let our_cookie = Cookie::new(connection.peer_real_pk.clone(), connection.peer_dht_pk.clone());
-        let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &self.symmetric_key, &our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&mut rng, &self.symmetric_key, &our_cookie);
         let handshake_payload = CryptoHandshakePayload {
             base_nonce: sent_nonce.into(),
             session_pk: connection.session_pk.clone(),
@@ -553,9 +554,10 @@ impl NetCrypto {
 
         connection.status = match connection.status {
             ConnectionStatus::CookieRequesting { .. } => {
-                let sent_nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
+                let mut rng = rand::thread_rng();
+                let sent_nonce = crypto_box::generate_nonce(&mut rng);
                 let our_cookie = Cookie::new(connection.peer_real_pk.clone(), connection.peer_dht_pk.clone());
-                let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &self.symmetric_key, &our_cookie);
+                let our_encrypted_cookie = EncryptedCookie::new(&mut rng, &self.symmetric_key, &our_cookie);
                 let handshake_payload = CryptoHandshakePayload {
                     base_nonce: sent_nonce.into(),
                     session_pk: connection.session_pk.clone(),
@@ -1746,7 +1748,7 @@ mod tests {
         let base_nonce = crypto_box::generate_nonce(&mut rng).into();
         let session_pk = SecretKey::generate(&mut rng).public_key();
         let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &net_crypto.symmetric_key, &our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&mut rng, &net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![43; 88]
@@ -1815,7 +1817,7 @@ mod tests {
         let base_nonce = crypto_box::generate_nonce(&mut rng).into();
         let session_pk = SecretKey::generate(&mut rng).public_key();
         let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &net_crypto.symmetric_key, &our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&mut rng, &net_crypto.symmetric_key, &our_cookie);
         let other_cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![43; 88]
@@ -1882,7 +1884,7 @@ mod tests {
         let base_nonce = crypto_box::generate_nonce(&mut rng).into();
         let session_pk = SecretKey::generate(&mut rng).public_key();
         let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &net_crypto.symmetric_key, &our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&mut rng, &net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![43; 88]
@@ -1932,7 +1934,7 @@ mod tests {
         let base_nonce = crypto_box::generate_nonce(&mut rng).into();
         let session_pk = SecretKey::generate(&mut rng).public_key();
         let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &net_crypto.symmetric_key, &our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&mut rng, &net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![43; 88]
@@ -1983,7 +1985,7 @@ mod tests {
         let session_pk = SecretKey::generate(&mut rng).public_key();
         let mut our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
         our_cookie.time -= COOKIE_TIMEOUT + 1;
-        let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &net_crypto.symmetric_key, &our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&mut rng, &net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![43; 88]
@@ -2034,7 +2036,7 @@ mod tests {
         let base_nonce = crypto_box::generate_nonce(&mut rng).into();
         let session_pk = SecretKey::generate(&mut rng).public_key();
         let our_cookie = Cookie::new(another_peer_real_pk, peer_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &net_crypto.symmetric_key, &our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&mut rng, &net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![43; 88]
@@ -2089,7 +2091,7 @@ mod tests {
         let base_nonce = crypto_box::generate_nonce(&mut rng).into();
         let session_pk = SecretKey::generate(&mut rng).public_key();
         let our_cookie = Cookie::new(peer_real_pk.clone(), new_dht_pk.clone());
-        let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &net_crypto.symmetric_key, &our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&mut rng, &net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![43; 88]
@@ -2154,7 +2156,7 @@ mod tests {
         let base_nonce = crypto_box::generate_nonce(&mut rng).into();
         let session_pk = SecretKey::generate(&mut rng).public_key();
         let our_cookie = Cookie::new(peer_real_pk.clone(), peer_dht_pk.clone());
-        let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &net_crypto.symmetric_key, &our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&mut rng, &net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![43; 88]
@@ -2235,7 +2237,7 @@ mod tests {
         let base_nonce = crypto_box::generate_nonce(&mut rng).into();
         let session_pk = SecretKey::generate(&mut rng).public_key();
         let our_cookie = Cookie::new(peer_real_pk.clone(), peer_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &net_crypto.symmetric_key, &our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&mut rng, &net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![43; 88]
@@ -2321,7 +2323,7 @@ mod tests {
         let base_nonce = crypto_box::generate_nonce(&mut rng).into();
         let session_pk = SecretKey::generate(&mut rng).public_key();
         let our_cookie = Cookie::new(peer_real_pk.clone(), new_peer_dht_pk.clone());
-        let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &net_crypto.symmetric_key, &our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&mut rng, &net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![43; 88]
@@ -2413,7 +2415,7 @@ mod tests {
         let base_nonce = crypto_box::generate_nonce(&mut rng).into();
         let session_pk = SecretKey::generate(&mut rng).public_key();
         let our_cookie = Cookie::new(peer_real_pk.clone(), peer_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &net_crypto.symmetric_key, &our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&mut rng, &net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![43; 88]
@@ -2502,7 +2504,7 @@ mod tests {
         let base_nonce = crypto_box::generate_nonce(&mut rng).into();
         let session_pk = SecretKey::generate(&mut rng).public_key();
         let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &net_crypto.symmetric_key, &our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&mut rng, &net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![43; 88]
@@ -2550,7 +2552,7 @@ mod tests {
         let base_nonce = crypto_box::generate_nonce(&mut rng).into();
         let session_pk = SecretKey::generate(&mut rng).public_key();
         let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &net_crypto.symmetric_key, &our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&mut rng, &net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![43; 88]
