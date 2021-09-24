@@ -8,6 +8,7 @@ extern crate log;
 mod node_config;
 mod motd;
 
+use std::convert::TryInto;
 use std::fs::File;
 use std::io::{ErrorKind, Read, Write};
 use std::net::SocketAddr;
@@ -16,12 +17,14 @@ use failure::Error;
 use futures::{channel::mpsc, StreamExt};
 use futures::{future, Future, TryFutureExt, FutureExt};
 use itertools::Itertools;
+use rand::thread_rng;
 use tokio::net::{TcpListener, UdpSocket};
 use tokio::runtime;
 use tox::crypto::*;
-use tox::core::dht::server::{Server as UdpServer};
+use tox::core::dht::server::Server as DhtServer;
 use tox::core::dht::server_ext::dht_run_socket;
 use tox::core::dht::lan_discovery::LanDiscoverySender;
+use tox::core::udp::Server as UdpServer;
 use tox::packet::onion::InnerOnionResponse;
 use tox::packet::relay::OnionRequest;
 use tox::core::relay::server::{Server as TcpServer, tcp_run};
@@ -78,15 +81,17 @@ fn save_keys(keys_file: &str, pk: PublicKey, sk: &SecretKey) {
         .expect("Failed to create the keys file");
 
     file.write_all(pk.as_ref()).expect("Failed to save public key to the keys file");
-    file.write_all(&sk[0..SECRETKEYBYTES]).expect("Failed to save secret key to the keys file");
+    file.write_all(sk.as_bytes()).expect("Failed to save secret key to the keys file");
 }
 
 /// Load DHT keys from a binary file.
 fn load_keys(mut file: File) -> (PublicKey, SecretKey) {
-    let mut buf = [0; PUBLICKEYBYTES + SECRETKEYBYTES];
+    let mut buf = [0; crypto_box::KEY_SIZE * 2];
     file.read_exact(&mut buf).expect("Failed to read keys from the keys file");
-    let pk = PublicKey::from_slice(&buf[..PUBLICKEYBYTES]).expect("Failed to read public key from the keys file");
-    let sk = SecretKey::from_slice(&buf[PUBLICKEYBYTES..]).expect("Failed to read secret key from the keys file");
+    let pk_bytes: [u8; crypto_box::KEY_SIZE] = buf[..crypto_box::KEY_SIZE].try_into().expect("Failed to read public key from the keys file");
+    let sk_bytes: [u8; crypto_box::KEY_SIZE] = buf[crypto_box::KEY_SIZE..].try_into().expect("Failed to read secret key from the keys file");
+    let pk = PublicKey::from(pk_bytes);
+    let sk = SecretKey::from(sk_bytes);
     assert!(pk == sk.public_key(), "The loaded public key does not correspond to the loaded secret key");
     (pk, sk)
 }
@@ -98,8 +103,9 @@ fn load_or_gen_keys(keys_file: &str) -> (PublicKey, SecretKey) {
         Ok(file) => load_keys(file),
         Err(ref e) if e.kind() == ErrorKind::NotFound => {
             info!("Generating new DHT keys and storing them to '{}'", keys_file);
-            let (pk, sk) = gen_keypair();
-            save_keys(keys_file, pk, &sk);
+            let sk = SecretKey::generate(&mut thread_rng());
+            let pk = sk.public_key();
+            save_keys(keys_file, pk.clone(), &sk);
             (pk, sk)
         },
         Err(e) => panic!("Failed to read the keys file: {}", e)
@@ -108,18 +114,18 @@ fn load_or_gen_keys(keys_file: &str) -> (PublicKey, SecretKey) {
 
 /// Run a future with the runtime specified by config.
 fn run<F>(future: F, threads: Threads)
-    where F: Future<Output = Result<(), Error>> + Send + 'static
+    where F: Future<Output = Result<(), Error>> + 'static
 {
     if threads == Threads::N(1) {
-        let mut runtime = runtime::Runtime::new().expect("Failed to create runtime");
+        let runtime = runtime::Runtime::new().expect("Failed to create runtime");
         runtime.block_on(future).expect("Execution was terminated with error");
     } else {
-        let mut builder = runtime::Builder::new();
+        let mut builder = runtime::Builder::new_multi_thread();
         match threads {
-            Threads::N(n) => { builder.core_threads(n as usize); },
+            Threads::N(n) => { builder.worker_threads(n as usize); },
             Threads::Auto => { }, // builder will detect number of cores automatically
         }
-        let mut runtime = builder
+        let runtime = builder
             .build()
             .expect("Failed to create runtime");
         runtime.block_on(future).expect("Execution was terminated with error");
@@ -231,9 +237,10 @@ async fn run_udp(config: &NodeConfig, dht_pk: PublicKey, dht_sk: &SecretKey, mut
     let (tx, rx) = mpsc::channel(DHT_CHANNEL_SIZE);
 
     let tx_clone = tx.clone();
+    let dht_pk_c = dht_pk.clone();
     let lan_discovery_future = async move {
         if config.lan_discovery_enabled {
-            LanDiscoverySender::new(tx_clone, dht_pk, udp_addr.is_ipv6())
+            LanDiscoverySender::new(tx_clone, dht_pk_c, udp_addr.is_ipv6())
                 .run()
                 .map_err(Error::from)
                 .await
@@ -243,18 +250,18 @@ async fn run_udp(config: &NodeConfig, dht_pk: PublicKey, dht_sk: &SecretKey, mut
 
     let (onion_tx, mut onion_rx) = (udp_onion.tx, udp_onion.rx);
 
-    let mut udp_server = UdpServer::new(tx, dht_pk, dht_sk.clone());
+    let mut dht_server = DhtServer::new(tx, dht_pk, dht_sk.clone());
     let counters = Counters::new(tcp_stats, udp_stats.clone());
     let motd = Motd::new(config.motd.clone(), counters);
-    udp_server.set_bootstrap_info(version(), Box::new(move |_| motd.format().as_bytes().to_owned()));
-    udp_server.enable_lan_discovery(config.lan_discovery_enabled);
-    udp_server.set_tcp_onion_sink(onion_tx);
-    udp_server.enable_ipv6_mode(udp_addr.is_ipv6());
+    dht_server.set_bootstrap_info(version(), Box::new(move |_| motd.format().as_bytes().to_owned()));
+    dht_server.enable_lan_discovery(config.lan_discovery_enabled);
+    dht_server.set_tcp_onion_sink(onion_tx);
+    dht_server.enable_ipv6_mode(udp_addr.is_ipv6());
 
-    let udp_server_c = udp_server.clone();
+    let dht_server_c = dht_server.clone();
     let udp_onion_future = async move {
         while let Some((onion_request, addr)) = onion_rx.next().await {
-            let res = udp_server_c
+            let res = dht_server_c
                 .handle_tcp_onion_request(onion_request, addr)
                 .await;
 
@@ -271,8 +278,10 @@ async fn run_udp(config: &NodeConfig, dht_pk: PublicKey, dht_sk: &SecretKey, mut
     }
 
     for node in config.bootstrap_nodes.iter().flat_map(|node| node.resolve()) {
-        udp_server.add_initial_bootstrap(node);
+        dht_server.add_initial_bootstrap(node);
     }
+
+    let udp_server = UdpServer::new(dht_server);
 
     info!("Running DHT server on {}", udp_addr);
 
@@ -284,10 +293,6 @@ async fn run_udp(config: &NodeConfig, dht_pk: PublicKey, dht_sk: &SecretKey, mut
 }
 
 fn main() {
-    if crypto_init().is_err() {
-        panic!("Crypto initialization failed.");
-    }
-
     let config = cli_parse();
 
     match config.log_type {

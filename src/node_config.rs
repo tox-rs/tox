@@ -1,3 +1,4 @@
+use std::convert::TryInto;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::num::ParseIntError;
 use std::str::FromStr;
@@ -72,7 +73,7 @@ pub struct BootstrapNode {
 impl BootstrapNode {
     /// Resolve string address of the node to possible multiple `SocketAddr`s.
     pub fn resolve(&self) -> impl Iterator<Item = PackedNode> {
-        let pk = self.pk;
+        let pk = self.pk.clone();
         let addrs = match self.addr.to_socket_addrs() {
             Ok(addrs) => addrs,
             Err(e) => {
@@ -80,7 +81,7 @@ impl BootstrapNode {
                 Vec::new().into_iter()
             },
         };
-        addrs.map(move |addr| PackedNode::new(addr, &pk))
+        addrs.map(move |addr| PackedNode::new(addr, pk.clone()))
     }
 }
 
@@ -89,8 +90,7 @@ fn de_from_hex<'de, D>(deserializer: D) -> Result<PublicKey, D::Error> where D: 
 
     let bootstrap_pk_bytes: [u8; 32] = FromHex::from_hex(s)
         .map_err(|e| de::Error::custom(format!("Can't make bytes from hex string {:?}", e)))?;
-    PublicKey::from_slice(&bootstrap_pk_bytes)
-        .ok_or_else(|| de::Error::custom("Can't make PublicKey"))
+    Ok(PublicKey::from(bootstrap_pk_bytes))
 }
 
 fn de_threads<'de, D>(deserializer: D) -> Result<Threads, D::Error> where D: Deserializer<'de> {
@@ -101,7 +101,7 @@ fn de_threads<'de, D>(deserializer: D) -> Result<Threads, D::Error> where D: Des
 }
 
 /// Config parsed from command line arguments.
-#[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct NodeConfig {
     /// UDP address to run DHT node
     #[serde(rename = "udp-address")]
@@ -302,17 +302,18 @@ fn run_derive_pk(matches: &ArgMatches) -> ! {
 
     let pk_from_arg = matches.value_of("secret-key").map(|s| {
         let sk_bytes: [u8; 32] = FromHex::from_hex(s).expect("Invalid DHT secret key");
-        let sk = SecretKey::from_slice(&sk_bytes).expect("Invalid DHT secret key");
-        sk.public_key()
+        SecretKey::from(sk_bytes).public_key()
     });
     let pk_from_file = matches.value_of("keys-file").map(|keys_file| {
         let mut file = std::fs::File::open(keys_file).expect("Failed to read the keys file");
 
-        let mut buf = [0; PUBLICKEYBYTES + SECRETKEYBYTES];
+        let mut buf = [0; crypto_box::KEY_SIZE * 2];
         use std::io::Read;
         file.read_exact(&mut buf).expect("Failed to read keys from the keys file");
-        let pk = PublicKey::from_slice(&buf[..PUBLICKEYBYTES]).expect("Failed to read public key from the keys file");
-        let sk = SecretKey::from_slice(&buf[PUBLICKEYBYTES..]).expect("Failed to read secret key from the keys file");
+        let pk_bytes: [u8; crypto_box::KEY_SIZE] = buf[..crypto_box::KEY_SIZE].try_into().expect("Failed to read public key from the keys file");
+        let sk_bytes: [u8; crypto_box::KEY_SIZE] = buf[crypto_box::KEY_SIZE..].try_into().expect("Failed to read secret key from the keys file");
+        let pk = PublicKey::from(pk_bytes);
+        let sk = SecretKey::from(sk_bytes);
         assert!(pk == sk.public_key(), "The loaded public key does not correspond to the loaded secret key");
         pk
     });
@@ -353,7 +354,7 @@ fn run_args(matches: &ArgMatches) -> NodeConfig {
 
     let sk = matches.value_of("secret-key").map(|s| {
         let sk_bytes: [u8; 32] = FromHex::from_hex(s).expect("Invalid DHT secret key");
-        SecretKey::from_slice(&sk_bytes).expect("Invalid DHT secret key")
+        SecretKey::from(sk_bytes)
     });
 
     let sk_passed_as_arg = matches.occurrences_of("secret-key") > 0;
@@ -369,7 +370,7 @@ fn run_args(matches: &ArgMatches) -> NodeConfig {
             // get PK bytes of the bootstrap node
             let bootstrap_pk_bytes: [u8; 32] = FromHex::from_hex(pk).expect("Invalid node key");
             // create PK from bytes
-            let bootstrap_pk = PublicKey::from_slice(&bootstrap_pk_bytes).expect("Invalid node key");
+            let bootstrap_pk = PublicKey::from(bootstrap_pk_bytes);
 
             BootstrapNode {
                 pk: bootstrap_pk,
@@ -481,10 +482,6 @@ mod tests {
             saddr_2,
         ]);
         let config = run_args(&matches);
-        assert_eq!(config.sk.unwrap(), {
-            let sk_bytes = <[u8; 32]>::from_hex(sk).unwrap();
-            SecretKey::from_slice(&sk_bytes).unwrap()
-        });
         assert!(config.sk_passed_as_arg);
         assert_eq!(config.udp_addr.unwrap(), saddr_1.parse().unwrap());
         assert_eq!(config.tcp_addrs, vec![saddr_2.parse().unwrap()]);
@@ -578,14 +575,14 @@ mod tests {
         let node_1 = BootstrapNode {
             pk: {
                 let pk_bytes = <[u8; 32]>::from_hex(pk_1).unwrap();
-                PublicKey::from_slice(&pk_bytes).unwrap()
+                PublicKey::from(pk_bytes)
             },
             addr: addr_1.into(),
         };
         let node_2 = BootstrapNode {
             pk: {
                 let pk_bytes = <[u8; 32]>::from_hex(pk_2).unwrap();
-                PublicKey::from_slice(&pk_bytes).unwrap()
+                PublicKey::from(pk_bytes)
             },
             addr: addr_2.into(),
         };
