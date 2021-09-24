@@ -18,3 +18,12 @@ edition = "2018"
 
 [dependencies]
 crypto_box = "0.6"
+crypto-bigint = "0.2"
+
+[dev-dependencies]
+criterion = "0.3"
+
+[[bench]]
+name = "increment_benchmark"
+path = "src/increment_benchmark.rs"
+harness = false

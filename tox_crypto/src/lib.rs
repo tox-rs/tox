@@ -2,6 +2,7 @@
 
 use crypto_box::{SalsaBox, aead::generic_array::typenum::marker_traits::Unsigned};
 use crypto_box::aead::AeadCore;
+use crypto_bigint::{Encoding, U192};
 pub use crypto_box::{PublicKey, SecretKey};
 
 pub type Nonce = [u8; <SalsaBox as AeadCore>::NonceSize::USIZE];
@@ -33,6 +34,13 @@ pub fn public_key_valid(pk: &PublicKey) -> bool {
 pub fn increment_nonce(nonce: &mut Nonce) {
     increment_nonce_number(nonce, 1)
 }
+
+// /// Inrement given nonce by number `num`.
+// pub fn increment_nonce_number(nonce: &mut Nonce, num: u16) {
+//     let left = U192::from_be_slice(nonce);
+//     let right = U192::from_u16(num);
+//     *nonce = left.wrapping_add(&right).to_be_bytes();
+// }
 
 /// Inrement given nonce by number `num`.
 pub fn increment_nonce_number(nonce: &mut Nonce, num: u16) {
