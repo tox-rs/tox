@@ -17,4 +17,4 @@ license = "GPL-3.0+"
 edition = "2018"
 
 [dependencies]
-crypto_box = "0.6"
+crypto_box = "0.7"
