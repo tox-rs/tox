@@ -5,7 +5,7 @@ publish = false
 edition = "2018"
 
 [dev-dependencies]
-tox_binary_io = { version = "0.1.1", path = "../tox_binary_io", features = ["sodium"] }
+tox_binary_io = { version = "0.1.1", path = "../tox_binary_io", features = ["crypto"] }
 tox_crypto = { version = "0.1.1", path = "../tox_crypto" }
 tox_packet = { version = "0.1.1", path = "../tox_packet" }
 tox_core = { version = "0.1.1", path = "../tox_core" }

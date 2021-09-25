@@ -3,6 +3,7 @@
 
 use super::*;
 
+use crypto_box::{SalsaBox, aead::{Aead, Error as AeadError}};
 use sha2::{Digest, Sha512};
 use sha2::digest::generic_array::typenum::marker_traits::Unsigned;
 use tox_binary_io::*;
@@ -68,15 +69,15 @@ impl ToBytes for CryptoHandshake {
 impl CryptoHandshake {
     /// Create `CryptoHandshake` from `CryptoHandshakePayload` encrypting it
     /// with `shared_key` and from `EncryptedCookie`.
-    pub fn new(shared_secret: &PrecomputedKey, payload: &CryptoHandshakePayload, cookie: EncryptedCookie) -> CryptoHandshake {
-        let nonce = gen_nonce();
+    pub fn new(shared_secret: &SalsaBox, payload: &CryptoHandshakePayload, cookie: EncryptedCookie) -> CryptoHandshake {
+        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
         let mut buf = [0; 232];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
-        let payload = seal_precomputed(&buf[..size], &nonce, shared_secret);
+        let payload = shared_secret.encrypt(&nonce, &buf[..size]).unwrap();
 
         CryptoHandshake {
             cookie,
-            nonce,
+            nonce: nonce.into(),
             payload,
         }
     }
@@ -87,9 +88,9 @@ impl CryptoHandshake {
     - fails to decrypt
     - fails to parse `CryptoHandshakePayload`
     */
-    pub fn get_payload(&self, shared_secret: &PrecomputedKey) -> Result<CryptoHandshakePayload, GetPayloadError> {
-        let decrypted = open_precomputed(&self.payload, &self.nonce, shared_secret)
-            .map_err(|()| {
+    pub fn get_payload(&self, shared_secret: &SalsaBox) -> Result<CryptoHandshakePayload, GetPayloadError> {
+        let decrypted = shared_secret.decrypt((&self.nonce).into(), self.payload.as_slice())
+            .map_err(|AeadError| {
                 GetPayloadError::decrypt()
             })?;
         match CryptoHandshakePayload::from_bytes(&decrypted) {
@@ -155,7 +156,7 @@ impl ToBytes for CryptoHandshakePayload {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_slice!(self.base_nonce.as_ref()) >>
-            gen_slice!(self.session_pk.as_ref()) >>
+            gen_slice!(self.session_pk.as_bytes()) >>
             gen_slice!(self.cookie_hash.as_ref()) >>
             gen_call!(|buf, cookie| EncryptedCookie::to_bytes(cookie, buf), &self.cookie)
         )
@@ -166,26 +167,26 @@ impl ToBytes for CryptoHandshakePayload {
 mod tests {
     use super::*;
     use nom::{Needed, Err};
+    use crypto_box::aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned};
+    use rand::thread_rng;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         crypto_handshake_encode_decode,
         CryptoHandshake {
             cookie: EncryptedCookie {
                 nonce: [42; xsalsa20poly1305::NONCE_SIZE],
                 payload: vec![42; 88],
             },
-            nonce: gen_nonce(),
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             payload: vec![42; 248],
         }
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         crypto_handshake_payload_encode_decode,
         CryptoHandshakePayload {
-            base_nonce: gen_nonce(),
-            session_pk: gen_keypair().0,
+            base_nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
+            session_pk: SecretKey::generate(&mut thread_rng()).public_key(),
             cookie_hash: [42; 64],
             cookie: EncryptedCookie {
                 nonce: [42; xsalsa20poly1305::NONCE_SIZE],
@@ -196,17 +197,17 @@ mod tests {
 
     #[test]
     fn crypto_handshake_encrypt_decrypt() {
-        crypto_init().unwrap();
-        let (_alice_pk, alice_sk) = gen_keypair();
-        let (bob_pk, _bob_sk) = gen_keypair();
-        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
+        let mut rng = thread_rng();
+        let alice_sk = SecretKey::generate(&mut rng);
+        let bob_pk = SecretKey::generate(&mut rng).public_key();
+        let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
         let cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![42; 88],
         };
         let payload = CryptoHandshakePayload {
-            base_nonce: gen_nonce(),
-            session_pk: gen_keypair().0,
+            base_nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
+            session_pk: SecretKey::generate(&mut rng).public_key(),
             cookie_hash: [42; 64],
             cookie: EncryptedCookie {
                 nonce: [42; xsalsa20poly1305::NONCE_SIZE],
@@ -223,19 +224,19 @@ mod tests {
 
     #[test]
     fn crypto_handshake_encrypt_decrypt_invalid_key() {
-        crypto_init().unwrap();
-        let (_alice_pk, alice_sk) = gen_keypair();
-        let (bob_pk, _bob_sk) = gen_keypair();
-        let (_eve_pk, eve_sk) = gen_keypair();
-        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
-        let eve_shared_secret = encrypt_precompute(&bob_pk, &eve_sk);
+        let mut rng = thread_rng();
+        let alice_sk = SecretKey::generate(&mut rng);
+        let bob_pk = SecretKey::generate(&mut rng).public_key();
+        let eve_sk = SecretKey::generate(&mut rng);
+        let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
+        let eve_shared_secret = SalsaBox::new(&bob_pk, &eve_sk);
         let cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![42; 88],
         };
         let payload = CryptoHandshakePayload {
-            base_nonce: gen_nonce(),
-            session_pk: gen_keypair().0,
+            base_nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
+            session_pk: SecretKey::generate(&mut rng).public_key(),
             cookie_hash: [42; 64],
             cookie: EncryptedCookie {
                 nonce: [42; xsalsa20poly1305::NONCE_SIZE],
@@ -252,21 +253,21 @@ mod tests {
 
     #[test]
     fn crypto_handshake_encrypt_decrypt_invalid() {
-        crypto_init().unwrap();
-        let (_alice_pk, alice_sk) = gen_keypair();
-        let (bob_pk, _bob_sk) = gen_keypair();
-        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
-        let nonce = gen_nonce();
+        let mut rng = thread_rng();
+        let alice_sk = SecretKey::generate(&mut rng);
+        let bob_pk = SecretKey::generate(&mut rng).public_key();
+        let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
+        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
         let cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![42; 88],
         };
         // Try long invalid array
         let invalid_payload = [42; 123];
-        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
+        let invalid_payload_encoded = shared_secret.encrypt(&nonce, &invalid_payload[..]).unwrap();
         let invalid_packet = CryptoHandshake {
             cookie: cookie.clone(),
-            nonce,
+            nonce: nonce.into(),
             payload: invalid_payload_encoded
         };
         let decoded_payload = invalid_packet.get_payload(&shared_secret);
@@ -277,10 +278,10 @@ mod tests {
         });
         // Try short incomplete array
         let invalid_payload = [];
-        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
+        let invalid_payload_encoded = shared_secret.encrypt(&nonce, &invalid_payload[..]).unwrap();
         let invalid_packet = CryptoHandshake {
             cookie,
-            nonce,
+            nonce: nonce.into(),
             payload: invalid_payload_encoded
         };
         let decoded_payload = invalid_packet.get_payload(&shared_secret);

@@ -87,7 +87,6 @@ mod tests {
     use super::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         file_send_request_encode_decode,
         FileSendRequest::new(1, FileType::Data, 4, FileUid([42; FILE_UID_BYTES]), "data".to_string())
     );

@@ -82,7 +82,7 @@ impl DaemonState {
             }
         };
 
-        let nodes_sender = nodes.iter()
+        let nodes_sender = nodes.into_iter()
             .map(|node| server.ping_node(node));
 
         future::join_all(nodes_sender).await;
@@ -95,6 +95,7 @@ impl DaemonState {
 mod tests {
     use super::*;
 
+    use rand::thread_rng;
     use tox_crypto::*;
     use tox_packet::dht::*;
 
@@ -112,14 +113,15 @@ mod tests {
 
     #[tokio::test]
     async fn daemon_state_serialize_deserialize() {
-        crypto_init().unwrap();
-        let (pk, sk) = gen_keypair();
+        let mut rng = thread_rng();
+        let sk = SecretKey::generate(&mut rng);
+        let pk = sk.public_key();
         let (tx, rx) = mpsc::channel(1);
-        let alice = Server::new(tx, pk, sk);
+        let alice = Server::new(tx, pk.clone(), sk);
 
         let addr_org = "1.2.3.4:1234".parse().unwrap();
-        let pk_org = gen_keypair().0;
-        let pn = PackedNode { pk: pk_org, saddr: addr_org };
+        let pk_org = SecretKey::generate(&mut rng).public_key();
+        let pn = PackedNode { pk: pk_org.clone(), saddr: addr_org };
         alice.close_nodes.write().await.try_add(pn);
 
         let serialized_vec = DaemonState::serialize_old(&alice).await;
@@ -140,7 +142,7 @@ mod tests {
         let res = DaemonState::deserialize_old(&alice, &serialized_vec[..serialized_len - 1]).await;
         let error = res.err().unwrap();
         let mut input = vec![2, 1, 2, 3, 4, 4, 210];
-        input.extend_from_slice(&pk_org.0[..PUBLICKEYBYTES - 1]);
+        input.extend_from_slice(&pk_org.as_bytes()[..crypto_box::KEY_SIZE - 1]);
         assert_eq!(*error.kind(), DeserializeErrorKind::Deserialize { error: Err::Error((
             input, NomErrorKind::Eof)), data: serialized_vec[..serialized_len - 1].to_vec() });
 

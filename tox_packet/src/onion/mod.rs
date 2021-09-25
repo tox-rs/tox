@@ -29,6 +29,7 @@ pub use self::onion_response_2::*;
 pub use self::onion_response_3::*;
 pub use self::friend_request::*;
 
+use crypto_box::{SalsaBox, aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned}};
 use tox_binary_io::*;
 use tox_crypto::*;
 use xsalsa20poly1305::{XSalsa20Poly1305, aead::{Aead, Error as AeadError}};
@@ -55,23 +56,23 @@ use nom::{
 };
 use std::io::{Error, ErrorKind};
 
-const ONION_SEND_BASE: usize = PUBLICKEYBYTES + SIZE_IPPORT + MACBYTES;
+const ONION_SEND_BASE: usize = crypto_box::KEY_SIZE + SIZE_IPPORT + <SalsaBox as AeadCore>::TagSize::USIZE;
 const ONION_SEND_1: usize = xsalsa20poly1305::NONCE_SIZE + ONION_SEND_BASE * 3;
 const MAX_ONION_DATA_SIZE: usize = ONION_MAX_PACKET_SIZE - (ONION_SEND_1 + 1); // 1 is for packet_id
-const MIN_ONION_DATA_REQUEST_SIZE: usize = 1 + PUBLICKEYBYTES + xsalsa20poly1305::NONCE_SIZE + PUBLICKEYBYTES + MACBYTES; // 1 is for packet_id
+const MIN_ONION_DATA_REQUEST_SIZE: usize = 1 + crypto_box::KEY_SIZE + xsalsa20poly1305::NONCE_SIZE + crypto_box::KEY_SIZE + <SalsaBox as AeadCore>::TagSize::USIZE; // 1 is for packet_id
 /// Maximum size in butes of Onion Data Request packet
 pub const MAX_DATA_REQUEST_SIZE: usize = MAX_ONION_DATA_SIZE - MIN_ONION_DATA_REQUEST_SIZE;
 /// Minimum size in bytes of Onion Data Response packet
-pub const MIN_ONION_DATA_RESPONSE_SIZE: usize = PUBLICKEYBYTES + MACBYTES;
+pub const MIN_ONION_DATA_RESPONSE_SIZE: usize = crypto_box::KEY_SIZE + <SalsaBox as AeadCore>::TagSize::USIZE;
 /// Maximum size in bytes of Onion Data Response inner payload
 pub const MAX_ONION_CLIENT_DATA_SIZE: usize = MAX_DATA_REQUEST_SIZE - MIN_ONION_DATA_RESPONSE_SIZE;
 
 /// Size of first `OnionReturn` struct with no inner `OnionReturn`s.
-pub const ONION_RETURN_1_SIZE: usize = xsalsa20poly1305::NONCE_SIZE + SIZE_IPPORT + MACBYTES; // 59
+pub const ONION_RETURN_1_SIZE: usize = xsalsa20poly1305::NONCE_SIZE + SIZE_IPPORT + <SalsaBox as AeadCore>::TagSize::USIZE; // 59
 /// Size of second `OnionReturn` struct with one inner `OnionReturn`.
-pub const ONION_RETURN_2_SIZE: usize = xsalsa20poly1305::NONCE_SIZE + SIZE_IPPORT + MACBYTES + ONION_RETURN_1_SIZE; // 118
+pub const ONION_RETURN_2_SIZE: usize = xsalsa20poly1305::NONCE_SIZE + SIZE_IPPORT + <SalsaBox as AeadCore>::TagSize::USIZE + ONION_RETURN_1_SIZE; // 118
 /// Size of third `OnionReturn` struct with two inner `OnionReturn`s.
-pub const ONION_RETURN_3_SIZE: usize = xsalsa20poly1305::NONCE_SIZE + SIZE_IPPORT + MACBYTES + ONION_RETURN_2_SIZE; // 177
+pub const ONION_RETURN_3_SIZE: usize = xsalsa20poly1305::NONCE_SIZE + SIZE_IPPORT + <SalsaBox as AeadCore>::TagSize::USIZE + ONION_RETURN_2_SIZE; // 177
 
 /// The maximum size of onion packet including public key, nonce, packet kind
 /// byte, onion return.
@@ -224,7 +225,6 @@ mod tests {
     const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - xsalsa20poly1305::NONCE_SIZE;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         onion_return_encode_decode,
         OnionReturn {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
@@ -233,19 +233,16 @@ mod tests {
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         announce_status_failed,
         AnnounceStatus::Failed
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         announce_status_found,
         AnnounceStatus::Found
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         announce_status_accounced,
         AnnounceStatus::Announced
     );

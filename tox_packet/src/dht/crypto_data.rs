@@ -2,6 +2,10 @@
 */
 use super::*;
 
+use crypto_box::{SalsaBox, aead::{
+    {Aead, AeadCore, Error as AeadError},
+    generic_array::typenum::marker_traits::Unsigned,
+}};
 use nom::{
     bytes::complete::take_while,
     number::complete::{be_u16, be_u32},
@@ -18,7 +22,7 @@ use crate::dht::errors::*;
 const MAX_CRYPTO_PACKET_SIZE: usize = 1400;
 
 /// The maximum size of data in packets.
-pub const MAX_CRYPTO_DATA_SIZE: usize = MAX_CRYPTO_PACKET_SIZE - MACBYTES - 11;
+pub const MAX_CRYPTO_DATA_SIZE: usize = MAX_CRYPTO_PACKET_SIZE - <SalsaBox as AeadCore>::TagSize::USIZE - 11;
 
 /// All packets will be padded a number of bytes based on this number.
 const CRYPTO_MAX_PADDING: usize = 8;
@@ -71,10 +75,10 @@ impl CryptoData {
     }
     /// Create `CryptoData` from `CryptoDataPayload` encrypting it with
     /// `shared_key`.
-    pub fn new(shared_secret: &PrecomputedKey, nonce: Nonce, payload: &CryptoDataPayload) -> CryptoData {
-        let mut buf = [0; MAX_CRYPTO_PACKET_SIZE - MACBYTES - 3];
+    pub fn new(shared_secret: &SalsaBox, nonce: Nonce, payload: &CryptoDataPayload) -> CryptoData {
+        let mut buf = [0; MAX_CRYPTO_PACKET_SIZE - <SalsaBox as AeadCore>::TagSize::USIZE - 3];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
-        let payload = seal_precomputed(&buf[..size], &nonce, shared_secret);
+        let payload = shared_secret.encrypt((&nonce).into(), &buf[..size]).unwrap();
         let nonce_last_bytes = CryptoData::nonce_last_bytes(nonce);
 
         CryptoData {
@@ -89,9 +93,9 @@ impl CryptoData {
     - fails to decrypt
     - fails to parse `CryptoDataPayload`
     */
-    pub fn get_payload(&self, shared_secret: &PrecomputedKey, nonce: &Nonce) -> Result<CryptoDataPayload, GetPayloadError> {
-        let decrypted = open_precomputed(&self.payload, nonce, shared_secret)
-            .map_err(|()| {
+    pub fn get_payload(&self, shared_secret: &SalsaBox, nonce: &Nonce) -> Result<CryptoDataPayload, GetPayloadError> {
+        let decrypted = shared_secret.decrypt(nonce.into(), self.payload.as_slice())
+            .map_err(|AeadError| {
                 GetPayloadError::decrypt()
             })?;
         match CryptoDataPayload::from_bytes(&decrypted) {
@@ -151,9 +155,9 @@ impl ToBytes for CryptoDataPayload {
 mod tests {
     use super::*;
     use nom::{Err, error::ErrorKind};
+    use rand::thread_rng;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         crypto_data_encode_decode,
         CryptoData {
             nonce_last_bytes: 42,
@@ -162,7 +166,6 @@ mod tests {
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         crypto_data_payload_encode_decode,
         CryptoDataPayload {
             buffer_start: 12345,
@@ -172,7 +175,6 @@ mod tests {
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         crypto_data_payload_encode_decode_empty,
         CryptoDataPayload {
             buffer_start: 0,
@@ -183,11 +185,11 @@ mod tests {
 
     #[test]
     fn crypto_data_encrypt_decrypt() {
-        crypto_init().unwrap();
-        let (_alice_pk, alice_sk) = gen_keypair();
-        let (bob_pk, _bob_sk) = gen_keypair();
-        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
-        let nonce = gen_nonce();
+        let mut rng = thread_rng();
+        let alice_sk = SecretKey::generate(&mut rng);
+        let bob_pk = SecretKey::generate(&mut rng).public_key();
+        let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
+        let nonce = crypto_box::generate_nonce(&mut rng).into();
         let payload = CryptoDataPayload {
             buffer_start: 12345,
             packet_number: 54321,
@@ -197,7 +199,7 @@ mod tests {
         let crypto_data = CryptoData::new(&shared_secret, nonce, &payload);
         // payload length should be gradual
         assert_eq!(
-            (crypto_data.payload.len() - MACBYTES - 8) % CRYPTO_MAX_PADDING,
+            (crypto_data.payload.len() - <SalsaBox as AeadCore>::TagSize::USIZE - 8) % CRYPTO_MAX_PADDING,
             MAX_CRYPTO_DATA_SIZE % CRYPTO_MAX_PADDING
         );
         // decode payload with shared secret
@@ -208,13 +210,13 @@ mod tests {
 
     #[test]
     fn crypto_data_encrypt_decrypt_invalid_key() {
-        crypto_init().unwrap();
-        let (_alice_pk, alice_sk) = gen_keypair();
-        let (bob_pk, _bob_sk) = gen_keypair();
-        let (_eve_pk, eve_sk) = gen_keypair();
-        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
-        let eve_shared_secret = encrypt_precompute(&bob_pk, &eve_sk);
-        let nonce = gen_nonce();
+        let mut rng = thread_rng();
+        let alice_sk = SecretKey::generate(&mut rng);
+        let bob_pk = SecretKey::generate(&mut rng).public_key();
+        let eve_sk = SecretKey::generate(&mut rng);
+        let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
+        let eve_shared_secret = SalsaBox::new(&bob_pk, &eve_sk);
+        let nonce = crypto_box::generate_nonce(&mut rng).into();
         let payload = CryptoDataPayload {
             buffer_start: 12345,
             packet_number: 54321,
@@ -224,7 +226,7 @@ mod tests {
         let crypto_data = CryptoData::new(&shared_secret, nonce, &payload);
         // payload length should be gradual
         assert_eq!(
-            (crypto_data.payload.len() - MACBYTES - 8) % CRYPTO_MAX_PADDING,
+            (crypto_data.payload.len() - <SalsaBox as AeadCore>::TagSize::USIZE - 8) % CRYPTO_MAX_PADDING,
             MAX_CRYPTO_DATA_SIZE % CRYPTO_MAX_PADDING
         );
         // try to decode payload with eve's shared secret
@@ -235,20 +237,20 @@ mod tests {
 
     #[test]
     fn crypto_data_encrypt_decrypt_invalid() {
-        crypto_init().unwrap();
-        let (_alice_pk, alice_sk) = gen_keypair();
-        let (bob_pk, _bob_sk) = gen_keypair();
-        let shared_secret = encrypt_precompute(&bob_pk, &alice_sk);
-        let nonce = gen_nonce();
-        let nonce_last_bytes = CryptoData::nonce_last_bytes(nonce);
+        let mut rng = thread_rng();
+        let alice_sk = SecretKey::generate(&mut rng);
+        let bob_pk = SecretKey::generate(&mut rng).public_key();
+        let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
+        let nonce = crypto_box::generate_nonce(&mut rng);
+        let nonce_last_bytes = CryptoData::nonce_last_bytes(nonce.into());
         // Try short incomplete array
         let invalid_payload = [];
-        let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);
+        let invalid_payload_encoded = shared_secret.encrypt(&nonce, &invalid_payload[..]).unwrap();
         let invalid_packet = CryptoData {
             nonce_last_bytes,
             payload: invalid_payload_encoded
         };
-        let decoded_payload = invalid_packet.get_payload(&shared_secret, &nonce);
+        let decoded_payload = invalid_packet.get_payload(&shared_secret, &nonce.into());
         let error = decoded_payload.err().unwrap();
         assert_eq!(*error.kind(), GetPayloadErrorKind::Deserialize { error: Err::Error((vec![], ErrorKind::Eof)), payload: invalid_payload.to_vec() });
     }

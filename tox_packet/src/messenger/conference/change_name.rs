@@ -88,7 +88,6 @@ mod tests {
     use super::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         change_name_encode_decode,
         ChangeName::new(1, 2, 3, "1234".to_owned())
     );

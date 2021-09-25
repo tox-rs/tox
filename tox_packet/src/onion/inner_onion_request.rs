@@ -37,25 +37,25 @@ impl FromBytes for InnerOnionRequest {
 
 #[cfg(test)]
 mod tests {
+    use rand::thread_rng;
+
     use super::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         inner_onion_announce_request_encode_decode,
         InnerOnionRequest::InnerOnionAnnounceRequest(InnerOnionAnnounceRequest {
-            nonce: gen_nonce(),
-            pk: gen_keypair().0,
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
+            pk: SecretKey::generate(&mut thread_rng()).public_key(),
             payload: vec![42; 123]
         })
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         inner_onion_data_request_encode_decode,
         InnerOnionRequest::InnerOnionDataRequest(InnerOnionDataRequest {
-            destination_pk: gen_keypair().0,
-            nonce: gen_nonce(),
-            temporary_pk: gen_keypair().0,
+            destination_pk: SecretKey::generate(&mut thread_rng()).public_key(),
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
+            temporary_pk: SecretKey::generate(&mut thread_rng()).public_key(),
             payload: vec![42; 123]
         })
     );

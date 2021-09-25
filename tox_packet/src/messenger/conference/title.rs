@@ -72,7 +72,6 @@ mod tests {
     use super::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         title_encode_decode,
         Title::new(1, "1234".to_owned())
     );

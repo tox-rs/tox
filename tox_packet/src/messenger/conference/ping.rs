@@ -71,7 +71,6 @@ mod tests {
     use super::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         ping_encode_decode,
         Ping::new(1, 2, 3)
     );

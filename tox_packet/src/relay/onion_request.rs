@@ -3,6 +3,7 @@
 
 use super::*;
 
+use crypto_box::{SalsaBox, aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned}};
 use tox_binary_io::*;
 use tox_crypto::*;
 use crate::ip_port::*;
@@ -15,11 +16,11 @@ use nom::combinator::rest;
 
 /// Encrypted payload should contain `IpPort`, `PublicKey` and inner encrypted
 /// payload that should contain at least `IpPort` struct.
-const ONION_MIN_PAYLOAD_SIZE: usize = (SIZE_IPPORT + MACBYTES) * 2 + PUBLICKEYBYTES;
+const ONION_MIN_PAYLOAD_SIZE: usize = (SIZE_IPPORT + <SalsaBox as AeadCore>::TagSize::USIZE) * 2 + crypto_box::KEY_SIZE;
 
 /// `OnionRequest1` packet with encrypted payload from `OnionRequest` packet
 /// shouldn't be bigger than `ONION_MAX_PACKET_SIZE`.
-const ONION_MAX_PAYLOAD_SIZE: usize = ONION_MAX_PACKET_SIZE - (1 + NONCEBYTES + PUBLICKEYBYTES + ONION_RETURN_1_SIZE);
+const ONION_MAX_PAYLOAD_SIZE: usize = ONION_MAX_PACKET_SIZE - (1 + NONCEBYTES + crypto_box::KEY_SIZE + ONION_RETURN_1_SIZE);
 
 /** Sent by client to server.
 The server will pack payload from this request to `OnionRequest1` packet and send
@@ -87,19 +88,20 @@ impl ToBytes for OnionRequest {
 
 #[cfg(test)]
 mod test {
+    use rand::thread_rng;
+
     use super::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         onion_request_encode_decode,
         OnionRequest {
-            nonce: gen_nonce(),
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             ip_port: IpPort {
                 protocol: ProtocolType::Tcp,
                 ip_addr: "5.6.7.8".parse().unwrap(),
                 port: 12345,
             },
-            temporary_pk: gen_keypair().0,
+            temporary_pk: SecretKey::generate(&mut thread_rng()).public_key(),
             payload: vec![42; ONION_MIN_PAYLOAD_SIZE]
         }
     );

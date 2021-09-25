@@ -24,6 +24,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::u16;
 
+use crypto_box::SalsaBox;
 use failure::Fail;
 use futures::{TryFutureExt, SinkExt};
 use futures::future;
@@ -251,12 +252,12 @@ impl NetCrypto {
             return;
         }
 
-        let dht_precomputed_key = precompute(&peer_dht_pk, &self.dht_sk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &self.dht_sk);
         let connection = CryptoConnection::new(
             &dht_precomputed_key,
-            self.dht_pk,
-            self.real_pk,
-            peer_real_pk,
+            self.dht_pk.clone(),
+            self.real_pk.clone(),
+            peer_real_pk.clone(),
             peer_dht_pk
         );
         let connection = Arc::new(RwLock::new(connection));
@@ -281,7 +282,7 @@ impl NetCrypto {
     async fn send_connection_status(&self, connection: &CryptoConnection, status: bool) -> Result<(), mpsc::SendError> {
         if connection.is_established() != status {
             let tx = (&*self.connection_status_tx.read().await).clone();
-            maybe_send_unbounded(tx, (connection.peer_real_pk, status)).await
+            maybe_send_unbounded(tx, (connection.peer_real_pk.clone(), status)).await
         } else {
             Ok(())
         }
@@ -397,17 +398,17 @@ impl NetCrypto {
 
     /// Create `CookieResponse` packet with `Cookie` requested by `CookieRequest` packet
     async fn handle_cookie_request(&self, packet: &CookieRequest) -> Result<CookieResponse, HandlePacketError> {
-        let payload = packet.get_payload(&self.precomputed_keys.get(packet.pk).await)
+        let payload = packet.get_payload(&self.precomputed_keys.get(packet.pk.clone()).await)
             .map_err(|e| e.context(HandlePacketErrorKind::GetPayload))?;
 
-        let cookie = Cookie::new(payload.pk, packet.pk);
+        let cookie = Cookie::new(payload.pk, packet.pk.clone());
         let encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &self.symmetric_key, &cookie);
 
         let response_payload = CookieResponsePayload {
             cookie: encrypted_cookie,
             id: payload.id,
         };
-        let precomputed_key = precompute(&packet.pk, &self.dht_sk);
+        let precomputed_key = SalsaBox::new(&packet.pk, &self.dht_sk);
         let response = CookieResponse::new(&precomputed_key, &response_payload);
 
         Ok(response)
@@ -443,7 +444,7 @@ impl NetCrypto {
             return Err(HandlePacketError::from(HandlePacketErrorKind::InvalidState))
         };
 
-        let payload = match packet.get_payload(&self.precomputed_keys.get(connection.peer_dht_pk).await) {
+        let payload = match packet.get_payload(&self.precomputed_keys.get(connection.peer_dht_pk.clone()).await) {
             Ok(payload) => payload,
             Err(e) => return Err(e.context(HandlePacketErrorKind::GetPayload).into()),
         };
@@ -452,19 +453,20 @@ impl NetCrypto {
             return Err(HandlePacketError::invalid_request_id(cookie_request_id, payload.id))
         }
 
-        let sent_nonce = gen_nonce();
-        let our_cookie = Cookie::new(connection.peer_real_pk, connection.peer_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &self.symmetric_key, &our_cookie);
+        let mut rng = rand::thread_rng();
+        let sent_nonce = crypto_box::generate_nonce(&mut rng);
+        let our_cookie = Cookie::new(connection.peer_real_pk.clone(), connection.peer_dht_pk.clone());
+        let our_encrypted_cookie = EncryptedCookie::new(&mut rng, &self.symmetric_key, &our_cookie);
         let handshake_payload = CryptoHandshakePayload {
-            base_nonce: sent_nonce,
-            session_pk: connection.session_pk,
+            base_nonce: sent_nonce.into(),
+            session_pk: connection.session_pk.clone(),
             cookie_hash: payload.cookie.hash(),
             cookie: our_encrypted_cookie,
         };
-        let handshake = CryptoHandshake::new(&precompute(&connection.peer_real_pk, &self.real_sk), &handshake_payload, payload.cookie);
+        let handshake = CryptoHandshake::new(&SalsaBox::new(&connection.peer_real_pk, &self.real_sk), &handshake_payload, payload.cookie);
 
         connection.status = ConnectionStatus::HandshakeSending {
-            sent_nonce,
+            sent_nonce: sent_nonce.into(),
             packet: StatusPacketWithTime::new_crypto_handshake(handshake)
         };
 
@@ -487,7 +489,7 @@ impl NetCrypto {
     /// Handle `CookieResponse` packet received from TCP socket
     pub async fn handle_tcp_cookie_response(&self, packet: &CookieResponse, sender_pk: PublicKey)
         -> Result<(), HandlePacketError> {
-        let connection = self.connection_by_dht_key(sender_pk).await;
+        let connection = self.connection_by_dht_key(sender_pk.clone()).await;
         if let Some(connection) = connection {
             let mut connection = connection.write().await;
             self.handle_cookie_response(&mut connection, packet).await
@@ -500,7 +502,7 @@ impl NetCrypto {
     /// - cookie is not timed out
     /// - hash for the cookie inside the payload is correct
     fn validate_crypto_handshake(&self, packet: &CryptoHandshake)
-        -> Result<(Cookie, CryptoHandshakePayload, PrecomputedKey), HandlePacketError> {
+        -> Result<(Cookie, CryptoHandshakePayload, SalsaBox), HandlePacketError> {
         let cookie = match packet.cookie.get_payload(&self.symmetric_key) {
             Ok(cookie) => cookie,
             Err(e) => return Err(e.context(HandlePacketErrorKind::GetPayload).into()),
@@ -510,7 +512,7 @@ impl NetCrypto {
             return Err(HandlePacketErrorKind::CookieTimedOut.into());
         }
 
-        let real_precomputed_key = precompute(&cookie.real_pk, &self.real_sk);
+        let real_precomputed_key = SalsaBox::new(&cookie.real_pk, &self.real_sk);
 
         let payload = match packet.get_payload(&real_precomputed_key) {
             Ok(payload) => payload,
@@ -540,7 +542,7 @@ impl NetCrypto {
             return Err(HandlePacketError::from(HandlePacketErrorKind::InvalidRealPk))
         }
         if cookie.dht_pk != connection.peer_dht_pk {
-            let msg = (connection.peer_real_pk, cookie.dht_pk);
+            let msg = (connection.peer_real_pk.clone(), cookie.dht_pk);
 
             let dht_pk_future = maybe_send_unbounded(self.dht_pk_tx.read().await.clone(), msg)
                 .map_err(|e| e.context(HandlePacketErrorKind::SendToDhtpk).into());
@@ -552,20 +554,21 @@ impl NetCrypto {
 
         connection.status = match connection.status {
             ConnectionStatus::CookieRequesting { .. } => {
-                let sent_nonce = gen_nonce();
-                let our_cookie = Cookie::new(connection.peer_real_pk, connection.peer_dht_pk);
-                let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &self.symmetric_key, &our_cookie);
+                let mut rng = rand::thread_rng();
+                let sent_nonce = crypto_box::generate_nonce(&mut rng);
+                let our_cookie = Cookie::new(connection.peer_real_pk.clone(), connection.peer_dht_pk.clone());
+                let our_encrypted_cookie = EncryptedCookie::new(&mut rng, &self.symmetric_key, &our_cookie);
                 let handshake_payload = CryptoHandshakePayload {
-                    base_nonce: sent_nonce,
-                    session_pk: connection.session_pk,
+                    base_nonce: sent_nonce.into(),
+                    session_pk: connection.session_pk.clone(),
                     cookie_hash: payload.cookie.hash(),
                     cookie: our_encrypted_cookie,
                 };
                 let handshake = CryptoHandshake::new(&real_precomputed_key, &handshake_payload, payload.cookie);
                 ConnectionStatus::NotConfirmed {
-                    sent_nonce,
+                    sent_nonce: sent_nonce.into(),
                     received_nonce: payload.base_nonce,
-                    session_precomputed_key: precompute(&payload.session_pk, &connection.session_sk),
+                    session_precomputed_key: SalsaBox::new(&payload.session_pk, &connection.session_sk),
                     packet: StatusPacketWithTime::new_crypto_handshake(handshake)
                 }
             },
@@ -573,7 +576,7 @@ impl NetCrypto {
             | ConnectionStatus::NotConfirmed { sent_nonce, ref packet, .. } => ConnectionStatus::NotConfirmed {
                 sent_nonce,
                 received_nonce: payload.base_nonce,
-                session_precomputed_key: precompute(&payload.session_pk, &connection.session_sk),
+                session_precomputed_key: SalsaBox::new(&payload.session_pk, &connection.session_sk),
                 packet: packet.clone()
             },
             ConnectionStatus::Established { .. } => unreachable!("Checked for Established status above"),
@@ -632,8 +635,8 @@ impl NetCrypto {
 
         let mut connection = CryptoConnection::new_not_confirmed(
             &self.real_sk,
-            cookie.real_pk,
-            cookie.dht_pk,
+            cookie.real_pk.clone(),
+            cookie.dht_pk.clone(),
             payload.base_nonce,
             payload.session_pk,
             payload.cookie,
@@ -641,10 +644,10 @@ impl NetCrypto {
         );
         if let Some(addr) = addr {
             connection.set_udp_addr(addr);
-            self.keys_by_addr.write().await.insert((addr.ip(), addr.port()), cookie.real_pk);
+            self.keys_by_addr.write().await.insert((addr.ip(), addr.port()), cookie.real_pk.clone());
         }
         let connection = Arc::new(RwLock::new(connection));
-        connections.insert(cookie.real_pk, connection);
+        connections.insert(cookie.real_pk.clone(), connection);
 
         let msg = (cookie.real_pk, cookie.dht_pk);
         maybe_send_unbounded(self.dht_pk_tx.read().await.clone(), msg).await
@@ -759,7 +762,7 @@ impl NetCrypto {
         let mut tx = self.lossless_tx.clone();
 
         while let Some(packet) = recv_array.pop_front() {
-            tx.send((pk, packet.data)).await?;
+            tx.send((pk.clone(), packet.data)).await?;
         }
 
         Ok(())
@@ -824,7 +827,7 @@ impl NetCrypto {
         let cur_last_bytes = CryptoData::nonce_last_bytes(received_nonce);
         let (diff, _) = packet.nonce_last_bytes.overflowing_sub(cur_last_bytes);
         let mut packet_nonce = received_nonce;
-        increment_nonce_number(&mut packet_nonce, u64::from(diff));
+        increment_nonce_number(&mut packet_nonce, diff);
 
         let payload = match packet.get_payload(&session_precomputed_key, &packet_nonce) {
             Ok(payload) => payload,
@@ -851,17 +854,17 @@ impl NetCrypto {
         if packet_id == PACKET_ID_KILL {
             // Kill the connection
             self.connections.write().await.remove(&connection.peer_real_pk);
-            self.clear_keys_by_addr(&connection).await;
-            return self.send_connection_status(&connection, false)
+            self.clear_keys_by_addr(connection).await;
+            return self.send_connection_status(connection, false)
                 .map_err(|e| e.context(HandlePacketErrorKind::SendToConnectionStatus).into()).await;
         }
 
         // Update nonce if diff is big enough
         if diff > NONCE_DIFF_THRESHOLD * 2 {
-            increment_nonce_number(&mut received_nonce, u64::from(NONCE_DIFF_THRESHOLD));
+            increment_nonce_number(&mut received_nonce, NONCE_DIFF_THRESHOLD);
         }
 
-        self.send_connection_status(&connection, true).await
+        self.send_connection_status(connection, true).await
             .map_err(|e| e.context(HandlePacketErrorKind::SendToConnectionStatus))?;
 
         connection.status = ConnectionStatus::Established {
@@ -886,14 +889,14 @@ impl NetCrypto {
                 return Err(e.context(HandlePacketErrorKind::PacketsArrayError).into())
             }
             connection.packets_received += 1;
-            self.process_ready_lossless_packets(&mut connection.recv_array, connection.peer_real_pk).await
+            self.process_ready_lossless_packets(&mut connection.recv_array, connection.peer_real_pk.clone()).await
                 .map_err(|e| e.context(HandlePacketErrorKind::SendToLossless))?;
         } else if (PACKET_ID_LOSSY_RANGE_START..=PACKET_ID_LOSSY_RANGE_END).contains(&packet_id) {
             // Update end index of received buffer ignoring the error - we still
             // want to handle this packet even if connection is too slow
             connection.recv_array.set_buffer_end(payload.packet_number).ok();
             let mut tx = self.lossy_tx.clone();
-            let peer_real_pk = connection.peer_real_pk;
+            let peer_real_pk = connection.peer_real_pk.clone();
             let data = payload.data.clone();
 
             tx.send((peer_real_pk, data)).await
@@ -927,7 +930,7 @@ impl NetCrypto {
 
     /// Handle `CryptoData` packet received from TCP socket
     pub async fn handle_tcp_crypto_data(&self, packet: &CryptoData, sender_pk: PublicKey) -> Result<(), HandlePacketError> {
-        if let Some(connection) = self.connection_by_dht_key(sender_pk).await {
+        if let Some(connection) = self.connection_by_dht_key(sender_pk.clone()).await {
             let mut connection = connection.write().await;
             self.handle_crypto_data(&mut connection, packet, /* udp */ false).await
         } else {
@@ -961,7 +964,7 @@ impl NetCrypto {
         };
 
         let tcp_tx = self.tcp_tx.read().await.clone();
-        maybe_send_bounded(tcp_tx, (packet.into(), connection.peer_dht_pk)).await
+        maybe_send_bounded(tcp_tx, (packet.into(), connection.peer_dht_pk.clone())).await
             .map_err(|e| e.context(SendPacketErrorKind::Tcp).into())
     }
 
@@ -1029,7 +1032,7 @@ impl NetCrypto {
         let mut to_remove = Vec::new();
 
         // Only one cycle over all connections to prevent many lock acquirements
-        for (&pk, connection) in connections.iter() {
+        for (pk, connection) in connections.iter() {
             let mut connection = connection.write().await;
 
             if connection.is_timed_out() {
@@ -1049,7 +1052,7 @@ impl NetCrypto {
                     self.send_kill_packet(&mut connection).await?;
                 }
 
-                to_remove.push(pk);
+                to_remove.push(pk.clone());
             }
 
             self.send_status_packet(&mut connection).await
@@ -1138,6 +1141,7 @@ mod tests {
     use super::{*, Packet};
     use futures::{Future, StreamExt};
     use rand::{CryptoRng, Rng};
+    use crypto_box::{SalsaBox, aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned}};
 
     impl NetCrypto {
         pub async fn has_friend(&self, pk: &PublicKey) -> bool {
@@ -1146,7 +1150,7 @@ mod tests {
 
         pub async fn connection_dht_pk(&self, pk: &PublicKey) -> Option<PublicKey> {
             if let Some(connection) = self.connections.read().await.get(pk) {
-                Some(connection.read().await.peer_dht_pk)
+                Some(connection.read().await.peer_dht_pk.clone())
             } else {
                 None
             }
@@ -1166,10 +1170,16 @@ mod tests {
             peer_real_pk: PublicKey,
             sent_nonce: Nonce,
             received_nonce: Nonce,
-            session_precomputed_key: PrecomputedKey
+            session_precomputed_key: SalsaBox
         ) {
-            let dht_precomputed_key = precompute(&peer_dht_pk, &self.dht_sk);
-            let mut connection = CryptoConnection::new(&dht_precomputed_key, self.dht_pk, self.real_pk, peer_real_pk, peer_dht_pk);
+            let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &self.dht_sk);
+            let mut connection = CryptoConnection::new(
+                &dht_precomputed_key,
+                self.dht_pk.clone(),
+                self.real_pk.clone(),
+                peer_real_pk.clone(),
+                peer_dht_pk,
+            );
             connection.status = ConnectionStatus::Established {
                 sent_nonce,
                 received_nonce,
@@ -1185,7 +1195,7 @@ mod tests {
 
         pub async fn get_session_pk(&self, friend_pk: &PublicKey) -> Option<PublicKey> {
             if let Some(connection) = self.connections.read().await.get(friend_pk) {
-                Some(connection.read().await.session_pk)
+                Some(connection.read().await.session_pk.clone())
             } else {
                 None
             }
@@ -1194,12 +1204,14 @@ mod tests {
 
     #[tokio::test]
     async fn add_remove_friend() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
@@ -1212,25 +1224,27 @@ mod tests {
             precomputed_keys,
         });
 
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
 
-        net_crypto.add_friend(peer_real_pk).await;
+        net_crypto.add_friend(peer_real_pk.clone()).await;
         assert!(net_crypto.friends.read().await.contains(&peer_real_pk));
-        net_crypto.remove_friend(peer_real_pk).await;
+        net_crypto.remove_friend(peer_real_pk.clone()).await;
         assert!(!net_crypto.friends.read().await.contains(&peer_real_pk));
     }
 
     #[tokio::test]
     async fn handle_cookie_request() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
@@ -1246,10 +1260,10 @@ mod tests {
         let cookie_request_id = 12345;
 
         let cookie_request_payload = CookieRequestPayload {
-            pk: peer_real_pk,
+            pk: peer_real_pk.clone(),
             id: cookie_request_id,
         };
-        let cookie_request = CookieRequest::new(&precomputed_key, &peer_dht_pk, &cookie_request_payload);
+        let cookie_request = CookieRequest::new(&precomputed_key, peer_dht_pk.clone(), &cookie_request_payload);
 
         let cookie_response = net_crypto.handle_cookie_request(&cookie_request).await.unwrap();
         let cookie_response_payload = cookie_response.get_payload(&precomputed_key).unwrap();
@@ -1263,12 +1277,14 @@ mod tests {
 
     #[tokio::test]
     async fn handle_cookie_request_invalid() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
@@ -1282,8 +1298,8 @@ mod tests {
         });
 
         let cookie_request = CookieRequest {
-            pk: gen_keypair().0,
-            nonce: gen_nonce(),
+            pk: SecretKey::generate(&mut rng).public_key(),
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             payload: vec![42; 88]
         };
 
@@ -1294,15 +1310,17 @@ mod tests {
 
     #[tokio::test]
     async fn handle_udp_cookie_request() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
@@ -1318,10 +1336,10 @@ mod tests {
         let cookie_request_id = 12345;
 
         let cookie_request_payload = CookieRequestPayload {
-            pk: peer_real_pk,
+            pk: peer_real_pk.clone(),
             id: cookie_request_id,
         };
-        let cookie_request = CookieRequest::new(&precomputed_key, &peer_dht_pk, &cookie_request_payload);
+        let cookie_request = CookieRequest::new(&precomputed_key, peer_dht_pk.clone(), &cookie_request_payload);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
 
@@ -1344,15 +1362,17 @@ mod tests {
 
     #[tokio::test]
     async fn handle_tcp_cookie_request() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
@@ -1371,12 +1391,12 @@ mod tests {
         let cookie_request_id = 12345;
 
         let cookie_request_payload = CookieRequestPayload {
-            pk: peer_real_pk,
+            pk: peer_real_pk.clone(),
             id: cookie_request_id,
         };
-        let cookie_request = CookieRequest::new(&precomputed_key, &peer_dht_pk, &cookie_request_payload);
+        let cookie_request = CookieRequest::new(&precomputed_key, peer_dht_pk.clone(), &cookie_request_payload);
 
-        net_crypto.handle_tcp_cookie_request(&cookie_request, peer_dht_pk).await.unwrap();
+        net_crypto.handle_tcp_cookie_request(&cookie_request, peer_dht_pk.clone()).await.unwrap();
 
         let (received, _net_crypto_tcp_rx) = net_crypto_tcp_rx.into_future().await;
         let (packet, pk_to_send) = received.unwrap();
@@ -1395,12 +1415,14 @@ mod tests {
 
     #[tokio::test]
     async fn handle_udp_cookie_request_invalid() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
@@ -1414,8 +1436,8 @@ mod tests {
         });
 
         let cookie_request = CookieRequest {
-            pk: gen_keypair().0,
-            nonce: gen_nonce(),
+            pk: SecretKey::generate(&mut rng).public_key(),
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             payload: vec![42; 88]
         };
 
@@ -1428,28 +1450,31 @@ mod tests {
 
     #[tokio::test]
     async fn handle_cookie_response() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_sk = SecretKey::generate(&mut rng);
+        let peer_real_pk = peer_real_sk.public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk.clone(), peer_real_pk, peer_dht_pk);
 
         let cookie_request_id = unpack!(connection.status, ConnectionStatus::CookieRequesting, cookie_request_id);
 
@@ -1469,18 +1494,20 @@ mod tests {
         let packet = unpack!(packet.packet, StatusPacket::CryptoHandshake);
         assert_eq!(packet.cookie, cookie);
 
-        let payload = packet.get_payload(&precompute(&real_pk, &peer_real_sk)).unwrap();
+        let payload = packet.get_payload(&SalsaBox::new(&real_pk, &peer_real_sk)).unwrap();
         assert_eq!(payload.cookie_hash, cookie.hash());
     }
 
     #[tokio::test]
     async fn handle_cookie_response_invalid_status() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
@@ -1493,14 +1520,14 @@ mod tests {
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
         let mut connection = CryptoConnection::new_not_confirmed(
             &real_sk,
             peer_real_pk,
-            peer_dht_pk,
-            gen_nonce(),
-            gen_keypair().0,
+            peer_dht_pk.clone(),
+            [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
+            SecretKey::generate(&mut rng).public_key(),
             EncryptedCookie {
                 nonce: [42; xsalsa20poly1305::NONCE_SIZE],
                 payload: vec![42; 88]
@@ -1516,7 +1543,7 @@ mod tests {
             cookie,
             id: 12345
         };
-        let cookie_response = CookieResponse::new(&precompute(&peer_dht_pk, &dht_sk), &cookie_response_payload);
+        let cookie_response = CookieResponse::new(&SalsaBox::new(&peer_dht_pk, &dht_sk), &cookie_response_payload);
 
         let res = net_crypto.handle_cookie_response(&mut connection, &cookie_response).await;
         assert!(res.is_err());
@@ -1525,27 +1552,29 @@ mod tests {
 
     #[tokio::test]
     async fn handle_cookie_response_invalid_request_id() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let cookie_request_id = unpack!(connection.status, ConnectionStatus::CookieRequesting, cookie_request_id);
@@ -1568,36 +1597,39 @@ mod tests {
         R: Future<Output=NetCrypto>,
         F: Fn(NetCrypto, CookieResponse, SocketAddr, PublicKey) -> R
     {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_sk = SecretKey::generate(&mut rng);
+        let peer_real_pk = peer_real_sk.public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk.clone(), peer_real_pk.clone(), peer_dht_pk.clone());
 
         let cookie_request_id = unpack!(connection.status, ConnectionStatus::CookieRequesting, cookie_request_id);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.set_udp_addr(addr);
 
-        net_crypto.connections.write().await.insert(peer_real_pk, Arc::new(RwLock::new(connection)));
-        net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk);
+        net_crypto.connections.write().await.insert(peer_real_pk.clone(), Arc::new(RwLock::new(connection)));
+        net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk.clone());
 
         let cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
@@ -1618,7 +1650,7 @@ mod tests {
         let packet = unpack!(packet.packet, StatusPacket::CryptoHandshake);
         assert_eq!(packet.cookie, cookie);
 
-        let payload = packet.get_payload(&precompute(&real_pk, &peer_real_sk)).unwrap();
+        let payload = packet.get_payload(&SalsaBox::new(&real_pk, &peer_real_sk)).unwrap();
         assert_eq!(payload.cookie_hash, cookie.hash());
     }
 
@@ -1644,12 +1676,14 @@ mod tests {
 
     #[tokio::test]
     async fn handle_udp_cookie_response_no_connection() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
@@ -1662,8 +1696,8 @@ mod tests {
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
 
@@ -1684,34 +1718,37 @@ mod tests {
 
     #[tokio::test]
     async fn handle_crypto_handshake_in_cookie_requesting_status() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_sk = SecretKey::generate(&mut rng);
+        let peer_real_pk = peer_real_sk.public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk.clone(), peer_real_pk.clone(), peer_dht_pk.clone());
 
-        let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
-        let base_nonce = gen_nonce();
-        let session_pk = gen_keypair().0;
+        let real_precomputed_key = SalsaBox::new(&real_pk, &peer_real_sk);
+        let base_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let session_pk = SecretKey::generate(&mut rng).public_key();
         let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &net_crypto.symmetric_key, &our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&mut rng, &net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![43; 88]
@@ -1739,12 +1776,14 @@ mod tests {
 
     #[tokio::test]
     async fn handle_crypto_handshake_in_not_confirmed_status() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
@@ -1752,32 +1791,33 @@ mod tests {
             lossy_tx,
             dht_pk,
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk: real_sk.clone(),
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, peer_real_sk) = gen_keypair();
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_sk = SecretKey::generate(&mut rng);
+        let peer_real_pk = peer_real_sk.public_key();
         let cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![42; 88]
         };
         let mut connection = CryptoConnection::new_not_confirmed(
             &real_sk,
-            peer_real_pk,
-            peer_dht_pk,
-            gen_nonce(),
-            gen_keypair().0,
+            peer_real_pk.clone(),
+            peer_dht_pk.clone(),
+            [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
+            SecretKey::generate(&mut rng).public_key(),
             cookie.clone(),
             &net_crypto.symmetric_key
         );
 
-        let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
-        let base_nonce = gen_nonce();
-        let session_pk = gen_keypair().0;
+        let real_precomputed_key = SalsaBox::new(&real_pk, &peer_real_sk);
+        let base_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let session_pk = SecretKey::generate(&mut rng).public_key();
         let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &net_crypto.symmetric_key, &our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&mut rng, &net_crypto.symmetric_key, &our_cookie);
         let other_cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![43; 88]
@@ -1807,42 +1847,44 @@ mod tests {
 
     #[tokio::test]
     async fn handle_crypto_handshake_invalid_status() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk.clone(), peer_dht_pk.clone());
 
-        let (peer_session_pk, _peer_session_sk) = gen_keypair();
-        let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let peer_session_pk = SecretKey::generate(&mut rng).public_key();
+        let session_sk = SecretKey::generate(&mut rng);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
-            sent_nonce: gen_nonce(),
-            received_nonce: gen_nonce(),
+            sent_nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
+            received_nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             session_precomputed_key,
         };
 
-        let base_nonce = gen_nonce();
-        let session_pk = gen_keypair().0;
+        let base_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let session_pk = SecretKey::generate(&mut rng).public_key();
         let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &net_crypto.symmetric_key, &our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&mut rng, &net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![43; 88]
@@ -1862,34 +1904,37 @@ mod tests {
 
     #[tokio::test]
     async fn handle_crypto_handshake_invalid_hash() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_sk = SecretKey::generate(&mut rng);
+        let peer_real_pk = peer_real_sk.public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk.clone(), peer_real_pk.clone(), peer_dht_pk.clone());
 
-        let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
-        let base_nonce = gen_nonce();
-        let session_pk = gen_keypair().0;
+        let real_precomputed_key = SalsaBox::new(&real_pk, &peer_real_sk);
+        let base_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let session_pk = SecretKey::generate(&mut rng).public_key();
         let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &net_crypto.symmetric_key, &our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&mut rng, &net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![43; 88]
@@ -1909,35 +1954,38 @@ mod tests {
 
     #[tokio::test]
     async fn handle_crypto_handshake_timed_out_cookie() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_sk = SecretKey::generate(&mut rng);
+        let peer_real_pk = peer_real_sk.public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk.clone(), peer_real_pk.clone(), peer_dht_pk.clone());
 
-        let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
-        let base_nonce = gen_nonce();
-        let session_pk = gen_keypair().0;
+        let real_precomputed_key = SalsaBox::new(&real_pk, &peer_real_sk);
+        let base_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let session_pk = SecretKey::generate(&mut rng).public_key();
         let mut our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
         our_cookie.time -= COOKIE_TIMEOUT + 1;
-        let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &&net_crypto.symmetric_key, &our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&mut rng, &net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![43; 88]
@@ -1957,35 +2005,38 @@ mod tests {
 
     #[tokio::test]
     async fn handle_crypto_handshake_invalid_peer_real_pk() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let (another_peer_real_pk, another_peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let another_peer_real_sk = SecretKey::generate(&mut rng);
+        let another_peer_real_pk = another_peer_real_sk.public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk.clone(), peer_real_pk, peer_dht_pk.clone());
 
-        let real_precomputed_key = precompute(&real_pk, &another_peer_real_sk);
-        let base_nonce = gen_nonce();
-        let session_pk = gen_keypair().0;
+        let real_precomputed_key = SalsaBox::new(&real_pk, &another_peer_real_sk);
+        let base_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let session_pk = SecretKey::generate(&mut rng).public_key();
         let our_cookie = Cookie::new(another_peer_real_pk, peer_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &net_crypto.symmetric_key, &our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&mut rng, &net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![43; 88]
@@ -2005,20 +2056,22 @@ mod tests {
 
     #[tokio::test]
     async fn handle_crypto_handshake_invalid_peer_dht_pk() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
@@ -2026,18 +2079,19 @@ mod tests {
         let (dht_pk_tx, dht_pk_rx) = mpsc::unbounded();
         net_crypto.set_dht_pk_sink(dht_pk_tx).await;
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_sk = SecretKey::generate(&mut rng);
+        let peer_real_pk = peer_real_sk.public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk.clone(), real_pk.clone(), peer_real_pk.clone(), peer_dht_pk);
 
-        let (new_dht_pk, _new_dht_sk) = gen_keypair();
+        let new_dht_pk = SecretKey::generate(&mut rng).public_key();
 
-        let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
-        let base_nonce = gen_nonce();
-        let session_pk = gen_keypair().0;
-        let our_cookie = Cookie::new(peer_real_pk, new_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &net_crypto.symmetric_key, &our_cookie);
+        let real_precomputed_key = SalsaBox::new(&real_pk, &peer_real_sk);
+        let base_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let session_pk = SecretKey::generate(&mut rng).public_key();
+        let our_cookie = Cookie::new(peer_real_pk.clone(), new_dht_pk.clone());
+        let our_encrypted_cookie = EncryptedCookie::new(&mut rng, &net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![43; 88]
@@ -2066,40 +2120,43 @@ mod tests {
         R: Future<Output=NetCrypto>,
         F: FnOnce(NetCrypto, CryptoHandshake, SocketAddr, PublicKey) -> R
     {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_sk = SecretKey::generate(&mut rng);
+        let peer_real_pk = peer_real_sk.public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk.clone(), peer_real_pk.clone(), peer_dht_pk.clone());
 
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.set_udp_addr(addr);
 
-        net_crypto.connections.write().await.insert(peer_real_pk, Arc::new(RwLock::new(connection)));
-        net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk);
+        net_crypto.connections.write().await.insert(peer_real_pk.clone(), Arc::new(RwLock::new(connection)));
+        net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk.clone());
 
-        let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
-        let base_nonce = gen_nonce();
-        let session_pk = gen_keypair().0;
-        let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &net_crypto.symmetric_key, &our_cookie);
+        let real_precomputed_key = SalsaBox::new(&real_pk, &peer_real_sk);
+        let base_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let session_pk = SecretKey::generate(&mut rng).public_key();
+        let our_cookie = Cookie::new(peer_real_pk.clone(), peer_dht_pk.clone());
+        let our_encrypted_cookie = EncryptedCookie::new(&mut rng, &net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![43; 88]
@@ -2150,12 +2207,14 @@ mod tests {
 
     #[tokio::test]
     async fn handle_udp_crypto_handshake_new_connection() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
@@ -2163,21 +2222,22 @@ mod tests {
             lossy_tx,
             dht_pk,
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, peer_real_sk) = gen_keypair();
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_sk = SecretKey::generate(&mut rng);
+        let peer_real_pk = peer_real_sk.public_key();
 
-        net_crypto.add_friend(peer_real_pk).await;
+        net_crypto.add_friend(peer_real_pk.clone()).await;
 
-        let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
-        let base_nonce = gen_nonce();
-        let session_pk = gen_keypair().0;
-        let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &net_crypto.symmetric_key, &our_cookie);
+        let real_precomputed_key = SalsaBox::new(&real_pk, &peer_real_sk);
+        let base_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let session_pk = SecretKey::generate(&mut rng).public_key();
+        let our_cookie = Cookie::new(peer_real_pk.clone(), peer_dht_pk);
+        let our_encrypted_cookie = EncryptedCookie::new(&mut rng, &net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![43; 88]
@@ -2212,36 +2272,40 @@ mod tests {
 
     #[tokio::test]
     async fn handle_udp_crypto_handshake_new_address_new_dht_pk() {
+        let mut rng = thread_rng();
         let (udp_tx, udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, peer_real_sk) = gen_keypair();
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_sk = SecretKey::generate(&mut rng);
+        let peer_real_pk = peer_real_sk.public_key();
 
-        net_crypto.add_friend(peer_real_pk).await;
+        net_crypto.add_friend(peer_real_pk.clone()).await;
 
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk.clone(), peer_real_pk.clone(), peer_dht_pk);
 
-        let received_nonce = gen_nonce();
-        let sent_nonce = gen_nonce();
-        let (peer_session_pk, _peer_session_sk) = gen_keypair();
-        let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let received_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let sent_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let peer_session_pk = SecretKey::generate(&mut rng).public_key();
+        let session_sk = SecretKey::generate(&mut rng);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
@@ -2251,15 +2315,15 @@ mod tests {
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.set_udp_addr(addr);
 
-        net_crypto.connections.write().await.insert(peer_real_pk, Arc::new(RwLock::new(connection)));
-        net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk);
+        net_crypto.connections.write().await.insert(peer_real_pk.clone(), Arc::new(RwLock::new(connection)));
+        net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk.clone());
 
-        let (new_peer_dht_pk, _new_peer_dht_sk) = gen_keypair();
-        let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
-        let base_nonce = gen_nonce();
-        let session_pk = gen_keypair().0;
-        let our_cookie = Cookie::new(peer_real_pk, new_peer_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &net_crypto.symmetric_key, &our_cookie);
+        let new_peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let real_precomputed_key = SalsaBox::new(&real_pk, &peer_real_sk);
+        let base_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let session_pk = SecretKey::generate(&mut rng).public_key();
+        let our_cookie = Cookie::new(peer_real_pk.clone(), new_peer_dht_pk.clone());
+        let our_encrypted_cookie = EncryptedCookie::new(&mut rng, &net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![43; 88]
@@ -2312,42 +2376,46 @@ mod tests {
 
     #[tokio::test]
     async fn handle_udp_crypto_handshake_new_address_old_dht_pk() {
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, peer_real_sk) = gen_keypair();
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_sk = SecretKey::generate(&mut rng);
+        let peer_real_pk = peer_real_sk.public_key();
 
-        net_crypto.add_friend(peer_real_pk).await;
+        net_crypto.add_friend(peer_real_pk.clone()).await;
 
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk.clone(), peer_real_pk.clone(), peer_dht_pk.clone());
 
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.set_udp_addr(addr);
 
-        net_crypto.connections.write().await.insert(peer_real_pk, Arc::new(RwLock::new(connection)));
-        net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk);
+        net_crypto.connections.write().await.insert(peer_real_pk.clone(), Arc::new(RwLock::new(connection)));
+        net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk.clone());
 
-        let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
-        let base_nonce = gen_nonce();
-        let session_pk = gen_keypair().0;
-        let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &net_crypto.symmetric_key, &our_cookie);
+        let real_precomputed_key = SalsaBox::new(&real_pk, &peer_real_sk);
+        let base_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let session_pk = SecretKey::generate(&mut rng).public_key();
+        let our_cookie = Cookie::new(peer_real_pk.clone(), peer_dht_pk);
+        let our_encrypted_cookie = EncryptedCookie::new(&mut rng, &net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![43; 88]
@@ -2386,36 +2454,40 @@ mod tests {
 
     #[tokio::test]
     async fn handle_udp_crypto_handshake_new_address_old_dht_pk_established() {
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, peer_real_sk) = gen_keypair();
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_sk = SecretKey::generate(&mut rng);
+        let peer_real_pk = peer_real_sk.public_key();
 
-        net_crypto.add_friend(peer_real_pk).await;
+        net_crypto.add_friend(peer_real_pk.clone()).await;
 
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk.clone(), peer_real_pk.clone(), peer_dht_pk.clone());
 
-        let received_nonce = gen_nonce();
-        let sent_nonce = gen_nonce();
-        let (peer_session_pk, _peer_session_sk) = gen_keypair();
-        let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let received_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let sent_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let peer_session_pk = SecretKey::generate(&mut rng).public_key();
+        let session_sk = SecretKey::generate(&mut rng);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
@@ -2425,14 +2497,14 @@ mod tests {
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.set_udp_addr(addr);
 
-        net_crypto.connections.write().await.insert(peer_real_pk, Arc::new(RwLock::new(connection)));
-        net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk);
+        net_crypto.connections.write().await.insert(peer_real_pk.clone(), Arc::new(RwLock::new(connection)));
+        net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk.clone());
 
-        let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
-        let base_nonce = gen_nonce();
-        let session_pk = gen_keypair().0;
+        let real_precomputed_key = SalsaBox::new(&real_pk, &peer_real_sk);
+        let base_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let session_pk = SecretKey::generate(&mut rng).public_key();
         let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &net_crypto.symmetric_key, &our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&mut rng, &net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![43; 88]
@@ -2452,12 +2524,14 @@ mod tests {
 
     #[tokio::test]
     async fn handle_udp_crypto_handshake_unexpected() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
@@ -2465,19 +2539,20 @@ mod tests {
             lossy_tx,
             dht_pk,
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, peer_real_sk) = gen_keypair();
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_sk = SecretKey::generate(&mut rng);
+        let peer_real_pk = peer_real_sk.public_key();
 
-        let real_precomputed_key = precompute(&real_pk, &peer_real_sk);
-        let base_nonce = gen_nonce();
-        let session_pk = gen_keypair().0;
+        let real_precomputed_key = SalsaBox::new(&real_pk, &peer_real_sk);
+        let base_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let session_pk = SecretKey::generate(&mut rng).public_key();
         let our_cookie = Cookie::new(peer_real_pk, peer_dht_pk);
-        let our_encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &net_crypto.symmetric_key, &our_cookie);
+        let our_encrypted_cookie = EncryptedCookie::new(&mut rng, &net_crypto.symmetric_key, &our_cookie);
         let cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![43; 88]
@@ -2499,35 +2574,37 @@ mod tests {
 
     #[tokio::test]
     async fn handle_crypto_data_lossy() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk.clone(), peer_dht_pk);
 
-        let received_nonce = gen_nonce();
-        let (peer_session_pk, _peer_session_sk) = gen_keypair();
-        let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let received_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let peer_session_pk = SecretKey::generate(&mut rng).public_key();
+        let session_sk = SecretKey::generate(&mut rng);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
-            sent_nonce: gen_nonce(),
+            sent_nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             received_nonce,
             session_precomputed_key: session_precomputed_key.clone(),
         };
@@ -2558,42 +2635,44 @@ mod tests {
 
     #[tokio::test]
     async fn handle_crypto_data_lossy_increment_nonce() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk.clone(), peer_dht_pk);
 
-        let received_nonce = gen_nonce();
-        let (peer_session_pk, _peer_session_sk) = gen_keypair();
-        let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let received_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let peer_session_pk = SecretKey::generate(&mut rng).public_key();
+        let session_sk = SecretKey::generate(&mut rng);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
-            sent_nonce: gen_nonce(),
+            sent_nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             received_nonce,
             session_precomputed_key: session_precomputed_key.clone(),
         };
 
         // Make the diff between nonces is bigger than the threshold
         let mut packet_nonce = received_nonce;
-        increment_nonce_number(&mut packet_nonce, u64::from(2 * NONCE_DIFF_THRESHOLD + 1));
+        increment_nonce_number(&mut packet_nonce, 2 * NONCE_DIFF_THRESHOLD + 1);
 
         let crypto_data_payload = CryptoDataPayload {
             buffer_start: 0,
@@ -2607,7 +2686,7 @@ mod tests {
         // The diff between nonces is bigger than the threshold so received
         // nonce should be changed increased
         let mut expected_nonce = received_nonce;
-        increment_nonce_number(&mut expected_nonce, u64::from(NONCE_DIFF_THRESHOLD));
+        increment_nonce_number(&mut expected_nonce, NONCE_DIFF_THRESHOLD);
         assert_eq!(unpack!(connection.status, ConnectionStatus::Established, received_nonce), expected_nonce);
 
         assert_eq!(connection.recv_array.buffer_start, 0);
@@ -2623,28 +2702,30 @@ mod tests {
 
     #[tokio::test]
     async fn handle_crypto_data_lossy_update_rtt() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk.clone(), peer_dht_pk);
 
         tokio::time::pause();
         let now = clock_now();
@@ -2658,12 +2739,12 @@ mod tests {
 
         connection.rtt = Duration::from_millis(500);
 
-        let received_nonce = gen_nonce();
-        let (peer_session_pk, _peer_session_sk) = gen_keypair();
-        let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let received_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let peer_session_pk = SecretKey::generate(&mut rng).public_key();
+        let session_sk = SecretKey::generate(&mut rng);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
-            sent_nonce: gen_nonce(),
+            sent_nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             received_nonce,
             session_precomputed_key: session_precomputed_key.clone(),
         };
@@ -2703,35 +2784,37 @@ mod tests {
 
     #[tokio::test]
     async fn handle_crypto_data_lossy_invalid_buffer_start() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
-        let received_nonce = gen_nonce();
-        let (peer_session_pk, _peer_session_sk) = gen_keypair();
-        let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let received_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let peer_session_pk = SecretKey::generate(&mut rng).public_key();
+        let session_sk = SecretKey::generate(&mut rng);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
-            sent_nonce: gen_nonce(),
+            sent_nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             received_nonce,
             session_precomputed_key: session_precomputed_key.clone(),
         };
@@ -2757,35 +2840,37 @@ mod tests {
 
     #[tokio::test]
     async fn handle_crypto_data_lossless() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk.clone(), peer_dht_pk);
 
-        let received_nonce = gen_nonce();
-        let (peer_session_pk, _peer_session_sk) = gen_keypair();
-        let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let received_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let peer_session_pk = SecretKey::generate(&mut rng).public_key();
+        let session_sk = SecretKey::generate(&mut rng);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
-            sent_nonce: gen_nonce(),
+            sent_nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             received_nonce,
             session_precomputed_key: session_precomputed_key.clone(),
         };
@@ -2845,35 +2930,37 @@ mod tests {
 
     #[tokio::test]
     async fn handle_crypto_data_lossless_too_big_index() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
-        let received_nonce = gen_nonce();
-        let (peer_session_pk, _peer_session_sk) = gen_keypair();
-        let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let received_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let peer_session_pk = SecretKey::generate(&mut rng).public_key();
+        let session_sk = SecretKey::generate(&mut rng);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
-            sent_nonce: gen_nonce(),
+            sent_nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             received_nonce,
             session_precomputed_key: session_precomputed_key.clone(),
         };
@@ -2899,44 +2986,46 @@ mod tests {
 
     #[tokio::test]
     async fn handle_crypto_data_kill() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk.clone(), peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.set_udp_addr(addr);
 
-        let received_nonce = gen_nonce();
-        let (peer_session_pk, _peer_session_sk) = gen_keypair();
-        let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let received_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let peer_session_pk = SecretKey::generate(&mut rng).public_key();
+        let session_sk = SecretKey::generate(&mut rng);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
-            sent_nonce: gen_nonce(),
+            sent_nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             received_nonce,
             session_precomputed_key: session_precomputed_key.clone(),
         };
 
         let connection = Arc::new(RwLock::new(connection));
-        net_crypto.connections.write().await.insert(peer_real_pk, connection.clone());
+        net_crypto.connections.write().await.insert(peer_real_pk.clone(), connection.clone());
         net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk);
 
         let crypto_data_payload = CryptoDataPayload {
@@ -2954,27 +3043,29 @@ mod tests {
 
     #[tokio::test]
     async fn handle_crypto_data_request() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         tokio::time::pause();
@@ -3001,12 +3092,12 @@ mod tests {
 
         connection.rtt = Duration::from_millis(500);
 
-        let received_nonce = gen_nonce();
-        let (peer_session_pk, _peer_session_sk) = gen_keypair();
-        let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let received_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let peer_session_pk = SecretKey::generate(&mut rng).public_key();
+        let session_sk = SecretKey::generate(&mut rng);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
-            sent_nonce: gen_nonce(),
+            sent_nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             received_nonce,
             session_precomputed_key: session_precomputed_key.clone(),
         };
@@ -3037,27 +3128,29 @@ mod tests {
 
     #[tokio::test]
     async fn handle_crypto_data_empty_request() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         assert!(connection.send_array.insert(0, SentPacket::new(vec![42; 123])).is_ok());
@@ -3066,12 +3159,12 @@ mod tests {
         assert!(connection.send_array.insert(7, SentPacket::new(vec![45; 123])).is_ok());
         assert!(connection.send_array.insert(1024, SentPacket::new(vec![46; 123])).is_ok());
 
-        let received_nonce = gen_nonce();
-        let (peer_session_pk, _peer_session_sk) = gen_keypair();
-        let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let received_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let peer_session_pk = SecretKey::generate(&mut rng).public_key();
+        let session_sk = SecretKey::generate(&mut rng);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
-            sent_nonce: gen_nonce(),
+            sent_nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             received_nonce,
             session_precomputed_key: session_precomputed_key.clone(),
         };
@@ -3094,35 +3187,37 @@ mod tests {
 
     #[tokio::test]
     async fn handle_crypto_data_invalid_packet_id() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
-        let received_nonce = gen_nonce();
-        let (peer_session_pk, _peer_session_sk) = gen_keypair();
-        let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let received_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let peer_session_pk = SecretKey::generate(&mut rng).public_key();
+        let session_sk = SecretKey::generate(&mut rng);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
-            sent_nonce: gen_nonce(),
+            sent_nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             received_nonce,
             session_precomputed_key: session_precomputed_key.clone(),
         };
@@ -3148,35 +3243,37 @@ mod tests {
 
     #[tokio::test]
     async fn handle_crypto_data_empty_data() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
-        let received_nonce = gen_nonce();
-        let (peer_session_pk, _peer_session_sk) = gen_keypair();
-        let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let received_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let peer_session_pk = SecretKey::generate(&mut rng).public_key();
+        let session_sk = SecretKey::generate(&mut rng);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
-            sent_nonce: gen_nonce(),
+            sent_nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             received_nonce,
             session_precomputed_key: session_precomputed_key.clone(),
         };
@@ -3202,33 +3299,35 @@ mod tests {
 
     #[tokio::test]
     async fn handle_crypto_data_invalid_status() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
-        let received_nonce = gen_nonce();
-        let (peer_session_pk, _peer_session_sk) = gen_keypair();
-        let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let received_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let peer_session_pk = SecretKey::generate(&mut rng).public_key();
+        let session_sk = SecretKey::generate(&mut rng);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         let crypto_data_payload = CryptoDataPayload {
             buffer_start: 0,
             packet_number: 0,
@@ -3246,35 +3345,37 @@ mod tests {
         R: Future<Output=NetCrypto>,
         F: Fn(NetCrypto, CryptoData, SocketAddr, PublicKey) -> R
     {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk.clone(), real_pk.clone(), peer_real_pk.clone(), peer_dht_pk.clone());
 
-        let received_nonce = gen_nonce();
-        let (peer_session_pk, _peer_session_sk) = gen_keypair();
-        let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let received_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let peer_session_pk = SecretKey::generate(&mut rng).public_key();
+        let session_sk = SecretKey::generate(&mut rng);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
-            sent_nonce: gen_nonce(),
+            sent_nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             received_nonce,
             session_precomputed_key: session_precomputed_key.clone(),
         };
@@ -3282,8 +3383,8 @@ mod tests {
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.set_udp_addr(addr);
 
-        net_crypto.connections.write().await.insert(peer_real_pk, Arc::new(RwLock::new(connection)));
-        net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk);
+        net_crypto.connections.write().await.insert(peer_real_pk.clone(), Arc::new(RwLock::new(connection)));
+        net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk.clone());
 
         let crypto_data_payload = CryptoDataPayload {
             buffer_start: 0,
@@ -3334,27 +3435,29 @@ mod tests {
 
     #[tokio::test]
     async fn send_status_packet() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
@@ -3384,27 +3487,29 @@ mod tests {
 
     #[tokio::test]
     async fn send_packet_udp() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
@@ -3426,31 +3531,33 @@ mod tests {
 
     #[tokio::test]
     async fn send_packet_udp_attempt() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, udp_rx) = mpsc::channel(1);
         let (tcp_tx, tcp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
         net_crypto.set_tcp_sink(tcp_tx).await;
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk.clone());
 
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.set_udp_addr(addr);
@@ -3480,31 +3587,33 @@ mod tests {
 
     #[tokio::test]
     async fn send_packet_no_udp_attempt() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (tcp_tx, tcp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
         net_crypto.set_tcp_sink(tcp_tx).await;
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk.clone());
 
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.set_udp_addr(addr);
@@ -3528,27 +3637,29 @@ mod tests {
 
     #[tokio::test]
     async fn send_packet_tcp() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let packet = Packet::CryptoData(CryptoData {
@@ -3563,28 +3674,30 @@ mod tests {
 
     #[tokio::test]
     async fn main_loop_sends_status_packets() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk.clone(), peer_dht_pk);
 
         let packet = unpack!(connection.status.clone(), ConnectionStatus::CookieRequesting, packet);
 
@@ -3607,28 +3720,30 @@ mod tests {
 
     #[tokio::test]
     async fn main_loop_removes_timed_out_connections() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk.clone(), peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.set_udp_addr(addr);
@@ -3645,7 +3760,7 @@ mod tests {
 
         assert!(connection.is_timed_out());
 
-        net_crypto.connections.write().await.insert(peer_real_pk, Arc::new(RwLock::new(connection)));
+        net_crypto.connections.write().await.insert(peer_real_pk.clone(), Arc::new(RwLock::new(connection)));
         net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk);
 
         net_crypto.main_loop().await.unwrap();
@@ -3656,44 +3771,46 @@ mod tests {
 
     #[tokio::test]
     async fn main_loop_sends_request_packets() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk.clone(), peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.set_udp_addr(addr);
 
-        let received_nonce = gen_nonce();
-        let sent_nonce = gen_nonce();
-        let (peer_session_pk, _peer_session_sk) = gen_keypair();
-        let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let received_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let sent_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let peer_session_pk = SecretKey::generate(&mut rng).public_key();
+        let session_sk = SecretKey::generate(&mut rng);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
             session_precomputed_key: session_precomputed_key.clone(),
         };
 
-        net_crypto.connections.write().await.insert(peer_real_pk, Arc::new(RwLock::new(connection)));
+        net_crypto.connections.write().await.insert(peer_real_pk.clone(), Arc::new(RwLock::new(connection)));
         net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk);
 
         net_crypto.main_loop().await.unwrap();
@@ -3712,37 +3829,39 @@ mod tests {
 
     #[tokio::test]
     async fn main_loop_sends_requested_packets() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk.clone(), peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.set_udp_addr(addr);
 
-        let received_nonce = gen_nonce();
-        let sent_nonce = gen_nonce();
-        let (peer_session_pk, _peer_session_sk) = gen_keypair();
-        let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let received_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let sent_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let peer_session_pk = SecretKey::generate(&mut rng).public_key();
+        let session_sk = SecretKey::generate(&mut rng);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
@@ -3762,7 +3881,7 @@ mod tests {
             requested: true,
         }).is_ok());
 
-        net_crypto.connections.write().await.insert(peer_real_pk, Arc::new(RwLock::new(connection)));
+        net_crypto.connections.write().await.insert(peer_real_pk.clone(), Arc::new(RwLock::new(connection)));
         net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk);
 
         net_crypto.main_loop().await.unwrap();
@@ -3781,35 +3900,37 @@ mod tests {
 
     #[tokio::test]
     async fn send_status_packet_established() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
-        let received_nonce = gen_nonce();
-        let (peer_session_pk, _peer_session_sk) = gen_keypair();
-        let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let received_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let peer_session_pk = SecretKey::generate(&mut rng).public_key();
+        let session_sk = SecretKey::generate(&mut rng);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
-            sent_nonce: gen_nonce(),
+            sent_nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             received_nonce,
             session_precomputed_key,
         };
@@ -3825,37 +3946,39 @@ mod tests {
 
     #[tokio::test]
     async fn send_data_packet() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.set_udp_addr(addr);
 
-        let received_nonce = gen_nonce();
-        let mut sent_nonce = gen_nonce();
-        let (peer_session_pk, _peer_session_sk) = gen_keypair();
-        let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let received_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let mut sent_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let peer_session_pk = SecretKey::generate(&mut rng).public_key();
+        let session_sk = SecretKey::generate(&mut rng);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
@@ -3886,37 +4009,39 @@ mod tests {
 
     #[tokio::test]
     async fn send_request_packet() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.set_udp_addr(addr);
 
-        let received_nonce = gen_nonce();
-        let sent_nonce = gen_nonce();
-        let (peer_session_pk, _peer_session_sk) = gen_keypair();
-        let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let received_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let sent_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let peer_session_pk = SecretKey::generate(&mut rng).public_key();
+        let session_sk = SecretKey::generate(&mut rng);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
@@ -3956,37 +4081,39 @@ mod tests {
 
     #[tokio::test]
     async fn send_request_packet_too_many_missing_packets() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, udp_rx) = mpsc::channel(1);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.set_udp_addr(addr);
 
-        let received_nonce = gen_nonce();
-        let sent_nonce = gen_nonce();
-        let (peer_session_pk, _peer_session_sk) = gen_keypair();
-        let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let received_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let sent_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let peer_session_pk = SecretKey::generate(&mut rng).public_key();
+        let session_sk = SecretKey::generate(&mut rng);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
@@ -4012,39 +4139,41 @@ mod tests {
     #[tokio::test]
     async fn send_requested_packets() {
         tokio::time::pause();
+        let mut rng = thread_rng();
         let now = clock_now();
 
-        crypto_init().unwrap();
         let (udp_tx, udp_rx) = mpsc::channel(2);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
         let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.set_udp_addr(addr);
 
-        let received_nonce = gen_nonce();
-        let sent_nonce = gen_nonce();
-        let (peer_session_pk, _peer_session_sk) = gen_keypair();
-        let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let received_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let sent_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let peer_session_pk = SecretKey::generate(&mut rng).public_key();
+        let session_sk = SecretKey::generate(&mut rng);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
@@ -4088,37 +4217,39 @@ mod tests {
 
     #[tokio::test]
     async fn send_lossless() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, udp_rx) = mpsc::channel(2);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk.clone(), peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.set_udp_addr(addr);
 
-        let received_nonce = gen_nonce();
-        let sent_nonce = gen_nonce();
-        let (peer_session_pk, _peer_session_sk) = gen_keypair();
-        let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let received_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let sent_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let peer_session_pk = SecretKey::generate(&mut rng).public_key();
+        let session_sk = SecretKey::generate(&mut rng);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
@@ -4126,8 +4257,8 @@ mod tests {
         };
 
         let connection = Arc::new(RwLock::new(connection));
-        net_crypto.connections.write().await.insert(peer_real_pk, connection.clone());
-        net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk);
+        net_crypto.connections.write().await.insert(peer_real_pk.clone(), connection.clone());
+        net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk.clone());
 
         let data = vec![16, 42];
 
@@ -4157,12 +4288,14 @@ mod tests {
 
     #[tokio::test]
     async fn send_lossless_no_connection() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(2);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
@@ -4175,7 +4308,7 @@ mod tests {
             precomputed_keys,
         });
 
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
 
         let error = net_crypto.send_lossless(peer_real_pk, vec![16, 42]).await.err().unwrap();
         assert_eq!(*error.kind(), SendLosslessPacketErrorKind::NoConnection);
@@ -4183,12 +4316,14 @@ mod tests {
 
     #[tokio::test]
     async fn send_lossless_invalid_packet_id() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(2);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
@@ -4201,7 +4336,7 @@ mod tests {
             precomputed_keys,
         });
 
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
 
         let error = net_crypto.send_lossless(peer_real_pk, vec![10, 42]).await.err().unwrap();
         assert_eq!(*error.kind(), SendLosslessPacketErrorKind::InvalidPacketId);
@@ -4209,27 +4344,30 @@ mod tests {
 
     #[tokio::test]
     async fn add_connection() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(2);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk,
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let (peer_dht_pk, peer_dht_sk) = gen_keypair();
-        net_crypto.add_connection(peer_real_pk, peer_dht_pk).await;
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_dht_sk = SecretKey::generate(&mut rng);
+        let peer_dht_pk = peer_dht_sk.public_key();
+        net_crypto.add_connection(peer_real_pk.clone(), peer_dht_pk.clone()).await;
 
         let connections = net_crypto.connections.read().await;
         let connection = connections[&peer_real_pk].read().await;
@@ -4239,19 +4377,21 @@ mod tests {
 
         let status_packet = unpack!(connection.status.clone(), ConnectionStatus::CookieRequesting, packet);
         let cookie_request = unpack!(status_packet.packet, StatusPacket::CookieRequest);
-        let cookie_request_payload = cookie_request.get_payload(&precompute(&dht_pk, &peer_dht_sk)).unwrap();
+        let cookie_request_payload = cookie_request.get_payload(&SalsaBox::new(&dht_pk, &peer_dht_sk)).unwrap();
 
         assert_eq!(cookie_request_payload.pk, real_pk);
     }
 
     #[tokio::test]
     async fn add_connection_already_exists() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(2);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
@@ -4264,13 +4404,13 @@ mod tests {
             precomputed_keys,
         });
 
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        net_crypto.add_connection(peer_real_pk, peer_dht_pk).await;
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        net_crypto.add_connection(peer_real_pk.clone(), peer_dht_pk.clone()).await;
 
         // adding a friend that already exists won't do anything
-        let (another_peer_dht_pk, _another_peer_dht_sk) = gen_keypair();
-        net_crypto.add_connection(peer_real_pk, another_peer_dht_pk).await;
+        let another_peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        net_crypto.add_connection(peer_real_pk.clone(), another_peer_dht_pk).await;
 
         let connections = net_crypto.connections.read().await;
         let connection = connections[&peer_real_pk].read().await;
@@ -4281,12 +4421,14 @@ mod tests {
 
     #[tokio::test]
     async fn set_friend_udp_addr() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(2);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
@@ -4299,14 +4441,14 @@ mod tests {
             precomputed_keys,
         });
 
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        net_crypto.add_connection(peer_real_pk, peer_dht_pk).await;
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        net_crypto.add_connection(peer_real_pk.clone(), peer_dht_pk).await;
 
         let addr_v4 = "127.0.0.1:12345".parse().unwrap();
-        net_crypto.set_friend_udp_addr(peer_real_pk, addr_v4).await;
+        net_crypto.set_friend_udp_addr(peer_real_pk.clone(), addr_v4).await;
         let addr_v6 = "[::]:12345".parse().unwrap();
-        net_crypto.set_friend_udp_addr(peer_real_pk, addr_v6).await;
+        net_crypto.set_friend_udp_addr(peer_real_pk.clone(), addr_v6).await;
 
         let connections = net_crypto.connections.read().await;
         let connection = connections[&peer_real_pk].read().await;
@@ -4319,12 +4461,14 @@ mod tests {
 
     #[tokio::test]
     async fn set_friend_udp_addr_update() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(2);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
@@ -4337,17 +4481,17 @@ mod tests {
             precomputed_keys,
         });
 
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        net_crypto.add_connection(peer_real_pk, peer_dht_pk).await;
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        net_crypto.add_connection(peer_real_pk.clone(), peer_dht_pk).await;
 
         let addr = "127.0.0.1:12345".parse().unwrap();
-        net_crypto.set_friend_udp_addr(peer_real_pk, addr).await;
+        net_crypto.set_friend_udp_addr(peer_real_pk.clone(), addr).await;
         // setting the same address won't do anything
-        net_crypto.set_friend_udp_addr(peer_real_pk, addr).await;
+        net_crypto.set_friend_udp_addr(peer_real_pk.clone(), addr).await;
 
         let addr = "127.0.0.1:12346".parse().unwrap();
-        net_crypto.set_friend_udp_addr(peer_real_pk, addr).await;
+        net_crypto.set_friend_udp_addr(peer_real_pk.clone(), addr).await;
 
         let connections = net_crypto.connections.read().await;
         let connection = connections[&peer_real_pk].read().await;
@@ -4361,12 +4505,14 @@ mod tests {
 
     #[tokio::test]
     async fn set_friend_udp_addr_no_connection() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(2);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
@@ -4380,7 +4526,7 @@ mod tests {
         });
 
         let addr = "127.0.0.1:12345".parse().unwrap();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
 
         // setting an address to nonexistent connection won't do anything
         net_crypto.set_friend_udp_addr(peer_real_pk, addr).await;
@@ -4390,34 +4536,36 @@ mod tests {
 
     #[tokio::test]
     async fn kill_connection() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, udp_rx) = mpsc::channel(2);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk.clone(), peer_dht_pk);
 
-        let received_nonce = gen_nonce();
-        let sent_nonce = gen_nonce();
-        let (peer_session_pk, _peer_session_sk) = gen_keypair();
-        let (_session_pk, session_sk) = gen_keypair();
-        let session_precomputed_key = precompute(&peer_session_pk, &session_sk);
+        let received_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let sent_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let peer_session_pk = SecretKey::generate(&mut rng).public_key();
+        let session_sk = SecretKey::generate(&mut rng);
+        let session_precomputed_key = SalsaBox::new(&peer_session_pk, &session_sk);
         connection.status = ConnectionStatus::Established {
             sent_nonce,
             received_nonce,
@@ -4427,10 +4575,10 @@ mod tests {
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.set_udp_addr(addr);
 
-        net_crypto.connections.write().await.insert(peer_real_pk, Arc::new(RwLock::new(connection)));
-        net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk);
+        net_crypto.connections.write().await.insert(peer_real_pk.clone(), Arc::new(RwLock::new(connection)));
+        net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk.clone());
 
-        net_crypto.kill_connection(peer_real_pk).await.unwrap();
+        net_crypto.kill_connection(peer_real_pk.clone()).await.unwrap();
 
         assert!(!net_crypto.connections.read().await.contains_key(&peer_real_pk));
         assert!(!net_crypto.keys_by_addr.read().await.contains_key(&(addr.ip(), addr.port())));
@@ -4449,12 +4597,14 @@ mod tests {
 
     #[tokio::test]
     async fn kill_connection_no_connection() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, _udp_rx) = mpsc::channel(2);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
@@ -4467,7 +4617,7 @@ mod tests {
             precomputed_keys,
         });
 
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
 
         let error = net_crypto.kill_connection(peer_real_pk).await.err().unwrap();
         assert_eq!(*error.kind(), KillConnectionErrorKind::NoConnection);
@@ -4475,36 +4625,38 @@ mod tests {
 
     #[tokio::test]
     async fn kill_connection_not_established() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let (udp_tx, udp_rx) = mpsc::channel(2);
         let (lossless_tx, _lossless_rx) = mpsc::unbounded();
         let (lossy_tx, _lossy_rx) = mpsc::unbounded();
-        let (dht_pk, dht_sk) = gen_keypair();
-        let (real_pk, real_sk) = gen_keypair();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
         let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 1);
         let net_crypto = NetCrypto::new(NetCryptoNewArgs {
             udp_tx,
             lossless_tx,
             lossy_tx,
-            dht_pk,
+            dht_pk: dht_pk.clone(),
             dht_sk: dht_sk.clone(),
-            real_pk,
+            real_pk: real_pk.clone(),
             real_sk,
             precomputed_keys,
         });
 
-        let (peer_dht_pk, _peer_dht_sk) = gen_keypair();
-        let (peer_real_pk, _peer_real_sk) = gen_keypair();
-        let dht_precomputed_key = precompute(&peer_dht_pk, &dht_sk);
-        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk, peer_dht_pk);
+        let peer_dht_pk = SecretKey::generate(&mut rng).public_key();
+        let peer_real_pk = SecretKey::generate(&mut rng).public_key();
+        let dht_precomputed_key = SalsaBox::new(&peer_dht_pk, &dht_sk);
+        let mut connection = CryptoConnection::new(&dht_precomputed_key, dht_pk, real_pk, peer_real_pk.clone(), peer_dht_pk);
 
         let addr = "127.0.0.1:12345".parse().unwrap();
         connection.set_udp_addr(addr);
 
-        net_crypto.connections.write().await.insert(peer_real_pk, Arc::new(RwLock::new(connection)));
-        net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk);
+        net_crypto.connections.write().await.insert(peer_real_pk.clone(), Arc::new(RwLock::new(connection)));
+        net_crypto.keys_by_addr.write().await.insert((addr.ip(), addr.port()), peer_real_pk.clone());
 
-        net_crypto.kill_connection(peer_real_pk).await.unwrap();
+        net_crypto.kill_connection(peer_real_pk.clone()).await.unwrap();
 
         assert!(!net_crypto.connections.read().await.contains_key(&peer_real_pk));
         assert!(!net_crypto.keys_by_addr.read().await.contains_key(&(addr.ip(), addr.port())));

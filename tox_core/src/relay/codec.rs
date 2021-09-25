@@ -182,14 +182,15 @@ impl Encoder<Packet> for Codec {
 
 #[cfg(test)]
 mod tests {
-    use tox_crypto::*;
+    use crypto_box::{SalsaBox, SecretKey, aead::{Aead, AeadCore, generic_array::typenum::marker_traits::Unsigned}};
+    use rand::thread_rng;
     use tox_packet::dht::CryptoData;
     use tox_packet::onion::*;
     use tox_packet::ip_port::*;
     use crate::relay::codec::*;
     use tox_packet::relay::connection_id::ConnectionId;
 
-    use std::io::{ErrorKind as IoErrorKind};
+    use std::io::ErrorKind as IoErrorKind;
     use std::net::{
       IpAddr,
       Ipv4Addr,
@@ -215,11 +216,11 @@ mod tests {
         let bob_session = Session::random();
 
         // assume we got Alice's PK & Nonce via handshake
-        let alice_pk = *alice_session.pk();
+        let alice_pk = alice_session.pk().clone();
         let alice_nonce = *alice_session.nonce();
 
         // assume we got Bob's PK & Nonce via handshake
-        let bob_pk = *bob_session.pk();
+        let bob_pk = bob_session.pk().clone();
         let bob_nonce = *bob_session.nonce();
 
         // Now both Alice and Bob may create secure Channels
@@ -231,8 +232,8 @@ mod tests {
 
     #[test]
     fn encode_decode() {
-        crypto_init().unwrap();
-        let (pk, _) = gen_keypair();
+        let mut rng = thread_rng();
+        let pk = SecretKey::generate(&mut rng).public_key();
         let (alice_channel, bob_channel) = create_channels();
         let mut buf = BytesMut::new();
         let stats = Stats::new();
@@ -240,45 +241,45 @@ mod tests {
         let mut bob_codec = Codec::new(bob_channel, stats);
 
         let test_packets = vec![
-            Packet::RouteRequest( RouteRequest { pk } ),
-            Packet::RouteResponse( RouteResponse { connection_id: ConnectionId::from_index(42), pk } ),
+            Packet::RouteRequest( RouteRequest { pk: pk.clone() } ),
+            Packet::RouteResponse( RouteResponse { connection_id: ConnectionId::from_index(42), pk: pk.clone() } ),
             Packet::ConnectNotification( ConnectNotification { connection_id: ConnectionId::from_index(42) } ),
             Packet::DisconnectNotification( DisconnectNotification { connection_id: ConnectionId::from_index(42) } ),
             Packet::PingRequest( PingRequest { ping_id: 4242 } ),
             Packet::PongResponse( PongResponse { ping_id: 4242 } ),
-            Packet::OobSend( OobSend { destination_pk: pk, data: vec![13; 42] } ),
+            Packet::OobSend( OobSend { destination_pk: pk.clone(), data: vec![13; 42] } ),
             Packet::OobReceive( OobReceive { sender_pk: pk, data: vec![13; 24] } ),
             Packet::OnionRequest( OnionRequest {
-                nonce: gen_nonce(),
+                nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
                 ip_port: IpPort {
                     protocol: ProtocolType::Tcp,
                     ip_addr: IpAddr::V4(Ipv4Addr::new(5, 6, 7, 8)),
                     port: 12345,
                 },
-                temporary_pk: gen_keypair().0,
+                temporary_pk: SecretKey::generate(&mut rng).public_key(),
                 payload: vec![13; 207]
             } ),
             Packet::OnionRequest( OnionRequest {
-                nonce: gen_nonce(),
+                nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
                 ip_port: IpPort {
                     protocol: ProtocolType::Tcp,
                     ip_addr: IpAddr::V6(Ipv6Addr::new(5, 6, 7, 8, 5, 6, 7, 8)),
                     port: 54321,
                 },
-                temporary_pk: gen_keypair().0,
+                temporary_pk: SecretKey::generate(&mut rng).public_key(),
                 payload: vec![13; 201]
             } ),
             Packet::OnionResponse( OnionResponse {
                 payload: InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
                     sendback_data: 12345,
-                    nonce: gen_nonce(),
+                    nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
                     payload: vec![42; 123]
                 })
             } ),
             Packet::OnionResponse( OnionResponse {
                 payload: InnerOnionResponse::OnionDataResponse(OnionDataResponse {
-                    nonce: gen_nonce(),
-                    temporary_pk: gen_keypair().0,
+                    nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
+                    temporary_pk: SecretKey::generate(&mut rng).public_key(),
                     payload: vec![42; 123]
                 })
             } ),
@@ -302,7 +303,6 @@ mod tests {
     }
     #[test]
     fn decode_encrypted_packet_incomplete() {
-        crypto_init().unwrap();
         let (alice_channel, _) = create_channels();
         let mut buf = BytesMut::new();
         buf.extend_from_slice(b"\x00");
@@ -314,7 +314,6 @@ mod tests {
     }
     #[test]
     fn decode_encrypted_packet_zero_length() {
-        crypto_init().unwrap();
         let (alice_channel, _) = create_channels();
         let mut buf = BytesMut::new();
         buf.extend_from_slice(b"\x00\x00");
@@ -326,7 +325,6 @@ mod tests {
     }
     #[test]
     fn decode_encrypted_packet_wrong_key() {
-        crypto_init().unwrap();
         let (alice_channel, _) = create_channels();
         let (mallory_channel, _) = create_channels();
 
@@ -343,7 +341,6 @@ mod tests {
     }
     #[test]
     fn decode_packet_imcomplete() {
-        crypto_init().unwrap();
         let (alice_channel, _) = create_channels();
 
         let mut buf = BytesMut::new();
@@ -355,24 +352,26 @@ mod tests {
     }
     #[test]
     fn decode_packet_error() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let alice_session = Session::random();
 
         // assume we got Alice's PK via handshake
-        let alice_pk = *alice_session.pk();
+        let alice_pk = alice_session.pk().clone();
 
         // assume we got Bob's PK & Nonce via handshake
-        let (bob_pk, bob_sk) = gen_keypair();
-        let bob_nonce = gen_nonce();
+        let bob_sk = SecretKey::generate(&mut rng);
+        let bob_pk = bob_sk.public_key();
+        let bob_nonce = crypto_box::generate_nonce(&mut rng);
 
         // Now both Alice and Bob may create secure Channels
-        let alice_channel = Channel::new(&alice_session, &bob_pk, &bob_nonce);
+        let alice_channel = Channel::new(&alice_session, &bob_pk, &bob_nonce.into());
 
         let stats = Stats::new();
         let mut alice_codec = Codec::new(alice_channel, stats);
 
         // packet with invalid id
-        let payload = seal(&[0x0F], &bob_nonce, &alice_pk, &bob_sk);
+        let precomputed_key = SalsaBox::new(&alice_pk, &bob_sk);
+        let payload = precomputed_key.encrypt(&bob_nonce, &[0x0F][..]).unwrap();
         let packet = EncryptedPacket {
             payload,
         };
@@ -387,7 +386,6 @@ mod tests {
 
     #[test]
     fn encode_packet_too_big() {
-        crypto_init().unwrap();
         let (alice_channel, _) = create_channels();
         let mut buf = BytesMut::new();
         let stats = Stats::new();

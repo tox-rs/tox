@@ -56,7 +56,6 @@ mod test {
     use super::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         disconnect_notification_encode_decode,
         DisconnectNotification {
             connection_id: ConnectionId::from_index(1)

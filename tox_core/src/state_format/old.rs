@@ -7,7 +7,7 @@ use nom::{
     combinator::rest,
     bytes::complete::take,
 };
-use rand::{Rng, distributions::{Distribution, Standard}};
+use rand::{CryptoRng, Rng};
 
 use tox_binary_io::*;
 use tox_crypto::*;
@@ -24,7 +24,7 @@ const SECTION_MAGIC: &[u8; 2] = &[0xce, 0x01];
 
 https://zetok.github.io/tox-spec/#nospam-and-keys-0x01
 */
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone)]
 pub struct NospamKeys {
     /// Own `NoSpam`.
     pub nospam: NoSpam,
@@ -35,11 +35,12 @@ pub struct NospamKeys {
 }
 
 /// Number of bytes of serialized [`NospamKeys`](./struct.NospamKeys.html).
-pub const NOSPAMKEYSBYTES: usize = NOSPAMBYTES + PUBLICKEYBYTES + SECRETKEYBYTES;
+pub const NOSPAMKEYSBYTES: usize = NOSPAMBYTES + crypto_box::KEY_SIZE + crypto_box::KEY_SIZE;
 
-impl Distribution<NospamKeys> for Standard {
-    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> NospamKeys {
-        let (pk, sk) = gen_keypair();
+impl NospamKeys {
+    pub fn random<R: Rng + CryptoRng>(rng: &mut R) -> Self {
+        let sk = SecretKey::generate(rng);
+        let pk = sk.public_key();
         NospamKeys {
             nospam: rng.gen(),
             pk,
@@ -74,7 +75,7 @@ impl ToBytes for NospamKeys {
             gen_slice!(SECTION_MAGIC) >>
             gen_slice!(self.nospam.0) >>
             gen_slice!(self.pk.as_ref()) >>
-            gen_slice!(self.sk.0)
+            gen_slice!(self.sk.to_bytes())
         )
     }
 }
@@ -359,7 +360,7 @@ pub struct FriendState {
 
 /// Number of bytes of serialized [`FriendState`](./struct.FriendState.html).
 pub const FRIENDSTATEBYTES: usize = 1      // "Status"
-    + PUBLICKEYBYTES
+    + crypto_box::KEY_SIZE
     /* Friend request message      */ + REQUEST_MSG_LEN
     /* padding1                    */ + 1
     /* actual size of FR message   */ + 2
@@ -487,7 +488,7 @@ impl ToBytes for Eof {
 
 https://zetok.github.io/tox-spec/#sections
 */
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone)]
 pub enum Section {
     /** Section for [`NoSpam`](../../toxid/struct.NoSpam.html), public and
     secret keys.
@@ -584,7 +585,7 @@ const STATE_MAGIC: &[u8; 4] = &[0x1f, 0x1b, 0xed, 0x15];
 
 https://zetok.github.io/tox-spec/#state-format
 */
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone)]
 pub struct State {
     sections: Vec<Section>,
 }
@@ -618,33 +619,25 @@ mod tests {
     use tox_packet::ip_port::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
-        no_spam_keys_encode_decode,
-        thread_rng().gen::<NospamKeys>()
-    );
-
-    encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         dht_state_encode_decode,
         DhtState(vec![
             PackedNode {
-                pk: gen_keypair().0,
+                pk: SecretKey::generate(&mut thread_rng()).public_key(),
                 saddr: "1.2.3.4:1234".parse().unwrap(),
             },
             PackedNode {
-                pk: gen_keypair().0,
+                pk: SecretKey::generate(&mut thread_rng()).public_key(),
                 saddr: "1.2.3.5:1235".parse().unwrap(),
             },
         ])
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         friends_encode_decode,
         Friends(vec![
             FriendState {
                 friend_status: FriendStatus::Added,
-                pk: gen_keypair().0,
+                pk: SecretKey::generate(&mut thread_rng()).public_key(),
                 fr_msg: b"test msg".to_vec(),
                 name: Name(b"test name".to_vec()),
                 status_msg: StatusMsg(b"test status msg".to_vec()),
@@ -654,7 +647,7 @@ mod tests {
             },
             FriendState {
                 friend_status: FriendStatus::Added,
-                pk: gen_keypair().0,
+                pk: SecretKey::generate(&mut thread_rng()).public_key(),
                 fr_msg: b"test msg2".to_vec(),
                 name: Name(b"test name2".to_vec()),
                 status_msg: StatusMsg(b"test status msg2".to_vec()),
@@ -666,11 +659,10 @@ mod tests {
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         friend_state_encode_decode,
         FriendState {
             friend_status: FriendStatus::Added,
-            pk: gen_keypair().0,
+            pk: SecretKey::generate(&mut thread_rng()).public_key(),
             fr_msg: b"test msg".to_vec(),
             name: Name(b"test name".to_vec()),
             status_msg: StatusMsg(b"test status msg".to_vec()),
@@ -681,35 +673,30 @@ mod tests {
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         name_encode_decode,
         Name(vec![0,1,2,3,4])
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         status_msg_encode_decode,
         StatusMsg(vec![0,1,2,3,4,5])
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         eof_encode_decode,
         Eof
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         user_status_encode_decode,
         UserStatus(UserWorkingStatus::Online)
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         tcp_relays_encode_decode,
         TcpRelays(vec![
             TcpUdpPackedNode {
-                pk: gen_keypair().0,
+                pk: SecretKey::generate(&mut thread_rng()).public_key(),
                 ip_port: IpPort {
                     protocol: ProtocolType::Tcp,
                     ip_addr: "1.2.3.4".parse().unwrap(),
@@ -717,7 +704,7 @@ mod tests {
                 },
             },
             TcpUdpPackedNode {
-                pk: gen_keypair().0,
+                pk: SecretKey::generate(&mut thread_rng()).public_key(),
                 ip_port: IpPort {
                     protocol: ProtocolType::Udp,
                     ip_addr: "1.2.3.5".parse().unwrap(),
@@ -728,11 +715,10 @@ mod tests {
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         path_nodes_encode_decode,
         PathNodes(vec![
             TcpUdpPackedNode {
-                pk: gen_keypair().0,
+                pk: SecretKey::generate(&mut thread_rng()).public_key(),
                 ip_port: IpPort {
                     protocol: ProtocolType::Tcp,
                     ip_addr: "1.2.3.4".parse().unwrap(),
@@ -740,7 +726,7 @@ mod tests {
                 },
             },
             TcpUdpPackedNode {
-                pk: gen_keypair().0,
+                pk: SecretKey::generate(&mut thread_rng()).public_key(),
                 ip_port: IpPort {
                     protocol: ProtocolType::Udp,
                     ip_addr: "1.2.3.5".parse().unwrap(),
@@ -748,87 +734,5 @@ mod tests {
                 },
             },
         ])
-    );
-
-    encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
-        state_encode_decode,
-        State {
-            sections: vec![
-                Section::NospamKeys(thread_rng().gen()),
-                Section::DhtState(DhtState(vec![
-                    PackedNode {
-                        pk: gen_keypair().0,
-                        saddr: "1.2.3.4:1234".parse().unwrap(),
-                    },
-                    PackedNode {
-                        pk: gen_keypair().0,
-                        saddr: "1.2.3.5:1235".parse().unwrap(),
-                    },
-                ])),
-                Section::Friends(Friends(vec![
-                    FriendState {
-                        friend_status: FriendStatus::Added,
-                        pk: gen_keypair().0,
-                        fr_msg: b"test msg".to_vec(),
-                        name: Name(b"test name".to_vec()),
-                        status_msg: StatusMsg(b"test status msg".to_vec()),
-                        user_status: UserWorkingStatus::Online,
-                        nospam: NoSpam([7; NOSPAMBYTES]),
-                        last_seen: 1234,
-                    },
-                    FriendState {
-                        friend_status: FriendStatus::Added,
-                        pk: gen_keypair().0,
-                        fr_msg: b"test msg2".to_vec(),
-                        name: Name(b"test name2".to_vec()),
-                        status_msg: StatusMsg(b"test status msg2".to_vec()),
-                        user_status: UserWorkingStatus::Online,
-                        nospam: NoSpam([8; NOSPAMBYTES]),
-                        last_seen: 1235,
-                    },
-                ])),
-                Section::Name(Name(vec![0,1,2,3,4])),
-                Section::StatusMsg(StatusMsg(vec![0,1,2,3,4,5])),
-                Section::UserStatus(UserStatus(UserWorkingStatus::Online)),
-                Section::TcpRelays(TcpRelays(vec![
-                    TcpUdpPackedNode {
-                        pk: gen_keypair().0,
-                        ip_port: IpPort {
-                            protocol: ProtocolType::Tcp,
-                            ip_addr: "1.2.3.4".parse().unwrap(),
-                            port: 1234,
-                        },
-                    },
-                    TcpUdpPackedNode {
-                        pk: gen_keypair().0,
-                        ip_port: IpPort {
-                            protocol: ProtocolType::Udp,
-                            ip_addr: "1.2.3.5".parse().unwrap(),
-                            port: 12345,
-                        },
-                    },
-                ])),
-                Section::PathNodes(PathNodes(vec![
-                    TcpUdpPackedNode {
-                        pk: gen_keypair().0,
-                        ip_port: IpPort {
-                            protocol: ProtocolType::Tcp,
-                            ip_addr: "1.2.3.4".parse().unwrap(),
-                            port: 1234,
-                        },
-                    },
-                    TcpUdpPackedNode {
-                        pk: gen_keypair().0,
-                        ip_port: IpPort {
-                            protocol: ProtocolType::Udp,
-                            ip_addr: "1.2.3.5".parse().unwrap(),
-                            port: 12345,
-                        },
-                    },
-                ])),
-                Section::Eof(Eof),
-            ],
-        }
     );
 }

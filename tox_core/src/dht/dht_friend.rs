@@ -103,40 +103,40 @@ mod tests {
 
     #[test]
     fn addr_is_unknown() {
-        crypto_init().unwrap();
-        let pk = gen_keypair().0;
+        let mut rng = thread_rng();
+        let pk = SecretKey::generate(&mut rng).public_key();
         let mut friend = DhtFriend::new(&mut thread_rng(), pk);
 
-        assert!(friend.try_add_to_close(PackedNode::new("192.168.1.1:12345".parse().unwrap(), &gen_keypair().0)));
-        assert!(friend.try_add_to_close(PackedNode::new("192.168.1.2:12345".parse().unwrap(), &gen_keypair().0)));
+        assert!(friend.try_add_to_close(PackedNode::new("192.168.1.1:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key())));
+        assert!(friend.try_add_to_close(PackedNode::new("192.168.1.2:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key())));
 
         assert!(!friend.is_addr_known())
     }
 
     #[test]
     fn addr_is_known() {
-        crypto_init().unwrap();
-        let pk = gen_keypair().0;
-        let mut friend = DhtFriend::new(&mut thread_rng(), pk);
+        let mut rng = thread_rng();
+        let pk = SecretKey::generate(&mut rng).public_key();
+        let mut friend = DhtFriend::new(&mut thread_rng(), pk.clone());
 
-        assert!(friend.try_add_to_close(PackedNode::new("192.168.1.1:12345".parse().unwrap(), &gen_keypair().0)));
-        assert!(friend.try_add_to_close(PackedNode::new("192.168.1.2:12345".parse().unwrap(), &gen_keypair().0)));
+        assert!(friend.try_add_to_close(PackedNode::new("192.168.1.1:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key())));
+        assert!(friend.try_add_to_close(PackedNode::new("192.168.1.2:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key())));
 
-        assert!(friend.try_add_to_close(PackedNode::new("192.168.1.3:12345".parse().unwrap(), &pk)));
+        assert!(friend.try_add_to_close(PackedNode::new("192.168.1.3:12345".parse().unwrap(), pk)));
 
         assert!(friend.is_addr_known())
     }
 
     #[test]
     fn get_returned_addrs() {
-        crypto_init().unwrap();
-        let pk = gen_keypair().0;
-        let mut friend = DhtFriend::new(&mut thread_rng(), pk);
+        let mut rng = thread_rng();
+        let pk = SecretKey::generate(&mut rng).public_key();
+        let mut friend = DhtFriend::new(&mut thread_rng(), pk.clone());
 
         let nodes = [
-            PackedNode::new("192.168.1.1:12345".parse().unwrap(), &gen_keypair().0),
-            PackedNode::new("192.168.1.2:12345".parse().unwrap(), &gen_keypair().0),
-            PackedNode::new("192.168.1.3:12345".parse().unwrap(), &gen_keypair().0),
+            PackedNode::new("192.168.1.1:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key()),
+            PackedNode::new("192.168.1.2:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key()),
+            PackedNode::new("192.168.1.3:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key()),
         ];
         let addrs: Vec<SocketAddr> = vec![
             "192.168.2.1:12345".parse().unwrap(),
@@ -144,8 +144,8 @@ mod tests {
             "192.168.2.3:12345".parse().unwrap(),
         ];
 
-        for (&node, &addr) in nodes.iter().zip(addrs.iter()) {
-            friend.try_add_to_close(node);
+        for (node, &addr) in nodes.iter().zip(addrs.iter()) {
+            friend.try_add_to_close(node.clone());
             let dht_node = friend.close_nodes.get_node_mut(&pk, &node.pk).unwrap();
             dht_node.update_returned_addr(addr);
         }
@@ -162,14 +162,14 @@ mod tests {
 
     #[tokio::test]
     async fn get_returned_addrs_timed_out() {
-        crypto_init().unwrap();
-        let pk = gen_keypair().0;
-        let mut friend = DhtFriend::new(&mut thread_rng(), pk);
+        let mut rng = thread_rng();
+        let pk = SecretKey::generate(&mut rng).public_key();
+        let mut friend = DhtFriend::new(&mut thread_rng(), pk.clone());
 
         let nodes = [
-            PackedNode::new("192.168.1.1:12345".parse().unwrap(), &gen_keypair().0),
-            PackedNode::new("192.168.1.2:12345".parse().unwrap(), &gen_keypair().0),
-            PackedNode::new("192.168.1.3:12345".parse().unwrap(), &gen_keypair().0),
+            PackedNode::new("192.168.1.1:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key()),
+            PackedNode::new("192.168.1.2:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key()),
+            PackedNode::new("192.168.1.3:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key()),
         ];
         let addrs: Vec<SocketAddr> = vec![
             "192.168.2.1:12345".parse().unwrap(),
@@ -177,8 +177,8 @@ mod tests {
             "192.168.2.3:12345".parse().unwrap(),
         ];
 
-        for (&node, &addr) in nodes.iter().zip(addrs.iter()) {
-            friend.try_add_to_close(node);
+        for (node, &addr) in nodes.iter().zip(addrs.iter()) {
+            friend.try_add_to_close(node.clone());
             let dht_node = friend.close_nodes.get_node_mut(&pk, &node.pk).unwrap();
             dht_node.update_returned_addr(addr);
         }
@@ -191,19 +191,18 @@ mod tests {
 
     #[test]
     fn can_and_try_add_to_close() {
-        crypto_init().unwrap();
-        let pk = PublicKey([0; PUBLICKEYBYTES]);
+        let pk = PublicKey::from([0; crypto_box::KEY_SIZE]);
         let mut friend = DhtFriend::new(&mut thread_rng(), pk);
 
         for i in 0 .. 8 {
             let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + u16::from(i));
-            let node = PackedNode::new(addr, &PublicKey([i + 2; PUBLICKEYBYTES]));
+            let node = PackedNode::new(addr, PublicKey::from([i + 2; crypto_box::KEY_SIZE]));
             assert!(friend.try_add_to_close(node));
         }
 
         let closer_node = PackedNode::new(
             "1.2.3.5:12345".parse().unwrap(),
-            &PublicKey([1; PUBLICKEYBYTES])
+            PublicKey::from([1; crypto_box::KEY_SIZE])
         );
 
         // should add a new closer node with eviction

@@ -34,7 +34,6 @@ mod tests {
     use super::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         offline_encode_decode,
         Offline
     );

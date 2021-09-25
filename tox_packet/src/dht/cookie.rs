@@ -180,17 +180,15 @@ mod tests {
     use xsalsa20poly1305::aead::NewAead;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         cookie_encode_decode,
         Cookie {
             time: 12345,
-            real_pk: gen_keypair().0,
-            dht_pk: gen_keypair().0,
+            real_pk: SecretKey::generate(&mut thread_rng()).public_key(),
+            dht_pk: SecretKey::generate(&mut thread_rng()).public_key(),
         }
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         encrypted_cookie_encode_decode,
         EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
@@ -200,10 +198,9 @@ mod tests {
 
     #[test]
     fn cookie_encrypt_decrypt() {
-        crypto_init().unwrap();
         let mut rng = thread_rng();
         let symmetric_key = XSalsa20Poly1305::new(&XSalsa20Poly1305::generate_key(&mut rng));
-        let payload = Cookie::new(gen_keypair().0, gen_keypair().0);
+        let payload = Cookie::new(SecretKey::generate(&mut rng).public_key(), SecretKey::generate(&mut rng).public_key());
         // encode payload with symmetric key
         let encrypted_cookie = EncryptedCookie::new(&mut rng, &symmetric_key, &payload);
         // decode payload with symmetric key
@@ -214,11 +211,10 @@ mod tests {
 
     #[test]
     fn cookie_encrypt_decrypt_invalid_key() {
-        crypto_init().unwrap();
         let mut rng = thread_rng();
         let symmetric_key = XSalsa20Poly1305::new(&XSalsa20Poly1305::generate_key(&mut rng));
         let eve_symmetric_key = XSalsa20Poly1305::new(&XSalsa20Poly1305::generate_key(&mut rng));
-        let payload = Cookie::new(gen_keypair().0, gen_keypair().0);
+        let payload = Cookie::new(SecretKey::generate(&mut rng).public_key(), SecretKey::generate(&mut rng).public_key());
         // encode payload with symmetric key
         let encrypted_cookie = EncryptedCookie::new(&mut rng, &symmetric_key, &payload);
         // try to decode payload with eve's symmetric key
@@ -262,8 +258,8 @@ mod tests {
 
     #[test]
     fn cookie_timed_out() {
-        crypto_init().unwrap();
-        let mut cookie = Cookie::new(gen_keypair().0, gen_keypair().0);
+        let mut rng = thread_rng();
+        let mut cookie = Cookie::new(SecretKey::generate(&mut rng).public_key(), SecretKey::generate(&mut rng).public_key());
         assert!(!cookie.is_timed_out());
         cookie.time -= COOKIE_TIMEOUT + 1;
         assert!(cookie.is_timed_out());

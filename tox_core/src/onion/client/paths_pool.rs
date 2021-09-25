@@ -26,7 +26,7 @@ const ONION_PATH_TIMEOUT: Duration = Duration::from_secs(10);
 const ONION_PATH_MAX_LIFETIME: Duration = Duration::from_secs(1200);
 
 /// Onion path that is stored for later usage.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone)]
 pub struct StoredOnionPath {
     /// Onion path.
     pub path: OnionPath,
@@ -94,7 +94,7 @@ impl StoredOnionPath {
 }
 
 /// Pool of random onion paths.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct PathsPool {
     /// Nodes cache for building random onion paths.
     pub path_nodes: NodesPool,
@@ -202,7 +202,7 @@ impl PathsPool {
             path.update_success();
             // re-add path nodes to the cache as they are still valid
             for node in &path.path.nodes {
-                self.path_nodes.put(PackedNode::new(node.saddr, &node.public_key));
+                self.path_nodes.put(PackedNode::new(node.saddr, node.public_key.clone()));
             }
         }
     }
@@ -218,8 +218,8 @@ impl Default for PathsPool {
 mod tests {
     use super::*;
 
+    use crypto_box::SecretKey;
     use futures::channel::mpsc;
-    use tox_crypto::*;
 
     macro_rules! paths_pool_tests {
         ($mod:ident, $friends:expr, $paths:ident) => {
@@ -228,17 +228,19 @@ mod tests {
 
                 #[tokio::test]
                 async fn random_path_stored() {
-                    let (dht_pk, dht_sk) = gen_keypair();
+                    let mut rng = thread_rng();
+                    let dht_sk = SecretKey::generate(&mut rng);
+                    let dht_pk = dht_sk.public_key();
                     let (udp_tx, _udp_rx) = mpsc::channel(1);
                     let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
-                    let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
+                    let dht = DhtServer::new(udp_tx, dht_pk.clone(), dht_sk.clone());
                     let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
                     let mut paths_pool = PathsPool::new();
                     for _ in 0 .. NUMBER_ONION_PATHS {
-                        let node_1 = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
-                        let node_2 = PackedNode::new("127.0.0.1:12346".parse().unwrap(), &gen_keypair().0);
-                        let node_3 = PackedNode::new("127.0.0.1:12347".parse().unwrap(), &gen_keypair().0);
-                        let path = OnionPath::new([node_1, node_2, node_3], OnionPathType::Udp);
+                        let node_1 = PackedNode::new("127.0.0.1:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key());
+                        let node_2 = PackedNode::new("127.0.0.1:12346".parse().unwrap(), SecretKey::generate(&mut rng).public_key());
+                        let node_3 = PackedNode::new("127.0.0.1:12347".parse().unwrap(), SecretKey::generate(&mut rng).public_key());
+                        let path = OnionPath::new([node_1.clone(), node_2.clone(), node_3.clone()], OnionPathType::Udp);
                         paths_pool.path_nodes.put(node_1);
                         paths_pool.path_nodes.put(node_2);
                         paths_pool.path_nodes.put(node_3);
@@ -253,125 +255,159 @@ mod tests {
 
                 #[tokio::test]
                 async fn random_path_new_udp_random() {
-                    let (dht_pk, dht_sk) = gen_keypair();
+                    let mut rng = thread_rng();
+                    let dht_sk = SecretKey::generate(&mut rng);
+                    let dht_pk = dht_sk.public_key();
                     let (udp_tx, _udp_rx) = mpsc::channel(1);
                     let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
-                    let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
+                    let dht = DhtServer::new(udp_tx, dht_pk.clone(), dht_sk.clone());
                     // make DHT connected so that we will build UDP onion paths
-                    dht.add_node(PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0)).await;
+                    dht.add_node(PackedNode::new("127.0.0.1:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key())).await;
                     let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
                     let mut paths_pool = PathsPool::new();
                     for _ in 0 .. MIN_NODES_POOL_SIZE {
-                        let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
+                        let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key());
                         paths_pool.path_nodes.put(node);
                     }
 
                     let path = paths_pool.random_path(&dht, &tcp_connections, $friends).await.unwrap();
-                    assert_eq!(path, paths_pool.$paths[0].path);
+                    for i in 0 .. 3 {
+                        assert_eq!(path.nodes[i].public_key, paths_pool.$paths[0].path.nodes[i].public_key);
+                    }
                     assert_eq!(path.path_type, OnionPathType::Udp);
                 }
 
                 #[tokio::test]
                 async fn random_path_new_tcp_random() {
-                    let (dht_pk, dht_sk) = gen_keypair();
+                    let mut rng = thread_rng();
+                    let dht_sk = SecretKey::generate(&mut rng);
+                    let dht_pk = dht_sk.public_key();
                     let (udp_tx, _udp_rx) = mpsc::channel(1);
                     let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
-                    let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
+                    let dht = DhtServer::new(udp_tx, dht_pk.clone(), dht_sk.clone());
                     let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
                     // add a relay that will be used as first node for onion path
                     let (_relay_incoming_rx, _relay_outgoing_rx, relay_pk) = tcp_connections.add_client().await;
                     let mut paths_pool = PathsPool::new();
                     for _ in 0 .. MIN_NODES_POOL_SIZE {
-                        let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
+                        let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key());
                         paths_pool.path_nodes.put(node);
                     }
 
                     let path = paths_pool.random_path(&dht, &tcp_connections, $friends).await.unwrap();
-                    assert_eq!(path, paths_pool.$paths[0].path);
+                    for i in 0 .. 3 {
+                        assert_eq!(path.nodes[i].public_key, paths_pool.$paths[0].path.nodes[i].public_key);
+                    }
                     assert_eq!(path.nodes[0].public_key, relay_pk);
                     assert_eq!(path.path_type, OnionPathType::Tcp);
                 }
 
                 #[tokio::test]
                 async fn get_or_random_path_stored() {
-                    let (dht_pk, dht_sk) = gen_keypair();
+                    let mut rng = thread_rng();
+                    let dht_sk = SecretKey::generate(&mut rng);
+                    let dht_pk = dht_sk.public_key();
                     let (udp_tx, _udp_rx) = mpsc::channel(1);
                     let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
-                    let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
+                    let dht = DhtServer::new(udp_tx, dht_pk.clone(), dht_sk.clone());
                     let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
                     let mut paths_pool = PathsPool::new();
-                    let node_1 = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
-                    let node_2 = PackedNode::new("127.0.0.1:12346".parse().unwrap(), &gen_keypair().0);
-                    let node_3 = PackedNode::new("127.0.0.1:12347".parse().unwrap(), &gen_keypair().0);
+                    let node_1 = PackedNode::new("127.0.0.1:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key());
+                    let node_2 = PackedNode::new("127.0.0.1:12346".parse().unwrap(), SecretKey::generate(&mut rng).public_key());
+                    let node_3 = PackedNode::new("127.0.0.1:12347".parse().unwrap(), SecretKey::generate(&mut rng).public_key());
                     let path = OnionPath::new([node_1, node_2, node_3], OnionPathType::Udp);
                     paths_pool.$paths.push(StoredOnionPath::new(path.clone()));
 
-                    assert_eq!(paths_pool.get_or_random_path(&dht, &tcp_connections, path.id(), $friends).await.unwrap(), path);
+                    let result_path = paths_pool.get_or_random_path(&dht, &tcp_connections, path.id(), $friends).await.unwrap();
+                    for i in 0 .. 3 {
+                        assert_eq!(result_path.nodes[i].public_key, path.nodes[i].public_key);
+                    }
                     assert_eq!(paths_pool.$paths[0].attempts, ONION_PATH_MAX_NO_RESPONSE_USES / 2 + 1);
                 }
 
                 #[tokio::test]
                 async fn get_or_random_path_new_udp_random() {
-                    let (dht_pk, dht_sk) = gen_keypair();
+                    let mut rng = thread_rng();
+                    let dht_sk = SecretKey::generate(&mut rng);
+                    let dht_pk = dht_sk.public_key();
                     let (udp_tx, _udp_rx) = mpsc::channel(1);
                     let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
-                    let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
+                    let dht = DhtServer::new(udp_tx, dht_pk.clone(), dht_sk.clone());
                     // make DHT connected so that we will build UDP onion paths
-                    dht.add_node(PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0)).await;
+                    dht.add_node(PackedNode::new("127.0.0.1:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key())).await;
                     let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
                     let mut paths_pool = PathsPool::new();
                     for _ in 0 .. MIN_NODES_POOL_SIZE {
-                        let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
+                        let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key());
                         paths_pool.path_nodes.put(node);
                     }
 
                     let path_id = OnionPathId {
-                        keys: [gen_keypair().0, gen_keypair().0, gen_keypair().0],
+                        keys: [
+                            SecretKey::generate(&mut rng).public_key(),
+                            SecretKey::generate(&mut rng).public_key(),
+                            SecretKey::generate(&mut rng).public_key(),
+                        ],
                         path_type: OnionPathType::Udp,
                     };
-                    let path = paths_pool.get_or_random_path(&dht, &tcp_connections, path_id, $friends).await.unwrap();
+                    let path = paths_pool.get_or_random_path(&dht, &tcp_connections, path_id.clone(), $friends).await.unwrap();
                     assert_ne!(path.id(), path_id);
-                    assert_eq!(path, paths_pool.$paths[0].path);
+                    for i in 0 .. 3 {
+                        assert_eq!(path.nodes[i].public_key, paths_pool.$paths[0].path.nodes[i].public_key);
+                    }
                     assert_eq!(path.path_type, OnionPathType::Udp);
                 }
 
                 #[tokio::test]
                 async fn get_or_random_path_new_tcp_random() {
-                    let (dht_pk, dht_sk) = gen_keypair();
+                    let mut rng = thread_rng();
+                    let dht_sk = SecretKey::generate(&mut rng);
+                    let dht_pk = dht_sk.public_key();
                     let (udp_tx, _udp_rx) = mpsc::channel(1);
                     let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
-                    let dht = DhtServer::new(udp_tx, dht_pk, dht_sk.clone());
+                    let dht = DhtServer::new(udp_tx, dht_pk.clone(), dht_sk.clone());
                     let tcp_connections = TcpConnections::new(dht_pk, dht_sk, tcp_incoming_tx);
                     // add a relay that will be used as first node for onion path
                     let (_relay_incoming_rx, _relay_outgoing_rx, relay_pk) = tcp_connections.add_client().await;
                     let mut paths_pool = PathsPool::new();
                     for _ in 0 .. MIN_NODES_POOL_SIZE {
-                        let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
+                        let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key());
                         paths_pool.path_nodes.put(node);
                     }
 
                     let path_id = OnionPathId {
-                        keys: [gen_keypair().0, gen_keypair().0, gen_keypair().0],
+                        keys: [
+                            SecretKey::generate(&mut rng).public_key(),
+                            SecretKey::generate(&mut rng).public_key(),
+                            SecretKey::generate(&mut rng).public_key(),
+                        ],
                         path_type: OnionPathType::Tcp,
                     };
-                    let path = paths_pool.get_or_random_path(&dht, &tcp_connections, path_id, $friends).await.unwrap();
+                    let path = paths_pool.get_or_random_path(&dht, &tcp_connections, path_id.clone(), $friends).await.unwrap();
                     assert_ne!(path.id(), path_id);
-                    assert_eq!(path, paths_pool.$paths[0].path);
+                    for i in 0 .. 3 {
+                        assert_eq!(path.nodes[i].public_key, paths_pool.$paths[0].path.nodes[i].public_key);
+                    }
                     assert_eq!(path.nodes[0].public_key, relay_pk);
                     assert_eq!(path.path_type, OnionPathType::Tcp);
                 }
 
                 #[test]
                 fn get_stored_path() {
+                    let mut rng = thread_rng();
                     let mut paths_pool = PathsPool::new();
-                    let node_1 = PackedNode::new("127.0.0.1:12345".parse().unwrap(), &gen_keypair().0);
-                    let node_2 = PackedNode::new("127.0.0.1:12346".parse().unwrap(), &gen_keypair().0);
-                    let node_3 = PackedNode::new("127.0.0.1:12347".parse().unwrap(), &gen_keypair().0);
+                    let node_1 = PackedNode::new("127.0.0.1:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key());
+                    let node_2 = PackedNode::new("127.0.0.1:12346".parse().unwrap(), SecretKey::generate(&mut rng).public_key());
+                    let node_3 = PackedNode::new("127.0.0.1:12347".parse().unwrap(), SecretKey::generate(&mut rng).public_key());
                     let path = OnionPath::new([node_1, node_2, node_3], OnionPathType::Udp);
                     let path_id = path.id();
                     let stored_path = StoredOnionPath::new(path);
                     paths_pool.$paths.push(stored_path.clone());
-                    assert_eq!(paths_pool.get_stored_path(path_id, $friends), Some(&stored_path));
+                    let result_path = paths_pool.get_stored_path(path_id, $friends).unwrap();
+                    for i in 0 .. 3 {
+                        assert_eq!(result_path.path.nodes[i].public_key, stored_path.path.nodes[i].public_key);
+                    }
+                    assert_eq!(result_path.creation_time, stored_path.creation_time);
                 }
             }
         }

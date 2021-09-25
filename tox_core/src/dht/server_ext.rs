@@ -85,19 +85,22 @@ pub async fn dht_run_socket(
 mod tests {
     use super::*;
 
+    use crypto_box::{SalsaBox, SecretKey};
     use futures::channel::mpsc;
     use futures::TryStreamExt;
 
-    use tox_crypto::*;
+    use rand::thread_rng;
     use tox_packet::dht::*;
     use crate::dht::server::Server as DhtServer;
 
     #[tokio::test]
     async fn run_socket() {
-        crypto_init().unwrap();
-        let (client_pk, client_sk) = gen_keypair();
-        let (server_pk, server_sk) = gen_keypair();
-        let shared_secret = precompute(&server_pk, &client_sk);
+        let mut rng = thread_rng();
+        let client_sk = SecretKey::generate(&mut rng);
+        let client_pk = client_sk.public_key();
+        let server_sk = SecretKey::generate(&mut rng);
+        let server_pk = server_sk.public_key();
+        let shared_secret = SalsaBox::new(&server_pk, &client_sk);
 
         let (tx, rx) = mpsc::channel(32);
 
@@ -130,7 +133,7 @@ mod tests {
             let ping_request_payload = PingRequestPayload {
                 id: ping_id,
             };
-            let ping_request = PingRequest::new(&shared_secret, &client_pk, &ping_request_payload);
+            let ping_request = PingRequest::new(&shared_secret, client_pk, &ping_request_payload);
 
             sink.send((Packet::PingRequest(ping_request), server_addr)).await
                 .map_err(|e| Error::new(ErrorKind::Other, e.compat()))?;

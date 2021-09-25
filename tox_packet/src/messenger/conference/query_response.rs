@@ -129,35 +129,37 @@ impl PeerInfo {
 
 #[cfg(test)]
 mod tests {
+    use rand::thread_rng;
+
     use super::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         query_response_encode_decode,
         QueryResponse::new(1, vec![
             PeerInfo {
                 peer_id: 1,
-                real_pk: gen_keypair().0,
-                temp_pk: gen_keypair().0,
+                real_pk: SecretKey::generate(&mut thread_rng()).public_key(),
+                temp_pk: SecretKey::generate(&mut thread_rng()).public_key(),
                 nickname: "1234".to_owned(),
             },
             PeerInfo {
                 peer_id: 2,
-                real_pk: gen_keypair().0,
-                temp_pk: gen_keypair().0,
+                real_pk: SecretKey::generate(&mut thread_rng()).public_key(),
+                temp_pk: SecretKey::generate(&mut thread_rng()).public_key(),
                 nickname: "56789".to_owned(),
             }])
     );
 
     #[test]
     fn peer_info_from_bytes_encoding_error() {
+        let mut rng = thread_rng();
         let err_string = vec![0, 159, 146, 150]; // not UTF8 bytes.
-        let real_pk = gen_keypair().0;
-        let temp_pk = gen_keypair().0;
+        let real_pk = SecretKey::generate(&mut rng).public_key();
+        let temp_pk = SecretKey::generate(&mut rng).public_key();
         let mut buf = vec![0x00, 0x01];
         let length = vec![0x04];
-        buf.extend_from_slice(&real_pk.0);
-        buf.extend_from_slice(&temp_pk.0);
+        buf.extend_from_slice(real_pk.as_bytes());
+        buf.extend_from_slice(temp_pk.as_bytes());
         buf.extend_from_slice(&length);
         buf.extend_from_slice(&err_string);
         assert!(PeerInfo::from_bytes(&buf).is_err());
@@ -165,11 +167,12 @@ mod tests {
 
     #[test]
     fn peer_info_to_bytes_overflow() {
+        let mut rng = thread_rng();
         let large_string = String::from_utf8(vec![32u8; 300]).unwrap();
         let peer_info = PeerInfo {
             peer_id: 1,
-            real_pk: gen_keypair().0,
-            temp_pk: gen_keypair().0,
+            real_pk: SecretKey::generate(&mut rng).public_key(),
+            temp_pk: SecretKey::generate(&mut rng).public_key(),
             nickname: large_string,
         };
         let mut buf = [0; MAX_NAME_LENGTH_IN_CONFERENCE + 2 + 32 + 32+ 1]; // peer_id(2) + real_pk(32) + temp_pk(32) + length(1)

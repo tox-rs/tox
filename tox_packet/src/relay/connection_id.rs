@@ -48,13 +48,11 @@ mod test {
     use super::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         connection_id_encode_decode,
         ConnectionId::from_index(42)
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         connection_id_0_encode_decode,
         ConnectionId::zero()
     );

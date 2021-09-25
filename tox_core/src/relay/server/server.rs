@@ -176,24 +176,24 @@ impl Server {
 
         if pk == &packet.pk {
             // send RouteResponse(0) if client requests its own pk
-            return client_a.send_route_response(pk, ConnectionId::zero()).await
+            return client_a.send_route_response(pk.clone(), ConnectionId::zero()).await
         }
 
         // check if client_a is already linked
         if let Some(index) = client_a.links().id_by_pk(&packet.pk) {
             // send RouteResponse if client was already linked to pk
-            return client_a.send_route_response(&packet.pk, ConnectionId::from_index(index)).await
+            return client_a.send_route_response(packet.pk.clone(), ConnectionId::from_index(index)).await
         }
 
         // try to insert a new link
-        let b_id_in_client_a = if let Some(index) = client_a.links_mut().insert(&packet.pk) {
+        let b_id_in_client_a = if let Some(index) = client_a.links_mut().insert(packet.pk.clone()) {
             index
         } else {
             // send RouteResponse(0) if no space to insert new link
-            return client_a.send_route_response(&packet.pk, ConnectionId::zero()).await
+            return client_a.send_route_response(packet.pk.clone(), ConnectionId::zero()).await
         };
 
-        client_a.send_route_response(&packet.pk, ConnectionId::from_index(b_id_in_client_a)).await?;
+        client_a.send_route_response(packet.pk.clone(), ConnectionId::from_index(b_id_in_client_a)).await?;
 
         // get client_b
         let client_b = if let Some(client) = state.connected_clients.get(&packet.pk) {
@@ -329,7 +329,7 @@ impl Server {
         }
         let state = self.state.read().await;
         if let Some(client_b) = state.connected_clients.get(&packet.destination_pk) {
-            client_b.send_oob(pk, packet.data).await;
+            client_b.send_oob(pk.clone(), packet.data).await;
         }
 
         Ok(())
@@ -342,7 +342,7 @@ impl Server {
     async fn handle_onion_request(&self, pk: &PublicKey, packet: OnionRequest) -> Result<(), Error> {
         if let Some(ref onion_sink) = self.onion_sink {
             let state = self.state.read().await;
-            if let Some(client) = state.connected_clients.get(&pk) {
+            if let Some(client) = state.connected_clients.get(pk) {
                 let saddr = SocketAddr::new(client.ip_addr(), client.port());
                 let mut tx = onion_sink.clone();
                 tx // clone sink for 1 send only
@@ -383,7 +383,7 @@ impl Server {
 
         // get the link from client.links if any
         let a_link = if let Some(link) = client_a.links().by_id(index) {
-            *link
+            link.clone()
         } else {
             trace!("Data.connection_id is not linked for the client {:?}", pk);
             // There is possibility that the first client disconnected but the second client
@@ -425,7 +425,7 @@ impl Server {
     async fn remove_timedout_clients(&self, state: &mut ServerState) -> Result<(), Error> {
         let keys = state.connected_clients.iter()
             .filter(|(_key, client)| client.is_pong_timedout())
-            .map(|(key, _client)| *key)
+            .map(|(key, _client)| key.clone())
             .collect::<Vec<PublicKey>>();
 
         for key in keys {
@@ -458,6 +458,7 @@ impl Server {
 mod tests {
     use super::*;
 
+    use rand::thread_rng;
     use tox_packet::dht::CryptoData;
     use tox_packet::ip_port::*;
     use tox_packet::onion::*;
@@ -468,12 +469,12 @@ mod tests {
     use futures::StreamExt;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::time::Duration;
+    use crypto_box::{SalsaBox, aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned}};
 
     use crate::time::*;
 
     #[tokio::test]
     async fn server_is_clonable() {
-        crypto_init().unwrap();
         let server = Server::new();
         let (client_1, _rx_1) = create_random_client("1.2.3.4:12345".parse().unwrap());
         server.insert(client_1).await.unwrap();
@@ -484,8 +485,7 @@ mod tests {
     /// A function that generates random keypair, random `std::net::IpAddr`,
     /// random port, creates mpsc channel and returns created with them Client
     fn create_random_client(saddr: SocketAddr) -> (Client, mpsc::Receiver<Packet>) {
-        crypto_init().unwrap();
-        let (client_pk, _) = gen_keypair();
+        let client_pk = SecretKey::generate(&mut thread_rng()).public_key();
         let (tx, rx) = mpsc::channel(32);
         let client = Client::new(tx, &client_pk, saddr.ip(), saddr.port());
         (client, rx)
@@ -508,13 +508,13 @@ mod tests {
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { pk: client_pk_2 }
+            RouteRequest { pk: client_pk_2.clone() }
         )).await.unwrap();
 
         // the server should put RouteResponse into rx_1
         let (packet, rx_1) = rx_1.into_future().await;
         assert_eq!(packet.unwrap(), Packet::RouteResponse(
-            RouteResponse { pk: client_pk_2, connection_id: ConnectionId::from_index(0) }
+            RouteResponse { pk: client_pk_2.clone(), connection_id: ConnectionId::from_index(0) }
         ));
 
         {
@@ -532,13 +532,13 @@ mod tests {
 
         // emulate send RouteRequest from client_1 again
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { pk: client_pk_2 }
+            RouteRequest { pk: client_pk_2.clone() }
         )).await.unwrap();
 
         // the server should put RouteResponse into rx_1
         let (packet, rx_1) = rx_1.into_future().await;
         assert_eq!(packet.unwrap(), Packet::RouteResponse(
-            RouteResponse { pk: client_pk_2, connection_id: ConnectionId::from_index(0) }
+            RouteResponse { pk: client_pk_2.clone(), connection_id: ConnectionId::from_index(0) }
         ));
 
         {
@@ -552,13 +552,13 @@ mod tests {
 
         // emulate send RouteRequest from client_2
         server.handle_packet(&client_pk_2, Packet::RouteRequest(
-            RouteRequest { pk: client_pk_1 }
+            RouteRequest { pk: client_pk_1.clone() }
         )).await.unwrap();
 
         // the server should put RouteResponse into rx_2
         let (packet, rx_2) = rx_2.into_future().await;
         assert_eq!(packet.unwrap(), Packet::RouteResponse(
-            RouteResponse { pk: client_pk_1, connection_id: ConnectionId::from_index(0) }
+            RouteResponse { pk: client_pk_1.clone(), connection_id: ConnectionId::from_index(0) }
         ));
         // AND
         // the server should put ConnectNotification into rx_1
@@ -638,13 +638,13 @@ mod tests {
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { pk: client_pk_2 }
+            RouteRequest { pk: client_pk_2.clone() }
         )).await.unwrap();
 
         // the server should put RouteResponse into rx_1
         let (packet, _rx_1) = rx_1.into_future().await;
         assert_eq!(packet.unwrap(), Packet::RouteResponse(
-            RouteResponse { pk: client_pk_2, connection_id: ConnectionId::from_index(0) }
+            RouteResponse { pk: client_pk_2.clone(), connection_id: ConnectionId::from_index(0) }
         ));
 
         {
@@ -671,7 +671,7 @@ mod tests {
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { pk: client_pk_1 }
+            RouteRequest { pk: client_pk_1.clone() }
         )).await.unwrap();
 
         // the server should put RouteResponse into rx_1
@@ -697,7 +697,7 @@ mod tests {
 
             // emulate send RouteRequest from client_1
             server.handle_packet(&client_pk_1, Packet::RouteRequest(
-                RouteRequest { pk: other_client_pk }
+                RouteRequest { pk: other_client_pk.clone() }
             )).await.unwrap();
 
             // the server should put RouteResponse into rx_1
@@ -713,7 +713,7 @@ mod tests {
         server.insert(other_client).await.unwrap();
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { pk: other_client_pk }
+            RouteRequest { pk: other_client_pk.clone() }
         )).await.unwrap();
 
         // the server should put RouteResponse into rx_1
@@ -750,24 +750,24 @@ mod tests {
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { pk: client_pk_2 }
+            RouteRequest { pk: client_pk_2.clone() }
         )).await.unwrap();
 
         // the server should put RouteResponse into rx_1
         let (packet, rx_1) = rx_1.into_future().await;
         assert_eq!(packet.unwrap(), Packet::RouteResponse(
-            RouteResponse { pk: client_pk_2, connection_id: ConnectionId::from_index(0) }
+            RouteResponse { pk: client_pk_2.clone(), connection_id: ConnectionId::from_index(0) }
         ));
 
         // emulate send RouteRequest from client_2
         server.handle_packet(&client_pk_2, Packet::RouteRequest(
-            RouteRequest { pk: client_pk_1 }
+            RouteRequest { pk: client_pk_1.clone() }
         )).await.unwrap();
 
         // the server should put RouteResponse into rx_2
         let (packet, rx_2) = rx_2.into_future().await;
         assert_eq!(packet.unwrap(), Packet::RouteResponse(
-            RouteResponse { pk: client_pk_1, connection_id: ConnectionId::from_index(0) }
+            RouteResponse { pk: client_pk_1.clone(), connection_id: ConnectionId::from_index(0) }
         ));
         // AND
         // the server should put ConnectNotification into rx_1
@@ -871,10 +871,9 @@ mod tests {
     }
     #[tokio::test]
     async fn handle_disconnect_notification_0() {
-        crypto_init().unwrap();
         let server = Server::new();
 
-        let (client_pk, _) = gen_keypair();
+        let client_pk = SecretKey::generate(&mut thread_rng()).public_key();
 
         let handle_res = server.handle_packet(&client_pk, Packet::DisconnectNotification(
             DisconnectNotification { connection_id: ConnectionId::zero() }
@@ -925,7 +924,6 @@ mod tests {
     }
     #[tokio::test]
     async fn handle_onion_request() {
-        crypto_init().unwrap();
         let (udp_onion_sink, udp_onion_stream) = mpsc::channel(1);
         let mut server = Server::new();
         server.set_udp_onion_sink(udp_onion_sink);
@@ -937,13 +935,13 @@ mod tests {
         server.insert(client_1).await.unwrap();
 
         let request = OnionRequest {
-            nonce: gen_nonce(),
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             ip_port: IpPort {
                 protocol: ProtocolType::Tcp,
                 ip_addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                 port: 12345,
             },
-            temporary_pk: gen_keypair().0,
+            temporary_pk: SecretKey::generate(&mut thread_rng()).public_key(),
             payload: vec![13; 170]
         };
         let handle_res = server
@@ -969,7 +967,7 @@ mod tests {
 
         let payload = InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
             sendback_data: 12345,
-            nonce: gen_nonce(),
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             payload: vec![42; 123]
         });
         let handle_res = server
@@ -990,9 +988,9 @@ mod tests {
         let (mut client_2, rx_2) = create_random_client("1.2.3.4:12346".parse().unwrap());
 
         // link client_1 with client_2
-        let index_1 = client_1.links_mut().insert(&client_2.pk()).unwrap();
+        let index_1 = client_1.links_mut().insert(client_2.pk()).unwrap();
         assert!(client_1.links_mut().upgrade(index_1));
-        let index_2 = client_2.links_mut().insert(&client_1.pk()).unwrap();
+        let index_2 = client_2.links_mut().insert(client_1.pk()).unwrap();
         assert!(client_2.links_mut().upgrade(index_2));
 
         let client_pk_1 = client_1.pk();
@@ -1034,7 +1032,7 @@ mod tests {
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { pk: client_pk_2 }
+            RouteRequest { pk: client_pk_2.clone() }
         )).await.unwrap();
 
         // the server should put RouteResponse into rx_1
@@ -1061,7 +1059,7 @@ mod tests {
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { pk: client_pk_2 }
+            RouteRequest { pk: client_pk_2.clone() }
         )).await.unwrap();
 
         // the server should put RouteResponse into rx_1
@@ -1084,10 +1082,9 @@ mod tests {
     }
     #[tokio::test]
     async fn handle_data_0() {
-        crypto_init().unwrap();
         let server = Server::new();
 
-        let (client_pk, _) = gen_keypair();
+        let client_pk = SecretKey::generate(&mut thread_rng()).public_key();
 
         let handle_res = server.handle_packet(&client_pk, Packet::Data(
             Data {
@@ -1113,7 +1110,7 @@ mod tests {
 
         // emulate send RouteResponse from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::RouteResponse(
-            RouteResponse { pk: client_pk_1, connection_id: ConnectionId::from_index(42) }
+            RouteResponse { pk: client_pk_1.clone(), connection_id: ConnectionId::from_index(42) }
         )).await;
         assert!(handle_res.is_err());
     }
@@ -1252,13 +1249,13 @@ mod tests {
         server.insert(client_1).await.unwrap();
 
         let request = OnionRequest {
-            nonce: gen_nonce(),
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             ip_port: IpPort {
                 protocol: ProtocolType::Tcp,
                 ip_addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                 port: 12345,
             },
-            temporary_pk: gen_keypair().0,
+            temporary_pk: SecretKey::generate(&mut thread_rng()).public_key(),
             payload: vec![13; 1500]
         };
         let handle_res = server
@@ -1276,7 +1273,7 @@ mod tests {
 
         let payload = InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
             sendback_data: 12345,
-            nonce: gen_nonce(),
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             payload: vec![42; 123]
         });
         let handle_res = server.handle_packet(&client_pk_1, Packet::OnionResponse(
@@ -1286,14 +1283,13 @@ mod tests {
     }
     #[tokio::test]
     async fn handle_udp_onion_response_for_unknown_client() {
-        crypto_init().unwrap();
         let (udp_onion_sink, _) = mpsc::channel(1);
         let mut server = Server::new();
         server.set_udp_onion_sink(udp_onion_sink);
 
         let client_addr_1 = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
         let client_port_1 = 12345u16;
-        let (client_pk_1, _) = gen_keypair();
+        let client_pk_1 = SecretKey::generate(&mut thread_rng()).public_key();
         let (tx_1, _rx_1) = mpsc::channel(1);
         let client_1 = Client::new(tx_1, &client_pk_1, client_addr_1, client_port_1);
         server.insert(client_1).await.unwrap();
@@ -1303,7 +1299,7 @@ mod tests {
 
         let payload = InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
             sendback_data: 12345,
-            nonce: gen_nonce(),
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             payload: vec![42; 123]
         });
         let handle_res = server
@@ -1316,10 +1312,10 @@ mod tests {
     // Here be all handle_* tests from PK or to PK not in connected clients list
     #[tokio::test]
     async fn handle_route_request_not_connected() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let server = Server::new();
-        let (client_pk_1, _) = gen_keypair();
-        let (client_pk_2, _) = gen_keypair();
+        let client_pk_1 = SecretKey::generate(&mut rng).public_key();
+        let client_pk_2 = SecretKey::generate(&mut rng).public_key();
 
         // emulate send RouteRequest from client_pk_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::RouteRequest(
@@ -1329,9 +1325,8 @@ mod tests {
     }
     #[tokio::test]
     async fn handle_disconnect_notification_not_connected() {
-        crypto_init().unwrap();
         let server = Server::new();
-        let (client_pk_1, _) = gen_keypair();
+        let client_pk_1 = SecretKey::generate(&mut thread_rng()).public_key();
 
         // emulate send DisconnectNotification from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::DisconnectNotification(
@@ -1347,7 +1342,7 @@ mod tests {
         let client_pk_1 = client_1.pk();
         server.insert(client_1).await.unwrap();
 
-        let (client_pk_2, _) = gen_keypair();
+        let client_pk_2 = SecretKey::generate(&mut thread_rng()).public_key();
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
@@ -1362,9 +1357,8 @@ mod tests {
     }
     #[tokio::test]
     async fn handle_ping_request_not_connected() {
-        crypto_init().unwrap();
         let server = Server::new();
-        let (client_pk_1, _) = gen_keypair();
+        let client_pk_1 = SecretKey::generate(&mut thread_rng()).public_key();
 
         // emulate send PingRequest from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::PingRequest(
@@ -1374,9 +1368,8 @@ mod tests {
     }
     #[tokio::test]
     async fn handle_pong_response_not_connected() {
-        crypto_init().unwrap();
         let server = Server::new();
-        let (client_pk_1, _) = gen_keypair();
+        let client_pk_1 = SecretKey::generate(&mut thread_rng()).public_key();
 
         // emulate send PongResponse from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::PongResponse(
@@ -1386,10 +1379,10 @@ mod tests {
     }
     #[tokio::test]
     async fn handle_oob_send_not_connected() {
-        crypto_init().unwrap();
+        let mut rng = thread_rng();
         let server = Server::new();
-        let (client_pk_1, _) = gen_keypair();
-        let (client_pk_2, _) = gen_keypair();
+        let client_pk_1 = SecretKey::generate(&mut rng).public_key();
+        let client_pk_2 = SecretKey::generate(&mut rng).public_key();
 
         // emulate send OobSend from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::OobSend(
@@ -1399,9 +1392,8 @@ mod tests {
     }
     #[tokio::test]
     async fn handle_data_not_connected() {
-        crypto_init().unwrap();
         let server = Server::new();
-        let (client_pk_1, _) = gen_keypair();
+        let client_pk_1 = SecretKey::generate(&mut thread_rng()).public_key();
 
         // emulate send Data from client_1
         let handle_res = server.handle_packet(&client_pk_1, Packet::Data(
@@ -1423,11 +1415,11 @@ mod tests {
         let client_pk_1 = client_1.pk();
         server.insert(client_1).await.unwrap();
 
-        let (client_pk_2, _) = gen_keypair();
+        let client_pk_2 = SecretKey::generate(&mut thread_rng()).public_key();
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { pk: client_pk_2 }
+            RouteRequest { pk: client_pk_2.clone() }
         )).await.unwrap();
 
         // the server should put RouteResponse into rx_1
@@ -1466,9 +1458,8 @@ mod tests {
     }
     #[tokio::test]
     async fn shutdown_not_connected() {
-        crypto_init().unwrap();
         let server = Server::new();
-        let (client_pk, _) = gen_keypair();
+        let client_pk = SecretKey::generate(&mut thread_rng()).public_key();
         let client_ip_addr = "1.2.3.4".parse().unwrap();
         let client_port = 12345;
 
@@ -1478,9 +1469,8 @@ mod tests {
     }
     #[tokio::test]
     async fn shutdown_inner_not_connected() {
-        crypto_init().unwrap();
         let server = Server::new();
-        let (client_pk, _) = gen_keypair();
+        let client_pk = SecretKey::generate(&mut thread_rng()).public_key();
 
         let mut state = server.state.write().await;
 
@@ -1498,11 +1488,11 @@ mod tests {
         let client_port_1 = client_1.port();
         server.insert(client_1).await.unwrap();
 
-        let (client_pk_2, _) = gen_keypair();
+        let client_pk_2 = SecretKey::generate(&mut thread_rng()).public_key();
 
         // emulate send RouteRequest from client_1
         server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { pk: client_pk_2 }
+            RouteRequest { pk: client_pk_2.clone() }
         )).await.unwrap();
 
         // the server should put RouteResponse into rx_1
@@ -1537,7 +1527,6 @@ mod tests {
     }
     #[tokio::test]
     async fn send_onion_request_to_dropped_stream() {
-        crypto_init().unwrap();
         let (udp_onion_sink, udp_onion_stream) = mpsc::channel(1);
         let mut server = Server::new();
         server.set_udp_onion_sink(udp_onion_sink);
@@ -1550,13 +1539,13 @@ mod tests {
 
         // emulate send OnionRequest from client_1
         let request = OnionRequest {
-            nonce: gen_nonce(),
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             ip_port: IpPort {
                 protocol: ProtocolType::Tcp,
                 ip_addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                 port: 12345,
             },
-            temporary_pk: gen_keypair().0,
+            temporary_pk: SecretKey::generate(&mut thread_rng()).public_key(),
             payload: vec![13; 170]
         };
         let handle_res = server

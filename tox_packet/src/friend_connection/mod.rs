@@ -65,37 +65,37 @@ impl FromBytes for Packet {
 
 #[cfg(test)]
 mod tests {
+    use crypto_box::SecretKey;
+    use rand::thread_rng;
+
     use super::*;
     use crate::toxid::{NoSpam, NOSPAMBYTES};
     use crate::dht::packed_node::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_alive_encode_decode,
         Packet::Alive(Alive)
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_friend_requests_encode_decode,
         Packet::FriendRequests(FriendRequests::new(NoSpam([42; NOSPAMBYTES]), vec![1,2,3,4]))
     );
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         packet_share_relays_encode_decode,
         Packet::ShareRelays(ShareRelays::new(vec![
             PackedNode {
                 saddr: "1.1.1.1:33445".parse().unwrap(),
-                pk: tox_crypto::gen_keypair().0,
+                pk: SecretKey::generate(&mut thread_rng()).public_key(),
             },
             PackedNode {
                 saddr: "1.1.1.1:33446".parse().unwrap(),
-                pk: tox_crypto::gen_keypair().0,
+                pk: SecretKey::generate(&mut thread_rng()).public_key(),
             },
             PackedNode {
                 saddr: "1.1.1.1:33447".parse().unwrap(),
-                pk: tox_crypto::gen_keypair().0,
+                pk: SecretKey::generate(&mut thread_rng()).public_key(),
             },
         ]))
     );

@@ -162,7 +162,7 @@ impl DhtNode {
     /// last response time.
     pub fn to_packed_node(&self) -> Option<PackedNode> {
         self.get_socket_addr()
-            .map(|addr| PackedNode::new(addr, &self.pk))
+            .map(|addr| PackedNode::new(addr, self.pk.clone()))
     }
 
     /// Convert `DhtNode` to list of `PackedNode` which can contain IPv4 and
@@ -170,7 +170,7 @@ impl DhtNode {
     pub fn to_all_packed_nodes(&self) -> Vec<PackedNode> {
         self.get_all_addrs()
             .into_iter()
-            .map(|addr| PackedNode::new(addr, &self.pk))
+            .map(|addr| PackedNode::new(addr, self.pk.clone()))
             .collect()
     }
 
@@ -197,7 +197,7 @@ impl From<PackedNode> for DhtNode {
 
 impl HasPk for DhtNode {
     fn pk(&self) -> PublicKey {
-        self.pk
+        self.pk.clone()
     }
 }
 

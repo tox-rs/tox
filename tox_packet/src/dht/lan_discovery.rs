@@ -46,13 +46,14 @@ impl FromBytes for LanDiscovery {
 
 #[cfg(test)]
 mod tests {
+    use rand::thread_rng;
+
     use crate::dht::lan_discovery::*;
 
     encode_decode_test!(
-        tox_crypto::crypto_init().unwrap(),
         lan_discovery_encode_decode,
         LanDiscovery {
-            pk: gen_keypair().0
+            pk: SecretKey::generate(&mut thread_rng()).public_key()
         }
     );
 }

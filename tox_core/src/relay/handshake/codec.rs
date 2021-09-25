@@ -88,63 +88,68 @@ impl Encoder<ServerHandshake> for ServerHandshakeCodec {
 #[cfg(test)]
 mod tests {
     use crate::relay::handshake::codec::*;
-    use tox_crypto::*;
     use bytes::BytesMut;
+    use crypto_box::{SalsaBox, SecretKey, aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned}};
+    use rand::thread_rng;
 
     #[test]
     fn client_encode_decode() {
-        crypto_init().unwrap();
-        let (pk, _) = gen_keypair();
-        let nonce = gen_nonce();
+        let pk = SecretKey::generate(&mut thread_rng()).public_key();
         let mut buf = BytesMut::new();
         let mut codec = ClientHandshakeCodec { };
-        let handshake = ClientHandshake { pk, nonce, payload: vec![42; ENC_PAYLOAD_SIZE] };
+        let handshake = ClientHandshake {
+            pk,
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
+            payload: vec![42; ENC_PAYLOAD_SIZE],
+        };
         codec.encode(handshake.clone(), &mut buf).expect("should encode");
         let res = codec.decode(&mut buf).unwrap().expect("should decode");
         assert_eq!(handshake, res);
     }
     #[test]
     fn client_decode_incomplete() {
-        crypto_init().unwrap();
         let mut buf = BytesMut::new();
         let mut codec = ClientHandshakeCodec { };
         assert!(codec.decode(&mut buf).unwrap().is_none());
     }
     #[test]
     fn client_encode_too_big() {
-        crypto_init().unwrap();
-        let nonce = gen_nonce();
-        let (pk, _) = gen_keypair();
-        let handshake = ClientHandshake { pk, nonce, payload: vec![42; ENC_PAYLOAD_SIZE + 1] };
+        let pk = SecretKey::generate(&mut thread_rng()).public_key();
+        let handshake = ClientHandshake {
+            pk,
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
+            payload: vec![42; ENC_PAYLOAD_SIZE + 1],
+        };
         let mut buf = BytesMut::new();
         let mut codec = ClientHandshakeCodec { };
         assert!(codec.encode(handshake, &mut buf).is_err());
     }
     #[test]
     fn server_encode_decode() {
-        crypto_init().unwrap();
-        let nonce = gen_nonce();
         let mut buf = BytesMut::new();
         let mut codec = ServerHandshakeCodec { };
-        let handshake = ServerHandshake { nonce, payload: vec![42; ENC_PAYLOAD_SIZE] };
+        let handshake = ServerHandshake {
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
+            payload: vec![42; ENC_PAYLOAD_SIZE],
+        };
         codec.encode(handshake.clone(), &mut buf).expect("should encode");
         let res = codec.decode(&mut buf).unwrap().expect("should decode");
         assert_eq!(handshake, res);
     }
     #[test]
     fn server_decode_incomplete() {
-        crypto_init().unwrap();
         let mut buf = BytesMut::new();
         let mut codec = ServerHandshakeCodec { };
         assert!(codec.decode(&mut buf).unwrap().is_none());
     }
     #[test]
     fn server_encode_too_big() {
-        crypto_init().unwrap();
-        let nonce = gen_nonce();
         let mut buf = BytesMut::new();
         let mut codec = ServerHandshakeCodec { };
-        let handshake = ServerHandshake { nonce, payload: vec![42; ENC_PAYLOAD_SIZE + 1] };
+        let handshake = ServerHandshake {
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
+            payload: vec![42; ENC_PAYLOAD_SIZE + 1],
+        };
         assert!(codec.encode(handshake, &mut buf).is_err());
     }
 }
