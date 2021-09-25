@@ -17,7 +17,7 @@ edition = "2018"
 [dependencies]
 nom = "5.1"
 cookie-factory = "0.3"
-crypto_box = { version = "0.6", optional = true }
+crypto_box = { version = "0.7", optional = true }
 
 [features]
 default = []
