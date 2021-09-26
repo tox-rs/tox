@@ -6,7 +6,6 @@ This module works on top of other modules.
 pub mod hole_punching;
 pub mod errors;
 
-use failure::Fail;
 use futures::{TryFutureExt, StreamExt, SinkExt, future};
 use futures::channel::mpsc;
 use tokio::sync::RwLock;
@@ -322,28 +321,28 @@ impl Server {
 
         // Send NodesRequest packets to nodes from the Server
         self.ping_nodes_to_bootstrap(&mut request_queue, &mut nodes_to_bootstrap, self.pk.clone()).await
-            .map_err(|e| e.context(RunErrorKind::SendTo))?;
+            .map_err(RunError::SendTo)?;
         self.ping_close_nodes(&mut request_queue, close_nodes.iter_mut(), self.pk.clone()).await
-            .map_err(|e| e.context(RunErrorKind::SendTo))?;
+            .map_err(RunError::SendTo)?;
         if send_random_request(&mut *self.last_nodes_req_time.write().await, &mut *self.random_requests_count.write().await) {
             self.send_nodes_req_random(&mut request_queue, close_nodes.iter(), self.pk.clone()).await
-                .map_err(|e| e.context(RunErrorKind::SendTo))?;
+                .map_err(RunError::SendTo)?;
         }
 
         // Send NodesRequest packets to nodes from every DhtFriend
         for friend in friends.values_mut() {
             self.ping_nodes_to_bootstrap(&mut request_queue, &mut friend.nodes_to_bootstrap, friend.pk.clone()).await
-                .map_err(|e| e.context(RunErrorKind::SendTo))?;
+                .map_err(RunError::SendTo)?;
             self.ping_close_nodes(&mut request_queue, friend.close_nodes.nodes.iter_mut(), friend.pk.clone()).await
-                .map_err(|e| e.context(RunErrorKind::SendTo))?;
+                .map_err(RunError::SendTo)?;
             if send_random_request(&mut friend.last_nodes_req_time, &mut friend.random_requests_count) {
                 self.send_nodes_req_random(&mut request_queue, friend.close_nodes.nodes.iter(), friend.pk.clone()).await
-                    .map_err(|e| e.context(RunErrorKind::SendTo))?
+                    .map_err(RunError::SendTo)?
             }
         }
 
         self.send_nat_ping_req(&mut request_queue, &mut friends).await
-            .map_err(|e| RunError::from(e.context(RunErrorKind::SendTo)))
+            .map_err(RunError::SendTo)
     }
 
     /// Run DHT periodical tasks. Result future will never be completed
@@ -387,9 +386,9 @@ impl Server {
                 match send_res {
                     Ok(Ok(_)) => Ok(()),
                     Ok(Err(e)) =>
-                        Err(e.context(RunErrorKind::SendTo).into()),
+                        Err(RunError::SendTo(e)),
                     Err(e) =>
-                        Err(e.context(RunErrorKind::SendTo).into()),
+                        Err(RunError::Timeout(e)),
                 };
 
             if let Err(ref e) = res {
@@ -440,9 +439,9 @@ impl Server {
             let res = match loop_res {
                 Ok(Ok(_)) => Ok(()),
                 Ok(Err(e)) =>
-                    Err(e.context(RunErrorKind::SendTo).into()),
+                    Err(e),
                 Err(e) =>
-                    Err(e.context(RunErrorKind::SendTo).into()),
+                    Err(RunError::Timeout(e)),
             };
 
             if let Err(ref e) = res {
@@ -476,7 +475,7 @@ impl Server {
             wakeups.tick().await;
 
             self.send_pings().await
-                .map_err(|e| e.context(RunErrorKind::SendTo))?;
+                .map_err(RunError::SendTo)?;
         }
     }
 
@@ -597,7 +596,7 @@ impl Server {
         let mut request_queue = self.request_queue.write().await;
         self.send_nodes_req(node, &mut request_queue, self.pk.clone())
             .await
-            .map_err(|e| e.context(PingErrorKind::SendTo).into())
+            .map_err(PingError::SendTo)
     }
 
     /// Send `PingRequest` packet to the node.
@@ -719,7 +718,7 @@ impl Server {
         -> Result<(), HandlePacketError> {
         let precomputed_key = self.precomputed_keys.get(packet.pk.clone()).await;
         let payload = match packet.get_payload(&precomputed_key) {
-            Err(e) => return future::err(e.context(HandlePacketErrorKind::GetPayload).into()).await,
+            Err(e) => return future::err(HandlePacketError::GetPayload(e)).await,
             Ok(payload) => payload,
         };
 
@@ -737,7 +736,7 @@ impl Server {
             self.send_to(addr, ping_resp),
         )
             .map_ok(drop)
-            .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
+            .map_err(HandlePacketError::SendTo)
             .await
     }
 
@@ -751,7 +750,7 @@ impl Server {
     /// friend then send it's IP address to appropriate sink.
     async fn try_add_to_close(&self, payload_id: u64, node: PackedNode, check_ping_id: bool) -> Result<(), HandlePacketError> {
         if check_ping_id && !self.check_ping_id(payload_id, &node.pk).await {
-            return Err(HandlePacketError::from(HandlePacketErrorKind::PingIdMismatch));
+            return Err(HandlePacketError::PingIdMismatch);
         }
 
         let mut close_nodes = self.close_nodes.write().await;
@@ -763,7 +762,7 @@ impl Server {
         if friends.contains_key(&node.pk) {
             let sink = self.friend_saddr_sink.read().await.clone();
             maybe_send_unbounded(sink, node).await
-                .map_err(|e| e.context(HandlePacketErrorKind::FriendSaddr).into())
+                .map_err(HandlePacketError::FriendSaddr)
         } else {
             Ok(())
         }
@@ -774,14 +773,12 @@ impl Server {
     pub async fn handle_ping_resp(&self, packet: PingResponse, addr: SocketAddr) -> Result<(), HandlePacketError> {
         let precomputed_key = self.precomputed_keys.get(packet.pk.clone()).await;
         let payload = match packet.get_payload(&precomputed_key) {
-            Err(e) => return Err(e.context(HandlePacketErrorKind::GetPayload).into()),
+            Err(e) => return Err(HandlePacketError::GetPayload(e)),
             Ok(payload) => payload,
         };
 
         if payload.id == 0u64 {
-            return Err(
-                HandlePacketError::from(
-                    HandlePacketErrorKind::ZeroPingId));
+            return Err(HandlePacketError::ZeroPingId);
         }
 
         self.try_add_to_close(payload.id, PackedNode::new(addr, packet.pk), true).await
@@ -794,7 +791,7 @@ impl Server {
         -> Result<(), HandlePacketError> {
         let precomputed_key = self.precomputed_keys.get(packet.pk.clone()).await;
         let payload = match packet.get_payload(&precomputed_key) {
-            Err(e) => return Err(e.context(HandlePacketErrorKind::GetPayload).into()),
+            Err(e) => return Err(HandlePacketError::GetPayload(e)),
             Ok(payload) => payload,
         };
 
@@ -815,7 +812,7 @@ impl Server {
             self.send_to(addr, nodes_resp),
         )
             .map_ok(drop)
-            .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
+            .map_err(HandlePacketError::SendTo)
             .await
     }
 
@@ -855,7 +852,7 @@ impl Server {
         let precomputed_key = self.precomputed_keys.get(packet.pk.clone()).await;
 
         let payload = match packet.get_payload(&precomputed_key) {
-            Err(e) => return Err(e.context(HandlePacketErrorKind::GetPayload).into()),
+            Err(e) => return Err(HandlePacketError::GetPayload(e)),
             Ok(payload) => payload,
         };
 
@@ -906,7 +903,7 @@ impl Server {
         let precomputed_key = self.precomputed_keys.get(packet.spk.clone()).await;
         let payload = packet.get_payload(&precomputed_key);
         let payload = match payload {
-            Err(e) => return Err(e.context(HandlePacketErrorKind::GetPayload).into()),
+            Err(e) => return Err(HandlePacketError::GetPayload(e)),
             Ok(payload) => payload,
         };
 
@@ -943,7 +940,7 @@ impl Server {
         if let Some(node) = close_nodes.get_node(&packet.rpk).and_then(|node| node.to_packed_node()) {
             let packet = Packet::DhtRequest(packet);
             self.send_to(node.saddr, packet).await
-                .map_err(|e| e.context(HandlePacketErrorKind::SendTo))?;
+                .map_err(HandlePacketError::SendTo)?;
         }
 
         Ok(())
@@ -954,7 +951,7 @@ impl Server {
         -> Result<(), HandlePacketError> {
         let mut friends = self.friends.write().await;
         match friends.get_mut(spk) {
-            None => Err(HandlePacketError::from(HandlePacketErrorKind::NoFriend)),
+            None => Err(HandlePacketError::NoFriend),
             Some(friend) => {
                 friend.hole_punch.last_recv_ping_time = ping_time;
                 Ok(())
@@ -977,20 +974,20 @@ impl Server {
             &resp_payload,
         ));
         self.send_to(addr, nat_ping_resp).await
-            .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
+            .map_err(HandlePacketError::SendTo)
     }
 
     /// Handle received `NatPingResponse` packet and enable hole punching if
     /// it's correct.
     async fn handle_nat_ping_resp(&self, payload: NatPingResponse, spk: &PublicKey) -> Result<(), HandlePacketError> {
         if payload.id == 0 {
-            return Err(HandlePacketError::from(HandlePacketErrorKind::ZeroPingId))
+            return Err(HandlePacketError::ZeroPingId)
         }
 
         let mut friends = self.friends.write().await;
 
         let friend = match friends.get_mut(spk) {
-            None => return Err(HandlePacketError::from(HandlePacketErrorKind::NoFriend)),
+            None => return Err(HandlePacketError::NoFriend),
             Some(friend) => friend,
         };
 
@@ -1004,7 +1001,7 @@ impl Server {
             friend.hole_punch.is_punching_done = false;
             Ok(())
         } else {
-            Err(HandlePacketError::from(HandlePacketErrorKind::PingIdMismatch))
+            Err(HandlePacketError::PingIdMismatch)
         }
     }
 
@@ -1024,7 +1021,7 @@ impl Server {
 
         self.send_nodes_req(PackedNode::new(addr, packet.pk.clone()), &mut *self.request_queue.write().await, self.pk.clone())
             .await
-            .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
+            .map_err(HandlePacketError::SendTo)
     }
 
     /// Handle received `OnionRequest0` packet and send `OnionRequest1` packet
@@ -1040,7 +1037,7 @@ impl Server {
         let shared_secret = self.precomputed_keys.get(packet.temporary_pk.clone()).await;
         let payload = packet.get_payload(&shared_secret);
         let payload = match payload {
-            Err(e) => return Err(e.context(HandlePacketErrorKind::GetPayload).into()),
+            Err(e) => return Err(HandlePacketError::GetPayload(e)),
             Ok(payload) => payload,
         };
 
@@ -1051,7 +1048,7 @@ impl Server {
             onion_return,
         });
         self.send_to(payload.ip_port.to_saddr(), next_packet).await
-            .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
+            .map_err(HandlePacketError::SendTo)
     }
 
     /// Handle received `OnionRequest1` packet and send `OnionRequest2` packet
@@ -1067,7 +1064,7 @@ impl Server {
         let shared_secret = self.precomputed_keys.get(packet.temporary_pk.clone()).await;
         let payload = packet.get_payload(&shared_secret);
         let payload = match payload {
-            Err(e) => return Err(e.context(HandlePacketErrorKind::GetPayload).into()),
+            Err(e) => return Err(HandlePacketError::GetPayload(e)),
             Ok(payload) => payload,
         };
         let next_packet = Packet::OnionRequest2(OnionRequest2 {
@@ -1077,7 +1074,7 @@ impl Server {
             onion_return,
         });
         self.send_to(payload.ip_port.to_saddr(), next_packet).await
-            .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
+            .map_err(HandlePacketError::SendTo)
     }
 
     /// Handle received `OnionRequest2` packet and send `OnionAnnounceRequest`
@@ -1093,7 +1090,7 @@ impl Server {
         let shared_secret = self.precomputed_keys.get(packet.temporary_pk.clone()).await;
         let payload = packet.get_payload(&shared_secret);
         let payload = match payload {
-            Err(e) => return Err(e.context(HandlePacketErrorKind::GetPayload).into()),
+            Err(e) => return Err(HandlePacketError::GetPayload(e)),
             Ok(payload) => payload,
         };
 
@@ -1108,7 +1105,7 @@ impl Server {
             }),
         };
         self.send_to(payload.ip_port.to_saddr(), next_packet).await
-            .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
+            .map_err(HandlePacketError::SendTo)
     }
 
     /// Adapt `OnionAnnounce.handle_onion_announce_request()`.
@@ -1136,7 +1133,7 @@ impl Server {
     pub async fn handle_onion_announce_request(&self, packet: OnionAnnounceRequest, addr: SocketAddr) -> Result<(), HandlePacketError> {
         let shared_secret = self.precomputed_keys.get(packet.inner.pk.clone()).await;
         let payload = match packet.inner.get_payload(&shared_secret) {
-            Err(e) => return Err(e.context(HandlePacketErrorKind::GetPayload).into()),
+            Err(e) => return Err(HandlePacketError::GetPayload(e)),
             Ok(payload) => payload,
         };
 
@@ -1160,7 +1157,7 @@ impl Server {
             payload: InnerOnionResponse::OnionAnnounceResponse(response),
         }))
             .await
-            .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
+            .map_err(HandlePacketError::SendTo)
     }
 
     /// Handle received `OnionDataRequest` packet and send `OnionResponse3`
@@ -1171,8 +1168,8 @@ impl Server {
         let onion_announce = self.onion_announce.read().await;
         match onion_announce.handle_data_request(packet) {
             Ok((response, addr)) => self.send_to(addr, Packet::OnionResponse3(response)).await
-                .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into()),
-            Err(e) => Err(e.context(HandlePacketErrorKind::OnionOrNetCrypto).into())
+                .map_err(HandlePacketError::SendTo),
+            Err(e) => Err(HandlePacketError::Onion(e))
         }
     }
 
@@ -1198,9 +1195,9 @@ impl Server {
                 payload: packet.payload
             });
             self.send_to(ip_port.to_saddr(), next_packet).await
-                .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
+                .map_err(HandlePacketError::SendTo)
         } else {
-            Err(HandlePacketErrorKind::OnionResponseNext.into())
+            Err(HandlePacketError::OnionResponseNext)
         }
     }
 
@@ -1226,9 +1223,9 @@ impl Server {
                 payload: packet.payload
             });
             self.send_to(ip_port.to_saddr(), next_packet).await
-                .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
+                .map_err(HandlePacketError::SendTo)
         } else {
-            Err(HandlePacketErrorKind::OnionResponseNext.into())
+            Err(HandlePacketError::OnionResponseNext)
         }
     }
 
@@ -1257,19 +1254,19 @@ impl Server {
                         InnerOnionResponse::OnionDataResponse(inner) => Packet::OnionDataResponse(inner),
                     };
                     self.send_to(ip_port.to_saddr(), next_packet).await
-                        .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
+                        .map_err(HandlePacketError::SendTo)
                 },
                 ProtocolType::Tcp => {
                     if let Some(ref tcp_onion_sink) = self.tcp_onion_sink {
                         tcp_onion_sink.clone().send((packet.payload, ip_port.to_saddr())).await
-                            .map_err(|e| e.context(HandlePacketErrorKind::OnionResponseRedirect).into())
+                            .map_err(HandlePacketError::OnionResponseRedirectSend)
                     } else {
-                        Err(HandlePacketErrorKind::OnionResponseRedirect.into())
+                        Err(HandlePacketError::OnionResponseRedirect)
                     }
                 },
             }
         } else {
-            Err(HandlePacketErrorKind::OnionResponseNext.into())
+            Err(HandlePacketError::OnionResponseNext)
         }
     }
 
@@ -1303,7 +1300,7 @@ impl Server {
     /// Handle `BootstrapInfo` packet and response with `BootstrapInfo` packet.
     pub async fn handle_bootstrap_info(&self, packet: &BootstrapInfo, addr: SocketAddr) -> Result<(), HandlePacketError> {
         if packet.motd.len() != BOOSTRAP_CLIENT_MAX_MOTD_LENGTH {
-            return Err(HandlePacketError::from(HandlePacketErrorKind::BootstrapInfoLength))
+            return Err(HandlePacketError::BootstrapInfoLength)
         }
 
         if let Some(ref bootstrap_info) = self.bootstrap_info {
@@ -1321,7 +1318,7 @@ impl Server {
                 motd,
             });
             self.send_to(addr, packet).await
-                .map_err(|e| e.context(HandlePacketErrorKind::SendTo))?;
+                .map_err(HandlePacketError::SendTo)?;
         }
 
         Ok(())
@@ -1501,8 +1498,7 @@ mod tests {
         };
 
         let res = alice.handle_bootstrap_info(&packet, addr).await;
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::BootstrapInfoLength);
+        assert!(matches!(res, Err(HandlePacketError::BootstrapInfoLength)));
 
         // Necessary to drop tx so that rx.collect::<Vec<_>>() can be finished
         drop(alice);
@@ -1576,8 +1572,7 @@ mod tests {
         let ping_req = PingRequest::new(&precomp, alice.pk.clone(), &req_payload);
 
         let res = alice.handle_ping_req(ping_req, addr).await;
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
+        assert!(matches!(res, Err(HandlePacketError::GetPayload(GetPayloadError::Decrypt))));
     }
 
     // handle_ping_resp
@@ -1679,8 +1674,7 @@ mod tests {
         let ping_resp = PingResponse::new(&precomp, alice.pk.clone(), &payload);
 
         let res = alice.handle_ping_resp(ping_resp, addr).await;
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
+        assert!(matches!(res, Err(HandlePacketError::GetPayload(GetPayloadError::Decrypt))));
     }
 
     #[tokio::test]
@@ -1694,8 +1688,7 @@ mod tests {
         let ping_resp = PingResponse::new(&precomp, bob_pk, &payload);
 
         let res = alice.handle_ping_resp(ping_resp, addr).await;
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::ZeroPingId);
+        assert!(matches!(res, Err(HandlePacketError::ZeroPingId)));
     }
 
     #[tokio::test]
@@ -1711,8 +1704,7 @@ mod tests {
         let ping_resp = PingResponse::new(&precomp, bob_pk, &payload);
 
         let res = alice.handle_ping_resp(ping_resp, addr).await;
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::PingIdMismatch);
+        assert!(matches!(res, Err(HandlePacketError::PingIdMismatch)));
     }
 
     // handle_nodes_req
@@ -1844,8 +1836,7 @@ mod tests {
         let nodes_req = NodesRequest::new(&precomp, alice.pk.clone(), &req_payload);
 
         let res = alice.handle_nodes_req(nodes_req, addr).await;
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
+        assert!(matches!(res, Err(HandlePacketError::GetPayload(GetPayloadError::Decrypt))));
     }
 
     // handle_nodes_resp
@@ -1931,8 +1922,7 @@ mod tests {
         let nodes_resp = NodesResponse::new(&precomp, alice.pk.clone(), &resp_payload);
 
         let res = alice.handle_nodes_resp(nodes_resp, addr).await;
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
+        assert!(matches!(res, Err(HandlePacketError::GetPayload(GetPayloadError::Decrypt))));
     }
 
     #[tokio::test]
@@ -2036,8 +2026,7 @@ mod tests {
         };
 
         let res = alice.handle_dht_req(dht_req, addr).await;
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
+        assert!(matches!(res, Err(HandlePacketError::GetPayload(GetPayloadError::Decrypt))));
     }
 
     // handle_nat_ping_request
@@ -2103,8 +2092,7 @@ mod tests {
         let dht_req = DhtRequest::new(&precomp, alice.pk.clone(), bob_pk, &nat_payload);
 
         let res = alice.handle_dht_req(dht_req, addr).await;
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::ZeroPingId);
+        assert!(matches!(res, Err(HandlePacketError::ZeroPingId)));
     }
 
     #[tokio::test]
@@ -2119,8 +2107,7 @@ mod tests {
         let dht_req = DhtRequest::new(&precomp, alice.pk.clone(), bob_pk, &nat_payload);
 
         let res = alice.handle_dht_req(dht_req, addr).await;
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::NoFriend);
+        assert!(matches!(res, Err(HandlePacketError::NoFriend)));
     }
 
     // handle_onion_request_0
@@ -2173,8 +2160,7 @@ mod tests {
         };
 
         let res = alice.handle_onion_request_0(packet, addr).await;
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
+        assert!(matches!(res, Err(HandlePacketError::GetPayload(GetPayloadError::Decrypt))));
     }
 
     // handle_onion_request_1
@@ -2235,8 +2221,7 @@ mod tests {
         };
 
         let res = alice.handle_onion_request_1(packet, addr).await;
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
+        assert!(matches!(res, Err(HandlePacketError::GetPayload(GetPayloadError::Decrypt))));
     }
 
     // handle_onion_request_2
@@ -2341,8 +2326,7 @@ mod tests {
         };
 
         let res = alice.handle_onion_request_2(packet, addr).await;
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
+        assert!(matches!(res, Err(HandlePacketError::GetPayload(GetPayloadError::Decrypt))));
     }
 
     // handle_onion_announce_request
@@ -2407,8 +2391,7 @@ mod tests {
         };
 
         let res = alice.handle_onion_announce_request(packet, addr).await;
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
+        assert!(matches!(res, Err(HandlePacketError::GetPayload(GetPayloadError::Decrypt))));
     }
 
     // handle_onion_data_request
@@ -2583,8 +2566,7 @@ mod tests {
         };
 
         let res = alice.handle_onion_response_3(packet).await;
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::OnionResponseNext);
+        assert!(matches!(res, Err(HandlePacketError::OnionResponseNext)));
     }
 
     // handle_onion_response_2
@@ -2677,8 +2659,7 @@ mod tests {
         };
 
         let res = alice.handle_onion_response_2(packet).await;
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::OnionResponseNext);
+        assert!(matches!(res, Err(HandlePacketError::OnionResponseNext)));
     }
 
     // handle_onion_response_1
@@ -2807,8 +2788,7 @@ mod tests {
         };
 
         let res = alice.handle_onion_response_1(packet).await;
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::OnionResponseRedirect);
+        assert!(matches!(res, Err(HandlePacketError::OnionResponseRedirect)));
     }
 
     #[tokio::test]
@@ -2865,8 +2845,7 @@ mod tests {
         };
 
         let res = alice.handle_onion_response_1(packet).await;
-        assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::OnionResponseNext);
+        assert!(matches!(res, Err(HandlePacketError::OnionResponseNext)));
     }
 
     // send_nat_ping_req()

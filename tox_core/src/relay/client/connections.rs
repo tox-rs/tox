@@ -28,7 +28,6 @@ use crate::relay::client::client::*;
 use tox_packet::relay::*;
 use crate::time::*;
 use crate::relay::client::errors::*;
-use failure::Fail;
 
 /// The amount of maximum connections for each friend.
 const MAX_FRIEND_TCP_CONNECTIONS: usize =  6;
@@ -123,7 +122,7 @@ impl Connections {
             let client = Client::new(relay_pk, relay_addr, self.incoming_tx.clone());
             vacant.insert(client.clone());
             client.spawn(self.dht_sk.clone(), self.dht_pk.clone())
-                .map_err(|e| e.context(ConnectionErrorKind::Spawn).into()).await
+                .map_err(ConnectionError::Spawn).await
         } else {
             trace!("Attempt to add relay that already exists: {}", relay_addr);
             Ok(())
@@ -158,7 +157,7 @@ impl Connections {
                 connection.connections.insert(relay_pk);
                 client.add_connection(node_pk).await;
                 client.spawn(self.dht_sk.clone(), self.dht_pk.clone()).await
-                    .map_err(|e| e.context(ConnectionErrorKind::Spawn).into())
+                    .map_err(ConnectionError::Spawn)
             } else {
                 Ok(())
             }
@@ -172,7 +171,7 @@ impl Connections {
         if let Some(client) = self.clients.read().await.get(&relay_pk) {
             self.add_connection_inner(client, node_pk).await
         } else {
-            Err(ConnectionErrorKind::NoSuchRelay.into())
+            Err(ConnectionError::NoSuchRelay)
         }
     }
 
@@ -186,7 +185,7 @@ impl Connections {
             Ok(())
         } else {
             // TODO: what if we didn't receive relays from friend and delete him?
-            Err(ConnectionErrorKind::NoConnection.into())
+            Err(ConnectionError::NoConnection)
         }
     }
 
@@ -200,7 +199,7 @@ impl Connections {
         if connection.status == NodeConnectionStatus::Tcp && client.is_sleeping().await {
             // unsleep relay
             client.clone().spawn(self.dht_sk.clone(), self.dht_pk.clone()).await
-                .map_err(|e| ConnectionError::from(e.context(ConnectionErrorKind::Spawn)))?;
+                .map_err(ConnectionError::Spawn)?;
         };
 
         client.add_connection(node_pk).await;
@@ -234,9 +233,9 @@ impl Connections {
         let clients = self.clients.read().await;
         if let Some(client) = clients.get(&relay_pk) {
             client.send_oob(node_pk, data).await
-                .map_err(|e| e.context(ConnectionErrorKind::SendTo).into())
+                .map_err(ConnectionError::SendTo)
         } else {
-            Err(ConnectionErrorKind::NotConnected.into())
+            Err(ConnectionError::NotConnected)
         }
     }
 
@@ -245,9 +244,9 @@ impl Connections {
         let clients = self.clients.read().await;
         if let Some(client) = clients.get(&relay_pk) {
             client.send_onion(onion_request).await
-                .map_err(|e| e.context(ConnectionErrorKind::SendTo).into())
+                .map_err(ConnectionError::SendTo)
         } else {
-            Err(ConnectionErrorKind::NotConnected.into())
+            Err(ConnectionError::NotConnected)
         }
     }
 
@@ -260,13 +259,13 @@ impl Connections {
                 let clients = self.clients.read().await;
                 for client in connection.clients(&clients) {
                     client.clone().spawn(self.dht_sk.clone(), self.dht_pk.clone()).await
-                        .map_err(|e| e.context(ConnectionErrorKind::Spawn))?;
+                        .map_err(ConnectionError::Spawn)?;
                 }
             };
             connection.status = status;
             Ok(())
         } else {
-            Err(ConnectionErrorKind::NoSuchRelay.into())
+            Err(ConnectionError::NoSuchRelay)
         }
     }
 
@@ -328,7 +327,7 @@ impl Connections {
                     to_remove.push(pk.clone());
                 } else {
                     client.clone().spawn(self.dht_sk.clone(), self.dht_pk.clone()).await
-                        .map_err(|e| e.context(ConnectionErrorKind::Spawn))?;
+                        .map_err(ConnectionError::Spawn)?;
                 }
             }
         }
@@ -549,8 +548,8 @@ mod tests {
         let relay_pk = SecretKey::generate(&mut rng).public_key();
         let node_pk = SecretKey::generate(&mut rng).public_key();
 
-        let error = connections.add_connection(relay_pk, node_pk).await.err().unwrap();
-        assert_eq!(*error.kind(), ConnectionErrorKind::NoSuchRelay);
+        let res = connections.add_connection(relay_pk, node_pk).await;
+        assert!(matches!(res, Err(ConnectionError::NoSuchRelay)));
     }
 
     #[tokio::test]
@@ -594,8 +593,8 @@ mod tests {
 
         let node_pk = SecretKey::generate(&mut rng).public_key();
 
-        let error = connections.remove_connection(node_pk).await.err().unwrap();
-        assert_eq!(*error.kind(), ConnectionErrorKind::NoConnection);
+        let res = connections.remove_connection(node_pk).await;
+        assert!(matches!(res, Err(ConnectionError::NoConnection)));
     }
 
     #[tokio::test]
@@ -714,8 +713,8 @@ mod tests {
         let destination_pk = SecretKey::generate(&mut rng).public_key();
         let relay_pk = SecretKey::generate(&mut rng).public_key();
 
-        let error = connections.send_oob(relay_pk, destination_pk, vec![42; 123]).await.err().unwrap();
-        assert_eq!(*error.kind(), ConnectionErrorKind::NotConnected);
+        let res = connections.send_oob(relay_pk, destination_pk, vec![42; 123]).await;
+        assert!(matches!(res, Err(ConnectionError::NotConnected)));
     }
 
     #[tokio::test]
@@ -770,8 +769,8 @@ mod tests {
             payload: vec![42; 123],
         };
 
-        let error = connections.send_onion(relay_pk, onion_request.clone()).await.err().unwrap();
-        assert_eq!(*error.kind(), ConnectionErrorKind::NotConnected);
+        let res = connections.send_onion(relay_pk, onion_request.clone()).await;
+        assert!(matches!(res, Err(ConnectionError::NotConnected)));
     }
 
     #[tokio::test]
@@ -804,8 +803,8 @@ mod tests {
 
         let node_pk = SecretKey::generate(&mut rng).public_key();
 
-        let error = connections.set_connection_status(node_pk, NodeConnectionStatus::Udp).await.err().unwrap();
-        assert_eq!(*error.kind(), ConnectionErrorKind::NoSuchRelay);
+        let res = connections.set_connection_status(node_pk, NodeConnectionStatus::Udp).await;
+        assert!(matches!(res, Err(ConnectionError::NoSuchRelay)));
     }
 
     #[tokio::test]

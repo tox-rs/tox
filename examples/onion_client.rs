@@ -3,7 +3,7 @@ extern crate log;
 
 use std::net::{SocketAddr, IpAddr};
 
-use failure::Error;
+use anyhow::Error;
 use futures::future::FutureExt;
 use futures::stream::StreamExt;
 use futures::sink::SinkExt;
@@ -91,11 +91,14 @@ async fn main() -> Result<(), Error> {
         while let Some(event) = stream.next().await {
             let (packet, addr) = match event {
                 Ok(ev) => ev,
-                Err(ref e) => {
+                Err(e) => {
                     error!("packet receive error = {:?}", e);
 
-                    if *e.kind() == DecodeErrorKind::Io { continue }
-                    else { unimplemented!() }
+                    if let DecodeError::Io(e) = e {
+                        return Err(Error::new(e));
+                    } else {
+                        continue;
+                    }
                 }
             };
 

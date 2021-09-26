@@ -4,261 +4,235 @@ Module for errors of NetCrypto.
 
 use std::net::SocketAddr;
 
-use failure::Fail;
+use futures::channel::mpsc::SendError;
+use thiserror::Error;
 
+use tokio::time::error::Elapsed;
 use tox_crypto::*;
+use tox_packet::dht::GetPayloadError;
 
-error_kind! {
-    #[doc = "Error that can happen while processing packets array"]
-    #[derive(Debug)]
-    PacketsArrayError,
-    #[doc = "The specific kind of error that can occur."]
-    #[derive(Debug, Eq, PartialEq, Fail)]
-    PacketsArrayErrorKind {
-        #[doc = "Index is too big error."]
-        #[fail(display = "The index {:?} is too big and can't be hold", index)]
-        TooBig {
-            #[doc = "The index that can't be hold."]
-            index: u32,
-        },
-        #[doc = "Index already exists error."]
-        #[fail(display = "The packet with index {:?} already exists", index)]
-        AlreadyExist {
-            #[doc = "The index that already exists."]
-            index: u32,
-        },
-        #[doc = "Packets array is full."]
-        #[fail(display = "Packets array is full")]
-        ArrayFull,
-        #[doc = "Index is lower than the end index."]
-        #[fail(display = "Index {:?} is lower than the end index", index)]
-        LowerIndex {
-            #[doc = "The index that lower than end index."]
-            index: u32,
-        },
-        #[doc = "Index is outside of buffer bounds."]
-        #[fail(display = "Index {:?} is outside of buffer bounds", index)]
-        OutsideIndex {
-            #[doc = "The index that is outside of buffer bounds."]
-            index: u32,
-        },
-    }
+/// Error that can happen while processing packets array
+#[derive(Clone, Debug, Eq, PartialEq, Error)]
+pub enum PacketsArrayError {
+    /// Index is too big error.
+    #[error("The index {:?} is too big and can't be hold", index)]
+    TooBig {
+        /// The index that can't be hold.
+        index: u32,
+    },
+    /// Index already exists error.
+    #[error("The packet with index {:?} already exists", index)]
+    AlreadyExist {
+        /// The index that already exists.
+        index: u32,
+    },
+    /// Packets array is full.
+    #[error("Packets array is full")]
+    ArrayFull,
+    /// Index is lower than the end index.
+    #[error("Index {:?} is lower than the end index", index)]
+    LowerIndex {
+        /// The index that lower than end index.
+        index: u32,
+    },
+    /// Index is outside of buffer bounds.
+    #[error("Index {:?} is outside of buffer bounds", index)]
+    OutsideIndex {
+        /// The index that is outside of buffer bounds.
+        index: u32,
+    },
 }
 
 impl PacketsArrayError {
     pub(crate) fn too_big(index: u32) -> PacketsArrayError {
-        PacketsArrayError::from(PacketsArrayErrorKind::TooBig { index })
+        PacketsArrayError::TooBig { index }
     }
 
     pub(crate) fn already_exist(index: u32) -> PacketsArrayError {
-        PacketsArrayError::from(PacketsArrayErrorKind::AlreadyExist { index })
+        PacketsArrayError::AlreadyExist { index }
     }
 
     pub(crate) fn lower_index(index: u32) -> PacketsArrayError {
-        PacketsArrayError::from(PacketsArrayErrorKind::LowerIndex { index })
+        PacketsArrayError::LowerIndex { index }
     }
 
     pub(crate) fn outside_index(index: u32) -> PacketsArrayError {
-        PacketsArrayError::from(PacketsArrayErrorKind::OutsideIndex { index })
+        PacketsArrayError::OutsideIndex { index }
     }
 }
 
-error_kind! {
-    #[doc = "Error that can happen when calling `handle_*` of packet."]
-    #[derive(Debug)]
-    HandlePacketError,
-    #[doc = "The specific kind of error that can occur."]
-    #[derive(Debug, Eq, PartialEq, Fail)]
-    HandlePacketErrorKind {
-        #[doc = "Error indicates that getting payload of received packet error."]
-        #[fail(display = "Get payload of received packet error")]
-        GetPayload,
-        #[doc = "Error indicates that sending response packet error."]
-        #[fail(display = "Sending response error")]
-        SendTo,
-        #[doc = "Error indicates that sending lossless response packet error."]
-        #[fail(display = "Sending lossless response error")]
-        SendToLossless,
-        #[doc = "Error indicates that sending lossy response packet error."]
-        #[fail(display = "Sending lossy response error")]
-        SendToLossy,
-        #[doc = "Error indicates that sending dhtpk packet error."]
-        #[fail(display = "Sending dhtpk packet error")]
-        SendToDhtpk,
-        #[doc = "Error indicates that sending connection status error."]
-        #[fail(display = "Sending connection status error")]
-        SendToConnectionStatus,
-        #[doc = "Error indicates that NetCrypto can't handle packet in current connection state."]
-        #[fail(display = "Can't handle CookieResponse in current connection state")]
-        InvalidState,
-        #[doc = "Error indicates that NetCrypto can't handle crypto data packet in current connection state."]
-        #[fail(display = "Can't handle CryptoData in current connection state")]
-        CannotHandleCryptoData,
-        #[doc = "Error indicates that invalid cookie request id."]
-        #[fail(display = "Invalid cookie request id: expected {:?} but got {:?}", expect, got)]
-        InvalidRequestId {
-            #[doc = "Expected request id."]
-            expect: u64,
-            #[doc = "Gotten request id."]
-            got: u64,
-        },
-        #[doc = "Error indicates that no crypto connection for address."]
-        #[fail(display = "No crypto connection for address: {:?}", addr)]
-        NoUdpConnection {
-            #[doc = "The address for connection which don't exist."]
-            addr: SocketAddr,
-        },
-        #[doc = "Error indicates that no crypto connection for address."]
-        #[fail(display = "No crypto connection for DHT key: {:?}", pk)]
-        NoTcpConnection {
-            #[doc = "The DHT key for connection which don't exist."]
-            pk: PublicKey,
-        },
-        #[doc = "Unexpected crypto handshake."]
-        #[fail(display = "Unexpected crypto handshake")]
-        UnexpectedCryptoHandshake,
-        #[doc = "Error indicates that invalid SHA512 hash of cookie."]
-        #[fail(display = "Invalid SHA512 hash of cookie")]
-        BadSha512,
-        #[doc = "Error indicates that cookie is timed out."]
-        #[fail(display = "Cookie is timed out")]
-        CookieTimedOut,
-        #[doc = "Error indicates that cookie contains invalid real pk."]
-        #[fail(display = "Cookie contains invalid real pk")]
-        InvalidRealPk,
-        #[doc = "Error indicates that cookie contains invalid dht pk."]
-        #[fail(display = "Cookie contains invalid dht pk")]
-        InvalidDhtPk,
-        #[doc = "Error indicates that there is PacketsArrayError."]
-        #[fail(display = "PacketsArrayError occurs")]
-        PacketsArrayError,
-        #[doc = "Error indicates that real data is empty."]
-        #[fail(display = "Real data is empty")]
-        DataEmpty,
-        #[doc = "Error indicates that invalid packet id."]
-        #[fail(display = "Invalid packet id: {:?}", id)]
-        PacketId {
-            #[doc = "The packet id that is invalid."]
-            id: u8,
-        },
-    }
+/// Error that can happen when calling `handle_*` of packet.
+#[derive(Clone, Debug, Eq, PartialEq, Error)]
+pub enum HandlePacketError {
+    /// Error indicates that getting payload of received packet error.
+    #[error("Get payload of received packet error")]
+    GetPayload(GetPayloadError),
+    /// Error indicates that sending response packet error.
+    #[error("Sending response error")]
+    SendTo(SendPacketError),
+    /// Error indicates that sending response packet error.
+    #[error("Sending response error")]
+    SendDataTo(SendDataError),
+    /// Error indicates that sending lossless response packet error.
+    #[error("Sending lossless response error")]
+    SendToLossless(SendError),
+    /// Error indicates that sending lossy response packet error.
+    #[error("Sending lossy response error")]
+    SendToLossy(SendError),
+    /// Error indicates that sending dhtpk packet error.
+    #[error("Sending dhtpk packet error")]
+    SendToDhtpk(SendError),
+    /// Error indicates that sending connection status error.
+    #[error("Sending connection status error")]
+    SendToConnectionStatus(SendError),
+    /// Error indicates that NetCrypto can't handle packet in current connection state.
+    #[error("Can't handle CookieResponse in current connection state")]
+    InvalidState,
+    /// Error indicates that NetCrypto can't handle crypto data packet in current connection state.
+    #[error("Can't handle CryptoData in current connection state")]
+    CannotHandleCryptoData,
+    /// Error indicates that invalid cookie request id.
+    #[error("Invalid cookie request id: expected {:?} but got {:?}", expect, got)]
+    InvalidRequestId {
+        /// Expected request id.
+        expect: u64,
+        /// Gotten request id.
+        got: u64,
+    },
+    /// Error indicates that no crypto connection for address.
+    #[error("No crypto connection for address: {:?}", addr)]
+    NoUdpConnection {
+        /// The address for connection which don't exist.
+        addr: SocketAddr,
+    },
+    /// Error indicates that no crypto connection for address.
+    #[error("No crypto connection for DHT key: {:?}", pk)]
+    NoTcpConnection {
+        /// The DHT key for connection which don't exist.
+        pk: PublicKey,
+    },
+    /// Unexpected crypto handshake.
+    #[error("Unexpected crypto handshake")]
+    UnexpectedCryptoHandshake,
+    /// Error indicates that invalid SHA512 hash of cookie.
+    #[error("Invalid SHA512 hash of cookie")]
+    BadSha512,
+    /// Error indicates that cookie is timed out.
+    #[error("Cookie is timed out")]
+    CookieTimedOut,
+    /// Error indicates that cookie contains invalid real pk.
+    #[error("Cookie contains invalid real pk")]
+    InvalidRealPk,
+    /// Error indicates that cookie contains invalid dht pk.
+    #[error("Cookie contains invalid dht pk")]
+    InvalidDhtPk,
+    /// Error indicates that there is PacketsArrayError.
+    #[error("PacketsArrayError occurs")]
+    PacketsArrayError(PacketsArrayError),
+    /// Error indicates that real data is empty.
+    #[error("Real data is empty")]
+    DataEmpty,
+    /// Error indicates that invalid packet id.
+    #[error("Invalid packet id: {:?}", id)]
+    PacketId {
+        /// The packet id that is invalid.
+        id: u8,
+    },
 }
 
 impl HandlePacketError {
     pub(crate) fn invalid_request_id(expect: u64, got: u64) -> HandlePacketError {
-        HandlePacketError::from(HandlePacketErrorKind::InvalidRequestId {
+        HandlePacketError::InvalidRequestId {
             expect,
             got,
-        })
+        }
     }
 
     pub(crate) fn no_udp_connection(addr: SocketAddr) -> HandlePacketError {
-        HandlePacketError::from(HandlePacketErrorKind::NoUdpConnection {
+        HandlePacketError::NoUdpConnection {
             addr,
-        })
+        }
     }
 
     pub(crate) fn no_tcp_connection(pk: PublicKey) -> HandlePacketError {
-        HandlePacketError::from(HandlePacketErrorKind::NoTcpConnection {
+        HandlePacketError::NoTcpConnection {
             pk,
-        })
+        }
     }
 
     pub(crate) fn packet_id(id: u8) -> HandlePacketError {
-        HandlePacketError::from(HandlePacketErrorKind::PacketId {
+        HandlePacketError::PacketId {
             id,
-        })
+        }
     }
 }
 
-error_kind! {
-    #[doc = "Error that can happen while processing packets array."]
-    #[derive(Debug)]
-    SendDataError,
-    #[doc = "The specific kind of error that can occur."]
-    #[derive(Debug, Eq, PartialEq, Fail)]
-    SendDataErrorKind {
-        #[doc = "Connection is not established."]
-        #[fail(display = "Connection is not established")]
-        NoConnection,
-        #[doc = "Error indicates that sending response packet error."]
-        #[fail(display = "Sending response error")]
-        SendTo,
-        #[doc = "Error indicates that sending connection status error."]
-        #[fail(display = "Sending connection status error")]
-        SendToConnectionStatus,
-    }
+/// Error that can happen while processing packets array.
+#[derive(Clone, Debug, Eq, PartialEq, Error)]
+pub enum SendDataError {
+    /// Connection is not established.
+    #[error("Connection is not established")]
+    NoConnection,
+    /// Error indicates that sending response packet error.
+    #[error("Sending response error")]
+    SendTo(SendPacketError),
+    /// Error indicates that sending connection status error.
+    #[error("Sending connection status error")]
+    SendToConnectionStatus(SendError),
 }
 
-error_kind! {
-    #[doc = "Error that can happen when calling `run`."]
-    #[derive(Debug)]
-    RunError,
-    #[doc = "The specific kind of error that can occur."]
-    #[derive(Clone, Debug, Eq, PartialEq, Fail)]
-    RunErrorKind {
-        #[doc = "Sending pings error."]
-        #[fail(display = "Sending crypto data packet error")]
-        SendData,
-        #[doc = "NetCrypto periodical wakeup timer error."]
-        #[fail(display = "Netcrypto periodical wakeup timer error")]
-        Wakeup,
-    }
+/// Error that can happen when calling `run`.
+#[derive(Debug, PartialEq, Error)]
+pub enum RunError {
+    /// Sending pings error.
+    #[error("Sending crypto data packet error")]
+    SendData(SendDataError),
+    /// Timeout error.
+    #[error("Timeout error")]
+    Timeout(Elapsed),
+    /// NetCrypto periodical wakeup timer error.
+    #[error("Netcrypto periodical wakeup timer error")]
+    Wakeup,
 }
 
-error_kind! {
-    #[doc = "Error that can happen during a lossless packet sending."]
-    #[derive(Debug)]
-    SendLosslessPacketError,
-    #[doc = "The specific kind of error that can occur."]
-    #[derive(Debug, Eq, PartialEq, Fail)]
-    SendLosslessPacketErrorKind {
-        #[doc = "Packet ID is outside lossless packets range."]
-        #[fail(display = "Packet ID is outside lossless packets range")]
-        InvalidPacketId,
-        #[doc = "Connection to a friend is not established."]
-        #[fail(display = "Connection to a friend is not established")]
-        NoConnection,
-        #[doc = "Packets send array is full."]
-        #[fail(display = "Packets send array is full")]
-        FullSendArray,
-        #[doc = "Failed to send packet."]
-        #[fail(display = "Failed to send packet")]
-        SendTo,
-    }
+/// Error that can happen during a lossless packet sending.
+#[derive(Clone, Debug, Eq, PartialEq, Error)]
+pub enum SendLosslessPacketError {
+    /// Packet ID is outside lossless packets range.
+    #[error("Packet ID is outside lossless packets range")]
+    InvalidPacketId,
+    /// Connection to a friend is not established.
+    #[error("Connection to a friend is not established")]
+    NoConnection,
+    /// Packets send array is full.
+    #[error("Packets send array is full")]
+    FullSendArray(PacketsArrayError),
+    /// Failed to send packet.
+    #[error("Failed to send packet")]
+    SendTo(SendDataError),
 }
 
-error_kind! {
-    #[doc = "Error that can happen during a lossless packet sending."]
-    #[derive(Debug)]
-    KillConnectionError,
-    #[doc = "The specific kind of error that can occur."]
-    #[derive(Debug, Eq, PartialEq, Fail)]
-    KillConnectionErrorKind {
-        #[doc = "Connection to a friend is not established."]
-        #[fail(display = "Connection to a friend is not established")]
-        NoConnection,
-        #[doc = "Failed to send kill packet."]
-        #[fail(display = "Failed to send kill packet")]
-        SendTo,
-        #[doc = "Error indicates that sending connection status error."]
-        #[fail(display = "Sending connection status error")]
-        SendToConnectionStatus,
-    }
+/// Error that can happen during a lossless packet sending.
+#[derive(Clone, Debug, Eq, PartialEq, Error)]
+pub enum KillConnectionError {
+    /// Connection to a friend is not established.
+    #[error("Connection to a friend is not established")]
+    NoConnection,
+    /// Failed to send kill packet.
+    #[error("Failed to send kill packet")]
+    SendTo(SendDataError),
+    /// Error indicates that sending connection status error.
+    #[error("Sending connection status error")]
+    SendToConnectionStatus(SendError),
 }
 
-error_kind! {
-    #[doc = "Error that can happen during a packet sending."]
-    #[derive(Debug)]
-    SendPacketError,
-    #[doc = "The specific kind of error that can occur."]
-    #[derive(Debug, Eq, PartialEq, Fail)]
-    SendPacketErrorKind {
-        #[doc = "Failed to send TCP packet."]
-        #[fail(display = "Failed to send TCP packet")]
-        Tcp,
-        #[doc = "Failed to send UDP packet."]
-        #[fail(display = "Failed to send UDP packet")]
-        Udp,
-    }
+/// Error that can happen during a packet sending.
+#[derive(Clone, Debug, Eq, PartialEq, Error)]
+pub enum SendPacketError {
+    /// Failed to send TCP packet.
+    #[error("Failed to send TCP packet")]
+    Tcp(SendError),
+    /// Failed to send UDP packet.
+    #[error("Failed to send UDP packet")]
+    Udp(SendError),
 }

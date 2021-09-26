@@ -3,7 +3,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 
-use failure::Fail;
 use futures::{FutureExt, TryFutureExt, StreamExt, SinkExt};
 use futures::channel::mpsc;
 use tokio_util::codec::Framed;
@@ -121,38 +120,38 @@ impl Client {
         if let ClientStatus::Connected(ref tx) = *self.status.read().await {
             let mut tx = tx.clone();
             tx.send(packet).await
-                .map_err(|e| e.context(SendPacketErrorKind::SendTo).into())
+                .map_err(SendPacketError::SendTo)
         } else {
             // Attempt to send packet to TCP relay with wrong status. For
             // instance it can happen when we received ping request from the
             // relay and right after that relay became sleeping so we are not
             // able to respond anymore.
-            Err(SendPacketErrorKind::WrongStatus.into())
+            Err(SendPacketError::WrongStatus)
         }
     }
 
     async fn handle_route_request(&self, _packet: &RouteRequest) -> Result<(), HandlePacketError> {
-        Err(HandlePacketErrorKind::MustNotSend.into())
+        Err(HandlePacketError::MustNotSend)
     }
 
     async fn handle_route_response(&self, packet: &RouteResponse) -> Result<(), HandlePacketError> {
         let index = if let Some(index) = packet.connection_id.index() {
             index
         } else {
-            return Err(HandlePacketErrorKind::InvalidConnectionId.into())
+            return Err(HandlePacketError::InvalidConnectionId)
         };
 
         if self.connections.read().await.contains(&packet.pk) {
             if self.links.write().await.insert_by_id(packet.pk.clone(), index) {
                 Ok(())
             } else {
-                Err(HandlePacketErrorKind::AlreadyLinked.into())
+                Err(HandlePacketError::AlreadyLinked)
             }
         } else {
             // in theory this can happen if we added connection and right
             // after that removed it
             // TODO: should it be handled better?
-            Err(HandlePacketErrorKind::UnexpectedRouteResponse.into())
+            Err(HandlePacketError::UnexpectedRouteResponse)
         }
     }
 
@@ -160,13 +159,13 @@ impl Client {
         let index = if let Some(index) = packet.connection_id.index() {
             index
         } else {
-            return Err(HandlePacketErrorKind::InvalidConnectionId.into())
+            return Err(HandlePacketError::InvalidConnectionId)
         };
 
         if self.links.write().await.upgrade(index) {
             Ok(())
         } else {
-            Err(HandlePacketErrorKind::AlreadyLinked.into())
+            Err(HandlePacketError::AlreadyLinked)
         }
     }
 
@@ -174,20 +173,20 @@ impl Client {
         let index = if let Some(index) = packet.connection_id.index() {
             index
         } else {
-            return Err(HandlePacketErrorKind::InvalidConnectionId.into())
+            return Err(HandlePacketError::InvalidConnectionId)
         };
 
         if (*self.links.write().await).downgrade(index) {
             Ok(())
         } else {
-            Err(HandlePacketErrorKind::AlreadyLinked.into())
+            Err(HandlePacketError::AlreadyLinked)
         }
     }
 
     async fn handle_ping_request(&self, packet: &PingRequest) -> Result<(), HandlePacketError> {
         self.send_packet(Packet::PongResponse(
             PongResponse { ping_id: packet.ping_id }
-        )).await.map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
+        )).await.map_err(HandlePacketError::SendPacket)
     }
 
     async fn handle_pong_response(&self, _packet: &PongResponse) -> Result<(), HandlePacketError> {
@@ -196,7 +195,7 @@ impl Client {
     }
 
     async fn handle_oob_send(&self, _packet: &OobSend) -> Result<(), HandlePacketError> {
-        Err(HandlePacketErrorKind::MustNotSend.into())
+        Err(HandlePacketError::MustNotSend)
     }
 
     async fn handle_oob_receive(&self, packet: OobReceive) -> Result<(), HandlePacketError> {
@@ -207,14 +206,14 @@ impl Client {
         );
 
         tx.send(msg).await
-            .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
+            .map_err(HandlePacketError::SendTo)
     }
 
     async fn handle_data(&self, packet: Data) -> Result<(), HandlePacketError> {
         let index = if let Some(index) = packet.connection_id.index() {
             index
         } else {
-            return Err(HandlePacketErrorKind::InvalidConnectionId.into())
+            return Err(HandlePacketError::InvalidConnectionId)
         };
 
         let links = self.links.read().await;
@@ -226,14 +225,14 @@ impl Client {
             );
 
             tx.send(msg).await
-                .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
+                .map_err(HandlePacketError::SendTo)
         } else {
-            Err(HandlePacketErrorKind::AlreadyLinked.into())
+            Err(HandlePacketError::AlreadyLinked)
         }
     }
 
     async fn handle_onion_request(&self, _packet: &OnionRequest) -> Result<(), HandlePacketError> {
-        Err(HandlePacketErrorKind::MustNotSend.into())
+        Err(HandlePacketError::MustNotSend)
     }
 
     async fn handle_onion_response(&self, packet: OnionResponse) -> Result<(), HandlePacketError> {
@@ -244,7 +243,7 @@ impl Client {
         );
 
         tx.send(msg).await
-            .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
+            .map_err(HandlePacketError::SendTo)
     }
 
     /// Spawn a connection to this TCP relay if it is not connected already. The
@@ -260,11 +259,11 @@ impl Client {
         }
 
         let socket = TcpStream::connect(&self.addr).await
-            .map_err(|e| e.context(SpawnErrorKind::Io))?;
+            .map_err(SpawnError::Io)?;
 
         let (socket, channel) =
             make_client_handshake(socket, &dht_pk, &dht_sk, &relay_pk).await
-                .map_err(|e| e.context(SpawnErrorKind::Io))?;
+                .map_err(SpawnError::Io)?;
 
         let stats = Stats::new();
         let secure_socket =
@@ -284,21 +283,19 @@ impl Client {
         *self.connected_time.write().await = Some(clock_now());
 
         self.send_route_requests().await
-            .map_err(|e| e.context(SpawnErrorKind::SendTo))?;
+            .map_err(SpawnError::SendTo)?;
 
         let mut to_server_rx = to_server_rx.map(Ok);
         let writer = to_server
             .send_all(&mut to_server_rx)
-            .map_err(|e|
-                SpawnError::from(e.context(SpawnErrorKind::Encode))
-            );
+            .map_err(SpawnError::Encode);
 
         let reader = async {
             while let Some(packet) = from_server.next().await {
                 let packet = packet
-                    .map_err(|e| e.context(SpawnErrorKind::ReadSocket))?;
+                    .map_err(SpawnError::ReadSocket)?;
                 self.handle_packet(packet).await
-                    .map_err(|e| e.context(SpawnErrorKind::HandlePacket))?;
+                    .map_err(SpawnError::HandlePacket)?;
             }
 
             Result::<(), SpawnError>::Ok(())
@@ -368,10 +365,10 @@ impl Client {
                     data,
                 })).await
             } else {
-                Err(SendPacketErrorKind::NotOnline.into())
+                Err(SendPacketError::NotOnline)
             }
         } else {
-            Err(SendPacketErrorKind::NotLinked.into())
+            Err(SendPacketError::NotLinked)
         }
     }
 
@@ -414,7 +411,7 @@ impl Client {
 
             Ok(())
         } else {
-            Err(SendPacketErrorKind::NoSuchConnection.into())
+            Err(SendPacketError::NoSuchConnection)
         }
     }
 
@@ -490,8 +487,7 @@ pub mod tests {
     use tox_binary_io::*;
 
     use std::time::{Duration, Instant};
-    use failure::Error;
-    use std::io::{Error as IoError, ErrorKind as IoErrorKind};
+    use std::io::{Error, ErrorKind};
 
     use tokio::net::TcpListener;
 
@@ -527,7 +523,7 @@ pub mod tests {
         });
 
         let error = client.handle_packet(route_request).await.err().unwrap();
-        assert_eq!(*error.kind(), HandlePacketErrorKind::MustNotSend);
+        assert_eq!(error, HandlePacketError::MustNotSend);
     }
 
     #[tokio::test]
@@ -590,7 +586,7 @@ pub mod tests {
         });
 
         let error = client.handle_packet(route_response).await.err().unwrap();
-        assert_eq!(*error.kind(), HandlePacketErrorKind::UnexpectedRouteResponse);
+        assert_eq!(error, HandlePacketError::UnexpectedRouteResponse);
 
         assert!(client.links.read().await.by_id(index).is_none());
     }
@@ -606,7 +602,7 @@ pub mod tests {
         });
 
         let error = client.handle_packet(route_response).await.err().unwrap();
-        assert_eq!(*error.kind(), HandlePacketErrorKind::InvalidConnectionId);
+        assert_eq!(error, HandlePacketError::InvalidConnectionId);
     }
 
     #[tokio::test]
@@ -641,7 +637,7 @@ pub mod tests {
         });
 
         let error = client.handle_packet(connect_notification).await.err().unwrap();
-        assert_eq!(*error.kind(), HandlePacketErrorKind::AlreadyLinked);
+        assert_eq!(error, HandlePacketError::AlreadyLinked);
 
         assert!(client.links.read().await.by_id(index).is_none());
     }
@@ -655,7 +651,7 @@ pub mod tests {
         });
 
         let error = client.handle_packet(connect_notification).await.err().unwrap();
-        assert_eq!(*error.kind(), HandlePacketErrorKind::InvalidConnectionId);
+        assert_eq!(error, HandlePacketError::InvalidConnectionId);
     }
 
     #[tokio::test]
@@ -691,7 +687,7 @@ pub mod tests {
         });
 
         let error = client.handle_packet(disconnect_notification).await.err().unwrap();
-        assert_eq!(*error.kind(), HandlePacketErrorKind::AlreadyLinked);
+        assert_eq!(error, HandlePacketError::AlreadyLinked);
 
         assert!(client.links.read().await.by_id(index).is_none());
     }
@@ -705,7 +701,7 @@ pub mod tests {
         });
 
         let error = client.handle_packet(disconnect_notification).await.err().unwrap();
-        assert_eq!(*error.kind(), HandlePacketErrorKind::InvalidConnectionId);
+        assert_eq!(error, HandlePacketError::InvalidConnectionId);
     }
 
     #[tokio::test]
@@ -747,7 +743,7 @@ pub mod tests {
         });
 
         let error = client.handle_packet(oob_send).await.err().unwrap();
-        assert_eq!(*error.kind(), HandlePacketErrorKind::MustNotSend);
+        assert_eq!(error, HandlePacketError::MustNotSend);
     }
 
     #[tokio::test]
@@ -815,7 +811,7 @@ pub mod tests {
         });
 
         let error = client.handle_packet(data_packet).await.err().unwrap();
-        assert_eq!(*error.kind(), HandlePacketErrorKind::AlreadyLinked);
+        assert_eq!(error, HandlePacketError::AlreadyLinked);
 
         // Necessary to drop tx so that rx.collect() can be finished
         drop(client);
@@ -836,7 +832,7 @@ pub mod tests {
         });
 
         let error = client.handle_packet(data_packet).await.err().unwrap();
-        assert_eq!(*error.kind(), HandlePacketErrorKind::InvalidConnectionId);
+        assert_eq!(error, HandlePacketError::InvalidConnectionId);
 
         // Necessary to drop tx so that rx.collect() can be finished
         drop(client);
@@ -861,7 +857,7 @@ pub mod tests {
         });
 
         let error = client.handle_packet(onion_request).await.err().unwrap();
-        assert_eq!(*error.kind(), HandlePacketErrorKind::MustNotSend);
+        assert_eq!(error, HandlePacketError::MustNotSend);
     }
 
     #[tokio::test]
@@ -922,7 +918,7 @@ pub mod tests {
         });
 
         let error = client.send_data(destination_pk, data.clone()).await.err().unwrap();
-        assert_eq!(*error.kind(), SendPacketErrorKind::NotLinked);
+        assert_eq!(error, SendPacketError::NotLinked);
 
         // Necessary to drop tx so that rx.collect() can be finished
         drop(client);
@@ -945,7 +941,7 @@ pub mod tests {
         client.links.write().await.insert_by_id(destination_pk.clone(), connection_id - 16);
 
         let error = client.send_data(destination_pk, data.clone()).await.err().unwrap();
-        assert_eq!(*error.kind(), SendPacketErrorKind::NotOnline);
+        assert_eq!(error, SendPacketError::NotOnline);
 
         // Necessary to drop tx so that rx.collect() can be finished
         drop(client);
@@ -1041,7 +1037,7 @@ pub mod tests {
         let connection_pk = SecretKey::generate(&mut rng).public_key();
 
         let error = client.remove_connection(connection_pk).await.err().unwrap();
-        assert_eq!(*error.kind(), SendPacketErrorKind::NoSuchConnection);
+        assert_eq!(error, SendPacketError::NoSuchConnection);
     }
 
     #[tokio::test]
@@ -1144,7 +1140,7 @@ pub mod tests {
                 match *client.status.read().await {
                     ClientStatus::Connecting => continue,
                     ClientStatus::Connected(_) => return Ok(()),
-                    ref other => return Err(Error::from(IoError::new(IoErrorKind::Other, format!("Invalid status: {:?}", other)))),
+                    ref other => return Err(Error::new(ErrorKind::Other, format!("Invalid status: {:?}", other))),
                 }
             }
         }
@@ -1176,7 +1172,7 @@ pub mod tests {
         let stats = Stats::new();
         let server_future = async {
             tcp_run(&Server::new(), listener, server_sk, stats, 2).await
-                .map_err(Error::from)
+                .map_err(|e| Error::new(ErrorKind::Other, e))
         };
         tokio::spawn(server_future);
 
@@ -1262,7 +1258,7 @@ pub mod tests {
         let server_future = async {
             let (connection, _) = listener.accept().await.unwrap();
             tcp_run_connection(&server, connection, server_sk, stats)
-                .map_err(Error::from).await
+                .map_err(|e| Error::new(ErrorKind::Other, e)).await
         };
 
         // run a client with invalid server's pk
@@ -1272,7 +1268,7 @@ pub mod tests {
         let (incoming_tx_1, _incoming_rx_1) = mpsc::unbounded();
         let client = Client::new(invalid_server_pk, addr, incoming_tx_1);
         let client_future = client.run(client_sk_1, client_pk_1)
-            .map_err(Error::from);
+            .map_err(|e| Error::new(ErrorKind::Other, e));
 
         let (server_res, client_res) = futures::join!(server_future, client_future);
         assert!(server_res.is_err()); // fail to process handshake

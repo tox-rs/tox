@@ -220,7 +220,7 @@ mod tests {
         // try to decode payload with eve's symmetric key
         let decoded_payload = encrypted_cookie.get_payload(&eve_symmetric_key);
         assert!(decoded_payload.is_err());
-        assert_eq!(*decoded_payload.err().unwrap().kind(), GetPayloadErrorKind::Decrypt);
+        assert_eq!(decoded_payload.err().unwrap(), GetPayloadError::Decrypt);
     }
 
     #[test]
@@ -237,7 +237,7 @@ mod tests {
         };
         let decoded_payload = invalid_encrypted_cookie.get_payload(&symmetric_key);
         let error = decoded_payload.err().unwrap();
-        assert_eq!(*error.kind(), GetPayloadErrorKind::Deserialize {
+        assert_eq!(error, GetPayloadError::Deserialize {
             error: Err::Error((vec![42; 51], ErrorKind::Eof)),
             payload: invalid_payload.to_vec()
         });
@@ -250,7 +250,7 @@ mod tests {
         };
         let decoded_payload = invalid_encrypted_cookie.get_payload(&symmetric_key);
         let error = decoded_payload.err().unwrap();
-        assert_eq!(*error.kind(), GetPayloadErrorKind::Deserialize {
+        assert_eq!(error, GetPayloadError::Deserialize {
             error: Err::Error((vec![], ErrorKind::Eof)),
             payload: invalid_payload.to_vec()
         });

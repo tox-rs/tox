@@ -8,16 +8,16 @@ use tox_packet::relay::*;
 use crate::relay::secure::*;
 use crate::stats::*;
 
-use failure::Fail;
+use thiserror::Error;
 use nom::{Needed, Offset, Err, error::ErrorKind};
 use bytes::{BytesMut, Buf};
 use tokio_util::codec::{Decoder, Encoder};
 
 /// Error that can happen when decoding `Packet` from bytes
-#[derive(Debug, Fail)]
+#[derive(Debug, Error)]
 pub enum DecodeError {
     /// Error indicates that received encrypted packet can't be parsed
-    #[fail(display = "Deserialize EncryptedPacket error: {:?}, buffer: {:?}", error, buf)]
+    #[error("Deserialize EncryptedPacket error: {:?}, buffer: {:?}", error, buf)]
     DeserializeEncryptedError {
         /// Parsing error
         error: ErrorKind,
@@ -25,10 +25,10 @@ pub enum DecodeError {
         buf: Vec<u8>,
     },
     /// Error indicates that received encrypted packet can't be decrypted
-    #[fail(display = "Decrypt EncryptedPacket error")]
+    #[error("Decrypt EncryptedPacket error")]
     DecryptError,
     /// Error indicates that more data is needed to parse decrypted packet
-    #[fail(display = "Decrypted packet should not be incomplete: {:?}, packet: {:?}", needed, packet)]
+    #[error("Decrypted packet should not be incomplete: {:?}, packet: {:?}", needed, packet)]
     IncompleteDecryptedPacket {
         /// Required data size to be parsed
         needed: Needed,
@@ -36,7 +36,7 @@ pub enum DecodeError {
         packet: Vec<u8>,
     },
     /// Error indicates that decrypted packet can't be parsed
-    #[fail(display = "Deserialize decrypted packet error: {:?}, packet: {:?}", error, packet)]
+    #[error("Deserialize decrypted packet error: {:?}, packet: {:?}", error, packet)]
     DeserializeDecryptedError {
         /// Parsing error
         error: ErrorKind,
@@ -44,10 +44,9 @@ pub enum DecodeError {
         packet: Vec<u8>,
     },
     /// General IO error
-    #[fail(display = "IO error: {:?}", error)]
+    #[error("IO error: {:?}", error)]
     IoError {
         /// IO error
-        #[fail(cause)]
         error: IoError
     },
 }
@@ -61,19 +60,18 @@ impl From<IoError> for DecodeError {
 }
 
 /// Error that can happen when encoding `Packet` to bytes
-#[derive(Debug, Fail)]
+#[derive(Debug, Error)]
 pub enum EncodeError {
     /// Error indicates that `Packet` is invalid and can't be serialized
-    #[fail(display = "Serialize Packet error: {:?}", error)]
+    #[error("Serialize Packet error: {:?}", error)]
     SerializeError {
         /// Serialization error
         error: GenError
     },
     /// General IO error
-    #[fail(display = "IO error: {:?}", error)]
+    #[error("IO error: {:?}", error)]
     IoError {
         /// IO error
-        #[fail(cause)]
         error: IoError
     },
 }

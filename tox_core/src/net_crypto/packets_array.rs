@@ -94,7 +94,7 @@ impl<T> PacketsArray<T> {
     /// Returns an error when the buffer is full
     pub fn push_back(&mut self, packet: T) -> Result<(), PacketsArrayError> {
         if self.len() == CRYPTO_PACKET_BUFFER_SIZE {
-            return Err(PacketsArrayError::from(PacketsArrayErrorKind::ArrayFull))
+            return Err(PacketsArrayError::ArrayFull)
         }
 
         self.buffer[real_index(self.buffer_end)] = Some(Box::new(packet));
@@ -254,7 +254,7 @@ mod tests {
         assert!(array.insert(7, ()).is_ok());
         let res = array.insert(7, ());
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), PacketsArrayErrorKind::AlreadyExist { index: 7 });
+        assert_eq!(res.err().unwrap(), PacketsArrayError::AlreadyExist { index: 7 });
         assert!(array.insert(6, ()).is_ok());
         assert!(array.insert(8, ()).is_ok());
     }
@@ -264,13 +264,13 @@ mod tests {
         let mut array = PacketsArray::<()>::new();
         let res = array.insert(CRYPTO_PACKET_BUFFER_SIZE, ());
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), PacketsArrayErrorKind::TooBig { index: CRYPTO_PACKET_BUFFER_SIZE });
+        assert_eq!(res.err().unwrap(), PacketsArrayError::TooBig { index: CRYPTO_PACKET_BUFFER_SIZE });
         assert_eq!(array.buffer_start, 0);
         assert_eq!(array.buffer_end, 0);
         array.buffer_start = u32::max_value();
         let res = array.insert(CRYPTO_PACKET_BUFFER_SIZE - 1, ());
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), PacketsArrayErrorKind::TooBig { index: CRYPTO_PACKET_BUFFER_SIZE - 1 });
+        assert_eq!(res.err().unwrap(), PacketsArrayError::TooBig { index: CRYPTO_PACKET_BUFFER_SIZE - 1 });
         assert_eq!(array.buffer_start, u32::max_value());
         assert_eq!(array.buffer_end, 0);
     }
@@ -301,7 +301,7 @@ mod tests {
         array.buffer_end = CRYPTO_PACKET_BUFFER_SIZE;
         let res = array.push_back(());
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), PacketsArrayErrorKind::ArrayFull);
+        assert_eq!(res.err().unwrap(), PacketsArrayError::ArrayFull);
         assert_eq!(array.buffer_start, 0);
         assert_eq!(array.buffer_end, CRYPTO_PACKET_BUFFER_SIZE);
     }
@@ -389,7 +389,7 @@ mod tests {
         let mut array = PacketsArray::<()>::new();
         let res = array.set_buffer_end(CRYPTO_PACKET_BUFFER_SIZE + 1);
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), PacketsArrayErrorKind::TooBig { index: CRYPTO_PACKET_BUFFER_SIZE + 1 });
+        assert_eq!(res.err().unwrap(), PacketsArrayError::TooBig { index: CRYPTO_PACKET_BUFFER_SIZE + 1 });
         assert_eq!(array.buffer_start, 0);
         assert_eq!(array.buffer_end, 0);
     }
@@ -400,7 +400,7 @@ mod tests {
         array.buffer_end = 7;
         let res = array.set_buffer_end(6);
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), PacketsArrayErrorKind::LowerIndex { index: 6 });
+        assert_eq!(res.err().unwrap(), PacketsArrayError::LowerIndex { index: 6 });
         assert_eq!(array.buffer_start, 0);
         assert_eq!(array.buffer_end, 7);
     }
@@ -429,7 +429,7 @@ mod tests {
         let mut array = PacketsArray::<()>::new();
         let res = array.set_buffer_start(1);
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), PacketsArrayErrorKind::OutsideIndex { index: 1 });
+        assert_eq!(res.err().unwrap(), PacketsArrayError::OutsideIndex { index: 1 });
         assert_eq!(array.buffer_start, 0);
         assert_eq!(array.buffer_end, 0);
     }
@@ -441,7 +441,7 @@ mod tests {
         array.buffer_end = 7;
         let res = array.set_buffer_start(1);
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), PacketsArrayErrorKind::OutsideIndex { index: 1 });
+        assert_eq!(res.err().unwrap(), PacketsArrayError::OutsideIndex { index: 1 });
         assert_eq!(array.buffer_start, 7);
         assert_eq!(array.buffer_end, 7);
     }

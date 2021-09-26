@@ -1,6 +1,6 @@
 //! Onion client implementation.
 
-mod errors;
+pub mod errors;
 mod nodes_pool;
 mod onion_path;
 mod paths_pool;
@@ -11,7 +11,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crypto_box::SalsaBox;
-use failure::Fail;
 use futures::{StreamExt, SinkExt};
 use futures::channel::mpsc;
 use futures::lock::Mutex;
@@ -423,7 +422,7 @@ impl OnionClient {
         let announce_data = if let Some(announce_data) = state.announce_requests.check_ping_id(packet.sendback_data, |_| true) {
             announce_data
         } else {
-            return Err(HandleAnnounceResponseErrorKind::InvalidRequestId.into());
+            return Err(HandleAnnounceResponseError::InvalidRequestId);
         };
 
         // Assign variables depending on response type (was it announcing or searching request)
@@ -437,7 +436,7 @@ impl OnionClient {
                 };
                 (&mut friend.close_nodes, Some(&mut friend.last_seen), announce_packet_data)
             } else {
-                return Err(HandleAnnounceResponseErrorKind::NoFriendWithPk.into());
+                return Err(HandleAnnounceResponseError::NoFriendWithPk);
             }
         } else {
             let announce_packet_data = AnnouncePacketData {
@@ -451,14 +450,14 @@ impl OnionClient {
 
         let payload = match packet.get_payload(&SalsaBox::new(&announce_data.pk, announce_packet_data.packet_sk)) {
             Ok(payload) => payload,
-            Err(e) => return Err(e.context(HandleAnnounceResponseErrorKind::InvalidPayload).into())
+            Err(e) => return Err(HandleAnnounceResponseError::InvalidPayload(e))
         };
 
         trace!("OnionAnnounceResponse status: {:?}, data: {:?}", payload.announce_status, announce_data);
 
         if announce_data.friend_pk.is_some() && payload.announce_status == AnnounceStatus::Announced ||
             announce_data.friend_pk.is_none() && payload.announce_status == AnnounceStatus::Found {
-            return Err(HandleAnnounceResponseErrorKind::InvalidAnnounceStatus.into());
+            return Err(HandleAnnounceResponseError::InvalidAnnounceStatus);
         }
 
         state.paths_pool.set_timeouts(announce_data.path_id.clone(), announce_data.friend_pk.is_some());
@@ -523,7 +522,7 @@ impl OnionClient {
             let inner_announce_request = announce_packet_data.search_request(&node.pk, request_id);
             self.send_onion_request(path, InnerOnionRequest::InnerOnionAnnounceRequest(inner_announce_request), node.saddr)
                 .await
-                .map_err(|e| e.context(HandleAnnounceResponseErrorKind::SendTo))?;
+                .map_err(HandleAnnounceResponseError::SendTo)?;
         }
 
         Ok(())
@@ -535,11 +534,11 @@ impl OnionClient {
 
         let friend = match state.friends.get_mut(&friend_pk) {
             Some(friend) => friend,
-            None => return Err(HandleDhtPkAnnounceErrorKind::NoFriendWithPk.into())
+            None => return Err(HandleDhtPkAnnounceError::NoFriendWithPk)
         };
 
         if dht_pk_announce.no_reply <= friend.last_no_reply {
-            return Err(HandleDhtPkAnnounceErrorKind::InvalidNoReply.into())
+            return Err(HandleDhtPkAnnounceError::InvalidNoReply)
         }
 
         friend.last_no_reply = dht_pk_announce.no_reply;
@@ -549,18 +548,18 @@ impl OnionClient {
         let tx = state.dht_pk_tx.clone();
         let dht_pk = dht_pk_announce.dht_pk.clone();
         maybe_send_unbounded(tx, (friend_pk, dht_pk)).await
-            .map_err(|e| e.context(HandleDhtPkAnnounceErrorKind::SendTo))?;
+            .map_err(HandleDhtPkAnnounceError::SendTo)?;
 
         for node in dht_pk_announce.nodes.into_iter() {
             match node.ip_port.protocol {
                 ProtocolType::Udp => {
                     let packed_node = PackedNode::new(node.ip_port.to_saddr(), node.pk.clone());
                     self.dht.ping_node(packed_node).await
-                        .map_err(|e| e.context(HandleDhtPkAnnounceErrorKind::PingNode))?;
+                        .map_err(HandleDhtPkAnnounceError::PingNode)?;
                 },
                 ProtocolType::Tcp => {
                     self.tcp_connections.add_relay_connection(node.ip_port.to_saddr(), node.pk, dht_pk_announce.dht_pk.clone()).await
-                        .map_err(|e| e.context(HandleDhtPkAnnounceErrorKind::AddRelay))?;
+                        .map_err(HandleDhtPkAnnounceError::AddRelay)?;
                 }
             }
         }
@@ -572,20 +571,20 @@ impl OnionClient {
     pub async fn handle_data_response(&self, packet: &OnionDataResponse) -> Result<(), HandleDataResponseError> {
         let payload = match packet.get_payload(&SalsaBox::new(&packet.temporary_pk, &self.data_sk)) {
             Ok(payload) => payload,
-            Err(e) => return Err(e.context(HandleDataResponseErrorKind::InvalidPayload).into())
+            Err(e) => return Err(HandleDataResponseError::InvalidPayload(e))
         };
         let iner_payload = match payload.get_payload(&packet.nonce, &SalsaBox::new(&payload.real_pk, &self.real_sk)) {
             Ok(payload) => payload,
-            Err(e) => return Err(e.context(HandleDataResponseErrorKind::InvalidInnerPayload).into())
+            Err(e) => return Err(HandleDataResponseError::InvalidInnerPayload(e))
         };
         match iner_payload {
             OnionDataResponseInnerPayload::DhtPkAnnounce(dht_pk_announce) =>
                 self.handle_dht_pk_announce(payload.real_pk, dht_pk_announce).await
-                    .map_err(|e| e.context(HandleDataResponseErrorKind::DhtPkAnnounce).into()),
+                    .map_err(HandleDataResponseError::DhtPkAnnounce),
             OnionDataResponseInnerPayload::FriendRequest(friend_request) => {
                 let tx = self.state.lock().await.friend_request_tx.clone();
                 maybe_send_unbounded(tx, (payload.real_pk, friend_request)).await
-                    .map_err(|e| e.context(HandleDataResponseErrorKind::FriendRequest).into())
+                    .map_err(HandleDataResponseError::FriendRequest)
             }
         }
     }
@@ -760,7 +759,7 @@ impl OnionClient {
             announce_packet_data,
             None,
             None,
-        ).await.map(drop).map_err(|e| e.context(RunErrorKind::SendTo).into())
+        ).await.map(drop).map_err(RunError::SendTo)
     }
 
     /// Get nodes to include to DHT `PublicKey` announcement packet.
@@ -894,18 +893,18 @@ impl OnionClient {
                 announce_packet_data,
                 Some(friend.real_pk.clone()),
                 Some(interval),
-            ).await.map_err(|e| e.context(RunErrorKind::SendTo))?;
+            ).await.map_err(RunError::SendTo)?;
 
             if packets_sent {
                 friend.search_count = friend.search_count.saturating_add(1);
             }
 
             if friend.last_dht_pk_onion_sent.map_or(true, |time| clock_elapsed(time) > ONION_DHTPK_SEND_INTERVAL) {
-                self.send_dht_pk_onion(friend, &mut state.paths_pool).await.map_err(|e| e.context(RunErrorKind::SendTo))?;
+                self.send_dht_pk_onion(friend, &mut state.paths_pool).await.map_err(RunError::SendTo)?;
             }
 
             if friend.last_dht_pk_dht_sent.map_or(true, |time| clock_elapsed(time) > DHT_DHTPK_SEND_INTERVAL) {
-                self.send_dht_pk_dht_request(friend).await.map_err(|e| e.context(RunErrorKind::SendTo))?;
+                self.send_dht_pk_dht_request(friend).await.map_err(RunError::SendTo)?;
             }
         }
 
@@ -1348,7 +1347,7 @@ mod tests {
         let packet = OnionAnnounceResponse::new(&SalsaBox::new(&friend_temporary_pk, &sender_sk), request_id, &payload);
 
         let error = onion_client.handle_announce_response(&packet, true).await.err().unwrap();
-        assert_eq!(error.kind(), &HandleAnnounceResponseErrorKind::InvalidAnnounceStatus);
+        assert_eq!(error, HandleAnnounceResponseError::InvalidAnnounceStatus);
     }
 
     #[tokio::test]
@@ -1551,7 +1550,7 @@ mod tests {
         let packet = OnionAnnounceResponse::new(&SalsaBox::new(&real_pk, &sender_sk), request_id, &payload);
 
         let error = onion_client.handle_announce_response(&packet, true).await.err().unwrap();
-        assert_eq!(error.kind(), &HandleAnnounceResponseErrorKind::InvalidAnnounceStatus);
+        assert_eq!(error, HandleAnnounceResponseError::InvalidAnnounceStatus);
     }
 
     #[tokio::test]
@@ -1601,7 +1600,7 @@ mod tests {
         let packet = OnionAnnounceResponse::new(&SalsaBox::new(&friend_temporary_pk, &sender_sk), request_id, &payload);
 
         let error = onion_client.handle_announce_response(&packet, true).await.err().unwrap();
-        assert_eq!(error.kind(), &HandleAnnounceResponseErrorKind::NoFriendWithPk);
+        assert_eq!(error, HandleAnnounceResponseError::NoFriendWithPk);
     }
 
     #[tokio::test]
@@ -1650,7 +1649,7 @@ mod tests {
         };
 
         let error = onion_client.handle_announce_response(&packet, true).await.err().unwrap();
-        assert_eq!(error.kind(), &HandleAnnounceResponseErrorKind::InvalidPayload);
+        assert_eq!(error, HandleAnnounceResponseError::InvalidPayload(GetPayloadError::Decrypt));
     }
 
     #[tokio::test]
@@ -1872,10 +1871,8 @@ mod tests {
         let temporary_pk = temporary_sk.public_key();
         let onion_data_response = OnionDataResponse::new(&SalsaBox::new(&onion_client.data_pk, &temporary_sk), temporary_pk, nonce, &onion_data_response_payload);
 
-        let error = onion_client.handle_data_response(&onion_data_response).await.err().unwrap();
-        assert_eq!(error.kind(), &HandleDataResponseErrorKind::DhtPkAnnounce);
-        let cause = error.cause().unwrap().downcast_ref::<HandleDhtPkAnnounceError>().unwrap();
-        assert_eq!(cause.kind(), &HandleDhtPkAnnounceErrorKind::NoFriendWithPk);
+        let res = onion_client.handle_data_response(&onion_data_response).await;
+        assert!(matches!(res, Err(HandleDataResponseError::DhtPkAnnounce(HandleDhtPkAnnounceError::NoFriendWithPk))));
     }
 
     #[tokio::test]
@@ -1913,10 +1910,8 @@ mod tests {
         onion_client.handle_data_response(&onion_data_response).await.unwrap();
 
         // second announce with the same no_reply should be rejected
-        let error = onion_client.handle_data_response(&onion_data_response).await.err().unwrap();
-        assert_eq!(error.kind(), &HandleDataResponseErrorKind::DhtPkAnnounce);
-        let cause = error.cause().unwrap().downcast_ref::<HandleDhtPkAnnounceError>().unwrap();
-        assert_eq!(cause.kind(), &HandleDhtPkAnnounceErrorKind::InvalidNoReply);
+        let res = onion_client.handle_data_response(&onion_data_response).await;
+        assert!(matches!(res, Err(HandleDataResponseError::DhtPkAnnounce(HandleDhtPkAnnounceError::InvalidNoReply))));
     }
 
     #[tokio::test]
@@ -1938,8 +1933,8 @@ mod tests {
             payload: vec![42; 123],
         };
 
-        let error = onion_client.handle_data_response(&onion_data_response).await.err().unwrap();
-        assert_eq!(error.kind(), &HandleDataResponseErrorKind::InvalidPayload);
+        let res = onion_client.handle_data_response(&onion_data_response).await;
+        assert!(matches!(res, Err(HandleDataResponseError::InvalidPayload(GetPayloadError::Decrypt))));
     }
 
     #[tokio::test]
@@ -1968,8 +1963,8 @@ mod tests {
             &onion_data_response_payload,
         );
 
-        let error = onion_client.handle_data_response(&onion_data_response).await.err().unwrap();
-        assert_eq!(error.kind(), &HandleDataResponseErrorKind::InvalidInnerPayload);
+        let res = onion_client.handle_data_response(&onion_data_response).await;
+        assert!(matches!(res, Err(HandleDataResponseError::InvalidInnerPayload(GetPayloadError::Decrypt))));
     }
 
     #[tokio::test]

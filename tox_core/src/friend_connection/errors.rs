@@ -1,60 +1,49 @@
 //! Errors for friend connections module.
 
-use failure::Fail;
+use futures::channel::mpsc::SendError;
+use thiserror::Error;
+use tokio::time::error::Elapsed;
 
-error_kind! {
-    #[doc = "Error that can happen while removing a friend"]
-    #[derive(Debug)]
-    RemoveFriendError,
-    #[doc = "The specific kind of error that can occur."]
-    #[derive(Debug, Eq, PartialEq, Fail)]
-    RemoveFriendErrorKind {
-        #[doc = "Failed to kill net_crypto connection."]
-        #[fail(display = "Failed to kill net_crypto connection")]
-        KillConnection,
-        #[doc = "There is no such friend."]
-        #[fail(display = "There is no such friend")]
-        NoFriend,
-    }
+use crate::{net_crypto::errors::{KillConnectionError, SendLosslessPacketError}, relay::client::ConnectionError};
+
+/// Error that can happen while removing a friend
+#[derive(Clone, Debug, Eq, PartialEq, Error)]
+pub enum RemoveFriendError {
+    /// Failed to kill net_crypto connection.
+    #[error("Failed to kill net_crypto connection")]
+    KillConnection(KillConnectionError),
+    /// There is no such friend.
+    #[error("There is no such friend")]
+    NoFriend,
 }
 
-error_kind! {
-    #[doc = "Error that can happen while removing a frind"]
-    #[derive(Debug)]
-    RunError,
-    #[doc = "The specific kind of error that can occur."]
-    #[derive(Debug, Eq, PartialEq, Fail)]
-    RunErrorKind {
-        #[doc = "Wakeup timer error."]
-        #[fail(display = "Wakeup timer error")]
-        Wakeup,
-        #[doc = "Timeout error."]
-        #[fail(display = "Timeout error")]
-        Timeout,
-        #[doc = "Failed to kill net_crypto connection."]
-        #[fail(display = "Failed to kill net_crypto connection")]
-        KillConnection,
-        #[doc = "Failed to send packet."]
-        #[fail(display = "Failed to send packet")]
-        SendTo,
-        #[doc = "Failed to add TCP connection."]
-        #[fail(display = "Failed to TCP connection")]
-        AddTcpConnection,
-        #[doc = "Failed to send connection status."]
-        #[fail(display = "Failed to send connection status")]
-        SendToConnectionStatus
-    }
+/// Error that can happen while removing a friend
+#[derive(Debug, Error)]
+pub enum RunError {
+    /// Wakeup timer error.
+    #[error("Wakeup timer error")]
+    Wakeup,
+    /// Timeout error.
+    #[error("Timeout error")]
+    Timeout(Elapsed),
+    /// Failed to kill net_crypto connection.
+    #[error("Failed to kill net_crypto connection")]
+    KillConnection(KillConnectionError),
+    /// Failed to send packet.
+    #[error("Failed to send packet")]
+    SendTo(SendLosslessPacketError),
+    /// Failed to add TCP connection.
+    #[error("Failed to TCP connection")]
+    AddTcpConnection(ConnectionError),
+    /// Failed to send connection status.
+    #[error("Failed to send connection status")]
+    SendToConnectionStatus(SendError)
 }
 
-error_kind! {
-    #[doc = "Error that can happen while handling `ShareRelays` packet."]
-    #[derive(Debug)]
-    HandleShareRelaysError,
-    #[doc = "The specific kind of error that can occur."]
-    #[derive(Debug, Eq, PartialEq, Fail)]
-    HandleShareRelaysErrorKind {
-        #[doc = "Failed to add TCP connection."]
-        #[fail(display = "Failed to TCP connection")]
-        AddTcpConnection
-    }
+/// Error that can happen while handling `ShareRelays` packet.
+#[derive(Debug, Error)]
+pub enum HandleShareRelaysError {
+    /// Failed to add TCP connection.
+    #[error("Failed to TCP connection")]
+    AddTcpConnection(ConnectionError)
 }

@@ -9,88 +9,74 @@ use crate::stats::*;
 
 use bytes::BytesMut;
 use cookie_factory::GenError;
-use failure::Fail;
+use thiserror::Error;
 use nom::{error::ErrorKind, Err};
 use tokio_util::codec::{Decoder, Encoder};
 
 /// A serialized `Packet` should be not longer than 2048 bytes.
 pub const MAX_DHT_PACKET_SIZE: usize = 2048;
 
-error_kind! {
-    #[doc = "Error that can happen when decoding `Packet` from bytes."]
-    #[derive(Debug)]
-    DecodeError,
-    #[doc = "Error that can happen when decoding `Packet` from bytes."]
-    #[derive(Clone, Debug, Eq, PartialEq, Fail)]
-    DecodeErrorKind {
-        #[doc = "Error indicates that we received too big packet."]
-        #[fail(display = "Packet should not be longer than 2048 bytes: {} bytes", len)]
-        TooBigPacket {
-            #[doc = "Length of received packet."]
-            len: usize
-        },
-        #[doc = "Error indicates that received packet can't be parsed."]
-        #[fail(display = "Deserialize Packet error: {:?}, packet: {:?}", error, packet)]
-        Deserialize {
-            #[doc = "Parsing error."]
-            error: nom::Err<(Vec<u8>, ErrorKind)>,
-            #[doc = "Received packet."]
-            packet: Vec<u8>,
-        },
-        #[doc = "General IO error that can happen with UDP socket."]
-        #[fail(display = "IO Error")]
-        Io,
-    }
+/// Error that can happen when decoding `Packet` from bytes.
+#[derive(Debug, Error)]
+pub enum DecodeError {
+    /// Error indicates that we received too big packet.
+    #[error("Packet should not be longer than 2048 bytes: {} bytes", len)]
+    TooBigPacket {
+        /// Length of received packet.
+        len: usize
+    },
+    /// Error indicates that received packet can't be parsed.
+    #[error("Deserialize Packet error: {:?}, packet: {:?}", error, packet)]
+    Deserialize {
+        /// Parsing error.
+        error: nom::Err<(Vec<u8>, ErrorKind)>,
+        /// Received packet.
+        packet: Vec<u8>,
+    },
+    /// General IO error that can happen with UDP socket.
+    #[error("IO Error")]
+    Io(IoError),
 }
 
 impl DecodeError {
     pub(crate) fn too_big_packet(len: usize) -> DecodeError {
-        DecodeError::from(DecodeErrorKind::TooBigPacket { len })
+        DecodeError::TooBigPacket { len }
     }
 
     pub(crate) fn deserialize(e: Err<(&[u8], ErrorKind)>, packet: Vec<u8>) -> DecodeError {
-        DecodeError::from(DecodeErrorKind::Deserialize { error: e.to_owned(), packet })
+        DecodeError::Deserialize { error: e.to_owned(), packet }
     }
 }
 
-error_kind! {
-    #[doc = "Error that can happen when encoding `Packet` to bytes."]
-    #[derive(Debug)]
-    EncodeError,
-    #[doc = "Error that can happen when encoding `Packet` to bytes."]
-    #[derive(Debug, Fail)]
-    EncodeErrorKind {
-        #[doc = "Error indicates that `Packet` is invalid and can't be serialized."]
-        #[fail(display = "Serialize Packet error: {:?}", error)]
-        Serialize {
-            #[doc = "Serialization error."]
-            error: GenError
-        },
-        #[doc = "General IO error that can happen with UDP socket."]
-        #[fail(display = "IO Error")]
-        Io,
-    }
+/// Error that can happen when encoding `Packet` to bytes.
+#[derive(Debug, Error)]
+pub enum EncodeError {
+    /// Error indicates that `Packet` is invalid and can't be serialized.
+    #[error("Serialize Packet error: {:?}", error)]
+    Serialize {
+        /// Serialization error.
+        error: GenError
+    },
+    /// General IO error that can happen with UDP socket.
+    #[error("IO Error")]
+    Io(IoError),
 }
 
 impl EncodeError {
     pub(crate) fn serialize(error: GenError) -> EncodeError {
-        EncodeError::from(EncodeErrorKind::Serialize { error })
+        EncodeError::Serialize { error }
     }
 }
 
 impl From<IoError> for DecodeError {
     fn from(error: IoError) -> DecodeError {
-        DecodeError {
-            ctx: error.context(DecodeErrorKind::Io)
-        }
+        DecodeError::Io(error)
     }
 }
 
 impl From<IoError> for EncodeError {
     fn from(error: IoError) -> EncodeError {
-        EncodeError {
-            ctx: error.context(EncodeErrorKind::Io)
-        }
+        EncodeError::Io(error)
     }
 }
 
@@ -340,9 +326,8 @@ mod tests {
         buf.extend_from_slice(b"\xFF");
 
         let res = codec.decode(&mut buf);
-        // not enought bytes to decode EncryptedPacket
-        let error = res.err().unwrap();
-        assert_eq!(*error.kind(), DecodeErrorKind::Deserialize { error: Err::Error((vec![255], ErrorKind::Alt)) , packet: vec![0xff] });
+        // not enough bytes to decode EncryptedPacket
+        assert!(matches!(res, Err(DecodeError::Deserialize { error: Err::Error((_, ErrorKind::Alt)), packet: _ })));
     }
 
     #[test]
@@ -372,9 +357,8 @@ mod tests {
         let res = codec.encode(packet, &mut buf);
         assert!(res.is_err());
         let error = res.err().unwrap();
-        let error_kind = error.kind();
-        let error_serialize = unpack!(error_kind, EncodeErrorKind::Serialize, error);
+        let error_serialize = unpack!(error, EncodeError::Serialize, error);
         let too_small = unpack!(error_serialize, GenError::BufferTooSmall);
-        assert_eq!(*too_small, 2106 - MAX_DHT_PACKET_SIZE);
+        assert_eq!(too_small, 2106 - MAX_DHT_PACKET_SIZE);
     }
 }

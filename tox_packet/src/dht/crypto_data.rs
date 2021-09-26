@@ -96,11 +96,14 @@ impl CryptoData {
     pub fn get_payload(&self, shared_secret: &SalsaBox, nonce: &Nonce) -> Result<CryptoDataPayload, GetPayloadError> {
         let decrypted = shared_secret.decrypt(nonce.into(), self.payload.as_slice())
             .map_err(|AeadError| {
-                GetPayloadError::decrypt()
+                GetPayloadError::Decrypt
             })?;
         match CryptoDataPayload::from_bytes(&decrypted) {
             Err(error) => {
-                Err(GetPayloadError::deserialize(error, decrypted.clone()))
+                Err(GetPayloadError::Deserialize {
+                    error: error.to_owned(),
+                    payload: decrypted.clone(),
+                })
             },
             Ok((_, payload)) => {
                 Ok(payload)
@@ -232,7 +235,7 @@ mod tests {
         // try to decode payload with eve's shared secret
         let decoded_payload = crypto_data.get_payload(&eve_shared_secret, &nonce);
         let error = decoded_payload.err().unwrap();
-        assert_eq!(*error.kind(), GetPayloadErrorKind::Decrypt);
+        assert_eq!(error, GetPayloadError::Decrypt);
     }
 
     #[test]
@@ -252,6 +255,6 @@ mod tests {
         };
         let decoded_payload = invalid_packet.get_payload(&shared_secret, &nonce.into());
         let error = decoded_payload.err().unwrap();
-        assert_eq!(*error.kind(), GetPayloadErrorKind::Deserialize { error: Err::Error((vec![], ErrorKind::Eof)), payload: invalid_payload.to_vec() });
+        assert_eq!(error, GetPayloadError::Deserialize { error: Err::Error((vec![], ErrorKind::Eof)), payload: invalid_payload.to_vec() });
     }
 }

@@ -6,7 +6,6 @@ use std::net::{SocketAddr, IpAddr};
 use futures::{FutureExt, SinkExt, StreamExt};
 use futures::channel::mpsc::Receiver;
 use tokio::net::UdpSocket;
-use failure::Fail;
 
 use crate::dht::codec::*;
 use tox_packet::dht::Packet;
@@ -41,9 +40,8 @@ pub async fn dht_run_socket(
                 Err(e) => {
                     error!("packet receive error = {:?}", e);
                     // ignore packet decode errors
-                    if *e.kind() != DecodeErrorKind::Io { continue }
-                    else {
-                        return Err(Error::new(ErrorKind::Other, e.compat()))
+                    if let DecodeError::Io(e) = e {
+                        return Err(e);
                     }
                 }
             }
@@ -65,7 +63,7 @@ pub async fn dht_run_socket(
 
             trace!("Sending packet {:?} to {:?}", packet, addr);
             sink.send((packet, addr)).await
-                .map_err(|e| Error::new(ErrorKind::Other, e.compat()))?
+                .map_err(|e| Error::new(ErrorKind::Other, e))?
         }
 
         Ok(())
@@ -76,7 +74,7 @@ pub async fn dht_run_socket(
         write = network_writer.fuse() => write,
         run = udp.dht.run().fuse() => { // TODO: should we run it here?
             let res: Result<_, _> = run;
-            res.map_err(|e| Error::new(ErrorKind::Other, e.compat()))
+            res.map_err(|e| Error::new(ErrorKind::Other, e))
         }
     }
 }
@@ -122,7 +120,7 @@ mod tests {
             // Send invalid request first to ensure that the server won't crash
             client_socket.send_to(&[42; 123][..], &server_addr)
                 .await
-                .map_err(|e| Error::new(ErrorKind::Other, e.compat()))?;
+                .map_err(|e| Error::new(ErrorKind::Other, e))?;
 
             let stats = Stats::new();
             let codec = DhtCodec::new(stats);
@@ -136,7 +134,7 @@ mod tests {
             let ping_request = PingRequest::new(&shared_secret, client_pk, &ping_request_payload);
 
             sink.send((Packet::PingRequest(ping_request), server_addr)).await
-                .map_err(|e| Error::new(ErrorKind::Other, e.compat()))?;
+                .map_err(|e| Error::new(ErrorKind::Other, e))?;
 
             // And wait for ping response
             let ping_response = stream
@@ -151,7 +149,7 @@ mod tests {
                 .unwrap();
 
             let ping_response = ping_response
-                .map_err(|e| Error::new(ErrorKind::Other, e.compat()))?;
+                .map_err(|e| Error::new(ErrorKind::Other, e))?;
             let ping_response_payload = ping_response.get_payload(&shared_secret).unwrap();
 
             assert_eq!(ping_response_payload.id, ping_id);

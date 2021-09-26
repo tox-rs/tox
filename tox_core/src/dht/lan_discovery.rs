@@ -2,30 +2,27 @@
 
 use std::iter;
 use std::net::{IpAddr, SocketAddr};
-use std::time::{Duration};
+use std::time::Duration;
 
-use failure::Fail;
+use thiserror::Error;
 use futures::{stream, SinkExt};
 use futures::channel::mpsc;
 use get_if_addrs::IfAddr;
 
+use tokio::time::error::Elapsed;
 use tox_crypto::*;
 use tox_packet::dht::*;
 
-error_kind! {
-    #[doc = "Error that can happen during lan discovery."]
-    #[derive(Debug)]
-    LanDiscoveryError,
-    #[doc = "The specific kind of error that can occur."]
-    #[derive(Debug, Eq, PartialEq, Fail)]
-    LanDiscoveryErrorKind {
-        #[doc = "Ping wakeup timer error"]
-        #[fail(display = "Lan discovery wakeup timer error.")]
-        Wakeup,
-        #[doc = "Send packet(s) error."]
-        #[fail(display = "Send packet(s) error")]
-        SendTo,
-    }
+
+/// Error that can happen during lan discovery.
+#[derive(Debug, PartialEq, Error)]
+pub enum LanDiscoveryError {
+    /// Ping wakeup timer error
+    #[error("Lan discovery wakeup timer error.")]
+    Wakeup,
+    /// Send packet(s) time out.
+    #[error("Send packet(s) error")]
+    Timeout(Elapsed),
 }
 
 /// How many ports should be used on every iteration.
@@ -150,7 +147,7 @@ impl LanDiscoverySender {
             if let Err(e) = tokio::time::timeout(interval, self.send()).await {
                 warn!("Failed to send LAN discovery packets: {}", e);
 
-                return Err(e.context(LanDiscoveryErrorKind::SendTo).into())
+                return Err(LanDiscoveryError::Timeout(e))
             }
         }
     }

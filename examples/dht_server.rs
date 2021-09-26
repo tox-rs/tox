@@ -7,7 +7,7 @@ extern crate log;
 
 use futures::future::FutureExt;
 use futures::channel::mpsc;
-use failure::Error;
+use anyhow::Error;
 use rand::thread_rng;
 
 use std::net::SocketAddr;

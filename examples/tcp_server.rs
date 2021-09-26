@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate log;
 
-use failure::Error;
+use anyhow::Error;
 use tox_crypto::*;
 use tox_core::relay::server::{Server, tcp_run};
 use tox_core::stats::Stats;
