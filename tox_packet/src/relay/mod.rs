@@ -29,17 +29,9 @@ pub use self::data::{Data, DataPayload};
 
 use tox_binary_io::*;
 
-use nom::{
-    named,
-    do_parse,
-    tag,
-    call,
-    alt,
-    map,
-    take,
-    value,
-    verify,
-};
+use nom::combinator::{success, verify, map};
+use nom::bytes::streaming::take;
+use nom::branch::alt;
 
 use cookie_factory::{
     do_gen,
@@ -89,19 +81,21 @@ pub enum Packet {
 pub const MAX_TCP_PACKET_SIZE: usize = 2032;
 
 impl FromBytes for Packet {
-    named!(from_bytes<Packet>, alt!(
-        map!(RouteRequest::from_bytes, Packet::RouteRequest) |
-        map!(RouteResponse::from_bytes, Packet::RouteResponse) |
-        map!(ConnectNotification::from_bytes, Packet::ConnectNotification) |
-        map!(DisconnectNotification::from_bytes, Packet::DisconnectNotification) |
-        map!(PingRequest::from_bytes, Packet::PingRequest) |
-        map!(PongResponse::from_bytes, Packet::PongResponse) |
-        map!(OobSend::from_bytes, Packet::OobSend) |
-        map!(OobReceive::from_bytes, Packet::OobReceive) |
-        map!(OnionRequest::from_bytes, Packet::OnionRequest) |
-        map!(OnionResponse::from_bytes, Packet::OnionResponse) |
-        map!(Data::from_bytes, Packet::Data)
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        alt((
+            map(RouteRequest::from_bytes, Packet::RouteRequest),
+            map(RouteResponse::from_bytes, Packet::RouteResponse),
+            map(ConnectNotification::from_bytes, Packet::ConnectNotification),
+            map(DisconnectNotification::from_bytes, Packet::DisconnectNotification),
+            map(PingRequest::from_bytes, Packet::PingRequest),
+            map(PongResponse::from_bytes, Packet::PongResponse),
+            map(OobSend::from_bytes, Packet::OobSend),
+            map(OobReceive::from_bytes, Packet::OobReceive),
+            map(OnionRequest::from_bytes, Packet::OnionRequest),
+            map(OnionResponse::from_bytes, Packet::OnionResponse),
+            map(Data::from_bytes, Packet::Data),
+        ))(input)
+    }
 }
 
 impl ToBytes for Packet {
@@ -145,12 +139,12 @@ pub const MAX_TCP_ENC_PACKET_SIZE: usize = 2050;
 pub const MAX_TCP_ENC_PACKET_PAYLOAD_SIZE: usize = 2048;
 
 impl FromBytes for EncryptedPacket {
-    named!(from_bytes<EncryptedPacket>, do_parse!(
-        length: be_u16 >>
-        verify!(value!(length), |len| *len > 0 && *len as usize <= MAX_TCP_ENC_PACKET_PAYLOAD_SIZE) >>
-        payload: take!(length) >>
-        (EncryptedPacket { payload: payload.to_vec() })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, length) = be_u16(input)?;
+        let (input, _) = verify(success(length), |len| *len > 0 && *len as usize <= MAX_TCP_ENC_PACKET_PAYLOAD_SIZE)(input)?;
+        let (input, payload) = take(length)(input)?;
+        Ok((input, EncryptedPacket { payload: payload.to_vec() }))
+    }
 }
 
 impl ToBytes for EncryptedPacket {

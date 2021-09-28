@@ -6,7 +6,8 @@ use super::*;
 use std::str;
 use nom::{
     number::complete::be_u16,
-    combinator::rest,
+    combinator::{rest, map_res, verify},
+    bytes::complete::tag,
 };
 
 use super::MAX_NAME_LENGTH_IN_CONFERENCE;
@@ -32,17 +33,16 @@ pub struct Title {
 }
 
 impl FromBytes for Title {
-    named!(from_bytes<Title>, do_parse!(
-        tag!("\x62") >>
-        conference_id: be_u16 >>
-        tag!("\x0a") >>
-        title: map_res!(verify!(rest, |title: &[u8]| title.len() <= MAX_NAME_LENGTH_IN_CONFERENCE),
-            str::from_utf8) >>
-        (Title {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x62")(input)?;
+        let (input, conference_id) = be_u16(input)?;
+        let (input, _) = tag("\x0a")(input)?;
+        let (input, title) = map_res(verify(rest, |title: &[u8]| title.len() <= MAX_NAME_LENGTH_IN_CONFERENCE), str::from_utf8)(input)?;
+        Ok((input, Title {
             conference_id,
             title: title.to_string(),
-        })
-    ));
+        }))
+    }
 }
 
 impl ToBytes for Title {

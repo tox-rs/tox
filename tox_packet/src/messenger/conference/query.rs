@@ -4,6 +4,7 @@
 use super::*;
 
 use nom::number::complete::be_u16;
+use nom::bytes::complete::tag;
 
 /** Query is a struct that holds info to query a peer in a conference.
 
@@ -20,12 +21,12 @@ Length    | Content
 pub struct Query(pub u16);
 
 impl FromBytes for Query {
-    named!(from_bytes<Query>, do_parse!(
-        tag!("\x62") >>
-        conference_id: be_u16 >>
-        tag!("\x08") >>
-        (Query(conference_id))
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x62")(input)?;
+        let (input, conference_id) = be_u16(input)?;
+        let (input, _) = tag("\x08")(input)?;
+        Ok((input, Query(conference_id)))
+    }
 }
 
 impl ToBytes for Query {

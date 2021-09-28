@@ -4,7 +4,8 @@
 use super::*;
 
 use std::str;
-use nom::combinator::rest;
+use nom::combinator::{map_res, rest, verify};
+use nom::bytes::complete::tag;
 
 /// Maximum size in bytes of message string of message packet
 const MAX_MESSAGE_DATA_SIZE: usize = 1372;
@@ -27,12 +28,11 @@ pub struct Message {
 }
 
 impl FromBytes for Message {
-    named!(from_bytes<Message>, do_parse!(
-        tag!("\x40") >>
-        msg: map_res!(verify!(rest, |msg: &[u8]| msg.len() <= MAX_MESSAGE_DATA_SIZE),
-            str::from_utf8) >>
-        (Message { msg: msg.to_string() })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x40")(input)?;
+        let (input, msg) = map_res(verify(rest, |msg: &[u8]| msg.len() <= MAX_MESSAGE_DATA_SIZE), str::from_utf8)(input)?;
+        Ok((input, Message { msg: msg.to_string() }))
+    }
 }
 
 impl ToBytes for Message {

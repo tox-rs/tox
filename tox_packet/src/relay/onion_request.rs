@@ -12,7 +12,8 @@ use crate::onion::{
     ONION_RETURN_1_SIZE,
 };
 
-use nom::combinator::rest;
+use nom::bytes::complete::tag;
+use nom::combinator::{rest, verify};
 
 /// Encrypted payload should contain `IpPort`, `PublicKey` and inner encrypted
 /// payload that should contain at least `IpPort` struct.
@@ -57,17 +58,17 @@ pub struct OnionRequest {
 }
 
 impl FromBytes for OnionRequest {
-    named!(from_bytes<OnionRequest>, do_parse!(
-        tag!("\x08") >>
-        nonce: call!(Nonce::from_bytes) >>
-        ip_port: call!(IpPort::from_bytes, IpPortPadding::WithPadding) >>
-        temporary_pk: call!(PublicKey::from_bytes) >>
-        payload: verify!(
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x08")(input)?;
+        let (input, nonce) = Nonce::from_bytes(input)?;
+        let (input, ip_port) = IpPort::from_bytes(input, IpPortPadding::WithPadding)?;
+        let (input, temporary_pk) = PublicKey::from_bytes(input)?;
+        let (input, payload) = verify(
             rest,
             |payload: &[u8]| payload.len() >= ONION_MIN_PAYLOAD_SIZE && payload.len() <= ONION_MAX_PAYLOAD_SIZE
-        ) >>
-        (OnionRequest { nonce, ip_port, temporary_pk, payload: payload.to_vec() })
-    ));
+        )(input)?;
+        Ok((input, OnionRequest { nonce, ip_port, temporary_pk, payload: payload.to_vec() }))
+    }
 }
 
 impl ToBytes for OnionRequest {

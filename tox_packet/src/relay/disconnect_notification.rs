@@ -5,6 +5,7 @@ use super::*;
 
 use tox_binary_io::*;
 use crate::relay::connection_id::ConnectionId;
+use nom::bytes::complete::tag;
 
 /** Sent by client to server.
 Sent when client wants the server to forget about the connection related
@@ -35,11 +36,11 @@ pub struct DisconnectNotification {
 }
 
 impl FromBytes for DisconnectNotification {
-    named!(from_bytes<DisconnectNotification>, do_parse!(
-        tag!("\x03") >>
-        connection_id: call!(ConnectionId::from_bytes) >>
-        (DisconnectNotification { connection_id })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x03")(input)?;
+        let (input, connection_id) = ConnectionId::from_bytes(input)?;
+        Ok((input, DisconnectNotification { connection_id }))
+    }
 }
 
 impl ToBytes for DisconnectNotification {

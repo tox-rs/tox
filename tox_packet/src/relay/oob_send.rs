@@ -7,6 +7,7 @@ use tox_binary_io::*;
 use tox_crypto::*;
 
 use nom::combinator::rest;
+use nom::bytes::complete::tag;
 
 /** Sent by client to server.
 If a peer with private key equal to the key they announced themselves with is
@@ -40,12 +41,12 @@ pub struct OobSend {
 }
 
 impl FromBytes for OobSend {
-    named!(from_bytes<OobSend>, do_parse!(
-        tag!("\x06") >>
-        destination_pk: call!(PublicKey::from_bytes) >>
-        data: rest >>
-        (OobSend { destination_pk, data: data.to_vec() })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x06")(input)?;
+        let (input, destination_pk) = PublicKey::from_bytes(input)?;
+        let (input, data) = rest(input)?;
+        Ok((input, OobSend { destination_pk, data: data.to_vec() }))
+    }
 }
 
 impl ToBytes for OobSend {

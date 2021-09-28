@@ -4,8 +4,11 @@
 use std::default::Default;
 use nom::{
     number::complete::{le_u16, be_u16, le_u8, le_u32, le_u64},
-    combinator::rest,
-    bytes::complete::take,
+    combinator::{rest, success, verify, map_parser, map},
+    bytes::complete::{take, tag},
+    multi::{many0, length_data},
+    error::{ErrorKind, make_error},
+    branch::alt,
 };
 use rand::{CryptoRng, Rng};
 
@@ -54,18 +57,18 @@ impl NospamKeys {
 */
 // NoSpam is defined in toxid.rs
 impl FromBytes for NospamKeys {
-    named!(from_bytes<NospamKeys>, do_parse!(
-        tag!([0x01,0x00]) >>
-        tag!(SECTION_MAGIC) >>
-        nospam: call!(NoSpam::from_bytes) >>
-        pk: call!(PublicKey::from_bytes) >>
-        sk: call!(SecretKey::from_bytes) >>
-        (NospamKeys {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag([0x01,0x00])(input)?;
+        let (input, _) = tag(SECTION_MAGIC)(input)?;
+        let (input, nospam) = NoSpam::from_bytes(input)?;
+        let (input, pk) = PublicKey::from_bytes(input)?;
+        let (input, sk) = SecretKey::from_bytes(input)?;
+        Ok((input, NospamKeys {
             nospam,
             pk,
             sk
-        })
-    ));
+        }))
+    }
 }
 
 impl ToBytes for NospamKeys {
@@ -92,13 +95,12 @@ pub const NAME_LEN: usize = 128;
     Can't fail.
 */
 impl FromBytes for Name {
-    named!(from_bytes<Name>, do_parse!(
-        tag!([0x04,0x00]) >>
-        tag!(SECTION_MAGIC) >>
-        name_bytes: rest >>
-        name: value!(name_bytes.to_vec()) >>
-        (Name(name))
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag([0x04,0x00])(input)?;
+        let (input, _) = tag(SECTION_MAGIC)(input)?;
+        let (input, name_bytes) = rest(input)?;
+        Ok((input, Name(name_bytes.to_vec())))
+    }
 }
 
 impl ToBytes for Name {
@@ -134,16 +136,16 @@ https://zetok.github.io/tox-spec/#dht-sections
 const DHT_2ND_MAGICAL: u16 = 0x11ce;
 
 impl FromBytes for DhtState {
-    named!(from_bytes<DhtState>, do_parse!(
-        tag!([0x02,0x00]) >>
-        tag!(SECTION_MAGIC) >>
-        verify!(le_u32, |value| *value == DHT_MAGICAL) >> // check whether beginning of the section matches DHT magic bytes
-        num_of_bytes: le_u32 >>
-        verify!(le_u16, |value| *value == DHT_SECTION_TYPE) >> // check DHT section type
-        verify!(le_u16, |value| *value == DHT_2ND_MAGICAL) >> // check whether yet another magic number matches
-        nodes: flat_map!(take(num_of_bytes), many0!(PackedNode::from_bytes)) >>
-        (DhtState(nodes))
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag([0x02,0x00])(input)?;
+        let (input, _) = tag(SECTION_MAGIC)(input)?;
+        let (input, _) = verify(le_u32, |value| *value == DHT_MAGICAL)(input)?; // check whether beginning of the section matches DHT magic bytes
+        let (input, num_of_bytes) = le_u32(input)?;
+        let (input, _) = verify(le_u16, |value| *value == DHT_SECTION_TYPE)(input)?; // check DHT section type
+        let (input, _) = verify(le_u16, |value| *value == DHT_2ND_MAGICAL)(input)?; // check whether yet another magic number matches
+        let (input, nodes) = map_parser(take(num_of_bytes), many0(PackedNode::from_bytes))(input)?;
+        Ok((input, DhtState(nodes)))
+    }
 }
 
 impl ToBytes for DhtState {
@@ -187,13 +189,17 @@ pub enum FriendStatus {
 }
 
 impl FromBytes for FriendStatus {
-    named!(from_bytes<FriendStatus>, switch!(le_u8,
-        0 => value!(FriendStatus::NotFriend) |
-        1 => value!(FriendStatus::Added) |
-        2 => value!(FriendStatus::FrSent) |
-        3 => value!(FriendStatus::Confirmed) |
-        4 => value!(FriendStatus::Online)
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, b) = le_u8(input)?;
+        match b {
+            0 => Ok((input, FriendStatus::NotFriend)),
+            1 => Ok((input, FriendStatus::Added)),
+            2 => Ok((input, FriendStatus::FrSent)),
+            3 => Ok((input, FriendStatus::Confirmed)),
+            4 => Ok((input, FriendStatus::Online)),
+            _ => Err(nom::Err::Error(make_error(input, ErrorKind::Switch))),
+        }
+    }
 }
 
 /** User status. Used for both own & friend statuses.
@@ -219,13 +225,15 @@ impl Default for UserWorkingStatus {
 }
 
 impl FromBytes for UserWorkingStatus {
-    named!(from_bytes<UserWorkingStatus>,
-        switch!(le_u8,
-            0 => value!(UserWorkingStatus::Online) |
-            1 => value!(UserWorkingStatus::Away) |
-            2 => value!(UserWorkingStatus::Busy)
-        )
-    );
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, b) = le_u8(input)?;
+        match b {
+            0 => Ok((input, UserWorkingStatus::Online)),
+            1 => Ok((input, UserWorkingStatus::Away)),
+            2 => Ok((input, UserWorkingStatus::Busy)),
+            _ => Err(nom::Err::Error(make_error(input, ErrorKind::Switch))),
+        }
+    }
 }
 
 /// Length in bytes of UserStatus
@@ -236,12 +244,12 @@ pub const USER_STATUS_LEN: usize = 1;
 pub struct UserStatus(UserWorkingStatus);
 
 impl FromBytes for UserStatus {
-    named!(from_bytes<UserStatus>, do_parse!(
-        tag!([0x06,0x00]) >>
-        tag!(SECTION_MAGIC) >>
-        user_status : call!(UserWorkingStatus::from_bytes) >>
-        (UserStatus(user_status))
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag([0x06,0x00])(input)?;
+        let (input, _) = tag(SECTION_MAGIC)(input)?;
+        let (input, user_status) = UserWorkingStatus::from_bytes(input)?;
+        Ok((input, UserStatus(user_status)))
+    }
 }
 
 impl ToBytes for UserStatus {
@@ -276,13 +284,12 @@ impl ToBytes for StatusMsg {
 }
 
 impl FromBytes for StatusMsg {
-    named!(from_bytes<StatusMsg>, do_parse!(
-        tag!([0x05,0x00]) >>
-        tag!(SECTION_MAGIC) >>
-        status_msg_bytes: rest >>
-        status_msg: value!(status_msg_bytes.to_vec()) >>
-        (StatusMsg(status_msg))
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag([0x05,0x00])(input)?;
+        let (input, _) = tag(SECTION_MAGIC)(input)?;
+        let (input, status_msg_bytes) = rest(input)?;
+        Ok((input, StatusMsg(status_msg_bytes.to_vec())))
+    }
 }
 
 /// Contains list in `TcpUdpPackedNode` format.
@@ -290,12 +297,12 @@ impl FromBytes for StatusMsg {
 pub struct TcpRelays(pub Vec<TcpUdpPackedNode>);
 
 impl FromBytes for TcpRelays {
-    named!(from_bytes<TcpRelays>, do_parse!(
-        tag!([0x0a, 0x00]) >>
-        tag!(SECTION_MAGIC) >>
-        nodes: many0!(TcpUdpPackedNode::from_bytes) >>
-        (TcpRelays(nodes))
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag([0x0a, 0x00])(input)?;
+        let (input, _) = tag(SECTION_MAGIC)(input)?;
+        let (input, nodes) = many0(TcpUdpPackedNode::from_bytes)(input)?;
+        Ok((input, TcpRelays(nodes)))
+    }
 }
 
 impl ToBytes for TcpRelays {
@@ -313,12 +320,12 @@ impl ToBytes for TcpRelays {
 pub struct PathNodes(pub Vec<TcpUdpPackedNode>);
 
 impl FromBytes for PathNodes {
-    named!(from_bytes<PathNodes>, do_parse!(
-        tag!([0x0b, 0x00]) >>
-        tag!(SECTION_MAGIC) >>
-        nodes: many0!(TcpUdpPackedNode::from_bytes) >>
-        (PathNodes(nodes))
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag([0x0b, 0x00])(input)?;
+        let (input, _) = tag(SECTION_MAGIC)(input)?;
+        let (input, nodes) = many0(TcpUdpPackedNode::from_bytes)(input)?;
+        Ok((input, PathNodes(nodes)))
+    }
 }
 
 impl ToBytes for PathNodes {
@@ -375,28 +382,28 @@ pub const FRIENDSTATEBYTES: usize = 1      // "Status"
     /* last time seen              */ + 8;
 
 impl FromBytes for FriendState {
-    named!(from_bytes<FriendState>, do_parse!(
-        friend_status: call!(FriendStatus::from_bytes) >>
-        pk: call!(PublicKey::from_bytes) >>
-        fr_msg_bytes: take!(REQUEST_MSG_LEN) >>
-        _padding1: take!(1) >>
-        fr_msg_len: be_u16 >>
-        verify!(value!(fr_msg_len), |len| *len <= REQUEST_MSG_LEN as u16) >>
-        fr_msg: value!(fr_msg_bytes[..fr_msg_len as usize].to_vec()) >>
-        name_bytes: take!(NAME_LEN) >>
-        name_len: be_u16 >>
-        verify!(value!(name_len), |len| *len <= NAME_LEN as u16) >>
-        name: value!(Name(name_bytes[..name_len as usize].to_vec())) >>
-        status_msg_bytes: take!(STATUS_MSG_LEN) >>
-        _padding2: take!(1) >>
-        status_msg_len: be_u16 >>
-        verify!(value!(status_msg_len), |len| *len <= STATUS_MSG_LEN as u16) >>
-        status_msg: value!(StatusMsg(status_msg_bytes[..status_msg_len as usize].to_vec())) >>
-        user_status: call!(UserWorkingStatus::from_bytes) >>
-        _padding3: take!(3) >>
-        nospam: call!(NoSpam::from_bytes) >>
-        last_seen: le_u64 >>
-        (FriendState {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, friend_status) = FriendStatus::from_bytes(input)?;
+        let (input, pk) = PublicKey::from_bytes(input)?;
+        let (input, fr_msg_bytes) = take(REQUEST_MSG_LEN)(input)?;
+        let (input, _) = take(1usize)(input)?;
+        let (input, fr_msg_len) = be_u16(input)?;
+        let (input, _) = verify(success(fr_msg_len), |len| *len <= REQUEST_MSG_LEN as u16)(input)?;
+        let fr_msg =fr_msg_bytes[..fr_msg_len as usize].to_vec();
+        let (input, name_bytes) = take(NAME_LEN)(input)?;
+        let (input, name_len) = be_u16(input)?;
+        let (input, _) = verify(success(name_len), |len| *len <= NAME_LEN as u16)(input)?;
+        let name = Name(name_bytes[..name_len as usize].to_vec());
+        let (input, status_msg_bytes) = take(STATUS_MSG_LEN)(input)?;
+        let (input, _) = take(1usize)(input)?;
+        let (input, status_msg_len) = be_u16(input)?;
+        let (input, _) = verify(success(status_msg_len), |len| *len <= STATUS_MSG_LEN as u16)(input)?;
+        let status_msg = StatusMsg(status_msg_bytes[..status_msg_len as usize].to_vec());
+        let (input, user_status) = UserWorkingStatus::from_bytes(input)?;
+        let (input, _) = take(3usize)(input)?;
+        let (input, nospam) = NoSpam::from_bytes(input)?;
+        let (input, last_seen) = le_u64(input)?;
+        Ok((input, FriendState {
             friend_status,
             pk,
             fr_msg,
@@ -405,8 +412,8 @@ impl FromBytes for FriendState {
             user_status,
             nospam,
             last_seen,
-        })
-    ));
+        }))
+    }
 }
 
 impl ToBytes for FriendState {
@@ -445,12 +452,12 @@ impl ToBytes for FriendState {
 pub struct Friends(pub Vec<FriendState>);
 
 impl FromBytes for Friends {
-    named!(from_bytes<Friends>, do_parse!(
-        tag!([0x03, 0x00]) >>
-        tag!(SECTION_MAGIC) >>
-        friends: many0!(flat_map!(take(FRIENDSTATEBYTES), FriendState::from_bytes)) >>
-        (Friends(friends))
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag([0x03, 0x00])(input)?;
+        let (input, _) = tag(SECTION_MAGIC)(input)?;
+        let (input, friends) = many0(map_parser(take(FRIENDSTATEBYTES), FriendState::from_bytes))(input)?;
+        Ok((input, Friends(friends)))
+    }
 }
 
 impl ToBytes for Friends {
@@ -468,11 +475,11 @@ impl ToBytes for Friends {
 pub struct Eof;
 
 impl FromBytes for Eof {
-    named!(from_bytes<Eof>, do_parse!(
-        tag!([0xff, 0x00]) >>
-        tag!(SECTION_MAGIC) >>
-        (Eof)
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag([0xff, 0x00])(input)?;
+        let (input, _) = tag(SECTION_MAGIC)(input)?;
+        Ok((input, Eof))
+    }
 }
 
 impl ToBytes for Eof {
@@ -538,17 +545,19 @@ pub enum Section {
 }
 
 impl FromBytes for Section {
-    named!(from_bytes<Section>, alt!(
-        map!(NospamKeys::from_bytes, Section::NospamKeys) |
-        map!(DhtState::from_bytes, Section::DhtState) |
-        map!(Friends::from_bytes, Section::Friends) |
-        map!(Name::from_bytes, Section::Name) |
-        map!(StatusMsg::from_bytes, Section::StatusMsg) |
-        map!(UserStatus::from_bytes, Section::UserStatus) |
-        map!(TcpRelays::from_bytes, Section::TcpRelays) |
-        map!(PathNodes::from_bytes, Section::PathNodes) |
-        map!(Eof::from_bytes, Section::Eof)
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        alt((
+            map(NospamKeys::from_bytes, Section::NospamKeys),
+            map(DhtState::from_bytes, Section::DhtState),
+            map(Friends::from_bytes, Section::Friends),
+            map(Name::from_bytes, Section::Name),
+            map(StatusMsg::from_bytes, Section::StatusMsg),
+            map(UserStatus::from_bytes, Section::UserStatus),
+            map(TcpRelays::from_bytes, Section::TcpRelays),
+            map(PathNodes::from_bytes, Section::PathNodes),
+            map(Eof::from_bytes, Section::Eof),
+        ))(input)
+    }
 }
 
 impl ToBytes for Section {
@@ -591,14 +600,14 @@ pub struct State {
 }
 
 impl FromBytes for State {
-    named!(from_bytes<State>, do_parse!(
-        tag!(&[0; 4][..]) >>
-        tag!(STATE_MAGIC) >>
-        sections: many0!(flat_map!(length_data!(map!(le_u32, |len| len + 4)), Section::from_bytes)) >>
-        (State {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag(&[0; 4][..])(input)?;
+        let (input, _) = tag(STATE_MAGIC)(input)?;
+        let (input, sections) = many0(map_parser(length_data(map(le_u32, |len| len + 4)), Section::from_bytes))(input)?;
+        Ok((input, State {
             sections: sections.to_vec(),
-        })
-    ));
+        }))
+    }
 }
 
 impl ToBytes for State {

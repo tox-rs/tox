@@ -3,6 +3,9 @@
 
 use super::*;
 use crate::dht::packed_node::*;
+use nom::bytes::complete::tag;
+use nom::multi::many0;
+use nom::combinator::{success, verify};
 
 /// Id of the `ShareRelays` packet.
 pub const PACKET_ID_SHARE_RELAYS: u8 = 0x11;
@@ -29,14 +32,14 @@ pub struct ShareRelays {
 }
 
 impl FromBytes for ShareRelays {
-    named!(from_bytes<ShareRelays>, do_parse!(
-        tag!(&[PACKET_ID_SHARE_RELAYS][..]) >>
-        relays: many0!(PackedNode::from_tcp_bytes) >>
-        verify!(value!(relays.len()), |len| *len <= MAX_SHARED_RELAYS) >>
-        (ShareRelays {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag(&[PACKET_ID_SHARE_RELAYS][..])(input)?;
+        let (input, relays) = many0(PackedNode::from_tcp_bytes)(input)?;
+        let (input, _) = verify(success(relays.len()), |len| *len <= MAX_SHARED_RELAYS)(input)?;
+        Ok((input, ShareRelays {
             relays,
-        })
-    ));
+        }))
+    }
 }
 
 impl ToBytes for ShareRelays {

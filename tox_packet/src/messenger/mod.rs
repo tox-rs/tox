@@ -29,19 +29,8 @@ pub use self::status_message::*;
 pub use crate::messenger::conference::Packet as ConferencePacket;
 pub use crate::messenger::file_transfer::Packet as FileTransferPacket;
 
-use nom::{
-    named,
-    do_parse,
-    tag,
-    call,
-    alt,
-    map,
-    map_res,
-    many_till,
-    switch,
-    value,
-    verify,
-};
+use nom::branch::alt;
+use nom::combinator::map;
 
 use cookie_factory::{
     do_gen,
@@ -99,19 +88,21 @@ impl ToBytes for Packet {
 }
 
 impl FromBytes for Packet {
-    named!(from_bytes<Packet>, alt!(
-        map!(Online::from_bytes, Packet::Online) |
-        map!(Action::from_bytes, Packet::Action) |
-        map!(Offline::from_bytes, Packet::Offline) |
-        map!(Nickname::from_bytes, Packet::Nickname) |
-        map!(Message::from_bytes, Packet::Message) |
-        map!(UserStatus::from_bytes, Packet::UserStatus) |
-        map!(Msi::from_bytes, Packet::Msi) |
-        map!(StatusMessage::from_bytes, Packet::StatusMessage) |
-        map!(Typing::from_bytes, Packet::Typing) |
-        map!(ConferencePacket::from_bytes, Packet::Conference) |
-        map!(FileTransferPacket::from_bytes, Packet::FileTransfer)
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        alt((
+            map(Online::from_bytes, Packet::Online),
+            map(Action::from_bytes, Packet::Action),
+            map(Offline::from_bytes, Packet::Offline),
+            map(Nickname::from_bytes, Packet::Nickname),
+            map(Message::from_bytes, Packet::Message),
+            map(UserStatus::from_bytes, Packet::UserStatus),
+            map(Msi::from_bytes, Packet::Msi),
+            map(StatusMessage::from_bytes, Packet::StatusMessage),
+            map(Typing::from_bytes, Packet::Typing),
+            map(ConferencePacket::from_bytes, Packet::Conference),
+            map(FileTransferPacket::from_bytes, Packet::FileTransfer),
+        ))(input)
+    }
 }
 
 #[cfg(test)]

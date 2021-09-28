@@ -6,6 +6,7 @@ use super::*;
 use tox_binary_io::*;
 use crate::dht::{CookieRequest, CookieResponse, CryptoHandshake, CryptoData};
 use crate::relay::connection_id::ConnectionId;
+use nom::{combinator::map, branch::alt};
 
 /** Sent by client to server.
 The client sends data with `connection_id` and the server
@@ -28,11 +29,11 @@ pub struct Data {
 }
 
 impl FromBytes for Data {
-    named!(from_bytes<Data>, do_parse!(
-        connection_id: call!(ConnectionId::from_bytes) >>
-        data: call!(DataPayload::from_bytes) >>
-        (Data { connection_id, data })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, connection_id) = ConnectionId::from_bytes(input)?;
+        let (input, data) = DataPayload::from_bytes(input)?;
+        Ok((input, Data { connection_id, data }))
+    }
 }
 
 impl ToBytes for Data {
@@ -69,12 +70,14 @@ impl ToBytes for DataPayload {
 }
 
 impl FromBytes for DataPayload {
-    named!(from_bytes<DataPayload>, alt!(
-        map!(CookieRequest::from_bytes, DataPayload::CookieRequest) |
-        map!(CookieResponse::from_bytes, DataPayload::CookieResponse) |
-        map!(CryptoHandshake::from_bytes, DataPayload::CryptoHandshake) |
-        map!(CryptoData::from_bytes, DataPayload::CryptoData)
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        alt((
+            map(CookieRequest::from_bytes, DataPayload::CookieRequest),
+            map(CookieResponse::from_bytes, DataPayload::CookieResponse),
+            map(CryptoHandshake::from_bytes, DataPayload::CryptoHandshake),
+            map(CryptoData::from_bytes, DataPayload::CryptoData),
+        ))(input)
+    }
 }
 
 #[cfg(test)]

@@ -4,6 +4,7 @@
 use super::*;
 
 use nom::number::complete::be_u16;
+use nom::bytes::complete::tag;
 
 /** PeerLeave is a struct that holds info to notify a peer quit a conference.
 
@@ -20,12 +21,12 @@ Length    | Content
 pub struct PeerLeave(pub u16);
 
 impl FromBytes for PeerLeave {
-    named!(from_bytes<PeerLeave>, do_parse!(
-        tag!("\x62") >>
-        conference_id: be_u16 >>
-        tag!("\x01") >>
-        (PeerLeave(conference_id))
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x62")(input)?;
+        let (input, conference_id) = be_u16(input)?;
+        let (input, _) = tag("\x01")(input)?;
+        Ok((input, PeerLeave(conference_id)))
+    }
 }
 
 impl ToBytes for PeerLeave {

@@ -34,11 +34,8 @@ pub use self::crypto_data::*;
 pub use self::cookie::*;
 pub use self::errors::*;
 
-use nom::{alt, map};
-
-use nom::{
-    named, do_parse, tag, call, take, verify,  eof,
-};
+use nom::branch::alt;
+use nom::combinator::map;
 
 use cookie_factory::{
     do_gen,
@@ -142,27 +139,29 @@ impl ToBytes for Packet {
 }
 
 impl FromBytes for Packet {
-    named!(from_bytes<Packet>, alt!(
-        map!(PingRequest::from_bytes, Packet::PingRequest) |
-        map!(PingResponse::from_bytes, Packet::PingResponse) |
-        map!(NodesRequest::from_bytes, Packet::NodesRequest) |
-        map!(NodesResponse::from_bytes, Packet::NodesResponse) |
-        map!(CookieRequest::from_bytes, Packet::CookieRequest) |
-        map!(CookieResponse::from_bytes, Packet::CookieResponse) |
-        map!(CryptoHandshake::from_bytes, Packet::CryptoHandshake) |
-        map!(CryptoData::from_bytes, Packet::CryptoData) |
-        map!(DhtRequest::from_bytes, Packet::DhtRequest) |
-        map!(LanDiscovery::from_bytes, Packet::LanDiscovery) |
-        map!(OnionRequest0::from_bytes, Packet::OnionRequest0) |
-        map!(OnionRequest1::from_bytes, Packet::OnionRequest1) |
-        map!(OnionRequest2::from_bytes, Packet::OnionRequest2) |
-        map!(OnionAnnounceRequest::from_bytes, Packet::OnionAnnounceRequest) |
-        map!(OnionAnnounceResponse::from_bytes, Packet::OnionAnnounceResponse) |
-        map!(OnionDataRequest::from_bytes, Packet::OnionDataRequest) |
-        map!(OnionDataResponse::from_bytes, Packet::OnionDataResponse) |
-        map!(OnionResponse3::from_bytes, Packet::OnionResponse3) |
-        map!(OnionResponse2::from_bytes, Packet::OnionResponse2) |
-        map!(OnionResponse1::from_bytes, Packet::OnionResponse1) |
-        map!(BootstrapInfo::from_bytes, Packet::BootstrapInfo)
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        alt((
+            map(PingRequest::from_bytes, Packet::PingRequest),
+            map(PingResponse::from_bytes, Packet::PingResponse),
+            map(NodesRequest::from_bytes, Packet::NodesRequest),
+            map(NodesResponse::from_bytes, Packet::NodesResponse),
+            map(CookieRequest::from_bytes, Packet::CookieRequest),
+            map(CookieResponse::from_bytes, Packet::CookieResponse),
+            map(CryptoHandshake::from_bytes, Packet::CryptoHandshake),
+            map(CryptoData::from_bytes, Packet::CryptoData),
+            map(DhtRequest::from_bytes, Packet::DhtRequest),
+            map(LanDiscovery::from_bytes, Packet::LanDiscovery),
+            map(OnionRequest0::from_bytes, Packet::OnionRequest0),
+            map(OnionRequest1::from_bytes, Packet::OnionRequest1),
+            map(OnionRequest2::from_bytes, Packet::OnionRequest2),
+            map(OnionAnnounceRequest::from_bytes, Packet::OnionAnnounceRequest),
+            map(OnionAnnounceResponse::from_bytes, Packet::OnionAnnounceResponse),
+            map(OnionDataRequest::from_bytes, Packet::OnionDataRequest),
+            map(OnionDataResponse::from_bytes, Packet::OnionDataResponse),
+            map(OnionResponse3::from_bytes, Packet::OnionResponse3),
+            map(OnionResponse2::from_bytes, Packet::OnionResponse2),
+            map(OnionResponse1::from_bytes, Packet::OnionResponse1),
+            map(BootstrapInfo::from_bytes, Packet::BootstrapInfo),
+        ))(input)
+    }
 }

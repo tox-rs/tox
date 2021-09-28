@@ -3,6 +3,8 @@
 
 use super::*;
 
+use nom::branch::alt;
+use nom::combinator::map;
 use tox_binary_io::*;
 
 /** Onion responses that can be enclosed in onion packets and sent through onion
@@ -29,10 +31,12 @@ impl ToBytes for InnerOnionResponse {
 }
 
 impl FromBytes for InnerOnionResponse {
-    named!(from_bytes<InnerOnionResponse>, alt!(
-        map!(OnionAnnounceResponse::from_bytes, InnerOnionResponse::OnionAnnounceResponse) |
-        map!(OnionDataResponse::from_bytes, InnerOnionResponse::OnionDataResponse)
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        alt((
+            map(OnionAnnounceResponse::from_bytes, InnerOnionResponse::OnionAnnounceResponse),
+            map(OnionDataResponse::from_bytes, InnerOnionResponse::OnionDataResponse),
+        ))(input)
+    }
 }
 
 #[cfg(test)]

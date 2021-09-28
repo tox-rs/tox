@@ -5,7 +5,8 @@ use super::*;
 use crypto_box::{SalsaBox, aead::{Aead, Error as AeadError}};
 use nom::{
     number::complete::be_u64,
-    combinator::rest,
+    combinator::{eof, rest},
+    bytes::complete::tag,
 };
 
 use tox_binary_io::*;
@@ -53,13 +54,13 @@ impl ToBytes for PingRequest {
 }
 
 impl FromBytes for PingRequest {
-    named!(from_bytes<PingRequest>, do_parse!(
-        tag!("\x00") >>
-        pk: call!(PublicKey::from_bytes) >>
-        nonce: call!(Nonce::from_bytes) >>
-        payload: map!(rest, |bytes| bytes.to_vec() ) >>
-        (PingRequest { pk, nonce, payload })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x00")(input)?;
+        let (input, pk) = PublicKey::from_bytes(input)?;
+        let (input, nonce) = Nonce::from_bytes(input)?;
+        let (input, payload) = map(rest, |bytes: &[u8]| bytes.to_vec())(input)?;
+        Ok((input, PingRequest { pk, nonce, payload }))
+    }
 }
 
 impl PingRequest {
@@ -130,12 +131,12 @@ pub struct PingRequestPayload {
 }
 
 impl FromBytes for PingRequestPayload {
-    named!(from_bytes<PingRequestPayload>, do_parse!(
-        tag!("\x00") >>
-        id: be_u64 >>
-        eof!() >>
-        (PingRequestPayload { id })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x00")(input)?;
+        let (input, id) = be_u64(input)?;
+        let (input, _) = eof(input)?;
+        Ok((input, PingRequestPayload { id }))
+    }
 }
 
 impl ToBytes for PingRequestPayload {

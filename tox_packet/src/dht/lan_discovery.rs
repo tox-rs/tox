@@ -2,6 +2,7 @@
 */
 use super::*;
 
+use nom::bytes::complete::tag;
 use tox_binary_io::*;
 use tox_crypto::*;
 
@@ -37,11 +38,11 @@ impl ToBytes for LanDiscovery {
 }
 
 impl FromBytes for LanDiscovery {
-    named!(from_bytes<LanDiscovery>, do_parse!(
-        tag!("\x21") >>
-        pk: call!(PublicKey::from_bytes) >>
-        (LanDiscovery { pk })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x21")(input)?;
+        let (input, pk) = PublicKey::from_bytes(input)?;
+        Ok((input, LanDiscovery { pk }))
+    }
 }
 
 #[cfg(test)]

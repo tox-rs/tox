@@ -4,6 +4,7 @@
 use super::*;
 
 use nom::number::complete::{be_u16, be_u32};
+use nom::bytes::complete::tag;
 
 /** Ping is a struct that holds info to send ping message to a conference.
 
@@ -29,18 +30,18 @@ pub struct Ping {
 }
 
 impl FromBytes for Ping {
-    named!(from_bytes<Ping>, do_parse!(
-        tag!("\x63") >>
-        conference_id: be_u16 >>
-        peer_id: be_u16 >>
-        message_id: be_u32 >>
-        tag!("\x00") >>
-        (Ping {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x63")(input)?;
+        let (input, conference_id) = be_u16(input)?;
+        let (input, peer_id) = be_u16(input)?;
+        let (input, message_id) = be_u32(input)?;
+        let (input, _) = tag("\x00")(input)?;
+        Ok((input, Ping {
             conference_id,
             peer_id,
             message_id,
-        })
-    ));
+        }))
+    }
 }
 
 impl ToBytes for Ping {

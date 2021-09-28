@@ -10,6 +10,8 @@ use tox_binary_io::*;
 use tox_crypto::*;
 use crate::dht::cookie::EncryptedCookie;
 use crate::dht::errors::*;
+use nom::bytes::complete::{take, tag};
+use nom::combinator::eof;
 
 /** Packet used to establish `net_crypto` connection between two peers.
 
@@ -41,18 +43,18 @@ pub struct CryptoHandshake {
 }
 
 impl FromBytes for CryptoHandshake {
-    named!(from_bytes<CryptoHandshake>, do_parse!(
-        tag!("\x1a") >>
-        cookie: call!(EncryptedCookie::from_bytes) >>
-        nonce: call!(Nonce::from_bytes) >>
-        payload: take!(248) >>
-        eof!() >>
-        (CryptoHandshake {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x1a")(input)?;
+        let (input, cookie) = EncryptedCookie::from_bytes(input)?;
+        let (input, nonce) = Nonce::from_bytes(input)?;
+        let (input, payload) = take(248usize)(input)?;
+        let (input, _) = eof(input)?;
+        Ok((input, CryptoHandshake {
             cookie,
             nonce,
             payload: payload.to_vec()
-        })
-    ));
+        }))
+    }
 }
 
 impl ToBytes for CryptoHandshake {
@@ -137,19 +139,19 @@ pub struct CryptoHandshakePayload {
 }
 
 impl FromBytes for CryptoHandshakePayload {
-    named!(from_bytes<CryptoHandshakePayload>, do_parse!(
-        base_nonce: call!(Nonce::from_bytes) >>
-        session_pk: call!(PublicKey::from_bytes) >>
-        cookie_hash: call!(<[u8; <Sha512 as Digest>::OutputSize::USIZE]>::from_bytes) >>
-        cookie: call!(EncryptedCookie::from_bytes) >>
-        eof!() >>
-        (CryptoHandshakePayload {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, base_nonce) = Nonce::from_bytes(input)?;
+        let (input, session_pk) = PublicKey::from_bytes(input)?;
+        let (input, cookie_hash) = <[u8; <Sha512 as Digest>::OutputSize::USIZE]>::from_bytes(input)?;
+        let (input, cookie) = EncryptedCookie::from_bytes(input)?;
+        let (input, _) = eof(input)?;
+        Ok((input, CryptoHandshakePayload {
             base_nonce,
             session_pk,
             cookie_hash,
             cookie
-        })
-    ));
+        }))
+    }
 }
 
 impl ToBytes for CryptoHandshakePayload {
@@ -165,6 +167,8 @@ impl ToBytes for CryptoHandshakePayload {
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroUsize;
+
     use super::*;
     use nom::{Needed, Err};
     use crypto_box::aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned};
@@ -273,7 +277,7 @@ mod tests {
         let decoded_payload = invalid_packet.get_payload(&shared_secret);
         let error = decoded_payload.err().unwrap();
         assert_eq!(error, GetPayloadError::Deserialize {
-            error: Err::Incomplete(Needed::Size(24)),
+            error: Err::Incomplete(Needed::Size(NonZeroUsize::new(21).unwrap())),
             payload: invalid_payload.to_vec()
         });
         // Try short incomplete array
@@ -287,7 +291,7 @@ mod tests {
         let decoded_payload = invalid_packet.get_payload(&shared_secret);
         let error = decoded_payload.err().unwrap();
         assert_eq!(error, GetPayloadError::Deserialize {
-            error: Err::Incomplete(Needed::Size(24)),
+            error: Err::Incomplete(Needed::Size(NonZeroUsize::new(24).unwrap())),
             payload: invalid_payload.to_vec()
         });
     }

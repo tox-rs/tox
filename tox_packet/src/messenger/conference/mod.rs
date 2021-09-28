@@ -33,22 +33,6 @@ pub use self::change_title::*;
 pub use self::message::*;
 pub use self::action::*;
 
-use nom::{
-    named,
-    do_parse,
-    tag,
-    call,
-    alt,
-    map,
-    map_opt,
-    map_res,
-    many0,
-    switch,
-    take,
-    value,
-    verify,
-};
-
 use cookie_factory::{
     do_gen,
     gen_slice,
@@ -61,6 +45,10 @@ use cookie_factory::{
 };
 use rand::{Rng, distributions::{Distribution, Standard}};
 use nom::number::complete::be_u8;
+use nom::combinator::{map_opt, map};
+use nom::bytes::complete::take;
+use nom::branch::alt;
+use nom::error::{ErrorKind, make_error};
 
 use tox_binary_io::*;
 
@@ -95,7 +83,9 @@ impl ConferenceUid {
 }
 
 impl FromBytes for ConferenceUid {
-    named!(from_bytes<ConferenceUid>, map_opt!(take!(CONFERENCE_UID_BYTES), ConferenceUid::from_slice));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        map_opt(take(CONFERENCE_UID_BYTES), ConferenceUid::from_slice)(input)
+    }
 }
 
 impl ToBytes for ConferenceUid {
@@ -116,12 +106,14 @@ pub enum ConferenceType {
 }
 
 impl FromBytes for ConferenceType {
-    named!(from_bytes<ConferenceType>,
-        switch!(be_u8,
-            0 => value!(ConferenceType::Text) |
-            1 => value!(ConferenceType::Audio)
-        )
-    );
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, b) = be_u8(input)?;
+        match b {
+            0 => Ok((input, ConferenceType::Text)),
+            1 => Ok((input, ConferenceType::Audio)),
+            _ => Err(nom::Err::Error(make_error(input, ErrorKind::Switch))),
+        }
+    }
 }
 
 /** Conference chat packet enum that encapsulates all types of conference packets.
@@ -183,23 +175,25 @@ impl ToBytes for Packet {
 }
 
 impl FromBytes for Packet {
-    named!(from_bytes<Packet>, alt!(
-        map!(Invite::from_bytes, Packet::Invite) |
-        map!(InviteResponse::from_bytes, Packet::InviteResponse) |
-        map!(PeerOnline::from_bytes, Packet::PeerOnline) |
-        map!(PeerLeave::from_bytes, Packet::PeerLeave) |
-        map!(Query::from_bytes, Packet::Query) |
-        map!(QueryResponse::from_bytes, Packet::QueryResponse) |
-        map!(Title::from_bytes, Packet::Title) |
-        map!(Ping::from_bytes, Packet::Ping) |
-        map!(NewPeer::from_bytes, Packet::NewPeer) |
-        map!(KillPeer::from_bytes, Packet::KillPeer) |
-        map!(FreezePeer::from_bytes, Packet::FreezePeer) |
-        map!(ChangeName::from_bytes, Packet::ChangeName) |
-        map!(ChangeTitle::from_bytes, Packet::ChangeTitle) |
-        map!(Message::from_bytes, Packet::Message) |
-        map!(Action::from_bytes, Packet::Action)
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        alt((
+            map(Invite::from_bytes, Packet::Invite),
+            map(InviteResponse::from_bytes, Packet::InviteResponse),
+            map(PeerOnline::from_bytes, Packet::PeerOnline),
+            map(PeerLeave::from_bytes, Packet::PeerLeave),
+            map(Query::from_bytes, Packet::Query),
+            map(QueryResponse::from_bytes, Packet::QueryResponse),
+            map(Title::from_bytes, Packet::Title),
+            map(Ping::from_bytes, Packet::Ping),
+            map(NewPeer::from_bytes, Packet::NewPeer),
+            map(KillPeer::from_bytes, Packet::KillPeer),
+            map(FreezePeer::from_bytes, Packet::FreezePeer),
+            map(ChangeName::from_bytes, Packet::ChangeName),
+            map(ChangeTitle::from_bytes, Packet::ChangeTitle),
+            map(Message::from_bytes, Packet::Message),
+            map(Action::from_bytes, Packet::Action),
+        ))(input)
+    }
 }
 
 #[cfg(test)]

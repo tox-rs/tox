@@ -111,12 +111,10 @@ impl Decoder for Codec {
                 return Ok(None)
             },
             Err(Err::Error(error)) => {
-                let (_, kind) = error;
-                return Err(DecodeError::DeserializeEncryptedError { error: kind, buf: buf.to_vec() })
+                return Err(DecodeError::DeserializeEncryptedError { error: error.code, buf: buf.to_vec() })
             },
             Err(Err::Failure(error)) => {
-                let (_, kind) = error;
-                return Err(DecodeError::DeserializeEncryptedError { error: kind, buf: buf.to_vec() })
+                return Err(DecodeError::DeserializeEncryptedError { error: error.code, buf: buf.to_vec() })
             },
             Ok((i, encrypted_packet)) => {
                 (buf.offset(i), encrypted_packet)
@@ -131,12 +129,10 @@ impl Decoder for Codec {
         match Packet::from_bytes(&decrypted_data) {
             Err(Err::Incomplete(needed)) => Err(DecodeError::IncompleteDecryptedPacket { needed, packet: decrypted_data }),
             Err(Err::Error(error)) => {
-                let (_, kind) = error;
-                Err(DecodeError::DeserializeDecryptedError { error: kind, packet: decrypted_data })
+                Err(DecodeError::DeserializeDecryptedError { error: error.code, packet: decrypted_data })
             },
             Err(Err::Failure(error)) => {
-                let (_, kind) = error;
-                Err(DecodeError::DeserializeDecryptedError { error: kind, packet: decrypted_data })
+                Err(DecodeError::DeserializeDecryptedError { error: error.code, packet: decrypted_data })
             },
             Ok((_i, packet)) => {
                 // Add 1 to incoming counter

@@ -11,6 +11,8 @@ use crypto_box::{SalsaBox, aead::{Aead, Error as AeadError}};
 use tox_binary_io::*;
 use tox_crypto::*;
 use crate::dht::errors::*;
+use nom::combinator::eof;
+use nom::bytes::complete::tag;
 
 /** Ping response packet struct. When `PingRequest` is received DHT node should
 respond with `PingResponse` that contains the same ping id inside it's encrypted
@@ -50,13 +52,13 @@ impl ToBytes for PingResponse {
 }
 
 impl FromBytes for PingResponse {
-    named!(from_bytes<PingResponse>, do_parse!(
-        tag!("\x01") >>
-        pk: call!(PublicKey::from_bytes) >>
-        nonce: call!(Nonce::from_bytes) >>
-        payload: map!(rest, |bytes| bytes.to_vec() ) >>
-        (PingResponse { pk, nonce, payload })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x01")(input)?;
+        let (input, pk) = PublicKey::from_bytes(input)?;
+        let (input, nonce) = Nonce::from_bytes(input)?;
+        let (input, payload) = map(rest, |bytes: &[u8]| bytes.to_vec())(input)?;
+        Ok((input, PingResponse { pk, nonce, payload }))
+    }
 }
 
 impl PingResponse {
@@ -126,12 +128,12 @@ pub struct PingResponsePayload {
 }
 
 impl FromBytes for PingResponsePayload {
-    named!(from_bytes<PingResponsePayload>, do_parse!(
-        tag!("\x01") >>
-        id: be_u64 >>
-        eof!() >>
-        (PingResponsePayload { id })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x01")(input)?;
+        let (input, id) = be_u64(input)?;
+        let (input, _) = eof(input)?;
+        Ok((input, PingResponsePayload { id }))
+    }
 }
 
 impl ToBytes for PingResponsePayload {

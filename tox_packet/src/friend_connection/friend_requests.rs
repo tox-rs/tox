@@ -7,6 +7,8 @@ use crate::onion::*;
 use crypto_box::{SalsaBox, aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned}};
 use crate::ip_port::SIZE_IPPORT;
 use crate::toxid::NoSpam;
+use nom::combinator::{rest, verify};
+use nom::bytes::complete::tag;
 
 const ONION_SEND_BASE: usize =  crypto_box::KEY_SIZE + SIZE_IPPORT + <SalsaBox as AeadCore>::TagSize::USIZE;
 const ONION_SEND_1: usize = xsalsa20poly1305::NONCE_SIZE + ONION_SEND_BASE * 3;
@@ -36,12 +38,12 @@ pub struct FriendRequests {
 }
 
 impl FromBytes for FriendRequests {
-    named!(from_bytes<FriendRequests>, do_parse!(
-        tag!("\x12") >>
-        nospam: call!(NoSpam::from_bytes) >>
-        message: verify!(rest, |message: &[u8]| message.len() <= MAX_ONION_CLIENT_DATA_SIZE) >>
-        (FriendRequests { nospam, message: message.to_vec() })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x12")(input)?;
+        let (input, nospam) = NoSpam::from_bytes(input)?;
+        let (input, message) = verify(rest, |message: &[u8]| message.len() <= MAX_ONION_CLIENT_DATA_SIZE)(input)?;
+        Ok((input, FriendRequests { nospam, message: message.to_vec() }))
+    }
 }
 
 impl ToBytes for FriendRequests {

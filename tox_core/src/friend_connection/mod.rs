@@ -1010,8 +1010,8 @@ mod tests {
         let join = future::join(run_future, packets_future);
 
         futures::select! {
-            _ = join.fuse() => (),
-            _ = connection_status_future.fuse() => (),
+            _ = join.fuse() => {},
+            _ = connection_status_future.fuse() => {},
         }
     }
 }

@@ -8,7 +8,9 @@ use tox_binary_io::*;
 use tox_crypto::*;
 use crate::dht::*;
 
-use nom::combinator::{rest, rest_len};
+use nom::combinator::{rest, rest_len, verify, map};
+use nom::bytes::complete::tag;
+use nom::branch::alt;
 
 /// Maximum size in bytes of Onion Data Response payload
 pub const MAX_ONION_RESPONSE_PAYLOAD_SIZE: usize = MAX_ONION_CLIENT_DATA_SIZE + crypto_box::KEY_SIZE + <SalsaBox as AeadCore>::TagSize::USIZE;
@@ -40,18 +42,18 @@ pub struct OnionDataResponse {
 }
 
 impl FromBytes for OnionDataResponse {
-    named!(from_bytes<OnionDataResponse>, do_parse!(
-        verify!(rest_len, |len| *len <= ONION_MAX_PACKET_SIZE) >>
-        tag!(&[0x86][..]) >>
-        nonce: call!(Nonce::from_bytes) >>
-        temporary_pk: call!(PublicKey::from_bytes) >>
-        payload: rest >>
-        (OnionDataResponse {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = verify(rest_len, |len| *len <= ONION_MAX_PACKET_SIZE)(input)?;
+        let (input, _) = tag(&[0x86][..])(input)?;
+        let (input, nonce) = Nonce::from_bytes(input)?;
+        let (input, temporary_pk) = PublicKey::from_bytes(input)?;
+        let (input, payload) = rest(input)?;
+        Ok((input, OnionDataResponse {
             nonce,
             temporary_pk,
             payload: payload.to_vec()
-        })
-    ));
+        }))
+    }
 }
 
 impl ToBytes for OnionDataResponse {
@@ -128,14 +130,14 @@ pub struct OnionDataResponsePayload {
 }
 
 impl FromBytes for OnionDataResponsePayload {
-    named!(from_bytes<OnionDataResponsePayload>, do_parse!(
-        real_pk: call!(PublicKey::from_bytes) >>
-        payload: rest >>
-        (OnionDataResponsePayload {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, real_pk) = PublicKey::from_bytes(input)?;
+        let (input, payload) = rest(input)?;
+        Ok((input, OnionDataResponsePayload {
             real_pk,
             payload: payload.to_vec()
-        })
-    ));
+        }))
+    }
 }
 
 impl ToBytes for OnionDataResponsePayload {
@@ -196,10 +198,12 @@ pub enum OnionDataResponseInnerPayload {
 }
 
 impl FromBytes for OnionDataResponseInnerPayload {
-    named!(from_bytes<OnionDataResponseInnerPayload>, alt!(
-        map!(DhtPkAnnouncePayload::from_bytes, OnionDataResponseInnerPayload::DhtPkAnnounce) |
-        map!(FriendRequest::from_bytes, OnionDataResponseInnerPayload::FriendRequest)
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        alt((
+            map(DhtPkAnnouncePayload::from_bytes, OnionDataResponseInnerPayload::DhtPkAnnounce),
+            map(FriendRequest::from_bytes, OnionDataResponseInnerPayload::FriendRequest),
+        ))(input)
+    }
 }
 
 impl ToBytes for OnionDataResponseInnerPayload {

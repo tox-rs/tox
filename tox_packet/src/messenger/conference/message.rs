@@ -6,7 +6,8 @@ use super::*;
 use std::str;
 use nom::{
     number::complete::{be_u16, be_u32},
-    combinator::rest,
+    combinator::{rest, map_res},
+    bytes::complete::tag,
 };
 
 /** Message is the struct that holds info to send chat message to a conference.
@@ -39,20 +40,20 @@ pub struct Message {
 }
 
 impl FromBytes for Message {
-    named!(from_bytes<Message>, do_parse!(
-        tag!("\x63") >>
-        conference_id: be_u16 >>
-        peer_id: be_u16 >>
-        message_id: be_u32 >>
-        tag!("\x40") >>
-        message: map_res!(rest, str::from_utf8) >>
-        (Message {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x63")(input)?;
+        let (input, conference_id) = be_u16(input)?;
+        let (input, peer_id) = be_u16(input)?;
+        let (input, message_id) = be_u32(input)?;
+        let (input, _) = tag("\x40")(input)?;
+        let (input, message) = map_res(rest, str::from_utf8)(input)?;
+        Ok((input, Message {
             conference_id,
             peer_id,
             message_id,
             message: message.to_string(),
-        })
-    ));
+        }))
+    }
 }
 
 impl ToBytes for Message {

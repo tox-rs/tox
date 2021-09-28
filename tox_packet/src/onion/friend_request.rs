@@ -4,6 +4,8 @@
 use super::*;
 use std::str;
 use crate::toxid::{NoSpam, NOSPAMBYTES};
+use nom::bytes::complete::tag;
+use nom::combinator::{map_res, verify};
 
 const MAX_FRIEND_REQUEST_MSG_SIZE: usize = MAX_ONION_CLIENT_DATA_SIZE - (1 + NOSPAMBYTES);
 
@@ -45,15 +47,15 @@ impl ToBytes for FriendRequest {
 }
 
 impl FromBytes for FriendRequest {
-    named!(from_bytes<FriendRequest>, do_parse!(
-        tag!(&[0x20][..]) >>
-        nospam: call!(NoSpam::from_bytes) >>
-        msg: map_res!(verify!(rest, |msg: &[u8]| msg.len() <= MAX_FRIEND_REQUEST_MSG_SIZE && !msg.is_empty()), str::from_utf8) >>
-        (FriendRequest {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag(&[0x20][..])(input)?;
+        let (input, nospam) = NoSpam::from_bytes(input)?;
+        let (input, msg) = map_res(verify(rest, |msg: &[u8]| msg.len() <= MAX_FRIEND_REQUEST_MSG_SIZE && !msg.is_empty()), str::from_utf8)(input)?;
+        Ok((input, FriendRequest {
             nospam,
             msg: msg.to_string(),
-        })
-    ));
+        }))
+    }
 }
 
 #[cfg(test)]

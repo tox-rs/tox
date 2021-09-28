@@ -62,7 +62,7 @@ impl PacketsArrayError {
 }
 
 /// Error that can happen when calling `handle_*` of packet.
-#[derive(Clone, Debug, Eq, PartialEq, Error)]
+#[derive(Debug, PartialEq, Error)]
 pub enum HandlePacketError {
     /// Error indicates that getting payload of received packet error.
     #[error("Get payload of received packet error")]

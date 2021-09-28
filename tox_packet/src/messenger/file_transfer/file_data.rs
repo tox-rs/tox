@@ -5,7 +5,8 @@ It is used to transfer chunk of file data to a friend.
 use nom::{
     AsBytes,
     number::complete::le_u8,
-    combinator::{rest, rest_len},
+    combinator::{rest, rest_len, verify},
+    bytes::complete::tag,
 };
 
 use super::*;
@@ -33,13 +34,13 @@ pub struct FileData {
 }
 
 impl FromBytes for FileData {
-    named!(from_bytes<FileData>, do_parse!(
-        tag!("\x52") >>
-        file_id: le_u8 >>
-        verify!(rest_len, |len| *len <= MAX_FILE_DATA_SIZE) >>
-        data : rest >>
-        (FileData { file_id, data: data.to_vec() })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x52")(input)?;
+        let (input, file_id) = le_u8(input)?;
+        let (input, _) = verify(rest_len, |len| *len <= MAX_FILE_DATA_SIZE)(input)?;
+        let (input, data) = rest(input)?;
+        Ok((input, FileData { file_id, data: data.to_vec() }))
+    }
 }
 
 impl ToBytes for FileData {

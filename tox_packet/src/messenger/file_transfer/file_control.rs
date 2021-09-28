@@ -4,6 +4,7 @@ It is used to control transferring file to a friend.
 
 use super::*;
 use nom::number::complete::le_u8;
+use nom::bytes::complete::tag;
 
 /** FileControl is a struct that holds info to handle transferring file to a friend.
 
@@ -30,17 +31,17 @@ pub struct FileControl {
 }
 
 impl FromBytes for FileControl {
-    named!(from_bytes<FileControl>, do_parse!(
-        tag!("\x51") >>
-        transfer_direction: call!(TransferDirection::from_bytes) >>
-        file_id: le_u8 >>
-        control_type: call!(ControlType::from_bytes) >>
-        (FileControl {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x51")(input)?;
+        let (input, transfer_direction) = TransferDirection::from_bytes(input)?;
+        let (input, file_id) = le_u8(input)?;
+        let (input, control_type) = ControlType::from_bytes(input)?;
+        Ok((input, FileControl {
             transfer_direction,
             file_id,
             control_type,
-        })
-    ));
+        }))
+    }
 }
 
 impl ToBytes for FileControl {

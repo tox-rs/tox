@@ -7,6 +7,7 @@ use tox_binary_io::*;
 use tox_crypto::*;
 
 use nom::combinator::rest;
+use nom::bytes::complete::tag;
 
 /** Sent by server to client.
 OOB recv are sent with the announced public key of the peer that sent the
@@ -30,12 +31,12 @@ pub struct OobReceive {
 }
 
 impl FromBytes for OobReceive {
-    named!(from_bytes<OobReceive>, do_parse!(
-        tag!("\x07") >>
-        sender_pk: call!(PublicKey::from_bytes) >>
-        data: rest >>
-        (OobReceive { sender_pk, data: data.to_vec() })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x07")(input)?;
+        let (input, sender_pk) = PublicKey::from_bytes(input)?;
+        let (input, data) = rest(input)?;
+        Ok((input, OobReceive { sender_pk, data: data.to_vec() }))
+    }
 }
 
 impl ToBytes for OobReceive {

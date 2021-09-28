@@ -15,24 +15,24 @@ use crate::dht::kbucket::*;
 use crate::dht::ktree::*;
 
 use thiserror::Error;
-use nom::{Err, error::ErrorKind as NomErrorKind};
+use nom::{Err, error::Error as NomError};
 
 /// An error that can occur while serializing/deserializing object.
-#[derive(Clone, Debug, Eq, PartialEq, Error)]
+#[derive(Debug, PartialEq, Error)]
 pub enum DeserializeError {
     /// Error indicates that object can't be parsed.
     #[error("Deserialize object error: {:?}, data: {:?}", error, data)]
     Deserialize {
         /// Parsing error.
-        error: nom::Err<(Vec<u8>, NomErrorKind)>,
+        error: nom::Err<NomError<Vec<u8>>>,
         /// Object serialized data.
         data: Vec<u8>,
     },
 }
 
 impl DeserializeError {
-    pub(crate) fn deserialize(e: Err<(&[u8], NomErrorKind)>, data: Vec<u8>) -> DeserializeError {
-        DeserializeError::Deserialize { error: e.to_owned(), data }
+    pub(crate) fn deserialize(e: Err<NomError<&[u8]>>, data: Vec<u8>) -> DeserializeError {
+        DeserializeError::Deserialize { error: e.map(|e| NomError::new(e.input.to_vec(), e.code)), data }
     }
 }
 
@@ -96,6 +96,7 @@ mod tests {
 
     use futures::channel::mpsc;
     use futures::StreamExt;
+    use nom::error::ErrorKind as NomErrorKind;
 
     macro_rules! unpack {
         ($variable:expr, $variant:path) => (
@@ -138,14 +139,14 @@ mod tests {
         let error = res.err().unwrap();
         let mut input = vec![2, 1, 2, 3, 4, 4, 210];
         input.extend_from_slice(&pk_org.as_bytes()[..crypto_box::KEY_SIZE - 1]);
-        assert_eq!(error, DeserializeError::Deserialize { error: Err::Error((
+        assert_eq!(error, DeserializeError::Deserialize { error: Err::Error(NomError::new(
             input, NomErrorKind::Eof)), data: serialized_vec[..serialized_len - 1].to_vec() });
 
         // test with serialized data corrupted
         let serialized_vec = [42; 10];
         let res = DaemonState::deserialize_old(&alice, &serialized_vec).await;
         let error = res.err().unwrap();
-        assert_eq!(error, DeserializeError::Deserialize { error: Err::Error((
+        assert_eq!(error, DeserializeError::Deserialize { error: Err::Error(NomError::new(
             vec![42; 10], NomErrorKind::Tag)), data: serialized_vec.to_vec() });
 
         // test with empty close list

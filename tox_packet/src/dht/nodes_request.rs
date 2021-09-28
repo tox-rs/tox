@@ -6,7 +6,8 @@ use aead::{Aead, Error as AeadError};
 use crypto_box::SalsaBox;
 use nom::{
     number::complete::be_u64,
-    combinator::rest,
+    combinator::{rest, eof},
+    bytes::complete::tag,
 };
 
 use tox_binary_io::*;
@@ -51,13 +52,13 @@ impl ToBytes for NodesRequest {
 }
 
 impl FromBytes for NodesRequest {
-    named!(from_bytes<NodesRequest>, do_parse!(
-        tag!("\x02") >>
-        pk: call!(PublicKey::from_bytes) >>
-        nonce: call!(Nonce::from_bytes) >>
-        payload: map!(rest, |bytes| bytes.to_vec() ) >>
-        (NodesRequest { pk, nonce, payload })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x02")(input)?;
+        let (input, pk) = PublicKey::from_bytes(input)?;
+        let (input, nonce) = Nonce::from_bytes(input)?;
+        let (input, payload) = map(rest, |bytes: &[u8]| bytes.to_vec())(input)?;
+        Ok((input, NodesRequest { pk, nonce, payload }))
+    }
 }
 
 impl NodesRequest {
@@ -128,12 +129,12 @@ impl ToBytes for NodesRequestPayload {
 }
 
 impl FromBytes for NodesRequestPayload {
-    named!(from_bytes<NodesRequestPayload>, do_parse!(
-        pk: call!(PublicKey::from_bytes) >>
-        id: be_u64 >>
-        eof!() >>
-        (NodesRequestPayload { pk, id })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, pk) = PublicKey::from_bytes(input)?;
+        let (input, id) = be_u64(input)?;
+        let (input, _) = eof(input)?;
+        Ok((input, NodesRequestPayload { pk, id }))
+    }
 }
 
 #[cfg(test)]

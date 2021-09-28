@@ -2,6 +2,7 @@
 */
 
 use super::*;
+use nom::bytes::complete::tag;
 
 /** Online is a struct that holds nothing.
 
@@ -15,10 +16,10 @@ Tox client shows status of it's friend as ONLINE only after receiving this packe
 pub struct Online;
 
 impl FromBytes for Online {
-    named!(from_bytes<Online>, do_parse!(
-        tag!("\x18") >>
-        (Online)
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x18")(input)?;
+        Ok((input, Online))
+    }
 }
 
 impl ToBytes for Online {

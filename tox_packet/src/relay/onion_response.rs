@@ -5,6 +5,7 @@ use super::*;
 
 use tox_binary_io::*;
 use crate::onion::InnerOnionResponse;
+use nom::bytes::complete::tag;
 
 /** Sent by server to client.
 The server just sends payload from `OnionResponse1` packet that it got from a
@@ -25,11 +26,11 @@ pub struct OnionResponse {
 }
 
 impl FromBytes for OnionResponse {
-    named!(from_bytes<OnionResponse>, do_parse!(
-        tag!("\x09") >>
-        payload: call!(InnerOnionResponse::from_bytes) >>
-        (OnionResponse { payload })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x09")(input)?;
+        let (input, payload) = InnerOnionResponse::from_bytes(input)?;
+        Ok((input, OnionResponse { payload }))
+    }
 }
 
 impl ToBytes for OnionResponse {

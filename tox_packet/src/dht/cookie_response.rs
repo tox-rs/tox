@@ -2,10 +2,9 @@
 */
 
 use crypto_box::{SalsaBox, aead::{Aead, Error as AeadError}};
-use nom::{
-    named, do_parse, tag, call, take, eof,
-    number::complete::be_u64
-};
+use nom::number::complete::be_u64;
+use nom::bytes::complete::{tag, take};
+use nom::combinator::eof;
 
 use cookie_factory::{
     do_gen, gen_slice, gen_be_u8, gen_call, gen_be_u64
@@ -39,13 +38,13 @@ pub struct CookieResponse {
 }
 
 impl FromBytes for CookieResponse {
-    named!(from_bytes<CookieResponse>, do_parse!(
-        tag!("\x19") >>
-        nonce: call!(Nonce::from_bytes) >>
-        payload: take!(136) >>
-        eof!() >>
-        (CookieResponse { nonce, payload: payload.to_vec() })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x19")(input)?;
+        let (input, nonce) = Nonce::from_bytes(input)?;
+        let (input, payload) = take(136usize)(input)?;
+        let (input, _) = eof(input)?;
+        Ok((input, CookieResponse { nonce, payload: payload.to_vec() }))
+    }
 }
 
 impl ToBytes for CookieResponse {
@@ -116,12 +115,12 @@ pub struct CookieResponsePayload {
 }
 
 impl FromBytes for CookieResponsePayload {
-    named!(from_bytes<CookieResponsePayload>, do_parse!(
-        cookie: call!(EncryptedCookie::from_bytes) >>
-        id: be_u64 >>
-        eof!() >>
-        (CookieResponsePayload { cookie, id })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, cookie) = EncryptedCookie::from_bytes(input)?;
+        let (input, id) = be_u64(input)?;
+        let (input, _) = eof(input)?;
+        Ok((input, CookieResponsePayload { cookie, id }))
+    }
 }
 
 impl ToBytes for CookieResponsePayload {
@@ -135,8 +134,10 @@ impl ToBytes for CookieResponsePayload {
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroUsize;
+
     use super::*;
-    use nom::{Needed, Err, error::ErrorKind};
+    use nom::{Needed, Err, error::{Error, ErrorKind}};
     use crypto_box::aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned};
     use rand::thread_rng;
 
@@ -220,7 +221,7 @@ mod tests {
         let decoded_payload = invalid_packet.get_payload(&shared_secret);
         let error = decoded_payload.err().unwrap();
         assert_eq!(error, GetPayloadError::Deserialize {
-            error: Err::Error((vec![42; 3], ErrorKind::Eof)),
+            error: Err::Error(Error::new(vec![42; 3], ErrorKind::Eof)),
             payload: invalid_payload.to_vec()
         });
         // Try short incomplete array
@@ -233,7 +234,7 @@ mod tests {
         let decoded_payload = invalid_packet.get_payload(&shared_secret);
         let error = decoded_payload.err().unwrap();
         assert_eq!(error, GetPayloadError::Deserialize {
-            error: Err::Incomplete(Needed::Size(24)),
+            error: Err::Incomplete(Needed::Size(NonZeroUsize::new(24).unwrap())),
             payload: invalid_payload.to_vec()
         });
     }

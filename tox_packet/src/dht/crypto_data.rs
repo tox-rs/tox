@@ -7,9 +7,9 @@ use crypto_box::{SalsaBox, aead::{
     generic_array::typenum::marker_traits::Unsigned,
 }};
 use nom::{
-    bytes::complete::take_while,
+    bytes::complete::{take_while, tag},
     number::complete::{be_u16, be_u32},
-    combinator::{rest, rest_len},
+    combinator::{rest, rest_len, verify},
 };
 use std::convert::TryInto;
 
@@ -48,13 +48,13 @@ pub struct CryptoData {
 }
 
 impl FromBytes for CryptoData {
-    named!(from_bytes<CryptoData>, do_parse!(
-        verify!(rest_len, |len| *len <= MAX_CRYPTO_PACKET_SIZE) >>
-        tag!("\x1b") >>
-        nonce_last_bytes: be_u16 >>
-        payload: rest >>
-        (CryptoData { nonce_last_bytes, payload: payload.to_vec() })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = verify(rest_len, |len| *len <= MAX_CRYPTO_PACKET_SIZE)(input)?;
+        let (input, _) = tag("\x1b")(input)?;
+        let (input, nonce_last_bytes) = be_u16(input)?;
+        let (input, payload) = rest(input)?;
+        Ok((input, CryptoData { nonce_last_bytes, payload: payload.to_vec() }))
+    }
 }
 
 impl ToBytes for CryptoData {
@@ -134,13 +134,13 @@ pub struct CryptoDataPayload {
 }
 
 impl FromBytes for CryptoDataPayload {
-    named!(from_bytes<CryptoDataPayload>, do_parse!(
-        buffer_start: be_u32 >>
-        packet_number: be_u32 >>
-        call!(take_while(|b| b == 0)) >>
-        data: rest >>
-        (CryptoDataPayload { buffer_start, packet_number, data: data.to_vec() })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, buffer_start) = be_u32(input)?;
+        let (input, packet_number) = be_u32(input)?;
+        let (input, _) = take_while(|b| b == 0)(input)?;
+        let (input, data) = rest(input)?;
+        Ok((input, CryptoDataPayload { buffer_start, packet_number, data: data.to_vec() }))
+    }
 }
 
 impl ToBytes for CryptoDataPayload {
@@ -157,7 +157,7 @@ impl ToBytes for CryptoDataPayload {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nom::{Err, error::ErrorKind};
+    use nom::{Err, error::{Error, ErrorKind}};
     use rand::thread_rng;
 
     encode_decode_test!(
@@ -255,6 +255,6 @@ mod tests {
         };
         let decoded_payload = invalid_packet.get_payload(&shared_secret, &nonce.into());
         let error = decoded_payload.err().unwrap();
-        assert_eq!(error, GetPayloadError::Deserialize { error: Err::Error((vec![], ErrorKind::Eof)), payload: invalid_payload.to_vec() });
+        assert_eq!(error, GetPayloadError::Deserialize { error: Err::Error(Error::new(vec![], ErrorKind::Eof)), payload: invalid_payload.to_vec() });
     }
 }

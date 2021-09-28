@@ -4,6 +4,8 @@
 use super::*;
 
 use nom::number::complete::le_u8;
+use nom::bytes::complete::tag;
+use nom::error::{ErrorKind, make_error};
 
 /// Status of user
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -17,13 +19,15 @@ pub enum PeerStatus {
 }
 
 impl FromBytes for PeerStatus {
-    named!(from_bytes<PeerStatus>,
-        switch!(le_u8,
-            0 => value!(PeerStatus::Online) |
-            1 => value!(PeerStatus::Away) |
-            2 => value!(PeerStatus::Busy)
-        )
-    );
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, b) = le_u8(input)?;
+        match b {
+            0 => Ok((input, PeerStatus::Online)),
+            1 => Ok((input, PeerStatus::Away)),
+            2 => Ok((input, PeerStatus::Busy)),
+            _ => Err(nom::Err::Error(make_error(input, ErrorKind::Switch))),
+        }
+    }
 }
 
 /** UserStatus is a struct that holds status of user.
@@ -44,11 +48,11 @@ Length    | Content
 pub struct UserStatus(PeerStatus);
 
 impl FromBytes for UserStatus {
-    named!(from_bytes<UserStatus>, do_parse!(
-        tag!("\x32") >>
-        status: call!(PeerStatus::from_bytes) >>
-        (UserStatus(status))
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x32")(input)?;
+        let (input, status) = PeerStatus::from_bytes(input)?;
+        Ok((input, UserStatus(status)))
+    }
 }
 
 impl ToBytes for UserStatus {

@@ -6,7 +6,8 @@ use super::*;
 use std::str;
 use nom::{
     number::complete::{be_u16, be_u32},
-    combinator::rest,
+    combinator::{rest, map_res},
+    bytes::complete::tag,
 };
 
 /** Action is the struct that holds info to send action to a conference.
@@ -39,20 +40,20 @@ pub struct Action {
 }
 
 impl FromBytes for Action {
-    named!(from_bytes<Action>, do_parse!(
-        tag!("\x63") >>
-        conference_id: be_u16 >>
-        peer_id: be_u16 >>
-        message_id: be_u32 >>
-        tag!("\x41") >>
-        action: map_res!(rest, str::from_utf8) >>
-        (Action {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x63")(input)?;
+        let (input, conference_id) = be_u16(input)?;
+        let (input, peer_id) = be_u16(input)?;
+        let (input, message_id) = be_u32(input)?;
+        let (input, _) = tag("\x41")(input)?;
+        let (input, action) = map_res(rest, str::from_utf8)(input)?;
+        Ok((input, Action {
             conference_id,
             peer_id,
             message_id,
             action: action.to_string(),
-        })
-    ));
+        }))
+    }
 }
 
 impl ToBytes for Action {

@@ -3,8 +3,9 @@ It is used to start transferring file to a friend.
 */
 
 use nom::{
-    combinator::rest,
+    combinator::{rest, map_res, verify},
     number::complete::le_u8,
+    bytes::complete::tag,
 };
 
 use std::str;
@@ -38,22 +39,21 @@ pub struct FileSendRequest {
 }
 
 impl FromBytes for FileSendRequest {
-    named!(from_bytes<FileSendRequest>, do_parse!(
-        tag!("\x50") >>
-        file_id: le_u8 >>
-        file_type: call!(FileType::from_bytes) >>
-        file_size: be_u64 >>
-        file_unique_id: call!(FileUid::from_bytes) >>
-        file_name: map_res!(verify!(rest, |file_name: &[u8]| file_name.len() <= MAX_FILESEND_FILENAME_LENGTH),
-            str::from_utf8) >>
-        (FileSendRequest {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x50")(input)?;
+        let (input, file_id) = le_u8(input)?;
+        let (input, file_type) = FileType::from_bytes(input)?;
+        let (input, file_size) = be_u64(input)?;
+        let (input, file_unique_id) = FileUid::from_bytes(input)?;
+        let (input, file_name) = map_res(verify(rest, |file_name: &[u8]| file_name.len() <= MAX_FILESEND_FILENAME_LENGTH), str::from_utf8)(input)?;
+        Ok((input, FileSendRequest {
             file_id,
             file_type,
             file_size,
             file_unique_id,
             file_name: file_name.to_string(),
-        })
-    ));
+        }))
+    }
 }
 
 impl ToBytes for FileSendRequest {

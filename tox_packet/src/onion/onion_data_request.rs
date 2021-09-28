@@ -9,8 +9,8 @@ use crate::dht::*;
 use crate::onion::MAX_ONION_RESPONSE_PAYLOAD_SIZE;
 
 use nom::{
-    combinator::{rest, rest_len},
-    bytes::complete::take,
+    combinator::{rest, rest_len, map_parser, verify},
+    bytes::complete::{take, tag},
 };
 
 /** It's used to send data requests to dht node using onion paths.
@@ -45,19 +45,19 @@ pub struct InnerOnionDataRequest {
 }
 
 impl FromBytes for InnerOnionDataRequest {
-    named!(from_bytes<InnerOnionDataRequest>, do_parse!(
-        tag!(&[0x85][..]) >>
-        destination_pk: call!(PublicKey::from_bytes) >>
-        nonce: call!(Nonce::from_bytes) >>
-        temporary_pk: call!(PublicKey::from_bytes) >>
-        payload: rest >>
-        (InnerOnionDataRequest {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag(&[0x85][..])(input)?;
+        let (input, destination_pk) = PublicKey::from_bytes(input)?;
+        let (input, nonce) = Nonce::from_bytes(input)?;
+        let (input, temporary_pk) = PublicKey::from_bytes(input)?;
+        let (input, payload) = rest(input)?;
+        Ok((input, InnerOnionDataRequest {
             destination_pk,
             nonce,
             temporary_pk,
             payload: payload.to_vec()
-        })
-    ));
+        }))
+    }
 }
 
 impl ToBytes for InnerOnionDataRequest {
@@ -141,12 +141,12 @@ pub struct OnionDataRequest {
 }
 
 impl FromBytes for OnionDataRequest {
-    named!(from_bytes<OnionDataRequest>, do_parse!(
-        rest_len: verify!(rest_len, |len| *len <= ONION_MAX_PACKET_SIZE && *len >= ONION_RETURN_3_SIZE) >>
-        inner: flat_map!(take(rest_len - ONION_RETURN_3_SIZE), InnerOnionDataRequest::from_bytes) >>
-        onion_return: call!(OnionReturn::from_bytes) >>
-        (OnionDataRequest { inner, onion_return })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, rest_len) = verify(rest_len, |len| *len <= ONION_MAX_PACKET_SIZE && *len >= ONION_RETURN_3_SIZE)(input)?;
+        let (input, inner) = map_parser(take(rest_len - ONION_RETURN_3_SIZE), InnerOnionDataRequest::from_bytes)(input)?;
+        let (input, onion_return) = OnionReturn::from_bytes(input)?;
+        Ok((input, OnionDataRequest { inner, onion_return }))
+    }
 }
 
 impl ToBytes for OnionDataRequest {

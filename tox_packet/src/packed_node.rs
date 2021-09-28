@@ -2,7 +2,6 @@
 
 use tox_binary_io::*;
 use tox_crypto::*;
-use nom::{named, do_parse, call};
 use cookie_factory::{do_gen, gen_call, gen_slice,};
 
 use crate::ip_port::*;
@@ -17,14 +16,14 @@ pub struct TcpUdpPackedNode { // TODO: unify with dht::packed_node
 }
 
 impl FromBytes for TcpUdpPackedNode {
-    named!(from_bytes<TcpUdpPackedNode>, do_parse!(
-        ip_port: call!(IpPort::from_bytes, IpPortPadding::NoPadding) >>
-        pk: call!(PublicKey::from_bytes) >>
-        (TcpUdpPackedNode {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, ip_port) = IpPort::from_bytes(input, IpPortPadding::NoPadding)?;
+        let (input, pk) = PublicKey::from_bytes(input)?;
+        Ok((input, TcpUdpPackedNode {
             ip_port,
             pk,
-        })
-    ));
+        }))
+    }
 }
 
 impl ToBytes for TcpUdpPackedNode {

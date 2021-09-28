@@ -3,7 +3,8 @@
 
 use super::*;
 
-use nom::combinator::rest_len;
+use nom::combinator::{rest_len, map_parser, verify};
+use nom::bytes::complete::{tag, take};
 
 use tox_binary_io::*;
 
@@ -31,13 +32,13 @@ pub struct OnionResponse2 {
 }
 
 impl FromBytes for OnionResponse2 {
-    named!(from_bytes<OnionResponse2>, do_parse!(
-        verify!(rest_len, |len| *len <= ONION_MAX_PACKET_SIZE) >>
-        tag!(&[0x8d][..]) >>
-        onion_return: flat_map!(take!(ONION_RETURN_2_SIZE), OnionReturn::from_bytes) >>
-        payload: call!(InnerOnionResponse::from_bytes) >>
-        (OnionResponse2 { onion_return, payload })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = verify(rest_len, |len| *len <= ONION_MAX_PACKET_SIZE)(input)?;
+        let (input, _) = tag(&[0x8d][..])(input)?;
+        let (input, onion_return) = map_parser(take(ONION_RETURN_2_SIZE), OnionReturn::from_bytes)(input)?;
+        let (input, payload) = InnerOnionResponse::from_bytes(input)?;
+        Ok((input, OnionResponse2 { onion_return, payload }))
+    }
 }
 
 impl ToBytes for OnionResponse2 {
