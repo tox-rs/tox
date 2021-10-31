@@ -23,7 +23,7 @@ assert_eq!(plaintext,
 
 use std::{convert::TryInto, ops::Deref};
 
-use failure::Fail;
+use thiserror::Error;
 use rand::{Rng, thread_rng};
 use sha2::{Digest, Sha256};
 use xsalsa20poly1305::{XSalsa20Poly1305, aead::{Aead, NewAead}};
@@ -331,25 +331,25 @@ pub fn get_salt(data: &[u8]) -> Option<[u8; SALT_LENGTH]> {
 }
 
 /// Deriving secret key for [`PassKey`](./struct.PassKey.html).
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Fail)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Error)]
 pub enum KeyDerivationError {
     /// Provided passphrase is empty.
-    #[fail(display = "Provided passphrase is empty")]
+    #[error("Provided passphrase is empty")]
     Null,
     /// Failed to derive key, most likely due to OOM.
-    #[fail(display = "Failed to derive key, most likely due to OOM")]
+    #[error("Failed to derive key, most likely due to OOM")]
     Failed
 }
 
 /// Error encrypting data.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Fail)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Error)]
 pub enum EncryptionError {
     /// Data provided for encryption is empty.
-    #[fail(display = "Data provided for encryption is empty")]
+    #[error("Data provided for encryption is empty")]
     Null,
     /// Failed to derive key – [`KeyDerivationError`]
     /// (./enum.KeyDerivationError.html)
-    #[fail(display = "Failed to derive key: {}", _0)]
+    #[error("Failed to derive key: {}", _0)]
     KeyDerivation(KeyDerivationError),
 }
 
@@ -360,19 +360,19 @@ impl From<KeyDerivationError> for EncryptionError {
 }
 
 /// Error when trying to decrypt data.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Fail)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Error)]
 pub enum DecryptionError {
     /// Data to be decrypted is empty.
-    #[fail(display = "Data to be decrypted is empty")]
+    #[error("Data to be decrypted is empty")]
     Null,
     /// There's not enough data to decrypt.
-    #[fail(display = "There's not enough data to decrypt")]
+    #[error("There's not enough data to decrypt")]
     InvalidLength,
     /// Provided data has invalid format, incompatible with **TES**.
-    #[fail(display = "Provided data has invalid format, incompatible with TES")]
+    #[error("Provided data has invalid format, incompatible with TES")]
     BadFormat,
     /// Deriving key failed.
-    #[fail(display = "Deriving key failed: {}", _0)]
+    #[error("Deriving key failed: {}", _0)]
     KeyDerivation(KeyDerivationError),
     /**
     Failure due to encrypted data being invalid.
@@ -385,7 +385,7 @@ pub enum DecryptionError {
      * not all encrypted bytes were provided
      * some bytes that aren't encrypted were provided after encrypted bytes
     */
-    #[fail(display = "Failure due to encrypted data being invalid")]
+    #[error("Failure due to encrypted data being invalid")]
     Failed
 }
 

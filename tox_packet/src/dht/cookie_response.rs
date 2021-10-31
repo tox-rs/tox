@@ -200,7 +200,7 @@ mod tests {
         // try to decode payload with eve's shared secret
         let decoded_payload = dht_packet.get_payload(&eve_shared_secret);
         assert!(decoded_payload.is_err());
-        assert_eq!(*decoded_payload.err().unwrap().kind(), GetPayloadErrorKind::Decrypt);
+        assert_eq!(decoded_payload.err().unwrap(), GetPayloadError::Decrypt);
     }
 
     #[test]
@@ -219,7 +219,7 @@ mod tests {
         };
         let decoded_payload = invalid_packet.get_payload(&shared_secret);
         let error = decoded_payload.err().unwrap();
-        assert_eq!(*error.kind(), GetPayloadErrorKind::Deserialize {
+        assert_eq!(error, GetPayloadError::Deserialize {
             error: Err::Error((vec![42; 3], ErrorKind::Eof)),
             payload: invalid_payload.to_vec()
         });
@@ -232,7 +232,7 @@ mod tests {
         };
         let decoded_payload = invalid_packet.get_payload(&shared_secret);
         let error = decoded_payload.err().unwrap();
-        assert_eq!(*error.kind(), GetPayloadErrorKind::Deserialize {
+        assert_eq!(error, GetPayloadError::Deserialize {
             error: Err::Incomplete(Needed::Size(24)),
             payload: invalid_payload.to_vec()
         });

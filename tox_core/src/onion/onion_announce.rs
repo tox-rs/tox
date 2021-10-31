@@ -1,12 +1,12 @@
 /*! The implementation of onion announce
 */
 
-use std::io::{ErrorKind, Error};
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant, SystemTime};
 use sha2::{Digest, Sha256};
 use sha2::digest::generic_array::typenum::marker_traits::Unsigned;
 use rand::{CryptoRng, Rng};
+use thiserror::Error;
 
 use tox_binary_io::*;
 use tox_crypto::*;
@@ -32,6 +32,16 @@ pub const ONION_ANNOUNCE_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Create onion ping id filled with zeros.
 pub const INITIAL_PING_ID: PingId = [0; <Sha256 as Digest>::OutputSize::USIZE];
+
+/// Error that can happen when handling data request.
+#[derive(Clone, Debug, Eq, PartialEq, Error)]
+pub enum HandleDataRequestError {
+    /// No announced node with public key.
+    #[error("No announced node with public key")]
+    NoAnnouncedNode {
+        pk: PublicKey,
+    }
+}
 
 /** Entry that corresponds to announced onion node.
 
@@ -310,7 +320,7 @@ impl OnionAnnounce {
     to this node through its onion path.
 
     */
-    pub fn handle_data_request(&self, request: OnionDataRequest) -> Result<(OnionResponse3, SocketAddr), Error> {
+    pub fn handle_data_request(&self, request: OnionDataRequest) -> Result<(OnionResponse3, SocketAddr), HandleDataRequestError> {
         if let Some(entry) = self.find_in_entries(request.inner.destination_pk.clone()) {
             let response_payload = OnionDataResponse {
                 nonce: request.inner.nonce,
@@ -324,10 +334,9 @@ impl OnionAnnounce {
             let saddr = SocketAddr::new(entry.ip_addr, entry.port);
             Ok((response, saddr))
         } else {
-            Err(Error::new(
-                ErrorKind::Other,
-                format!("No announced node with public key {:?}", request.inner.destination_pk)
-            ))
+            Err(HandleDataRequestError::NoAnnouncedNode {
+                pk: request.inner.destination_pk,
+            })
         }
     }
 }

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use failure::Fail;
+use thiserror::Error;
 use futures::{FutureExt, TryFutureExt, SinkExt, StreamExt, TryStreamExt};
 use futures::channel::mpsc;
 use tokio::net::{TcpStream, TcpListener};
@@ -28,89 +28,80 @@ const TCP_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 const SERVER_CHANNEL_SIZE: usize = 64;
 
 /// Error that can happen during server execution
-#[derive(Debug, Fail)]
+#[derive(Debug, Error)]
 pub enum ServerRunError {
     /// Incoming IO error
-    #[fail(display = "Incoming IO error: {:?}", error)]
+    #[error("Incoming IO error: {:?}", error)]
     Incoming {
         /// IO error
-        #[fail(cause)]
         error: IoError
     },
     /// Ping wakeups timer error
-    #[fail(display = "Ping wakeups timer error: {:?}", error)]
+    #[error("Ping wakeups timer error: {:?}", error)]
     PingWakeups {
         /// Timer error
         error: TimerError
     },
     /// Send pings error
-    #[fail(display = "Send pings error: {:?}", error)]
+    #[error("Send pings error: {:?}", error)]
     SendPings {
         /// Send pings error
-        #[fail(cause)]
         error: IoError
     },
 }
 
 /// Error that can happen during TCP connection execution
-#[derive(Debug, Fail)]
+#[derive(Debug, Error)]
 pub enum ConnectionError {
     /// Error indicates that we couldn't get peer address
-    #[fail(display = "Failed to get peer address: {}", error)]
+    #[error("Failed to get peer address: {}", error)]
     PeerAddr {
         /// Peer address error
-        #[fail(cause)]
         error: IoError,
     },
     /// Sending packet error
-    #[fail(display = "Failed to send TCP packet: {}", error)]
+    #[error("Failed to send TCP packet: {}", error)]
     SendPacket {
         error: EncodeError
     },
     /// Decode incoming packet error
-    #[fail(display = "Failed to decode incoming packet: {}", error)]
+    #[error("Failed to decode incoming packet: {}", error)]
     DecodePacket {
         error: DecodeError
     },
     /// Incoming IO error
-    #[fail(display = "Incoming IO error: {:?}", error)]
+    #[error("Incoming IO error: {:?}", error)]
     Incoming {
         /// IO error
-        #[fail(cause)]
         error: IoError
     },
     /// Server handshake error
-    #[fail(display = "Server handshake error: {:?}", error)]
+    #[error("Server handshake error: {:?}", error)]
     ServerHandshakeTimeout {
         /// Server handshake error
-        #[fail(cause)]
         error: tokio::time::error::Elapsed
     },
-    #[fail(display = "Server handshake error: {:?}", error)]
+    #[error("Server handshake error: {:?}", error)]
     ServerHandshakeIo {
         /// Server handshake error
-        #[fail(cause)]
         error: IoError,
     },
     /// Packet handling error
-    #[fail(display = "Packet handling error: {:?}", error)]
+    #[error("Packet handling error: {:?}", error)]
     PacketHandling {
         /// Packet handling error
-        #[fail(cause)]
         error: IoError
     },
     /// Insert client error
-    #[fail(display = "Packet handling error: {:?}", error)]
+    #[error("Packet handling error: {:?}", error)]
     InsertClient {
         /// Insert client error
-        #[fail(cause)]
         error: IoError
     },
 
-    #[fail(display = "Packet handling error: {:?}", error)]
+    #[error("Packet handling error: {:?}", error)]
     Shutdown {
         /// Insert client error
-        #[fail(cause)]
         error: IoError
     },
 }
@@ -246,7 +237,7 @@ mod tests {
     use super::*;
     use tox_binary_io::*;
 
-    use failure::Error;
+    use std::io::{Error, ErrorKind};
     use rand::thread_rng;
 
     use crate::relay::codec::Codec;
@@ -273,7 +264,7 @@ mod tests {
             // take the first connection
             let (connection, _) = listener.accept().await.unwrap();
             tcp_run_connection(&Server::new(), connection, server_sk, stats.clone())
-                .map_err(Error::from).await
+                .map_err(|e| Error::new(ErrorKind::Other, e)).await
         };
 
         let client = async {
@@ -286,7 +277,7 @@ mod tests {
                 ping_id: 42
             });
 
-            to_server.send(packet).map_err(Error::from).await.unwrap();
+            to_server.send(packet).map_err(|e| Error::new(ErrorKind::Other, e)).await.unwrap();
             let packet = from_server.next().await.unwrap();
 
             assert_eq!(packet.unwrap(), Packet::PongResponse(PongResponse {
@@ -321,7 +312,7 @@ mod tests {
         let stats = Stats::new();
         let server = async {
             tcp_run(&Server::new(), listener, server_sk, stats.clone(), 1).await
-                .map_err(Error::from)
+                .map_err(|e| Error::new(ErrorKind::Other, e))
         };
 
         let client = async {
@@ -334,7 +325,7 @@ mod tests {
             let packet = Packet::PingRequest(PingRequest {
                 ping_id: 42
             });
-            to_server.send(packet).map_err(Error::from).await?;
+            to_server.send(packet).map_err(|e| Error::new(ErrorKind::Other, e)).await?;
 
             let packet = from_server.next().await.unwrap();
             assert_eq!(packet.unwrap(), Packet::PongResponse(PongResponse {

@@ -18,8 +18,6 @@ extern crate nom;
 #[macro_use]
 extern crate cookie_factory;
 
-#[macro_use]
-mod error;
 pub mod io_tokio;
 pub mod time;
 pub mod state_format;

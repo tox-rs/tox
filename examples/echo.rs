@@ -9,7 +9,7 @@ extern crate log;
 use futures::{*, future::TryFutureExt};
 use futures::channel::mpsc;
 use hex::FromHex;
-use failure::{err_msg, Error};
+use anyhow::Error;
 use rand::thread_rng;
 
 use std::net::SocketAddr;
@@ -174,7 +174,7 @@ async fn main() -> Result<(), Error> {
                         Ok((_, share_relays)) =>
                             friend_connections_c.handle_share_relays(pk, share_relays)
                                 .map_err(Error::from).await?,
-                        _ => return Err(err_msg("Failed to parse ShareRelays"))
+                        _ => return Err(Error::msg("Failed to parse ShareRelays"))
                     }
                 },
                 0x18 => { // PACKET_ID_ONLINE

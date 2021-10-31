@@ -3,7 +3,6 @@ use crate::dht::server::Server as DhtServer;
 use crate::dht::server::errors::*;
 use crate::net_crypto::NetCrypto;
 use crate::onion::client::OnionClient;
-use failure::Fail;
 use tox_packet::dht::*;
 use tox_packet::onion::*;
 use std::net::SocketAddr;
@@ -87,9 +86,9 @@ impl Server {
     async fn handle_onion_data_response(&self, packet: &OnionDataResponse) -> Result<(), HandlePacketError> {
         if let Some(ref onion_client) = self.onion_client {
             onion_client.handle_data_response(packet).await
-                .map_err(|e| e.context(HandlePacketErrorKind::HandleOnionClient).into())
+                .map_err(HandlePacketError::HandleOnionClientData)
         } else {
-            Err(HandlePacketError::from(HandlePacketErrorKind::OnionClient))
+            Err(HandlePacketError::OnionClient)
         }
     }
 
@@ -97,9 +96,9 @@ impl Server {
     async fn handle_onion_announce_response(&self, packet: &OnionAnnounceResponse, addr: SocketAddr) -> Result<(), HandlePacketError> {
         if let Some(ref onion_client) = self.onion_client {
             onion_client.handle_announce_response(packet, IsGlobal::is_global(&addr.ip())).await
-                .map_err(|e| e.context(HandlePacketErrorKind::HandleOnionClient).into())
+                .map_err(HandlePacketError::HandleOnionClientAnnounce)
         } else {
-            Err(HandlePacketError::from(HandlePacketErrorKind::OnionClient))
+            Err(HandlePacketError::OnionClient)
         }
     }
 
@@ -114,11 +113,9 @@ impl Server {
         -> Result<(), HandlePacketError> {
         if let Some(ref net_crypto) = self.net_crypto {
             net_crypto.handle_udp_cookie_request(packet, addr).await
-                .map_err(|e| e.context(HandlePacketErrorKind::HandleNetCrypto).into())
+                .map_err(HandlePacketError::HandleNetCrypto)
         } else {
-            Err(
-                HandlePacketError::from(HandlePacketErrorKind::NetCrypto)
-            )
+            Err(HandlePacketError::NetCrypto)
         }
     }
 
@@ -128,9 +125,9 @@ impl Server {
         -> Result<(), HandlePacketError> {
         if let Some(ref net_crypto) = self.net_crypto {
             net_crypto.handle_udp_cookie_response(packet, addr).await
-                .map_err(|e| e.context(HandlePacketErrorKind::HandleNetCrypto).into())
+                .map_err(HandlePacketError::HandleNetCrypto)
         } else {
-            Err(HandlePacketError::from(HandlePacketErrorKind::NetCrypto))
+            Err(HandlePacketError::NetCrypto)
         }
     }
 
@@ -140,9 +137,9 @@ impl Server {
         -> Result<(), HandlePacketError> {
         if let Some(ref net_crypto) = self.net_crypto {
             net_crypto.handle_udp_crypto_handshake(packet, addr).await
-                .map_err(|e| e.context(HandlePacketErrorKind::HandleNetCrypto).into())
+                .map_err(HandlePacketError::HandleNetCrypto)
         } else {
-            Err(HandlePacketError::from(HandlePacketErrorKind::NetCrypto))
+            Err(HandlePacketError::NetCrypto)
         }
     }
 
@@ -150,9 +147,9 @@ impl Server {
     pub async fn handle_crypto_data(&self, packet: &CryptoData, addr: SocketAddr) -> Result<(), HandlePacketError> {
         if let Some(ref net_crypto) = self.net_crypto {
             net_crypto.handle_udp_crypto_data(packet, addr).await
-                .map_err(|e| e.context(HandlePacketErrorKind::HandleNetCrypto).into())
+                .map_err(HandlePacketError::HandleNetCrypto)
         } else {
-            Err(HandlePacketError::from(HandlePacketErrorKind::NetCrypto))
+            Err(HandlePacketError::NetCrypto)
         }
     }
 

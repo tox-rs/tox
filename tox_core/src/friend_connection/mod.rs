@@ -9,7 +9,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use failure::Fail;
 use futures::{FutureExt, StreamExt, SinkExt, future};
 use futures::channel::mpsc;
 use tokio::sync::RwLock;
@@ -22,7 +21,7 @@ use crate::dht::server::Server as DhtServer;
 use crate::friend_connection::errors::*;
 use tox_packet::friend_connection::*;
 use crate::net_crypto::NetCrypto;
-use crate::net_crypto::errors::KillConnectionErrorKind;
+use crate::net_crypto::errors::KillConnectionError;
 use crate::onion::client::OnionClient;
 use crate::relay::client::Connections as TcpConnections;
 use crate::time::*;
@@ -155,13 +154,13 @@ impl FriendConnections {
             self.net_crypto.kill_connection(friend_pk.clone())
                 .then(|res| future::ready(match res {
                     Err(ref e)
-                    if *e.kind() == KillConnectionErrorKind::NoConnection =>
+                    if e == &KillConnectionError::NoConnection =>
                         Ok(()),
                     res => res,
                 })).await
-                .map_err(|e| e.context(RemoveFriendErrorKind::KillConnection).into())
+                .map_err(RemoveFriendError::KillConnection)
         } else {
-            Err(RemoveFriendErrorKind::NoFriend.into())
+            Err(RemoveFriendError::NoFriend)
         }
     }
 
@@ -171,7 +170,7 @@ impl FriendConnections {
             if let Some(ref dht_pk) = friend.dht_pk {
                 for node in share_relays.relays {
                     self.tcp_connections.add_relay_connection(node.saddr, node.pk, dht_pk.clone()).await
-                        .map_err(|e| e.context(HandleShareRelaysErrorKind::AddTcpConnection))?;
+                        .map_err(HandleShareRelaysError::AddTcpConnection)?;
                 }
             }
         }
@@ -207,12 +206,12 @@ impl FriendConnections {
                             .then(|res| future::ready(
                                 match res {
                                     Err(ref e)
-                                        if *e.kind() == KillConnectionErrorKind::NoConnection =>
+                                        if e == &KillConnectionError::NoConnection =>
                                         Ok(()),
                                     res => res,
                                 }
                             )).await
-                            .map_err(|e| e.context(RunErrorKind::KillConnection))?;
+                            .map_err(RunError::KillConnection)?;
                         // TODO: handle error properly after migrating the TCP client to failure
                         tcp_connections.remove_connection(dht_pk.clone()).await.ok();
                     };
@@ -279,7 +278,7 @@ impl FriendConnections {
                     onion_client.set_friend_connected(real_pk.clone(), status).await;
                     if let Some(mut connection_status_tx) = connection_status_tx.read().await.clone() {
                         connection_status_tx.send((real_pk, status)).await
-                            .map_err(|e| e.context(RunErrorKind::SendToConnectionStatus))?;
+                            .map_err(RunError::SendToConnectionStatus)?;
                     }
                 }
             }
@@ -295,7 +294,7 @@ impl FriendConnections {
         if !relays.is_empty() {
             for relay in &relays {
                 self.tcp_connections.add_connection(relay.pk.clone(), friend_pk.clone()).await
-                    .map_err(|e| e.context(RunErrorKind::AddTcpConnection))?;
+                    .map_err(RunError::AddTcpConnection)?;
             }
 
             let share_relays = ShareRelays {
@@ -305,7 +304,7 @@ impl FriendConnections {
             let (_, size) = share_relays.to_bytes((&mut buf, 0)).unwrap();
             buf.truncate(size);
             self.net_crypto.send_lossless(friend_pk, buf).await
-                .map_err(|e| e.context(RunErrorKind::SendTo).into())
+                .map_err(RunError::SendTo)
         } else {
             Ok(())
         }
@@ -319,17 +318,17 @@ impl FriendConnections {
                     self.net_crypto.kill_connection(friend.real_pk.clone())
                         .then(|res| future::ready(match res {
                             Err(ref e)
-                            if *e.kind() == KillConnectionErrorKind::NoConnection =>
+                            if e == &KillConnectionError::NoConnection =>
                                 Ok(()),
                             res => res,
                         })).await
-                        .map_err(|e| e.context(RunErrorKind::KillConnection))?;
+                        .map_err(RunError::KillConnection)?;
                     continue;
                 }
 
                 if friend.ping_sent_time.map_or(true, |time| clock_elapsed(time) >= FRIEND_PING_INTERVAL) {
                     self.net_crypto.send_lossless(friend.real_pk.clone(), vec![PACKET_ID_ALIVE]).await
-                        .map_err(|e| e.context(RunErrorKind::SendTo))?;
+                        .map_err(RunError::SendTo)?;
                     friend.ping_sent_time = Some(clock_now());
                 }
 
@@ -372,7 +371,7 @@ impl FriendConnections {
 
             let fut = tokio::time::timeout(MAIN_LOOP_INTERVAL, self.main_loop());
             let res = match fut.await {
-                Err(e) => Err(e.context(RunErrorKind::Timeout).into()),
+                Err(e) => Err(RunError::Timeout(e)),
                 Ok(Err(e)) => Err(e),
                 Ok(Ok(_)) => Ok(()),
             };

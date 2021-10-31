@@ -25,7 +25,6 @@ use std::time::{Duration, Instant};
 use std::u16;
 
 use crypto_box::SalsaBox;
-use failure::Fail;
 use futures::{TryFutureExt, SinkExt};
 use futures::future;
 use futures::channel::mpsc;
@@ -306,11 +305,11 @@ impl NetCrypto {
             self.clear_keys_by_addr(&connection).await;
 
             self.send_connection_status(&connection, false).await
-                .map_err(|e| e.context(KillConnectionErrorKind::SendToConnectionStatus))?;
+                .map_err(KillConnectionError::SendToConnectionStatus)?;
             self.send_kill_packet(&mut connection).await
-                .map_err(|e| e.context(KillConnectionErrorKind::SendTo).into())
+                .map_err(KillConnectionError::SendTo)
         } else {
-            Err(KillConnectionErrorKind::NoConnection.into())
+            Err(KillConnectionError::NoConnection)
         }
     }
 
@@ -343,21 +342,21 @@ impl NetCrypto {
     /// Send lossless packet to a friend via established connection.
     pub async fn send_lossless(&self, real_pk: PublicKey, packet: Vec<u8>) -> Result<(), SendLosslessPacketError> {
         if packet.first().map_or(true, |&packet_id| packet_id <= PACKET_ID_CRYPTO_RANGE_END || packet_id >= PACKET_ID_LOSSY_RANGE_START) {
-            return Err(SendLosslessPacketErrorKind::InvalidPacketId.into());
+            return Err(SendLosslessPacketError::InvalidPacketId);
         }
 
         if let Some(connection) = self.connections.read().await.get(&real_pk) {
             let mut connection = connection.write().await;
             let packet_number = connection.send_array.buffer_end;
             if let Err(e) = connection.send_array.push_back(SentPacket::new(packet.clone())) {
-                Err(e.context(SendLosslessPacketErrorKind::FullSendArray).into())
+                Err(SendLosslessPacketError::FullSendArray(e))
             } else {
                 connection.packets_sent += 1;
                 self.send_data_packet(&mut connection, packet, packet_number).await
-                    .map_err(|e| e.context(SendLosslessPacketErrorKind::SendTo).into())
+                    .map_err(SendLosslessPacketError::SendTo)
             }
         } else {
-            Err(SendLosslessPacketErrorKind::NoConnection.into())
+            Err(SendLosslessPacketError::NoConnection)
         }
     }
 
@@ -399,7 +398,7 @@ impl NetCrypto {
     /// Create `CookieResponse` packet with `Cookie` requested by `CookieRequest` packet
     async fn handle_cookie_request(&self, packet: &CookieRequest) -> Result<CookieResponse, HandlePacketError> {
         let payload = packet.get_payload(&self.precomputed_keys.get(packet.pk.clone()).await)
-            .map_err(|e| e.context(HandlePacketErrorKind::GetPayload))?;
+            .map_err(HandlePacketError::GetPayload)?;
 
         let cookie = Cookie::new(payload.pk, packet.pk.clone());
         let encrypted_cookie = EncryptedCookie::new(&mut thread_rng(), &self.symmetric_key, &cookie);
@@ -418,7 +417,7 @@ impl NetCrypto {
     pub async fn handle_udp_cookie_request(&self, packet: &CookieRequest, addr: SocketAddr) -> Result<(), HandlePacketError> {
         match self.handle_cookie_request(packet).await {
             Ok(response) => self.send_to_udp(addr, DhtPacket::CookieResponse(response)).await
-                .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into()),
+                .map_err(|e| HandlePacketError::SendTo(SendPacketError::Udp(e))),
             Err(e) => Err(e),
         }
     }
@@ -429,7 +428,7 @@ impl NetCrypto {
             Ok(response) => {
                 let msg = (TcpDataPayload::CookieResponse(response), sender_pk);
                 maybe_send_bounded(self.tcp_tx.read().await.clone(), msg).await
-                    .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
+                    .map_err(|e| HandlePacketError::SendTo(SendPacketError::Tcp(e)))
             }
             Err(e) => Err(e),
         }
@@ -441,12 +440,12 @@ impl NetCrypto {
         let cookie_request_id = if let ConnectionStatus::CookieRequesting { cookie_request_id, .. } = connection.status {
             cookie_request_id
         } else {
-            return Err(HandlePacketError::from(HandlePacketErrorKind::InvalidState))
+            return Err(HandlePacketError::InvalidState)
         };
 
         let payload = match packet.get_payload(&self.precomputed_keys.get(connection.peer_dht_pk.clone()).await) {
             Ok(payload) => payload,
-            Err(e) => return Err(e.context(HandlePacketErrorKind::GetPayload).into()),
+            Err(e) => return Err(HandlePacketError::GetPayload(e)),
         };
 
         if payload.id != cookie_request_id {
@@ -471,7 +470,7 @@ impl NetCrypto {
         };
 
         self.send_status_packet(connection)
-            .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into()).await
+            .map_err(HandlePacketError::SendTo).await
     }
 
     /// Handle `CookieResponse` packet received from UDP socket
@@ -505,22 +504,22 @@ impl NetCrypto {
         -> Result<(Cookie, CryptoHandshakePayload, SalsaBox), HandlePacketError> {
         let cookie = match packet.cookie.get_payload(&self.symmetric_key) {
             Ok(cookie) => cookie,
-            Err(e) => return Err(e.context(HandlePacketErrorKind::GetPayload).into()),
+            Err(e) => return Err(HandlePacketError::GetPayload(e)),
         };
 
         if cookie.is_timed_out() {
-            return Err(HandlePacketErrorKind::CookieTimedOut.into());
+            return Err(HandlePacketError::CookieTimedOut);
         }
 
         let real_precomputed_key = SalsaBox::new(&cookie.real_pk, &self.real_sk);
 
         let payload = match packet.get_payload(&real_precomputed_key) {
             Ok(payload) => payload,
-            Err(e) => return Err(e.context(HandlePacketErrorKind::GetPayload).into()),
+            Err(e) => return Err(HandlePacketError::GetPayload(e)),
         };
 
         if packet.cookie.hash() != payload.cookie_hash {
-            return Err(HandlePacketErrorKind::BadSha512.into());
+            return Err(HandlePacketError::BadSha512);
         }
 
         Ok((cookie, payload, real_precomputed_key))
@@ -530,7 +529,7 @@ impl NetCrypto {
     pub async fn handle_crypto_handshake(&self, connection: &mut CryptoConnection, packet: &CryptoHandshake)
         -> Result<(), HandlePacketError> {
         if let ConnectionStatus::Established { .. } = connection.status {
-            return Err(HandlePacketError::from(HandlePacketErrorKind::InvalidState))
+            return Err(HandlePacketError::InvalidState)
         }
 
         let (cookie, payload, real_precomputed_key) = match self.validate_crypto_handshake(packet) {
@@ -539,17 +538,15 @@ impl NetCrypto {
         };
 
         if cookie.real_pk != connection.peer_real_pk {
-            return Err(HandlePacketError::from(HandlePacketErrorKind::InvalidRealPk))
+            return Err(HandlePacketError::InvalidRealPk)
         }
         if cookie.dht_pk != connection.peer_dht_pk {
             let msg = (connection.peer_real_pk.clone(), cookie.dht_pk);
 
             let dht_pk_future = maybe_send_unbounded(self.dht_pk_tx.read().await.clone(), msg)
-                .map_err(|e| e.context(HandlePacketErrorKind::SendToDhtpk).into());
+                .map_err(HandlePacketError::SendToDhtpk);
 
-            return dht_pk_future.and_then(|()| future::err(
-                HandlePacketError::from(HandlePacketErrorKind::InvalidDhtPk)
-            )).await
+            return dht_pk_future.and_then(|()| future::err(HandlePacketError::InvalidDhtPk)).await
         }
 
         connection.status = match connection.status {
@@ -583,7 +580,7 @@ impl NetCrypto {
         };
 
         self.send_status_packet(connection).await
-            .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into())
+            .map_err(HandlePacketError::SendTo)
     }
 
     /// Handle incoming `CryptoHandshake` in case when we don't have associated
@@ -596,7 +593,7 @@ impl NetCrypto {
         };
 
         if !self.friends.read().await.contains(&cookie.real_pk) {
-            return Err(HandlePacketErrorKind::UnexpectedCryptoHandshake.into());
+            return Err(HandlePacketError::UnexpectedCryptoHandshake);
         }
 
         let mut connections = self.connections.write().await;
@@ -611,13 +608,9 @@ impl NetCrypto {
 
                 self.clear_keys_by_addr(&connection).await;
                 self.send_connection_status(&connection, false).await
-                    .map_err(|e|
-                        HandlePacketError::from(e.context(HandlePacketErrorKind::SendToConnectionStatus))
-                    )?;
+                    .map_err(HandlePacketError::SendToConnectionStatus)?;
                 self.send_kill_packet(&mut connection).await
-                    .map_err(|e|
-                        HandlePacketError::from(e.context(HandlePacketErrorKind::SendTo))
-                    )?;
+                    .map_err(HandlePacketError::SendDataTo)?;
             } else {
                 // We received a handshake packet for an existent connection
                 // from a new address and this packet contains the same DHT
@@ -626,7 +619,7 @@ impl NetCrypto {
                 // otherwise.
 
                 if connection.is_established() || connection.is_not_confirmed() {
-                    return Err(HandlePacketErrorKind::UnexpectedCryptoHandshake.into());
+                    return Err(HandlePacketError::UnexpectedCryptoHandshake);
                 }
 
                 self.clear_keys_by_addr(&connection).await;
@@ -651,7 +644,7 @@ impl NetCrypto {
 
         let msg = (cookie.real_pk, cookie.dht_pk);
         maybe_send_unbounded(self.dht_pk_tx.read().await.clone(), msg).await
-            .map_err(|e| e.context(HandlePacketErrorKind::SendToDhtpk).into())
+            .map_err(HandlePacketError::SendToDhtpk)
     }
 
     /// Handle `CryptoHandshake` packet received from UDP socket
@@ -817,9 +810,7 @@ impl NetCrypto {
                     (sent_nonce, received_nonce, session_precomputed_key.clone())
                 },
                 _ => {
-                    return Err(HandlePacketError::from(
-                        HandlePacketErrorKind::CannotHandleCryptoData)
-                    )
+                    return Err(HandlePacketError::CannotHandleCryptoData)
 
                 }
             };
@@ -831,7 +822,7 @@ impl NetCrypto {
 
         let payload = match packet.get_payload(&session_precomputed_key, &packet_nonce) {
             Ok(payload) => payload,
-            Err(e) => return Err(e.context(HandlePacketErrorKind::GetPayload).into())
+            Err(e) => return Err(HandlePacketError::GetPayload(e))
         };
 
         // Find the time when the last acknowledged packet was sent
@@ -842,13 +833,13 @@ impl NetCrypto {
 
         // Remove all acknowledged packets and set new start index to the send buffer
         if let Err(e) = connection.send_array.set_buffer_start(payload.buffer_start) {
-            return Err(e.context(HandlePacketErrorKind::PacketsArrayError).into())
+            return Err(HandlePacketError::PacketsArrayError(e))
         }
 
         // And get the ID of the packet
         let packet_id = match payload.data.first() {
             Some(&packet_id) => packet_id,
-            None => return Err(HandlePacketError::from(HandlePacketErrorKind::DataEmpty))
+            None => return Err(HandlePacketError::DataEmpty)
         };
 
         if packet_id == PACKET_ID_KILL {
@@ -856,7 +847,7 @@ impl NetCrypto {
             self.connections.write().await.remove(&connection.peer_real_pk);
             self.clear_keys_by_addr(connection).await;
             return self.send_connection_status(connection, false)
-                .map_err(|e| e.context(HandlePacketErrorKind::SendToConnectionStatus).into()).await;
+                .map_err(HandlePacketError::SendToConnectionStatus).await;
         }
 
         // Update nonce if diff is big enough
@@ -865,7 +856,7 @@ impl NetCrypto {
         }
 
         self.send_connection_status(connection, true).await
-            .map_err(|e| e.context(HandlePacketErrorKind::SendToConnectionStatus))?;
+            .map_err(HandlePacketError::SendToConnectionStatus)?;
 
         connection.status = ConnectionStatus::Established {
             sent_nonce,
@@ -886,11 +877,11 @@ impl NetCrypto {
             connection.recv_array.set_buffer_end(payload.packet_number).ok();
         } else if packet_id > PACKET_ID_CRYPTO_RANGE_END && packet_id < PACKET_ID_LOSSY_RANGE_START {
             if let Err(e) = connection.recv_array.insert(payload.packet_number, RecvPacket::new(payload.data)) {
-                return Err(e.context(HandlePacketErrorKind::PacketsArrayError).into())
+                return Err(HandlePacketError::PacketsArrayError(e))
             }
             connection.packets_received += 1;
             self.process_ready_lossless_packets(&mut connection.recv_array, connection.peer_real_pk.clone()).await
-                .map_err(|e| e.context(HandlePacketErrorKind::SendToLossless))?;
+                .map_err(HandlePacketError::SendToLossless)?;
         } else if (PACKET_ID_LOSSY_RANGE_START..=PACKET_ID_LOSSY_RANGE_END).contains(&packet_id) {
             // Update end index of received buffer ignoring the error - we still
             // want to handle this packet even if connection is too slow
@@ -900,7 +891,7 @@ impl NetCrypto {
             let data = payload.data.clone();
 
             tx.send((peer_real_pk, data)).await
-                .map_err(|e| e.context(HandlePacketErrorKind::SendToLossy))?;
+                .map_err(HandlePacketError::SendToLossy)?;
         } else {
             return Err(HandlePacketError::packet_id(packet_id))
         };
@@ -946,7 +937,7 @@ impl NetCrypto {
         if let Some(addr) = connection.get_udp_addr() {
             if connection.is_udp_alive() {
                 return self.send_to_udp(addr, packet.into()).await
-                    .map_err(|e| e.context(SendPacketErrorKind::Udp).into())
+                    .map_err(SendPacketError::Udp)
             }
 
             let dht_packet: DhtPacket = packet.clone().into();
@@ -959,13 +950,13 @@ impl NetCrypto {
             if udp_attempt_should_be_made {
                 connection.update_udp_send_attempt_time();
                 self.send_to_udp(addr, dht_packet).await
-                    .map_err(|e| e.context(SendPacketErrorKind::Udp))?;
+                    .map_err(SendPacketError::Udp)?;
             }
         };
 
         let tcp_tx = self.tcp_tx.read().await.clone();
         maybe_send_bounded(tcp_tx, (packet.into(), connection.peer_dht_pk.clone())).await
-            .map_err(|e| e.context(SendPacketErrorKind::Tcp).into())
+            .map_err(SendPacketError::Tcp)
     }
 
     /// Send `CookieRequest` or `CryptoHandshake` packet if needed depending on
@@ -992,10 +983,10 @@ impl NetCrypto {
                 increment_nonce(sent_nonce);
                 packet
             },
-            _ => return Err(SendDataError::from(SendDataErrorKind::NoConnection)),
+            _ => return Err(SendDataError::NoConnection),
         };
         self.send_packet(Packet::CryptoData(packet), connection).await
-            .map_err(|e| e.context(SendDataErrorKind::SendTo).into())
+            .map_err(SendDataError::SendTo)
     }
 
     /// Send request packet with indices of not received packets.
@@ -1045,7 +1036,7 @@ impl NetCrypto {
 
                 if connection.is_established() {
                     self.send_connection_status(&connection, false).await
-                        .map_err(|e| e.context(SendDataErrorKind::SendToConnectionStatus))?;
+                        .map_err(SendDataError::SendToConnectionStatus)?;
                 }
 
                 if connection.is_established() || connection.is_not_confirmed() {
@@ -1056,7 +1047,7 @@ impl NetCrypto {
             }
 
             self.send_status_packet(&mut connection).await
-                .map_err(|e| e.context(SendDataErrorKind::SendTo))?;
+                .map_err(SendDataError::SendTo)?;
 
             if connection.is_not_confirmed() || connection.is_established() {
                 let should_send = connection.request_packet_sent_time.map_or(true, |time|
@@ -1106,8 +1097,8 @@ impl NetCrypto {
 
             let res =
                 match fut.await {
-                    Err(e) => Err(e.context(RunErrorKind::SendData).into()),
-                    Ok(Err(e)) => Err(e.context(RunErrorKind::SendData).into()),
+                    Err(e) => Err(RunError::Timeout(e)),
+                    Ok(Err(e)) => Err(RunError::SendData(e)),
                     Ok(Ok(_)) => Ok(()),
                 };
 
@@ -1305,7 +1296,7 @@ mod tests {
 
         let res = net_crypto.handle_cookie_request(&cookie_request).await;
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
+        assert_eq!(res.err().unwrap(), HandlePacketError::GetPayload(GetPayloadError::Decrypt));
     }
 
     #[tokio::test]
@@ -1445,7 +1436,7 @@ mod tests {
 
         let res = net_crypto.handle_udp_cookie_request(&cookie_request, addr).await;
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::GetPayload);
+        assert_eq!(res.err().unwrap(), HandlePacketError::GetPayload(GetPayloadError::Decrypt));
     }
 
     #[tokio::test]
@@ -1547,7 +1538,7 @@ mod tests {
 
         let res = net_crypto.handle_cookie_response(&mut connection, &cookie_response).await;
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::InvalidState);
+        assert_eq!(res.err().unwrap(), HandlePacketError::InvalidState);
     }
 
     #[tokio::test]
@@ -1713,7 +1704,7 @@ mod tests {
 
         let res = net_crypto.handle_udp_cookie_response(&cookie_response, addr).await;
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::NoUdpConnection { addr: "127.0.0.1:12345".parse().unwrap() });
+        assert_eq!(res.err().unwrap(), HandlePacketError::NoUdpConnection { addr: "127.0.0.1:12345".parse().unwrap() });
     }
 
     #[tokio::test]
@@ -1899,7 +1890,7 @@ mod tests {
 
         let res = net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).await;
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::InvalidState);
+        assert_eq!(res.err().unwrap(), HandlePacketError::InvalidState);
     }
 
     #[tokio::test]
@@ -1949,7 +1940,7 @@ mod tests {
 
         let res = net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).await;
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::BadSha512);
+        assert_eq!(res.err().unwrap(), HandlePacketError::BadSha512);
     }
 
     #[tokio::test]
@@ -2000,7 +1991,7 @@ mod tests {
 
         let res = net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).await;
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::CookieTimedOut);
+        assert_eq!(res.err().unwrap(), HandlePacketError::CookieTimedOut);
     }
 
     #[tokio::test]
@@ -2051,7 +2042,7 @@ mod tests {
 
         let res = net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).await;
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::InvalidRealPk);
+        assert_eq!(res.err().unwrap(), HandlePacketError::InvalidRealPk);
     }
 
     #[tokio::test]
@@ -2106,7 +2097,7 @@ mod tests {
 
         let res = net_crypto.handle_crypto_handshake(&mut connection, &crypto_handshake).await;
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::InvalidDhtPk);
+        assert_eq!(res.err().unwrap(), HandlePacketError::InvalidDhtPk);
 
         let (keys, _dht_pk_rx) = dht_pk_rx.into_future().await;
         let (received_real_pk, received_dht_pk) = keys.unwrap();
@@ -2519,7 +2510,7 @@ mod tests {
 
         let new_addr = "127.0.0.2:12345".parse().unwrap();
         let error = net_crypto.handle_udp_crypto_handshake(&crypto_handshake, new_addr).await.err().unwrap();
-        assert_eq!(*error.kind(), HandlePacketErrorKind::UnexpectedCryptoHandshake);
+        assert_eq!(error, HandlePacketError::UnexpectedCryptoHandshake);
     }
 
     #[tokio::test]
@@ -2569,7 +2560,7 @@ mod tests {
 
         let error = net_crypto.handle_udp_crypto_handshake(&crypto_handshake, addr).await.err().unwrap();
 
-        assert_eq!(*error.kind(), HandlePacketErrorKind::UnexpectedCryptoHandshake);
+        assert_eq!(error, HandlePacketError::UnexpectedCryptoHandshake);
     }
 
     #[tokio::test]
@@ -2828,7 +2819,7 @@ mod tests {
 
         let res = net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).await;
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::PacketsArrayError);
+        assert_eq!(res.err().unwrap(), HandlePacketError::PacketsArrayError(PacketsArrayError::OutsideIndex { index: 7 }));
 
         assert_eq!(unpack!(connection.status, ConnectionStatus::Established, received_nonce), received_nonce);
 
@@ -2974,7 +2965,7 @@ mod tests {
 
         let res = net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).await;
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::PacketsArrayError);
+        assert_eq!(res.err().unwrap(), HandlePacketError::PacketsArrayError(PacketsArrayError::TooBig { index: 32768 }));
 
         assert_eq!(unpack!(connection.status, ConnectionStatus::Established, received_nonce), received_nonce);
 
@@ -3231,7 +3222,7 @@ mod tests {
 
         let res = net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).await;
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::PacketId { id: 255 });
+        assert_eq!(res.err().unwrap(), HandlePacketError::PacketId { id: 255 });
 
         assert_eq!(unpack!(connection.status, ConnectionStatus::Established, received_nonce), received_nonce);
 
@@ -3287,7 +3278,7 @@ mod tests {
 
         let res = net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).await;
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::DataEmpty);
+        assert_eq!(res.err().unwrap(), HandlePacketError::DataEmpty);
 
         assert_eq!(unpack!(connection.status, ConnectionStatus::Established, received_nonce), received_nonce);
 
@@ -3337,7 +3328,7 @@ mod tests {
 
         let res = net_crypto.handle_crypto_data(&mut connection, &crypto_data, /* udp */ true).await;
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), HandlePacketErrorKind::CannotHandleCryptoData);
+        assert_eq!(res.err().unwrap(), HandlePacketError::CannotHandleCryptoData);
     }
 
     async fn handle_crypto_data_lossy_test<'a, R, F>(handle_function: F)
@@ -4311,7 +4302,7 @@ mod tests {
         let peer_real_pk = SecretKey::generate(&mut rng).public_key();
 
         let error = net_crypto.send_lossless(peer_real_pk, vec![16, 42]).await.err().unwrap();
-        assert_eq!(*error.kind(), SendLosslessPacketErrorKind::NoConnection);
+        assert_eq!(error, SendLosslessPacketError::NoConnection);
     }
 
     #[tokio::test]
@@ -4339,7 +4330,7 @@ mod tests {
         let peer_real_pk = SecretKey::generate(&mut rng).public_key();
 
         let error = net_crypto.send_lossless(peer_real_pk, vec![10, 42]).await.err().unwrap();
-        assert_eq!(*error.kind(), SendLosslessPacketErrorKind::InvalidPacketId);
+        assert_eq!(error, SendLosslessPacketError::InvalidPacketId);
     }
 
     #[tokio::test]
@@ -4620,7 +4611,7 @@ mod tests {
         let peer_real_pk = SecretKey::generate(&mut rng).public_key();
 
         let error = net_crypto.kill_connection(peer_real_pk).await.err().unwrap();
-        assert_eq!(*error.kind(), KillConnectionErrorKind::NoConnection);
+        assert_eq!(error, KillConnectionError::NoConnection);
     }
 
     #[tokio::test]

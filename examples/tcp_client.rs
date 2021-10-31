@@ -9,7 +9,7 @@ use tox_core::relay::handshake::make_client_handshake;
 use tox_core::relay::codec;
 use tox_core::stats::Stats;
 
-use failure::{Error, err_msg};
+use anyhow::Error;
 
 use hex::FromHex;
 
@@ -81,7 +81,7 @@ async fn create_client(mut rx: mpsc::Receiver<Packet>, tx: mpsc::Sender<Packet>)
                 tx.clone().send(Packet::PongResponse(
                     PongResponse { ping_id: ping.ping_id }
                 ))
-                .map_err(|_| err_msg("Could not send pong") )
+                .map_err(|_| Error::msg("Could not send pong") )
                 .await?;
             }
         }
