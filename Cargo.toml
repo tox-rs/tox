@@ -28,6 +28,7 @@ assets = [
     ["README.md", "/usr/share/doc/tox-node/README", "644"],
     ["dpkg/tox-node.service", "/lib/systemd/system/", "644"],
     ["dpkg/config.yml", "/etc/tox-node/", "644"],
+    ["dpkg/usr.bin.tox-node", "/etc/apparmor.d/", "644"],
 ]
 conf-files = ["/etc/tox-node/config.yml"]
 maintainer-scripts = "dpkg/info"
