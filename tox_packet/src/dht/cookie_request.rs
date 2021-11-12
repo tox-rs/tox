@@ -6,6 +6,8 @@ use super::*;
 use aead::{Aead, Error as AeadError};
 use crypto_box::SalsaBox;
 use nom::number::complete::be_u64;
+use nom::bytes::complete::{tag, take};
+use nom::combinator::eof;
 
 use tox_binary_io::*;
 use tox_crypto::*;
@@ -59,13 +61,13 @@ impl ToBytes for CookieRequest {
 }
 
 impl FromBytes for CookieRequest {
-    named!(from_bytes<CookieRequest>, do_parse!(
-        tag!("\x18") >>
-        pk: call!(PublicKey::from_bytes) >>
-        nonce: call!(Nonce::from_bytes) >>
-        payload: take!(88) >>
-        (CookieRequest { pk, nonce, payload: payload.to_vec() })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x18")(input)?;
+        let (input, pk) = PublicKey::from_bytes(input)?;
+        let (input, nonce) = Nonce::from_bytes(input)?;
+        let (input, payload) = take(88usize)(input)?;
+        Ok((input, CookieRequest { pk, nonce, payload: payload.to_vec() }))
+    }
 }
 
 impl CookieRequest {
@@ -136,13 +138,13 @@ impl ToBytes for CookieRequestPayload {
 }
 
 impl FromBytes for CookieRequestPayload {
-    named!(from_bytes<CookieRequestPayload>, do_parse!(
-        pk: call!(PublicKey::from_bytes) >>
-        take!(32) >> // padding
-        id: be_u64 >>
-        eof!() >>
-        (CookieRequestPayload { pk, id })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, pk) = PublicKey::from_bytes(input)?;
+        let (input, _) = take(32usize)(input)?; // padding
+        let (input, id) = be_u64(input)?;
+        let (input, _) = eof(input)?;
+        Ok((input, CookieRequestPayload { pk, id }))
+    }
 }
 
 #[cfg(test)]

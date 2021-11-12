@@ -9,6 +9,8 @@ use nom::{
 };
 
 use tox_binary_io::*;
+use nom::combinator::verify;
+use nom::bytes::complete::tag;
 
 /** Sent by both client and server, only server will respond.
 When server receives this packet it may respond with the version of the library
@@ -57,12 +59,12 @@ impl ToBytes for BootstrapInfo {
 }
 
 impl FromBytes for BootstrapInfo {
-    named!(from_bytes<BootstrapInfo>, do_parse!(
-        tag!(&[0xf0][..]) >>
-        version: be_u32 >>
-        motd: verify!(rest, |motd: &[u8]| motd.len() <= BOOSTRAP_SERVER_MAX_MOTD_LENGTH) >>
-        (BootstrapInfo { version, motd: motd.to_vec() })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag(&[0xf0][..])(input)?;
+        let (input, version) = be_u32(input)?;
+        let (input, motd) = verify(rest, |motd: &[u8]| motd.len() <= BOOSTRAP_SERVER_MAX_MOTD_LENGTH)(input)?;
+        Ok((input, BootstrapInfo { version, motd: motd.to_vec() }))
+    }
 }
 
 #[cfg(test)]

@@ -4,6 +4,7 @@
 use super::*;
 
 use nom::number::complete::{be_u16, be_u32};
+use nom::bytes::complete::tag;
 
 use tox_crypto::*;
 
@@ -43,24 +44,24 @@ pub struct NewPeer {
 }
 
 impl FromBytes for NewPeer {
-    named!(from_bytes<NewPeer>, do_parse!(
-        tag!("\x63") >>
-        conference_id: be_u16 >>
-        peer_id: be_u16 >>
-        message_id: be_u32 >>
-        tag!("\x10") >>
-        new_peer_id: be_u16 >>
-        long_term_pk: call!(PublicKey::from_bytes) >>
-        dht_pk: call!(PublicKey::from_bytes) >>
-        (NewPeer {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x63")(input)?;
+        let (input, conference_id) = be_u16(input)?;
+        let (input, peer_id) = be_u16(input)?;
+        let (input, message_id) = be_u32(input)?;
+        let (input, _) = tag("\x10")(input)?;
+        let (input, new_peer_id) = be_u16(input)?;
+        let (input, long_term_pk) = PublicKey::from_bytes(input)?;
+        let (input, dht_pk) = PublicKey::from_bytes(input)?;
+        Ok((input, NewPeer {
             conference_id,
             peer_id,
             message_id,
             new_peer_id,
             long_term_pk,
             dht_pk,
-        })
-    ));
+        }))
+    }
 }
 
 impl ToBytes for NewPeer {

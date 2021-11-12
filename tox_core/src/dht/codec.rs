@@ -10,7 +10,7 @@ use crate::stats::*;
 use bytes::BytesMut;
 use cookie_factory::GenError;
 use thiserror::Error;
-use nom::{error::ErrorKind, Err};
+use nom::error::Error as NomError;
 use tokio_util::codec::{Decoder, Encoder};
 
 /// A serialized `Packet` should be not longer than 2048 bytes.
@@ -29,7 +29,7 @@ pub enum DecodeError {
     #[error("Deserialize Packet error: {:?}, packet: {:?}", error, packet)]
     Deserialize {
         /// Parsing error.
-        error: nom::Err<(Vec<u8>, ErrorKind)>,
+        error: nom::Err<NomError<Vec<u8>>>,
         /// Received packet.
         packet: Vec<u8>,
     },
@@ -43,8 +43,8 @@ impl DecodeError {
         DecodeError::TooBigPacket { len }
     }
 
-    pub(crate) fn deserialize(e: Err<(&[u8], ErrorKind)>, packet: Vec<u8>) -> DecodeError {
-        DecodeError::Deserialize { error: e.to_owned(), packet }
+    pub(crate) fn deserialize(e: nom::Err<NomError<&[u8]>>, packet: Vec<u8>) -> DecodeError {
+        DecodeError::Deserialize { error: e.map(|e| NomError::new(e.input.to_vec(), e.code)), packet }
     }
 }
 
@@ -151,6 +151,7 @@ mod tests {
     use rand::thread_rng;
     use tox_packet::onion::*;
     use crypto_box::{SalsaBox, SecretKey, aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned}};
+    use nom::{Err, error::ErrorKind as NomErrorKind};
 
     const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - xsalsa20poly1305::NONCE_SIZE;
     const ONION_RETURN_2_PAYLOAD_SIZE: usize = ONION_RETURN_2_SIZE - xsalsa20poly1305::NONCE_SIZE;
@@ -327,7 +328,7 @@ mod tests {
 
         let res = codec.decode(&mut buf);
         // not enough bytes to decode EncryptedPacket
-        assert!(matches!(res, Err(DecodeError::Deserialize { error: Err::Error((_, ErrorKind::Alt)), packet: _ })));
+        assert!(matches!(res, Err(DecodeError::Deserialize { error: Err::Error(NomError { input: _, code: NomErrorKind::Tag }), packet: _ })));
     }
 
     #[test]

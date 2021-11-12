@@ -9,8 +9,12 @@ use std::net::{
 
 use nom::{
     IResult,
-    do_parse, alt, switch, terminated, map, cond, call, take,
+    branch::alt,
+    combinator::{map, flat_map, cond},
+    error::{ErrorKind, make_error},
     number::complete::{be_u16, le_u8},
+    sequence::terminated,
+    bytes::complete::take
 };
 use cookie_factory::{do_gen, gen_slice, gen_cond, gen_call, gen_be_u8, gen_be_u16};
 
@@ -101,37 +105,38 @@ impl IpPort {
 
     /// Parse `IpPort` with UDP protocol type with optional padding.
     pub fn from_udp_bytes(input: &[u8], padding: IpPortPadding) -> IResult<&[u8], IpPort> {
-        do_parse!(input,
-            ip_addr: switch!(le_u8,
-                2 => terminated!(
-                    map!(Ipv4Addr::from_bytes, IpAddr::V4),
-                    cond!(padding == IpPortPadding::WithPadding, take!(IPV4_PADDING_SIZE))
-                ) |
-                10 => map!(Ipv6Addr::from_bytes, IpAddr::V6)
-            ) >>
-            port: be_u16 >>
-            (IpPort { protocol: ProtocolType::Udp, ip_addr, port })
-        )
+        let (input, ip_addr) = flat_map(le_u8, |b| move |input| match b {
+            2 => terminated(
+                map(Ipv4Addr::from_bytes, IpAddr::V4),
+                cond(padding == IpPortPadding::WithPadding, take(IPV4_PADDING_SIZE))
+            )(input),
+            10 => map(Ipv6Addr::from_bytes, IpAddr::V6)(input),
+            _ => Err(nom::Err::Error(make_error(input, ErrorKind::Switch))),
+        })(input)?;
+        let (input, port) = be_u16(input)?;
+        Ok((input, IpPort { protocol: ProtocolType::Udp, ip_addr, port }))
     }
 
     /// Parse `IpPort` with TCP protocol type with optional padding.
     pub fn from_tcp_bytes(input: &[u8], padding: IpPortPadding) -> IResult<&[u8], IpPort> {
-        do_parse!(input,
-            ip_addr: switch!(le_u8,
-                130 => terminated!(
-                    map!(Ipv4Addr::from_bytes, IpAddr::V4),
-                    cond!(padding == IpPortPadding::WithPadding, take!(IPV4_PADDING_SIZE))
-                ) |
-                138 => map!(Ipv6Addr::from_bytes, IpAddr::V6)
-            ) >>
-            port: be_u16 >>
-            (IpPort { protocol: ProtocolType::Tcp, ip_addr, port })
-        )
+        let (input, ip_addr) = flat_map(le_u8, |b| move |input| match b {
+            130 => terminated(
+                map(Ipv4Addr::from_bytes, IpAddr::V4),
+                cond(padding == IpPortPadding::WithPadding, take(IPV4_PADDING_SIZE))
+            )(input),
+            138 => map(Ipv6Addr::from_bytes, IpAddr::V6)(input),
+            _ => Err(nom::Err::Error(make_error(input, ErrorKind::Switch))),
+        })(input)?;
+        let (input, port) = be_u16(input)?;
+        Ok((input, IpPort { protocol: ProtocolType::Tcp, ip_addr, port }))
     }
 
     /// Parse `IpPort` with optional padding.
     pub fn from_bytes(input: &[u8], padding: IpPortPadding) -> IResult<&[u8], IpPort> {
-        alt!(input, call!(IpPort::from_udp_bytes, padding) | call!(IpPort::from_tcp_bytes, padding))
+        alt((
+            |input| IpPort::from_udp_bytes(input, padding),
+            |input| IpPort::from_tcp_bytes(input, padding),
+        ))(input)
     }
 
     /// Write `IpPort` with UDP protocol type with optional padding.

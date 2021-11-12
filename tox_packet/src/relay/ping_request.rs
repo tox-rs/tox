@@ -5,7 +5,8 @@ use super::*;
 
 use tox_binary_io::*;
 
-use nom::number::streaming::be_u64;
+use nom::number::complete::be_u64;
+use nom::bytes::complete::tag;
 
 /** Sent by both client and server, both will respond.
 Ping packets are used to know if the other side of the connection is still
@@ -35,11 +36,11 @@ pub struct PingRequest {
 }
 
 impl FromBytes for PingRequest {
-    named!(from_bytes<PingRequest>, do_parse!(
-        tag!("\x04") >>
-        ping_id: be_u64 >>
-        (PingRequest { ping_id })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x04")(input)?;
+        let (input, ping_id) = be_u64(input)?;
+        Ok((input, PingRequest { ping_id }))
+    }
 }
 
 impl ToBytes for PingRequest {

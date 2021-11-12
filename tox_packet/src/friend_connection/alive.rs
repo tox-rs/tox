@@ -3,6 +3,8 @@
 
 use super::*;
 
+use nom::bytes::complete::tag;
+
 /// Id of the ping packet.
 pub const PACKET_ID_ALIVE: u8 = 0x10;
 
@@ -18,10 +20,10 @@ and destroyed.
 pub struct Alive;
 
 impl FromBytes for Alive {
-    named!(from_bytes<Alive>, do_parse!(
-        tag!(&[PACKET_ID_ALIVE][..]) >>
-        (Alive)
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag(&[PACKET_ID_ALIVE][..])(input)?;
+        Ok((input, Alive))
+    }
 }
 
 impl ToBytes for Alive {

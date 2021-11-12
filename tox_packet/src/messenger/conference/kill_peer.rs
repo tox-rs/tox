@@ -3,6 +3,7 @@
 
 use super::*;
 use nom::number::complete::{be_u16, be_u32};
+use nom::bytes::complete::tag;
 
 /** KillPeer is a struct that holds info to send kill peer message to a conference.
 
@@ -33,20 +34,20 @@ pub struct KillPeer {
 }
 
 impl FromBytes for KillPeer {
-    named!(from_bytes<KillPeer>, do_parse!(
-        tag!("\x63") >>
-        conference_id: be_u16 >>
-        peer_id: be_u16 >>
-        message_id: be_u32 >>
-        tag!("\x11") >>
-        kill_peer_id: be_u16 >>
-        (KillPeer {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x63")(input)?;
+        let (input, conference_id) = be_u16(input)?;
+        let (input, peer_id) = be_u16(input)?;
+        let (input, message_id) = be_u32(input)?;
+        let (input, _) = tag("\x11")(input)?;
+        let (input, kill_peer_id) = be_u16(input)?;
+        Ok((input, KillPeer {
             conference_id,
             peer_id,
             message_id,
             kill_peer_id,
-        })
-    ));
+        }))
+    }
 }
 
 impl ToBytes for KillPeer {

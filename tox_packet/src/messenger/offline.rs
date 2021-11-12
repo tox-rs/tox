@@ -3,6 +3,8 @@
 
 use super::*;
 
+use nom::bytes::complete::tag;
+
 /** Offline is a struct that holds nothing.
 
 This packet is used to notify that a friend is being deleted.
@@ -15,10 +17,10 @@ be shown as Online.
 pub struct Offline;
 
 impl FromBytes for Offline {
-    named!(from_bytes<Offline>, do_parse!(
-        tag!("\x19") >>
-        (Offline)
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x19")(input)?;
+        Ok((input, Offline))
+    }
 }
 
 impl ToBytes for Offline {

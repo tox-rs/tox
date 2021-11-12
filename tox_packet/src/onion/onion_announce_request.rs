@@ -8,10 +8,9 @@ use tox_crypto::*;
 use crate::dht::*;
 
 use nom::{
-    flat_map,
     number::complete::le_u64,
-    combinator::{rest, rest_len},
-    bytes::complete::take
+    combinator::{rest, rest_len, map_parser, verify, eof},
+    bytes::complete::{take, tag}
 };
 use sha2::{Digest, Sha256};
 use sha2::digest::generic_array::typenum::marker_traits::Unsigned;
@@ -57,17 +56,17 @@ pub struct InnerOnionAnnounceRequest {
 }
 
 impl FromBytes for InnerOnionAnnounceRequest {
-    named!(from_bytes<InnerOnionAnnounceRequest>, do_parse!(
-        tag!(&[0x83][..]) >>
-        nonce: call!(Nonce::from_bytes) >>
-        pk: call!(PublicKey::from_bytes) >>
-        payload: rest >>
-        (InnerOnionAnnounceRequest {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag(&[0x83][..])(input)?;
+        let (input, nonce) = Nonce::from_bytes(input)?;
+        let (input, pk) = PublicKey::from_bytes(input)?;
+        let (input, payload) = rest(input)?;
+        Ok((input, InnerOnionAnnounceRequest {
             nonce,
             pk,
             payload: payload.to_vec()
-        })
-    ));
+        }))
+    }
 }
 
 impl ToBytes for InnerOnionAnnounceRequest {
@@ -142,12 +141,12 @@ pub struct OnionAnnounceRequest {
 }
 
 impl FromBytes for OnionAnnounceRequest {
-    named!(from_bytes<OnionAnnounceRequest>, do_parse!(
-        rest_len: verify!(rest_len, |len| *len <= ONION_MAX_PACKET_SIZE && *len >= ONION_RETURN_3_SIZE) >>
-        inner: flat_map!(take(rest_len - ONION_RETURN_3_SIZE), InnerOnionAnnounceRequest::from_bytes) >>
-        onion_return: call!(OnionReturn::from_bytes) >>
-        (OnionAnnounceRequest { inner, onion_return })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, rest_len) = verify(rest_len, |len| *len <= ONION_MAX_PACKET_SIZE && *len >= ONION_RETURN_3_SIZE)(input)?;
+        let (input, inner) = map_parser(take(rest_len - ONION_RETURN_3_SIZE), InnerOnionAnnounceRequest::from_bytes)(input)?;
+        let (input, onion_return) = OnionReturn::from_bytes(input)?;
+        Ok((input, OnionAnnounceRequest { inner, onion_return }))
+    }
 }
 
 impl ToBytes for OnionAnnounceRequest {
@@ -185,14 +184,14 @@ pub struct OnionAnnounceRequestPayload {
 }
 
 impl FromBytes for OnionAnnounceRequestPayload {
-    named!(from_bytes<OnionAnnounceRequestPayload>, do_parse!(
-        ping_id: call!(PingId::from_bytes) >>
-        search_pk: call!(PublicKey::from_bytes) >>
-        data_pk: call!(PublicKey::from_bytes) >>
-        sendback_data: le_u64 >>
-        eof!() >>
-        (OnionAnnounceRequestPayload { ping_id, search_pk, data_pk, sendback_data })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, ping_id) = PingId::from_bytes(input)?;
+        let (input, search_pk) = PublicKey::from_bytes(input)?;
+        let (input, data_pk) = PublicKey::from_bytes(input)?;
+        let (input, sendback_data) = le_u64(input)?;
+        let (input, _) = eof(input)?;
+        Ok((input, OnionAnnounceRequestPayload { ping_id, search_pk, data_pk, sendback_data }))
+    }
 }
 
 impl ToBytes for OnionAnnounceRequestPayload {

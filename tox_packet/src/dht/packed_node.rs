@@ -2,11 +2,9 @@
 */
 use super::*;
 
-use nom::{
-    switch,
-    value,
-    number::complete::{le_u8, be_u16}
-};
+use nom::number::complete::{le_u8, be_u16};
+use nom::combinator::flat_map;
+use nom::error::{ErrorKind, make_error};
 use cookie_factory::gen_if_else;
 
 use std::net::{
@@ -78,16 +76,17 @@ address.
 */
 
 impl FromBytes for PackedNode {
-    named!(from_bytes<PackedNode>, do_parse!(
-        addr: switch!(le_u8,
-            2  => map!(Ipv4Addr::from_bytes, IpAddr::V4) |
-            10 => map!(Ipv6Addr::from_bytes, IpAddr::V6)
-        ) >>
-        port: be_u16 >>
-        saddr: value!(SocketAddr::new(addr, port)) >>
-        pk: call!(PublicKey::from_bytes) >>
-        (PackedNode::new(saddr, pk))
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, addr) = flat_map(le_u8, |b| move |input| match b {
+            2 => map(Ipv4Addr::from_bytes, IpAddr::V4)(input),
+            10 => map(Ipv6Addr::from_bytes, IpAddr::V6)(input),
+            _ => Err(nom::Err::Error(make_error(input, ErrorKind::Switch))),
+        })(input)?;
+        let (input, port) = be_u16(input)?;
+        let saddr = SocketAddr::new(addr, port);
+        let (input, pk) = PublicKey::from_bytes(input)?;
+        Ok((input, PackedNode::new(saddr, pk)))
+    }
 }
 
 impl PackedNode {
@@ -123,19 +122,18 @@ impl PackedNode {
         )
     }
 
-    named!(
-        #[allow(unused_variables)]
-        #[doc = "from_bytes for TCP."],
-        pub from_tcp_bytes<PackedNode>, do_parse!(
-            addr: switch!(le_u8,
-                130  => map!(Ipv4Addr::from_bytes, IpAddr::V4) |
-                138 => map!(Ipv6Addr::from_bytes, IpAddr::V6)
-            ) >>
-            port: be_u16 >>
-            saddr: value!(SocketAddr::new(addr, port)) >>
-            pk: call!(PublicKey::from_bytes) >>
-            (PackedNode::new(saddr, pk))
-        ));
+    /// from_bytes for TCP
+    pub fn from_tcp_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, addr) = flat_map(le_u8, |b| move |input| match b {
+            130 => map(Ipv4Addr::from_bytes, IpAddr::V4)(input),
+            138 => map(Ipv6Addr::from_bytes, IpAddr::V6)(input),
+            _ => Err(nom::Err::Error(make_error(input, ErrorKind::Switch))),
+        })(input)?;
+        let (input, port) = be_u16(input)?;
+        let saddr = SocketAddr::new(addr, port);
+        let (input, pk) = PublicKey::from_bytes(input)?;
+        Ok((input, PackedNode::new(saddr, pk)))
+    }
 
     /// Get an IP type from the `PackedNode`.
     pub fn ip_type(&self) -> u8 {

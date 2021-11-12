@@ -5,6 +5,7 @@ use super::*;
 
 use tox_binary_io::*;
 use crate::relay::connection_id::ConnectionId;
+use nom::bytes::complete::tag;
 
 /** Sent by server to client.
 Tell the client that connection_id is now connected meaning the other
@@ -25,11 +26,11 @@ pub struct ConnectNotification {
 }
 
 impl FromBytes for ConnectNotification {
-    named!(from_bytes<ConnectNotification>, do_parse!(
-        tag!("\x02") >>
-        connection_id: call!(ConnectionId::from_bytes) >>
-        (ConnectNotification { connection_id })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x02")(input)?;
+        let (input, connection_id) = ConnectionId::from_bytes(input)?;
+        Ok((input, ConnectNotification { connection_id }))
+    }
 }
 
 impl ToBytes for ConnectNotification {

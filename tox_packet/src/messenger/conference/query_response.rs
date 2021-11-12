@@ -4,6 +4,9 @@
 use super::*;
 
 use nom::number::complete::{be_u8, be_u16};
+use nom::bytes::complete::tag;
+use nom::multi::many0;
+use nom::combinator::map_res;
 use std::str;
 
 use tox_crypto::*;
@@ -32,16 +35,16 @@ pub struct QueryResponse {
 }
 
 impl FromBytes for QueryResponse {
-    named!(from_bytes<QueryResponse>, do_parse!(
-        tag!("\x62") >>
-        conference_id: be_u16 >>
-        tag!("\x09") >>
-        peer_infos: many0!(PeerInfo::from_bytes) >>
-        (QueryResponse {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x62")(input)?;
+        let (input, conference_id) = be_u16(input)?;
+        let (input, _) = tag("\x09")(input)?;
+        let (input, peer_infos) = many0(PeerInfo::from_bytes)(input)?;
+        Ok((input, QueryResponse {
             conference_id,
             peer_infos: peer_infos.to_vec()
-        })
-    ));
+        }))
+    }
 }
 
 impl ToBytes for QueryResponse {
@@ -87,19 +90,19 @@ pub struct PeerInfo {
 }
 
 impl FromBytes for PeerInfo {
-    named!(from_bytes<PeerInfo>, do_parse!(
-        peer_id: be_u16 >>
-        real_pk: call!(PublicKey::from_bytes) >>
-        temp_pk: call!(PublicKey::from_bytes) >>
-        length: be_u8 >>
-        nickname: map_res!(take!(length), str::from_utf8) >>
-        (PeerInfo {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, peer_id) = be_u16(input)?;
+        let (input, real_pk) = PublicKey::from_bytes(input)?;
+        let (input, temp_pk) = PublicKey::from_bytes(input)?;
+        let (input, length) = be_u8(input)?;
+        let (input, nickname) = map_res(take(length), str::from_utf8)(input)?;
+        Ok((input, PeerInfo {
             peer_id,
             real_pk,
             temp_pk,
             nickname: nickname.to_string(),
-        })
-    ));
+        }))
+    }
 }
 
 impl ToBytes for PeerInfo {

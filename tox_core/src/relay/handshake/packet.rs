@@ -5,6 +5,7 @@ handshake using [`diagram`](https://zetok.github.io/tox-spec/#handshake-diagram)
 
 use tox_binary_io::*;
 use tox_crypto::*;
+use nom::bytes::streaming::take;
 
 /** The request of the client to create a TCP handshake.
 
@@ -36,12 +37,12 @@ pub struct ClientHandshake {
 pub const CLIENT_HANDSHAKE_SIZE: usize = 128;
 
 impl FromBytes for ClientHandshake {
-    named!(from_bytes<ClientHandshake>, do_parse!(
-        pk: call!(PublicKey::from_bytes) >>
-        nonce: call!(Nonce::from_bytes) >>
-        payload: take!(ENC_PAYLOAD_SIZE) >>
-        (ClientHandshake { pk, nonce, payload: payload.to_vec() })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, pk) = PublicKey::from_bytes(input)?;
+        let (input, nonce) = Nonce::from_bytes(input)?;
+        let (input, payload) = take(ENC_PAYLOAD_SIZE)(input)?;
+        Ok((input, ClientHandshake { pk, nonce, payload: payload.to_vec() }))
+    }
 }
 
 impl ToBytes for ClientHandshake {
@@ -81,11 +82,11 @@ pub struct ServerHandshake {
 pub const SERVER_HANDSHAKE_SIZE: usize = 96;
 
 impl FromBytes for ServerHandshake {
-    named!(from_bytes<ServerHandshake>, do_parse!(
-        nonce: call!(Nonce::from_bytes) >>
-        payload: take!(ENC_PAYLOAD_SIZE) >>
-        (ServerHandshake { nonce, payload: payload.to_vec() })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, nonce) = Nonce::from_bytes(input)?;
+        let (input, payload) = take(ENC_PAYLOAD_SIZE)(input)?;
+        Ok((input, ServerHandshake { nonce, payload: payload.to_vec() }))
+    }
 }
 
 impl ToBytes for ServerHandshake {
@@ -132,11 +133,11 @@ pub const PAYLOAD_SIZE: usize = 56;
 pub const ENC_PAYLOAD_SIZE: usize = 72;
 
 impl FromBytes for HandshakePayload {
-    named!(from_bytes<HandshakePayload>, do_parse!(
-        pk: call!(PublicKey::from_bytes) >>
-        nonce: call!(Nonce::from_bytes) >>
-        (HandshakePayload { session_pk: pk, session_nonce: nonce })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, pk) = PublicKey::from_bytes(input)?;
+        let (input, nonce) = Nonce::from_bytes(input)?;
+        Ok((input, HandshakePayload { session_pk: pk, session_nonce: nonce }))
+    }
 }
 
 impl ToBytes for HandshakePayload {

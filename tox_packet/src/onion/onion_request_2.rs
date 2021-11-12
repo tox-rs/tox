@@ -3,7 +3,8 @@
 
 use super::*;
 
-use nom::combinator::rest_len;
+use nom::combinator::{rest_len, verify, eof};
+use nom::bytes::complete::{tag, take};
 use crypto_box::{SalsaBox, aead::Error as AeadError};
 
 use tox_binary_io::*;
@@ -40,21 +41,21 @@ pub struct OnionRequest2 {
 }
 
 impl FromBytes for OnionRequest2 {
-    named!(from_bytes<OnionRequest2>, do_parse!(
-        verify!(rest_len, |len| *len <= ONION_MAX_PACKET_SIZE) >>
-        tag!(&[0x82][..]) >>
-        nonce: call!(Nonce::from_bytes) >>
-        temporary_pk: call!(PublicKey::from_bytes) >>
-        rest_len: verify!(rest_len, |rest_len| *rest_len >= ONION_RETURN_2_SIZE) >>
-        payload: take!(rest_len - ONION_RETURN_2_SIZE) >>
-        onion_return: call!(OnionReturn::from_bytes) >>
-        (OnionRequest2 {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = verify(rest_len, |len| *len <= ONION_MAX_PACKET_SIZE)(input)?;
+        let (input, _) = tag(&[0x82][..])(input)?;
+        let (input, nonce) = Nonce::from_bytes(input)?;
+        let (input, temporary_pk) = PublicKey::from_bytes(input)?;
+        let (input, rest_len) = verify(rest_len, |rest_len| *rest_len >= ONION_RETURN_2_SIZE)(input)?;
+        let (input, payload) = take(rest_len - ONION_RETURN_2_SIZE)(input)?;
+        let (input, onion_return) = OnionReturn::from_bytes(input)?;
+        Ok((input, OnionRequest2 {
             nonce,
             temporary_pk,
             payload: payload.to_vec(),
             onion_return
-        })
-    ));
+        }))
+    }
 }
 
 impl ToBytes for OnionRequest2 {
@@ -129,15 +130,15 @@ pub struct OnionRequest2Payload {
 }
 
 impl FromBytes for OnionRequest2Payload {
-    named!(from_bytes<OnionRequest2Payload>, do_parse!(
-        ip_port: call!(IpPort::from_udp_bytes, IpPortPadding::WithPadding) >>
-        inner: call!(InnerOnionRequest::from_bytes) >>
-        eof!() >>
-        (OnionRequest2Payload {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, ip_port) = IpPort::from_udp_bytes(input, IpPortPadding::WithPadding)?;
+        let (input, inner) = InnerOnionRequest::from_bytes(input)?;
+        let (input, _) = eof(input)?;
+        Ok((input, OnionRequest2Payload {
             ip_port,
             inner
-        })
-    ));
+        }))
+    }
 }
 
 impl ToBytes for OnionRequest2Payload {

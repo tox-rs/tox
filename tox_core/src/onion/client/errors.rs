@@ -5,7 +5,7 @@ use tox_packet::dht::GetPayloadError;
 use crate::{dht::server::errors::PingError, relay::client::ConnectionError};
 
 /// Error that can happen when handling `OnionAnnounceResponse` packet.
-#[derive(Clone, Debug, Eq, PartialEq, Error)]
+#[derive(Debug, PartialEq, Error)]
 pub enum HandleAnnounceResponseError {
     /// Invalid request ID when handling OnionAnnounceResponse.
     #[error("Invalid request ID when handling OnionAnnounceResponse")]

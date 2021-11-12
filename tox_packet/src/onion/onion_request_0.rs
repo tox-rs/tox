@@ -9,7 +9,8 @@ use tox_binary_io::*;
 use tox_crypto::*;
 use crate::dht::*;
 
-use nom::combinator::{rest, rest_len};
+use nom::combinator::{rest, rest_len, verify};
+use nom::bytes::complete::tag;
 
 /// Encrypted payload should contain `IpPort`, `PublicKey` and inner encrypted
 /// payload that should contain at least `IpPort` struct.
@@ -42,18 +43,18 @@ pub struct OnionRequest0 {
 }
 
 impl FromBytes for OnionRequest0 {
-    named!(from_bytes<OnionRequest0>, do_parse!(
-        verify!(rest_len, |len| *len <= ONION_MAX_PACKET_SIZE) >>
-        tag!(&[0x80][..]) >>
-        nonce: call!(Nonce::from_bytes) >>
-        temporary_pk: call!(PublicKey::from_bytes) >>
-        payload: verify!(rest, |payload: &[u8]| payload.len() >= ONION_REQUEST_0_MIN_PAYLOAD_SIZE) >>
-        (OnionRequest0 {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = verify(rest_len, |len| *len <= ONION_MAX_PACKET_SIZE)(input)?;
+        let (input, _) = tag(&[0x80][..])(input)?;
+        let (input, nonce) = Nonce::from_bytes(input)?;
+        let (input, temporary_pk) = PublicKey::from_bytes(input)?;
+        let (input, payload) = verify(rest, |payload: &[u8]| payload.len() >= ONION_REQUEST_0_MIN_PAYLOAD_SIZE)(input)?;
+        Ok((input, OnionRequest0 {
             nonce,
             temporary_pk,
             payload: payload.to_vec()
-        })
-    ));
+        }))
+    }
 }
 
 impl ToBytes for OnionRequest0 {
@@ -132,16 +133,16 @@ pub struct OnionRequest0Payload {
 }
 
 impl FromBytes for OnionRequest0Payload{
-    named!(from_bytes<OnionRequest0Payload>, do_parse!(
-        ip_port: call!(IpPort::from_udp_bytes, IpPortPadding::WithPadding) >>
-        temporary_pk: call!(PublicKey::from_bytes) >>
-        inner: rest >>
-        (OnionRequest0Payload {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, ip_port) = IpPort::from_udp_bytes(input, IpPortPadding::WithPadding)?;
+        let (input, temporary_pk) = PublicKey::from_bytes(input)?;
+        let (input, inner) = rest(input)?;
+        Ok((input, OnionRequest0Payload {
             ip_port,
             temporary_pk,
             inner: inner.to_vec()
-        })
-    ));
+        }))
+    }
 }
 
 impl ToBytes for OnionRequest0Payload {

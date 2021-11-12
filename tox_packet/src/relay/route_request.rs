@@ -5,6 +5,7 @@ use super::*;
 
 use tox_binary_io::*;
 use tox_crypto::*;
+use nom::bytes::complete::tag;
 
 /** Sent by client to server.
 Send a routing request to the server that we want to connect
@@ -26,11 +27,11 @@ pub struct RouteRequest {
 }
 
 impl FromBytes for RouteRequest {
-    named!(from_bytes<RouteRequest>, do_parse!(
-        tag!("\x00") >>
-        pk: call!(PublicKey::from_bytes) >>
-        (RouteRequest { pk })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x00")(input)?;
+        let (input, pk) = PublicKey::from_bytes(input)?;
+        Ok((input, RouteRequest { pk }))
+    }
 }
 
 impl ToBytes for RouteRequest {

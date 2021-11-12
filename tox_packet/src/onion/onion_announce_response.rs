@@ -9,9 +9,10 @@ use tox_crypto::*;
 use crate::dht::*;
 
 use nom::{
-    many0,
     number::complete::le_u64,
-    combinator::{rest, rest_len},
+    combinator::{rest, rest_len, verify, success, eof},
+    bytes::complete::tag,
+    multi::many0,
 };
 
 /** It's used to respond to `OnionAnnounceRequest` packet.
@@ -43,18 +44,18 @@ pub struct OnionAnnounceResponse {
 }
 
 impl FromBytes for OnionAnnounceResponse {
-    named!(from_bytes<OnionAnnounceResponse>, do_parse!(
-        verify!(rest_len, |len| *len <= ONION_MAX_PACKET_SIZE) >>
-        tag!(&[0x84][..]) >>
-        sendback_data: le_u64 >>
-        nonce: call!(Nonce::from_bytes) >>
-        payload: rest >>
-        (OnionAnnounceResponse {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = verify(rest_len, |len| *len <= ONION_MAX_PACKET_SIZE)(input)?;
+        let (input, _) = tag(&[0x84][..])(input)?;
+        let (input, sendback_data) = le_u64(input)?;
+        let (input, nonce) = Nonce::from_bytes(input)?;
+        let (input, payload) = rest(input)?;
+        Ok((input, OnionAnnounceResponse {
             sendback_data,
             nonce,
             payload: payload.to_vec()
-        })
-    ));
+        }))
+    }
 }
 
 impl ToBytes for OnionAnnounceResponse {
@@ -137,18 +138,18 @@ pub struct OnionAnnounceResponsePayload {
 }
 
 impl FromBytes for OnionAnnounceResponsePayload {
-    named!(from_bytes<OnionAnnounceResponsePayload>, do_parse!(
-        announce_status: call!(AnnounceStatus::from_bytes) >>
-        ping_id_or_pk: call!(<[u8; 32]>::from_bytes) >>
-        nodes: many0!(PackedNode::from_bytes) >>
-        _len: verify!(value!(nodes.len()), |len| *len <= 4_usize) >>
-        eof!() >>
-        (OnionAnnounceResponsePayload {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, announce_status) = AnnounceStatus::from_bytes(input)?;
+        let (input, ping_id_or_pk) = <[u8; 32]>::from_bytes(input)?;
+        let (input, nodes) = many0(PackedNode::from_bytes)(input)?;
+        let (input, _) = verify(success(nodes.len()), |len| *len <= 4_usize)(input)?;
+        let (input, _) = eof(input)?;
+        Ok((input, OnionAnnounceResponsePayload {
             announce_status,
             ping_id_or_pk,
             nodes
-        })
-    ));
+        }))
+    }
 }
 
 impl ToBytes for OnionAnnounceResponsePayload {

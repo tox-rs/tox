@@ -4,9 +4,10 @@ use super::*;
 
 use crypto_box::{SalsaBox, aead::{Aead, Error as AeadError}};
 use nom::{
-    cond, many0,
     number::complete::be_u64,
-    combinator::rest,
+    combinator::{rest, eof, cond},
+    bytes::complete::tag,
+    multi::many0,
 };
 
 use tox_binary_io::*;
@@ -59,14 +60,14 @@ impl ToBytes for DhtRequest {
 }
 
 impl FromBytes for DhtRequest {
-    named!(from_bytes<DhtRequest>, do_parse!(
-        tag!("\x20") >>
-        rpk: call!(PublicKey::from_bytes) >>
-        spk: call!(PublicKey::from_bytes) >>
-        nonce: call!(Nonce::from_bytes) >>
-        payload: map!(rest, |bytes| bytes.to_vec() ) >>
-        (DhtRequest { rpk, spk, nonce, payload })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x20")(input)?;
+        let (input, rpk) = PublicKey::from_bytes(input)?;
+        let (input, spk) = PublicKey::from_bytes(input)?;
+        let (input, nonce) = Nonce::from_bytes(input)?;
+        let (input, payload) = map(rest, |bytes: &[u8]| bytes.to_vec() )(input)?;
+        Ok((input, DhtRequest { rpk, spk, nonce, payload }))
+    }
 }
 
 impl DhtRequest {
@@ -142,13 +143,15 @@ impl ToBytes for DhtRequestPayload {
 }
 
 impl FromBytes for DhtRequestPayload {
-    named!(from_bytes<DhtRequestPayload>, alt!(
-        map!(NatPingRequest::from_bytes, DhtRequestPayload::NatPingRequest) |
-        map!(NatPingResponse::from_bytes, DhtRequestPayload::NatPingResponse) |
-        map!(DhtPkAnnounce::from_bytes, DhtRequestPayload::DhtPkAnnounce) |
-        map!(HardeningRequest::from_bytes, DhtRequestPayload::HardeningRequest) |
-        map!(HardeningResponse::from_bytes, DhtRequestPayload::HardeningResponse)
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        alt((
+            map(NatPingRequest::from_bytes, DhtRequestPayload::NatPingRequest),
+            map(NatPingResponse::from_bytes, DhtRequestPayload::NatPingResponse),
+            map(DhtPkAnnounce::from_bytes, DhtRequestPayload::DhtPkAnnounce),
+            map(HardeningRequest::from_bytes, DhtRequestPayload::HardeningRequest),
+            map(HardeningResponse::from_bytes, DhtRequestPayload::HardeningResponse),
+        ))(input)
+    }
 }
 
 /** NatPing request of DHT Request packet.
@@ -167,12 +170,12 @@ pub struct NatPingRequest {
 }
 
 impl FromBytes for NatPingRequest {
-    named!(from_bytes<NatPingRequest>, do_parse!(
-        tag!(&[0xfe][..]) >>
-        tag!("\x00") >>
-        id: be_u64 >>
-        (NatPingRequest { id })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag(&[0xfe][..])(input)?;
+        let (input, _) = tag("\x00")(input)?;
+        let (input, id) = be_u64(input)?;
+        Ok((input, NatPingRequest { id }))
+    }
 }
 
 impl ToBytes for NatPingRequest {
@@ -202,12 +205,12 @@ pub struct NatPingResponse {
 }
 
 impl FromBytes for NatPingResponse {
-    named!(from_bytes<NatPingResponse>, do_parse!(
-        tag!(&[0xfe][..]) >>
-        tag!("\x01") >>
-        id: be_u64 >>
-        (NatPingResponse { id })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag(&[0xfe][..])(input)?;
+        let (input, _) = tag("\x01")(input)?;
+        let (input, id) = be_u64(input)?;
+        Ok((input, NatPingResponse { id }))
+    }
 }
 
 impl ToBytes for NatPingResponse {
@@ -245,13 +248,13 @@ pub struct DhtPkAnnounce {
 }
 
 impl FromBytes for DhtPkAnnounce {
-    named!(from_bytes<DhtPkAnnounce>, do_parse!(
-        tag!(&[0x9c][..]) >>
-        real_pk: call!(PublicKey::from_bytes) >>
-        nonce: call!(Nonce::from_bytes) >>
-        payload: rest >>
-        (DhtPkAnnounce { real_pk, nonce, payload: payload.to_vec() })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag(&[0x9c][..])(input)?;
+        let (input, real_pk) = PublicKey::from_bytes(input)?;
+        let (input, nonce) = Nonce::from_bytes(input)?;
+        let (input, payload) = rest(input)?;
+        Ok((input, DhtPkAnnounce { real_pk, nonce, payload: payload.to_vec() }))
+    }
 }
 
 impl ToBytes for DhtPkAnnounce {
@@ -330,18 +333,18 @@ pub struct DhtPkAnnouncePayload {
 }
 
 impl FromBytes for DhtPkAnnouncePayload {
-    named!(from_bytes<DhtPkAnnouncePayload>, do_parse!(
-        tag!(&[0x9c][..]) >>
-        no_reply: be_u64 >>
-        dht_pk: call!(PublicKey::from_bytes) >>
-        nodes: many0!(TcpUdpPackedNode::from_bytes) >>
-        cond!(nodes.len() <= 4, eof!()) >>
-        (DhtPkAnnouncePayload {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag(&[0x9c][..])(input)?;
+        let (input, no_reply) = be_u64(input)?;
+        let (input, dht_pk) = PublicKey::from_bytes(input)?;
+        let (input, nodes) = many0(TcpUdpPackedNode::from_bytes)(input)?;
+        let (input, _) = cond(nodes.len() <= 4, eof)(input)?;
+        Ok((input, DhtPkAnnouncePayload {
             no_reply,
             dht_pk,
             nodes,
-        })
-    ));
+        }))
+    }
 }
 
 impl ToBytes for DhtPkAnnouncePayload {
@@ -386,12 +389,12 @@ So we just ignore rest except packet ids.
 pub struct HardeningRequest;
 
 impl FromBytes for HardeningRequest {
-    named!(from_bytes<HardeningRequest>, do_parse!(
-        tag!("\x30") >>
-        tag!("\x02") >>
-        rest >> // Hardening will be deprecated, so no need to parse body of packet.
-        (HardeningRequest)
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x30")(input)?;
+        let (input, _) = tag("\x02")(input)?;
+        let (input, _) = rest(input)?; // Hardening will be deprecated, so no need to parse body of packet.
+        Ok((input, HardeningRequest))
+    }
 }
 
 impl ToBytes for HardeningRequest {
@@ -419,12 +422,12 @@ So we just ignore rest except packet ids.
 pub struct HardeningResponse;
 
 impl FromBytes for HardeningResponse {
-    named!(from_bytes<HardeningResponse>, do_parse!(
-        tag!("\x30") >>
-        tag!("\x03") >>
-        rest >> // Hardening will be deprecated, so no need to parse body of packet.
-        (HardeningResponse)
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x30")(input)?;
+        let (input, _) = tag("\x03")(input)?;
+        let (input, _) = rest(input)?; // Hardening will be deprecated, so no need to parse body of packet.
+        Ok((input, HardeningResponse))
+    }
 }
 
 impl ToBytes for HardeningResponse {
@@ -440,7 +443,7 @@ impl ToBytes for HardeningResponse {
 mod tests {
     use super::*;
 
-    use nom::{Needed, Err, error::ErrorKind};
+    use nom::{Err, error::{ErrorKind, Error}};
     use crypto_box::aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned};
     use rand::thread_rng;
 
@@ -602,7 +605,7 @@ mod tests {
         let decoded_payload = invalid_packet.get_payload(&precomputed_key);
         let error = decoded_payload.err().unwrap();
         assert_eq!(error, GetPayloadError::Deserialize {
-            error: Err::Error((invalid_payload.to_vec(), ErrorKind::Alt)),
+            error: Err::Error(Error::new(invalid_payload.to_vec(), ErrorKind::Tag)),
             payload: invalid_payload.to_vec()
         });
         // Try short incomplete
@@ -617,7 +620,7 @@ mod tests {
         let decoded_payload = invalid_packet.get_payload(&precomputed_key);
         let error = decoded_payload.err().unwrap();
         assert_eq!(error, GetPayloadError::Deserialize {
-            error: Err::Incomplete(Needed::Size(1)),
+            error: Err::Error(Error::new(invalid_payload.to_vec(), ErrorKind::Tag)),
             payload: invalid_payload.to_vec()
         });
     }

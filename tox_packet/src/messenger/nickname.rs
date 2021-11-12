@@ -4,7 +4,8 @@
 use super::*;
 
 use std::str;
-use nom::combinator::rest;
+use nom::combinator::{rest, map_res, verify};
+use nom::bytes::complete::tag;
 
 /// Maximum size in bytes of nickname string of nickname packet
 const MAX_NICKNAME_DATA_SIZE: usize = 128;
@@ -29,12 +30,11 @@ pub struct Nickname {
 }
 
 impl FromBytes for Nickname {
-    named!(from_bytes<Nickname>, do_parse!(
-        tag!("\x30") >>
-        nickname: map_res!(verify!(rest, |nickname: &[u8]| nickname.len() <= MAX_NICKNAME_DATA_SIZE),
-            str::from_utf8) >>
-        (Nickname { nickname: nickname.to_string() })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x30")(input)?;
+        let (input, nickname) = map_res(verify(rest, |nickname: &[u8]| nickname.len() <= MAX_NICKNAME_DATA_SIZE), str::from_utf8)(input)?;
+        Ok((input, Nickname { nickname: nickname.to_string() }))
+    }
 }
 
 impl ToBytes for Nickname {

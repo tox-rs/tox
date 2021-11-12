@@ -3,6 +3,8 @@
 
 use super::*;
 use nom::number::complete::be_u64;
+use nom::combinator::eof;
+use nom::bytes::complete::take;
 use sha2::{Digest, Sha512};
 use sha2::digest::generic_array::typenum::marker_traits::Unsigned;
 use xsalsa20poly1305::{XSalsa20Poly1305, aead::{Aead, Error as AeadError}};
@@ -75,13 +77,13 @@ impl Cookie {
 }
 
 impl FromBytes for Cookie {
-    named!(from_bytes<Cookie>, do_parse!(
-        time: be_u64 >>
-        real_pk: call!(PublicKey::from_bytes) >>
-        dht_pk: call!(PublicKey::from_bytes) >>
-        eof!() >>
-        (Cookie { time, real_pk, dht_pk })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, time) = be_u64(input)?;
+        let (input, real_pk) = PublicKey::from_bytes(input)?;
+        let (input, dht_pk) = PublicKey::from_bytes(input)?;
+        let (input, _) = eof(input)?;
+        Ok((input, Cookie { time, real_pk, dht_pk }))
+    }
 }
 
 impl ToBytes for Cookie {
@@ -113,11 +115,11 @@ pub struct EncryptedCookie {
 }
 
 impl FromBytes for EncryptedCookie {
-    named!(from_bytes<EncryptedCookie>, do_parse!(
-        nonce: call!(<[u8; xsalsa20poly1305::NONCE_SIZE]>::from_bytes) >>
-        payload: take!(88) >>
-        (EncryptedCookie { nonce, payload: payload.to_vec() })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, nonce) = <[u8; xsalsa20poly1305::NONCE_SIZE]>::from_bytes(input)?;
+        let (input, payload) = take(88usize)(input)?;
+        Ok((input, EncryptedCookie { nonce, payload: payload.to_vec() }))
+    }
 }
 
 impl ToBytes for EncryptedCookie {
@@ -176,7 +178,7 @@ impl EncryptedCookie {
 mod tests {
     use super::*;
     use rand::thread_rng;
-    use nom::{Err, error::ErrorKind};
+    use nom::{Err, error::{Error, ErrorKind}};
     use xsalsa20poly1305::aead::NewAead;
 
     encode_decode_test!(
@@ -238,7 +240,7 @@ mod tests {
         let decoded_payload = invalid_encrypted_cookie.get_payload(&symmetric_key);
         let error = decoded_payload.err().unwrap();
         assert_eq!(error, GetPayloadError::Deserialize {
-            error: Err::Error((vec![42; 51], ErrorKind::Eof)),
+            error: Err::Error(Error::new(vec![42; 51], ErrorKind::Eof)),
             payload: invalid_payload.to_vec()
         });
         // Try short incomplete array
@@ -251,7 +253,7 @@ mod tests {
         let decoded_payload = invalid_encrypted_cookie.get_payload(&symmetric_key);
         let error = decoded_payload.err().unwrap();
         assert_eq!(error, GetPayloadError::Deserialize {
-            error: Err::Error((vec![], ErrorKind::Eof)),
+            error: Err::Error(Error::new(vec![], ErrorKind::Eof)),
             payload: invalid_payload.to_vec()
         });
     }

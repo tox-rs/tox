@@ -5,9 +5,10 @@ use super::*;
 use aead::{Aead, Error as AeadError};
 use crypto_box::SalsaBox;
 use nom::{
-    count,
+    multi::count,
     number::complete::{le_u8, be_u64},
-    combinator::rest,
+    combinator::{rest, eof, verify},
+    bytes::complete::tag,
 };
 
 use tox_binary_io::*;
@@ -54,13 +55,13 @@ impl ToBytes for NodesResponse {
 }
 
 impl FromBytes for NodesResponse {
-    named!(from_bytes<NodesResponse>, do_parse!(
-        tag!("\x04") >>
-        pk: call!(PublicKey::from_bytes) >>
-        nonce: call!(Nonce::from_bytes) >>
-        payload: map!(rest, |bytes| bytes.to_vec() ) >>
-        (NodesResponse { pk, nonce, payload })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x04")(input)?;
+        let (input, pk) = PublicKey::from_bytes(input)?;
+        let (input, nonce) = Nonce::from_bytes(input)?;
+        let (input, payload) = map(rest, |bytes: &[u8]| bytes.to_vec())(input)?;
+        Ok((input, NodesResponse { pk, nonce, payload }))
+    }
 }
 
 impl NodesResponse {
@@ -141,13 +142,13 @@ impl ToBytes for NodesResponsePayload {
 }
 
 impl FromBytes for NodesResponsePayload {
-    named!(from_bytes<NodesResponsePayload>, do_parse!(
-        nodes_number: verify!(le_u8, |len| *len <= 4) >>
-        nodes: count!(PackedNode::from_bytes, nodes_number as usize) >>
-        id: be_u64 >>
-        eof!() >>
-        (NodesResponsePayload { nodes, id })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, nodes_number) = verify(le_u8, |len| *len <= 4)(input)?;
+        let (input, nodes) = count(PackedNode::from_bytes, nodes_number as usize)(input)?;
+        let (input, id) = be_u64(input)?;
+        let (input, _) = eof(input)?;
+        Ok((input, NodesResponsePayload { nodes, id }))
+    }
 }
 
 #[cfg(test)]

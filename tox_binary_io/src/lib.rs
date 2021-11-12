@@ -1,8 +1,10 @@
 pub use nom::IResult;
 pub use cookie_factory::GenError;
 
-use nom::number::streaming::{le_u8, le_u16};
-use nom::{named, map, map_opt, take, count};
+use nom::bytes::streaming::take;
+use nom::combinator::{map, map_opt};
+use nom::multi::count;
+use nom::number::complete::{le_u8, le_u16};
 use cookie_factory::{do_gen, gen_be_u8, gen_le_u16, gen_slice};
 
 use std::{convert::TryInto, net::{
@@ -19,7 +21,7 @@ mod crypto;
 /// The trait provides method to deserialize struct from raw bytes
 pub trait FromBytes: Sized {
     /// Deserialize struct using `nom` from raw bytes
-    fn from_bytes(i: &[u8]) -> IResult<&[u8], Self>;
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self>;
 }
 
 /// The trait provides method to serialize struct into raw bytes
@@ -38,9 +40,11 @@ impl ToBytes for IpAddr {
 }
 
 impl FromBytes for Ipv4Addr {
-    named!(from_bytes<Ipv4Addr>, map!(count!(le_u8, 4),
-        |v| Ipv4Addr::new(v[0], v[1], v[2], v[3])
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        map(count(le_u8, 4),
+            |v| Ipv4Addr::new(v[0], v[1], v[2], v[3])
+        )(input)
+    }
 }
 
 impl<const N: usize> ToBytes for [u8; N] {
@@ -50,7 +54,9 @@ impl<const N: usize> ToBytes for [u8; N] {
 }
 
 impl <const N: usize> FromBytes for [u8; N] {
-    named!(from_bytes<[u8; N]>, map_opt!(take!(N), |bytes: &[u8]| bytes.try_into().ok()));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        map_opt(take(N), |bytes: &[u8]| bytes.try_into().ok())(input)
+    }
 }
 
 impl ToBytes for Ipv4Addr {
@@ -66,9 +72,11 @@ impl ToBytes for Ipv4Addr {
 }
 
 impl FromBytes for Ipv6Addr {
-    named!(from_bytes<Ipv6Addr>, map!(count!(le_u16, 8),
-        |v| Ipv6Addr::new(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7])
-    ));
+    fn from_bytes(i: &[u8]) -> IResult<&[u8], Self> {
+        map(count(le_u16, 8),
+            |v| Ipv6Addr::new(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7])
+        )(i)
+    }
 }
 
 impl ToBytes for Ipv6Addr {

@@ -4,9 +4,12 @@
 use super::*;
 
 use nom::{
-    Err, error::ErrorKind,
-    number::complete::le_u8,
-    combinator::rest_len
+    Err,
+    bytes::complete::tag,
+    combinator::{rest_len, verify},
+    error::{Error, ErrorKind, make_error},
+    multi::many_till,
+    number::complete::le_u8
 };
 use bitflags::*;
 
@@ -69,11 +72,11 @@ pub enum RequestKind {
 struct Request(RequestKind);
 
 impl FromBytes for Request {
-    named!(from_bytes<Request>, do_parse!(
-        tag!("\x01\x01") >>
-        value: call!(RequestKind::from_bytes) >>
-        (Request(value))
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x01\x01")(input)?;
+        let (input, value) = RequestKind::from_bytes(input)?;
+        Ok((input, Request(value)))
+    }
 }
 
 impl ToBytes for Request {
@@ -87,11 +90,11 @@ impl ToBytes for Request {
 }
 
 impl FromBytes for MsiError {
-    named!(from_bytes<MsiError>, do_parse!(
-        tag!("\x02\x01") >>
-        value: call!(MsiErrorKind::from_bytes) >>
-        (MsiError(value))
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x02\x01")(input)?;
+        let (input, value) = MsiErrorKind::from_bytes(input)?;
+        Ok((input, MsiError(value)))
+    }
 }
 
 impl ToBytes for MsiError {
@@ -105,20 +108,20 @@ impl ToBytes for MsiError {
 }
 
 impl FromBytes for CapabilitiesKind {
-    named!(from_bytes<CapabilitiesKind>, do_parse!(
-        value: le_u8 >>
-        (CapabilitiesKind {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, value) = le_u8(input)?;
+        Ok((input, CapabilitiesKind {
             bits: value,
-        })
-    ));
+        }))
+    }
 }
 
 impl FromBytes for Capabilities {
-    named!(from_bytes<Capabilities>, do_parse!(
-        tag!("\x03\x01") >>
-        value: call!(CapabilitiesKind::from_bytes) >>
-        (Capabilities(value))
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x03\x01")(input)?;
+        let (input, value) = CapabilitiesKind::from_bytes(input)?;
+        Ok((input, Capabilities(value)))
+    }
 }
 
 impl ToBytes for Capabilities {
@@ -132,24 +135,32 @@ impl ToBytes for Capabilities {
 }
 
 impl FromBytes for RequestKind {
-    named!(from_bytes<RequestKind>, switch!(le_u8,
-        1 => value!(RequestKind::Init) |
-        2 => value!(RequestKind::Push) |
-        3 => value!(RequestKind::Pop)
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, b) = le_u8(input)?;
+        match b {
+            1 => Ok((input, RequestKind::Init)),
+            2 => Ok((input, RequestKind::Push)),
+            3 => Ok((input, RequestKind::Pop)),
+            _ => Err(nom::Err::Error(make_error(input, ErrorKind::Switch))),
+        }
+    }
 }
 
 impl FromBytes for MsiErrorKind {
-    named!(from_bytes<MsiErrorKind>, switch!(le_u8,
-        0 => value!(MsiErrorKind::MsiNone) |
-        1 => value!(MsiErrorKind::InvalidMessage) |
-        2 => value!(MsiErrorKind::InvalidParam) |
-        3 => value!(MsiErrorKind::InvalidState) |
-        4 => value!(MsiErrorKind::StrayMessage) |
-        5 => value!(MsiErrorKind::System) |
-        6 => value!(MsiErrorKind::Handle) |
-        7 => value!(MsiErrorKind::Undisclosed)
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, b) = le_u8(input)?;
+        match b {
+            0 => Ok((input, MsiErrorKind::MsiNone)),
+            1 => Ok((input, MsiErrorKind::InvalidMessage)),
+            2 => Ok((input, MsiErrorKind::InvalidParam)),
+            3 => Ok((input, MsiErrorKind::InvalidState)),
+            4 => Ok((input, MsiErrorKind::StrayMessage)),
+            5 => Ok((input, MsiErrorKind::System)),
+            6 => Ok((input, MsiErrorKind::Handle)),
+            7 => Ok((input, MsiErrorKind::Undisclosed)),
+            _ => Err(nom::Err::Error(make_error(input, ErrorKind::Switch))),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -160,11 +171,13 @@ enum MsiSubPacket {
 }
 
 impl FromBytes for MsiSubPacket {
-    named!(from_bytes<MsiSubPacket>, alt!(
-        map!(Request::from_bytes, MsiSubPacket::Request) |
-        map!(MsiError::from_bytes, MsiSubPacket::MsiError) |
-        map!(Capabilities::from_bytes, MsiSubPacket::Capabilities)
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        alt((
+            map(Request::from_bytes, MsiSubPacket::Request),
+            map(MsiError::from_bytes, MsiSubPacket::MsiError),
+            map(Capabilities::from_bytes, MsiSubPacket::Capabilities),
+        ))(input)
+    }
 }
 
 impl ToBytes for MsiSubPacket {
@@ -238,12 +251,12 @@ impl Msi {
         let request = if let Some(request) = request {
             request
         } else {
-            return Err(Err::Error((input, ErrorKind::NoneOf)));
+            return Err(Err::Error(Error::new(input, ErrorKind::NoneOf)));
         };
         let capabilities = if let Some(capabilities) = capabilities {
             capabilities
         } else {
-            return Err(Err::Error((input, ErrorKind::NoneOf)));
+            return Err(Err::Error(Error::new(input, ErrorKind::NoneOf)));
         };
 
         let msi = Msi {
@@ -256,13 +269,12 @@ impl Msi {
 }
 
 impl FromBytes for Msi {
-    named!(from_bytes<Msi>, do_parse!(
-        tag!("\x45") >>
-        verify!(rest_len, |len| *len < MAX_MSI_PAYLOAD_SIZE) >>
-        sub_pack: many_till!(call!(MsiSubPacket::from_bytes), tag!("\x00")) >>
-        msi: call!(Msi::remove_redundant, sub_pack.0) >>
-        (msi)
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x45")(input)?;
+        let (input, _) = verify(rest_len, |len| *len < MAX_MSI_PAYLOAD_SIZE)(input)?;
+        let (input, sub_pack) = many_till(MsiSubPacket::from_bytes, tag("\x00"))(input)?;
+        Msi::remove_redundant(input, sub_pack.0)
+    }
 }
 
 impl ToBytes for Msi {

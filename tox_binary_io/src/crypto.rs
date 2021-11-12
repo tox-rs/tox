@@ -1,6 +1,8 @@
 use std::convert::TryInto;
 
-use nom::{map, map_opt, named, take};
+use nom::IResult;
+use nom::bytes::streaming::take;
+use nom::combinator::{map, map_opt};
 
 use crypto_box::{PublicKey, SecretKey, KEY_SIZE};
 
@@ -8,8 +10,9 @@ use super::FromBytes;
 
 
 impl FromBytes for PublicKey {
-    // TODO: use map_from with new nom version
-    named!(from_bytes<PublicKey>, map!(map_opt!(take!(KEY_SIZE), |pk: &[u8]| pk.try_into().ok()), |pk: [u8; KEY_SIZE]| pk.into()));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        map(map_opt(take(KEY_SIZE), |pk: &[u8]| pk.try_into().ok()), |pk: [u8; KEY_SIZE]| pk.into())(input)
+    }
 }
 
 /* TODO
@@ -26,8 +29,9 @@ impl FromBytes for PublicKey {
 */
 
 impl FromBytes for SecretKey {
-    // TODO: use map_from with new nom version
-    named!(from_bytes<SecretKey>, map!(map_opt!(take!(KEY_SIZE), |sk: &[u8]| sk.try_into().ok()), |sk: [u8; KEY_SIZE]| sk.into()));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        map(map_opt(take(KEY_SIZE), |sk: &[u8]| sk.try_into().ok()), |sk: [u8; KEY_SIZE]| sk.into())(input)
+    }
 }
 
 #[cfg(test)]

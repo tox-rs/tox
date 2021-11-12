@@ -24,7 +24,7 @@ tox_packet = { version = "0.1.1", path = "../tox_packet" }
 bytes = "1.0"
 futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
 log = "0.4"
-nom = "5.1"
+nom = "7.0"
 cookie-factory = "0.3"
 get_if_addrs = "0.5"
 thiserror = "1.0"

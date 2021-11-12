@@ -4,6 +4,7 @@
 use super::*;
 
 use nom::number::complete::be_u16;
+use nom::bytes::complete::tag;
 
 /** Invite is a struct that holds info to invite a peer to a conference.
 
@@ -29,18 +30,18 @@ pub struct Invite {
 }
 
 impl FromBytes for Invite {
-    named!(from_bytes<Invite>, do_parse!(
-        tag!("\x60") >>
-        tag!("\x00") >>
-        conference_id: be_u16 >>
-        conference_type: call!(ConferenceType::from_bytes) >>
-        unique_id: call!(ConferenceUid::from_bytes) >>
-        (Invite {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x60")(input)?;
+        let (input, _) = tag("\x00")(input)?;
+        let (input, conference_id) = be_u16(input)?;
+        let (input, conference_type) = ConferenceType::from_bytes(input)?;
+        let (input, unique_id) = ConferenceUid::from_bytes(input)?;
+        Ok((input, Invite {
             conference_id,
             conference_type,
             unique_id,
-        })
-    ));
+        }))
+    }
 }
 
 impl ToBytes for Invite {

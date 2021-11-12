@@ -6,7 +6,8 @@ This packet is sent to my friends every time they become online, or whenever my 
 use super::*;
 
 use std::str;
-use nom::combinator::rest;
+use nom::combinator::{rest, map_res, verify};
+use nom::bytes::complete::tag;
 
 /// Maximum size in bytes of status message string
 const MAX_STATUS_MESSAGE_DATA_SIZE: usize = 1007;
@@ -29,12 +30,11 @@ Length    | Content
 pub struct StatusMessage(String);
 
 impl FromBytes for StatusMessage {
-    named!(from_bytes<StatusMessage>, do_parse!(
-        tag!("\x31") >>
-        message: map_res!(verify!(rest, |message: &[u8]| message.len() <= MAX_STATUS_MESSAGE_DATA_SIZE),
-            str::from_utf8) >>
-        (StatusMessage(message.to_string()))
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x31")(input)?;
+        let (input, message) = map_res(verify(rest, |message: &[u8]| message.len() <= MAX_STATUS_MESSAGE_DATA_SIZE), str::from_utf8)(input)?;
+        Ok((input, StatusMessage(message.to_string())))
+    }
 }
 
 impl ToBytes for StatusMessage {

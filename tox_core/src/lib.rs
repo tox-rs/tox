@@ -14,8 +14,6 @@ Repo: https://github.com/tox-rs/tox
 #[macro_use]
 extern crate log;
 #[macro_use]
-extern crate nom;
-#[macro_use]
 extern crate cookie_factory;
 
 pub mod io_tokio;

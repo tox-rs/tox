@@ -8,10 +8,8 @@
 
 use std::fmt;
 
-use nom::{
-    named,
-    do_parse, map, call, take,
-};
+use nom::combinator::map;
+use nom::bytes::complete::take;
 use rand::{CryptoRng, Rng, distributions::{Distribution, Standard}};
 use cookie_factory::{do_gen, gen_slice};
 
@@ -85,9 +83,11 @@ impl fmt::Display for NoSpam {
 }
 
 impl FromBytes for NoSpam {
-    named!(from_bytes<NoSpam>, map!(take!(NOSPAMBYTES), |bytes| {
-        NoSpam([bytes[0], bytes[1], bytes[2], bytes[3]])
-    }));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        map(take(NOSPAMBYTES), |bytes: &[u8]| {
+            NoSpam([bytes[0], bytes[1], bytes[2], bytes[3]])
+        })(input)
+    }
 }
 
 impl ToBytes for NoSpam {
@@ -222,12 +222,12 @@ impl ToxId {
 }
 
 impl FromBytes for ToxId {
-    named!(from_bytes<ToxId>, do_parse!(
-        pk: call!(PublicKey::from_bytes) >>
-        nospam: call!(NoSpam::from_bytes) >>
-        checksum: map!(take!(CHECKSUMBYTES), |bytes| { [bytes[0], bytes[1]] }) >>
-        (ToxId { pk, nospam, checksum })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, pk) = PublicKey::from_bytes(input)?;
+        let (input, nospam) = NoSpam::from_bytes(input)?;
+        let (input, checksum) = map(take(CHECKSUMBYTES), |bytes: &[u8]| { [bytes[0], bytes[1]] })(input)?;
+        Ok((input, ToxId { pk, nospam, checksum }))
+    }
 }
 
 impl ToBytes for ToxId {

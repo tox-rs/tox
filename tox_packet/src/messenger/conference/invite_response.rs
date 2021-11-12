@@ -4,6 +4,7 @@
 use super::*;
 
 use nom::number::complete::be_u16;
+use nom::bytes::complete::tag;
 
 /** InviteResponse is a struct that holds info to response to invite message from a peer.
 
@@ -32,20 +33,20 @@ pub struct InviteResponse {
 }
 
 impl FromBytes for InviteResponse {
-    named!(from_bytes<InviteResponse>, do_parse!(
-        tag!("\x60") >>
-        tag!("\x01") >>
-        conference_id_local: be_u16 >>
-        conference_id_join: be_u16 >>
-        conference_type: call!(ConferenceType::from_bytes) >>
-        unique_id: call!(ConferenceUid::from_bytes) >>
-        (InviteResponse {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x60")(input)?;
+        let (input, _) = tag("\x01")(input)?;
+        let (input, conference_id_local) = be_u16(input)?;
+        let (input, conference_id_join) = be_u16(input)?;
+        let (input, conference_type) = ConferenceType::from_bytes(input)?;
+        let (input, unique_id) = ConferenceUid::from_bytes(input)?;
+        Ok((input, InviteResponse {
             conference_id_local,
             conference_id_join,
             conference_type,
             unique_id,
-        })
-    ));
+        }))
+    }
 }
 
 impl ToBytes for InviteResponse {

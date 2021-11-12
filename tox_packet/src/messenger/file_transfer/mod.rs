@@ -2,6 +2,10 @@
 */
 
 use nom::number::complete::{le_u8, be_u32, be_u64};
+use nom::error::{ErrorKind, make_error};
+use nom::combinator::{map, map_opt};
+use nom::branch::alt;
+use nom::bytes::complete::take;
 use rand::{Rng, distributions::{Distribution, Standard}};
 
 use tox_binary_io::*;
@@ -13,21 +17,6 @@ mod file_send_request;
 pub use self::file_control::*;
 pub use self::file_data::*;
 pub use self::file_send_request::*;
-
-use nom::{
-    named,
-    do_parse,
-    tag,
-    call,
-    alt,
-    map,
-    map_opt,
-    map_res,
-    switch,
-    take,
-    value,
-    verify,
-};
 
 use cookie_factory::{
     do_gen,
@@ -52,12 +41,14 @@ pub enum TransferDirection {
 }
 
 impl FromBytes for TransferDirection {
-    named!(from_bytes<TransferDirection>,
-        switch!(le_u8,
-            0 => value!(TransferDirection::Send) |
-            1 => value!(TransferDirection::Receive)
-        )
-    );
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, b) = le_u8(input)?;
+        match b {
+            0 => Ok((input, TransferDirection::Send)),
+            1 => Ok((input, TransferDirection::Receive)),
+            _ => Err(nom::Err::Error(make_error(input, ErrorKind::Switch))),
+        }
+    }
 }
 
 /// Control types for transferring file data
@@ -87,16 +78,16 @@ impl ToBytes for ControlType {
 }
 
 impl FromBytes for ControlType {
-    named!(from_bytes<ControlType>,
-        switch!(le_u8,
-            0 => value!(ControlType::Accept) |
-            1 => value!(ControlType::Pause) |
-            2 => value!(ControlType::Kill) |
-            3 => do_parse!(
-                seek_param: be_u64 >>
-                (ControlType::Seek(seek_param)))
-        )
-    );
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, b) = le_u8(input)?;
+        match b {
+            0 => Ok((input, ControlType::Accept)),
+            1 => Ok((input, ControlType::Pause)),
+            2 => Ok((input, ControlType::Kill)),
+            3 => map(be_u64, ControlType::Seek)(input),
+            _ => Err(nom::Err::Error(make_error(input, ErrorKind::Switch))),
+        }
+    }
 }
 
 /// Type of file to transfer
@@ -112,12 +103,14 @@ pub enum FileType {
 const MAX_FILESEND_FILENAME_LENGTH: usize = 255;
 
 impl FromBytes for FileType {
-    named!(from_bytes<FileType>,
-        switch!(be_u32,
-            0 => value!(FileType::Data) |
-            1 => value!(FileType::Avatar)
-        )
-    );
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, b) = be_u32(input)?;
+        match b {
+            0 => Ok((input, FileType::Data)),
+            1 => Ok((input, FileType::Avatar)),
+            _ => Err(nom::Err::Error(make_error(input, ErrorKind::Switch))),
+        }
+    }
 }
 
 const FILE_UID_BYTES: usize = 32;
@@ -145,7 +138,9 @@ impl FileUid {
 }
 
 impl FromBytes for FileUid {
-    named!(from_bytes<FileUid>, map_opt!(take!(FILE_UID_BYTES), FileUid::from_slice));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        map_opt(take(FILE_UID_BYTES), FileUid::from_slice)(input)
+    }
 }
 
 /** FileTransfer packet enum that encapsulates all types of FileTransfer packets.
@@ -171,11 +166,13 @@ impl ToBytes for Packet {
 }
 
 impl FromBytes for Packet {
-    named!(from_bytes<Packet>, alt!(
-        map!(FileControl::from_bytes, Packet::FileControl) |
-        map!(FileData::from_bytes, Packet::FileData) |
-        map!(FileSendRequest::from_bytes, Packet::FileSendRequest)
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        alt((
+            map(FileControl::from_bytes, Packet::FileControl),
+            map(FileData::from_bytes, Packet::FileData),
+            map(FileSendRequest::from_bytes, Packet::FileSendRequest),
+        ))(input)
+    }
 }
 
 #[cfg(test)]

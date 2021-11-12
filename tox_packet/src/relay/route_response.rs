@@ -6,6 +6,7 @@ use super::*;
 use tox_binary_io::*;
 use tox_crypto::*;
 use crate::relay::connection_id::ConnectionId;
+use nom::bytes::complete::tag;
 
 /** Sent by server to client.
 The response to the routing request, tell the client if the
@@ -33,12 +34,12 @@ pub struct RouteResponse {
 }
 
 impl FromBytes for RouteResponse {
-    named!(from_bytes<RouteResponse>, do_parse!(
-        tag!("\x01") >>
-        connection_id: call!(ConnectionId::from_bytes) >>
-        pk: call!(PublicKey::from_bytes) >>
-        (RouteResponse { connection_id, pk })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x01")(input)?;
+        let (input, connection_id) = ConnectionId::from_bytes(input)?;
+        let (input, pk) = PublicKey::from_bytes(input)?;
+        Ok((input, RouteResponse { connection_id, pk }))
+    }
 }
 
 impl ToBytes for RouteResponse {

@@ -4,6 +4,8 @@
 use super::*;
 
 use tox_binary_io::*;
+use nom::branch::alt;
+use nom::combinator::map;
 
 /** Onion requests that can be enclosed in onion packets and sent through onion
 path.
@@ -29,10 +31,12 @@ impl ToBytes for InnerOnionRequest {
 }
 
 impl FromBytes for InnerOnionRequest {
-    named!(from_bytes<InnerOnionRequest>, alt!(
-        map!(InnerOnionAnnounceRequest::from_bytes, InnerOnionRequest::InnerOnionAnnounceRequest) |
-        map!(InnerOnionDataRequest::from_bytes, InnerOnionRequest::InnerOnionDataRequest)
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        alt((
+            map(InnerOnionAnnounceRequest::from_bytes, InnerOnionRequest::InnerOnionAnnounceRequest),
+            map(InnerOnionDataRequest::from_bytes, InnerOnionRequest::InnerOnionDataRequest),
+        ))(input)
+    }
 }
 
 #[cfg(test)]

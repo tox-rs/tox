@@ -5,7 +5,8 @@ use super::*;
 
 use tox_binary_io::*;
 
-use nom::number::streaming::be_u64;
+use nom::number::complete::be_u64;
+use nom::bytes::complete::tag;
 
 /** Sent by both client and server, both will respond.
 The server should respond to ping packets with pong packets with the same `ping_id`
@@ -27,11 +28,11 @@ pub struct PongResponse {
 }
 
 impl FromBytes for PongResponse {
-    named!(from_bytes<PongResponse>, do_parse!(
-        tag!("\x05") >>
-        ping_id: be_u64 >>
-        (PongResponse {  ping_id })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x05")(input)?;
+        let (input, ping_id) = be_u64(input)?;
+        Ok((input, PongResponse {  ping_id }))
+    }
 }
 
 impl ToBytes for PongResponse {

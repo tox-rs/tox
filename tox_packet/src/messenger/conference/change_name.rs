@@ -6,7 +6,8 @@ use super::*;
 use std::str;
 use nom::{
     number::complete::{be_u16, be_u32},
-    combinator::rest,
+    combinator::{rest, map_res, verify},
+    bytes::complete::tag,
 };
 
 use super::MAX_NAME_LENGTH_IN_CONFERENCE;
@@ -40,21 +41,20 @@ pub struct ChangeName {
 }
 
 impl FromBytes for ChangeName {
-    named!(from_bytes<ChangeName>, do_parse!(
-        tag!("\x63") >>
-        conference_id: be_u16 >>
-        peer_id: be_u16 >>
-        message_id: be_u32 >>
-        tag!("\x30") >>
-        name: map_res!(verify!(rest, |name: &[u8]| name.len() <= MAX_NAME_LENGTH_IN_CONFERENCE),
-            str::from_utf8) >>
-        (ChangeName {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, _) = tag("\x63")(input)?;
+        let (input, conference_id) = be_u16(input)?;
+        let (input, peer_id) = be_u16(input)?;
+        let (input, message_id) = be_u32(input)?;
+        let (input, _) = tag("\x30")(input)?;
+        let (input, name) = map_res(verify(rest, |name: &[u8]| name.len() <= MAX_NAME_LENGTH_IN_CONFERENCE), str::from_utf8)(input)?;
+        Ok((input, ChangeName {
             conference_id,
             peer_id,
             message_id,
             name: name.to_string(),
-        })
-    ));
+        }))
+    }
 }
 
 impl ToBytes for ChangeName {

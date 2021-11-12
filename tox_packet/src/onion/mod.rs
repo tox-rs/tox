@@ -37,7 +37,9 @@ use crate::dht::packed_node::PackedNode;
 use crate::ip_port::*;
 
 use rand::{CryptoRng, Rng};
-use nom::{alt, call, cond, do_parse, eof, flat_map, map, map_res, named, switch, tag, take, value, verify};
+
+use nom::number::complete::le_u8;
+use nom::error::{ErrorKind, make_error};
 
 use cookie_factory::{
     do_gen,
@@ -51,10 +53,9 @@ use cookie_factory::{
 
 use nom::{
     Err,
-    number::complete::le_u8,
-    combinator::{rest, rest_len},
+    combinator::{rest, rest_len, cond},
 };
-use std::io::{Error, ErrorKind};
+use std::io::{Error, ErrorKind as IoErrorKind};
 
 const ONION_SEND_BASE: usize = crypto_box::KEY_SIZE + SIZE_IPPORT + <SalsaBox as AeadCore>::TagSize::USIZE;
 const ONION_SEND_1: usize = xsalsa20poly1305::NONCE_SIZE + ONION_SEND_BASE * 3;
@@ -106,11 +107,11 @@ pub struct OnionReturn {
 }
 
 impl FromBytes for OnionReturn {
-    named!(from_bytes<OnionReturn>, do_parse!(
-        nonce: call!(<[u8; xsalsa20poly1305::NONCE_SIZE]>::from_bytes) >>
-        payload: rest >>
-        (OnionReturn { nonce, payload: payload.to_vec() })
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, nonce) = <[u8; xsalsa20poly1305::NONCE_SIZE]>::from_bytes(input)?;
+        let (input, payload) = rest(input)?;
+        Ok((input, OnionReturn { nonce, payload: payload.to_vec() }))
+    }
 }
 
 impl ToBytes for OnionReturn {
@@ -134,12 +135,12 @@ impl OnionReturn {
         )
     }
 
-    named!(inner_from_bytes<(IpPort, Option<OnionReturn>)>, do_parse!(
-        ip_port: call!(IpPort::from_bytes, IpPortPadding::WithPadding) >>
-        rest_len: rest_len >>
-        inner: cond!(rest_len > 0, OnionReturn::from_bytes) >>
-        (ip_port, inner)
-    ));
+    fn inner_from_bytes(input: &[u8]) -> IResult<&[u8], (IpPort, Option<OnionReturn>)> {
+        let (input, ip_port) = IpPort::from_bytes(input, IpPortPadding::WithPadding)?;
+        let (input, rest_len) = rest_len(input)?;
+        let (input, inner) = cond(rest_len > 0, OnionReturn::from_bytes)(input)?;
+        Ok((input, (ip_port, inner)))
+    }
 
     /// Create new `OnionReturn` object using symmetric key for encryption.
     pub fn new<R: Rng + CryptoRng>(rng: &mut R, symmetric_key: &XSalsa20Poly1305, ip_port: &IpPort, inner: Option<&OnionReturn>) -> OnionReturn {
@@ -164,19 +165,19 @@ impl OnionReturn {
     pub fn get_payload(&self, symmetric_key: &XSalsa20Poly1305) -> Result<(IpPort, Option<OnionReturn>), Error> {
         let decrypted = symmetric_key.decrypt(&self.nonce.into(), self.payload.as_slice())
             .map_err(|AeadError| {
-                Error::new(ErrorKind::Other, "OnionReturn decrypt error.")
+                Error::new(IoErrorKind::Other, "OnionReturn decrypt error.")
             })?;
         match OnionReturn::inner_from_bytes(&decrypted) {
             Err(Err::Incomplete(e)) => {
-                Err(Error::new(ErrorKind::Other,
+                Err(Error::new(IoErrorKind::Other,
                                format!("Inner onion return deserialize error: {:?}", e)))
             },
             Err(Err::Error(e)) => {
-                Err(Error::new(ErrorKind::Other,
+                Err(Error::new(IoErrorKind::Other,
                                format!("Inner onion return deserialize error: {:?}", e)))
             },
             Err(Err::Failure(e)) => {
-                Err(Error::new(ErrorKind::Other,
+                Err(Error::new(IoErrorKind::Other,
                                format!("Inner onion return deserialize error: {:?}", e)))
             },
             Ok((_, inner)) => {
@@ -202,11 +203,15 @@ pub enum AnnounceStatus {
 }
 
 impl FromBytes for AnnounceStatus {
-    named!(from_bytes<AnnounceStatus>, switch!(le_u8,
-        0 => value!(AnnounceStatus::Failed) |
-        1 => value!(AnnounceStatus::Found) |
-        2 => value!(AnnounceStatus::Announced)
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, b) = le_u8(input)?;
+        match b {
+            0 => Ok((input, AnnounceStatus::Failed)),
+            1 => Ok((input, AnnounceStatus::Found)),
+            2 => Ok((input, AnnounceStatus::Announced)),
+            _ => Err(nom::Err::Error(make_error(input, ErrorKind::Switch))),
+        }
+    }
 }
 
 impl ToBytes for AnnounceStatus {

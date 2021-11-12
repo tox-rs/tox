@@ -11,18 +11,8 @@ pub use self::alive::*;
 pub use self::share_relays::*;
 pub use self::friend_requests::*;
 
-use nom::{
-    named,
-    do_parse,
-    tag,
-    call,
-    alt,
-    many0,
-    map,
-    value,
-    verify,
-};
-use nom::combinator::rest;
+use nom::branch::alt;
+use nom::combinator::map;
 
 use cookie_factory::{
     do_gen,
@@ -56,11 +46,13 @@ impl ToBytes for Packet {
 }
 
 impl FromBytes for Packet {
-    named!(from_bytes<Packet>, alt!(
-        map!(Alive::from_bytes, Packet::Alive) |
-        map!(ShareRelays::from_bytes, Packet::ShareRelays) |
-        map!(FriendRequests::from_bytes, Packet::FriendRequests)
-    ));
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        alt((
+            map(Alive::from_bytes, Packet::Alive),
+            map(ShareRelays::from_bytes, Packet::ShareRelays),
+            map(FriendRequests::from_bytes, Packet::FriendRequests),
+        ))(input)
+    }
 }
 
 #[cfg(test)]
