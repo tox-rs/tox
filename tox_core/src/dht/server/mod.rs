@@ -81,6 +81,39 @@ struct ServerBootstrapInfo {
     motd_cb: Arc<dyn Fn(&Server) -> Vec<u8> + Send + Sync>,
 }
 
+/// DHT server state.
+#[derive(Clone)]
+struct ServerState {
+    /// Struct that stores and manages requests IDs and timeouts.
+    request_queue: RequestQueue<PublicKey>,
+    /// Friends list used to store friends related data like close nodes per
+    /// friend, hole punching status, etc. First FAKE_FRIENDS_NUMBER friends
+    /// are fake with random public key.
+    friends: HashMap<PublicKey, DhtFriend>,
+    /// List of nodes to send `NodesRequest` packet. When we receive
+    /// `NodesResponse` packet we should send `NodesRequest` to all nodes from
+    /// the response to check if they are capable of handling our requests and
+    /// to continue bootstrapping. But instead of instant sending `NodesRequest`
+    /// we will add the node to this list which is processed every second. The
+    /// purpose of this is to prevent amplification attacks.
+    nodes_to_bootstrap: Kbucket<PackedNode>,
+    /// Close nodes list which contains nodes close to own DHT `PublicKey`.
+    close_nodes: ForcedKtree,
+    /// How many times we sent `NodesRequest` packet to a random node from close
+    /// nodes list.
+    random_requests_count: u32,
+    /// Time when we sent `NodesRequest` packet to a random node from close
+    /// nodes list.
+    last_nodes_req_time: Instant,
+}
+
+impl ServerState {
+    /// Adapt `RequestQueue.check_ping_id()`.
+    fn check_ping_id(&mut self, ping_id: u64, packet_pk: &PublicKey) -> bool {
+        self.request_queue.check_ping_id(ping_id, |pk| packet_pk.eq(pk)).is_some()
+    }
+}
+
 /**
 Own DHT node data.
 
@@ -114,12 +147,10 @@ pub struct Server {
     pub pk: PublicKey,
     /// Tx split of a channel to send packets to this peer via UDP socket.
     pub tx: Tx,
+    /// DHT server state
+    state: Arc<RwLock<ServerState>>,
     /// Sink to send friend's `SocketAddr` when it gets known.
     friend_saddr_sink: Arc<RwLock<Option<mpsc::UnboundedSender<PackedNode>>>>,
-    /// Struct that stores and manages requests IDs and timeouts.
-    request_queue: Arc<RwLock<RequestQueue<PublicKey>>>,
-    /// Close nodes list which contains nodes close to own DHT `PublicKey`.
-    pub close_nodes: Arc<RwLock<ForcedKtree>>,
     /// Symmetric key used for onion return encryption.
     onion_symmetric_key: Arc<RwLock<XSalsa20Poly1305>>,
     /// Onion announce struct to handle `OnionAnnounce` and `OnionData` packets.
@@ -131,23 +162,6 @@ pub struct Server {
     /// - close nodes of these two friends can be used as pool of random nodes
     /// for onion client.
     fake_friends_keys: Vec<PublicKey>,
-    /// Friends list used to store friends related data like close nodes per
-    /// friend, hole punching status, etc. First FAKE_FRIENDS_NUMBER friends
-    /// are fake with random public key.
-    friends: Arc<RwLock<HashMap<PublicKey, DhtFriend>>>,
-    /// List of nodes to send `NodesRequest` packet. When we receive
-    /// `NodesResponse` packet we should send `NodesRequest` to all nodes from
-    /// the response to check if they are capable of handling our requests and
-    /// to continue bootstrapping. But instead of instant sending `NodesRequest`
-    /// we will add the node to this list which is processed every second. The
-    /// purpose of this is to prevent amplification attacks.
-    nodes_to_bootstrap: Arc<RwLock<Kbucket<PackedNode>>>,
-    /// How many times we sent `NodesRequest` packet to a random node from close
-    /// nodes list.
-    random_requests_count: Arc<RwLock<u32>>,
-    /// Time when we sent `NodesRequest` packet to a random node from close
-    /// nodes list.
-    last_nodes_req_time: Arc<RwLock<Instant>>,
     /// List of nodes to send `PingRequest`. When we receive `PingRequest` or
     /// `NodesRequest` packet from a new node we should send `PingRequest` to
     /// this node to check if it's capable of handling our requests. But instead
@@ -190,22 +204,26 @@ impl Server {
             .collect();
 
         let precomputed_keys = PrecomputedCache::new(sk.clone(), PRECOMPUTED_LRU_CACHE_SIZE);
-
         let onion_symmetric_key = XSalsa20Poly1305::new(&XSalsa20Poly1305::generate_key(&mut rng));
+
+        let state = ServerState {
+            request_queue: RequestQueue::new(PING_TIMEOUT),
+            friends,
+            nodes_to_bootstrap: Kbucket::new(MAX_TO_BOOTSTRAP),
+            close_nodes: ForcedKtree::new(pk.clone()),
+            random_requests_count: 0,
+            last_nodes_req_time: clock_now(),
+        };
+
         Server {
             sk,
             pk: pk.clone(),
             tx,
+            state: Arc::new(RwLock::new(state)),
             friend_saddr_sink: Default::default(),
-            request_queue: Arc::new(RwLock::new(RequestQueue::new(PING_TIMEOUT))),
-            close_nodes: Arc::new(RwLock::new(ForcedKtree::new(pk.clone()))),
             onion_symmetric_key: Arc::new(RwLock::new(onion_symmetric_key)),
             onion_announce: Arc::new(RwLock::new(OnionAnnounce::new(&mut rng, pk))),
             fake_friends_keys,
-            friends: Arc::new(RwLock::new(friends)),
-            nodes_to_bootstrap: Arc::new(RwLock::new(Kbucket::new(MAX_TO_BOOTSTRAP))),
-            random_requests_count: Arc::new(RwLock::new(0)),
-            last_nodes_req_time: Arc::new(RwLock::new(clock_now())),
             nodes_to_ping: Arc::new(RwLock::new(Kbucket::new(MAX_TO_PING))),
             bootstrap_info: None,
             tcp_onion_sink: None,
@@ -233,10 +251,20 @@ impl Server {
 
     /// Check if we have at least one node in good state.
     pub async fn is_connected(&self) -> bool {
-        self.close_nodes.read()
+        self.state.read()
             .await
+            .close_nodes
             .iter()
             .any(|node| !node.is_bad())
+    }
+
+    /// Get all known nodes.
+    pub async fn get_all_nodes(&self) -> Vec<PackedNode> {
+        let state = self.state.read().await;
+
+        state.close_nodes.iter()
+            .flat_map(|node| node.to_packed_node())
+            .collect::<Vec<PackedNode>>()
     }
 
     /// Get closest nodes from both close_nodes and friend's close_nodes
@@ -262,37 +290,34 @@ impl Server {
 
     /// Get closest nodes from both close_nodes and friend's close_nodes
     pub async fn get_closest(&self, base_pk: &PublicKey, count: u8, only_global: bool) -> Kbucket<PackedNode> {
-        let close_nodes = self.close_nodes.read().await;
-        let friends = self.friends.read().await;
+        let state = self.state.read().await;
 
-        Server::get_closest_inner(&close_nodes, &friends, base_pk, count, only_global)
+        Server::get_closest_inner(&state.close_nodes, &state.friends, base_pk, count, only_global)
     }
 
     /// Add a friend to the DHT friends list to look for it's IP address. After
     /// IP address it will be sent to `friend_saddr_sink`.
     pub async fn add_friend(&self, friend_pk: PublicKey) {
-        let mut friends = self.friends.write().await;
+        let mut state = self.state.write().await;
 
-        if friends.contains_key(&friend_pk) {
+        if state.friends.contains_key(&friend_pk) {
             return;
         }
 
-        let close_nodes = self.close_nodes.read().await;
-
         let mut friend = DhtFriend::new(&mut thread_rng(), friend_pk.clone());
-        let close_nodes = Server::get_closest_inner(&close_nodes, &friends, &friend.pk, 4, true);
+        let close_nodes = Server::get_closest_inner(&state.close_nodes, &state.friends, &friend.pk, 4, true);
 
         for node in close_nodes.iter() {
             friend.nodes_to_bootstrap.try_add(&friend.pk, node.clone(), /* evict */ true);
         }
 
-        friends.insert(friend_pk, friend);
+        state.friends.insert(friend_pk, friend);
     }
 
     /// Remove a friend from the DHT friends list to stop looking for it's IP
     /// address.
     pub async fn remove_friend(&self, friend_pk: PublicKey) {
-        self.friends.write().await.remove(&friend_pk);
+        self.state.write().await.friends.remove(&friend_pk);
     }
 
     /// The main loop of DHT server which should be called every second. This
@@ -312,36 +337,33 @@ impl Server {
             }
         }
 
-        let mut request_queue = self.request_queue.write().await;
-        let mut nodes_to_bootstrap = self.nodes_to_bootstrap.write().await;
-        let mut close_nodes = self.close_nodes.write().await;
-        let mut friends = self.friends.write().await;
+        let state = &mut *self.state.write().await;
 
-        request_queue.clear_timed_out();
+        state.request_queue.clear_timed_out();
 
         // Send NodesRequest packets to nodes from the Server
-        self.ping_nodes_to_bootstrap(&mut request_queue, &mut nodes_to_bootstrap, self.pk.clone()).await
+        self.ping_nodes_to_bootstrap(&mut state.request_queue, &mut state.nodes_to_bootstrap, self.pk.clone()).await
             .map_err(RunError::SendTo)?;
-        self.ping_close_nodes(&mut request_queue, close_nodes.iter_mut(), self.pk.clone()).await
+        self.ping_close_nodes(&mut state.request_queue, state.close_nodes.iter_mut(), self.pk.clone()).await
             .map_err(RunError::SendTo)?;
-        if send_random_request(&mut *self.last_nodes_req_time.write().await, &mut *self.random_requests_count.write().await) {
-            self.send_nodes_req_random(&mut request_queue, close_nodes.iter(), self.pk.clone()).await
+        if send_random_request(&mut state.last_nodes_req_time, &mut state.random_requests_count) {
+            self.send_nodes_req_random(&mut state.request_queue, state.close_nodes.iter(), self.pk.clone()).await
                 .map_err(RunError::SendTo)?;
         }
 
         // Send NodesRequest packets to nodes from every DhtFriend
-        for friend in friends.values_mut() {
-            self.ping_nodes_to_bootstrap(&mut request_queue, &mut friend.nodes_to_bootstrap, friend.pk.clone()).await
+        for friend in state.friends.values_mut() {
+            self.ping_nodes_to_bootstrap(&mut state.request_queue, &mut friend.nodes_to_bootstrap, friend.pk.clone()).await
                 .map_err(RunError::SendTo)?;
-            self.ping_close_nodes(&mut request_queue, friend.close_nodes.nodes.iter_mut(), friend.pk.clone()).await
+            self.ping_close_nodes(&mut state.request_queue, friend.close_nodes.nodes.iter_mut(), friend.pk.clone()).await
                 .map_err(RunError::SendTo)?;
             if send_random_request(&mut friend.last_nodes_req_time, &mut friend.random_requests_count) {
-                self.send_nodes_req_random(&mut request_queue, friend.close_nodes.nodes.iter(), friend.pk.clone()).await
+                self.send_nodes_req_random(&mut state.request_queue, friend.close_nodes.nodes.iter(), friend.pk.clone()).await
                     .map_err(RunError::SendTo)?
             }
         }
 
-        self.send_nat_ping_req(&mut request_queue, &mut friends).await
+        self.send_nat_ping_req(&mut state.request_queue, &mut state.friends).await
             .map_err(RunError::SendTo)
     }
 
@@ -403,20 +425,19 @@ impl Server {
     /// it's empty) and if so then send `NodesRequest` packet to nodes from
     /// initial bootstrap list and from Ktree.
     async fn send_bootstrap_requests(&self) -> Result<(), mpsc::SendError> {
-        let mut request_queue = self.request_queue.write().await;
-        let close_nodes = self.close_nodes.read().await;
+        let state = &mut *self.state.write().await;
 
-        if !close_nodes.is_all_discarded() {
+        if !state.close_nodes.is_all_discarded() {
             return Ok(());
         }
 
-        let nodes = close_nodes
+        let nodes = state.close_nodes
             .iter()
             .flat_map(|node| node.to_all_packed_nodes())
             .chain(self.initial_bootstrap.iter().cloned());
 
         for node in nodes {
-            self.send_nodes_req(node, &mut request_queue, self.pk.clone()).await?;
+            self.send_nodes_req(node, &mut state.request_queue, self.pk.clone()).await?;
         }
 
         Ok(())
@@ -490,10 +511,10 @@ impl Server {
             return Ok(());
         }
 
-        let mut request_queue = self.request_queue.write().await;
+        let mut state = self.state.write().await;
 
         for node in nodes_to_ping.iter() {
-            self.send_ping_req(node.clone(), &mut request_queue).await?;
+            self.send_ping_req(node.clone(), &mut state.request_queue).await?;
         }
 
         Ok(())
@@ -504,18 +525,16 @@ impl Server {
     /// `PingRequest` immediately instead of adding to a `nodes_to_ping`
     /// list.
     async fn ping_add(&self, node: PackedNode) -> Result<(), mpsc::SendError> {
-        let close_nodes = self.close_nodes.read().await;
+        let mut state = self.state.write().await;
 
-        if !close_nodes.can_add(&node) {
+        if !state.close_nodes.can_add(&node) {
             return Ok(());
         }
 
-        let friends = self.friends.read().await;
-
         // If node is friend and we don't know friend's IP address yet then send
         // PingRequest immediately and unconditionally
-        if friends.get(&node.pk).map_or(false, |friend| !friend.is_addr_known()) {
-            return self.send_ping_req(node.clone(), &mut *self.request_queue.write().await).await;
+        if state.friends.get(&node.pk).map_or(false, |friend| !friend.is_addr_known()) {
+            return self.send_ping_req(node.clone(), &mut state.request_queue).await;
         }
 
         self.nodes_to_ping.write().await.try_add(&self.pk, node, /* evict */ true);
@@ -593,8 +612,8 @@ impl Server {
 
     /// Ping node with `NodesRequest` packet with self DHT `PublicKey`.
     pub async fn ping_node(&self, node: PackedNode) -> Result<(), PingError> {
-        let mut request_queue = self.request_queue.write().await;
-        self.send_nodes_req(node, &mut request_queue, self.pk.clone())
+        let mut state = self.state.write().await;
+        self.send_nodes_req(node, &mut state.request_queue, self.pk.clone())
             .await
             .map_err(PingError::SendTo)
     }
@@ -740,26 +759,18 @@ impl Server {
             .await
     }
 
-    /// Adapt `RequestQueue.check_ping_id()`.
-    async fn check_ping_id(&self, ping_id: u64, packet_pk: &PublicKey) -> bool {
-        let mut request_queue = self.request_queue.write().await;
-        request_queue.check_ping_id(ping_id, |pk| packet_pk.eq(pk)).is_some()
-    }
-
     /// Add node to close list after we received a response from it. If it's a
     /// friend then send it's IP address to appropriate sink.
-    async fn try_add_to_close(&self, payload_id: u64, node: PackedNode, check_ping_id: bool) -> Result<(), HandlePacketError> {
-        if check_ping_id && !self.check_ping_id(payload_id, &node.pk).await {
+    async fn try_add_to_close(&self, state: &mut ServerState, payload_id: u64, node: PackedNode, check_ping_id: bool) -> Result<(), HandlePacketError> {
+        if check_ping_id && !state.check_ping_id(payload_id, &node.pk) {
             return Err(HandlePacketError::PingIdMismatch);
         }
 
-        let mut close_nodes = self.close_nodes.write().await;
-        let mut friends = self.friends.write().await;
-        close_nodes.try_add(node.clone());
-        for friend in friends.values_mut() {
+        state.close_nodes.try_add(node.clone());
+        for friend in state.friends.values_mut() {
             friend.try_add_to_close(node.clone());
         }
-        if friends.contains_key(&node.pk) {
+        if state.friends.contains_key(&node.pk) {
             let sink = self.friend_saddr_sink.read().await.clone();
             maybe_send_unbounded(sink, node).await
                 .map_err(HandlePacketError::FriendSaddr)
@@ -781,7 +792,7 @@ impl Server {
             return Err(HandlePacketError::ZeroPingId);
         }
 
-        self.try_add_to_close(payload.id, PackedNode::new(addr, packet.pk), true).await
+        self.try_add_to_close(&mut *self.state.write().await, payload.id, PackedNode::new(addr, packet.pk), true).await
     }
 
     /// Handle received `NodesRequest` packet and respond with `NodesResponse`
@@ -818,28 +829,24 @@ impl Server {
 
     /// Add nodes to bootstrap nodes list to send `NodesRequest` packet to them
     /// later.
-    async fn add_bootstrap_nodes(&self, nodes: &[PackedNode], packet_pk: &PublicKey) {
-        let mut close_nodes = self.close_nodes.write().await;
-        let mut friends = self.friends.write().await;
-        let mut nodes_to_bootstrap = self.nodes_to_bootstrap.write().await;
-
+    async fn add_bootstrap_nodes(&self, state: &mut ServerState, nodes: &[PackedNode], packet_pk: &PublicKey) {
         // Process nodes from NodesResponse
         for node in nodes {
             if !self.is_ipv6_enabled && node.saddr.is_ipv6() {
                 continue;
             }
 
-            if close_nodes.can_add(node) {
-                nodes_to_bootstrap.try_add(&self.pk, node.clone(), /* evict */ true);
+            if state.close_nodes.can_add(node) {
+                state.nodes_to_bootstrap.try_add(&self.pk, node.clone(), /* evict */ true);
             }
 
-            for friend in friends.values_mut() {
+            for friend in state.friends.values_mut() {
                 if friend.can_add_to_close(node) {
                     friend.nodes_to_bootstrap.try_add(&friend.pk, node.clone(), /* evict */ true);
                 }
             }
 
-            self.update_returned_addr(node, packet_pk, &mut close_nodes, &mut friends);
+            self.update_returned_addr(node, packet_pk, &mut state.close_nodes, &mut state.friends);
         }
     }
 
@@ -856,13 +863,15 @@ impl Server {
             Ok(payload) => payload,
         };
 
-        if self.check_ping_id(payload.id, &packet.pk).await {
+        let mut state = self.state.write().await;
+
+        if state.check_ping_id(payload.id, &packet.pk) {
             trace!("Received nodes with NodesResponse from {}: {:?}", addr, payload.nodes);
 
-            self.try_add_to_close(payload.id, PackedNode::new(addr, packet.pk.clone()), false).await?;
+            self.try_add_to_close(&mut *state, payload.id, PackedNode::new(addr, packet.pk.clone()), false).await?;
 
             // Process nodes from NodesResponse
-            self.add_bootstrap_nodes(&payload.nodes, &packet.pk).await;
+            self.add_bootstrap_nodes(&mut *state, &payload.nodes, &packet.pk).await;
         } else {
             // Some old version toxcore responds with wrong ping_id.
             // So we do not treat this as our own error.
@@ -936,8 +945,8 @@ impl Server {
 
     /// Redirect received `DhtRequest` packet.
     async fn handle_dht_req_for_others(&self, packet: DhtRequest) -> Result<(), HandlePacketError> {
-        let close_nodes = self.close_nodes.read().await;
-        if let Some(node) = close_nodes.get_node(&packet.rpk).and_then(|node| node.to_packed_node()) {
+        let state = self.state.read().await;
+        if let Some(node) = state.close_nodes.get_node(&packet.rpk).and_then(|node| node.to_packed_node()) {
             let packet = Packet::DhtRequest(packet);
             self.send_to(node.saddr, packet).await
                 .map_err(HandlePacketError::SendTo)?;
@@ -949,8 +958,8 @@ impl Server {
     /// Set last received ping time for `DhtFriend`.
     async fn set_friend_hole_punch_last_recv_ping_time(&self, spk: &PublicKey, ping_time: Instant)
         -> Result<(), HandlePacketError> {
-        let mut friends = self.friends.write().await;
-        match friends.get_mut(spk) {
+        let mut state = self.state.write().await;
+        match state.friends.get_mut(spk) {
             None => Err(HandlePacketError::NoFriend),
             Some(friend) => {
                 friend.hole_punch.last_recv_ping_time = ping_time;
@@ -984,9 +993,9 @@ impl Server {
             return Err(HandlePacketError::ZeroPingId)
         }
 
-        let mut friends = self.friends.write().await;
+        let mut state = self.state.write().await;
 
-        let friend = match friends.get_mut(spk) {
+        let friend = match state.friends.get_mut(spk) {
             None => return Err(HandlePacketError::NoFriend),
             Some(friend) => friend,
         };
@@ -1019,7 +1028,9 @@ impl Server {
             return Ok(());
         }
 
-        self.send_nodes_req(PackedNode::new(addr, packet.pk.clone()), &mut *self.request_queue.write().await, self.pk.clone())
+        let mut state = self.state.write().await;
+
+        self.send_nodes_req(PackedNode::new(addr, packet.pk.clone()), &mut state.request_queue, self.pk.clone())
             .await
             .map_err(HandlePacketError::SendTo)
     }
@@ -1326,13 +1337,13 @@ impl Server {
 
     /// Get up to `count` random nodes stored in fake friends.
     pub async fn random_friend_nodes(&self, count: u8) -> Vec<PackedNode> {
-        let friends = self.friends.read().await;
+        let state = self.state.read().await;
         let mut nodes = Vec::new();
         let mut rng = thread_rng();
         let mut fake_friends_keys = self.fake_friends_keys.clone();
         fake_friends_keys.shuffle(&mut rng);
         for pk in fake_friends_keys {
-            let mut close_nodes: Vec<_> = friends[&pk]
+            let mut close_nodes: Vec<_> = state.friends[&pk]
                 .close_nodes
                 .iter()
                 .flat_map(|node| node.to_packed_node())
@@ -1384,11 +1395,11 @@ mod tests {
 
     impl Server {
         pub async fn has_friend(&self, pk: &PublicKey) -> bool {
-            self.friends.read().await.contains_key(pk)
+            self.state.read().await.friends.contains_key(pk)
         }
 
         pub async fn add_node(&self, node: PackedNode) {
-            assert!(self.close_nodes.write().await.try_add(node));
+            assert!(self.state.write().await.close_nodes.try_add(node));
         }
     }
 
@@ -1413,12 +1424,12 @@ mod tests {
         let (alice, _precomp, bob_pk, _bob_sk, _rx, _addr) = create_node();
 
         let packed_node = PackedNode::new("211.192.153.67:33445".parse().unwrap(), bob_pk.clone());
-        assert!(alice.close_nodes.write().await.try_add(packed_node));
+        assert!(alice.state.write().await.close_nodes.try_add(packed_node));
 
         let friend_pk = SecretKey::generate(&mut rng).public_key();
         alice.add_friend(friend_pk.clone()).await;
 
-        let inserted_friend = &alice.friends.read().await[&friend_pk];
+        let inserted_friend = &alice.state.read().await.friends[&friend_pk];
         assert!(inserted_friend.nodes_to_bootstrap.contains(&friend_pk, &bob_pk));
     }
 
@@ -1431,13 +1442,13 @@ mod tests {
         alice.add_friend(friend_pk.clone()).await;
 
         let packed_node = PackedNode::new("127.0.0.1:33445".parse().unwrap(), bob_pk.clone());
-        assert!(alice.friends.write().await.get_mut(&friend_pk).unwrap().try_add_to_close(packed_node));
+        assert!(alice.state.write().await.friends.get_mut(&friend_pk).unwrap().try_add_to_close(packed_node));
 
         // adding the same friend shouldn't replace existing `DhtFriend`
         alice.add_friend(friend_pk.clone()).await;
 
         // so it should still contain the added node
-        assert!(alice.friends.read().await[&friend_pk].close_nodes.contains(&friend_pk, &bob_pk));
+        assert!(alice.state.read().await.friends[&friend_pk].close_nodes.contains(&friend_pk, &bob_pk));
     }
 
     #[tokio::test]
@@ -1448,11 +1459,11 @@ mod tests {
         let friend_pk = SecretKey::generate(&mut rng).public_key();
         alice.add_friend(friend_pk.clone()).await;
 
-        assert!(alice.friends.read().await.contains_key(&friend_pk));
+        assert!(alice.state.read().await.friends.contains_key(&friend_pk));
 
         alice.remove_friend(friend_pk.clone()).await;
 
-        assert!(!alice.friends.read().await.contains_key(&friend_pk));
+        assert!(!alice.state.read().await.friends.contains_key(&friend_pk));
     }
 
     #[tokio::test]
@@ -1541,7 +1552,7 @@ mod tests {
 
         alice.handle_ping_req(ping_req, addr).await.unwrap();
 
-        let mut request_queue = alice.request_queue.write().await;
+        let mut state = alice.state.write().await;
 
         rx.take(2).map(|(packet, addr_to_send)| {
             assert_eq!(addr_to_send, addr);
@@ -1554,7 +1565,7 @@ mod tests {
                 let ping_req = unpack!(packet, Packet::PingRequest);
                 let precomputed_key = SalsaBox::new(&ping_req.pk, &bob_sk);
                 let ping_req_payload = ping_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(ping_req_payload.id, |pk| pk == &bob_pk).is_some());
+                assert!(state.request_queue.check_ping_id(ping_req_payload.id, |pk| pk == &bob_pk).is_some());
             }
         }).collect::<Vec<_>>().await;
 
@@ -1583,9 +1594,9 @@ mod tests {
         alice.add_friend(bob_pk.clone()).await;
 
         let packed_node = PackedNode::new(addr, bob_pk.clone());
-        assert!(alice.close_nodes.write().await.try_add(packed_node));
+        assert!(alice.state.write().await.close_nodes.try_add(packed_node));
 
-        let ping_id = alice.request_queue.write().await.new_ping_id(&mut thread_rng(), bob_pk.clone());
+        let ping_id = alice.state.write().await.request_queue.new_ping_id(&mut thread_rng(), bob_pk.clone());
 
         let resp_payload = PingResponsePayload { id: ping_id };
         let ping_resp = PingResponse::new(&precomp, bob_pk.clone(), &resp_payload);
@@ -1595,15 +1606,15 @@ mod tests {
 
         alice.handle_ping_resp(ping_resp, addr).await.unwrap();
 
-        let friends = alice.friends.read().await;
-        let friend = friends.values().next().unwrap();
+        let state = alice.state.read().await;
+        let friend = state.friends.values().next().unwrap();
 
         // All nodes from PingResponse should be added to bootstrap nodes list
         // of each friend
         assert!(friend.close_nodes.contains(&bob_pk, &bob_pk));
 
-        let close_nodes = alice.close_nodes.read().await;
-        let node = close_nodes.get_node(&bob_pk).unwrap();
+        let state = alice.state.read().await;
+        let node = state.close_nodes.get_node(&bob_pk).unwrap();
 
         // Node that sent PingResponse should be added to close nodes list and
         // have updated last_resp_time
@@ -1619,9 +1630,9 @@ mod tests {
         alice.set_friend_saddr_sink(friend_saddr_tx).await;
 
         let packed_node = PackedNode::new(addr, bob_pk.clone());
-        assert!(alice.close_nodes.write().await.try_add(packed_node));
+        assert!(alice.state.write().await.close_nodes.try_add(packed_node));
 
-        let ping_id = alice.request_queue.write().await.new_ping_id(&mut thread_rng(), bob_pk.clone());
+        let ping_id = alice.state.write().await.request_queue.new_ping_id(&mut thread_rng(), bob_pk.clone());
 
         let resp_payload = PingResponsePayload { id: ping_id };
         let ping_resp = PingResponse::new(&precomp, bob_pk, &resp_payload);
@@ -1644,9 +1655,9 @@ mod tests {
         alice.add_friend(bob_pk.clone()).await;
 
         let packed_node = PackedNode::new(addr, bob_pk.clone());
-        assert!(alice.close_nodes.write().await.try_add(packed_node));
+        assert!(alice.state.write().await.close_nodes.try_add(packed_node));
 
-        let ping_id = alice.request_queue.write().await.new_ping_id(&mut thread_rng(), bob_pk.clone());
+        let ping_id = alice.state.write().await.request_queue.new_ping_id(&mut thread_rng(), bob_pk.clone());
 
         let resp_payload = PingResponsePayload { id: ping_id };
         let ping_resp = PingResponse::new(&precomp, bob_pk.clone(), &resp_payload);
@@ -1665,9 +1676,9 @@ mod tests {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let packed_node = PackedNode::new(addr, bob_pk.clone());
-        assert!(alice.close_nodes.write().await.try_add(packed_node));
+        assert!(alice.state.write().await.close_nodes.try_add(packed_node));
 
-        let ping_id = alice.request_queue.write().await.new_ping_id(&mut thread_rng(), bob_pk);
+        let ping_id = alice.state.write().await.request_queue.new_ping_id(&mut thread_rng(), bob_pk);
 
         // can't be decrypted payload since packet contains wrong key
         let payload = PingResponsePayload { id: ping_id };
@@ -1682,7 +1693,7 @@ mod tests {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let packed_node = PackedNode::new(addr, bob_pk.clone());
-        assert!(alice.close_nodes.write().await.try_add(packed_node));
+        assert!(alice.state.write().await.close_nodes.try_add(packed_node));
 
         let payload = PingResponsePayload { id: 0 };
         let ping_resp = PingResponse::new(&precomp, bob_pk, &payload);
@@ -1696,9 +1707,9 @@ mod tests {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         let packed_node = PackedNode::new(addr, bob_pk.clone());
-        assert!(alice.close_nodes.write().await.try_add(packed_node));
+        assert!(alice.state.write().await.close_nodes.try_add(packed_node));
 
-        let ping_id = alice.request_queue.write().await.new_ping_id(&mut thread_rng(), bob_pk.clone());
+        let ping_id = alice.state.write().await.request_queue.new_ping_id(&mut thread_rng(), bob_pk.clone());
 
         let payload = PingResponsePayload { id: ping_id + 1 };
         let ping_resp = PingResponse::new(&precomp, bob_pk, &payload);
@@ -1714,7 +1725,7 @@ mod tests {
 
         let packed_node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), bob_pk.clone());
 
-        assert!(alice.close_nodes.write().await.try_add(packed_node.clone()));
+        assert!(alice.state.write().await.close_nodes.try_add(packed_node.clone()));
 
         let req_payload = NodesRequestPayload { pk: bob_pk.clone(), id: 42 };
         let nodes_req = NodesRequest::new(&precomp, bob_pk.clone(), &req_payload);
@@ -1743,7 +1754,7 @@ mod tests {
         alice.add_friend(bob_pk.clone()).await;
 
         let packed_node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), bob_pk.clone());
-        assert!(alice.friends.write().await.get_mut(&bob_pk).unwrap().try_add_to_close(packed_node.clone()));
+        assert!(alice.state.write().await.friends.get_mut(&bob_pk).unwrap().try_add_to_close(packed_node.clone()));
 
         let req_payload = NodesRequestPayload { pk: bob_pk.clone(), id: 42 };
         let nodes_req = NodesRequest::new(&precomp, bob_pk.clone(), &req_payload);
@@ -1771,7 +1782,7 @@ mod tests {
 
         let packed_node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), bob_pk.clone());
 
-        assert!(alice.close_nodes.write().await.try_add(packed_node));
+        assert!(alice.state.write().await.close_nodes.try_add(packed_node));
 
         let req_payload = NodesRequestPayload { pk: bob_pk.clone(), id: 42 };
         let nodes_req = NodesRequest::new(&precomp, bob_pk.clone(), &req_payload);
@@ -1805,7 +1816,7 @@ mod tests {
 
         let packed_node = PackedNode::new("192.168.42.42:12345".parse().unwrap(), bob_pk.clone());
 
-        assert!(alice.close_nodes.write().await.try_add(packed_node));
+        assert!(alice.state.write().await.close_nodes.try_add(packed_node));
 
         let req_payload = NodesRequestPayload { pk: bob_pk.clone(), id: 42 };
         let nodes_req = NodesRequest::new(&precomp, bob_pk.clone(), &req_payload);
@@ -1849,7 +1860,7 @@ mod tests {
 
         let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key());
 
-        let ping_id = alice.request_queue.write().await.new_ping_id(&mut rng, bob_pk.clone());
+        let ping_id = alice.state.write().await.request_queue.new_ping_id(&mut rng, bob_pk.clone());
 
         let resp_payload = NodesResponsePayload { nodes: vec![node.clone()], id: ping_id };
         let nodes_resp = NodesResponse::new(&precomp, bob_pk.clone(), &resp_payload);
@@ -1859,11 +1870,12 @@ mod tests {
 
         alice.handle_nodes_resp(nodes_resp, addr).await.unwrap();
 
-        // All nodes from NodesResponse should be added to bootstrap nodes list
-        assert!(alice.nodes_to_bootstrap.read().await.contains(&alice.pk, &node.pk));
+        let state = alice.state.read().await;
 
-        let friends = alice.friends.read().await;
-        let friend = friends.values().next().unwrap();
+        // All nodes from NodesResponse should be added to bootstrap nodes list
+        assert!(state.nodes_to_bootstrap.contains(&alice.pk, &node.pk));
+
+        let friend = state.friends.values().next().unwrap();
 
         // Node that sent NodesResponse should be added to close nodes list of
         // each friend
@@ -1872,8 +1884,8 @@ mod tests {
         // of each friend
         assert!(friend.close_nodes.contains(&bob_pk, &bob_pk));
 
-        let close_nodes = alice.close_nodes.read().await;
-        let node = close_nodes.get_node(&bob_pk).unwrap();
+        let state = alice.state.read().await;
+        let node = state.close_nodes.get_node(&bob_pk).unwrap();
 
         // Node that sent NodesResponse should be added to close nodes list and
         // have updated last_resp_time
@@ -1892,11 +1904,11 @@ mod tests {
         alice.add_friend(bob_pk.clone()).await;
 
         let packed_node = PackedNode::new(addr, bob_pk.clone());
-        assert!(alice.close_nodes.write().await.try_add(packed_node));
+        assert!(alice.state.write().await.close_nodes.try_add(packed_node));
 
         let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key());
 
-        let ping_id = alice.request_queue.write().await.new_ping_id(&mut rng, bob_pk.clone());
+        let ping_id = alice.state.write().await.request_queue.new_ping_id(&mut rng, bob_pk.clone());
 
         let resp_payload = NodesResponsePayload { nodes: vec![node], id: ping_id };
         let nodes_resp = NodesResponse::new(&precomp, bob_pk.clone(), &resp_payload);
@@ -1948,7 +1960,7 @@ mod tests {
         let mut rng = thread_rng();
         let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
 
-        let ping_id = alice.request_queue.write().await.new_ping_id(&mut rng, bob_pk.clone());
+        let ping_id = alice.state.write().await.request_queue.new_ping_id(&mut rng, bob_pk.clone());
 
         let resp_payload = NodesResponsePayload {
             nodes: vec![
@@ -1999,7 +2011,7 @@ mod tests {
 
         // if receiver' pk != node's pk and receiver's pk exists in close_nodes, returns ok()
         let pn = PackedNode::new(charlie_addr, charlie_pk.clone());
-        assert!(alice.close_nodes.write().await.try_add(pn));
+        assert!(alice.state.write().await.close_nodes.try_add(pn));
 
         let nat_req = NatPingRequest { id: 42 };
         let nat_payload = DhtRequestPayload::NatPingRequest(nat_req);
@@ -2057,10 +2069,10 @@ mod tests {
 
         assert_eq!(nat_ping_resp_payload.id, nat_req.id);
 
-        let friends = alice.friends.read().await;
+        let state = alice.state.read().await;
 
         let time = clock_now();
-        assert_eq!(friends[&bob_pk].hole_punch.last_recv_ping_time, time);
+        assert_eq!(state.friends[&bob_pk].hole_punch.last_recv_ping_time, time);
     }
 
     // handle_nat_ping_response
@@ -2069,7 +2081,7 @@ mod tests {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         alice.add_friend(bob_pk.clone()).await;
-        let ping_id = alice.friends.read().await[&bob_pk].hole_punch.ping_id;
+        let ping_id = alice.state.read().await.friends[&bob_pk].hole_punch.ping_id;
 
         let nat_res = NatPingResponse { id: ping_id };
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
@@ -2077,9 +2089,9 @@ mod tests {
 
         alice.handle_dht_req(dht_req, addr).await.unwrap();
 
-        let friends = alice.friends.read().await;
+        let state = alice.state.read().await;
 
-        assert!(!friends[&bob_pk].hole_punch.is_punching_done);
+        assert!(!state.friends[&bob_pk].hole_punch.is_punching_done);
     }
 
     #[tokio::test]
@@ -2100,7 +2112,7 @@ mod tests {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         // error case, incorrect ping_id
-        let ping_id = alice.request_queue.write().await.new_ping_id(&mut thread_rng(), bob_pk.clone());
+        let ping_id = alice.state.write().await.request_queue.new_ping_id(&mut thread_rng(), bob_pk.clone());
 
         let nat_res = NatPingResponse { id: ping_id + 1 };
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
@@ -2865,14 +2877,14 @@ mod tests {
         ];
         alice.add_friend(friend_pk.clone()).await;
 
-        let mut friends = alice.friends.write().await;
+        let mut state = alice.state.write().await;
         for node in &nodes {
-            let friend = friends.get_mut(&friend_pk).unwrap();
+            let friend = state.friends.get_mut(&friend_pk).unwrap();
             friend.try_add_to_close(node.clone());
             let dht_node = friend.close_nodes.get_node_mut(&friend_pk, &node.pk).unwrap();
             dht_node.update_returned_addr(node.saddr);
         }
-        drop(friends);
+        drop(state);
 
         alice.dht_main_loop().await.unwrap();
 
@@ -2885,7 +2897,7 @@ mod tests {
                 let nat_ping_req_payload = nat_ping_req.get_payload(&precomputed_key).unwrap();
                 let nat_ping_req_payload = unpack!(nat_ping_req_payload, DhtRequestPayload::NatPingRequest);
 
-                assert_eq!(alice.friends.read().await[&friend_pk].hole_punch.ping_id, nat_ping_req_payload.id);
+                assert_eq!(alice.state.read().await.friends[&friend_pk].hole_punch.ping_id, nat_ping_req_payload.id);
                 break;
             }
             rx = rx1;
@@ -2989,26 +3001,26 @@ mod tests {
         let node_pk = node_sk.public_key();
 
         let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), node_pk.clone());
-        assert!(alice.nodes_to_bootstrap.write().await.try_add(&alice.pk, pn, /* evict */ true));
+        assert!(alice.state.write().await.nodes_to_bootstrap.try_add(&alice.pk, pn, /* evict */ true));
 
         let pn = PackedNode::new("127.0.0.1:33445".parse().unwrap(), bob_pk.clone());
-        assert!(alice.nodes_to_bootstrap.write().await.try_add(&alice.pk, pn, /* evict */ true));
+        assert!(alice.state.write().await.nodes_to_bootstrap.try_add(&alice.pk, pn, /* evict */ true));
 
         alice.dht_main_loop().await.unwrap();
 
-        let mut request_queue = alice.request_queue.write().await;
+        let mut state = alice.state.write().await;
 
         rx.take(2).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, Packet::NodesRequest);
             if addr == "127.0.0.1:33445".parse().unwrap() {
                 let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &bob_pk).is_some());
+                assert!(state.request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &bob_pk).is_some());
                 assert_eq!(nodes_req_payload.pk, alice.pk);
             } else {
                 let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &node_pk).is_some());
+                assert!(state.request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &node_pk).is_some());
                 assert_eq!(nodes_req_payload.pk, alice.pk);
             }
         }).collect::<Vec<_>>().await;
@@ -3029,18 +3041,18 @@ mod tests {
 
         alice.send_pings().await.unwrap();
 
-        let mut request_queue = alice.request_queue.write().await;
+        let mut state = alice.state.write().await;
 
         rx.take(2).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, Packet::PingRequest);
             if addr == "127.0.0.1:33445".parse().unwrap() {
                 let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
                 let ping_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(ping_req_payload.id, |pk| pk == &bob_pk).is_some());
+                assert!(state.request_queue.check_ping_id(ping_req_payload.id, |pk| pk == &bob_pk).is_some());
             } else {
                 let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
                 let ping_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(ping_req_payload.id, |pk| pk == &node_pk).is_some());
+                assert!(state.request_queue.check_ping_id(ping_req_payload.id, |pk| pk == &node_pk).is_some());
             }
         }).collect::<Vec<_>>().await;
     }
@@ -3065,14 +3077,14 @@ mod tests {
         let node_pk = node_sk.public_key();
 
         let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), node_pk.clone());
-        assert!(alice.close_nodes.write().await.try_add(pn));
+        assert!(alice.state.write().await.close_nodes.try_add(pn));
 
         let pn = PackedNode::new("127.0.0.1:33445".parse().unwrap(), bob_pk.clone());
-        assert!(alice.close_nodes.write().await.try_add(pn));
+        assert!(alice.state.write().await.close_nodes.try_add(pn));
 
         alice.dht_main_loop().await.unwrap();
 
-        let mut request_queue = alice.request_queue.write().await;
+        let mut state = alice.state.write().await;
 
         // 3 = 2 packets sent by ping_close_nodes + 1 packet sent by send_nodes_req_random
         rx.take(3).map(|(packet, addr)| {
@@ -3080,12 +3092,12 @@ mod tests {
             if addr == "127.0.0.1:33445".parse().unwrap() {
                 let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &bob_pk).is_some());
+                assert!(state.request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &bob_pk).is_some());
                 assert_eq!(nodes_req_payload.pk, alice.pk);
             } else {
                 let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &node_pk).is_some());
+                assert!(state.request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &node_pk).is_some());
                 assert_eq!(nodes_req_payload.pk, alice.pk);
             }
         }).collect::<Vec<_>>().await;
@@ -3096,10 +3108,10 @@ mod tests {
         let (alice, _precomp, bob_pk, _bob_sk, mut rx, _addr) = create_node();
 
         {
-            let mut close_nodes = alice.close_nodes.write().await;
+            let mut state = alice.state.write().await;
             let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), bob_pk.clone());
-            assert!(close_nodes.try_add(pn));
-            let node = close_nodes.get_node_mut(&bob_pk).unwrap();
+            assert!(state.close_nodes.try_add(pn));
+            let node = state.close_nodes.get_node_mut(&bob_pk).unwrap();
             // Set last_ping_req_time so that only random request will be sent
             node.assoc4.last_ping_req_time = Some(clock_now());
             node.assoc6.last_ping_req_time = Some(clock_now());
@@ -3141,8 +3153,8 @@ mod tests {
 
         alice.add_friend(friend_pk.clone()).await;
 
-        let mut friends = alice.friends.write().await;
-        let friend = friends.get_mut(&friend_pk).unwrap();
+        let mut state = alice.state.write().await;
+        let friend = state.friends.get_mut(&friend_pk).unwrap();
 
         let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), node_pk.clone());
         assert!(friend.nodes_to_bootstrap.try_add(&alice.pk, pn, /* evict */ true));
@@ -3150,23 +3162,23 @@ mod tests {
         let pn = PackedNode::new("127.0.0.1:33445".parse().unwrap(), bob_pk.clone());
         assert!(friend.nodes_to_bootstrap.try_add(&alice.pk, pn, /* evict */ true));
 
-        drop(friends);
+        drop(state);
 
         alice.dht_main_loop().await.unwrap();
 
-        let mut request_queue = alice.request_queue.write().await;
+        let mut state = alice.state.write().await;
 
         rx.take(2).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, Packet::NodesRequest);
             if addr == "127.0.0.1:33445".parse().unwrap() {
                 let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &bob_pk).is_some());
+                assert!(state.request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &bob_pk).is_some());
                 assert_eq!(nodes_req_payload.pk, friend_pk);
             } else {
                 let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &node_pk).is_some());
+                assert!(state.request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &node_pk).is_some());
                 assert_eq!(nodes_req_payload.pk, friend_pk);
             }
         }).collect::<Vec<_>>().await;
@@ -3184,8 +3196,8 @@ mod tests {
         alice.add_friend(friend_pk.clone()).await;
 
         {
-            let mut friends = alice.friends.write().await;
-            let friend = friends.get_mut(&friend_pk).unwrap();
+            let mut state = alice.state.write().await;
+            let friend = state.friends.get_mut(&friend_pk).unwrap();
 
             let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), node_pk.clone());
             assert!(friend.try_add_to_close(pn));
@@ -3196,7 +3208,7 @@ mod tests {
 
         alice.dht_main_loop().await.unwrap();
 
-        let mut request_queue = alice.request_queue.write().await;
+        let mut state = alice.state.write().await;
 
         // 3 = 2 packets sent by ping_close_nodes + 1 packet sent by send_nodes_req_random
         rx.take(3).map(|(packet, addr)| {
@@ -3204,12 +3216,12 @@ mod tests {
             if addr == "127.0.0.1:33445".parse().unwrap() {
                 let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &bob_pk).is_some());
+                assert!(state.request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &bob_pk).is_some());
                 assert_eq!(nodes_req_payload.pk, friend_pk);
             } else {
                 let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &node_pk).is_some());
+                assert!(state.request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &node_pk).is_some());
                 assert_eq!(nodes_req_payload.pk, friend_pk);
             }
         }).collect::<Vec<_>>().await;
@@ -3223,8 +3235,8 @@ mod tests {
         let friend_pk = SecretKey::generate(&mut rng).public_key();
         alice.add_friend(friend_pk.clone()).await;
 
-        let mut friends = alice.friends.write().await;
-        let friend = friends.get_mut(&friend_pk).unwrap();
+        let mut state = alice.state.write().await;
+        let friend = state.friends.get_mut(&friend_pk).unwrap();
 
         let pn = PackedNode::new("127.0.0.1:33445".parse().unwrap(), bob_pk);
         assert!(friend.try_add_to_close(pn));
@@ -3233,14 +3245,14 @@ mod tests {
         friend.close_nodes.nodes[0].assoc4.last_ping_req_time = Some(clock_now());
         friend.close_nodes.nodes[0].assoc6.last_ping_req_time = Some(clock_now());
 
-        drop(friends);
+        drop(state);
 
         tokio::time::pause();
 
         // Random request should be sent every second MAX_BOOTSTRAP_TIMES times
         // This loop will produce MAX_BOOTSTRAP_TIMES random packets
         for _ in 0 .. MAX_BOOTSTRAP_TIMES {
-            alice.friends.write().await.get_mut(&friend_pk).unwrap().hole_punch.last_send_ping_time = Some(clock_now());
+            alice.state.write().await.friends.get_mut(&friend_pk).unwrap().hole_punch.last_send_ping_time = Some(clock_now());
             alice.dht_main_loop().await.unwrap();
 
             let (received, rx1) = rx.into_future().await;
@@ -3277,27 +3289,27 @@ mod tests {
         let node_pk = node_sk.public_key();
 
         let pn = PackedNode::new("[FF::01]:33445".parse().unwrap(), bob_pk.clone());
-        assert!(alice.close_nodes.write().await.try_add(pn));
+        assert!(alice.state.write().await.close_nodes.try_add(pn));
 
         let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), node_pk.clone());
-        assert!(alice.close_nodes.write().await.try_add(pn));
+        assert!(alice.state.write().await.close_nodes.try_add(pn));
 
         // test with ipv6 mode
         alice.enable_ipv6_mode(true);
         alice.dht_main_loop().await.unwrap();
 
-        let mut request_queue = alice.request_queue.write().await;
+        let mut state = alice.state.write().await;
 
         rx.take(2).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, Packet::NodesRequest);
             if addr == "[FF::01]:33445".parse().unwrap() {
                 let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &bob_pk).is_some());
+                assert!(state.request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &bob_pk).is_some());
             } else {
                 let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &node_pk).is_some());
+                assert!(state.request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &node_pk).is_some());
             }
         }).collect::<Vec<_>>().await;
     }
@@ -3319,18 +3331,18 @@ mod tests {
         alice.enable_ipv6_mode(true);
         alice.send_bootstrap_requests().await.unwrap();
 
-        let mut request_queue = alice.request_queue.write().await;
+        let mut state = alice.state.write().await;
 
         rx.take(2).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, Packet::NodesRequest);
             if addr == "[FF::01]:33445".parse().unwrap() {
                 let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &bob_pk).is_some());
+                assert!(state.request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &bob_pk).is_some());
             } else {
                 let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &node_pk).is_some());
+                assert!(state.request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &node_pk).is_some());
             }
         }).collect::<Vec<_>>().await;
     }
@@ -3345,7 +3357,7 @@ mod tests {
         alice.add_initial_bootstrap(pn);
 
         let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), node_pk);
-        assert!(alice.close_nodes.write().await.try_add(pn));
+        assert!(alice.state.write().await.close_nodes.try_add(pn));
 
         // test with ipv6 mode
         alice.enable_ipv6_mode(true);
@@ -3364,14 +3376,14 @@ mod tests {
         let node_sk = SecretKey::generate(&mut rng);
         let node_pk = node_sk.public_key();
 
-        let mut close_nodes = alice.close_nodes.write().await;
+        let mut state = alice.state.write().await;
 
         let pn = PackedNode::new("[FF::01]:33445".parse().unwrap(), bob_pk.clone());
-        assert!(close_nodes.try_add(pn));
+        assert!(state.close_nodes.try_add(pn));
         let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), node_pk.clone());
-        assert!(close_nodes.try_add(pn));
+        assert!(state.close_nodes.try_add(pn));
 
-        drop(close_nodes);
+        drop(state);
 
         // test with ipv6 mode
         alice.enable_ipv6_mode(true);
@@ -3381,18 +3393,18 @@ mod tests {
 
         alice.send_bootstrap_requests().await.unwrap();
 
-        let mut request_queue = alice.request_queue.write().await;
+        let mut state = alice.state.write().await;
 
         rx.take(2).map(|(packet, addr)| {
             let nodes_req = unpack!(packet, Packet::NodesRequest);
             if addr == "[FF::01]:33445".parse().unwrap() {
                 let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &bob_pk).is_some());
+                assert!(state.request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &bob_pk).is_some());
             } else {
                 let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
                 let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &node_pk).is_some());
+                assert!(state.request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &node_pk).is_some());
             }
         }).collect::<Vec<_>>().await;
     }
@@ -3425,17 +3437,17 @@ mod tests {
         let friend_pk = SecretKey::generate(&mut rng).public_key();
         alice.add_friend(friend_pk.clone()).await;
 
-        let mut friends = alice.friends.write().await;
+        let mut state = alice.state.write().await;
 
         for pk in &alice.fake_friends_keys {
             let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key());
-            assert!(friends.get_mut(pk).unwrap().close_nodes.try_add(pk, node, true));
+            assert!(state.friends.get_mut(pk).unwrap().close_nodes.try_add(pk, node, true));
         }
 
         let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key());
-        assert!(friends.get_mut(&friend_pk).unwrap().close_nodes.try_add(&friend_pk, node.clone(), true));
+        assert!(state.friends.get_mut(&friend_pk).unwrap().close_nodes.try_add(&friend_pk, node.clone(), true));
 
-        drop(friends);
+        drop(state);
 
         let nodes = alice.random_friend_nodes(FAKE_FRIENDS_NUMBER as u8 + 1).await;
         assert_eq!(nodes.len(), FAKE_FRIENDS_NUMBER);

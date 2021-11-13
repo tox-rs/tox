@@ -2362,14 +2362,12 @@ mod tests {
 
         state.friends.insert(friend_pk.clone(), friend);
 
-        let mut dht_close_nodes = onion_client.dht.close_nodes.write().await;
         for i in 0 .. 4 {
             let saddr = SocketAddr::new(addr, 23456 + i);
             let node_pk = SecretKey::generate(&mut rng).public_key();
             let node = PackedNode::new(saddr, node_pk);
-            assert!(dht_close_nodes.try_add(node));
+            onion_client.dht.add_node(node).await;
         }
-        drop(dht_close_nodes);
 
         onion_client.friends_loop(&mut state).await.unwrap();
 
@@ -2419,14 +2417,12 @@ mod tests {
         state.friends.insert(friend_pk, friend);
 
         let addr = "127.0.0.1".parse().unwrap();
-        let mut dht_close_nodes = onion_client.dht.close_nodes.write().await;
         for i in 0 .. 8 {
             let saddr = SocketAddr::new(addr, 23456 + i);
             let node_pk = SecretKey::generate(&mut rng).public_key();
             let node = PackedNode::new(saddr, node_pk);
-            assert!(dht_close_nodes.try_add(node));
+            onion_client.dht.add_node(node).await;
         }
-        drop(dht_close_nodes);
 
         onion_client.friends_loop(&mut state).await.unwrap();
 
