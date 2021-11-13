@@ -12,7 +12,7 @@ description = "I/O traits for tox"
 documentation = "https://docs.rs/tox_binary_io/"
 repository = "https://github.com/tox-rs/tox/"
 license = "GPL-3.0+"
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 nom = "7.0"

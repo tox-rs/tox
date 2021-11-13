@@ -14,7 +14,7 @@ repository = "https://github.com/tox-rs/tox/"
 keywords = ["p2p", "instant-messaging", "tox", "toxcore", "networking"]
 categories = ["multimedia"]
 license = "GPL-3.0+"
-edition = "2018"
+edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
