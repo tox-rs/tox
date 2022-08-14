@@ -3,7 +3,7 @@
 use std::convert::Into;
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::time::{Duration, Instant};
-use crypto_box::SalsaBox;
+use crypto_box::{SalsaBox, aead::AeadCore};
 use rand::{thread_rng, Rng};
 use xsalsa20poly1305::XSalsa20Poly1305;
 
@@ -382,7 +382,7 @@ impl CryptoConnection {
         let mut rng = thread_rng();
         let session_sk = SecretKey::generate(&mut rng);
         let session_pk = session_sk.public_key();
-        let sent_nonce = crypto_box::generate_nonce(&mut rng);
+        let sent_nonce = SalsaBox::generate_nonce(&mut rng);
 
         let our_cookie = Cookie::new(peer_real_pk.clone(), peer_dht_pk.clone());
         let our_encrypted_cookie = EncryptedCookie::new(&mut rng, symmetric_key, &our_cookie);

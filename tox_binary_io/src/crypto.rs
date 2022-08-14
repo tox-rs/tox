@@ -51,6 +51,6 @@ mod tests {
         let bytes = [42; KEY_SIZE];
         let (_rest, sk) = SecretKey::from_bytes(&bytes).unwrap();
 
-        assert_eq!(&sk.to_bytes()[..], &bytes as &[u8]);
+        assert_eq!(sk.as_bytes(), &bytes as &[u8]);
     }
 }

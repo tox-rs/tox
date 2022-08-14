@@ -26,7 +26,7 @@ use std::{convert::TryInto, ops::Deref};
 use thiserror::Error;
 use rand::{Rng, thread_rng};
 use sha2::{Digest, Sha256};
-use xsalsa20poly1305::{XSalsa20Poly1305, aead::{Aead, NewAead}};
+use xsalsa20poly1305::{XSalsa20Poly1305, KeyInit, aead::Aead};
 use zeroize::Zeroizing;
 
 /// Length (in bytes) of [`MAGIC_NUMBER`](./constant.MAGIC_NUMBER.html).
@@ -154,7 +154,7 @@ impl PassKey {
         if data.is_empty() { return Err(EncryptionError::Null) };
 
         let mut output = Vec::with_capacity(EXTRA_LENGTH + data.len());
-        let nonce = xsalsa20poly1305::generate_nonce(&mut thread_rng());
+        let nonce = XSalsa20Poly1305::generate_nonce(&mut thread_rng());
 
         output.extend_from_slice(MAGIC_NUMBER);
         output.extend_from_slice(&self.salt);

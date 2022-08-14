@@ -355,7 +355,7 @@ mod tests {
         // assume we got Bob's PK & Nonce via handshake
         let bob_sk = SecretKey::generate(&mut rng);
         let bob_pk = bob_sk.public_key();
-        let bob_nonce = crypto_box::generate_nonce(&mut rng);
+        let bob_nonce = SalsaBox::generate_nonce(&mut rng);
 
         // Now both Alice and Bob may create secure Channels
         let alice_channel = Channel::new(&alice_session, &bob_pk, &bob_nonce.into());

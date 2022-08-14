@@ -144,7 +144,7 @@ impl OnionReturn {
 
     /// Create new `OnionReturn` object using symmetric key for encryption.
     pub fn new<R: Rng + CryptoRng>(rng: &mut R, symmetric_key: &XSalsa20Poly1305, ip_port: &IpPort, inner: Option<&OnionReturn>) -> OnionReturn {
-        let nonce = xsalsa20poly1305::generate_nonce(rng);
+        let nonce = XSalsa20Poly1305::generate_nonce(rng);
         let mut buf = [0; ONION_RETURN_2_SIZE + SIZE_IPPORT];
         let (_, size) = OnionReturn::inner_to_bytes(ip_port, inner, (&mut buf, 0)).unwrap();
         let payload = symmetric_key.encrypt(&nonce, &buf[..size]).unwrap();
@@ -225,7 +225,7 @@ mod tests {
     use super::*;
 
     use rand::thread_rng;
-    use xsalsa20poly1305::aead::NewAead;
+    use xsalsa20poly1305::KeyInit;
 
     const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - xsalsa20poly1305::NONCE_SIZE;
 
@@ -310,7 +310,7 @@ mod tests {
     fn onion_return_decrypt_invalid() {
         let mut rng = thread_rng();
         let symmetric_key = XSalsa20Poly1305::new(&XSalsa20Poly1305::generate_key(&mut rng));
-        let nonce = xsalsa20poly1305::generate_nonce(&mut rng);
+        let nonce = XSalsa20Poly1305::generate_nonce(&mut rng);
         // Try long invalid array
         let invalid_payload = [42; 123];
         let invalid_payload_encoded = symmetric_key.encrypt(&nonce, &invalid_payload[..]).unwrap();

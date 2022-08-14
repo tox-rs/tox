@@ -1,7 +1,7 @@
 /*! CookieResponse packet
 */
 
-use crypto_box::{SalsaBox, aead::{Aead, Error as AeadError}};
+use crypto_box::{SalsaBox, aead::{Aead, AeadCore, Error as AeadError}};
 use nom::number::complete::be_u64;
 use nom::bytes::complete::{tag, take};
 use nom::combinator::eof;
@@ -60,7 +60,7 @@ impl ToBytes for CookieResponse {
 impl CookieResponse {
     /// Create `CookieResponse` from `CookieRequestPayload` encrypting it with `shared_key`
     pub fn new(shared_secret: &SalsaBox, payload: &CookieResponsePayload) -> CookieResponse {
-        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
+        let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng());
         let mut buf = [0; 120];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
         let payload = shared_secret.encrypt(&nonce, &buf[..size]).unwrap();
@@ -210,7 +210,7 @@ mod tests {
         let alice_sk = SecretKey::generate(&mut rng);
         let bob_pk = SecretKey::generate(&mut rng).public_key();
         let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
-        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
+        let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng());
         // Try long invalid array
         let invalid_payload = [42; 123];
         let invalid_payload_encoded = shared_secret.encrypt(&nonce, &invalid_payload[..]).unwrap();

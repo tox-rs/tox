@@ -15,9 +15,9 @@ license = "GPL-3.0+"
 edition = "2021"
 
 [dependencies]
-nom = "7.0"
+nom = "7.1"
 cookie-factory = "0.3"
-crypto_box = { version = "0.7", optional = true }
+crypto_box = { version = "0.8", optional = true }
 
 [features]
 default = []

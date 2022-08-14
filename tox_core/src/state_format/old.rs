@@ -78,7 +78,7 @@ impl ToBytes for NospamKeys {
             gen_slice!(SECTION_MAGIC) >>
             gen_slice!(self.nospam.0) >>
             gen_slice!(self.pk.as_ref()) >>
-            gen_slice!(self.sk.to_bytes())
+            gen_slice!(self.sk.as_bytes())
         )
     }
 }

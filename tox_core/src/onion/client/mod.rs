@@ -10,7 +10,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crypto_box::SalsaBox;
+use crypto_box::{SalsaBox, aead::AeadCore};
 use futures::{StreamExt, SinkExt};
 use futures::channel::mpsc;
 use futures::lock::Mutex;
@@ -780,7 +780,7 @@ impl OnionClient {
         let mut rng = thread_rng();
         let dht_pk_announce = DhtPkAnnouncePayload::new(self.dht.pk.clone(), self.dht_pk_nodes().await);
         let inner_payload = OnionDataResponseInnerPayload::DhtPkAnnounce(dht_pk_announce);
-        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng()).into();
+        let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng()).into();
         let payload = OnionDataResponsePayload::new(
             &SalsaBox::new(&friend.real_pk, &self.real_sk),
             self.real_pk.clone(),
@@ -1760,7 +1760,7 @@ mod tests {
         ]);
         let no_reply = dht_pk_announce_payload.no_reply;
         let onion_data_response_inner_payload = OnionDataResponseInnerPayload::DhtPkAnnounce(dht_pk_announce_payload);
-        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng()).into();
+        let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng()).into();
         let onion_data_response_payload = OnionDataResponsePayload::new(&SalsaBox::new(&real_pk, &friend_real_sk), friend_real_pk.clone(), &nonce, &onion_data_response_inner_payload);
         let temporary_sk = SecretKey::generate(&mut rng);
         let temporary_pk = temporary_sk.public_key();
@@ -1827,7 +1827,7 @@ mod tests {
         ]);
         let no_reply = dht_pk_announce_payload.no_reply;
         let onion_data_response_inner_payload = OnionDataResponseInnerPayload::DhtPkAnnounce(dht_pk_announce_payload);
-        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng()).into();
+        let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng()).into();
         let onion_data_response_payload = OnionDataResponsePayload::new(&SalsaBox::new(&real_pk, &friend_real_sk), friend_real_pk.clone(), &nonce, &onion_data_response_inner_payload);
         let temporary_sk = SecretKey::generate(&mut rng);
         let temporary_pk = temporary_sk.public_key();
@@ -1865,7 +1865,7 @@ mod tests {
 
         let dht_pk_announce_payload = DhtPkAnnouncePayload::new(friend_dht_pk, vec![]);
         let onion_data_response_inner_payload = OnionDataResponseInnerPayload::DhtPkAnnounce(dht_pk_announce_payload);
-        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng()).into();
+        let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng()).into();
         let onion_data_response_payload = OnionDataResponsePayload::new(&SalsaBox::new(&real_pk, &friend_real_sk), friend_real_pk, &nonce, &onion_data_response_inner_payload);
         let temporary_sk = SecretKey::generate(&mut rng);
         let temporary_pk = temporary_sk.public_key();
@@ -1896,7 +1896,7 @@ mod tests {
 
         let dht_pk_announce_payload = DhtPkAnnouncePayload::new(friend_dht_pk, vec![]);
         let onion_data_response_inner_payload = OnionDataResponseInnerPayload::DhtPkAnnounce(dht_pk_announce_payload);
-        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng()).into();
+        let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng()).into();
         let onion_data_response_payload = OnionDataResponsePayload::new(&SalsaBox::new(&real_pk, &friend_real_sk), friend_real_pk, &nonce, &onion_data_response_inner_payload);
         let temporary_sk = SecretKey::generate(&mut rng);
         let temporary_pk = temporary_sk.public_key();

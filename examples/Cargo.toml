@@ -19,12 +19,12 @@ rand = "0.8"
 anyhow = "1.0"
 
 [dev-dependencies.tokio]
-version = "1.12"
+version = "1.20"
 default-features = false
 features = ["macros", "test-util", "net", "rt", "rt-multi-thread", "sync", "time"]
 
 [dev-dependencies.tokio-util]
-version = "0.6"
+version = "0.7"
 features = ["codec", "net"]
 
 [[example]]

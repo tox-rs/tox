@@ -239,7 +239,7 @@ mod tests {
         let alice_sk = SecretKey::generate(&mut rng);
         let alice_pk = alice_sk.public_key();
         let bob_pk = SecretKey::generate(&mut rng).public_key();
-        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
+        let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng());
         let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
         let payload = OnionDataResponsePayload {
             real_pk: SecretKey::generate(&mut rng).public_key(),
@@ -260,7 +260,7 @@ mod tests {
         let alice_pk = alice_sk.public_key();
         let bob_pk = SecretKey::generate(&mut rng).public_key();
         let eve_sk = SecretKey::generate(&mut rng);
-        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng()).into();
+        let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng()).into();
         let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
         let shared_secret_invalid = SalsaBox::new(&bob_pk, &eve_sk);
         let payload = OnionDataResponsePayload {
@@ -281,7 +281,7 @@ mod tests {
         let alice_pk = alice_sk.public_key();
         let bob_pk = SecretKey::generate(&mut rng).public_key();
         let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
-        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
+        let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng());
         // Try short incomplete array
         let invalid_payload = [];
         let invalid_payload_encoded = shared_secret.encrypt(&nonce, &invalid_payload[..]).unwrap();
@@ -300,7 +300,7 @@ mod tests {
         let alice_sk = SecretKey::generate(&mut rng);
         let alice_pk = alice_sk.public_key();
         let bob_pk = SecretKey::generate(&mut rng).public_key();
-        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng()).into();
+        let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng()).into();
         let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
         let payload = OnionDataResponseInnerPayload::DhtPkAnnounce(DhtPkAnnouncePayload {
             no_reply: 42,
@@ -331,7 +331,7 @@ mod tests {
         let alice_pk = alice_sk.public_key();
         let bob_pk = SecretKey::generate(&mut rng).public_key();
         let eve_sk = SecretKey::generate(&mut rng);
-        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng()).into();
+        let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng()).into();
         let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
         let shared_secret_invalid = SalsaBox::new(&bob_pk, &eve_sk);
         let payload = OnionDataResponseInnerPayload::DhtPkAnnounce(DhtPkAnnouncePayload {
@@ -362,7 +362,7 @@ mod tests {
         let alice_pk = alice_sk.public_key();
         let bob_pk = SecretKey::generate(&mut rng).public_key();
         let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
-        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
+        let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng());
         // Try long invalid array
         let invalid_payload = [42; 123];
         let invalid_payload_encoded = shared_secret.encrypt(&nonce, &invalid_payload[..]).unwrap();
@@ -389,7 +389,7 @@ mod tests {
         let alice_sk = SecretKey::generate(&mut rng);
         let alice_pk = alice_sk.public_key();
         let bob_pk = SecretKey::generate(&mut rng).public_key();
-        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng()).into();
+        let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng()).into();
         let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
         let friend_request = FriendRequest::new(NoSpam([42; NOSPAMBYTES]), "1234".to_owned());
         let payload = OnionDataResponseInnerPayload::FriendRequest(friend_request);

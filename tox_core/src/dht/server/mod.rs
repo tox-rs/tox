@@ -16,7 +16,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::{iter, mem};
-use xsalsa20poly1305::{XSalsa20Poly1305, aead::NewAead};
+use xsalsa20poly1305::{XSalsa20Poly1305, KeyInit};
 
 use crate::time::*;
 use tox_crypto::*;
@@ -2456,7 +2456,7 @@ mod tests {
 
         // send onion data request
 
-        let nonce = crypto_box::generate_nonce(&mut rng).into();
+        let nonce = SalsaBox::generate_nonce(&mut rng).into();
         let temporary_pk = SecretKey::generate(&mut rng).public_key();
         let payload = vec![42; 123];
         let inner = InnerOnionDataRequest {
