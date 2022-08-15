@@ -6,8 +6,6 @@ Toxcore daemon may serialize its states to file with some interval.
 
 use futures::future;
 
-use tox_packet::dht::packed_node::*;
-
 use crate::dht::server::*;
 use crate::state_format::old::*;
 use tox_binary_io::*;
@@ -54,11 +52,7 @@ pub const DHT_STATE_BUFFER_SIZE: usize =
 impl DaemonState {
     /// Serialize DHT states, old means that the format of seriaization is old version
     pub async fn serialize_old(server: &Server) -> Vec<u8> {
-        let close_nodes = server.close_nodes.read().await;
-
-        let nodes = close_nodes.iter()
-            .flat_map(|node| node.to_packed_node())
-            .collect::<Vec<PackedNode>>();
+        let nodes = server.get_all_nodes().await;
 
         let mut buf = [0u8; DHT_STATE_BUFFER_SIZE];
         let (_, buf_len) = DhtState(nodes).to_bytes((&mut buf, 0)).expect("DhtState(nodes).to_bytes has failed");
@@ -93,6 +87,7 @@ mod tests {
     use rand::thread_rng;
     use tox_crypto::*;
     use tox_packet::dht::*;
+    use tox_packet::dht::packed_node::*;
 
     use futures::channel::mpsc;
     use futures::StreamExt;
@@ -115,10 +110,14 @@ mod tests {
         let (tx, rx) = mpsc::channel(1);
         let alice = Server::new(tx, pk.clone(), sk);
 
+        // test with empty close list
+        let serialized_vec = DaemonState::serialize_old(&alice).await;
+        assert!(DaemonState::deserialize_old(&alice, &serialized_vec).await.is_ok());
+
         let addr_org = "1.2.3.4:1234".parse().unwrap();
         let pk_org = SecretKey::generate(&mut rng).public_key();
         let pn = PackedNode { pk: pk_org.clone(), saddr: addr_org };
-        alice.close_nodes.write().await.try_add(pn);
+        alice.add_node(pn).await;
 
         let serialized_vec = DaemonState::serialize_old(&alice).await;
         DaemonState::deserialize_old(&alice, &serialized_vec).await.unwrap();
@@ -148,10 +147,5 @@ mod tests {
         let error = res.err().unwrap();
         assert_eq!(error, DeserializeError::Deserialize { error: Err::Error(NomError::new(
             vec![42; 10], NomErrorKind::Tag)), data: serialized_vec.to_vec() });
-
-        // test with empty close list
-        alice.close_nodes.write().await.remove(&pk_org);
-        let serialized_vec = DaemonState::serialize_old(&alice).await;
-        assert!(DaemonState::deserialize_old(&alice, &serialized_vec).await.is_ok());
     }
 }
