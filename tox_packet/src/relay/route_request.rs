@@ -20,7 +20,7 @@ Length | Content
 `32`   | Public Key
 
 */
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct RouteRequest {
     /// The requested PK
     pub pk: PublicKey,

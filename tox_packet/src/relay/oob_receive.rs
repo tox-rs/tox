@@ -22,7 +22,7 @@ Length   | Content
 variable | Data
 
 */
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct OobReceive {
     /// Public Key of the sender
     pub sender_pk: PublicKey,

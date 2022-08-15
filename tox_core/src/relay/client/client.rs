@@ -28,7 +28,7 @@ const CLIENT_CHANNEL_SIZE: usize = 2;
 
 /// Packet that can be received from a TCP relay and should be handled outside
 /// of connections module.
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum IncomingPacket {
     /// Data packet with sender's `PublicKey`.
     Data(PublicKey, DataPayload),

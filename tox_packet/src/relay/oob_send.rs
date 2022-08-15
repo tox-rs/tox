@@ -32,7 +32,7 @@ Length   | Content
 variable | Data
 
 */
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct OobSend {
     /// Public Key of the receiver
     pub destination_pk: PublicKey,

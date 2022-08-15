@@ -9,7 +9,7 @@ use std::collections::HashMap;
 pub const MAX_LINKS_N: u8 = 240;
 
 /// The status of the Link
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum LinkStatus {
     /// The link is registered on one side only.
     ///

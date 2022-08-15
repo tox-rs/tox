@@ -33,7 +33,7 @@ pub fn create_client_handshake(client_pk: &PublicKey,
 
     let common_key = SalsaBox::new(server_pk, client_sk);
     let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng());
-    let encrypted_payload = common_key.encrypt(&nonce, &serialized_payload[..]).unwrap();
+    let encrypted_payload = common_key.encrypt(&nonce, &*serialized_payload).unwrap();
 
     let handshake = ClientHandshake {
         pk: client_pk.clone(),
@@ -70,7 +70,7 @@ pub fn handle_client_handshake(server_sk: &SecretKey,
     let (serialized_payload, _) = server_payload.to_bytes((&mut serialized_payload, 0)).unwrap();
 
     let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng());
-    let server_encrypted_payload = common_key.encrypt(&nonce, &serialized_payload[..]).unwrap();
+    let server_encrypted_payload = common_key.encrypt(&nonce, &*serialized_payload).unwrap();
 
     let server_handshake = ServerHandshake {
         nonce: nonce.into(),

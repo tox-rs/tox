@@ -228,7 +228,7 @@ impl RecvPacket {
 }
 
 /// UDP address of a connection with the time when last UDP packet was received
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConnectionAddr<T: Into<SocketAddr> + Copy> {
     /// Address to send UDP packets directly to the peer
     pub addr: T,

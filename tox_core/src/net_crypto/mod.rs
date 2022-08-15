@@ -1135,6 +1135,10 @@ mod tests {
     use crypto_box::{SalsaBox, aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned}};
 
     impl NetCrypto {
+        pub fn real_pk(&self) -> &PublicKey {
+            &self.real_pk
+        }
+
         pub async fn has_friend(&self, pk: &PublicKey) -> bool {
             self.friends.read().await.contains(pk)
         }

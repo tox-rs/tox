@@ -29,7 +29,7 @@ Length | Content
 `8`    | ping_id in BigEndian
 
 */
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct PingRequest {
     /// The id of ping
     pub ping_id: u64

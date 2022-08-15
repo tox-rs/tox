@@ -25,7 +25,7 @@ Length | Content
 `32`   | Public Key
 
 */
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct RouteResponse {
     /// The id of the requested PK
     pub connection_id: ConnectionId,

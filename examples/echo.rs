@@ -104,8 +104,6 @@ async fn main() -> Result<(), Error> {
     net_crypto.set_tcp_sink(net_crypto_tcp_tx).await;
 
     let friend_connections = FriendConnections::new(
-        real_sk,
-        real_pk,
         dht_server.clone(),
         tcp_connections.clone(),
         onion_client.clone(),
