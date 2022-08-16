@@ -192,7 +192,7 @@ mod tests {
         let alice_sk = SecretKey::generate(&mut rng);
         let bob_pk = SecretKey::generate(&mut rng).public_key();
         let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
-        let nonce = crypto_box::generate_nonce(&mut rng).into();
+        let nonce = SalsaBox::generate_nonce(&mut rng).into();
         let payload = CryptoDataPayload {
             buffer_start: 12345,
             packet_number: 54321,
@@ -219,7 +219,7 @@ mod tests {
         let eve_sk = SecretKey::generate(&mut rng);
         let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
         let eve_shared_secret = SalsaBox::new(&bob_pk, &eve_sk);
-        let nonce = crypto_box::generate_nonce(&mut rng).into();
+        let nonce = SalsaBox::generate_nonce(&mut rng).into();
         let payload = CryptoDataPayload {
             buffer_start: 12345,
             packet_number: 54321,
@@ -244,7 +244,7 @@ mod tests {
         let alice_sk = SecretKey::generate(&mut rng);
         let bob_pk = SecretKey::generate(&mut rng).public_key();
         let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
-        let nonce = crypto_box::generate_nonce(&mut rng);
+        let nonce = SalsaBox::generate_nonce(&mut rng);
         let nonce_last_bytes = CryptoData::nonce_last_bytes(nonce.into());
         // Try short incomplete array
         let invalid_payload = [];

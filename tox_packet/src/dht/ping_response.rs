@@ -6,7 +6,7 @@ use nom::{
     number::complete::be_u64,
     combinator::rest,
 };
-use crypto_box::{SalsaBox, aead::{Aead, Error as AeadError}};
+use crypto_box::{SalsaBox, aead::{Aead, AeadCore, Error as AeadError}};
 
 use tox_binary_io::*;
 use tox_crypto::*;
@@ -64,7 +64,7 @@ impl FromBytes for PingResponse {
 impl PingResponse {
     /// create new PingResponse object
     pub fn new(shared_secret: &SalsaBox, pk: PublicKey, payload: &PingResponsePayload) -> PingResponse {
-        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
+        let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng());
         let mut buf = [0; MAX_DHT_PACKET_SIZE];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
         let payload = shared_secret.encrypt(&nonce, &buf[..size]).unwrap();

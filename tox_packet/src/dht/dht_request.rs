@@ -2,7 +2,7 @@
 */
 use super::*;
 
-use crypto_box::{SalsaBox, aead::{Aead, Error as AeadError}};
+use crypto_box::{SalsaBox, aead::{Aead, AeadCore, Error as AeadError}};
 use nom::{
     number::complete::be_u64,
     combinator::{rest, eof, cond},
@@ -73,7 +73,7 @@ impl FromBytes for DhtRequest {
 impl DhtRequest {
     /// create new DhtRequest object
     pub fn new(shared_secret: &SalsaBox, rpk: PublicKey, spk: PublicKey, dp: &DhtRequestPayload) -> DhtRequest {
-        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
+        let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng());
 
         let mut buf = [0; MAX_DHT_PACKET_SIZE];
         let (_, size) = dp.to_bytes((&mut buf, 0)).unwrap();
@@ -272,7 +272,7 @@ impl DhtPkAnnounce {
     /// Create `DhtPkAnnounce` from `DhtPkAnnouncePayload` encrypting it with
     /// `shared_key`
     pub fn new(shared_secret: &SalsaBox, real_pk: PublicKey, payload: &DhtPkAnnouncePayload) -> DhtPkAnnounce {
-        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
+        let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng());
         let mut buf = [0; 245];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
         let payload = shared_secret.encrypt(&nonce, &buf[..size]).unwrap();
@@ -589,7 +589,7 @@ mod tests {
         let bob_sk = SecretKey::generate(&mut rng);
         let bob_pk = bob_sk.public_key();
         let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
-        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
+        let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng());
         // Try long invalid array
         let invalid_payload = [42; 123];
         let invalid_payload_encoded = shared_secret.encrypt(&nonce, &invalid_payload[..]).unwrap();
@@ -689,7 +689,7 @@ mod tests {
         let alice_pk = alice_sk.public_key();
         let bob_pk = SecretKey::generate(&mut rng).public_key();
         let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
-        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
+        let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng());
         // Try long invalid array
         let invalid_payload = [42; 123];
         let invalid_payload_encoded = shared_secret.encrypt(&nonce, &invalid_payload[..]).unwrap();

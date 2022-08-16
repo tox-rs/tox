@@ -21,7 +21,7 @@ Length  | Contents
 
 */
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub struct ClientHandshake {
     /// Client's Public Key
     pub pk: PublicKey,
@@ -68,7 +68,7 @@ Length  | Contents
 
 */
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub struct ServerHandshake {
     /// Nonce of the encrypted payload
     pub nonce: Nonce,

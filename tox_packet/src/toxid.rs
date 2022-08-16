@@ -265,16 +265,13 @@ assert_eq!(&format!("{:X}", toxid),
 */
 impl fmt::UpperHex for ToxId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut string = String::with_capacity(TOXIDBYTES * 2);
         for byte in self.pk.as_bytes() {
-            string.push_str(&format!("{:02X}", byte));
+            write!(f, "{:02X}", byte)?;
         }
         for byte in &self.nospam.0 {
-            string.push_str(&format!("{:02X}", byte));
+            write!(f, "{:02X}", byte)?;
         }
-        string.push_str(&format!("{:02X}{:02X}", self.checksum[0],
-                                    self.checksum[1]));
-        write!(f, "{}", string)
+        write!(f, "{:02X}{:02X}", self.checksum[0], self.checksum[1])
     }
 }
 

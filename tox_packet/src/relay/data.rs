@@ -20,7 +20,7 @@ Length   | Content
 variable | Data
 
 */
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Data {
     /// The id of the connection of the client
     pub connection_id: ConnectionId,
@@ -46,7 +46,7 @@ impl ToBytes for Data {
 }
 
 /// Data payload enum.
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum DataPayload {
     /// [`CookieRequest`](../../dht/packet/struct.CookieRequest.html) structure.
     CookieRequest(CookieRequest),

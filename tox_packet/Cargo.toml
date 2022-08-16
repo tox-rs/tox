@@ -22,13 +22,13 @@ edition = "2021"
 tox_binary_io = { version = "0.1.0", path = "../tox_binary_io", features = ["crypto"] }
 tox_crypto = { version = "0.1.0", path = "../tox_crypto" }
 
-nom = "7.0"
+nom = "7.1"
 cookie-factory = "0.3"
 bitflags = "1.3"
 thiserror = "1.0"
-sha2 = "0.9"
-xsalsa20poly1305 = "0.8"
+sha2 = "0.10"
+xsalsa20poly1305 = "0.9"
 # for enabling rand_core feature
-aead = { version = "0.4", features = ["rand_core"] }
+aead = { version = "0.5", features = ["rand_core"] }
 rand = "0.8"
-crypto_box = "0.7"
+crypto_box = "0.8"

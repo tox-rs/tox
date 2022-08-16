@@ -51,7 +51,7 @@ pub const MAX_LINKS_N: u8 = 240;
 
     According to [Tox spec](https://zetok.github.io/tox-spec/#encrypted-payload-types)
 */
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Packet {
     /// [`RouteRequest`](./struct.RouteRequest.html) structure.
     RouteRequest(RouteRequest),
@@ -126,7 +126,7 @@ Length     | Content
 variable   | Encrypted payload (max 2048)
 
 */
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct EncryptedPacket {
     /// Encrypted payload
     pub payload: Vec<u8>

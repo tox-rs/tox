@@ -7,6 +7,7 @@ use nom::combinator::eof;
 use nom::bytes::complete::take;
 use sha2::{Digest, Sha512};
 use sha2::digest::generic_array::typenum::marker_traits::Unsigned;
+use sha2::digest::crypto_common::OutputSizeUser;
 use xsalsa20poly1305::{XSalsa20Poly1305, aead::{Aead, Error as AeadError}};
 use rand::{CryptoRng, Rng};
 
@@ -134,7 +135,7 @@ impl ToBytes for EncryptedCookie {
 impl EncryptedCookie {
     /// Create `EncryptedCookie` from `Cookie` encrypting it with `symmetric_key`
     pub fn new<R: Rng + CryptoRng>(rng: &mut R, symmetric_key: &XSalsa20Poly1305, payload: &Cookie) -> EncryptedCookie {
-        let nonce = xsalsa20poly1305::generate_nonce(rng);
+        let nonce = XSalsa20Poly1305::generate_nonce(rng);
         let mut buf = [0; 72];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
         let payload = symmetric_key.encrypt(&nonce, &buf[..size]).unwrap();
@@ -166,7 +167,7 @@ impl EncryptedCookie {
         }
     }
     /// Calculate SHA512 hash of encrypted cookie together with nonce
-    pub fn hash(&self) -> [u8; <Sha512 as Digest>::OutputSize::USIZE] {
+    pub fn hash(&self) -> [u8; <Sha512 as OutputSizeUser>::OutputSize::USIZE] {
         let mut buf = [0; 112];
         let (_, size) = self.to_bytes((&mut buf, 0)).unwrap();
         // TODO: use `Into` directly when GenericArray supports it
@@ -179,7 +180,7 @@ mod tests {
     use super::*;
     use rand::thread_rng;
     use nom::{Err, error::{Error, ErrorKind}};
-    use xsalsa20poly1305::aead::NewAead;
+    use xsalsa20poly1305::KeyInit;
 
     encode_decode_test!(
         cookie_encode_decode,
@@ -229,7 +230,7 @@ mod tests {
     fn cookie_encrypt_decrypt_invalid() {
         let mut rng = thread_rng();
         let symmetric_key = XSalsa20Poly1305::new(&XSalsa20Poly1305::generate_key(&mut rng));
-        let nonce = xsalsa20poly1305::generate_nonce(&mut rng);
+        let nonce = XSalsa20Poly1305::generate_nonce(&mut rng);
         // Try long invalid array
         let invalid_payload = [42; 123];
         let invalid_payload_encoded = symmetric_key.encrypt(&nonce, &invalid_payload[..]).unwrap();

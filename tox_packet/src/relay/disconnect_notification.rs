@@ -29,7 +29,7 @@ Length | Content
 `1`    | connection_id [ `0x10` .. `0xFF` ]
 
 */
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct DisconnectNotification {
     /// The id of the disconnected client
     pub connection_id: ConnectionId

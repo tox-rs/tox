@@ -12,11 +12,12 @@ use nom::{
     combinator::{rest, rest_len, map_parser, verify, eof},
     bytes::complete::{take, tag}
 };
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 use sha2::digest::generic_array::typenum::marker_traits::Unsigned;
+use sha2::digest::crypto_common::OutputSizeUser;
 
 /// The type of onion ping ID which is SHA256 hash.
-pub type PingId = [u8; <Sha256 as Digest>::OutputSize::USIZE];
+pub type PingId = [u8; <Sha256 as OutputSizeUser>::OutputSize::USIZE];
 
 /** It's used for announcing ourselves to onion node and for looking for other
 announced nodes.
@@ -83,7 +84,7 @@ impl ToBytes for InnerOnionAnnounceRequest {
 impl InnerOnionAnnounceRequest {
     /// Create new `InnerOnionAnnounceRequest` object.
     pub fn new(shared_secret: &SalsaBox, pk: PublicKey, payload: &OnionAnnounceRequestPayload) -> InnerOnionAnnounceRequest {
-        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
+        let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng());
         let mut buf = [0; ONION_MAX_PACKET_SIZE];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
         let payload = shared_secret.encrypt(&nonce, &buf[..size]).unwrap();
@@ -239,7 +240,7 @@ mod tests {
     encode_decode_test!(
         onion_announce_request_payload_encode_decode,
         OnionAnnounceRequestPayload {
-            ping_id: [42; <Sha256 as Digest>::OutputSize::USIZE],
+            ping_id: [42; <Sha256 as OutputSizeUser>::OutputSize::USIZE],
             search_pk: SecretKey::generate(&mut thread_rng()).public_key(),
             data_pk: SecretKey::generate(&mut thread_rng()).public_key(),
             sendback_data: 12345
@@ -254,7 +255,7 @@ mod tests {
         let bob_pk = SecretKey::generate(&mut rng).public_key();
         let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
         let payload = OnionAnnounceRequestPayload {
-            ping_id: [42; <Sha256 as Digest>::OutputSize::USIZE],
+            ping_id: [42; <Sha256 as OutputSizeUser>::OutputSize::USIZE],
             search_pk: SecretKey::generate(&mut rng).public_key(),
             data_pk: SecretKey::generate(&mut rng).public_key(),
             sendback_data: 12345
@@ -276,7 +277,7 @@ mod tests {
         let eve_sk = SecretKey::generate(&mut rng);
         let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
         let payload = OnionAnnounceRequestPayload {
-            ping_id: [42; <Sha256 as Digest>::OutputSize::USIZE],
+            ping_id: [42; <Sha256 as OutputSizeUser>::OutputSize::USIZE],
             search_pk: SecretKey::generate(&mut rng).public_key(),
             data_pk: SecretKey::generate(&mut rng).public_key(),
             sendback_data: 12345
@@ -295,7 +296,7 @@ mod tests {
         let alice_sk = SecretKey::generate(&mut rng);
         let bob_pk = SecretKey::generate(&mut rng).public_key();
         let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
-        let nonce = crypto_box::generate_nonce(&mut rng);
+        let nonce = SalsaBox::generate_nonce(&mut rng);
         let pk = SecretKey::generate(&mut rng).public_key();
         // Try long invalid array
         let invalid_payload = [42; 123];

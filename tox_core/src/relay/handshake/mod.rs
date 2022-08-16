@@ -9,7 +9,7 @@ pub mod codec;
 pub use self::packet::*;
 pub use self::codec::*;
 
-use crypto_box::{SalsaBox, aead::{Aead, Error as AeadError}};
+use crypto_box::{SalsaBox, aead::{Aead, AeadCore, Error as AeadError}};
 use tox_binary_io::*;
 use tox_crypto::*;
 use crate::relay::secure;
@@ -32,8 +32,8 @@ pub fn create_client_handshake(client_pk: &PublicKey,
     let (serialized_payload, _) = payload.to_bytes((&mut serialized_payload, 0)).unwrap();
 
     let common_key = SalsaBox::new(server_pk, client_sk);
-    let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
-    let encrypted_payload = common_key.encrypt(&nonce, &serialized_payload[..]).unwrap();
+    let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng());
+    let encrypted_payload = common_key.encrypt(&nonce, &*serialized_payload).unwrap();
 
     let handshake = ClientHandshake {
         pk: client_pk.clone(),
@@ -69,8 +69,8 @@ pub fn handle_client_handshake(server_sk: &SecretKey,
     // HandshakePayload::to_bytes may not fail because we created buffer with enough size
     let (serialized_payload, _) = server_payload.to_bytes((&mut serialized_payload, 0)).unwrap();
 
-    let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
-    let server_encrypted_payload = common_key.encrypt(&nonce, &serialized_payload[..]).unwrap();
+    let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng());
+    let server_encrypted_payload = common_key.encrypt(&nonce, &*serialized_payload).unwrap();
 
     let server_handshake = ServerHandshake {
         nonce: nonce.into(),
@@ -272,7 +272,7 @@ mod tests {
 
         let client_handshake = {
             let common_key = SalsaBox::new(&server_pk, &client_sk);
-            let nonce = crypto_box::generate_nonce(&mut rng);
+            let nonce = SalsaBox::generate_nonce(&mut rng);
             // bad payload [1,2,3]
             let encrypted_payload = common_key.encrypt(&nonce, &[1, 2, 3][..]).unwrap();
 
@@ -290,7 +290,7 @@ mod tests {
         let client_session = Session::random();
 
         let server_handshake = {
-            let nonce = crypto_box::generate_nonce(&mut rng);
+            let nonce = SalsaBox::generate_nonce(&mut rng);
             // bad payload [1,2,3]
             let server_encrypted_payload = common_key.encrypt(&nonce, &[1, 2, 3][..]).unwrap();
 

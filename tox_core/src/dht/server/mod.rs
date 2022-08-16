@@ -16,7 +16,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::{iter, mem};
-use xsalsa20poly1305::{XSalsa20Poly1305, aead::NewAead};
+use xsalsa20poly1305::{XSalsa20Poly1305, KeyInit};
 
 use crate::time::*;
 use tox_crypto::*;
@@ -71,6 +71,8 @@ pub const PRECOMPUTED_LRU_CACHE_SIZE: usize = KBUCKET_DEFAULT_SIZE as usize * KB
 /// How often DHT main loop should be called.
 const MAIN_LOOP_INTERVAL: u64 = 1;
 
+type MotdCallback = dyn Fn(&Server) -> Vec<u8> + Send + Sync;
+
 /// Struct that contains necessary data for `BootstrapInfo` packet.
 #[derive(Clone)]
 struct ServerBootstrapInfo {
@@ -78,7 +80,7 @@ struct ServerBootstrapInfo {
     version: u32,
     /// Callback to get the message of the day which will be sent with
     /// `BootstrapInfo` packet.
-    motd_cb: Arc<dyn Fn(&Server) -> Vec<u8> + Send + Sync>,
+    motd_cb: Arc<MotdCallback>,
 }
 
 /// DHT server state.
@@ -1358,7 +1360,7 @@ impl Server {
     }
 
     /// Set toxcore version and message of the day callback.
-    pub fn set_bootstrap_info(&mut self, version: u32, motd_cb: Box<dyn Fn(&Server) -> Vec<u8> + Send + Sync>) {
+    pub fn set_bootstrap_info(&mut self, version: u32, motd_cb: Box<MotdCallback>) {
         self.bootstrap_info = Some(ServerBootstrapInfo {
             version,
             motd_cb: motd_cb.into(),
@@ -2456,7 +2458,7 @@ mod tests {
 
         // send onion data request
 
-        let nonce = crypto_box::generate_nonce(&mut rng).into();
+        let nonce = SalsaBox::generate_nonce(&mut rng).into();
         let temporary_pk = SecretKey::generate(&mut rng).public_key();
         let payload = vec![42; 123];
         let inner = InnerOnionDataRequest {

@@ -73,7 +73,7 @@ impl ToBytes for OnionAnnounceResponse {
 impl OnionAnnounceResponse {
     /// Create new `OnionAnnounceResponse` object.
     pub fn new(shared_secret: &SalsaBox, sendback_data: u64, payload: &OnionAnnounceResponsePayload) -> OnionAnnounceResponse {
-        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
+        let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng());
         let mut buf = [0; ONION_MAX_PACKET_SIZE];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
         let payload = shared_secret.encrypt(&nonce, &buf[..size]).unwrap();
@@ -242,7 +242,7 @@ mod tests {
         let alice_sk = SecretKey::generate(&mut rng);
         let bob_pk = SecretKey::generate(&mut rng).public_key();
         let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
-        let nonce = crypto_box::generate_nonce(&mut rng);
+        let nonce = SalsaBox::generate_nonce(&mut rng);
         // Try long invalid array
         let invalid_payload = [42; 123];
         let invalid_payload_encoded = shared_secret.encrypt(&nonce, &invalid_payload[..]).unwrap();

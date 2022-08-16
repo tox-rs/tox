@@ -21,7 +21,7 @@ Length | Content
 `8`    | ping_id in BigEndian
 
 */
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct PongResponse {
     /// The id of ping to respond
     pub ping_id: u64

@@ -2,7 +2,7 @@
 
 use std::net::SocketAddr;
 
-use crypto_box::{SalsaBox, aead::Aead};
+use crypto_box::{SalsaBox, aead::{Aead, AeadCore}};
 use rand::thread_rng;
 use tox_binary_io::*;
 use tox_crypto::*;
@@ -98,7 +98,7 @@ impl OnionPath {
     /// Create `OnionRequest0` packet from `InnerOnionRequest` that should be
     /// sent through this path.
     pub fn create_udp_onion_request(&self, destination: SocketAddr, inner_onion_request: InnerOnionRequest) -> OnionRequest0 {
-        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
+        let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng());
         let mut buf = [0; ONION_MAX_PACKET_SIZE];
 
         let payload = OnionRequest2Payload {
@@ -134,7 +134,7 @@ impl OnionPath {
     /// Create `OnionRequest` packet from `InnerOnionRequest` that should be
     /// sent through this path.
     pub fn create_tcp_onion_request(&self, destination: SocketAddr, inner_onion_request: InnerOnionRequest) -> OnionRequest {
-        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
+        let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng());
         let mut buf = [0; ONION_MAX_PACKET_SIZE];
 
         let payload = OnionRequest2Payload {

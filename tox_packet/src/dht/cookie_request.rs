@@ -3,7 +3,7 @@
 
 use super::*;
 
-use aead::{Aead, Error as AeadError};
+use aead::{Aead, AeadCore, Error as AeadError};
 use crypto_box::SalsaBox;
 use nom::number::complete::be_u64;
 use nom::bytes::complete::{tag, take};
@@ -73,7 +73,7 @@ impl FromBytes for CookieRequest {
 impl CookieRequest {
     /// Create `CookieRequest` from `CookieRequestPayload` encrypting it with `shared_key`
     pub fn new(shared_secret: &SalsaBox, pk: PublicKey, payload: &CookieRequestPayload) -> CookieRequest {
-        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
+        let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng());
         let mut buf = [0; 72];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
         let payload = shared_secret.encrypt(&nonce, &buf[..size]).unwrap();

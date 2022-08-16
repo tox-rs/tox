@@ -200,7 +200,7 @@ mod tests {
         let data_pk = SecretKey::generate(&mut rng).public_key();
         let temporary_sk = SecretKey::generate(&mut rng);
         let temporary_pk = temporary_sk.public_key();
-        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
+        let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng());
         let shared_secret = SalsaBox::new(&data_pk, &temporary_sk);
         let payload = OnionDataResponsePayload {
             real_pk: SecretKey::generate(&mut rng).public_key(),
@@ -222,7 +222,7 @@ mod tests {
         let temporary_sk = SecretKey::generate(&mut rng);
         let temporary_pk = temporary_sk.public_key();
         let invalid_sk = SecretKey::generate(&mut rng);
-        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
+        let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng());
         let shared_secret = SalsaBox::new(&data_pk, &temporary_sk);
         let shared_secret_invalid = SalsaBox::new(&temporary_pk, &invalid_sk);
         let payload = OnionDataResponsePayload {
@@ -243,7 +243,7 @@ mod tests {
         let data_pk = SecretKey::generate(&mut rng).public_key();
         let temporary_sk = SecretKey::generate(&mut rng);
         let temporary_pk = temporary_sk.public_key();
-        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
+        let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng());
         let shared_secret = SalsaBox::new(&data_pk, &temporary_sk);
         // Try short incomplete array
         let invalid_payload = [];

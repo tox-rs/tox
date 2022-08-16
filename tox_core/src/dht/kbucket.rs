@@ -249,7 +249,7 @@ where
                 if self.is_full() {
                     debug!(target: "Kbucket",
                         "No free space left in the kbucket, the last (bad) node removed.");
-                    let eviction_index = Node::eviction_index(&self.nodes).unwrap_or_else(|| self.nodes.len() - 1);
+                    let eviction_index = Node::eviction_index(&self.nodes).unwrap_or(self.nodes.len() - 1);
                     self.nodes.remove(eviction_index);
                     let index = index - if eviction_index < index { 1 } else { 0 };
                     self.nodes.insert(index, new_node.into());

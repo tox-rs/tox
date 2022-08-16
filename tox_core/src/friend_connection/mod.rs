@@ -90,10 +90,6 @@ impl Friend {
 /// Friend connections module that handles friends and their connections.
 #[derive(Clone)]
 pub struct FriendConnections {
-    /// Our long term `SecretKey`.
-    real_sk: SecretKey,
-    /// Our long term `PublicKey`.
-    real_pk: PublicKey,
     /// List of friends we want to be connected to.
     friends: Arc<RwLock<HashMap<PublicKey, Friend>>>,
     /// Sink to send a connection status when it becomes connected or
@@ -112,16 +108,12 @@ pub struct FriendConnections {
 impl FriendConnections {
     /// Create new `FriendConnections`.
     pub fn new(
-        real_sk: SecretKey,
-        real_pk: PublicKey,
         dht: DhtServer,
         tcp_connections: TcpConnections,
         onion_client: OnionClient,
         net_crypto: NetCrypto,
     ) -> Self {
         FriendConnections {
-            real_sk,
-            real_pk,
             friends: Arc::new(RwLock::new(HashMap::new())),
             connection_status_tx: Arc::new(RwLock::new(None)),
             dht,
@@ -450,13 +442,11 @@ mod tests {
             lossy_tx,
             dht_pk,
             dht_sk,
-            real_pk: real_pk.clone(),
-            real_sk: real_sk.clone(),
+            real_pk,
+            real_sk,
             precomputed_keys,
         });
         let friend_connections = FriendConnections::new(
-            real_sk,
-            real_pk,
             dht,
             tcp_connections,
             onion_client,
@@ -494,7 +484,7 @@ mod tests {
         let _ = friend_connections.tcp_connections.add_connection(relay_pk, friend_dht_pk.clone());
 
         let session_precomputed_key = SalsaBox::new(&SecretKey::generate(&mut rng).public_key(), &SecretKey::generate(&mut rng));
-        let sent_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let sent_nonce = SalsaBox::generate_nonce(&mut rng).into();
         friend_connections.net_crypto.add_established_connection(
             SecretKey::generate(&mut rng).public_key(),
             friend_pk.clone(),
@@ -547,7 +537,7 @@ mod tests {
         let _ = friend_connections.tcp_connections.add_connection(relay_pk, friend_dht_pk.clone());
 
         let session_precomputed_key = SalsaBox::new(&SecretKey::generate(&mut rng).public_key(), &SecretKey::generate(&mut rng));
-        let sent_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let sent_nonce = SalsaBox::generate_nonce(&mut rng).into();
         friend_connections.net_crypto.add_established_connection(
             SecretKey::generate(&mut rng).public_key(),
             friend_pk.clone(),
@@ -703,7 +693,7 @@ mod tests {
         friend_connections.friends.write().await.insert(friend_pk.clone(), friend);
 
         let session_precomputed_key = SalsaBox::new(&SecretKey::generate(&mut rng).public_key(), &SecretKey::generate(&mut rng));
-        let sent_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let sent_nonce = SalsaBox::generate_nonce(&mut rng).into();
         friend_connections.net_crypto.add_established_connection(
             SecretKey::generate(&mut rng).public_key(),
             friend_pk.clone(),
@@ -750,7 +740,7 @@ mod tests {
         friend_connections.friends.write().await.insert(friend_pk.clone(), friend);
 
         let session_precomputed_key = SalsaBox::new(&SecretKey::generate(&mut rng).public_key(), &SecretKey::generate(&mut rng));
-        let sent_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let sent_nonce = SalsaBox::generate_nonce(&mut rng).into();
         friend_connections.net_crypto.add_established_connection(
             SecretKey::generate(&mut rng).public_key(),
             friend_pk.clone(),
@@ -800,7 +790,7 @@ mod tests {
         friend_connections.friends.write().await.insert(friend_pk.clone(), friend);
 
         let session_precomputed_key = SalsaBox::new(&SecretKey::generate(&mut rng).public_key(), &SecretKey::generate(&mut rng));
-        let sent_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let sent_nonce = SalsaBox::generate_nonce(&mut rng).into();
         friend_connections.net_crypto.add_established_connection(
             SecretKey::generate(&mut rng).public_key(),
             friend_pk.clone(),
@@ -961,9 +951,9 @@ mod tests {
         let run_future = friend_connections.run()
             .map(Result::unwrap);
 
-        let precomputed_key = SalsaBox::new(&friend_connections.real_pk, &friend_sk);
+        let precomputed_key = SalsaBox::new(friend_connections.net_crypto.real_pk(), &friend_sk);
         let cookie = friend_connections.net_crypto.get_cookie(&mut rng, friend_pk.clone(), friend_dht_pk);
-        let sent_nonce = crypto_box::generate_nonce(&mut rng).into();
+        let sent_nonce = SalsaBox::generate_nonce(&mut rng).into();
         let friend_session_sk = SecretKey::generate(&mut rng);
         let friend_session_pk = friend_session_sk.public_key();
         let our_cookie = EncryptedCookie {

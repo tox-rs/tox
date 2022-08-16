@@ -19,7 +19,7 @@ Length | Content
 `1`    | connection_id [ `0x10` .. `0xFF` ]
 
 */
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ConnectNotification {
     /// The id of the connected client
     pub connection_id: ConnectionId

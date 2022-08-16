@@ -7,7 +7,7 @@ macro_rules! dht_packet_encode_decode (
             $test,
             Packet::$packet($packet {
                 pk: crypto_box::SecretKey::generate(&mut rand::thread_rng()).public_key(),
-                nonce: crypto_box::generate_nonce(&mut rand::thread_rng()).into(),
+                nonce: SalsaBox::generate_nonce(&mut rand::thread_rng()).into(),
                 payload: vec![42; 123],
             })
         );
@@ -71,7 +71,7 @@ macro_rules! dht_packet_decode_invalid (
             let alice_pk = alice_sk.public_key();
             let bob_pk = SecretKey::generate(&mut rng).public_key();
             let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
-            let nonce = crypto_box::generate_nonce(&mut rng);
+            let nonce = SalsaBox::generate_nonce(&mut rng);
             // Try long invalid array
             let invalid_payload = [42; 123];
             let invalid_payload_encoded = shared_secret.encrypt(&nonce, &invalid_payload[..]).unwrap();

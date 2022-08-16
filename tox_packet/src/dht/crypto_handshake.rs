@@ -3,9 +3,10 @@
 
 use super::*;
 
-use crypto_box::{SalsaBox, aead::{Aead, Error as AeadError}};
-use sha2::{Digest, Sha512};
+use crypto_box::{SalsaBox, aead::{Aead, AeadCore, Error as AeadError}};
+use sha2::Sha512;
 use sha2::digest::generic_array::typenum::marker_traits::Unsigned;
+use sha2::digest::crypto_common::OutputSizeUser;
 use tox_binary_io::*;
 use tox_crypto::*;
 use crate::dht::cookie::EncryptedCookie;
@@ -72,7 +73,7 @@ impl CryptoHandshake {
     /// Create `CryptoHandshake` from `CryptoHandshakePayload` encrypting it
     /// with `shared_key` and from `EncryptedCookie`.
     pub fn new(shared_secret: &SalsaBox, payload: &CryptoHandshakePayload, cookie: EncryptedCookie) -> CryptoHandshake {
-        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
+        let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng());
         let mut buf = [0; 232];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
         let payload = shared_secret.encrypt(&nonce, &buf[..size]).unwrap();
@@ -131,7 +132,7 @@ pub struct CryptoHandshakePayload {
     /// used to make sure that possible attacker can't combine payload from old
     /// `CryptoHandshake` with new `Cookie` and try to do mess sending such
     /// packets.
-    pub cookie_hash: [u8; <Sha512 as Digest>::OutputSize::USIZE],
+    pub cookie_hash: [u8; <Sha512 as OutputSizeUser>::OutputSize::USIZE],
     /// Encrypted cookie of sender of `CryptoHandshake` packet. When node
     /// receives `CryptoHandshake` it can take this cookie instead of sending
     /// `CookieRequest` to obtain one.
@@ -142,7 +143,7 @@ impl FromBytes for CryptoHandshakePayload {
     fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
         let (input, base_nonce) = Nonce::from_bytes(input)?;
         let (input, session_pk) = PublicKey::from_bytes(input)?;
-        let (input, cookie_hash) = <[u8; <Sha512 as Digest>::OutputSize::USIZE]>::from_bytes(input)?;
+        let (input, cookie_hash) = <[u8; <Sha512 as OutputSizeUser>::OutputSize::USIZE]>::from_bytes(input)?;
         let (input, cookie) = EncryptedCookie::from_bytes(input)?;
         let (input, _) = eof(input)?;
         Ok((input, CryptoHandshakePayload {
@@ -261,7 +262,7 @@ mod tests {
         let alice_sk = SecretKey::generate(&mut rng);
         let bob_pk = SecretKey::generate(&mut rng).public_key();
         let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
-        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng());
+        let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng());
         let cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
             payload: vec![42; 88],

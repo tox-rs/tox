@@ -19,7 +19,7 @@ Length   | Content
 variable | Payload
 
 */
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct OnionResponse {
     /// Inner onion response
     pub payload: InnerOnionResponse

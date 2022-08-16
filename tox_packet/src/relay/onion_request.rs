@@ -45,7 +45,7 @@ Length   | Content
 variable | Payload
 
 */
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct OnionRequest {
     /// Nonce that was used for payload encryption
     pub nonce: Nonce,

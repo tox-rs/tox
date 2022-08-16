@@ -45,7 +45,7 @@ assert_eq!( bob_msg.as_bytes().to_vec(), alice_channel.decrypt(bob_msg_encrypted
 
 */
 
-use crypto_box::{SalsaBox, aead::{Aead, Error as AeadError}};
+use crypto_box::{SalsaBox, aead::{Aead, AeadCore, Error as AeadError}};
 use rand::thread_rng;
 use tox_crypto::*;
 
@@ -77,7 +77,7 @@ impl Session {
     pub fn random() -> Session {
         let sk = SecretKey::generate(&mut thread_rng());
         let pk = sk.public_key();
-        let nonce = crypto_box::generate_nonce(&mut rand::thread_rng()).into();
+        let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng()).into();
         Session { pk, sk, nonce }
     }
 
