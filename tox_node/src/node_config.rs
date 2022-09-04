@@ -2,10 +2,9 @@ use std::convert::TryInto;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::num::ParseIntError;
 use std::str::FromStr;
-use std::path::Path;
 use std::collections::HashMap;
 
-use config::{Config, File as CfgFile};
+use config::{Config, File as CfgFile, FileFormat as CfgFileFormat};
 use serde::{de, Deserialize, Deserializer};
 use serde_yaml::Value;
 use clap::{App, AppSettings, Arg, SubCommand, ArgMatches};
@@ -146,9 +145,9 @@ pub struct NodeConfig {
     pub unused: HashMap<String, Value>,
 }
 
-fn create_sk_arg() -> Arg<'static, 'static> {
+fn create_sk_arg() -> Arg<'static> {
     Arg::with_name("secret-key")
-        .short("s")
+        .short('s')
         .long("secret-key")
         .help("DHT secret key. Note that you should not pass the key via \
                arguments due to security reasons. Use this argument for \
@@ -160,9 +159,9 @@ fn create_sk_arg() -> Arg<'static, 'static> {
         .hidden(true)
 }
 
-fn create_keys_file_arg() -> Arg<'static, 'static> {
+fn create_keys_file_arg() -> Arg<'static> {
     Arg::with_name("keys-file")
-        .short("k")
+        .short('k')
         .long("keys-file")
         .help("Path to the file where DHT keys are stored")
         .takes_value(true)
@@ -170,7 +169,7 @@ fn create_keys_file_arg() -> Arg<'static, 'static> {
         .conflicts_with("secret-key")
 }
 
-fn app() -> App<'static, 'static> {
+fn app() -> App<'static> {
     App::new(crate_name!())
         .version(crate_version!())
         .about(crate_description!())
@@ -190,13 +189,13 @@ fn app() -> App<'static, 'static> {
         .arg(create_sk_arg())
         .arg(create_keys_file_arg())
         .arg(Arg::with_name("udp-address")
-            .short("u")
+            .short('u')
             .long("udp-address")
             .help("UDP address to run DHT node")
             .takes_value(true)
             .required_unless("tcp-address"))
         .arg(Arg::with_name("tcp-address")
-            .short("t")
+            .short('t')
             .long("tcp-address")
             .help("TCP address to run TCP relay")
             .multiple(true)
@@ -204,15 +203,15 @@ fn app() -> App<'static, 'static> {
             .use_delimiter(true)
             .required_unless("udp-address"))
         .arg(Arg::with_name("tcp-connections-limit")
-            .short("c")
+            .short('c')
             .long("tcp-connections-limit")
             .help("Maximum number of active TCP connections relay can hold. \
                    Defaults to 512 when tcp-address is specified")
             .requires("tcp-address")
             .takes_value(true)
-            .default_value_if("tcp-address", None, "512"))
+            .default_value_if("tcp-address", None, Some("512")))
         .arg(Arg::with_name("bootstrap-node")
-            .short("b")
+            .short('b')
             .long("bootstrap-node")
             .help("Node to perform initial bootstrap")
             .multiple(true)
@@ -220,7 +219,7 @@ fn app() -> App<'static, 'static> {
             .number_of_values(2)
             .value_names(&["public key", "address"]))
         .arg(Arg::with_name("threads")
-            .short("j")
+            .short('j')
             .long("threads")
             .help("Number of threads to use. The value 'auto' means that the \
                    number of threads will be determined automatically by the \
@@ -228,14 +227,14 @@ fn app() -> App<'static, 'static> {
             .takes_value(true)
             .default_value("1"))
         .arg(Arg::with_name("log-type")
-            .short("l")
+            .short('l')
             .long("log-type")
             .help("Where to write logs")
             .takes_value(true)
             .default_value("Stderr")
-            .possible_values(&LogType::variants()))
+            .possible_values(LogType::variants()))
         .arg(Arg::with_name("motd")
-            .short("m")
+            .short('m')
             .long("motd")
             .help("Message of the day. Must be no longer than 256 bytes. May \
                    contain next variables placed in {{ }}:\n\
@@ -260,31 +259,28 @@ pub fn cli_parse() -> NodeConfig {
     let matches = app().get_matches();
 
     match matches.subcommand() {
-        ("derive-pk", Some(m)) => run_derive_pk(m),
-        ("config", Some(m)) => run_config(m),
+        Some(("derive-pk", m)) => run_derive_pk(m),
+        Some(("config", m)) => run_config(m),
         _ => run_args(&matches),
     }
 }
 
 /// Parse settings from a saved file.
 fn parse_config(config_path: &str) -> NodeConfig {
-    let mut settings = Config::default();
+    let config_builder = Config::builder()
+        .set_default("log-type", "Stderr").expect("Can't set default value for `log-type`")
+        .set_default("motd", "This is tox-rs").expect("Can't set default value for `motd`")
+        .set_default("lan-discovery", "False").expect("Can't set default value for `lan-discovery`")
+        .set_default("threads", "1").expect("Can't set default value for `threads`")
+        .set_default("tcp-connections-limit", "512").expect("Can't set default value for `tcp-connections-limit`")
+        .add_source(CfgFile::from_str(config_path, CfgFileFormat::Yaml));
 
-    settings.set_default("log-type", "Stderr").expect("Can't set default value for `log-type`");
-    settings.set_default("motd", "This is tox-rs").expect("Can't set default value for `motd`");
-    settings.set_default("lan-discovery", "False").expect("Can't set default value for `lan-discovery`");
-    settings.set_default("threads", "1").expect("Can't set default value for `threads`");
-    settings.set_default("tcp-connections-limit", "512").expect("Can't set default value for `tcp-connections-limit`");
-
-    let config_file = if !Path::new(config_path).exists() {
-        panic!("Can't find config file {}", config_path);
-    } else {
-        CfgFile::with_name(config_path)
+    let config_file = match config_builder.build() {
+        Ok(cfg) => cfg,
+        Err(e) => panic!("Can't build config file {}", e),
     };
 
-    settings.merge(config_file).expect("Merging config file with default values failed");
-
-    let config: NodeConfig = settings.try_into().expect("Can't deserialize config");
+    let config: NodeConfig = config_file.try_deserialize().expect("Can't deserialize config");
 
     if config.keys_file.is_none() {
         panic!("Can't deserialize config: 'keys-file' is not set");

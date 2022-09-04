@@ -36,7 +36,7 @@ maintainer-scripts = "dpkg/info"
 
 [dependencies]
 chrono = "0.4"
-clap = "2.33"
+clap = { version = "3.2", features = ["cargo", "env"] }
 env_logger = "0.9"
 anyhow = "1.0"
 futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
@@ -51,7 +51,7 @@ rand = "0.8"
 tox = { path = "../tox" }
 
 [dependencies.config]
-version = "0.10"
+version = "0.13.2"
 default-features = false
 features = ["yaml"]
 
@@ -61,4 +61,4 @@ default-features = false
 features = ["net", "time", "rt", "rt-multi-thread"]
 
 [target.'cfg(unix)'.dependencies]
-syslog = "5.0"
+syslog = "6.0"
