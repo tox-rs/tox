@@ -14,7 +14,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         rust:
           - stable
-          - 1.51.0
+          - 1.58
     steps:
     - uses: actions/checkout@v2
     - uses: actions-rs/toolchain@v1
