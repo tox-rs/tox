@@ -93,15 +93,6 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "block-buffer"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4152116fd6e9dadb291ae18fc1ec3575ed6d84c29642d97890f4b4a3417297e4"
-dependencies = [
- "generic-array",
-]
-
-[[package]]
-name = "block-buffer"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bf7fe51849ea569fd452f37822f606a5cabb684dc918707a0193fd4664ff324"
@@ -291,7 +282,7 @@ version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2fb860ca6fafa5552fb6d0e816a69c8e49f0908bf524e30a90d97c85892d506"
 dependencies = [
- "block-buffer 0.10.2",
+ "block-buffer",
  "crypto-common",
  "subtle",
 ]
@@ -337,10 +328,10 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-util",
- "tox_binary_io 0.1.1",
- "tox_core 0.1.1",
- "tox_crypto 0.1.1",
- "tox_packet 0.1.1",
+ "tox_binary_io",
+ "tox_core",
+ "tox_crypto",
+ "tox_packet",
 ]
 
 [[package]]
@@ -845,7 +836,7 @@ dependencies = [
  "password-hash",
  "pbkdf2",
  "salsa20",
- "sha2 0.10.5",
+ "sha2",
 ]
 
 [[package]]
@@ -879,19 +870,6 @@ dependencies = [
  "ryu",
  "serde",
  "unsafe-libyaml",
-]
-
-[[package]]
-name = "sha2"
-version = "0.9.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d58a1e1bf39749807d89cf2d98ac2dfa0ff1cb3faa38fbb64dd88ac8013d800"
-dependencies = [
- "block-buffer 0.9.0",
- "cfg-if",
- "cpufeatures",
- "digest 0.9.0",
- "opaque-debug",
 ]
 
 [[package]]
@@ -1072,21 +1050,10 @@ dependencies = [
 name = "tox"
 version = "0.1.1"
 dependencies = [
- "tox_core 0.1.1",
- "tox_crypto 0.1.1",
- "tox_encryptsave 0.1.1",
- "tox_packet 0.1.1",
-]
-
-[[package]]
-name = "tox"
-version = "0.1.1"
-source = "git+https://github.com/tox-rs/tox.git#65ec00d71966c08087ddfcaa6ed0ebfbe056b23b"
-dependencies = [
- "tox_core 0.1.1 (git+https://github.com/tox-rs/tox.git)",
- "tox_crypto 0.1.1 (git+https://github.com/tox-rs/tox.git)",
- "tox_encryptsave 0.1.1 (git+https://github.com/tox-rs/tox.git)",
- "tox_packet 0.1.1 (git+https://github.com/tox-rs/tox.git)",
+ "tox_core",
+ "tox_crypto",
+ "tox_encryptsave",
+ "tox_packet",
 ]
 
 [[package]]
@@ -1109,22 +1076,12 @@ dependencies = [
  "serde_yaml",
  "syslog",
  "tokio",
- "tox 0.1.1 (git+https://github.com/tox-rs/tox.git)",
+ "tox",
 ]
 
 [[package]]
 name = "tox_binary_io"
 version = "0.1.1"
-dependencies = [
- "cookie-factory",
- "crypto_box",
- "nom 7.1.1",
-]
-
-[[package]]
-name = "tox_binary_io"
-version = "0.1.1"
-source = "git+https://github.com/tox-rs/tox.git#65ec00d71966c08087ddfcaa6ed0ebfbe056b23b"
 dependencies = [
  "cookie-factory",
  "crypto_box",
@@ -1146,39 +1103,13 @@ dependencies = [
  "lru",
  "nom 7.1.1",
  "rand",
- "sha2 0.9.9",
+ "sha2",
  "thiserror",
  "tokio",
  "tokio-util",
- "tox_binary_io 0.1.1",
- "tox_crypto 0.1.1",
- "tox_packet 0.1.1",
- "xsalsa20poly1305",
-]
-
-[[package]]
-name = "tox_core"
-version = "0.1.1"
-source = "git+https://github.com/tox-rs/tox.git#65ec00d71966c08087ddfcaa6ed0ebfbe056b23b"
-dependencies = [
- "bitflags",
- "bytes",
- "cookie-factory",
- "crypto_box",
- "futures",
- "get_if_addrs",
- "itertools",
- "log",
- "lru",
- "nom 7.1.1",
- "rand",
- "sha2 0.10.5",
- "thiserror",
- "tokio",
- "tokio-util",
- "tox_binary_io 0.1.1 (git+https://github.com/tox-rs/tox.git)",
- "tox_crypto 0.1.1 (git+https://github.com/tox-rs/tox.git)",
- "tox_packet 0.1.1 (git+https://github.com/tox-rs/tox.git)",
+ "tox_binary_io",
+ "tox_crypto",
+ "tox_packet",
  "xsalsa20poly1305",
 ]
 
@@ -1190,33 +1121,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "tox_crypto"
-version = "0.1.1"
-source = "git+https://github.com/tox-rs/tox.git#65ec00d71966c08087ddfcaa6ed0ebfbe056b23b"
-dependencies = [
- "crypto_box",
-]
-
-[[package]]
 name = "tox_encryptsave"
 version = "0.1.1"
 dependencies = [
  "rand",
  "scrypt",
- "sha2 0.10.5",
- "thiserror",
- "xsalsa20poly1305",
- "zeroize",
-]
-
-[[package]]
-name = "tox_encryptsave"
-version = "0.1.1"
-source = "git+https://github.com/tox-rs/tox.git#65ec00d71966c08087ddfcaa6ed0ebfbe056b23b"
-dependencies = [
- "rand",
- "scrypt",
- "sha2 0.10.5",
+ "sha2",
  "thiserror",
  "xsalsa20poly1305",
  "zeroize",
@@ -1232,28 +1142,10 @@ dependencies = [
  "crypto_box",
  "nom 7.1.1",
  "rand",
- "sha2 0.10.5",
+ "sha2",
  "thiserror",
- "tox_binary_io 0.1.1",
- "tox_crypto 0.1.1",
- "xsalsa20poly1305",
-]
-
-[[package]]
-name = "tox_packet"
-version = "0.1.1"
-source = "git+https://github.com/tox-rs/tox.git#65ec00d71966c08087ddfcaa6ed0ebfbe056b23b"
-dependencies = [
- "aead",
- "bitflags",
- "cookie-factory",
- "crypto_box",
- "nom 7.1.1",
- "rand",
- "sha2 0.10.5",
- "thiserror",
- "tox_binary_io 0.1.1 (git+https://github.com/tox-rs/tox.git)",
- "tox_crypto 0.1.1 (git+https://github.com/tox-rs/tox.git)",
+ "tox_binary_io",
+ "tox_crypto",
  "xsalsa20poly1305",
 ]
 
