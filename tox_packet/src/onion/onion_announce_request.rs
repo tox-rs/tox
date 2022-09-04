@@ -13,8 +13,8 @@ use nom::{
     bytes::complete::{take, tag}
 };
 use sha2::Sha256;
-use sha2::digest::generic_array::typenum::marker_traits::Unsigned;
-use sha2::digest::crypto_common::OutputSizeUser;
+use sha2::digest::typenum::Unsigned;
+use sha2::digest::OutputSizeUser;
 
 /// The type of onion ping ID which is SHA256 hash.
 pub type PingId = [u8; <Sha256 as OutputSizeUser>::OutputSize::USIZE];

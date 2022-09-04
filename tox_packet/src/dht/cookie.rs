@@ -6,8 +6,8 @@ use nom::number::complete::be_u64;
 use nom::combinator::eof;
 use nom::bytes::complete::take;
 use sha2::{Digest, Sha512};
-use sha2::digest::generic_array::typenum::marker_traits::Unsigned;
-use sha2::digest::crypto_common::OutputSizeUser;
+use sha2::digest::typenum::Unsigned;
+use sha2::digest::OutputSizeUser;
 use xsalsa20poly1305::{XSalsa20Poly1305, aead::{Aead, Error as AeadError}};
 use rand::{CryptoRng, Rng};
 

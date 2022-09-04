@@ -4,7 +4,8 @@
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant, SystemTime};
 use sha2::{Digest, Sha256};
-use sha2::digest::generic_array::typenum::marker_traits::Unsigned;
+use sha2::digest::typenum::Unsigned;
+use sha2::digest::OutputSizeUser;
 use rand::{CryptoRng, Rng};
 use thiserror::Error;
 
@@ -31,7 +32,7 @@ pub const PING_ID_TIMEOUT: Duration = Duration::from_secs(300);
 pub const ONION_ANNOUNCE_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Create onion ping id filled with zeros.
-pub const INITIAL_PING_ID: PingId = [0; <Sha256 as Digest>::OutputSize::USIZE];
+pub const INITIAL_PING_ID: PingId = [0; <Sha256 as OutputSizeUser>::OutputSize::USIZE];
 
 /// Error that can happen when handling data request.
 #[derive(Clone, Debug, Eq, PartialEq, Error)]

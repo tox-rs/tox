@@ -5,8 +5,8 @@ use super::*;
 
 use crypto_box::{SalsaBox, aead::{Aead, AeadCore, Error as AeadError}};
 use sha2::Sha512;
-use sha2::digest::generic_array::typenum::marker_traits::Unsigned;
-use sha2::digest::crypto_common::OutputSizeUser;
+use sha2::digest::typenum::Unsigned;
+use sha2::digest::OutputSizeUser;
 use tox_binary_io::*;
 use tox_crypto::*;
 use crate::dht::cookie::EncryptedCookie;
