@@ -13,7 +13,7 @@ use std::fs::File;
 use std::io::{ErrorKind, Read, Write};
 use std::net::SocketAddr;
 
-use failure::Error;
+use anyhow::Error;
 use futures::{channel::mpsc, StreamExt};
 use futures::{future, Future, TryFutureExt, FutureExt};
 use itertools::Itertools;
