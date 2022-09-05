@@ -273,7 +273,7 @@ fn parse_config(config_path: &str) -> NodeConfig {
         .set_default("lan-discovery", "False").expect("Can't set default value for `lan-discovery`")
         .set_default("threads", "1").expect("Can't set default value for `threads`")
         .set_default("tcp-connections-limit", "512").expect("Can't set default value for `tcp-connections-limit`")
-        .add_source(CfgFile::from_str(config_path, CfgFileFormat::Yaml));
+        .add_source(CfgFile::new(config_path, CfgFileFormat::Yaml));
 
     let config_file = match config_builder.build() {
         Ok(cfg) => cfg,
