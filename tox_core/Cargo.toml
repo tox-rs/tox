@@ -37,7 +37,7 @@ xsalsa20poly1305 = "0.9"
 crypto_box = "0.8"
 
 [dependencies.tokio]
-version = "1.20"
+version = "1.21"
 default-features = false
 features = ["net", "sync", "time"]
 
@@ -46,6 +46,6 @@ version = "0.7"
 features = ["codec", "net"]
 
 [dev-dependencies.tokio]
-version = "1.20"
+version = "1.21"
 default-features = false
 features = ["macros", "test-util", "net", "rt", "rt-multi-thread", "sync", "time"]

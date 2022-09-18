@@ -56,7 +56,7 @@ default-features = false
 features = ["yaml"]
 
 [dependencies.tokio]
-version = "1.12"
+version = "1.21"
 default-features = false
 features = ["net", "time", "rt", "rt-multi-thread"]
 
