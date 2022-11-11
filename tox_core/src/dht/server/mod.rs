@@ -870,10 +870,10 @@ impl Server {
         if state.check_ping_id(payload.id, &packet.pk) {
             trace!("Received nodes with NodesResponse from {}: {:?}", addr, payload.nodes);
 
-            self.try_add_to_close(&mut *state, payload.id, PackedNode::new(addr, packet.pk.clone()), false).await?;
+            self.try_add_to_close(&mut state, payload.id, PackedNode::new(addr, packet.pk.clone()), false).await?;
 
             // Process nodes from NodesResponse
-            self.add_bootstrap_nodes(&mut *state, &payload.nodes, &packet.pk).await;
+            self.add_bootstrap_nodes(&mut state, &payload.nodes, &packet.pk).await;
         } else {
             // Some old version toxcore responds with wrong ping_id.
             // So we do not treat this as our own error.

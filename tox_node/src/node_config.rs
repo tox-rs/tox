@@ -234,7 +234,7 @@ fn app() -> Command {
             .help("Node to perform initial bootstrap")
             .num_args(2)
             .action(clap::ArgAction::Append)
-            .value_names(&["public key", "address"]))
+            .value_names(["public key", "address"]))
         .group(ArgGroup::new("req_flags")
             .args(["bootstrap-node", "tcp-address"])
             .multiple(true))

@@ -226,7 +226,7 @@ where
                             "No free space left in the kbucket, the last bad node removed.");
                         // replace the farthest bad node
                         self.nodes.remove(eviction_index);
-                        let index = index - if eviction_index < index { 1 } else { 0 };
+                        let index = index - usize::from(eviction_index < index);
                         self.nodes.insert(index, new_node.into());
                         true
                     } else {
@@ -251,7 +251,7 @@ where
                         "No free space left in the kbucket, the last (bad) node removed.");
                     let eviction_index = Node::eviction_index(&self.nodes).unwrap_or(self.nodes.len() - 1);
                     self.nodes.remove(eviction_index);
-                    let index = index - if eviction_index < index { 1 } else { 0 };
+                    let index = index - usize::from(eviction_index < index);
                     self.nodes.insert(index, new_node.into());
                 } else {
                     self.nodes.insert(index, new_node.into());

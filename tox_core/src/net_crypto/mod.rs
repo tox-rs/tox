@@ -280,7 +280,7 @@ impl NetCrypto {
     /// or disconnected.
     async fn send_connection_status(&self, connection: &CryptoConnection, status: bool) -> Result<(), mpsc::SendError> {
         if connection.is_established() != status {
-            let tx = (&*self.connection_status_tx.read().await).clone();
+            let tx = (*self.connection_status_tx.read().await).clone();
             maybe_send_unbounded(tx, (connection.peer_real_pk.clone(), status)).await
         } else {
             Ok(())
