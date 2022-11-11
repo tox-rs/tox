@@ -1,0 +1,15 @@
+#include <tunables/global>
+
+/usr/bin/tox-node {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+
+  /etc/tox-node/config.yml r,
+  /sys/fs/cgroup/cpu,cpuacct/cpu.cfs_quota_us r,
+  /usr/bin/tox-node mr,
+  /var/lib/tox-node/keys r,
+  owner /proc/*/cgroup r,
+  owner /proc/*/mountinfo r,
+
+}
+

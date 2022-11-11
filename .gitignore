@@ -1,7 +1,6 @@
 # Rust
 target/
 .cargo/
-Cargo.lock
 
 # vim
 *.swp

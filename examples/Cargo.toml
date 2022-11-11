@@ -19,7 +19,7 @@ rand = "0.8"
 anyhow = "1.0"
 
 [dev-dependencies.tokio]
-version = "1.20"
+version = "1.21"
 default-features = false
 features = ["macros", "test-util", "net", "rt", "rt-multi-thread", "sync", "time"]
 

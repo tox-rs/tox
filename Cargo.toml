@@ -6,6 +6,7 @@ members = [
     "tox_packet",
     "tox_core",
     "tox_encryptsave",
+    "tox_node",
 
     "examples"
 ]
