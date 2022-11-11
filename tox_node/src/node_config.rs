@@ -262,13 +262,13 @@ fn app() -> Command {
                    - start_date: time when the node was started\n\
                    - uptime: uptime in the format 'XX days XX hours XX minutes'\n")
             .num_args(1)
-            // .validator(|m| {
-            //     if m.len() > BOOSTRAP_SERVER_MAX_MOTD_LENGTH {
-            //         Err(format!("Message of the day must not be longer than {} bytes", BOOSTRAP_SERVER_MAX_MOTD_LENGTH))
-            //     } else {
-            //         Ok(())
-            //     }
-            // })
+            .value_parser(|m: &str| {
+                if m.len() > BOOSTRAP_SERVER_MAX_MOTD_LENGTH {
+                    Err(format!("Message of the day must not be longer than {} bytes", BOOSTRAP_SERVER_MAX_MOTD_LENGTH))
+                } else {
+                    Ok(m.to_string())
+                }
+            })
             .default_value("This is tox-rs"))
         .arg(Arg::new("lan-discovery")
             .long("lan-discovery")
@@ -543,6 +543,21 @@ mod tests {
         ]);
         let config = run_args(&matches);
         assert_eq!(config.motd, motd);
+    }
+
+    #[test]
+    fn args_motd_too_long() {
+        let motd = "x".repeat(BOOSTRAP_SERVER_MAX_MOTD_LENGTH + 1);
+        let matches = app().try_get_matches_from(vec![
+            "tox-node",
+            "--keys-file",
+            "./keys",
+            "--udp-address",
+            "127.0.0.1:33445",
+            "--motd",
+            &motd,
+        ]);
+        assert!(matches.is_err());
     }
 
     #[test]
