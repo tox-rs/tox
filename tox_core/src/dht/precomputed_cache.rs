@@ -1,6 +1,7 @@
 //! LRU cache for `SalsaBox`es.
 
 use std::sync::Arc;
+use std::num::NonZeroUsize;
 
 use crypto_box::SalsaBox;
 use lru::LruCache;
@@ -22,6 +23,7 @@ pub struct PrecomputedCache {
 impl PrecomputedCache {
     /// Create new `PrecomputedCache`.
     pub fn new(sk: SecretKey, capacity: usize) -> PrecomputedCache {
+        let capacity = NonZeroUsize::new(capacity).expect("must be non zero");
         PrecomputedCache {
             sk,
             precomputed_keys: Arc::new(Mutex::new(LruCache::new(capacity))),
