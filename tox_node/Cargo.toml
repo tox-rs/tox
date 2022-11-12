@@ -42,7 +42,6 @@ futures = { version = "0.3", default-features = false, features = ["std", "async
 hex = "0.4"
 itertools = "0.10"
 log = "0.4"
-regex = "1.6"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
 crypto_box = "0.8"

@@ -1015,7 +1015,6 @@ dependencies = [
  "itertools",
  "log",
  "rand",
- "regex",
  "serde",
  "serde_yaml",
  "syslog",
