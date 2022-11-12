@@ -1,8 +1,6 @@
 use std::borrow::Cow;
-use chrono::DateTime;
-use chrono::offset::Local;
 use regex::Regex;
-use std::u64;
+use time::OffsetDateTime;
 
 use tox::core::stats::Stats;
 
@@ -50,7 +48,7 @@ pub struct Motd {
     tcp_packets_out_regex: RegexMatches,
     udp_packets_in_regex: RegexMatches,
     udp_packets_out_regex: RegexMatches,
-    start_date: DateTime<Local>,
+    start_date: OffsetDateTime,
     counters: Counters,
     template: String,
 }
@@ -76,7 +74,7 @@ impl Motd {
             tcp_packets_out_regex: RegexMatches::new(&template, tcp_packets_out_regex),
             udp_packets_in_regex: RegexMatches::new(&template, udp_packets_in_regex),
             udp_packets_out_regex: RegexMatches::new(&template, udp_packets_out_regex),
-            start_date: Local::now(),
+            start_date: OffsetDateTime::now_utc(),
             counters,
             template,
         }
@@ -93,14 +91,17 @@ impl Motd {
     }
 
     pub fn format(&self) -> String {
-        let result = self.start_date_regex.replace(&self.template, ||
-            self.start_date.format("%c").to_string()
-        );
+        let result = self.start_date_regex.replace(&self.template, || {
+            let format = time::format_description::parse(
+                "[year]-[month]-[day] [hour]:[minute]:[second]",
+            ).unwrap();
+            self.start_date.format(&format).unwrap()
+        });
         let result = self.uptime_regex.replace(&result, || {
-            let uptime = Local::now() - self.start_date;
-            let days = uptime.num_days();
-            let hours = uptime.num_hours() - uptime.num_days() * 24;
-            let minutes = uptime.num_minutes() - uptime.num_hours() * 60;
+            let uptime = OffsetDateTime::now_utc() - self.start_date;
+            let days = uptime.whole_days();
+            let hours = uptime.whole_hours() - uptime.whole_days() * 24;
+            let minutes = uptime.whole_minutes() / 60 - uptime.whole_hours() * 60;
             format!(
               "{:0>#2} days {:0>#2} hours {:0>#2} minutes",
               days,
