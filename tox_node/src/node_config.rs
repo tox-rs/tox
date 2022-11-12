@@ -35,12 +35,12 @@ impl FromStr for Threads {
     }
 }
 
-#[cfg(unix)]
 /// Specifies where to write logs.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize)]
 pub enum LogType {
     Stderr,
     Stdout,
+    #[cfg(unix)]
     Syslog,
     None,
 }
@@ -48,7 +48,13 @@ pub enum LogType {
 impl ValueEnum for LogType {
     fn value_variants<'a>() -> &'a [Self] {
         use self::LogType::*;
-        &[Stderr, Stdout, Syslog, None]
+        &[
+            Stderr,
+            Stdout,
+            #[cfg(unix)]
+            Syslog,
+            None,
+        ]
     }
 
     fn to_possible_value<'a>(&self) -> Option<PossibleValue> {
@@ -56,21 +62,10 @@ impl ValueEnum for LogType {
         Some(match self {
             Stderr => PossibleValue::new("Stderr"),
             Stdout => PossibleValue::new("Stdout"),
+            #[cfg(unix)]
             Syslog => PossibleValue::new("Syslog"),
-            None => PossibleValue::new("None")
+            None => PossibleValue::new("None"),
         })
-    }
-}
-
-
-#[cfg(not(unix))]
-arg_enum! {
-    /// Specifies where to write logs.
-    #[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize)]
-    pub enum LogType {
-        Stderr,
-        Stdout,
-        None,
     }
 }
 
