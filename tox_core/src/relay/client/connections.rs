@@ -217,7 +217,7 @@ impl Connections {
         if let Some(connection) = connections.get(&node_pk) {
             let clients = self.clients.read().await;
 
-            for c in connection.clients(&*clients) {
+            for c in connection.clients(&clients) {
                 let res = c.send_data(node_pk.clone(), data.clone()).await;
 
                 if res.is_ok() { break }

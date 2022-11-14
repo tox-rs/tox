@@ -155,7 +155,7 @@ impl OnionPingData {
         let mut buf = [0; ONION_PING_DATA_SIZE];
         // can not fail since buf has enough length
         self.to_bytes((&mut buf, 0)).unwrap();
-        Sha256::digest(&buf).into()
+        Sha256::digest(buf).into()
     }
 }
 

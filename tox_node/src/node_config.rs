@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use config::{Config, File as CfgFile, FileFormat as CfgFileFormat};
 use serde::{de, Deserialize, Deserializer};
 use serde_yaml::Value;
-use clap::{App, AppSettings, Arg, SubCommand, ArgMatches};
+use clap::{Arg, ArgAction, ArgGroup, ArgMatches, builder::{ArgPredicate, PossibleValue}, Command, ValueEnum, value_parser}; 
 use hex::FromHex;
 use itertools::Itertools;
 use tox::crypto::*;
@@ -35,26 +35,37 @@ impl FromStr for Threads {
     }
 }
 
-#[cfg(unix)]
-arg_enum! {
-    /// Specifies where to write logs.
-    #[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize)]
-    pub enum LogType {
-        Stderr,
-        Stdout,
-        Syslog,
-        None,
-    }
+/// Specifies where to write logs.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize)]
+pub enum LogType {
+    Stderr,
+    Stdout,
+    #[cfg(unix)]
+    Syslog,
+    None,
 }
 
-#[cfg(not(unix))]
-arg_enum! {
-    /// Specifies where to write logs.
-    #[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize)]
-    pub enum LogType {
-        Stderr,
-        Stdout,
-        None,
+impl ValueEnum for LogType {
+    fn value_variants<'a>() -> &'a [Self] {
+        use self::LogType::*;
+        &[
+            Stderr,
+            Stdout,
+            #[cfg(unix)]
+            Syslog,
+            None,
+        ]
+    }
+
+    fn to_possible_value<'a>(&self) -> Option<PossibleValue> {
+        use self::LogType::*;
+        Some(match self {
+            Stderr => PossibleValue::new("Stderr"),
+            Stdout => PossibleValue::new("Stdout"),
+            #[cfg(unix)]
+            Syslog => PossibleValue::new("Syslog"),
+            None => PossibleValue::new("None"),
+        })
     }
 }
 
@@ -145,113 +156,119 @@ pub struct NodeConfig {
     pub unused: HashMap<String, Value>,
 }
 
-fn create_sk_arg() -> Arg<'static> {
-    Arg::with_name("secret-key")
+fn create_sk_arg() -> Arg {
+    Arg::new("secret-key")
         .short('s')
         .long("secret-key")
         .help("DHT secret key. Note that you should not pass the key via \
                arguments due to security reasons. Use this argument for \
                test purposes only. In the real world use the environment \
                variable instead")
-        .takes_value(true)
+        .num_args(1)
         .conflicts_with("keys-file")
         .env("TOX_SECRET_KEY")
-        .hidden(true)
+        .hide(true)
 }
 
-fn create_keys_file_arg() -> Arg<'static> {
-    Arg::with_name("keys-file")
+fn create_keys_file_arg() -> Arg {
+    Arg::new("keys-file")
         .short('k')
         .long("keys-file")
         .help("Path to the file where DHT keys are stored")
-        .takes_value(true)
-        .required_unless("secret-key")
+        .num_args(1)
+        .required_unless_present("secret-key")
         .conflicts_with("secret-key")
 }
 
-fn app() -> App<'static> {
-    App::new(crate_name!())
+fn app() -> Command {
+    Command::new(crate_name!())
         .version(crate_version!())
         .about(crate_description!())
-        .setting(AppSettings::ColoredHelp)
-        .setting(AppSettings::SubcommandsNegateReqs)
-        .subcommand(SubCommand::with_name("config")
-            .arg(Arg::with_name("cfg-file")
+        .args_conflicts_with_subcommands(true)
+        .subcommand(Command::new("config")
+            .arg(Arg::new("cfg-file")
                 .index(1)
                 .help("Load settings from saved config file. \
                     Config file format is YAML")
-                .takes_value(true)))
-        .subcommand(SubCommand::with_name("derive-pk")
+                .num_args(1)
+                .required(true)))
+        .subcommand(Command::new("derive-pk")
             .about("Derive PK from either --keys-file or from env:TOX_SECRET_KEY")
             .arg(create_sk_arg())
             .arg(create_keys_file_arg()))
         // here go args without subcommands
         .arg(create_sk_arg())
         .arg(create_keys_file_arg())
-        .arg(Arg::with_name("udp-address")
+        .arg(Arg::new("udp-address")
             .short('u')
             .long("udp-address")
             .help("UDP address to run DHT node")
-            .takes_value(true)
-            .required_unless("tcp-address"))
-        .arg(Arg::with_name("tcp-address")
+            .num_args(1)
+            .value_parser(value_parser!(SocketAddr))
+            .required_unless_present("tcp-address"))
+        .arg(Arg::new("tcp-address")
             .short('t')
             .long("tcp-address")
             .help("TCP address to run TCP relay")
-            .multiple(true)
-            .takes_value(true)
-            .use_delimiter(true)
-            .required_unless("udp-address"))
-        .arg(Arg::with_name("tcp-connections-limit")
+            .num_args(1..)
+            .value_parser(value_parser!(SocketAddr))
+            .action(clap::ArgAction::Append)
+            .required_unless_present("udp-address"))
+        .arg(Arg::new("tcp-connections-limit")
             .short('c')
             .long("tcp-connections-limit")
             .help("Maximum number of active TCP connections relay can hold. \
                    Defaults to 512 when tcp-address is specified")
             .requires("tcp-address")
-            .takes_value(true)
-            .default_value_if("tcp-address", None, Some("512")))
-        .arg(Arg::with_name("bootstrap-node")
+            .num_args(1)
+            .value_parser(value_parser!(usize))
+            .default_value_if("tcp-address", ArgPredicate::IsPresent, Some("512")))
+        .arg(Arg::new("bootstrap-node")
             .short('b')
             .long("bootstrap-node")
             .help("Node to perform initial bootstrap")
-            .multiple(true)
-            .takes_value(true)
-            .number_of_values(2)
-            .value_names(&["public key", "address"]))
-        .arg(Arg::with_name("threads")
+            .num_args(2)
+            .action(clap::ArgAction::Append)
+            .value_names(["public key", "address"]))
+        .group(ArgGroup::new("req_flags")
+            .args(["bootstrap-node", "tcp-address"])
+            .multiple(true))
+        .arg(Arg::new("threads")
             .short('j')
             .long("threads")
             .help("Number of threads to use. The value 'auto' means that the \
                    number of threads will be determined automatically by the \
                    number of CPU cores")
-            .takes_value(true)
+            .num_args(1)
+            .value_parser(value_parser!(Threads))
             .default_value("1"))
-        .arg(Arg::with_name("log-type")
+        .arg(Arg::new("log-type")
             .short('l')
             .long("log-type")
             .help("Where to write logs")
-            .takes_value(true)
-            .default_value("Stderr")
-            .possible_values(LogType::variants()))
-        .arg(Arg::with_name("motd")
+            .num_args(1)
+            .value_parser(value_parser!(LogType))
+            .default_value("Stderr"))
+        .arg(Arg::new("motd")
             .short('m')
             .long("motd")
             .help("Message of the day. Must be no longer than 256 bytes. May \
                    contain next variables placed in {{ }}:\n\
                    - start_date: time when the node was started\n\
                    - uptime: uptime in the format 'XX days XX hours XX minutes'\n")
-            .takes_value(true)
-            .validator(|m| {
+            .num_args(1)
+            .value_parser(|m: &str| {
                 if m.len() > BOOSTRAP_SERVER_MAX_MOTD_LENGTH {
                     Err(format!("Message of the day must not be longer than {} bytes", BOOSTRAP_SERVER_MAX_MOTD_LENGTH))
                 } else {
-                    Ok(())
+                    Ok(m.to_string())
                 }
             })
             .default_value("This is tox-rs"))
-        .arg(Arg::with_name("lan-discovery")
+        .arg(Arg::new("lan-discovery")
             .long("lan-discovery")
-            .help("Enable LAN discovery (disabled by default)"))
+            .help("Enable LAN discovery (disabled by default)")
+            .action(ArgAction::SetTrue))
 }
 
 /// Parse command line arguments.
@@ -290,17 +307,17 @@ fn parse_config(config_path: &str) -> NodeConfig {
 }
 
 fn run_derive_pk(matches: &ArgMatches) -> ! {
-    let sk_passed_as_arg = matches.occurrences_of("secret-key") > 0;
+    let sk_passed_as_arg = matches.contains_id("secret-key");
     if sk_passed_as_arg {
         panic!("You should not pass the secret key via arguments due to \
                security reasons. Use the environment variable instead");
     }
 
-    let pk_from_arg = matches.value_of("secret-key").map(|s| {
+    let pk_from_arg = matches.get_one::<String>("secret-key").map(|s| {
         let sk_bytes: [u8; 32] = FromHex::from_hex(s).expect("Invalid DHT secret key");
         SecretKey::from(sk_bytes).public_key()
     });
-    let pk_from_file = matches.value_of("keys-file").map(|keys_file| {
+    let pk_from_file = matches.get_one::<String>("keys-file").map(|keys_file| {
         let mut file = std::fs::File::open(keys_file).expect("Failed to read the keys file");
 
         let mut buf = [0; crypto_box::KEY_SIZE * 2];
@@ -324,41 +341,30 @@ fn run_derive_pk(matches: &ArgMatches) -> ! {
 }
 
 fn run_config(matches: &ArgMatches) -> NodeConfig {
-    let config_path = value_t!(matches.value_of("cfg-file"), String).unwrap_or_else(|e| e.exit());
+    let config_path = matches.get_one::<String>("cfg-file").unwrap();
 
-    parse_config(&config_path)
+    parse_config(config_path)
 }
 
 fn run_args(matches: &ArgMatches) -> NodeConfig {
-    let udp_addr = if matches.is_present("udp-address") {
-        Some(value_t!(matches.value_of("udp-address"), SocketAddr).unwrap_or_else(|e| e.exit()))
-    } else {
-        None
-    };
+    let udp_addr = matches.get_one::<SocketAddr>("udp-address").copied();
 
-    let tcp_addrs = if matches.is_present("tcp-address") {
-        values_t!(matches.values_of("tcp-address"), SocketAddr).unwrap_or_else(|e| e.exit())
-    } else {
-        Vec::new()
-    };
+    let tcp_addrs: Vec<SocketAddr> = matches.get_many("tcp-address").unwrap_or_default().copied().collect();
 
-    let tcp_connections_limit = if matches.is_present("tcp-connections-limit") {
-        value_t!(matches.value_of("tcp-connections-limit"), usize).unwrap_or_else(|e| e.exit())
-    } else {
-        512
-    };
+    let tcp_connections_limit = matches.get_one::<usize>("tcp-connections-limit").copied()
+        .unwrap_or(512);
 
-    let sk = matches.value_of("secret-key").map(|s| {
+    let sk = matches.get_one::<String>("secret-key").map(|s| {
         let sk_bytes: [u8; 32] = FromHex::from_hex(s).expect("Invalid DHT secret key");
         SecretKey::from(sk_bytes)
     });
 
-    let sk_passed_as_arg = matches.occurrences_of("secret-key") > 0;
+    let sk_passed_as_arg = matches.contains_id("secret-key");
 
-    let keys_file = matches.value_of("keys-file").map(|s| s.to_owned());
+    let keys_file = matches.get_one("keys-file").cloned();
 
     let bootstrap_nodes = matches
-        .values_of("bootstrap-node")
+        .get_many::<String>("bootstrap-node")
         .into_iter()
         .flatten()
         .tuples()
@@ -370,18 +376,18 @@ fn run_args(matches: &ArgMatches) -> NodeConfig {
 
             BootstrapNode {
                 pk: bootstrap_pk,
-                addr: addr.to_owned(),
+                addr: addr.to_string(),
             }
         })
         .collect();
 
-    let threads = value_t!(matches.value_of("threads"), Threads).unwrap_or_else(|e| e.exit());
+    let threads = matches.get_one("threads").copied().unwrap();
 
-    let log_type = value_t!(matches.value_of("log-type"), LogType).unwrap_or_else(|e| e.exit());
+    let log_type = matches.get_one("log-type").copied().unwrap();
 
-    let motd = value_t!(matches.value_of("motd"), String).unwrap_or_else(|e| e.exit());
+    let motd = matches.get_one("motd").cloned().unwrap();
 
-    let lan_discovery_enabled = matches.is_present("lan-discovery");
+    let lan_discovery_enabled = matches.get_flag("lan-discovery");
 
     NodeConfig {
         udp_addr,
@@ -486,7 +492,7 @@ mod tests {
 
     #[test]
     fn args_udp_or_tcp_required() {
-        let matches = app().get_matches_from_safe(vec![
+        let matches = app().try_get_matches_from(vec![
             "tox-node",
             "--keys-file",
             "./keys",
@@ -496,7 +502,7 @@ mod tests {
 
     #[test]
     fn args_keys_file_or_secret_key_required() {
-        let matches = app().get_matches_from_safe(vec![
+        let matches = app().try_get_matches_from(vec![
             "tox-node",
             "--udp-address",
             "127.0.0.1:33445",
@@ -506,7 +512,7 @@ mod tests {
 
     #[test]
     fn args_keys_file_and_secret_key_conflicts() {
-        let matches = app().get_matches_from_safe(vec![
+        let matches = app().try_get_matches_from(vec![
             "tox-node",
             "--keys-file",
             "./keys",
@@ -532,6 +538,21 @@ mod tests {
         ]);
         let config = run_args(&matches);
         assert_eq!(config.motd, motd);
+    }
+
+    #[test]
+    fn args_motd_too_long() {
+        let motd = "x".repeat(BOOSTRAP_SERVER_MAX_MOTD_LENGTH + 1);
+        let matches = app().try_get_matches_from(vec![
+            "tox-node",
+            "--keys-file",
+            "./keys",
+            "--udp-address",
+            "127.0.0.1:33445",
+            "--motd",
+            &motd,
+        ]);
+        assert!(matches.is_err());
     }
 
     #[test]
@@ -617,7 +638,7 @@ mod tests {
 
     #[test]
     fn args_tcp_connections_limit_requires_tcp_addr() {
-        let matches = app().get_matches_from_safe(vec![
+        let matches = app().try_get_matches_from(vec![
             "tox-node",
             "--keys-file",
             "./keys",
@@ -653,7 +674,7 @@ mod tests {
             "./keys",
         ]);
         let matches = matches.subcommand_matches("derive-pk").unwrap();
-        assert_eq!("./keys", matches.value_of("keys-file").unwrap());
+        assert_eq!("./keys", matches.get_one::<String>("keys-file").unwrap());
     }
 
     #[test]
@@ -666,6 +687,6 @@ mod tests {
             sk_str
         ]);
         let matches = matches.subcommand_matches("derive-pk").unwrap();
-        assert_eq!(sk_str, matches.value_of("secret-key").unwrap());
+        assert_eq!(sk_str, matches.get_one::<String>("secret-key").unwrap());
     }
 }

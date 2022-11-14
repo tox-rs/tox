@@ -35,19 +35,18 @@ maintainer-scripts = "dpkg/info"
 
 
 [dependencies]
-chrono = "0.4"
-clap = { version = "3.2", features = ["cargo", "env"] }
+clap = { version = "4.0", features = ["cargo", "env"] }
 env_logger = "0.9"
 anyhow = "1.0"
 futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
 hex = "0.4"
 itertools = "0.10"
 log = "0.4"
-regex = "1.6"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
 crypto_box = "0.8"
 rand = "0.8"
+time = { version = "0.3", features = ["serde-well-known"] }
 tox = { version = "0.1.1", path = "../tox" }
 
 [dependencies.config]
