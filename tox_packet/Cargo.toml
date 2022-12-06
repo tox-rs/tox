@@ -1,6 +1,6 @@
 [package]
 name = "tox_packet"
-version = "0.1.1"
+version = "0.2.0"
 authors = [
     "Zetok Zalbavar <zetok@openmailbox.org>",
     "Roman Proskuryakov <humbug@deeptown.org>",
@@ -19,8 +19,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tox_binary_io = { version = "0.1.0", path = "../tox_binary_io", features = ["crypto"] }
-tox_crypto = { version = "0.1.0", path = "../tox_crypto" }
+tox_binary_io = { version = "0.2.0", path = "../tox_binary_io", features = ["crypto"] }
+tox_crypto = { version = "0.2.0", path = "../tox_crypto" }
 
 nom = "7.1"
 cookie-factory = "0.3"
