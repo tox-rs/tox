@@ -1,3 +1,12 @@
+# 0.2.0 (Dec 10, 2022)
+
+* Update dependencies (#445, #454, #456, #459, #460, #463, #465, #467)
+* Use pure rust cryptography instead of `libsodium` (#446, #447, #449, #450, #452, #453, #455)
+* Resolve dependency cycle between modules (#448)
+* Use `thiserror` instead of unmaintained `failure` (#457)
+* Merge `tox_node` and `tox` repositories (#466)
+* Fix deadlocks (#461, #464)
+
 # 0.1.1 (Dec 27, 2020)
 
 * Fix bug in k-bucket eviction (#443)

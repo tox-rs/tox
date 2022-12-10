@@ -1,6 +1,6 @@
 [package]
 name = "tox_core"
-version = "0.1.1"
+version = "0.2.0"
 authors = [
     "Zetok Zalbavar <zetok@openmailbox.org>",
     "Roman Proskuryakov <humbug@deeptown.org>",
@@ -17,9 +17,9 @@ license = "GPL-3.0+"
 edition = "2021"
 
 [dependencies]
-tox_binary_io = { version = "0.1.1", path = "../tox_binary_io" }
-tox_crypto = { version = "0.1.1", path = "../tox_crypto" }
-tox_packet = { version = "0.1.1", path = "../tox_packet" }
+tox_binary_io = { version = "0.2.0", path = "../tox_binary_io" }
+tox_crypto = { version = "0.2.0", path = "../tox_crypto" }
+tox_packet = { version = "0.2.0", path = "../tox_packet" }
 
 bytes = "1.2"
 futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }

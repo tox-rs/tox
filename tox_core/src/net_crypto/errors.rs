@@ -182,7 +182,7 @@ pub enum SendDataError {
 }
 
 /// Error that can happen when calling `run`.
-#[derive(Debug, PartialEq, Error)]
+#[derive(Debug, Eq, PartialEq, Error)]
 pub enum RunError {
     /// Sending pings error.
     #[error("Sending crypto data packet error")]

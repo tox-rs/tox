@@ -15,7 +15,7 @@ use tox_packet::dht::*;
 
 
 /// Error that can happen during lan discovery.
-#[derive(Debug, PartialEq, Error)]
+#[derive(Debug, Eq, PartialEq, Error)]
 pub enum LanDiscoveryError {
     /// Ping wakeup timer error
     #[error("Lan discovery wakeup timer error.")]

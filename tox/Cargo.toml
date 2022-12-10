@@ -1,6 +1,6 @@
 [package]
 name = "tox"
-version = "0.1.1"
+version = "0.2.0"
 authors = [
     "Zetok Zalbavar <zetok@openmailbox.org>",
     "Roman Proskuryakov <humbug@deeptown.org>",
@@ -30,7 +30,7 @@ coveralls = { repository = "tox-rs/tox" }
 maintenance = { status = "actively-developed" }
 
 [dependencies]
-tox_packet = { version = "0.1.0", path = "../tox_packet" }
-tox_core = { version = "0.1.0", path = "../tox_core" }
-tox_encryptsave = { version = "0.1.0", path = "../tox_encryptsave" }
-tox_crypto = { version = "0.1.1", path = "../tox_crypto" }
+tox_packet = { version = "0.2.0", path = "../tox_packet" }
+tox_core = { version = "0.2.0", path = "../tox_core" }
+tox_encryptsave = { version = "0.2.0", path = "../tox_encryptsave" }
+tox_crypto = { version = "0.2.0", path = "../tox_crypto" }

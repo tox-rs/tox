@@ -63,7 +63,7 @@ pub enum HandlePacketError {
 }
 
 /// Error that can happen when calling `run_*`.
-#[derive(Debug, PartialEq, Error)]
+#[derive(Debug, Eq, PartialEq, Error)]
 pub enum RunError {
     /// Send packet(s) error.
     #[error("Send packet(s) error")]

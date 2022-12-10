@@ -1,6 +1,6 @@
 [package]
 name = "tox-node"
-version = "0.1.1"
+version = "0.2.0"
 authors = [
   "Roman Proskuryakov <humbug@deeptown.org>",
   "Evgeny Kurnevsky <kurnevsky@gmail.com>",
@@ -47,7 +47,7 @@ serde_yaml = "0.9"
 crypto_box = "0.8"
 rand = "0.8"
 time = { version = "0.3", features = ["serde-well-known"] }
-tox = { version = "0.1.1", path = "../tox" }
+tox = { version = "0.2.0", path = "../tox" }
 
 [dependencies.config]
 version = "0.13.2"
