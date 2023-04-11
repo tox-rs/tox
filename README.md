@@ -35,7 +35,7 @@ issue / pull request should be filled on the reference repository.
 
 ## Building
 
-Fairly simple. First, install [Rust] >= 1.61 and a C compiler ([Build Tools
+Fairly simple. First, install [Rust] >= 1.64 and a C compiler ([Build Tools
 for Visual Studio][VSBuild] on Windows, GCC or Clang on other platforms).
 
 Then you can build the debug version with
