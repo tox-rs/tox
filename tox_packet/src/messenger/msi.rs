@@ -18,6 +18,7 @@ const MAX_MSI_PAYLOAD_SIZE: usize = 256;
 
 bitflags! {
     /// Capabilities kind of msi packet. Used by bitwise OR.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub struct CapabilitiesKind: u8 {
         /// Send audio
         const SEND_AUDIO = 4;
@@ -110,9 +111,7 @@ impl ToBytes for MsiError {
 impl FromBytes for CapabilitiesKind {
     fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
         let (input, value) = le_u8(input)?;
-        Ok((input, CapabilitiesKind {
-            bits: value,
-        }))
+        Ok((input, CapabilitiesKind::from_bits_truncate(value)))
     }
 }
 
@@ -129,7 +128,7 @@ impl ToBytes for Capabilities {
         do_gen!(buf,
             gen_le_u8!(0x03) >> // Capabilities
             gen_le_u8!(0x01) >> // Size
-            gen_le_u8!(self.0.bits)
+            gen_le_u8!(self.0.bits())
         )
     }
 }

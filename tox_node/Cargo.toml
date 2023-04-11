@@ -36,7 +36,7 @@ maintainer-scripts = "dpkg/info"
 
 [dependencies]
 clap = { version = "4.0", features = ["cargo", "env"] }
-env_logger = "0.9"
+env_logger = "0.10"
 anyhow = "1.0"
 futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
 hex = "0.4"
@@ -50,12 +50,12 @@ time = { version = "0.3", features = ["serde-well-known"] }
 tox = { version = "0.2.0", path = "../tox" }
 
 [dependencies.config]
-version = "0.13.2"
+version = "0.13"
 default-features = false
 features = ["yaml"]
 
 [dependencies.tokio]
-version = "1.21"
+version = "1.27"
 default-features = false
 features = ["net", "time", "rt", "rt-multi-thread"]
 
