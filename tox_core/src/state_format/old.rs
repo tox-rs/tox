@@ -155,10 +155,10 @@ impl ToBytes for DhtState {
         let (buf, idx) = do_gen!(buf,
             gen_le_u16!(0x0002) >>
             gen_slice!(SECTION_MAGIC) >>
-            gen_le_u32!(DHT_MAGICAL as u32) >>
+            gen_le_u32!(DHT_MAGICAL) >>
             gen_skip!(4) >>
-            gen_le_u16!(DHT_SECTION_TYPE as u16) >>
-            gen_le_u16!(DHT_2ND_MAGICAL as u16) >>
+            gen_le_u16!(DHT_SECTION_TYPE) >>
+            gen_le_u16!(DHT_2ND_MAGICAL) >>
             gen_many_ref!(&self.0, |buf, node| PackedNode::to_bytes(node, buf))
         )?;
 
