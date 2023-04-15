@@ -299,7 +299,7 @@ mod tests {
     fn links_by_id_nonexistent() {
         let links = Links::new();
 
-        assert!(links.by_id(MAX_LINKS_N as u8 + 1).is_none());
+        assert!(links.by_id(MAX_LINKS_N + 1).is_none());
     }
 
     #[test]
@@ -364,7 +364,7 @@ mod tests {
     fn links_take_nonexistent() {
         let mut links = Links::new();
 
-        assert!(links.take(MAX_LINKS_N as u8 + 1).is_none());
+        assert!(links.take(MAX_LINKS_N + 1).is_none());
     }
 
     #[test]

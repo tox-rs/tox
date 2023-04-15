@@ -24,7 +24,7 @@ tox_crypto = { version = "0.2.0", path = "../tox_crypto" }
 
 nom = "7.1"
 cookie-factory = "0.3"
-bitflags = "1.3"
+bitflags = "2.1"
 thiserror = "1.0"
 sha2 = "0.10"
 xsalsa20poly1305 = "0.9"

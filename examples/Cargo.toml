@@ -12,14 +12,14 @@ tox_core = { version = "0.2.0", path = "../tox_core" }
 
 log = "0.4"
 futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
-env_logger = "0.9"
+env_logger = "0.10"
 hex = "0.4"
 thiserror = "1.0"
 rand = "0.8"
 anyhow = "1.0"
 
 [dev-dependencies.tokio]
-version = "1.21"
+version = "1.27"
 default-features = false
 features = ["macros", "test-util", "net", "rt", "rt-multi-thread", "sync", "time"]
 

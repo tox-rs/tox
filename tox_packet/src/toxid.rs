@@ -303,7 +303,7 @@ mod tests {
 
     fn test_is_hexdump_uppercase(s: &str) -> bool {
         fn test_is_hexdump_uppercase_b(b: u8) -> bool {
-            matches!(b, b'A' ..= b'F') || matches!(b, b'0' ..= b'9')
+            b.is_ascii_uppercase() || b.is_ascii_digit()
         }
         s.bytes().all(test_is_hexdump_uppercase_b)
     }

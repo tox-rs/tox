@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use config::{Config, File as CfgFile, FileFormat as CfgFileFormat};
 use serde::{de, Deserialize, Deserializer};
 use serde_yaml::Value;
-use clap::{Arg, ArgAction, ArgGroup, ArgMatches, builder::{ArgPredicate, PossibleValue}, Command, ValueEnum, value_parser}; 
+use clap::{Arg, ArgAction, ArgGroup, ArgMatches, builder::{ArgPredicate, PossibleValue}, Command, ValueEnum, value_parser};
 use hex::FromHex;
 use itertools::Itertools;
 use tox::crypto::*;
@@ -333,7 +333,7 @@ fn run_derive_pk(matches: &ArgMatches) -> ! {
 
     let pk = pk_from_arg.or(pk_from_file).unwrap();
 
-    println!("{}", hex::encode(&pk).to_uppercase());
+    println!("{}", hex::encode(pk).to_uppercase());
 
     // FIXME: use ExitCode::SUCCESS when stabilized
     // https://doc.rust-lang.org/std/process/struct.ExitCode.html

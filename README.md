@@ -1,6 +1,10 @@
 # Tox
 
-[![Github Build Status][gh-badge]][gh-url] [![Coverage Status][cov-badge]][cov-url] [![Docs][doc-badge]][doc-url] [![Current Crates.io Version][crates-badge]][crates-url] [![Join Gitter][gitter-badge]][gitter-url]
+[![Github Build Status][gh-badge]][gh-url]
+[![Coverage Status][cov-badge]][cov-url]
+[![Docs][doc-badge]][doc-url]
+[![Current Crates.io Version][crates-badge]][crates-url]
+[![Join Gitter][gitter-badge]][gitter-url]
 
 [gh-badge]: https://github.com/tox-rs/tox/workflows/Rust/badge.svg?branch=master
 [gh-url]: https://github.com/tox-rs/tox/actions?query=branch%3Amaster
@@ -30,7 +34,8 @@ issue / pull request should be filled on the reference repository.
 [CONTRIBUTING.md](/CONTRIBUTING.md).
 
 ## Building
-Fairly simple. First, install [Rust] >= 1.61 and a C compiler ([Build Tools
+
+Fairly simple. First, install [Rust] >= 1.64 and a C compiler ([Build Tools
 for Visual Studio][VSBuild] on Windows, GCC or Clang on other platforms).
 
 Then you can build the debug version with
@@ -52,6 +57,7 @@ cargo doc --open
 ```
 
 ### With clippy
+
 To check for [clippy](https://github.com/rust-lang-nursery/rust-clippy) warnings
 (linting), you need nightly Rust with `clippy-preview` component.
 
@@ -67,13 +73,13 @@ To check with tests:
 cargo clippy --all --tests
 ```
 
-
 ## Goals
- - improved toxcore implementation in Rust
- - Rust API
- - documentation
- - tests
- - more
+
+- improved toxcore implementation in Rust
+- Rust API
+- documentation
+- tests
+- more
 
 ## Progress
 
@@ -81,7 +87,6 @@ A fully working tox-node written in pure Rust with a DHT server and a TCP relay
 can be found [here](https://github.com/tox-rs/tox-node).
 
 Right now we are working on the client part.
-
 
 ## Authors
 
