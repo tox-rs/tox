@@ -1,3 +1,7 @@
+<!-- markdownlint-configure-file
+{ "line-length": { "code_block_line_length": 175 } }
+-->
+
 # Tox Bootstrap Node
 
 A server application to run tox bootstrap node.
@@ -30,8 +34,8 @@ Also it's possible to use syslog via `--log-type` parameter.
 
 ### Running tox-node in docker
 
-There is a [docker repository] of tox-node with exposed 443/tcp 3389/tcp 33445/tcp 33445/udp ports.
-You can run tox-node using docker like this:
+There is a [docker repository] of tox-node with exposed 443/tcp 3389/tcp
+33445/tcp 33445/udp ports. You can run tox-node using docker like this:
 
 ```sh
 TOX_SECRET_KEY=<secret key> docker run -e TOX_SECRET_KEY toxrust/tox-node <ARGS>
@@ -41,29 +45,30 @@ or
 
 ```sh
 docker run --mount type=bind,source=<path/to/config.yml>,target=<path/to/target/config.yml> \
-    --mount type=bind,source=<path/to/keys>,target=/var/lib/tox-node/keys toxrust/tox-node config <path/to/config.yml>
+  --mount type=bind,source=<path/to/keys>,target=/var/lib/tox-node/keys toxrust/tox-node config <path/to/config.yml>
 ```
 
 Example commands:
 
 ```sh
 TOX_SECRET_KEY="4a2d4098e9d6ae6addb8035085cf1467fd7611edd2e22df2f1b60a71763b4ce4" \
-    docker run -e TOX_SECRET_KEY toxrust/tox-node \
-    --bootstrap-node 1D5A5F2F5D6233058BF0259B09622FB40B482E4FA0931EB8FD3AB8E7BF7DAF6F 198.98.51.198:33445 \
-    --udp-address '0.0.0.0:33445' --tcp-address '0.0.0.0:33445' \
-    --motd "{{start_date}} {{uptime}} Tcp: incoming {{tcp_packets_in}}, outgoing {{tcp_packets_out}}, Udp: incoming {{udp_packets_in}}, outgoing {{udp_packets_out}}"
+  docker run -e TOX_SECRET_KEY toxrust/tox-node \
+  --bootstrap-node 1D5A5F2F5D6233058BF0259B09622FB40B482E4FA0931EB8FD3AB8E7BF7DAF6F 198.98.51.198:33445 \
+  --udp-address '0.0.0.0:33445' --tcp-address '0.0.0.0:33445' \
+  --motd "{{start_date}} {{uptime}} Tcp: incoming {{tcp_packets_in}}, outgoing {{tcp_packets_out}}, Udp: incoming {{udp_packets_in}}, outgoing {{udp_packets_out}}"
 ```
 
 or
 
 ```sh
 docker run --mount type=bind,source=$PWD/dpkg/config.yml,target=/config.yml \
-    --mount type=bind,source=$PWD/keys,target=/var/lib/tox-node/keys toxrust/tox-node config /config.yml
+  --mount type=bind,source=$PWD/keys,target=/var/lib/tox-node/keys toxrust/tox-node config /config.yml
 ```
 
 ### Running tox-node on NixOS
 
-If you are using NixOS (unstable channel), you can install and run tox-node by adding `services.tox-node.enable = true;` to your `configuration.nix`.
+If you are using NixOS (unstable channel), you can install and run tox-node by
+adding `services.tox-node.enable = true;` to your `configuration.nix`.
 
 Configuration options are also available. An example of configuration:
 
@@ -96,6 +101,7 @@ special packet kind called `BootstrapInfo` to retrieve the MOTD alongside with
 version. Our node supports basic templates for the MOTD that can be specified
 via `--motd` key. It's possible to use the following variables surrounded by
 `{{ }}`:
+
 - `start_date`: time when the node was started
 - `uptime`: uptime in the format 'XX days XX hours XX minutes'
 - `tcp_packets_in`: counter of tcp incoming packets
@@ -135,8 +141,9 @@ od -vN 32 -An -tx1 /dev/random | tr -d " \n" ; echo
 
 ## Config or CLI
 
-In order to run with config, run with `config` subcommand, e.g. `tox-node config <file>`.
-Example config.yml is below.
+In order to run with config, run with `config` subcommand, e.g.
+`tox-node config <file>`. Example config.yml is below.
+
 ```yaml
 log-type: Stderr
 keys-file: ./keys
@@ -153,17 +160,20 @@ bootstrap-nodes:
 threads: auto # or any u16 > 0
 lan-discovery: True
 ```
+
 Or you can use it with CLI like this
+
 ```sh
 tox-node --keys-file keys \
-    --bootstrap-node 1D5A5F2F5D6233058BF0259B09622FB40B482E4FA0931EB8FD3AB8E7BF7DAF6F 198.98.51.198:33445 \
-    --udp-address '0.0.0.0:33445' --tcp-address '0.0.0.0:33445' \
-    --motd "{{start_date}} {{uptime}} Tcp: incoming {{tcp_packets_in}}, outgoing {{tcp_packets_out}}, Udp: incoming {{udp_packets_in}}, outgoing {{udp_packets_out}}"
+  --bootstrap-node 1D5A5F2F5D6233058BF0259B09622FB40B482E4FA0931EB8FD3AB8E7BF7DAF6F 198.98.51.198:33445 \
+  --udp-address '0.0.0.0:33445' --tcp-address '0.0.0.0:33445' \
+  --motd "{{start_date}} {{uptime}} Tcp: incoming {{tcp_packets_in}}, outgoing {{tcp_packets_out}}, Udp: incoming {{udp_packets_in}}, outgoing {{udp_packets_out}}"
 ```
 
 ## Build Debian package
 
-Install [cargo-deb] - a Cargo helper command which automatically creates binary Debian packages (.deb) from Cargo projects:
+Install [cargo-deb] - a Cargo helper command which automatically creates binary
+Debian packages (.deb) from Cargo projects:
 
 ```sh
 cargo install cargo-deb
@@ -178,16 +188,17 @@ cargo deb
 This command will create a Debian package in `target/debian` directory.
 The description of the package:
 
-* Binary in `/usr/bin/tox-node`
-* Default config in `/etc/tox-node/config.yml`
-* Systemd config in `/lib/systemd/system/tox-node.service`
-* postinstall creates user `tox-node` and its home in `/var/lib/tox-node/`
-* keys will be generated in `/var/lib/tox-node/keys` if missing during service startup
+- Binary in `/usr/bin/tox-node`
+- Default config in `/etc/tox-node/config.yml`
+- Systemd config in `/lib/systemd/system/tox-node.service`
+- postinstall creates user `tox-node` and its home in `/var/lib/tox-node/`
+- keys will be generated in `/var/lib/tox-node/keys` if missing during service startup
 
 bootstrap-nodes from config.yml can be generated with:
 
 ```sh
-curl 'https://nodes.tox.chat/json' -s | jq -r '.nodes[] | select(.status_udp) | .public_key + " " + .ipv4 + " " + .ipv6 + " " + (.port | tostring)' | \
+curl 'https://nodes.tox.chat/json' -s | \
+  jq -r '.nodes[] | select(.status_udp) | .public_key + " " + .ipv4 + " " + .ipv6 + " " + (.port | tostring)' | \
   while read -r pk ipv4 ipv6 port
   do
     if [ "$ipv4" != "NONE" ]
@@ -203,7 +214,6 @@ curl 'https://nodes.tox.chat/json' -s | jq -r '.nodes[] | select(.status_udp) | 
   done
 ```
 
-[libsodium]: https://github.com/jedisct1/libsodium
 [Rust]: https://www.rust-lang.org
 [cargo-deb]: https://crates.io/crates/cargo-deb
 [tox-node-rs]: https://aur.archlinux.org/packages/tox-node-rs
