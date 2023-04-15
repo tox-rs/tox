@@ -187,8 +187,20 @@ The description of the package:
 bootstrap-nodes from config.yml can be generated with:
 
 ```sh
-curl 'https://nodes.tox.chat/json' -s | jq -r '.nodes[] | .public_key + " " + .ipv4 + ":" + (.port | tostring)' | \
-while read pk addr; do echo "  - pk: $pk"; echo "    addr: $addr"; done
+curl 'https://nodes.tox.chat/json' -s | jq -r '.nodes[] | select(.status_udp) | .public_key + " " + .ipv4 + " " + .ipv6 + " " + (.port | tostring)' | \
+  while read -r pk ipv4 ipv6 port
+  do
+    if [ "$ipv4" != "NONE" ]
+    then
+      echo "  - pk: $pk"
+      echo "    addr: $ipv4:$port"
+    fi
+    if [ "$ipv6" != "-" ] && [ "$ipv6" != "$ipv4" ]
+    then
+      echo "  - pk: $pk"
+      echo "    addr: $ipv6:$port"
+    fi
+  done
 ```
 
 [libsodium]: https://github.com/jedisct1/libsodium
