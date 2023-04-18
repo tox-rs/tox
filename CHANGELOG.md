@@ -1,19 +1,22 @@
-# 0.2.0 (Dec 10, 2022)
+# Changelog
+
+## 0.2.0 (Dec 10, 2022)
 
 * Update dependencies (#445, #454, #456, #459, #460, #463, #465, #467)
-* Use pure rust cryptography instead of `libsodium` (#446, #447, #449, #450, #452, #453, #455)
+* Use pure rust cryptography instead of `libsodium` (#446, #447, #449, #450,
+  #452, #453, #455)
 * Resolve dependency cycle between modules (#448)
 * Use `thiserror` instead of unmaintained `failure` (#457)
 * Merge `tox_node` and `tox` repositories (#466)
 * Fix deadlocks (#461, #464)
 
-# 0.1.1 (Dec 27, 2020)
+## 0.1.1 (Dec 27, 2020)
 
 * Fix bug in k-bucket eviction (#443)
 * Code cleanup (#441, #442)
 * Implement k-tree with force-k modification (#436)
 
-# 0.1.0 (Oct 7, 2020)
+## 0.1.0 (Oct 7, 2020)
 
 * Replace `parking_lot` mutex with `futures` mutex (#434)
 * Send userstatus from echo server (#431)
@@ -31,8 +34,7 @@
 * Handle friend requests inside onion client (#380)
 * Friends connection (#367)
 
-
-# 0.0.10 (May 27, 2019)
+## 0.0.10 (May 27, 2019)
 
 * Do not store peer_session_pk in net crypto status (#373)
 * Re-grouping file transfer packets from messenger (#371)
@@ -75,8 +77,7 @@
 * Add function for unbiased random numbers (#309)
 * Unify kbucket with nodes queue (#310)
 
-
-# 0.0.9 (January 27, 2019)
+## 0.0.9 (January 27, 2019)
 
 * Add dht::MAIN_LOOP_INTERVAL const (#304)
 * Update parking_lot and env_logger deps (#303)
@@ -90,7 +91,7 @@
 * Relax assert rule for floats to avoid sporadic test failures (#296, #302)
 * Fix crash on invalid DHT packets (#294)
 
-# 0.0.8 (December 27, 2018)
+## 0.0.8 (December 27, 2018)
 
 * Update the onion proposal link (#292)
 * Use assert_eq and assert_ne whenever possible (#290)
@@ -121,7 +122,7 @@
 * Fix unlinking TCP clients in server on shutdown (#258)
 * Fix NLL warnings (#256)
 
-# 0.0.7 (October 27, 2018)
+## 0.0.7 (October 27, 2018)
 
 * Fix connection_id verification in tcp_server (#253)
 * Silence wrong ping_id error in NodesResponse (#252)
@@ -160,7 +161,7 @@
 * NodesQueue stores PackedNodes(#215)
 * parser for Online packet for Messenger (#214)
 
-# 0.0.6 (September 7, 2018)
+## 0.0.6 (September 7, 2018)
 
 * Fill node_to_bootstrap of friend with close nodes (#212)
 * Parse packet type FriendRequests (#211)
@@ -173,7 +174,8 @@
 * Handle all connections in ServerExt::run (#203)
 * Renaming and minor refactoring (#202)
 * Parse packet type Alive (#201, #208)
-* Treat IPv4 and IPv6 addresses of same node as they belonged to different nodes (#200)
+* Treat IPv4 and IPv6 addresses of same node as they belonged to different nodes
+  (#200)
 * Fix Appveyor to download libsodium v1.0.16 (#198)
 * Remove pub from DHT Server::try_add_close_nodes (#197)
 * Remove take_while while bootstrapping from nodes (#196)
@@ -203,7 +205,7 @@
 * Do not send LAN IPs in NodesResponse (#168)
 * Optional LanDiscovery for DhtNode (#167)
 
-# 0.0.5 (June 27, 2018)
+## 0.0.5 (June 27, 2018)
 
 * DHT refactoring, move periodic tasks from example into lib code (#161)
 * Update the deps of the project (#159)
@@ -218,7 +220,8 @@
 * Implement CI on Travis for OsX (#145)
 * Add Good and Bad status of a dht node (#144)
 * Use correct IPv6 broadcast address (#143)
-* Unify send functions, do not layer errors, set tcp onion sink in separate method (#143)
+* Unify send functions, do not layer errors, set tcp onion sink in separate
+  method (#143)
 * Implement Net crypto handshake (#142)
 * Update the status of the project (#140, #148)
 * Fix the mechanism of verification commit messages in gitlab (#139)
@@ -226,7 +229,8 @@
 * Fix type of DHT handle_packet function (#136)
 * Prettify code a little bit in DHT module (#133)
 * Implement Hole Punching and NatPing (#132)
-* Add parsing for net crypto packets: CookieResponse, CryptoHandshake and CryptoData (#131)
+* Add parsing for net crypto packets: CookieResponse, CryptoHandshake and
+  CryptoData (#131)
 * Add sha512 to cryptocore, refactor crypto core a little bit (#130)
 * Implemented CI for gitlab for Linux and Windows (#129)
 * Use constant keypair in example dht node (#128)
@@ -244,7 +248,7 @@
 * Add sender's address to onion sink (#113)
 * Move to our IoFuture since it is going to be deprecated in tokio (#112)
 
-# 0.0.4 (April 27, 2018)
+## 0.0.4 (April 27, 2018)
 
 * Implement OnionAnnounce struct (#77)
 * Use InnerOnionResponse as onion response payload (#85)
@@ -266,7 +270,7 @@
 * Split Onion, TCP, DHT Packet into multiple files (#72, #83, #109)
 * Move to our IoFuture since it is going to be deprecated in tokio (#112)
 
-# 0.0.3 (March 27, 2018)
+## 0.0.3 (March 27, 2018)
 
 * Parse all Onion packets (#50)
 * Update Onion docs (#46)
@@ -276,7 +280,7 @@
 * Update DHT Codec (#48)
 * Fix clippy warnings (#63, #64)
 
-# 0.0.2 (March 7, 2018)
+## 0.0.2 (March 7, 2018)
 
 * Parse TCP all packets
 * Parse DHT Ping/Nat/NodesRequest/NodeResponse packets
@@ -284,6 +288,6 @@
 * Add example for TCP Relay
 * Add example for DHT Node
 
-# 0.0.1 (December 31, 2014)
+## 0.0.1 (December 31, 2014)
 
 * Squatter release (we did not make it)

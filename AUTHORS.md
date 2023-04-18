@@ -1,4 +1,4 @@
-## Developers
+# Developers
 
 (in alphabetical order, with 10 commits or more excluding merges)
 
