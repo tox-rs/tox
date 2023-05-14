@@ -3,9 +3,9 @@
 
 use super::*;
 
-use tox_binary_io::*;
 use nom::branch::alt;
 use nom::combinator::map;
+use tox_binary_io::*;
 
 /** Onion requests that can be enclosed in onion packets and sent through onion
 path.
@@ -18,7 +18,7 @@ pub enum InnerOnionRequest {
     /// [`InnerOnionAnnounceRequest`](./struct.InnerOnionAnnounceRequest.html) structure.
     InnerOnionAnnounceRequest(InnerOnionAnnounceRequest),
     /// [`InnerOnionDataRequest`](./struct.InnerOnionDataRequest.html) structure.
-    InnerOnionDataRequest(InnerOnionDataRequest)
+    InnerOnionDataRequest(InnerOnionDataRequest),
 }
 
 impl ToBytes for InnerOnionRequest {
@@ -33,8 +33,14 @@ impl ToBytes for InnerOnionRequest {
 impl FromBytes for InnerOnionRequest {
     fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
         alt((
-            map(InnerOnionAnnounceRequest::from_bytes, InnerOnionRequest::InnerOnionAnnounceRequest),
-            map(InnerOnionDataRequest::from_bytes, InnerOnionRequest::InnerOnionDataRequest),
+            map(
+                InnerOnionAnnounceRequest::from_bytes,
+                InnerOnionRequest::InnerOnionAnnounceRequest,
+            ),
+            map(
+                InnerOnionDataRequest::from_bytes,
+                InnerOnionRequest::InnerOnionDataRequest,
+            ),
         ))(input)
     }
 }

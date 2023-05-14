@@ -71,7 +71,7 @@ impl Links {
         const LINK: Option<Link> = None;
         Links {
             links: [LINK; 240],
-            pk_to_id: HashMap::new()
+            pk_to_id: HashMap::new(),
         }
     }
     /** Try to find a hole inside `links` and insert a new `Link` to the given PK
@@ -100,7 +100,12 @@ impl Links {
     Return false if there is a `Link` with such PK or there is no hole at links[id]
     */
     pub fn insert_by_id(&mut self, pk: PublicKey, index: u8) -> bool {
-        assert!(index < MAX_LINKS_N, "The index {} must be lower than {}", index, MAX_LINKS_N);
+        assert!(
+            index < MAX_LINKS_N,
+            "The index {} must be lower than {}",
+            index,
+            MAX_LINKS_N
+        );
         if !self.pk_to_id.contains_key(&pk) && self.links[index as usize].is_none() {
             let link = Link::new(pk.clone());
             self.links[index as usize] = Some(link);
@@ -138,7 +143,12 @@ impl Links {
     /// Call Links::downgrade on the `Link` by id
     /// Return false of links[id] is None
     pub fn downgrade(&mut self, index: u8) -> bool {
-        assert!(index < MAX_LINKS_N, "The index {} must be lower than {}", index, MAX_LINKS_N);
+        assert!(
+            index < MAX_LINKS_N,
+            "The index {} must be lower than {}",
+            index,
+            MAX_LINKS_N
+        );
         if let Some(ref mut link) = self.links[index as usize] {
             link.downgrade();
             true
@@ -149,7 +159,12 @@ impl Links {
     /// Call Links::upgrade on the `Link` by id
     /// Return false of links[id] is None
     pub fn upgrade(&mut self, index: u8) -> bool {
-        assert!(index < MAX_LINKS_N, "The index {} must be lower than {}", index, MAX_LINKS_N);
+        assert!(
+            index < MAX_LINKS_N,
+            "The index {} must be lower than {}",
+            index,
+            MAX_LINKS_N
+        );
         if let Some(ref mut link) = self.links[index as usize] {
             link.upgrade();
             true
@@ -277,13 +292,12 @@ mod tests {
 
         let id1 = links.insert(pk1.clone()).unwrap();
 
-        assert!(!links.insert_by_id(pk1, id1+1));
+        assert!(!links.insert_by_id(pk1, id1 + 1));
         assert!(!links.insert_by_id(pk2.clone(), id1));
-        assert!(links.insert_by_id(pk2.clone(), id1+1));
+        assert!(links.insert_by_id(pk2.clone(), id1 + 1));
 
-        assert_eq!(links.by_id(id1+1).unwrap().pk, pk2);
+        assert_eq!(links.by_id(id1 + 1).unwrap().pk, pk2);
     }
-
 
     #[test]
     fn links_by_id() {
@@ -325,7 +339,7 @@ mod tests {
 
         assert_eq!(LinkStatus::Online, links.by_id(id).unwrap().status);
 
-        assert!(!links.upgrade(id+1)); // try to upgrade an nonexistent link
+        assert!(!links.upgrade(id + 1)); // try to upgrade an nonexistent link
     }
 
     #[test]
@@ -342,7 +356,7 @@ mod tests {
 
         assert_eq!(LinkStatus::Registered, links.by_id(id).unwrap().status);
 
-        assert!(!links.downgrade(id+1)); // try to downgrade an nonexistent link
+        assert!(!links.downgrade(id + 1)); // try to downgrade an nonexistent link
     }
 
     #[test]

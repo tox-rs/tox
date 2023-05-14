@@ -1,10 +1,10 @@
 //! Nodes pool.
 
-use std::collections::VecDeque;
 use rand::{thread_rng, Rng};
+use std::collections::VecDeque;
 
-use tox_packet::dht::packed_node::PackedNode;
 use crate::onion::client::onion_path::{OnionPath, OnionPathType};
+use tox_packet::dht::packed_node::PackedNode;
 
 /// Maximum number of nodes that onion can store for building random paths.
 const MAX_PATH_NODES: usize = 32;
@@ -46,7 +46,7 @@ impl NodesPool {
     pub fn rand(&self) -> Option<PackedNode> {
         let len = self.nodes.len();
         if len > 0 {
-            Some(self.nodes[thread_rng().gen_range(0 .. len)].clone())
+            Some(self.nodes[thread_rng().gen_range(0..len)].clone())
         } else {
             None
         }
@@ -128,7 +128,10 @@ mod tests {
     #[test]
     fn put() {
         let mut nodes_pool = NodesPool::new();
-        let node = PackedNode::new("127.0.0.1:33445".parse().unwrap(), SecretKey::generate(&mut thread_rng()).public_key());
+        let node = PackedNode::new(
+            "127.0.0.1:33445".parse().unwrap(),
+            SecretKey::generate(&mut thread_rng()).public_key(),
+        );
         nodes_pool.put(node.clone());
         assert_eq!(nodes_pool.nodes[0], node);
     }
@@ -136,7 +139,10 @@ mod tests {
     #[test]
     fn put_already_exists() {
         let mut nodes_pool = NodesPool::new();
-        let node = PackedNode::new("127.0.0.1:33445".parse().unwrap(), SecretKey::generate(&mut thread_rng()).public_key());
+        let node = PackedNode::new(
+            "127.0.0.1:33445".parse().unwrap(),
+            SecretKey::generate(&mut thread_rng()).public_key(),
+        );
         nodes_pool.put(node.clone());
         nodes_pool.put(node);
         assert_eq!(nodes_pool.len(), 1);
@@ -147,14 +153,17 @@ mod tests {
         let mut rng = thread_rng();
         let mut nodes_pool = NodesPool::new();
         let addr = "127.0.0.1".parse().unwrap();
-        for i in 0 .. MAX_PATH_NODES {
+        for i in 0..MAX_PATH_NODES {
             let saddr = SocketAddr::new(addr, 33446 + i as u16);
             let node = PackedNode::new(saddr, SecretKey::generate(&mut rng).public_key());
             nodes_pool.put(node);
         }
         assert_eq!(nodes_pool.nodes.len(), MAX_PATH_NODES);
         // adding one more node should evict the oldest node
-        let node = PackedNode::new("127.0.0.1:33445".parse().unwrap(), SecretKey::generate(&mut rng).public_key());
+        let node = PackedNode::new(
+            "127.0.0.1:33445".parse().unwrap(),
+            SecretKey::generate(&mut rng).public_key(),
+        );
         nodes_pool.put(node);
         assert_eq!(nodes_pool.nodes.len(), MAX_PATH_NODES);
     }
@@ -163,9 +172,15 @@ mod tests {
     fn rand() {
         let mut rng = thread_rng();
         let mut nodes_pool = NodesPool::new();
-        let node = PackedNode::new("127.0.0.1:33445".parse().unwrap(), SecretKey::generate(&mut rng).public_key());
+        let node = PackedNode::new(
+            "127.0.0.1:33445".parse().unwrap(),
+            SecretKey::generate(&mut rng).public_key(),
+        );
         nodes_pool.put(node);
-        let node = PackedNode::new("127.0.0.1:33446".parse().unwrap(), SecretKey::generate(&mut rng).public_key());
+        let node = PackedNode::new(
+            "127.0.0.1:33446".parse().unwrap(),
+            SecretKey::generate(&mut rng).public_key(),
+        );
         nodes_pool.put(node);
         assert!(nodes_pool.rand().is_some());
     }

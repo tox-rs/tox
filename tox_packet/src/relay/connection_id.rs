@@ -22,7 +22,12 @@ impl ConnectionId {
 
     /// Get connection id corresponding to the index.
     pub fn from_index(index: u8) -> Self {
-        assert!(index < MAX_LINKS_N, "The index {} must be lower than {}", index, MAX_LINKS_N);
+        assert!(
+            index < MAX_LINKS_N,
+            "The index {} must be lower than {}",
+            index,
+            MAX_LINKS_N
+        );
         ConnectionId(Some(NonZeroU8::new(index + 16).unwrap()))
     }
 
@@ -35,7 +40,9 @@ impl ConnectionId {
 
 impl FromBytes for ConnectionId {
     fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
-        map(verify(be_u8, |id| *id == 0 || *id >= 0x10), |id| ConnectionId(NonZeroU8::new(id)))(input)
+        map(verify(be_u8, |id| *id == 0 || *id >= 0x10), |id| {
+            ConnectionId(NonZeroU8::new(id))
+        })(input)
     }
 }
 
@@ -49,15 +56,9 @@ impl ToBytes for ConnectionId {
 mod test {
     use super::*;
 
-    encode_decode_test!(
-        connection_id_encode_decode,
-        ConnectionId::from_index(42)
-    );
+    encode_decode_test!(connection_id_encode_decode, ConnectionId::from_index(42));
 
-    encode_decode_test!(
-        connection_id_0_encode_decode,
-        ConnectionId::zero()
-    );
+    encode_decode_test!(connection_id_0_encode_decode, ConnectionId::zero());
 
     #[test]
     fn zero() {

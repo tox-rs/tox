@@ -1,12 +1,15 @@
 /*! File transfer packets
 */
 
-use nom::number::complete::{le_u8, be_u32, be_u64};
-use nom::error::{ErrorKind, make_error};
-use nom::combinator::{map, map_opt};
 use nom::branch::alt;
 use nom::bytes::complete::take;
-use rand::{Rng, distributions::{Distribution, Standard}};
+use nom::combinator::{map, map_opt};
+use nom::error::{make_error, ErrorKind};
+use nom::number::complete::{be_u32, be_u64, le_u8};
+use rand::{
+    distributions::{Distribution, Standard},
+    Rng,
+};
 
 use tox_binary_io::*;
 
@@ -18,15 +21,7 @@ pub use self::file_control::*;
 pub use self::file_data::*;
 pub use self::file_send_request::*;
 
-use cookie_factory::{
-    do_gen,
-    gen_slice,
-    gen_call,
-    gen_cond,
-    gen_be_u8,
-    gen_be_u32,
-    gen_be_u64,
-};
+use cookie_factory::{do_gen, gen_be_u32, gen_be_u64, gen_be_u8, gen_call, gen_cond, gen_slice};
 
 /// Maximum size in bytes of chunk of file data
 const MAX_FILE_DATA_SIZE: usize = 1371;
@@ -37,7 +32,7 @@ pub enum TransferDirection {
     /// I am a sender
     Send = 0,
     /// I am a receiver
-    Receive
+    Receive,
 }
 
 impl FromBytes for TransferDirection {
@@ -57,11 +52,11 @@ pub enum ControlType {
     /// Accept a request of transferring file from a peer
     Accept,
     /// Pause transferring
-    Pause ,
+    Pause,
     /// Stop transferring and quit session
     Kill,
     /// Seek to position of file stream and holds seek parameter
-    Seek(u64)
+    Seek(u64),
 }
 
 impl ToBytes for ControlType {
@@ -70,9 +65,7 @@ impl ToBytes for ControlType {
             ControlType::Accept => do_gen!(buf, gen_be_u8!(0x00)),
             ControlType::Pause => do_gen!(buf, gen_be_u8!(0x01)),
             ControlType::Kill => do_gen!(buf, gen_be_u8!(0x02)),
-            ControlType::Seek(seek_param) => do_gen!(buf,
-                gen_be_u8!(0x03) >>
-                gen_be_u64!(*seek_param))
+            ControlType::Seek(seek_param) => do_gen!(buf, gen_be_u8!(0x03) >> gen_be_u64!(*seek_param)),
         }
     }
 }
@@ -128,7 +121,7 @@ impl Distribution<FileUid> for Standard {
 impl FileUid {
     fn from_slice(bs: &[u8]) -> Option<FileUid> {
         if bs.len() != FILE_UID_BYTES {
-            return None
+            return None;
         }
         let mut n = [0; FILE_UID_BYTES];
         n.clone_from_slice(bs);
@@ -186,11 +179,17 @@ mod tests {
 
     encode_decode_test!(
         packet_file_data_encode_decode,
-        Packet::FileData(FileData::new(1, vec![1,2,3,4]))
+        Packet::FileData(FileData::new(1, vec![1, 2, 3, 4]))
     );
 
     encode_decode_test!(
         packet_file_send_request_encode_decode,
-        Packet::FileSendRequest(FileSendRequest::new(1, FileType::Avatar, 4, FileUid([42; FILE_UID_BYTES]), "data".to_string()))
+        Packet::FileSendRequest(FileSendRequest::new(
+            1,
+            FileType::Avatar,
+            4,
+            FileUid([42; FILE_UID_BYTES]),
+            "data".to_string()
+        ))
     );
 }

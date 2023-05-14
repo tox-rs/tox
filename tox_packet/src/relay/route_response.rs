@@ -3,10 +3,10 @@
 
 use super::*;
 
-use tox_binary_io::*;
-use tox_crypto::*;
 use crate::relay::connection_id::ConnectionId;
 use nom::bytes::complete::tag;
+use tox_binary_io::*;
+use tox_crypto::*;
 
 /** Sent by server to client.
 The response to the routing request, tell the client if the
@@ -43,6 +43,7 @@ impl FromBytes for RouteResponse {
 }
 
 impl ToBytes for RouteResponse {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x01) >>

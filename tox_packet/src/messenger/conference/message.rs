@@ -3,12 +3,12 @@
 
 use super::*;
 
-use std::str;
 use nom::{
-    number::complete::{be_u16, be_u32},
-    combinator::{rest, map_res},
     bytes::complete::tag,
+    combinator::{map_res, rest},
+    number::complete::{be_u16, be_u32},
 };
+use std::str;
 
 /** Message is the struct that holds info to send chat message to a conference.
 
@@ -47,16 +47,20 @@ impl FromBytes for Message {
         let (input, message_id) = be_u32(input)?;
         let (input, _) = tag("\x40")(input)?;
         let (input, message) = map_res(rest, str::from_utf8)(input)?;
-        Ok((input, Message {
-            conference_id,
-            peer_id,
-            message_id,
-            message: message.to_string(),
-        }))
+        Ok((
+            input,
+            Message {
+                conference_id,
+                peer_id,
+                message_id,
+                message: message.to_string(),
+            },
+        ))
     }
 }
 
 impl ToBytes for Message {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x63) >>

@@ -3,14 +3,14 @@
 
 use std::io::Error as IoError;
 
-use tox_packet::dht::*;
-use tox_binary_io::*;
 use crate::stats::*;
+use tox_binary_io::*;
+use tox_packet::dht::*;
 
 use bytes::BytesMut;
 use cookie_factory::GenError;
-use thiserror::Error;
 use nom::error::Error as NomError;
+use thiserror::Error;
 use tokio_util::codec::{Decoder, Encoder};
 
 /// A serialized `Packet` should be not longer than 2048 bytes.
@@ -23,7 +23,7 @@ pub enum DecodeError {
     #[error("Packet should not be longer than 2048 bytes: {} bytes", len)]
     TooBigPacket {
         /// Length of received packet.
-        len: usize
+        len: usize,
     },
     /// Error indicates that received packet can't be parsed.
     #[error("Deserialize Packet error: {:?}, packet: {:?}", error, packet)]
@@ -44,7 +44,10 @@ impl DecodeError {
     }
 
     pub(crate) fn deserialize(e: nom::Err<NomError<&[u8]>>, packet: Vec<u8>) -> DecodeError {
-        DecodeError::Deserialize { error: e.map(|e| NomError::new(e.input.to_vec(), e.code)), packet }
+        DecodeError::Deserialize {
+            error: e.map(|e| NomError::new(e.input.to_vec(), e.code)),
+            packet,
+        }
     }
 }
 
@@ -55,7 +58,7 @@ pub enum EncodeError {
     #[error("Serialize Packet error: {:?}", error)]
     Serialize {
         /// Serialization error.
-        error: GenError
+        error: GenError,
     },
     /// General IO error that can happen with UDP socket.
     #[error("IO Error")]
@@ -89,9 +92,7 @@ pub struct DhtCodec {
 impl DhtCodec {
     /// Make object
     pub fn new(stats: Stats) -> Self {
-        DhtCodec {
-            stats
-        }
+        DhtCodec { stats }
     }
 }
 
@@ -106,13 +107,11 @@ impl Decoder for DhtCodec {
 
         let len = buf.len();
         if len > MAX_DHT_PACKET_SIZE {
-            return Err(DecodeError::too_big_packet(len))
+            return Err(DecodeError::too_big_packet(len));
         }
 
         let result = match Packet::from_bytes(buf) {
-            Err(error) => {
-                Err(DecodeError::deserialize(error, buf.to_vec()))
-            },
+            Err(error) => Err(DecodeError::deserialize(error, buf.to_vec())),
             Ok((_, packet)) => {
                 // Add 1 to incoming counter
                 self.stats.counters.increase_incoming();
@@ -132,26 +131,28 @@ impl Encoder<Packet> for DhtCodec {
 
     fn encode(&mut self, packet: Packet, buf: &mut BytesMut) -> Result<(), Self::Error> {
         let mut packet_buf = [0; MAX_DHT_PACKET_SIZE];
-        packet.to_bytes((&mut packet_buf, 0))
+        packet
+            .to_bytes((&mut packet_buf, 0))
             .map(|(packet_buf, size)| {
                 // Add 1 to outgoing counter
                 self.stats.counters.increase_outgoing();
 
                 buf.extend(&packet_buf[..size]);
             })
-            .map_err(|error|
-                EncodeError::serialize(error)
-            )
+            .map_err(|error| EncodeError::serialize(error))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crypto_box::{
+        aead::{generic_array::typenum::marker_traits::Unsigned, AeadCore},
+        SalsaBox, SecretKey,
+    };
+    use nom::{error::ErrorKind as NomErrorKind, Err};
     use rand::thread_rng;
     use tox_packet::onion::*;
-    use crypto_box::{SalsaBox, SecretKey, aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned}};
-    use nom::{Err, error::ErrorKind as NomErrorKind};
 
     const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - xsalsa20poly1305::NONCE_SIZE;
     const ONION_RETURN_2_PAYLOAD_SIZE: usize = ONION_RETURN_2_SIZE - xsalsa20poly1305::NONCE_SIZE;
@@ -197,7 +198,7 @@ mod tests {
             Packet::OnionRequest0(OnionRequest0 {
                 nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
                 temporary_pk: SecretKey::generate(&mut thread_rng()).public_key(),
-                payload: vec![42; 123]
+                payload: vec![42; 123],
             }),
             Packet::OnionRequest1(OnionRequest1 {
                 nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
@@ -205,8 +206,8 @@ mod tests {
                 payload: vec![42; 123],
                 onion_return: OnionReturn {
                     nonce: [42; xsalsa20poly1305::NONCE_SIZE],
-                    payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
-                }
+                    payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE],
+                },
             }),
             Packet::OnionRequest2(OnionRequest2 {
                 nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
@@ -214,78 +215,78 @@ mod tests {
                 payload: vec![42; 123],
                 onion_return: OnionReturn {
                     nonce: [42; xsalsa20poly1305::NONCE_SIZE],
-                    payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
-                }
+                    payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE],
+                },
             }),
             Packet::OnionAnnounceRequest(OnionAnnounceRequest {
                 inner: InnerOnionAnnounceRequest {
                     nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
                     pk: SecretKey::generate(&mut thread_rng()).public_key(),
-                    payload: vec![42; 123]
+                    payload: vec![42; 123],
                 },
                 onion_return: OnionReturn {
                     nonce: [42; xsalsa20poly1305::NONCE_SIZE],
-                    payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
-                }
+                    payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE],
+                },
             }),
             Packet::OnionDataRequest(OnionDataRequest {
                 inner: InnerOnionDataRequest {
                     destination_pk: SecretKey::generate(&mut thread_rng()).public_key(),
                     nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
                     temporary_pk: SecretKey::generate(&mut thread_rng()).public_key(),
-                    payload: vec![42; 123]
+                    payload: vec![42; 123],
                 },
                 onion_return: OnionReturn {
                     nonce: [42; xsalsa20poly1305::NONCE_SIZE],
-                    payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
-                }
+                    payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE],
+                },
             }),
             Packet::OnionDataResponse(OnionDataResponse {
                 nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
                 temporary_pk: SecretKey::generate(&mut thread_rng()).public_key(),
-                payload: vec![42; 123]
+                payload: vec![42; 123],
             }),
             Packet::OnionAnnounceResponse(OnionAnnounceResponse {
                 sendback_data: 12345,
                 nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
-                payload: vec![42; 123]
+                payload: vec![42; 123],
             }),
             Packet::OnionResponse3(OnionResponse3 {
                 onion_return: OnionReturn {
                     nonce: [42; xsalsa20poly1305::NONCE_SIZE],
-                    payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
+                    payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE],
                 },
                 payload: InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
                     sendback_data: 12345,
                     nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
-                    payload: vec![42; 123]
-                })
+                    payload: vec![42; 123],
+                }),
             }),
             Packet::OnionResponse2(OnionResponse2 {
                 onion_return: OnionReturn {
                     nonce: [42; xsalsa20poly1305::NONCE_SIZE],
-                    payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
+                    payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE],
                 },
                 payload: InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
                     sendback_data: 12345,
                     nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
-                    payload: vec![42; 123]
-                })
+                    payload: vec![42; 123],
+                }),
             }),
             Packet::OnionResponse1(OnionResponse1 {
                 onion_return: OnionReturn {
                     nonce: [42; xsalsa20poly1305::NONCE_SIZE],
-                    payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
+                    payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE],
                 },
                 payload: InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
                     sendback_data: 12345,
                     nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
-                    payload: vec![42; 123]
-                })
+                    payload: vec![42; 123],
+                }),
             }),
             Packet::BootstrapInfo(BootstrapInfo {
                 version: 42,
-                motd: vec![1, 2, 3, 4]
+                motd: vec![1, 2, 3, 4],
             }),
         ];
 
@@ -306,13 +307,13 @@ mod tests {
         let mut codec = DhtCodec::new(stats);
         let mut buf = BytesMut::new();
         let packet = Packet::PingRequest(PingRequest {
-                pk: SecretKey::generate(&mut thread_rng()).public_key(),
-                nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
-                payload: vec![42; 88],
-            });
-        let mut packet_buf = [0;256];
+            pk: SecretKey::generate(&mut thread_rng()).public_key(),
+            nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
+            payload: vec![42; 88],
+        });
+        let mut packet_buf = [0; 256];
         let (_, size) = packet.to_bytes((&mut packet_buf, 0)).unwrap();
-        buf.extend_from_slice(&packet_buf[..(size-90)]);
+        buf.extend_from_slice(&packet_buf[..(size - 90)]);
 
         // not enought bytes to decode EncryptedPacket
         assert!(codec.decode(&mut buf).is_err());
@@ -328,7 +329,16 @@ mod tests {
 
         let res = codec.decode(&mut buf);
         // not enough bytes to decode EncryptedPacket
-        assert!(matches!(res, Err(DecodeError::Deserialize { error: Err::Error(NomError { input: _, code: NomErrorKind::Tag }), packet: _ })));
+        assert!(matches!(
+            res,
+            Err(DecodeError::Deserialize {
+                error: Err::Error(NomError {
+                    input: _,
+                    code: NomErrorKind::Tag
+                }),
+                packet: _
+            })
+        ));
     }
 
     #[test]

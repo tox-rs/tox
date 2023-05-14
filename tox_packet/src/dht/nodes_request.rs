@@ -5,14 +5,14 @@ use super::*;
 use aead::{Aead, AeadCore, Error as AeadError};
 use crypto_box::SalsaBox;
 use nom::{
-    number::complete::be_u64,
-    combinator::{rest, eof},
     bytes::complete::tag,
+    combinator::{eof, rest},
+    number::complete::be_u64,
 };
 
+use crate::dht::errors::*;
 use tox_binary_io::*;
 use tox_crypto::*;
-use crate::dht::errors::*;
 
 /** Nodes request packet struct. It's used to get up to 4 closest nodes to
 requested public key. Every 20 seconds DHT node sends `NodesRequest` packet to
@@ -41,6 +41,7 @@ pub struct NodesRequest {
 }
 
 impl ToBytes for NodesRequest {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x02) >>
@@ -83,18 +84,13 @@ impl NodesRequest {
     - fails to parse as given packet type
     */
     pub fn get_payload(&self, shared_secret: &SalsaBox) -> Result<NodesRequestPayload, GetPayloadError> {
-        let decrypted = shared_secret.decrypt((&self.nonce).into(), self.payload.as_slice())
-            .map_err(|AeadError| {
-                GetPayloadError::decrypt()
-            })?;
+        let decrypted = shared_secret
+            .decrypt((&self.nonce).into(), self.payload.as_slice())
+            .map_err(|AeadError| GetPayloadError::decrypt())?;
 
         match NodesRequestPayload::from_bytes(&decrypted) {
-            Err(error) => {
-                Err(GetPayloadError::deserialize(error, decrypted.clone()))
-            },
-            Ok((_, payload)) => {
-                Ok(payload)
-            }
+            Err(error) => Err(GetPayloadError::deserialize(error, decrypted.clone())),
+            Ok((_, payload)) => Ok(payload),
         }
     }
 }
@@ -120,6 +116,7 @@ pub struct NodesRequestPayload {
 }
 
 impl ToBytes for NodesRequestPayload {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_slice!(self.pk.as_ref()) >>
@@ -146,7 +143,10 @@ mod tests {
 
     encode_decode_test!(
         nodes_request_payload_encode_decode,
-        NodesRequestPayload { pk: SecretKey::generate(&mut thread_rng()).public_key(), id: 42 }
+        NodesRequestPayload {
+            pk: SecretKey::generate(&mut thread_rng()).public_key(),
+            id: 42
+        }
     );
 
     dht_packet_encode_decode!(nodes_request_encode_decode, NodesRequest);
@@ -154,13 +154,19 @@ mod tests {
     dht_packet_encrypt_decrypt!(
         nodes_request_payload_encrypt_decrypt,
         NodesRequest,
-        NodesRequestPayload { pk: SecretKey::generate(&mut thread_rng()).public_key(), id: 42 }
+        NodesRequestPayload {
+            pk: SecretKey::generate(&mut thread_rng()).public_key(),
+            id: 42
+        }
     );
 
     dht_packet_encrypt_decrypt_invalid_key!(
         nodes_request_payload_encrypt_decrypt_invalid_key,
         NodesRequest,
-        NodesRequestPayload { pk: SecretKey::generate(&mut thread_rng()).public_key(), id: 42 }
+        NodesRequestPayload {
+            pk: SecretKey::generate(&mut thread_rng()).public_key(),
+            id: 42
+        }
     );
 
     dht_packet_decode_invalid!(nodes_request_decode_invalid, NodesRequest);

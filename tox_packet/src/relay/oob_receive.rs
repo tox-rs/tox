@@ -6,8 +6,8 @@ use super::*;
 use tox_binary_io::*;
 use tox_crypto::*;
 
-use nom::combinator::rest;
 use nom::bytes::complete::tag;
+use nom::combinator::rest;
 
 /** Sent by server to client.
 OOB recv are sent with the announced public key of the peer that sent the
@@ -27,7 +27,7 @@ pub struct OobReceive {
     /// Public Key of the sender
     pub sender_pk: PublicKey,
     /// OOB data packet
-    pub data: Vec<u8>
+    pub data: Vec<u8>,
 }
 
 impl FromBytes for OobReceive {
@@ -35,11 +35,18 @@ impl FromBytes for OobReceive {
         let (input, _) = tag("\x07")(input)?;
         let (input, sender_pk) = PublicKey::from_bytes(input)?;
         let (input, data) = rest(input)?;
-        Ok((input, OobReceive { sender_pk, data: data.to_vec() }))
+        Ok((
+            input,
+            OobReceive {
+                sender_pk,
+                data: data.to_vec(),
+            },
+        ))
     }
 }
 
 impl ToBytes for OobReceive {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x07) >>

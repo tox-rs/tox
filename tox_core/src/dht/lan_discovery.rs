@@ -4,15 +4,14 @@ use std::iter;
 use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
-use thiserror::Error;
-use futures::{stream, SinkExt};
 use futures::channel::mpsc;
+use futures::{stream, SinkExt};
 use get_if_addrs::IfAddr;
+use thiserror::Error;
 
 use tokio::time::error::Elapsed;
 use tox_crypto::*;
 use tox_packet::dht::*;
-
 
 /// Error that can happen during lan discovery.
 #[derive(Debug, Eq, PartialEq, Error)]
@@ -70,14 +69,11 @@ impl LanDiscoverySender {
     /// Get broadcast addresses for host's network interfaces.
     fn get_ipv4_broadcast_addrs() -> Vec<IpAddr> {
         let ifs = get_if_addrs::get_if_addrs().expect("no network interface");
-        ifs
-            .iter()
-            .filter_map(|interface|
-                match interface.addr {
-                    IfAddr::V4(ref addr) => addr.broadcast,
-                    _ => None,
-                }
-            )
+        ifs.iter()
+            .filter_map(|interface| match interface.addr {
+                IfAddr::V4(ref addr) => addr.broadcast,
+                _ => None,
+            })
             .map(Into::into)
             .collect()
     }
@@ -107,13 +103,14 @@ impl LanDiscoverySender {
         }
         let ip_addrs = self.get_broadcast_addrs();
         // range of ports to send discovery packet to
-        let ports_range = (self.next_port .. self.next_port + PORTS_PER_DISCOVERY).map(cycle);
+        let ports_range = (self.next_port..self.next_port + PORTS_PER_DISCOVERY).map(cycle);
         // always send discovery packet to default port
         let ports_range = iter::once(DEFAULT_PORT).chain(ports_range);
         // add ports to ip addrs
-        let socket_addrs = ip_addrs.into_iter().flat_map(move |ip_addr| {
-            ports_range.clone().map(move |port| SocketAddr::new(ip_addr, port))
-        }).collect();
+        let socket_addrs = ip_addrs
+            .into_iter()
+            .flat_map(move |ip_addr| ports_range.clone().map(move |port| SocketAddr::new(ip_addr, port)))
+            .collect();
         // update port for next iteration
         self.next_port = cycle(self.next_port + PORTS_PER_DISCOVERY);
         socket_addrs
@@ -126,9 +123,7 @@ impl LanDiscoverySender {
             pk: self.dht_pk.clone(),
         });
 
-        let mut stream = stream::iter(
-            addrs.into_iter().map(move |addr| Ok((lan_packet.clone(), addr)))
-        );
+        let mut stream = stream::iter(addrs.into_iter().map(move |addr| Ok((lan_packet.clone(), addr))));
 
         self.tx.send_all(&mut stream).await?;
 
@@ -147,7 +142,7 @@ impl LanDiscoverySender {
             if let Err(e) = tokio::time::timeout(interval, self.send()).await {
                 warn!("Failed to send LAN discovery packets: {}", e);
 
-                return Err(LanDiscoveryError::Timeout(e))
+                return Err(LanDiscoveryError::Timeout(e));
             }
         }
     }
@@ -157,17 +152,17 @@ impl LanDiscoverySender {
 mod tests {
     use super::*;
     use futures::StreamExt;
-    use tox_binary_io::*;
     use rand::thread_rng;
+    use tox_binary_io::*;
 
     fn broadcast_addrs_count() -> usize {
-        get_if_addrs::get_if_addrs().expect("no network interface").iter()
-            .filter_map(|interface|
-                match interface.addr {
-                    IfAddr::V4(ref addr) => addr.broadcast,
-                    _ => None,
-                }
-            )
+        get_if_addrs::get_if_addrs()
+            .expect("no network interface")
+            .iter()
+            .filter_map(|interface| match interface.addr {
+                IfAddr::V4(ref addr) => addr.broadcast,
+                _ => None,
+            })
             .count()
     }
 
@@ -184,7 +179,7 @@ mod tests {
 
         assert_eq!(lan_discovery.next_port, START_PORT + PORTS_PER_DISCOVERY);
 
-        for _i in 0 .. packets_count {
+        for _i in 0..packets_count {
             let (received, rx1) = rx.into_future().await;
             let (packet, _addr) = received.unwrap();
 
@@ -209,7 +204,7 @@ mod tests {
 
         assert_eq!(lan_discovery.next_port, START_PORT + PORTS_PER_DISCOVERY);
 
-        for _i in 0 .. packets_count {
+        for _i in 0..packets_count {
             let (received, rx1) = rx.into_future().await;
             let (packet, _addr) = received.unwrap();
 
@@ -236,7 +231,7 @@ mod tests {
 
         assert_eq!(lan_discovery.next_port, START_PORT + PORTS_PER_DISCOVERY - 1);
 
-        for _i in 0 .. packets_count {
+        for _i in 0..packets_count {
             let (received, rx1) = rx.into_future().await;
             let (packet, _addr) = received.unwrap();
 

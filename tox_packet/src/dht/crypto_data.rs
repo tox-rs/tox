@@ -2,20 +2,23 @@
 */
 use super::*;
 
-use crypto_box::{SalsaBox, aead::{
-    {Aead, AeadCore, Error as AeadError},
-    generic_array::typenum::marker_traits::Unsigned,
-}};
+use crypto_box::{
+    aead::{
+        generic_array::typenum::marker_traits::Unsigned,
+        {Aead, AeadCore, Error as AeadError},
+    },
+    SalsaBox,
+};
 use nom::{
-    bytes::complete::{take_while, tag},
-    number::complete::{be_u16, be_u32},
+    bytes::complete::{tag, take_while},
     combinator::{rest, rest_len, verify},
+    number::complete::{be_u16, be_u32},
 };
 use std::convert::TryInto;
 
+use crate::dht::errors::*;
 use tox_binary_io::*;
 use tox_crypto::*;
-use crate::dht::errors::*;
 
 /// The maximum size of `CryptoData` packet including two bytes of nonce and
 /// packet kind byte.
@@ -44,7 +47,7 @@ pub struct CryptoData {
     /// format
     pub nonce_last_bytes: u16,
     /// Encrypted payload
-    pub payload: Vec<u8>
+    pub payload: Vec<u8>,
 }
 
 impl FromBytes for CryptoData {
@@ -53,11 +56,18 @@ impl FromBytes for CryptoData {
         let (input, _) = tag("\x1b")(input)?;
         let (input, nonce_last_bytes) = be_u16(input)?;
         let (input, payload) = rest(input)?;
-        Ok((input, CryptoData { nonce_last_bytes, payload: payload.to_vec() }))
+        Ok((
+            input,
+            CryptoData {
+                nonce_last_bytes,
+                payload: payload.to_vec(),
+            },
+        ))
     }
 }
 
 impl ToBytes for CryptoData {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x1b) >>
@@ -94,20 +104,15 @@ impl CryptoData {
     - fails to parse `CryptoDataPayload`
     */
     pub fn get_payload(&self, shared_secret: &SalsaBox, nonce: &Nonce) -> Result<CryptoDataPayload, GetPayloadError> {
-        let decrypted = shared_secret.decrypt(nonce.into(), self.payload.as_slice())
-            .map_err(|AeadError| {
-                GetPayloadError::Decrypt
-            })?;
+        let decrypted = shared_secret
+            .decrypt(nonce.into(), self.payload.as_slice())
+            .map_err(|AeadError| GetPayloadError::Decrypt)?;
         match CryptoDataPayload::from_bytes(&decrypted) {
-            Err(error) => {
-                Err(GetPayloadError::Deserialize {
-                    error: error.to_owned(),
-                    payload: decrypted.clone(),
-                })
-            },
-            Ok((_, payload)) => {
-                Ok(payload)
-            }
+            Err(error) => Err(GetPayloadError::Deserialize {
+                error: error.to_owned(),
+                payload: decrypted.clone(),
+            }),
+            Ok((_, payload)) => Ok(payload),
         }
     }
 }
@@ -130,7 +135,7 @@ pub struct CryptoDataPayload {
     /// Packet number used by the receiver to know if any packets have been lost
     pub packet_number: u32,
     /// Data of `CryptoData` packet
-    pub data: Vec<u8>
+    pub data: Vec<u8>,
 }
 
 impl FromBytes for CryptoDataPayload {
@@ -139,11 +144,19 @@ impl FromBytes for CryptoDataPayload {
         let (input, packet_number) = be_u32(input)?;
         let (input, _) = take_while(|b| b == 0)(input)?;
         let (input, data) = rest(input)?;
-        Ok((input, CryptoDataPayload { buffer_start, packet_number, data: data.to_vec() }))
+        Ok((
+            input,
+            CryptoDataPayload {
+                buffer_start,
+                packet_number,
+                data: data.to_vec(),
+            },
+        ))
     }
 }
 
 impl ToBytes for CryptoDataPayload {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u32!(self.buffer_start) >>
@@ -157,7 +170,10 @@ impl ToBytes for CryptoDataPayload {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nom::{Err, error::{Error, ErrorKind}};
+    use nom::{
+        error::{Error, ErrorKind},
+        Err,
+    };
     use rand::thread_rng;
 
     encode_decode_test!(
@@ -251,10 +267,16 @@ mod tests {
         let invalid_payload_encoded = shared_secret.encrypt(&nonce, &invalid_payload[..]).unwrap();
         let invalid_packet = CryptoData {
             nonce_last_bytes,
-            payload: invalid_payload_encoded
+            payload: invalid_payload_encoded,
         };
         let decoded_payload = invalid_packet.get_payload(&shared_secret, &nonce.into());
         let error = decoded_payload.err().unwrap();
-        assert_eq!(error, GetPayloadError::Deserialize { error: Err::Error(Error::new(vec![], ErrorKind::Eof)), payload: invalid_payload.to_vec() });
+        assert_eq!(
+            error,
+            GetPayloadError::Deserialize {
+                error: Err::Error(Error::new(vec![], ErrorKind::Eof)),
+                payload: invalid_payload.to_vec()
+            }
+        );
     }
 }

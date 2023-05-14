@@ -1,30 +1,28 @@
 //! Extension trait for running DHT server on `UdpSocket`
 
 use std::io::{Error, ErrorKind};
-use std::net::{SocketAddr, IpAddr};
+use std::net::{IpAddr, SocketAddr};
 
-use futures::{FutureExt, SinkExt, StreamExt};
 use futures::channel::mpsc::Receiver;
+use futures::{FutureExt, SinkExt, StreamExt};
 use tokio::net::UdpSocket;
 
 use crate::dht::codec::*;
-use tox_packet::dht::Packet;
-use crate::udp::Server;
 use crate::stats::Stats;
+use crate::udp::Server;
+use tox_packet::dht::Packet;
 
 /// Run DHT server on `UdpSocket`.
 pub async fn dht_run_socket(
     udp: &Server,
     socket: UdpSocket,
     mut rx: Receiver<(Packet, SocketAddr)>,
-    stats: Stats
+    stats: Stats,
 ) -> Result<(), Error> {
-    let udp_addr = socket.local_addr()
-        .expect("Failed to get socket address");
+    let udp_addr = socket.local_addr().expect("Failed to get socket address");
 
     let codec = DhtCodec::new(stats);
-    let (mut sink, mut stream) =
-        tokio_util::udp::UdpFramed::new(socket, codec).split();
+    let (mut sink, mut stream) = tokio_util::udp::UdpFramed::new(socket, codec).split();
 
     let network_reader = async {
         while let Some(event) = stream.next().await {
@@ -36,7 +34,7 @@ pub async fn dht_run_socket(
                     if let Err(ref err) = res {
                         error!("Failed to handle packet: {:?}", err);
                     }
-                },
+                }
                 Err(e) => {
                     error!("packet receive error = {:?}", e);
                     // ignore packet decode errors
@@ -53,7 +51,9 @@ pub async fn dht_run_socket(
     let network_writer = async {
         while let Some((packet, mut addr)) = rx.next().await {
             // filter out IPv6 packets if node is running in IPv4 mode
-            if udp_addr.is_ipv4() && addr.is_ipv6() { continue }
+            if udp_addr.is_ipv4() && addr.is_ipv6() {
+                continue;
+            }
 
             if udp_addr.is_ipv6() {
                 if let IpAddr::V4(ip) = addr.ip() {
@@ -62,7 +62,8 @@ pub async fn dht_run_socket(
             }
 
             trace!("Sending packet {:?} to {:?}", packet, addr);
-            sink.send((packet, addr)).await
+            sink.send((packet, addr))
+                .await
                 .map_err(|e| Error::new(ErrorKind::Other, e))?
         }
 
@@ -87,9 +88,9 @@ mod tests {
     use futures::channel::mpsc;
     use futures::TryStreamExt;
 
+    use crate::dht::server::Server as DhtServer;
     use rand::thread_rng;
     use tox_packet::dht::*;
-    use crate::dht::server::Server as DhtServer;
 
     #[tokio::test]
     async fn run_socket() {
@@ -118,7 +119,8 @@ mod tests {
 
         let client_future = async {
             // Send invalid request first to ensure that the server won't crash
-            client_socket.send_to(&[42; 123][..], &server_addr)
+            client_socket
+                .send_to(&[42; 123][..], &server_addr)
                 .await
                 .map_err(|e| Error::new(ErrorKind::Other, e))?;
 
@@ -128,28 +130,26 @@ mod tests {
 
             // Send ping request
             let ping_id = 42;
-            let ping_request_payload = PingRequestPayload {
-                id: ping_id,
-            };
+            let ping_request_payload = PingRequestPayload { id: ping_id };
             let ping_request = PingRequest::new(&shared_secret, client_pk, &ping_request_payload);
 
-            sink.send((Packet::PingRequest(ping_request), server_addr)).await
+            sink.send((Packet::PingRequest(ping_request), server_addr))
+                .await
                 .map_err(|e| Error::new(ErrorKind::Other, e))?;
 
             // And wait for ping response
             let ping_response = stream
-                .try_filter_map(|(packet, _)| futures::future::ok(
-                    match packet {
+                .try_filter_map(|(packet, _)| {
+                    futures::future::ok(match packet {
                         Packet::PingResponse(ping_response) => Some(ping_response),
                         _ => None,
-                    }
-                ))
+                    })
+                })
                 .next()
                 .await
                 .unwrap();
 
-            let ping_response = ping_response
-                .map_err(|e| Error::new(ErrorKind::Other, e))?;
+            let ping_response = ping_response.map_err(|e| Error::new(ErrorKind::Other, e))?;
             let ping_response_payload = ping_response.get_payload(&shared_secret).unwrap();
 
             assert_eq!(ping_response_payload.id, ping_id);

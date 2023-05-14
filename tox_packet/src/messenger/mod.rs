@@ -6,25 +6,25 @@ use tox_binary_io::*;
 mod conference;
 mod file_transfer;
 
-mod online;
 mod action;
-mod offline;
 mod message;
-mod nickname;
 mod msi;
+mod nickname;
+mod offline;
+mod online;
+mod status_message;
 mod typing;
 mod user_status;
-mod status_message;
 
-pub use self::online::*;
 pub use self::action::*;
-pub use self::offline::*;
 pub use self::message::*;
-pub use self::nickname::*;
 pub use self::msi::*;
+pub use self::nickname::*;
+pub use self::offline::*;
+pub use self::online::*;
+pub use self::status_message::*;
 pub use self::typing::*;
 pub use self::user_status::*;
-pub use self::status_message::*;
 
 pub use crate::messenger::conference::Packet as ConferencePacket;
 pub use crate::messenger::file_transfer::Packet as FileTransferPacket;
@@ -32,14 +32,7 @@ pub use crate::messenger::file_transfer::Packet as FileTransferPacket;
 use nom::branch::alt;
 use nom::combinator::map;
 
-use cookie_factory::{
-    do_gen,
-    gen_slice,
-    gen_call,
-    gen_cond,
-    gen_be_u8,
-    gen_le_u8,
-};
+use cookie_factory::{do_gen, gen_be_u8, gen_call, gen_cond, gen_le_u8, gen_slice};
 
 /** Messenger packet enum that encapsulates all types of Messenger packets.
 */
@@ -107,26 +100,20 @@ impl FromBytes for Packet {
 
 #[cfg(test)]
 mod tests {
-    use rand::{Rng, thread_rng};
+    use rand::{thread_rng, Rng};
 
     use super::*;
     use crate::messenger::conference::{ConferenceType, Invite};
-    use crate::messenger::file_transfer::{FileControl, TransferDirection, ControlType};
+    use crate::messenger::file_transfer::{ControlType, FileControl, TransferDirection};
 
-    encode_decode_test!(
-        packet_online_encode_decode,
-        Packet::Online(Online)
-    );
+    encode_decode_test!(packet_online_encode_decode, Packet::Online(Online));
 
     encode_decode_test!(
         packet_action_encode_decode,
         Packet::Action(Action::new("1234".to_string()))
     );
 
-    encode_decode_test!(
-        packet_offline_encode_decode,
-        Packet::Offline(Offline)
-    );
+    encode_decode_test!(packet_offline_encode_decode, Packet::Offline(Offline));
 
     encode_decode_test!(
         packet_message_encode_decode,
@@ -161,11 +148,19 @@ mod tests {
 
     encode_decode_test!(
         packet_conference_encode_decode,
-        Packet::Conference(ConferencePacket::Invite(Invite::new(1, ConferenceType::Text, thread_rng().gen())))
+        Packet::Conference(ConferencePacket::Invite(Invite::new(
+            1,
+            ConferenceType::Text,
+            thread_rng().gen()
+        )))
     );
 
     encode_decode_test!(
         packet_file_transfer_encode_decode,
-        Packet::FileTransfer(FileTransferPacket::FileControl(FileControl::new(TransferDirection::Send, 1, ControlType::Seek(100))))
+        Packet::FileTransfer(FileTransferPacket::FileControl(FileControl::new(
+            TransferDirection::Send,
+            1,
+            ControlType::Seek(100)
+        )))
     );
 }

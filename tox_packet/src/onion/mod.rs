@@ -1,10 +1,11 @@
 /*! Onion UDP Packets
 */
 
-mod onion_announce_request;
-mod onion_announce_response;
+mod friend_request;
 mod inner_onion_request;
 mod inner_onion_response;
+mod onion_announce_request;
+mod onion_announce_response;
 mod onion_data_request;
 mod onion_data_response;
 mod onion_request_0;
@@ -13,12 +14,12 @@ mod onion_request_2;
 mod onion_response_1;
 mod onion_response_2;
 mod onion_response_3;
-mod friend_request;
 
-pub use self::onion_announce_request::*;
-pub use self::onion_announce_response::*;
+pub use self::friend_request::*;
 pub use self::inner_onion_request::*;
 pub use self::inner_onion_response::*;
+pub use self::onion_announce_request::*;
+pub use self::onion_announce_response::*;
 pub use self::onion_data_request::*;
 pub use self::onion_data_response::*;
 pub use self::onion_request_0::*;
@@ -27,40 +28,41 @@ pub use self::onion_request_2::*;
 pub use self::onion_response_1::*;
 pub use self::onion_response_2::*;
 pub use self::onion_response_3::*;
-pub use self::friend_request::*;
 
-use crypto_box::{SalsaBox, aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned}};
-use tox_binary_io::*;
-use tox_crypto::*;
-use xsalsa20poly1305::{XSalsa20Poly1305, aead::{Aead, Error as AeadError}};
 use crate::dht::packed_node::PackedNode;
 use crate::ip_port::*;
+use crypto_box::{
+    aead::{generic_array::typenum::marker_traits::Unsigned, AeadCore},
+    SalsaBox,
+};
+use tox_binary_io::*;
+use tox_crypto::*;
+use xsalsa20poly1305::{
+    aead::{Aead, Error as AeadError},
+    XSalsa20Poly1305,
+};
 
 use rand::{CryptoRng, Rng};
 
+use nom::error::{make_error, ErrorKind};
 use nom::number::complete::le_u8;
-use nom::error::{ErrorKind, make_error};
 
-use cookie_factory::{
-    do_gen,
-    gen_slice,
-    gen_call,
-    gen_cond,
-    gen_be_u8,
-    gen_le_u64,
-    gen_many_ref
-};
+use cookie_factory::{do_gen, gen_be_u8, gen_call, gen_cond, gen_le_u64, gen_many_ref, gen_slice};
 
 use nom::{
+    combinator::{cond, rest, rest_len},
     Err,
-    combinator::{rest, rest_len, cond},
 };
 use std::io::{Error, ErrorKind as IoErrorKind};
 
 const ONION_SEND_BASE: usize = crypto_box::KEY_SIZE + SIZE_IPPORT + <SalsaBox as AeadCore>::TagSize::USIZE;
 const ONION_SEND_1: usize = xsalsa20poly1305::NONCE_SIZE + ONION_SEND_BASE * 3;
 const MAX_ONION_DATA_SIZE: usize = ONION_MAX_PACKET_SIZE - (ONION_SEND_1 + 1); // 1 is for packet_id
-const MIN_ONION_DATA_REQUEST_SIZE: usize = 1 + crypto_box::KEY_SIZE + xsalsa20poly1305::NONCE_SIZE + crypto_box::KEY_SIZE + <SalsaBox as AeadCore>::TagSize::USIZE; // 1 is for packet_id
+const MIN_ONION_DATA_REQUEST_SIZE: usize = 1
+    + crypto_box::KEY_SIZE
+    + xsalsa20poly1305::NONCE_SIZE
+    + crypto_box::KEY_SIZE
+    + <SalsaBox as AeadCore>::TagSize::USIZE; // 1 is for packet_id
 /// Maximum size in butes of Onion Data Request packet
 pub const MAX_DATA_REQUEST_SIZE: usize = MAX_ONION_DATA_SIZE - MIN_ONION_DATA_REQUEST_SIZE;
 /// Minimum size in bytes of Onion Data Response packet
@@ -69,11 +71,14 @@ pub const MIN_ONION_DATA_RESPONSE_SIZE: usize = crypto_box::KEY_SIZE + <SalsaBox
 pub const MAX_ONION_CLIENT_DATA_SIZE: usize = MAX_DATA_REQUEST_SIZE - MIN_ONION_DATA_RESPONSE_SIZE;
 
 /// Size of first `OnionReturn` struct with no inner `OnionReturn`s.
-pub const ONION_RETURN_1_SIZE: usize = xsalsa20poly1305::NONCE_SIZE + SIZE_IPPORT + <SalsaBox as AeadCore>::TagSize::USIZE; // 59
+pub const ONION_RETURN_1_SIZE: usize =
+    xsalsa20poly1305::NONCE_SIZE + SIZE_IPPORT + <SalsaBox as AeadCore>::TagSize::USIZE; // 59
 /// Size of second `OnionReturn` struct with one inner `OnionReturn`.
-pub const ONION_RETURN_2_SIZE: usize = xsalsa20poly1305::NONCE_SIZE + SIZE_IPPORT + <SalsaBox as AeadCore>::TagSize::USIZE + ONION_RETURN_1_SIZE; // 118
+pub const ONION_RETURN_2_SIZE: usize =
+    xsalsa20poly1305::NONCE_SIZE + SIZE_IPPORT + <SalsaBox as AeadCore>::TagSize::USIZE + ONION_RETURN_1_SIZE; // 118
 /// Size of third `OnionReturn` struct with two inner `OnionReturn`s.
-pub const ONION_RETURN_3_SIZE: usize = xsalsa20poly1305::NONCE_SIZE + SIZE_IPPORT + <SalsaBox as AeadCore>::TagSize::USIZE + ONION_RETURN_2_SIZE; // 177
+pub const ONION_RETURN_3_SIZE: usize =
+    xsalsa20poly1305::NONCE_SIZE + SIZE_IPPORT + <SalsaBox as AeadCore>::TagSize::USIZE + ONION_RETURN_2_SIZE; // 177
 
 /// The maximum size of onion packet including public key, nonce, packet kind
 /// byte, onion return.
@@ -103,18 +108,25 @@ pub struct OnionReturn {
     /// Nonce for the current encrypted payload
     pub nonce: [u8; xsalsa20poly1305::NONCE_SIZE],
     /// Encrypted payload
-    pub payload: Vec<u8>
+    pub payload: Vec<u8>,
 }
 
 impl FromBytes for OnionReturn {
     fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
         let (input, nonce) = <[u8; xsalsa20poly1305::NONCE_SIZE]>::from_bytes(input)?;
         let (input, payload) = rest(input)?;
-        Ok((input, OnionReturn { nonce, payload: payload.to_vec() }))
+        Ok((
+            input,
+            OnionReturn {
+                nonce,
+                payload: payload.to_vec(),
+            },
+        ))
     }
 }
 
 impl ToBytes for OnionReturn {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_slice!(self.nonce.as_ref()) >>
@@ -125,6 +137,7 @@ impl ToBytes for OnionReturn {
 
 impl OnionReturn {
     #[allow(clippy::needless_pass_by_value)]
+    #[rustfmt::skip]
     fn inner_to_bytes<'a>(ip_port: &IpPort, inner: Option<&OnionReturn>, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_call!(|buf, ip_port| IpPort::to_bytes(ip_port, buf, IpPortPadding::WithPadding), ip_port) >>
@@ -143,7 +156,12 @@ impl OnionReturn {
     }
 
     /// Create new `OnionReturn` object using symmetric key for encryption.
-    pub fn new<R: Rng + CryptoRng>(rng: &mut R, symmetric_key: &XSalsa20Poly1305, ip_port: &IpPort, inner: Option<&OnionReturn>) -> OnionReturn {
+    pub fn new<R: Rng + CryptoRng>(
+        rng: &mut R,
+        symmetric_key: &XSalsa20Poly1305,
+        ip_port: &IpPort,
+        inner: Option<&OnionReturn>,
+    ) -> OnionReturn {
         let nonce = XSalsa20Poly1305::generate_nonce(rng);
         let mut buf = [0; ONION_RETURN_2_SIZE + SIZE_IPPORT];
         let (_, size) = OnionReturn::inner_to_bytes(ip_port, inner, (&mut buf, 0)).unwrap();
@@ -151,7 +169,7 @@ impl OnionReturn {
 
         OnionReturn {
             nonce: nonce.into(),
-            payload
+            payload,
         }
     }
 
@@ -163,26 +181,23 @@ impl OnionReturn {
     - fails to parse as `IpPort` with possibly inner `OnionReturn`
     */
     pub fn get_payload(&self, symmetric_key: &XSalsa20Poly1305) -> Result<(IpPort, Option<OnionReturn>), Error> {
-        let decrypted = symmetric_key.decrypt(&self.nonce.into(), self.payload.as_slice())
-            .map_err(|AeadError| {
-                Error::new(IoErrorKind::Other, "OnionReturn decrypt error.")
-            })?;
+        let decrypted = symmetric_key
+            .decrypt(&self.nonce.into(), self.payload.as_slice())
+            .map_err(|AeadError| Error::new(IoErrorKind::Other, "OnionReturn decrypt error."))?;
         match OnionReturn::inner_from_bytes(&decrypted) {
-            Err(Err::Incomplete(e)) => {
-                Err(Error::new(IoErrorKind::Other,
-                               format!("Inner onion return deserialize error: {:?}", e)))
-            },
-            Err(Err::Error(e)) => {
-                Err(Error::new(IoErrorKind::Other,
-                               format!("Inner onion return deserialize error: {:?}", e)))
-            },
-            Err(Err::Failure(e)) => {
-                Err(Error::new(IoErrorKind::Other,
-                               format!("Inner onion return deserialize error: {:?}", e)))
-            },
-            Ok((_, inner)) => {
-                Ok(inner)
-            }
+            Err(Err::Incomplete(e)) => Err(Error::new(
+                IoErrorKind::Other,
+                format!("Inner onion return deserialize error: {:?}", e),
+            )),
+            Err(Err::Error(e)) => Err(Error::new(
+                IoErrorKind::Other,
+                format!("Inner onion return deserialize error: {:?}", e),
+            )),
+            Err(Err::Failure(e)) => Err(Error::new(
+                IoErrorKind::Other,
+                format!("Inner onion return deserialize error: {:?}", e),
+            )),
+            Ok((_, inner)) => Ok(inner),
         }
     }
 }
@@ -199,7 +214,7 @@ pub enum AnnounceStatus {
     /// Requested node is found by its long term `PublicKey`
     Found = 1,
     /// We successfully announced ourselves
-    Announced = 2
+    Announced = 2,
 }
 
 impl FromBytes for AnnounceStatus {
@@ -237,20 +252,11 @@ mod tests {
         }
     );
 
-    encode_decode_test!(
-        announce_status_failed,
-        AnnounceStatus::Failed
-    );
+    encode_decode_test!(announce_status_failed, AnnounceStatus::Failed);
 
-    encode_decode_test!(
-        announce_status_found,
-        AnnounceStatus::Found
-    );
+    encode_decode_test!(announce_status_found, AnnounceStatus::Found);
 
-    encode_decode_test!(
-        announce_status_accounced,
-        AnnounceStatus::Announced
-    );
+    encode_decode_test!(announce_status_accounced, AnnounceStatus::Announced);
 
     #[test]
     fn onion_return_encrypt_decrypt() {
@@ -261,14 +267,14 @@ mod tests {
         let ip_port_1 = IpPort {
             protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
-            port: 12345
+            port: 12345,
         };
         let onion_return_1 = OnionReturn::new(&mut rng, &alice_symmetric_key, &ip_port_1, None);
         // bob encrypt
         let ip_port_2 = IpPort {
             protocol: ProtocolType::Udp,
             ip_addr: "7.8.5.6".parse().unwrap(),
-            port: 54321
+            port: 54321,
         };
         let onion_return_2 = OnionReturn::new(&mut rng, &bob_symmetric_key, &ip_port_2, Some(&onion_return_1));
         // bob can decrypt it's return address
@@ -291,14 +297,14 @@ mod tests {
         let ip_port_1 = IpPort {
             protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
-            port: 12345
+            port: 12345,
         };
         let onion_return_1 = OnionReturn::new(&mut rng, &alice_symmetric_key, &ip_port_1, None);
         // bob encrypt
         let ip_port_2 = IpPort {
             protocol: ProtocolType::Udp,
             ip_addr: "7.8.5.6".parse().unwrap(),
-            port: 54321
+            port: 54321,
         };
         let onion_return_2 = OnionReturn::new(&mut rng, &bob_symmetric_key, &ip_port_2, Some(&onion_return_1));
         // eve can't decrypt return addresses
@@ -324,7 +330,7 @@ mod tests {
         let invalid_payload_encoded = symmetric_key.encrypt(&nonce, &invalid_payload[..]).unwrap();
         let invalid_onion_return = OnionReturn {
             nonce: nonce.into(),
-            payload: invalid_payload_encoded
+            payload: invalid_payload_encoded,
         };
         assert!(invalid_onion_return.get_payload(&symmetric_key).is_err());
     }

@@ -2,18 +2,21 @@
 */
 use super::*;
 
-use crypto_box::{SalsaBox, aead::{Aead, AeadCore, Error as AeadError}};
+use crypto_box::{
+    aead::{Aead, AeadCore, Error as AeadError},
+    SalsaBox,
+};
 use nom::{
-    number::complete::be_u64,
-    combinator::{rest, eof, cond},
     bytes::complete::tag,
+    combinator::{cond, eof, rest},
     multi::many0,
+    number::complete::be_u64,
 };
 
-use tox_binary_io::*;
-use tox_crypto::*;
 use crate::dht::errors::*;
 use crate::packed_node::*;
+use tox_binary_io::*;
+use tox_crypto::*;
 
 /** DHT Request packet struct.
 DHT Request packet consists of NatPingRequest and NatPingResponse.
@@ -48,6 +51,7 @@ pub struct DhtRequest {
 }
 
 impl ToBytes for DhtRequest {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x20) >>
@@ -65,8 +69,16 @@ impl FromBytes for DhtRequest {
         let (input, rpk) = PublicKey::from_bytes(input)?;
         let (input, spk) = PublicKey::from_bytes(input)?;
         let (input, nonce) = Nonce::from_bytes(input)?;
-        let (input, payload) = map(rest, |bytes: &[u8]| bytes.to_vec() )(input)?;
-        Ok((input, DhtRequest { rpk, spk, nonce, payload }))
+        let (input, payload) = map(rest, |bytes: &[u8]| bytes.to_vec())(input)?;
+        Ok((
+            input,
+            DhtRequest {
+                rpk,
+                spk,
+                nonce,
+                payload,
+            },
+        ))
     }
 }
 
@@ -95,18 +107,13 @@ impl DhtRequest {
     - fails to parse as given packet type
     */
     pub fn get_payload(&self, shared_secret: &SalsaBox) -> Result<DhtRequestPayload, GetPayloadError> {
-        let decrypted = shared_secret.decrypt((&self.nonce).into(), self.payload.as_slice())
-            .map_err(|AeadError| {
-                GetPayloadError::decrypt()
-            })?;
+        let decrypted = shared_secret
+            .decrypt((&self.nonce).into(), self.payload.as_slice())
+            .map_err(|AeadError| GetPayloadError::decrypt())?;
 
         match DhtRequestPayload::from_bytes(&decrypted) {
-            Err(error) => {
-                Err(GetPayloadError::deserialize(error, decrypted.clone()))
-            },
-            Ok((_, payload)) => {
-                Ok(payload)
-            }
+            Err(error) => Err(GetPayloadError::deserialize(error, decrypted.clone())),
+            Ok((_, payload)) => Ok(payload),
         }
     }
 }
@@ -179,6 +186,7 @@ impl FromBytes for NatPingRequest {
 }
 
 impl ToBytes for NatPingRequest {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0xfe) >>
@@ -214,6 +222,7 @@ impl FromBytes for NatPingResponse {
 }
 
 impl ToBytes for NatPingResponse {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0xfe) >>
@@ -244,7 +253,7 @@ pub struct DhtPkAnnounce {
     /// Nonce for the current encrypted payload
     pub nonce: Nonce,
     /// Encrypted payload
-    pub payload: Vec<u8>
+    pub payload: Vec<u8>,
 }
 
 impl FromBytes for DhtPkAnnounce {
@@ -253,11 +262,19 @@ impl FromBytes for DhtPkAnnounce {
         let (input, real_pk) = PublicKey::from_bytes(input)?;
         let (input, nonce) = Nonce::from_bytes(input)?;
         let (input, payload) = rest(input)?;
-        Ok((input, DhtPkAnnounce { real_pk, nonce, payload: payload.to_vec() }))
+        Ok((
+            input,
+            DhtPkAnnounce {
+                real_pk,
+                nonce,
+                payload: payload.to_vec(),
+            },
+        ))
     }
 }
 
 impl ToBytes for DhtPkAnnounce {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x9c) >>
@@ -292,17 +309,12 @@ impl DhtPkAnnounce {
     - fails to parse as `DhtPkAnnouncePayload`
     */
     pub fn get_payload(&self, shared_secret: &SalsaBox) -> Result<DhtPkAnnouncePayload, GetPayloadError> {
-        let decrypted = shared_secret.decrypt((&self.nonce).into(), self.payload.as_slice())
-            .map_err(|AeadError| {
-                GetPayloadError::decrypt()
-            })?;
+        let decrypted = shared_secret
+            .decrypt((&self.nonce).into(), self.payload.as_slice())
+            .map_err(|AeadError| GetPayloadError::decrypt())?;
         match DhtPkAnnouncePayload::from_bytes(&decrypted) {
-            Err(error) => {
-                Err(GetPayloadError::deserialize(error, decrypted.clone()))
-            },
-            Ok((_, payload)) => {
-                Ok(payload)
-            }
+            Err(error) => Err(GetPayloadError::deserialize(error, decrypted.clone())),
+            Ok((_, payload)) => Ok(payload),
         }
     }
 }
@@ -339,15 +351,19 @@ impl FromBytes for DhtPkAnnouncePayload {
         let (input, dht_pk) = PublicKey::from_bytes(input)?;
         let (input, nodes) = many0(TcpUdpPackedNode::from_bytes)(input)?;
         let (input, _) = cond(nodes.len() <= 4, eof)(input)?;
-        Ok((input, DhtPkAnnouncePayload {
-            no_reply,
-            dht_pk,
-            nodes,
-        }))
+        Ok((
+            input,
+            DhtPkAnnouncePayload {
+                no_reply,
+                dht_pk,
+                nodes,
+            },
+        ))
     }
 }
 
 impl ToBytes for DhtPkAnnouncePayload {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x9c) >>
@@ -398,6 +414,7 @@ impl FromBytes for HardeningRequest {
 }
 
 impl ToBytes for HardeningRequest {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x30) >>
@@ -431,6 +448,7 @@ impl FromBytes for HardeningResponse {
 }
 
 impl ToBytes for HardeningResponse {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x30) >>
@@ -443,8 +461,11 @@ impl ToBytes for HardeningResponse {
 mod tests {
     use super::*;
 
-    use nom::{Err, error::{ErrorKind, Error}};
-    use crypto_box::aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned};
+    use crypto_box::aead::{generic_array::typenum::marker_traits::Unsigned, AeadCore};
+    use nom::{
+        error::{Error, ErrorKind},
+        Err,
+    };
     use rand::thread_rng;
 
     use crate::ip_port::*;
@@ -537,7 +558,7 @@ mod tests {
                 payload: vec![42; 123],
             }),
             DhtRequestPayload::HardeningRequest(HardeningRequest),
-            DhtRequestPayload::HardeningResponse(HardeningResponse)
+            DhtRequestPayload::HardeningResponse(HardeningResponse),
         ];
 
         for payload in test_payloads {
@@ -568,7 +589,7 @@ mod tests {
                 payload: vec![42; 123],
             }),
             DhtRequestPayload::HardeningRequest(HardeningRequest),
-            DhtRequestPayload::HardeningResponse(HardeningResponse)
+            DhtRequestPayload::HardeningResponse(HardeningResponse),
         ];
         for payload in test_payloads {
             // encode payload with shared secret
@@ -597,17 +618,20 @@ mod tests {
             rpk: bob_pk.clone(),
             spk: alice_pk.clone(),
             nonce: nonce.into(),
-            payload: invalid_payload_encoded
+            payload: invalid_payload_encoded,
         };
 
         let precomputed_key = SalsaBox::new(&alice_pk, &bob_sk);
 
         let decoded_payload = invalid_packet.get_payload(&precomputed_key);
         let error = decoded_payload.err().unwrap();
-        assert_eq!(error, GetPayloadError::Deserialize {
-            error: Err::Error(Error::new(invalid_payload.to_vec(), ErrorKind::Tag)),
-            payload: invalid_payload.to_vec()
-        });
+        assert_eq!(
+            error,
+            GetPayloadError::Deserialize {
+                error: Err::Error(Error::new(invalid_payload.to_vec(), ErrorKind::Tag)),
+                payload: invalid_payload.to_vec()
+            }
+        );
         // Try short incomplete
         let invalid_payload = [0xfe];
         let invalid_payload_encoded = shared_secret.encrypt(&nonce, &invalid_payload[..]).unwrap();
@@ -615,14 +639,17 @@ mod tests {
             rpk: bob_pk,
             spk: alice_pk,
             nonce: nonce.into(),
-            payload: invalid_payload_encoded
+            payload: invalid_payload_encoded,
         };
         let decoded_payload = invalid_packet.get_payload(&precomputed_key);
         let error = decoded_payload.err().unwrap();
-        assert_eq!(error, GetPayloadError::Deserialize {
-            error: Err::Error(Error::new(invalid_payload.to_vec(), ErrorKind::Tag)),
-            payload: invalid_payload.to_vec()
-        });
+        assert_eq!(
+            error,
+            GetPayloadError::Deserialize {
+                error: Err::Error(Error::new(invalid_payload.to_vec(), ErrorKind::Tag)),
+                payload: invalid_payload.to_vec()
+            }
+        );
     }
 
     #[test]
@@ -634,16 +661,14 @@ mod tests {
         let shared_secret = SalsaBox::new(&bob_pk, &alice_sk);
         let payload = DhtPkAnnouncePayload::new(
             SecretKey::generate(&mut rng).public_key(),
-            vec![
-                TcpUdpPackedNode {
-                    ip_port: IpPort {
-                        protocol: ProtocolType::Udp,
-                        ip_addr: "127.0.0.1".parse().unwrap(),
-                        port: 12345,
-                    },
-                    pk: SecretKey::generate(&mut rng).public_key(),
+            vec![TcpUdpPackedNode {
+                ip_port: IpPort {
+                    protocol: ProtocolType::Udp,
+                    ip_addr: "127.0.0.1".parse().unwrap(),
+                    port: 12345,
                 },
-            ],
+                pk: SecretKey::generate(&mut rng).public_key(),
+            }],
         );
         // encode payload with shared secret
         let packet = DhtPkAnnounce::new(&shared_secret, alice_pk, &payload);
@@ -664,16 +689,14 @@ mod tests {
         let shared_secret_invalid = SalsaBox::new(&bob_pk, &eve_sk);
         let payload = DhtPkAnnouncePayload::new(
             SecretKey::generate(&mut rng).public_key(),
-            vec![
-                TcpUdpPackedNode {
-                    ip_port: IpPort {
-                        protocol: ProtocolType::Udp,
-                        ip_addr: "127.0.0.1".parse().unwrap(),
-                        port: 12345,
-                    },
-                    pk: SecretKey::generate(&mut rng).public_key(),
+            vec![TcpUdpPackedNode {
+                ip_port: IpPort {
+                    protocol: ProtocolType::Udp,
+                    ip_addr: "127.0.0.1".parse().unwrap(),
+                    port: 12345,
                 },
-            ],
+                pk: SecretKey::generate(&mut rng).public_key(),
+            }],
         );
         // encode payload with shared secret
         let packet = DhtPkAnnounce::new(&shared_secret, alice_pk, &payload);
@@ -696,7 +719,7 @@ mod tests {
         let invalid_packet = DhtPkAnnounce {
             real_pk: alice_pk.clone(),
             nonce: nonce.into(),
-            payload: invalid_payload_encoded
+            payload: invalid_payload_encoded,
         };
         let decoded_payload = invalid_packet.get_payload(&shared_secret);
         assert!(decoded_payload.is_err());
@@ -706,7 +729,7 @@ mod tests {
         let invalid_packet = DhtPkAnnounce {
             real_pk: alice_pk,
             nonce: nonce.into(),
-            payload: invalid_payload_encoded
+            payload: invalid_payload_encoded,
         };
         let decoded_payload = invalid_packet.get_payload(&shared_secret);
         assert!(decoded_payload.is_err());

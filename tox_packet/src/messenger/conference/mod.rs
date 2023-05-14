@@ -1,54 +1,48 @@
 /*! The implementation of conference packets.
 */
 
+mod action;
+mod change_name;
+mod change_title;
+mod freeze_peer;
 mod invite;
 mod invite_response;
-mod peer_online;
+mod kill_peer;
+mod message;
+mod new_peer;
 mod peer_leave;
+mod peer_online;
+mod ping;
 mod query;
 mod query_response;
 mod title;
-mod ping;
-mod new_peer;
-mod kill_peer;
-mod freeze_peer;
-mod change_name;
-mod change_title;
-mod message;
-mod action;
 
+pub use self::action::*;
+pub use self::change_name::*;
+pub use self::change_title::*;
+pub use self::freeze_peer::*;
 pub use self::invite::*;
 pub use self::invite_response::*;
-pub use self::peer_online::*;
+pub use self::kill_peer::*;
+pub use self::message::*;
+pub use self::new_peer::*;
 pub use self::peer_leave::*;
+pub use self::peer_online::*;
+pub use self::ping::*;
 pub use self::query::*;
 pub use self::query_response::*;
 pub use self::title::*;
-pub use self::ping::*;
-pub use self::new_peer::*;
-pub use self::kill_peer::*;
-pub use self::freeze_peer::*;
-pub use self::change_name::*;
-pub use self::change_title::*;
-pub use self::message::*;
-pub use self::action::*;
 
-use cookie_factory::{
-    do_gen,
-    gen_slice,
-    gen_call,
-    gen_cond,
-    gen_be_u8,
-    gen_be_u16,
-    gen_be_u32,
-    gen_many_ref
-};
-use rand::{Rng, distributions::{Distribution, Standard}};
-use nom::number::complete::be_u8;
-use nom::combinator::{map_opt, map};
-use nom::bytes::complete::take;
+use cookie_factory::{do_gen, gen_be_u16, gen_be_u32, gen_be_u8, gen_call, gen_cond, gen_many_ref, gen_slice};
 use nom::branch::alt;
-use nom::error::{ErrorKind, make_error};
+use nom::bytes::complete::take;
+use nom::combinator::{map, map_opt};
+use nom::error::{make_error, ErrorKind};
+use nom::number::complete::be_u8;
+use rand::{
+    distributions::{Distribution, Standard},
+    Rng,
+};
 
 use tox_binary_io::*;
 
@@ -72,7 +66,7 @@ impl ConferenceUid {
     /// Custom from_slice function of ConferenceUID
     pub fn from_slice(bs: &[u8]) -> Option<ConferenceUid> {
         if bs.len() != CONFERENCE_UID_BYTES {
-            return None
+            return None;
         }
         let mut n = ConferenceUid([0; CONFERENCE_UID_BYTES]);
         for (ni, &bsi) in n.0.iter_mut().zip(bs.iter()) {
@@ -90,9 +84,7 @@ impl FromBytes for ConferenceUid {
 
 impl ToBytes for ConferenceUid {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        do_gen!(buf,
-            gen_slice!(self.0)
-        )
+        do_gen!(buf, gen_slice!(self.0))
     }
 }
 
@@ -203,10 +195,7 @@ mod tests {
 
     use super::*;
 
-    encode_decode_test!(
-        conference_uid_encode_decode,
-        ConferenceUid([42; CONFERENCE_UID_BYTES])
-    );
+    encode_decode_test!(conference_uid_encode_decode, ConferenceUid([42; CONFERENCE_UID_BYTES]));
 
     #[test]
     fn conference_type_from_bytes() {
@@ -217,35 +206,55 @@ mod tests {
 
     encode_decode_test!(
         packet_invite_encode_decode,
-        Packet::Invite(Invite::new(1, ConferenceType::Audio, ConferenceUid([42; CONFERENCE_UID_BYTES])))
+        Packet::Invite(Invite::new(
+            1,
+            ConferenceType::Audio,
+            ConferenceUid([42; CONFERENCE_UID_BYTES])
+        ))
     );
 
     encode_decode_test!(
         packet_invite_response_encode_decode,
-        Packet::InviteResponse(InviteResponse::new(1, 2, ConferenceType::Text, ConferenceUid([42; CONFERENCE_UID_BYTES])))
+        Packet::InviteResponse(InviteResponse::new(
+            1,
+            2,
+            ConferenceType::Text,
+            ConferenceUid([42; CONFERENCE_UID_BYTES])
+        ))
     );
 
     encode_decode_test!(
         packet_peer_noline_encode_decode,
-        Packet::PeerOnline(PeerOnline::new(1, ConferenceType::Text, ConferenceUid([42; CONFERENCE_UID_BYTES])))
+        Packet::PeerOnline(PeerOnline::new(
+            1,
+            ConferenceType::Text,
+            ConferenceUid([42; CONFERENCE_UID_BYTES])
+        ))
     );
 
-    encode_decode_test!(
-        packet_peer_leave_encode_decode,
-        Packet::PeerLeave(PeerLeave::new(1))
-    );
+    encode_decode_test!(packet_peer_leave_encode_decode, Packet::PeerLeave(PeerLeave::new(1)));
 
-    encode_decode_test!(
-        packet_query_encode_decode,
-        Packet::Query(Query::new(1))
-    );
+    encode_decode_test!(packet_query_encode_decode, Packet::Query(Query::new(1)));
 
     encode_decode_test!(
         packet_query_response_encode_decode,
-        Packet::QueryResponse(QueryResponse::new(1, vec![
-            PeerInfo::new(1, SecretKey::generate(&mut thread_rng()).public_key(), SecretKey::generate(&mut thread_rng()).public_key(), "1234".to_owned()),
-            PeerInfo::new(2, SecretKey::generate(&mut thread_rng()).public_key(), SecretKey::generate(&mut thread_rng()).public_key(), "56789".to_owned()),
-            ]))
+        Packet::QueryResponse(QueryResponse::new(
+            1,
+            vec![
+                PeerInfo::new(
+                    1,
+                    SecretKey::generate(&mut thread_rng()).public_key(),
+                    SecretKey::generate(&mut thread_rng()).public_key(),
+                    "1234".to_owned()
+                ),
+                PeerInfo::new(
+                    2,
+                    SecretKey::generate(&mut thread_rng()).public_key(),
+                    SecretKey::generate(&mut thread_rng()).public_key(),
+                    "56789".to_owned()
+                ),
+            ]
+        ))
     );
 
     encode_decode_test!(
@@ -253,14 +262,18 @@ mod tests {
         Packet::Title(Title::new(1, "1234".to_owned()))
     );
 
-    encode_decode_test!(
-        packet_ping_encode_decode,
-        Packet::Ping(Ping::new(1, 2, 3))
-    );
+    encode_decode_test!(packet_ping_encode_decode, Packet::Ping(Ping::new(1, 2, 3)));
 
     encode_decode_test!(
         packet_new_peer_encode_decode,
-        Packet::NewPeer(NewPeer::new(1, 2, 3, 4, SecretKey::generate(&mut thread_rng()).public_key(), SecretKey::generate(&mut thread_rng()).public_key()))
+        Packet::NewPeer(NewPeer::new(
+            1,
+            2,
+            3,
+            4,
+            SecretKey::generate(&mut thread_rng()).public_key(),
+            SecretKey::generate(&mut thread_rng()).public_key()
+        ))
     );
 
     encode_decode_test!(

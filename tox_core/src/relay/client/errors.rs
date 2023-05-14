@@ -1,5 +1,5 @@
-use std::io::Error as IoError;
 use futures::channel::mpsc::SendError;
+use std::io::Error as IoError;
 use thiserror::Error;
 
 use crate::relay::codec::{DecodeError, EncodeError};

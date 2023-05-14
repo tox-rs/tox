@@ -3,22 +3,22 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 
-use futures::{FutureExt, TryFutureExt, StreamExt, SinkExt};
 use futures::channel::mpsc;
-use tokio_util::codec::Framed;
+use futures::{FutureExt, SinkExt, StreamExt, TryFutureExt};
 use tokio::net::TcpStream;
 use tokio::sync::RwLock;
+use tokio_util::codec::Framed;
 
-use tox_crypto::*;
-use tox_packet::onion::InnerOnionResponse;
-use crate::stats::Stats;
+use crate::relay::client::errors::*;
 use crate::relay::codec::Codec;
-use tox_packet::relay::connection_id::ConnectionId;
 use crate::relay::handshake::make_client_handshake;
 use crate::relay::links::*;
-use tox_packet::relay::*;
+use crate::stats::Stats;
 use crate::time::*;
-use crate::relay::client::errors::*;
+use tox_crypto::*;
+use tox_packet::onion::InnerOnionResponse;
+use tox_packet::relay::connection_id::ConnectionId;
+use tox_packet::relay::*;
 
 /// Buffer size (in packets) for outgoing packets. This number shouldn't be high
 /// to minimize latency. If some relay can't take more packets we can use
@@ -84,7 +84,11 @@ pub struct Client {
 
 impl Client {
     /// Create new `Client` object.
-    pub fn new(pk: PublicKey, addr: SocketAddr, incoming_tx: mpsc::UnboundedSender<(PublicKey, IncomingPacket)>) -> Client {
+    pub fn new(
+        pk: PublicKey,
+        addr: SocketAddr,
+        incoming_tx: mpsc::UnboundedSender<(PublicKey, IncomingPacket)>,
+    ) -> Client {
         Client {
             pk,
             addr,
@@ -119,8 +123,7 @@ impl Client {
     async fn send_packet(&self, packet: Packet) -> Result<(), SendPacketError> {
         if let ClientStatus::Connected(ref tx) = *self.status.read().await {
             let mut tx = tx.clone();
-            tx.send(packet).await
-                .map_err(SendPacketError::SendTo)
+            tx.send(packet).await.map_err(SendPacketError::SendTo)
         } else {
             // Attempt to send packet to TCP relay with wrong status. For
             // instance it can happen when we received ping request from the
@@ -138,7 +141,7 @@ impl Client {
         let index = if let Some(index) = packet.connection_id.index() {
             index
         } else {
-            return Err(HandlePacketError::InvalidConnectionId)
+            return Err(HandlePacketError::InvalidConnectionId);
         };
 
         if self.connections.read().await.contains(&packet.pk) {
@@ -159,7 +162,7 @@ impl Client {
         let index = if let Some(index) = packet.connection_id.index() {
             index
         } else {
-            return Err(HandlePacketError::InvalidConnectionId)
+            return Err(HandlePacketError::InvalidConnectionId);
         };
 
         if self.links.write().await.upgrade(index) {
@@ -173,7 +176,7 @@ impl Client {
         let index = if let Some(index) = packet.connection_id.index() {
             index
         } else {
-            return Err(HandlePacketError::InvalidConnectionId)
+            return Err(HandlePacketError::InvalidConnectionId);
         };
 
         if (*self.links.write().await).downgrade(index) {
@@ -184,9 +187,11 @@ impl Client {
     }
 
     async fn handle_ping_request(&self, packet: &PingRequest) -> Result<(), HandlePacketError> {
-        self.send_packet(Packet::PongResponse(
-            PongResponse { ping_id: packet.ping_id }
-        )).await.map_err(HandlePacketError::SendPacket)
+        self.send_packet(Packet::PongResponse(PongResponse {
+            ping_id: packet.ping_id,
+        }))
+        .await
+        .map_err(HandlePacketError::SendPacket)
     }
 
     async fn handle_pong_response(&self, _packet: &PongResponse) -> Result<(), HandlePacketError> {
@@ -200,32 +205,24 @@ impl Client {
 
     async fn handle_oob_receive(&self, packet: OobReceive) -> Result<(), HandlePacketError> {
         let mut tx = self.incoming_tx.clone();
-        let msg = (
-            self.pk.clone(),
-            IncomingPacket::Oob(packet.sender_pk, packet.data)
-        );
+        let msg = (self.pk.clone(), IncomingPacket::Oob(packet.sender_pk, packet.data));
 
-        tx.send(msg).await
-            .map_err(HandlePacketError::SendTo)
+        tx.send(msg).await.map_err(HandlePacketError::SendTo)
     }
 
     async fn handle_data(&self, packet: Data) -> Result<(), HandlePacketError> {
         let index = if let Some(index) = packet.connection_id.index() {
             index
         } else {
-            return Err(HandlePacketError::InvalidConnectionId)
+            return Err(HandlePacketError::InvalidConnectionId);
         };
 
         let links = self.links.read().await;
         if let Some(link) = links.by_id(index) {
             let mut tx = self.incoming_tx.clone();
-            let msg = (
-                self.pk.clone(),
-                IncomingPacket::Data(link.pk.clone(), packet.data)
-            );
+            let msg = (self.pk.clone(), IncomingPacket::Data(link.pk.clone(), packet.data));
 
-            tx.send(msg).await
-                .map_err(HandlePacketError::SendTo)
+            tx.send(msg).await.map_err(HandlePacketError::SendTo)
         } else {
             Err(HandlePacketError::AlreadyLinked)
         }
@@ -237,65 +234,52 @@ impl Client {
 
     async fn handle_onion_response(&self, packet: OnionResponse) -> Result<(), HandlePacketError> {
         let mut tx = self.incoming_tx.clone();
-        let msg = (
-            self.pk.clone(),
-            IncomingPacket::Onion(packet.payload)
-        );
+        let msg = (self.pk.clone(), IncomingPacket::Onion(packet.payload));
 
-        tx.send(msg).await
-            .map_err(HandlePacketError::SendTo)
+        tx.send(msg).await.map_err(HandlePacketError::SendTo)
     }
 
     /// Spawn a connection to this TCP relay if it is not connected already. The
     /// connection is spawned via `tokio::spawn` so the result future will be
     /// completed after first poll.
-    async fn spawn_inner(&self, dht_sk: SecretKey, dht_pk: PublicKey) -> Result<(), SpawnError> { // TODO: send pings periodically
+    async fn spawn_inner(&self, dht_sk: SecretKey, dht_pk: PublicKey) -> Result<(), SpawnError> {
+        // TODO: send pings periodically
         let relay_pk = self.pk.clone();
         match *self.status.write().await {
-            ref mut status @ ClientStatus::Disconnected
-            | ref mut status @ ClientStatus::Sleeping =>
-                *status = ClientStatus::Connecting,
+            ref mut status @ ClientStatus::Disconnected | ref mut status @ ClientStatus::Sleeping => {
+                *status = ClientStatus::Connecting
+            }
             _ => return Ok(()),
         }
 
-        let socket = TcpStream::connect(&self.addr).await
+        let socket = TcpStream::connect(&self.addr).await.map_err(SpawnError::Io)?;
+
+        let (socket, channel) = make_client_handshake(socket, &dht_pk, &dht_sk, &relay_pk)
+            .await
             .map_err(SpawnError::Io)?;
 
-        let (socket, channel) =
-            make_client_handshake(socket, &dht_pk, &dht_sk, &relay_pk).await
-                .map_err(SpawnError::Io)?;
-
         let stats = Stats::new();
-        let secure_socket =
-            Framed::new(socket, Codec::new(channel, stats));
-        let (mut to_server, mut from_server) =
-            secure_socket.split();
-        let (to_server_tx, to_server_rx) =
-            mpsc::channel(CLIENT_CHANNEL_SIZE);
+        let secure_socket = Framed::new(socket, Codec::new(channel, stats));
+        let (mut to_server, mut from_server) = secure_socket.split();
+        let (to_server_tx, to_server_rx) = mpsc::channel(CLIENT_CHANNEL_SIZE);
 
         match *self.status.write().await {
-            ref mut status @ ClientStatus::Connecting =>
-                *status = ClientStatus::Connected(to_server_tx),
+            ref mut status @ ClientStatus::Connecting => *status = ClientStatus::Connected(to_server_tx),
             _ => return Ok(()),
         }
 
         *self.connection_attempts.write().await = 0;
         *self.connected_time.write().await = Some(clock_now());
 
-        self.send_route_requests().await
-            .map_err(SpawnError::SendTo)?;
+        self.send_route_requests().await.map_err(SpawnError::SendTo)?;
 
         let mut to_server_rx = to_server_rx.map(Ok);
-        let writer = to_server
-            .send_all(&mut to_server_rx)
-            .map_err(SpawnError::Encode);
+        let writer = to_server.send_all(&mut to_server_rx).map_err(SpawnError::Encode);
 
         let reader = async {
             while let Some(packet) = from_server.next().await {
-                let packet = packet
-                    .map_err(SpawnError::ReadSocket)?;
-                self.handle_packet(packet).await
-                    .map_err(SpawnError::HandlePacket)?;
+                let packet = packet.map_err(SpawnError::ReadSocket)?;
+                self.handle_packet(packet).await.map_err(SpawnError::HandlePacket)?;
             }
 
             Result::<(), SpawnError>::Ok(())
@@ -311,7 +295,7 @@ impl Client {
         let result = self.spawn_inner(dht_sk, dht_pk).await;
 
         match *self.status.write().await {
-            ClientStatus::Sleeping => { },
+            ClientStatus::Sleeping => {}
             ref mut status => *status = ClientStatus::Disconnected,
         }
         if let Err(ref e) = result {
@@ -328,18 +312,15 @@ impl Client {
     /// Spawn a connection to this TCP relay if it is not connected already. The
     /// connection is spawned via `tokio::spawn` so the result future will be
     /// completed after first poll.
-    pub async fn spawn(self, dht_sk: SecretKey, dht_pk: PublicKey) -> Result<(), SpawnError> { // TODO: send pings periodically
-        tokio::spawn(async move {
-            self.run(dht_sk, dht_pk).await
-        });
+    pub async fn spawn(self, dht_sk: SecretKey, dht_pk: PublicKey) -> Result<(), SpawnError> {
+        // TODO: send pings periodically
+        tokio::spawn(async move { self.run(dht_sk, dht_pk).await });
         Ok(())
     }
 
     /// Send `RouteRequest` packet with specified `PublicKey`.
     async fn send_route_request(&self, pk: PublicKey) -> Result<(), SendPacketError> {
-        self.send_packet(Packet::RouteRequest(RouteRequest {
-            pk
-        })).await
+        self.send_packet(Packet::RouteRequest(RouteRequest { pk })).await
     }
 
     /// Send `RouteRequest` packets for all nodes we should be connected to via
@@ -363,7 +344,8 @@ impl Client {
                 self.send_packet(Packet::Data(Data {
                     connection_id: ConnectionId::from_index(index),
                     data,
-                })).await
+                }))
+                .await
             } else {
                 Err(SendPacketError::NotOnline)
             }
@@ -374,10 +356,8 @@ impl Client {
 
     /// Send `OobSend` packet to a node via relay.
     pub async fn send_oob(&self, destination_pk: PublicKey, data: Vec<u8>) -> Result<(), SendPacketError> {
-        self.send_packet(Packet::OobSend(OobSend {
-            destination_pk,
-            data,
-        })).await
+        self.send_packet(Packet::OobSend(OobSend { destination_pk, data }))
+            .await
     }
 
     /// Send `OnionRequest` packet to the relay.
@@ -406,7 +386,9 @@ impl Client {
                 links.take(index);
                 self.send_packet(Packet::DisconnectNotification(DisconnectNotification {
                     connection_id: ConnectionId::from_index(index),
-                })).await.ok();
+                }))
+                .await
+                .ok();
             }
 
             Ok(())
@@ -486,18 +468,25 @@ pub mod tests {
     use rand::thread_rng;
     use tox_binary_io::*;
 
-    use std::time::{Duration, Instant};
     use std::io::{Error, ErrorKind};
+    use std::time::{Duration, Instant};
 
     use tokio::net::TcpListener;
 
+    use crate::relay::server::{tcp_run, tcp_run_connection, Server};
+    use crypto_box::{
+        aead::{generic_array::typenum::marker_traits::Unsigned, AeadCore},
+        SalsaBox,
+    };
     use tox_packet::dht::CryptoData;
     use tox_packet::ip_port::*;
     use tox_packet::onion::*;
-    use crate::relay::server::{Server, tcp_run, tcp_run_connection};
-    use crypto_box::{SalsaBox, aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned}};
 
-    pub async fn create_client() -> (mpsc::UnboundedReceiver<(PublicKey, IncomingPacket)>, mpsc::Receiver<Packet>, Client) {
+    pub async fn create_client() -> (
+        mpsc::UnboundedReceiver<(PublicKey, IncomingPacket)>,
+        mpsc::Receiver<Packet>,
+        Client,
+    ) {
         let mut rng = thread_rng();
         let relay_addr = "127.0.0.1:12345".parse().unwrap();
         let relay_pk = SecretKey::generate(&mut rng).public_key();
@@ -709,9 +698,7 @@ pub mod tests {
         let (_incoming_rx, outgoing_rx, client) = create_client().await;
 
         let ping_id = 42;
-        let ping_request = Packet::PingRequest(PingRequest {
-            ping_id
-        });
+        let ping_request = Packet::PingRequest(PingRequest { ping_id });
 
         client.handle_packet(ping_request).await.unwrap();
 
@@ -725,9 +712,7 @@ pub mod tests {
         let (_incoming_rx, _outgoing_rx, client) = create_client().await;
 
         let ping_id = 42;
-        let pong_response = Packet::PongResponse(PongResponse {
-            ping_id
-        });
+        let pong_response = Packet::PongResponse(PongResponse { ping_id });
 
         client.handle_packet(pong_response).await.unwrap();
     }
@@ -868,7 +853,7 @@ pub mod tests {
         let payload = InnerOnionResponse::OnionDataResponse(OnionDataResponse {
             nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             temporary_pk: SecretKey::generate(&mut rng).public_key(),
-            payload: vec![42; 123]
+            payload: vec![42; 123],
         });
         let onion_response = Packet::OnionResponse(OnionResponse {
             payload: payload.clone(),
@@ -938,7 +923,11 @@ pub mod tests {
         });
 
         let connection_id = 42;
-        client.links.write().await.insert_by_id(destination_pk.clone(), connection_id - 16);
+        client
+            .links
+            .write()
+            .await
+            .insert_by_id(destination_pk.clone(), connection_id - 16);
 
         let error = client.send_data(destination_pk, data.clone()).await.err().unwrap();
         assert_eq!(error, SendPacketError::NotOnline);
@@ -1024,7 +1013,10 @@ pub mod tests {
 
         client.remove_connection(connection_pk).await.unwrap();
 
-        let packet = unpack!(outgoing_rx.into_future().await.0.unwrap(), Packet::DisconnectNotification);
+        let packet = unpack!(
+            outgoing_rx.into_future().await.0.unwrap(),
+            Packet::DisconnectNotification
+        );
 
         assert_eq!(packet.connection_id, ConnectionId::from_index(index));
     }
@@ -1095,7 +1087,11 @@ pub mod tests {
         let connection_pk = SecretKey::generate(&mut rng).public_key();
         let connection_id = 42;
 
-        client.links.write().await.insert_by_id(connection_pk.clone(), connection_id - 16);
+        client
+            .links
+            .write()
+            .await
+            .insert_by_id(connection_pk.clone(), connection_id - 16);
 
         assert!(!client.is_connection_online(connection_pk.clone()).await);
 
@@ -1155,7 +1151,9 @@ pub mod tests {
                 let links = client.links.read().await;
                 if let Some(index) = links.id_by_pk(&pk) {
                     let status = links.by_id(index).map(|link| link.status);
-                    if status == Some(LinkStatus::Online) { return Ok(()) }
+                    if status == Some(LinkStatus::Online) {
+                        return Ok(());
+                    }
                 }
             }
         }
@@ -1171,7 +1169,8 @@ pub mod tests {
 
         let stats = Stats::new();
         let server_future = async {
-            tcp_run(&Server::new(), listener, server_sk, stats, 2).await
+            tcp_run(&Server::new(), listener, server_sk, stats, 2)
+                .await
                 .map_err(|e| Error::new(ErrorKind::Other, e))
         };
         tokio::spawn(server_future);
@@ -1183,7 +1182,11 @@ pub mod tests {
         let client_1 = Client::new(server_pk.clone(), addr, incoming_tx_1);
         // connection attempts should be set to 0 after successful connection
         set_connection_attempts(&client_1, 3).await;
-        client_1.clone().spawn(client_sk_1.clone(), client_pk_1.clone()).await.unwrap();
+        client_1
+            .clone()
+            .spawn(client_sk_1.clone(), client_pk_1.clone())
+            .await
+            .unwrap();
 
         // run second client
         let client_sk_2 = SecretKey::generate(&mut rng);
@@ -1258,7 +1261,8 @@ pub mod tests {
         let server_future = async {
             let (connection, _) = listener.accept().await.unwrap();
             tcp_run_connection(&server, connection, server_sk, stats)
-                .map_err(|e| Error::new(ErrorKind::Other, e)).await
+                .map_err(|e| Error::new(ErrorKind::Other, e))
+                .await
         };
 
         // run a client with invalid server's pk
@@ -1267,7 +1271,8 @@ pub mod tests {
         let invalid_server_pk = SecretKey::generate(&mut rng).public_key();
         let (incoming_tx_1, _incoming_rx_1) = mpsc::unbounded();
         let client = Client::new(invalid_server_pk, addr, incoming_tx_1);
-        let client_future = client.run(client_sk_1, client_pk_1)
+        let client_future = client
+            .run(client_sk_1, client_pk_1)
             .map_err(|e| Error::new(ErrorKind::Other, e));
 
         let (server_res, client_res) = futures::join!(server_future, client_future);

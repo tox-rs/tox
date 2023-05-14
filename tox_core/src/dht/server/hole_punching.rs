@@ -4,10 +4,10 @@ Module for hole-punching.
 https://zetok.github.io/tox-spec/#hole-punching
 */
 
+use rand::{CryptoRng, Rng};
+use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
-use std::collections::HashMap;
-use rand::{CryptoRng, Rng};
 
 use crate::dht::dht_friend::*;
 use crate::dht::server::*;
@@ -80,31 +80,37 @@ impl HolePunching {
     /// This function returns list of addresses to which we should send
     ///`PingRequest` packet.
     pub fn next_punch_addrs(&mut self, addrs: &[SocketAddr]) -> Vec<SocketAddr> {
-        if !self.is_punching_done &&
-            self.last_punching_time.map_or(true, |time| time.elapsed() >= PUNCH_INTERVAL) &&
-            self.last_recv_ping_time.elapsed() <= PUNCH_INTERVAL * 2 {
-                let ip = match HolePunching::get_common_ip(addrs, u32::from(FRIEND_CLOSE_NODES_COUNT) / 2) {
-                    // A friend can have maximum 8 close node. If 4 or more close nodes returned
-                    // the same friend's IP address but with different port we consider that friend
-                    // is behind NAT. Otherwise we do nothing.
-                    None => return Vec::new(),
-                    Some(ip) => ip,
-                };
+        if !self.is_punching_done
+            && self
+                .last_punching_time
+                .map_or(true, |time| time.elapsed() >= PUNCH_INTERVAL)
+            && self.last_recv_ping_time.elapsed() <= PUNCH_INTERVAL * 2
+        {
+            let ip = match HolePunching::get_common_ip(addrs, u32::from(FRIEND_CLOSE_NODES_COUNT) / 2) {
+                // A friend can have maximum 8 close node. If 4 or more close nodes returned
+                // the same friend's IP address but with different port we consider that friend
+                // is behind NAT. Otherwise we do nothing.
+                None => return Vec::new(),
+                Some(ip) => ip,
+            };
 
-                if self.last_punching_time.map_or(true, |time| time.elapsed() > RESET_PUNCH_INTERVAL) {
-                    self.num_punch_tries = 0;
-                    self.first_punching_index = 0;
-                    self.last_punching_index = 0;
-                }
+            if self
+                .last_punching_time
+                .map_or(true, |time| time.elapsed() > RESET_PUNCH_INTERVAL)
+            {
+                self.num_punch_tries = 0;
+                self.first_punching_index = 0;
+                self.last_punching_index = 0;
+            }
 
-                let ports_to_try = HolePunching::get_nat_ports(addrs, ip);
+            let ports_to_try = HolePunching::get_nat_ports(addrs, ip);
 
-                let res = self.punch_addrs(&ports_to_try, ip);
+            let res = self.punch_addrs(&ports_to_try, ip);
 
-                self.last_punching_time = Some(clock_now());
-                self.is_punching_done = true;
+            self.last_punching_time = Some(clock_now());
+            self.is_punching_done = true;
 
-                res
+            res
         } else {
             Vec::new()
         }
@@ -123,19 +129,16 @@ impl HolePunching {
             *occurrences.entry(addr.ip()).or_insert(0) += 1;
         }
 
-        occurrences.into_iter().max_by_key(|&(_, count)| count)
-            .and_then(|(common_ip, count)|
-                if count > need_num {
-                    Some(common_ip)
-                } else {
-                    None
-                }
-            )
+        occurrences
+            .into_iter()
+            .max_by_key(|&(_, count)| count)
+            .and_then(|(common_ip, count)| if count > need_num { Some(common_ip) } else { None })
     }
 
     /// Get ports list of given IP address.
     fn get_nat_ports(addrs: &[SocketAddr], ip: IpAddr) -> Vec<u16> {
-        addrs.iter()
+        addrs
+            .iter()
             .filter(|addr| addr.ip() == ip)
             .map(|addr| addr.port())
             .collect::<Vec<u16>>()
@@ -145,17 +148,19 @@ impl HolePunching {
     /// neighborhood) returned by close nodes of a friend.
     fn first_hole_punching(&self, ports: &[u16], ip: IpAddr) -> Vec<SocketAddr> {
         let num_ports = ports.len();
-        (0..MAX_PORTS_TO_PUNCH).map(|i| {
-            // algorithm designed by irungentoo
-            // https://zetok.github.io/tox-spec/#symmetric-nat
-            let it = i + self.first_punching_index;
-            let sign: i16 = if it % 2 == 1 { -1 } else { 1 };
-            let delta = sign * (it / (2 * num_ports as u32)) as i16;
-            let index = (it as usize / 2) % num_ports;
-            let port = (ports[index] as i16 + delta) as u16;
+        (0..MAX_PORTS_TO_PUNCH)
+            .map(|i| {
+                // algorithm designed by irungentoo
+                // https://zetok.github.io/tox-spec/#symmetric-nat
+                let it = i + self.first_punching_index;
+                let sign: i16 = if it % 2 == 1 { -1 } else { 1 };
+                let delta = sign * (it / (2 * num_ports as u32)) as i16;
+                let index = (it as usize / 2) % num_ports;
+                let port = (ports[index] as i16 + delta) as u16;
 
-            SocketAddr::new(ip, port)
-        }).collect()
+                SocketAddr::new(ip, port)
+            })
+            .collect()
     }
 
     /// Advanced port guessing algorithm. It uses all ports sequentially
@@ -163,14 +168,16 @@ impl HolePunching {
     fn last_hole_punching(&self, ip: IpAddr) -> Vec<SocketAddr> {
         let port: u32 = 1024;
 
-        (0..MAX_PORTS_TO_PUNCH).map(|i| {
-            // algorithm designed by irungentoo
-            // https://zetok.github.io/tox-spec/#symmetric-nat
-            let it = i + self.last_punching_index;
-            let port = port + it;
+        (0..MAX_PORTS_TO_PUNCH)
+            .map(|i| {
+                // algorithm designed by irungentoo
+                // https://zetok.github.io/tox-spec/#symmetric-nat
+                let it = i + self.last_punching_index;
+                let port = port + it;
 
-            SocketAddr::new(ip, port as u16)
-        }).collect()
+                SocketAddr::new(ip, port as u16)
+            })
+            .collect()
     }
 
     /// Get addresses for hole punching using different port guessing
@@ -180,7 +187,7 @@ impl HolePunching {
     ///`PingRequest` packet.
     fn punch_addrs(&mut self, ports: &[u16], ip: IpAddr) -> Vec<SocketAddr> {
         if ports.is_empty() {
-            return Vec::new()
+            return Vec::new();
         }
 
         let first_port = ports[0];

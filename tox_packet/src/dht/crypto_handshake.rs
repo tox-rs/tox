@@ -3,16 +3,19 @@
 
 use super::*;
 
-use crypto_box::{SalsaBox, aead::{Aead, AeadCore, Error as AeadError}};
-use sha2::Sha512;
-use sha2::digest::typenum::Unsigned;
-use sha2::digest::OutputSizeUser;
-use tox_binary_io::*;
-use tox_crypto::*;
 use crate::dht::cookie::EncryptedCookie;
 use crate::dht::errors::*;
-use nom::bytes::complete::{take, tag};
+use crypto_box::{
+    aead::{Aead, AeadCore, Error as AeadError},
+    SalsaBox,
+};
+use nom::bytes::complete::{tag, take};
 use nom::combinator::eof;
+use sha2::digest::typenum::Unsigned;
+use sha2::digest::OutputSizeUser;
+use sha2::Sha512;
+use tox_binary_io::*;
+use tox_crypto::*;
 
 /** Packet used to establish `net_crypto` connection between two peers.
 
@@ -40,7 +43,7 @@ pub struct CryptoHandshake {
     /// Nonce for the current encrypted payload
     pub nonce: Nonce,
     /// Encrypted payload
-    pub payload: Vec<u8>
+    pub payload: Vec<u8>,
 }
 
 impl FromBytes for CryptoHandshake {
@@ -50,15 +53,19 @@ impl FromBytes for CryptoHandshake {
         let (input, nonce) = Nonce::from_bytes(input)?;
         let (input, payload) = take(248usize)(input)?;
         let (input, _) = eof(input)?;
-        Ok((input, CryptoHandshake {
-            cookie,
-            nonce,
-            payload: payload.to_vec()
-        }))
+        Ok((
+            input,
+            CryptoHandshake {
+                cookie,
+                nonce,
+                payload: payload.to_vec(),
+            },
+        ))
     }
 }
 
 impl ToBytes for CryptoHandshake {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x1a) >>
@@ -92,17 +99,12 @@ impl CryptoHandshake {
     - fails to parse `CryptoHandshakePayload`
     */
     pub fn get_payload(&self, shared_secret: &SalsaBox) -> Result<CryptoHandshakePayload, GetPayloadError> {
-        let decrypted = shared_secret.decrypt((&self.nonce).into(), self.payload.as_slice())
-            .map_err(|AeadError| {
-                GetPayloadError::decrypt()
-            })?;
+        let decrypted = shared_secret
+            .decrypt((&self.nonce).into(), self.payload.as_slice())
+            .map_err(|AeadError| GetPayloadError::decrypt())?;
         match CryptoHandshakePayload::from_bytes(&decrypted) {
-            Err(error) => {
-                Err(GetPayloadError::deserialize(error, decrypted.clone()))
-            },
-            Ok((_, payload)) => {
-                Ok(payload)
-            }
+            Err(error) => Err(GetPayloadError::deserialize(error, decrypted.clone())),
+            Ok((_, payload)) => Ok(payload),
         }
     }
 }
@@ -136,7 +138,7 @@ pub struct CryptoHandshakePayload {
     /// Encrypted cookie of sender of `CryptoHandshake` packet. When node
     /// receives `CryptoHandshake` it can take this cookie instead of sending
     /// `CookieRequest` to obtain one.
-    pub cookie: EncryptedCookie
+    pub cookie: EncryptedCookie,
 }
 
 impl FromBytes for CryptoHandshakePayload {
@@ -146,16 +148,20 @@ impl FromBytes for CryptoHandshakePayload {
         let (input, cookie_hash) = <[u8; <Sha512 as OutputSizeUser>::OutputSize::USIZE]>::from_bytes(input)?;
         let (input, cookie) = EncryptedCookie::from_bytes(input)?;
         let (input, _) = eof(input)?;
-        Ok((input, CryptoHandshakePayload {
-            base_nonce,
-            session_pk,
-            cookie_hash,
-            cookie
-        }))
+        Ok((
+            input,
+            CryptoHandshakePayload {
+                base_nonce,
+                session_pk,
+                cookie_hash,
+                cookie,
+            },
+        ))
     }
 }
 
 impl ToBytes for CryptoHandshakePayload {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_slice!(self.base_nonce.as_ref()) >>
@@ -171,8 +177,8 @@ mod tests {
     use std::num::NonZeroUsize;
 
     use super::*;
-    use nom::{Needed, Err};
-    use crypto_box::aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned};
+    use crypto_box::aead::{generic_array::typenum::marker_traits::Unsigned, AeadCore};
+    use nom::{Err, Needed};
     use rand::thread_rng;
 
     encode_decode_test!(
@@ -273,27 +279,33 @@ mod tests {
         let invalid_packet = CryptoHandshake {
             cookie: cookie.clone(),
             nonce: nonce.into(),
-            payload: invalid_payload_encoded
+            payload: invalid_payload_encoded,
         };
         let decoded_payload = invalid_packet.get_payload(&shared_secret);
         let error = decoded_payload.err().unwrap();
-        assert_eq!(error, GetPayloadError::Deserialize {
-            error: Err::Incomplete(Needed::Size(NonZeroUsize::new(21).unwrap())),
-            payload: invalid_payload.to_vec()
-        });
+        assert_eq!(
+            error,
+            GetPayloadError::Deserialize {
+                error: Err::Incomplete(Needed::Size(NonZeroUsize::new(21).unwrap())),
+                payload: invalid_payload.to_vec()
+            }
+        );
         // Try short incomplete array
         let invalid_payload = [];
         let invalid_payload_encoded = shared_secret.encrypt(&nonce, &invalid_payload[..]).unwrap();
         let invalid_packet = CryptoHandshake {
             cookie,
             nonce: nonce.into(),
-            payload: invalid_payload_encoded
+            payload: invalid_payload_encoded,
         };
         let decoded_payload = invalid_packet.get_payload(&shared_secret);
         let error = decoded_payload.err().unwrap();
-        assert_eq!(error, GetPayloadError::Deserialize {
-            error: Err::Incomplete(Needed::Size(NonZeroUsize::new(24).unwrap())),
-            payload: invalid_payload.to_vec()
-        });
+        assert_eq!(
+            error,
+            GetPayloadError::Deserialize {
+                error: Err::Incomplete(Needed::Size(NonZeroUsize::new(24).unwrap())),
+                payload: invalid_payload.to_vec()
+            }
+        );
     }
 }

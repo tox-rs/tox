@@ -3,8 +3,8 @@
 
 use super::*;
 
-use nom::combinator::{rest_len, map_parser, verify};
 use nom::bytes::complete::{tag, take};
+use nom::combinator::{map_parser, rest_len, verify};
 
 use tox_binary_io::*;
 
@@ -28,7 +28,7 @@ pub struct OnionResponse1 {
     /// Return address encrypted by the first node from onion chain
     pub onion_return: OnionReturn,
     /// Encrypted payload
-    pub payload: InnerOnionResponse
+    pub payload: InnerOnionResponse,
 }
 
 impl FromBytes for OnionResponse1 {
@@ -42,6 +42,7 @@ impl FromBytes for OnionResponse1 {
 }
 
 impl ToBytes for OnionResponse1 {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x8e) >>

@@ -4,8 +4,8 @@
 use super::*;
 use crate::dht::packed_node::*;
 use nom::bytes::complete::tag;
-use nom::multi::many0;
 use nom::combinator::{success, verify};
+use nom::multi::many0;
 
 /// Id of the `ShareRelays` packet.
 pub const PACKET_ID_SHARE_RELAYS: u8 = 0x11;
@@ -36,13 +36,12 @@ impl FromBytes for ShareRelays {
         let (input, _) = tag(&[PACKET_ID_SHARE_RELAYS][..])(input)?;
         let (input, relays) = many0(PackedNode::from_tcp_bytes)(input)?;
         let (input, _) = verify(success(relays.len()), |len| *len <= MAX_SHARED_RELAYS)(input)?;
-        Ok((input, ShareRelays {
-            relays,
-        }))
+        Ok((input, ShareRelays { relays }))
     }
 }
 
 impl ToBytes for ShareRelays {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(PACKET_ID_SHARE_RELAYS) >>

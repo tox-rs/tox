@@ -45,7 +45,10 @@ assert_eq!( bob_msg.as_bytes().to_vec(), alice_channel.decrypt(bob_msg_encrypted
 
 */
 
-use crypto_box::{SalsaBox, aead::{Aead, AeadCore, Error as AeadError}};
+use crypto_box::{
+    aead::{Aead, AeadCore, Error as AeadError},
+    SalsaBox,
+};
 use rand::thread_rng;
 use tox_crypto::*;
 
@@ -67,7 +70,7 @@ pub struct Session {
     /// to establish a secure [`Channel`](./struct.Channel.html)
     sk: SecretKey,
     /// nonce must be sent to another person
-    nonce: Nonce
+    nonce: Nonce,
 }
 
 impl Session {
@@ -108,32 +111,39 @@ increment `recv_nonce` after data was decrypted.
 pub struct Channel {
     precomputed_key: SalsaBox,
     sent_nonce: RefCell<Nonce>,
-    recv_nonce: RefCell<Nonce>
+    recv_nonce: RefCell<Nonce>,
 }
 
 impl Channel {
     /** Create a secure channel with `our_session` and `their_pk` & `their_nonce`
-    */
+     */
     pub fn new(our_session: &Session, their_pk: &PublicKey, their_nonce: &Nonce) -> Channel {
         let precomputed = our_session.create_precomputed_key(their_pk);
         let sent_n = RefCell::new(*our_session.nonce());
         let recv_n = RefCell::new(*their_nonce);
-        Channel { precomputed_key: precomputed, sent_nonce: sent_n, recv_nonce: recv_n }
+        Channel {
+            precomputed_key: precomputed,
+            sent_nonce: sent_n,
+            recv_nonce: recv_n,
+        }
     }
     /** Encrypt data, increment sent_nonce
-    */
+     */
     pub fn encrypt(&self, plain: &[u8]) -> Vec<u8> {
         let mut nonce = self.sent_nonce.borrow_mut();
         let encrypted = self.precomputed_key.encrypt((&nonce[..]).into(), plain).unwrap();
-        increment_nonce( &mut nonce );
+        increment_nonce(&mut nonce);
         encrypted
     }
     /** Decrypt data, increment recv_nonce
-    */
+     */
     pub fn decrypt(&self, encrypted: &[u8]) -> Result<Vec<u8>, ()> {
         let mut nonce = self.recv_nonce.borrow_mut();
-        let decrypted = self.precomputed_key.decrypt((&nonce[..]).into(), encrypted).map_err(|AeadError| ());
-        increment_nonce( &mut nonce );
+        let decrypted = self
+            .precomputed_key
+            .decrypt((&nonce[..]).into(), encrypted)
+            .map_err(|AeadError| ());
+        increment_nonce(&mut nonce);
         decrypted
     }
 }
@@ -173,7 +183,10 @@ mod tests {
         // Alice sends it somehow
 
         // Bob receives and decrypts
-        assert_eq!( alice_msg.as_bytes().to_vec(), bob_channel.decrypt(alice_msg_encrypted.as_ref()).unwrap() );
+        assert_eq!(
+            alice_msg.as_bytes().to_vec(),
+            bob_channel.decrypt(alice_msg_encrypted.as_ref()).unwrap()
+        );
 
         // Now Bob encrypts his message
         let bob_msg = "Oh hello Alice!";
@@ -181,6 +194,9 @@ mod tests {
         assert_ne!(bob_msg.as_bytes().to_vec(), bob_msg_encrypted);
         // And sends it back to Alice
 
-        assert_eq!( bob_msg.as_bytes().to_vec(), alice_channel.decrypt(bob_msg_encrypted.as_ref()).unwrap() );
+        assert_eq!(
+            bob_msg.as_bytes().to_vec(),
+            alice_channel.decrypt(bob_msg_encrypted.as_ref()).unwrap()
+        );
     }
 }

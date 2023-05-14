@@ -26,11 +26,14 @@ According to the [spec](https://zetok.github.io/tox-spec#bucket-index).
 Fails (returns `None`) only if supplied keys are the same.
 */
 pub fn kbucket_index(own_pk: &PublicKey, other_pk: &PublicKey) -> Option<u8> {
-
     debug!(target: "KBucketIndex", "Calculating KBucketIndex for PKs.");
     trace!(target: "KBucketIndex", "With PK1: {:?}; PK2: {:?}", own_pk, other_pk);
 
-    let xoring = own_pk.as_bytes().iter().zip(other_pk.as_bytes().iter()).map(|(x, y)| x ^ y);
+    let xoring = own_pk
+        .as_bytes()
+        .iter()
+        .zip(other_pk.as_bytes().iter())
+        .map(|(x, y)| x ^ y);
     for (i, byte) in xoring.enumerate() {
         for j in 0..8 {
             if byte & (0x80 >> j) != 0 {
@@ -38,7 +41,7 @@ pub fn kbucket_index(own_pk: &PublicKey, other_pk: &PublicKey) -> Option<u8> {
             }
         }
     }
-    None  // PKs are equal
+    None // PKs are equal
 }
 
 /// Trait for functionality related to distance between `PublicKey`s.
@@ -50,11 +53,13 @@ pub trait Distance {
 
 impl Distance for PublicKey {
     fn distance(&self, pk1: &PublicKey, pk2: &PublicKey) -> Ordering {
-
         trace!(target: "Distance", "Comparing distance between PKs.");
         for i in 0..crypto_box::KEY_SIZE {
             if pk1.as_bytes()[i] != pk2.as_bytes()[i] {
-                return Ord::cmp(&(self.as_bytes()[i] ^ pk1.as_bytes()[i]), &(self.as_bytes()[i] ^ pk2.as_bytes()[i]))
+                return Ord::cmp(
+                    &(self.as_bytes()[i] ^ pk1.as_bytes()[i]),
+                    &(self.as_bytes()[i] ^ pk2.as_bytes()[i]),
+                );
             }
         }
         Ordering::Equal
@@ -74,7 +79,7 @@ impl HasPk for PackedNode {
 }
 
 /// Node that can be stored in a `Kbucket`.
-pub trait KbucketNode : Sized + HasPk {
+pub trait KbucketNode: Sized + HasPk {
     /// The type of nodes that can be added to a `Kbucket`.
     type NewNode: HasPk;
     /// The type of nodes that can be checked if they can be added to a
@@ -152,7 +157,7 @@ impl<NewNode, CheckNode, Node> Kbucket<Node>
 where
     NewNode: HasPk,
     CheckNode: HasPk,
-    Node: KbucketNode<NewNode = NewNode, CheckNode = CheckNode> + From<NewNode>
+    Node: KbucketNode<NewNode = NewNode, CheckNode = CheckNode> + From<NewNode>,
 {
     /** Create a new `Kbucket` to store nodes close to the `PublicKey`.
 
@@ -172,8 +177,7 @@ where
 
     /// Get reference to a `KbucketNode` by it's `PublicKey`.
     pub fn get_node(&self, base_pk: &PublicKey, pk: &PublicKey) -> Option<&Node> {
-        self.find(base_pk, pk)
-            .map(move |node_index| &self.nodes[node_index])
+        self.find(base_pk, pk).map(move |node_index| &self.nodes[node_index])
     }
 
     /// Get mutable reference to a `KbucketNode` by it's `PublicKey`.
@@ -209,13 +213,16 @@ where
     pub fn try_add(&mut self, base_pk: &PublicKey, new_node: NewNode, evict: bool) -> bool {
         trace!(target: "Kbucket", "Trying to add PackedNode: {:?}.", new_node.pk());
 
-        match self.nodes.binary_search_by(|n| base_pk.distance(&n.pk(), &new_node.pk())) {
+        match self
+            .nodes
+            .binary_search_by(|n| base_pk.distance(&n.pk(), &new_node.pk()))
+        {
             Ok(index) => {
                 debug!(target: "Kbucket",
                     "Updated: the node was already in the kbucket.");
                 self.nodes[index].update(&new_node);
                 true
-            },
+            }
             Err(index) if !evict || index == self.nodes.len() => {
                 // index is pointing past the end
                 // we are not going to evict the farthest node or the current
@@ -242,7 +249,7 @@ where
                     self.nodes.insert(index, new_node.into());
                     true
                 }
-            },
+            }
             Err(index) => {
                 // index is pointing inside the list
                 // we are going to evict the farthest node if the kbucket is full
@@ -258,7 +265,7 @@ where
                     debug!(target: "Kbucket", "Node inserted inside the kbucket.");
                 }
                 true
-            },
+            }
         }
     }
 
@@ -336,19 +343,28 @@ where
     [`PackedNode`]: ./struct.PackedNode.html
     */
     pub fn can_add(&self, base_pk: &PublicKey, new_node: &CheckNode, evict: bool) -> bool {
-        match self.nodes.binary_search_by(|n| base_pk.distance(&n.pk(), &new_node.pk())) {
+        match self
+            .nodes
+            .binary_search_by(|n| base_pk.distance(&n.pk(), &new_node.pk()))
+        {
             Ok(index) =>
-                // if node is bad then we'd want to update it's address
-                self.nodes[index].is_evictable() || self.nodes[index].is_outdated(new_node),
+            // if node is bad then we'd want to update it's address
+            {
+                self.nodes[index].is_evictable() || self.nodes[index].is_outdated(new_node)
+            }
             Err(index) if !evict || index == self.nodes.len() =>
-                // can't find node in the kbucket
-                // we are not going to evict the farthest node or the current
-                // node is the farthest one
-                !self.is_full() || self.nodes.iter().any(|n| n.is_evictable()),
+            // can't find node in the kbucket
+            // we are not going to evict the farthest node or the current
+            // node is the farthest one
+            {
+                !self.is_full() || self.nodes.iter().any(|n| n.is_evictable())
+            }
             Err(_index) =>
-                // can't find node in the kbucket
-                // we are going to evict the farthest node if the kbucket is full
-                true,
+            // can't find node in the kbucket
+            // we are going to evict the farthest node if the kbucket is full
+            {
+                true
+            }
         }
     }
 
@@ -373,11 +389,7 @@ mod tests {
 
     use super::*;
 
-    use std::net::{
-        Ipv4Addr,
-        SocketAddr,
-        SocketAddrV4,
-    };
+    use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
     use std::time::Duration;
 
     use crate::dht::dht_node::*;
@@ -413,7 +425,7 @@ mod tests {
         let pk = PublicKey::from([0; crypto_box::KEY_SIZE]);
         let mut kbucket = Kbucket::<DhtNode>::new(KBUCKET_DEFAULT_SIZE);
 
-        for i in 0 .. 8 {
+        for i in 0..8 {
             let addr = SocketAddr::new("1.2.3.4".parse().unwrap(), 12345 + u16::from(i));
             let node = PackedNode::new(addr, PublicKey::from([i + 2; crypto_box::KEY_SIZE]));
             assert!(kbucket.try_add(&pk, node, /* evict */ false));
@@ -421,15 +433,15 @@ mod tests {
 
         let closer_node = PackedNode::new(
             "1.2.3.5:12345".parse().unwrap(),
-            PublicKey::from([1; crypto_box::KEY_SIZE])
+            PublicKey::from([1; crypto_box::KEY_SIZE]),
         );
         let farther_node = PackedNode::new(
             "1.2.3.5:12346".parse().unwrap(),
-            PublicKey::from([10; crypto_box::KEY_SIZE])
+            PublicKey::from([10; crypto_box::KEY_SIZE]),
         );
         let existing_node = PackedNode::new(
             "1.2.3.5:12347".parse().unwrap(),
-            PublicKey::from([2; crypto_box::KEY_SIZE])
+            PublicKey::from([2; crypto_box::KEY_SIZE]),
         );
 
         // can't add a new farther node
@@ -451,11 +463,11 @@ mod tests {
 
         let node_1 = PackedNode::new(
             "1.2.3.4:12345".parse().unwrap(),
-            PublicKey::from([1; crypto_box::KEY_SIZE])
+            PublicKey::from([1; crypto_box::KEY_SIZE]),
         );
         let node_2 = PackedNode::new(
             "1.2.3.4:12346".parse().unwrap(),
-            PublicKey::from([2; crypto_box::KEY_SIZE])
+            PublicKey::from([2; crypto_box::KEY_SIZE]),
         );
 
         assert!(kbucket.try_add(&pk, node_2, /* evict */ false));
@@ -478,22 +490,10 @@ mod tests {
         let pk_3 = PublicKey::from([3; crypto_box::KEY_SIZE]);
         let pk_4 = PublicKey::from([4; crypto_box::KEY_SIZE]);
 
-        let node_1 = PackedNode::new(
-            "1.2.3.4:12345".parse().unwrap(),
-            pk_1.clone(),
-        );
-        let node_2 = PackedNode::new(
-            "1.2.3.4:12346".parse().unwrap(),
-            pk_2.clone(),
-        );
-        let node_3 = PackedNode::new(
-            "1.2.3.4:12346".parse().unwrap(),
-            pk_3.clone(),
-        );
-        let node_4 = PackedNode::new(
-            "1.2.3.4:12346".parse().unwrap(),
-            pk_4.clone(),
-        );
+        let node_1 = PackedNode::new("1.2.3.4:12345".parse().unwrap(), pk_1.clone());
+        let node_2 = PackedNode::new("1.2.3.4:12346".parse().unwrap(), pk_2.clone());
+        let node_3 = PackedNode::new("1.2.3.4:12346".parse().unwrap(), pk_3.clone());
+        let node_4 = PackedNode::new("1.2.3.4:12346".parse().unwrap(), pk_4.clone());
 
         assert!(kbucket.try_add(&pk, node_2, /* evict */ false));
 
@@ -517,11 +517,11 @@ mod tests {
 
         let node_1 = PackedNode::new(
             "1.2.3.4:12345".parse().unwrap(),
-            PublicKey::from([1; crypto_box::KEY_SIZE])
+            PublicKey::from([1; crypto_box::KEY_SIZE]),
         );
         let node_2 = PackedNode::new(
             "1.2.3.4:12346".parse().unwrap(),
-            PublicKey::from([2; crypto_box::KEY_SIZE])
+            PublicKey::from([2; crypto_box::KEY_SIZE]),
         );
 
         assert!(kbucket.try_add(&pk, node_1, /* evict */ true));
@@ -543,18 +543,9 @@ mod tests {
         let pk_2 = PublicKey::from([2; crypto_box::KEY_SIZE]);
         let pk_3 = PublicKey::from([3; crypto_box::KEY_SIZE]);
 
-        let node_1 = PackedNode::new(
-            "1.2.3.4:12345".parse().unwrap(),
-            pk_1.clone(),
-        );
-        let node_2 = PackedNode::new(
-            "1.2.3.4:12346".parse().unwrap(),
-            pk_2.clone(),
-        );
-        let node_3 = PackedNode::new(
-            "1.2.3.4:12346".parse().unwrap(),
-            pk_3.clone(),
-        );
+        let node_1 = PackedNode::new("1.2.3.4:12345".parse().unwrap(), pk_1.clone());
+        let node_2 = PackedNode::new("1.2.3.4:12346".parse().unwrap(), pk_2.clone());
+        let node_3 = PackedNode::new("1.2.3.4:12346".parse().unwrap(), pk_3.clone());
 
         assert!(kbucket.try_add(&pk, node_1, /* evict */ true));
 
@@ -576,7 +567,7 @@ mod tests {
 
         let node = PackedNode::new(
             "1.2.3.4:12345".parse().unwrap(),
-            PublicKey::from([1; crypto_box::KEY_SIZE])
+            PublicKey::from([1; crypto_box::KEY_SIZE]),
         );
 
         // "removing" non-existent node
@@ -601,7 +592,7 @@ mod tests {
 
         let node = PackedNode::new(
             "1.2.3.4:12345".parse().unwrap(),
-            PublicKey::from([1; crypto_box::KEY_SIZE])
+            PublicKey::from([1; crypto_box::KEY_SIZE]),
         );
 
         assert!(kbucket.try_add(&pk, node, /* evict */ true));
@@ -713,6 +704,7 @@ mod tests {
         kbucket.try_add(&base_pk, n1.clone(), true); // => 0
         kbucket.try_add(&base_pk, n2.clone(), true); // => 1
         kbucket.try_add(&base_pk, n3.clone(), true); // => 2
+
         // test removing from the beginning (n1 => 0)
         kbucket.remove(&base_pk, &n1.pk);
         assert_eq!(kbucket.find(&base_pk, &n1.pk), None);
@@ -728,6 +720,7 @@ mod tests {
         kbucket.try_add(&base_pk, n1.clone(), true); // => 0
         kbucket.try_add(&base_pk, n2.clone(), true); // => 1
         kbucket.try_add(&base_pk, n3.clone(), true); // => 2
+
         // test removing from the middle (n2 => 1)
         kbucket.remove(&base_pk, &n2.pk);
         assert_eq!(kbucket.find(&base_pk, &n1.pk), Some(0));
@@ -743,6 +736,7 @@ mod tests {
         kbucket.try_add(&base_pk, n1.clone(), true); // => 0
         kbucket.try_add(&base_pk, n2.clone(), true); // => 1
         kbucket.try_add(&base_pk, n3.clone(), true); // => 2
+
         // test removing from the end (n3 => 2)
         kbucket.remove(&base_pk, &n3.pk);
         assert_eq!(kbucket.find(&base_pk, &n1.pk), Some(0));
@@ -759,7 +753,7 @@ mod tests {
 
         let node = PackedNode::new(
             "1.2.3.4:12345".parse().unwrap(),
-            PublicKey::from([1; crypto_box::KEY_SIZE])
+            PublicKey::from([1; crypto_box::KEY_SIZE]),
         );
 
         assert!(kbucket.try_add(&pk, node, /* evict */ true));

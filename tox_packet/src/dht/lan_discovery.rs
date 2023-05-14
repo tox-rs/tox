@@ -29,6 +29,7 @@ pub struct LanDiscovery {
 }
 
 impl ToBytes for LanDiscovery {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x21) >>

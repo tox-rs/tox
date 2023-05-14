@@ -2,17 +2,17 @@
 */
 use super::*;
 
-use nom::{
-    number::complete::be_u64,
-    combinator::rest,
+use crypto_box::{
+    aead::{Aead, AeadCore, Error as AeadError},
+    SalsaBox,
 };
-use crypto_box::{SalsaBox, aead::{Aead, AeadCore, Error as AeadError}};
+use nom::{combinator::rest, number::complete::be_u64};
 
+use crate::dht::errors::*;
+use nom::bytes::complete::tag;
+use nom::combinator::eof;
 use tox_binary_io::*;
 use tox_crypto::*;
-use crate::dht::errors::*;
-use nom::combinator::eof;
-use nom::bytes::complete::tag;
 
 /** Ping response packet struct. When `PingRequest` is received DHT node should
 respond with `PingResponse` that contains the same ping id inside it's encrypted
@@ -41,6 +41,7 @@ pub struct PingResponse {
 }
 
 impl ToBytes for PingResponse {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x01) >>
@@ -83,18 +84,13 @@ impl PingResponse {
     - fails to parse as given packet type
     */
     pub fn get_payload(&self, shared_secret: &SalsaBox) -> Result<PingResponsePayload, GetPayloadError> {
-        let decrypted = shared_secret.decrypt((&self.nonce).into(), self.payload.as_slice())
-            .map_err(|AeadError| {
-                GetPayloadError::decrypt()
-            })?;
+        let decrypted = shared_secret
+            .decrypt((&self.nonce).into(), self.payload.as_slice())
+            .map_err(|AeadError| GetPayloadError::decrypt())?;
 
         match PingResponsePayload::from_bytes(&decrypted) {
-            Err(error) => {
-                Err(GetPayloadError::deserialize(error, decrypted.clone()))
-            },
-            Ok((_, payload)) => {
-                Ok(payload)
-            }
+            Err(error) => Err(GetPayloadError::deserialize(error, decrypted.clone())),
+            Ok((_, payload)) => Ok(payload),
         }
     }
 }
@@ -137,6 +133,7 @@ impl FromBytes for PingResponsePayload {
 }
 
 impl ToBytes for PingResponsePayload {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x01) >>
@@ -150,10 +147,7 @@ mod tests {
     use crate::dht::ping_response::*;
     use crate::dht::Packet;
 
-    encode_decode_test!(
-        ping_response_payload_encode_decode,
-        PingResponsePayload { id: 42 }
-    );
+    encode_decode_test!(ping_response_payload_encode_decode, PingResponsePayload { id: 42 });
 
     dht_packet_encode_decode!(ping_response_encode_decode, PingResponse);
 

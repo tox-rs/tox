@@ -3,9 +3,9 @@ handshake using [`diagram`](https://zetok.github.io/tox-spec/#handshake-diagram)
 
 */
 
+use nom::bytes::streaming::take;
 use tox_binary_io::*;
 use tox_crypto::*;
-use nom::bytes::streaming::take;
 
 /** The request of the client to create a TCP handshake.
 
@@ -29,7 +29,7 @@ pub struct ClientHandshake {
     pub nonce: Nonce,
     /// Encrypted payload according to
     /// [Tox spec](https://zetok.github.io/tox-spec/#handshake-request-packet-payload).
-    pub payload: Vec<u8>
+    pub payload: Vec<u8>,
 }
 
 /// A serialized client handshake must be equal to 32 (PK) + 24 (nonce)
@@ -41,11 +41,19 @@ impl FromBytes for ClientHandshake {
         let (input, pk) = PublicKey::from_bytes(input)?;
         let (input, nonce) = Nonce::from_bytes(input)?;
         let (input, payload) = take(ENC_PAYLOAD_SIZE)(input)?;
-        Ok((input, ClientHandshake { pk, nonce, payload: payload.to_vec() }))
+        Ok((
+            input,
+            ClientHandshake {
+                pk,
+                nonce,
+                payload: payload.to_vec(),
+            },
+        ))
     }
 }
 
 impl ToBytes for ClientHandshake {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_slice!(self.pk.as_ref()) >>
@@ -74,7 +82,7 @@ pub struct ServerHandshake {
     pub nonce: Nonce,
     /// Encrypted payload according to
     /// [Tox spec](https://zetok.github.io/tox-spec/#handshake-response-payload).
-    pub payload: Vec<u8>
+    pub payload: Vec<u8>,
 }
 
 /// A serialized server handshake must be equal to 24 (nonce)
@@ -85,11 +93,18 @@ impl FromBytes for ServerHandshake {
     fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
         let (input, nonce) = Nonce::from_bytes(input)?;
         let (input, payload) = take(ENC_PAYLOAD_SIZE)(input)?;
-        Ok((input, ServerHandshake { nonce, payload: payload.to_vec() }))
+        Ok((
+            input,
+            ServerHandshake {
+                nonce,
+                payload: payload.to_vec(),
+            },
+        ))
     }
 }
 
 impl ToBytes for ServerHandshake {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_slice!(self.nonce.as_ref()) >>
@@ -123,7 +138,7 @@ pub struct HandshakePayload {
     /// Temporary Session PK
     pub session_pk: PublicKey,
     /// Temporary Session Nonce
-    pub session_nonce: Nonce
+    pub session_nonce: Nonce,
 }
 
 /// A serialized payload must be equal to 32 (PK) + 24 (nonce) bytes
@@ -136,11 +151,18 @@ impl FromBytes for HandshakePayload {
     fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
         let (input, pk) = PublicKey::from_bytes(input)?;
         let (input, nonce) = Nonce::from_bytes(input)?;
-        Ok((input, HandshakePayload { session_pk: pk, session_nonce: nonce }))
+        Ok((
+            input,
+            HandshakePayload {
+                session_pk: pk,
+                session_nonce: nonce,
+            },
+        ))
     }
 }
 
 impl ToBytes for HandshakePayload {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_slice!(self.session_pk.as_ref()) >>

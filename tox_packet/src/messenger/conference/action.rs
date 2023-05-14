@@ -3,12 +3,12 @@
 
 use super::*;
 
-use std::str;
 use nom::{
-    number::complete::{be_u16, be_u32},
-    combinator::{rest, map_res},
     bytes::complete::tag,
+    combinator::{map_res, rest},
+    number::complete::{be_u16, be_u32},
 };
+use std::str;
 
 /** Action is the struct that holds info to send action to a conference.
 
@@ -47,16 +47,20 @@ impl FromBytes for Action {
         let (input, message_id) = be_u32(input)?;
         let (input, _) = tag("\x41")(input)?;
         let (input, action) = map_res(rest, str::from_utf8)(input)?;
-        Ok((input, Action {
-            conference_id,
-            peer_id,
-            message_id,
-            action: action.to_string(),
-        }))
+        Ok((
+            input,
+            Action {
+                conference_id,
+                peer_id,
+                message_id,
+                action: action.to_string(),
+            },
+        ))
     }
 }
 
 impl ToBytes for Action {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x63) >>
@@ -85,10 +89,7 @@ impl Action {
 mod tests {
     use super::*;
 
-    encode_decode_test!(
-        conference_action_encode_decode,
-        Action::new(1, 2, 3, "1234".to_owned())
-    );
+    encode_decode_test!(conference_action_encode_decode, Action::new(1, 2, 3, "1234".to_owned()));
 
     #[test]
     fn conference_action_from_bytes_encoding_error() {

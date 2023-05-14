@@ -1,7 +1,7 @@
 //! Functions for the core crypto.
 
-use crypto_box::{SalsaBox, aead::generic_array::typenum::marker_traits::Unsigned};
 use crypto_box::aead::AeadCore;
+use crypto_box::{aead::generic_array::typenum::marker_traits::Unsigned, SalsaBox};
 pub use crypto_box::{PublicKey, SecretKey};
 
 pub type Nonce = [u8; <SalsaBox as AeadCore>::NonceSize::USIZE];
@@ -37,7 +37,7 @@ pub fn increment_nonce(nonce: &mut Nonce) {
 /// Inrement given nonce by number `num`.
 pub fn increment_nonce_number(nonce: &mut Nonce, num: u16) {
     let mut c = num as u32;
-    for i in (0 .. NONCEBYTES).rev() {
+    for i in (0..NONCEBYTES).rev() {
         c += nonce[i] as u32;
         nonce[i] = c as u8;
         c >>= 8;
@@ -50,9 +50,7 @@ pub mod tests {
 
     #[test]
     fn increment_nonce_test_zero_plus_one() {
-        let cmp_nonce = [0, 0, 0, 0, 0, 0, 0, 0,
-                         0, 0, 0, 0, 0, 0, 0, 0,
-                         0, 0, 0, 0, 0, 0, 0, 1];
+        let cmp_nonce = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
 
         let mut nonce = [0; NONCEBYTES];
         increment_nonce(&mut nonce);
@@ -61,26 +59,22 @@ pub mod tests {
 
     #[test]
     fn increment_nonce_test_0xf_plus_one() {
-        let cmp_nonce = [0, 0, 0, 0, 0, 0, 0, 0,
-                         0, 0, 0, 0, 0, 0, 0, 0,
-                         0, 0, 0, 0, 0, 0, 0, 0x10];
+        let cmp_nonce = [
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10,
+        ];
 
-        let mut nonce = [0, 0, 0, 0, 0, 0, 0, 0,
-                         0, 0, 0, 0, 0, 0, 0, 0,
-                         0, 0, 0, 0, 0, 0, 0, 0xf];
+        let mut nonce = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xf];
         increment_nonce(&mut nonce);
         assert_eq!(nonce, cmp_nonce);
     }
 
     #[test]
     fn increment_nonce_test_0xff_plus_one() {
-        let cmp_nonce = [0, 0, 0, 0, 0, 0, 0, 0,
-                         0, 0, 0, 0, 0, 0, 0, 0,
-                         0, 0, 0, 0, 0, 0, 1, 0];
+        let cmp_nonce = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0];
 
-        let mut nonce = [0, 0, 0, 0, 0, 0, 0, 0,
-                         0, 0, 0, 0, 0, 0, 0, 0,
-                         0, 0, 0, 0, 0, 0, 0, 0xff];
+        let mut nonce = [
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff,
+        ];
         increment_nonce(&mut nonce);
         assert_eq!(nonce, cmp_nonce);
     }
@@ -97,9 +91,9 @@ pub mod tests {
 
     #[test]
     fn increment_nonce_number_test_zero_plus_0xff00() {
-        let cmp_nonce = [0, 0, 0, 0, 0, 0, 0, 0,
-                         0, 0, 0, 0, 0, 0, 0, 0,
-                         0, 0, 0, 0, 0, 0, 0xff, 0];
+        let cmp_nonce = [
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0,
+        ];
         let mut nonce = [0; NONCEBYTES];
 
         increment_nonce_number(&mut nonce, 0xff00);
@@ -108,13 +102,13 @@ pub mod tests {
 
     #[test]
     fn increment_nonce_number_test_0xff00_plus_0x0110() {
-        let cmp_nonce = [0, 0, 0, 0, 0, 0, 0, 0,
-                         0, 0, 0, 0, 0, 0, 0, 0,
-                         0, 0, 0, 0, 0, 1, 0, 0x10];
+        let cmp_nonce = [
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0x10,
+        ];
 
-        let mut nonce = [0, 0, 0, 0, 0, 0, 0, 0,
-                         0, 0, 0, 0, 0, 0, 0, 0,
-                         0, 0, 0, 0, 0, 0, 0xff, 0];
+        let mut nonce = [
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0,
+        ];
 
         increment_nonce_number(&mut nonce, 0x01_10);
         assert_eq!(nonce, cmp_nonce);

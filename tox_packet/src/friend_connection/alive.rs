@@ -36,9 +36,5 @@ impl ToBytes for Alive {
 mod tests {
     use super::*;
 
-    encode_decode_test!(
-        alive_encode_decode,
-        Alive
-    );
-
+    encode_decode_test!(alive_encode_decode, Alive);
 }

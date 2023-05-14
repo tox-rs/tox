@@ -1,22 +1,17 @@
 //! `IpAddr` with a port number.
 
-use std::net::{
-    IpAddr,
-    Ipv4Addr,
-    Ipv6Addr,
-    SocketAddr,
-};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
+use cookie_factory::{do_gen, gen_be_u16, gen_be_u8, gen_call, gen_cond, gen_slice};
 use nom::{
-    IResult,
     branch::alt,
-    combinator::{map, flat_map, cond},
-    error::{ErrorKind, make_error},
+    bytes::complete::take,
+    combinator::{cond, flat_map, map},
+    error::{make_error, ErrorKind},
     number::complete::{be_u16, le_u8},
     sequence::terminated,
-    bytes::complete::take
+    IResult,
 };
-use cookie_factory::{do_gen, gen_slice, gen_cond, gen_call, gen_be_u8, gen_be_u16};
 
 use tox_binary_io::*;
 
@@ -49,7 +44,7 @@ pub enum ProtocolType {
     /// `UDP` type if the least significant bit is 0.
     Udp,
     /// `TCP` type if the least significant bit is 1.
-    Tcp
+    Tcp,
 }
 
 /** `IpAddr` with a port number. IPv4 can be padded with 12 bytes of zeros
@@ -72,7 +67,7 @@ pub struct IpPort {
     /// IP address
     pub ip_addr: IpAddr,
     /// Port number
-    pub port: u16
+    pub port: u16,
 }
 
 impl IpPort {
@@ -105,30 +100,48 @@ impl IpPort {
 
     /// Parse `IpPort` with UDP protocol type with optional padding.
     pub fn from_udp_bytes(input: &[u8], padding: IpPortPadding) -> IResult<&[u8], IpPort> {
-        let (input, ip_addr) = flat_map(le_u8, |b| move |input| match b {
-            2 => terminated(
-                map(Ipv4Addr::from_bytes, IpAddr::V4),
-                cond(padding == IpPortPadding::WithPadding, take(IPV4_PADDING_SIZE))
-            )(input),
-            10 => map(Ipv6Addr::from_bytes, IpAddr::V6)(input),
-            _ => Err(nom::Err::Error(make_error(input, ErrorKind::Switch))),
+        let (input, ip_addr) = flat_map(le_u8, |b| {
+            move |input| match b {
+                2 => terminated(
+                    map(Ipv4Addr::from_bytes, IpAddr::V4),
+                    cond(padding == IpPortPadding::WithPadding, take(IPV4_PADDING_SIZE)),
+                )(input),
+                10 => map(Ipv6Addr::from_bytes, IpAddr::V6)(input),
+                _ => Err(nom::Err::Error(make_error(input, ErrorKind::Switch))),
+            }
         })(input)?;
         let (input, port) = be_u16(input)?;
-        Ok((input, IpPort { protocol: ProtocolType::Udp, ip_addr, port }))
+        Ok((
+            input,
+            IpPort {
+                protocol: ProtocolType::Udp,
+                ip_addr,
+                port,
+            },
+        ))
     }
 
     /// Parse `IpPort` with TCP protocol type with optional padding.
     pub fn from_tcp_bytes(input: &[u8], padding: IpPortPadding) -> IResult<&[u8], IpPort> {
-        let (input, ip_addr) = flat_map(le_u8, |b| move |input| match b {
-            130 => terminated(
-                map(Ipv4Addr::from_bytes, IpAddr::V4),
-                cond(padding == IpPortPadding::WithPadding, take(IPV4_PADDING_SIZE))
-            )(input),
-            138 => map(Ipv6Addr::from_bytes, IpAddr::V6)(input),
-            _ => Err(nom::Err::Error(make_error(input, ErrorKind::Switch))),
+        let (input, ip_addr) = flat_map(le_u8, |b| {
+            move |input| match b {
+                130 => terminated(
+                    map(Ipv4Addr::from_bytes, IpAddr::V4),
+                    cond(padding == IpPortPadding::WithPadding, take(IPV4_PADDING_SIZE)),
+                )(input),
+                138 => map(Ipv6Addr::from_bytes, IpAddr::V6)(input),
+                _ => Err(nom::Err::Error(make_error(input, ErrorKind::Switch))),
+            }
         })(input)?;
         let (input, port) = be_u16(input)?;
-        Ok((input, IpPort { protocol: ProtocolType::Tcp, ip_addr, port }))
+        Ok((
+            input,
+            IpPort {
+                protocol: ProtocolType::Tcp,
+                ip_addr,
+                port,
+            },
+        ))
     }
 
     /// Parse `IpPort` with optional padding.
@@ -140,6 +153,7 @@ impl IpPort {
     }
 
     /// Write `IpPort` with UDP protocol type with optional padding.
+    #[rustfmt::skip]
     pub fn to_udp_bytes<'a>(&self, buf: (&'a mut [u8], usize), padding: IpPortPadding) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_cond!(self.protocol == ProtocolType::Tcp, |buf| gen_error(buf, 0)) >>
@@ -148,6 +162,7 @@ impl IpPort {
     }
 
     /// Write `IpPort` with TCP protocol type with optional padding.
+    #[rustfmt::skip]
     pub fn to_tcp_bytes<'a>(&self, buf: (&'a mut [u8], usize), padding: IpPortPadding) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_cond!(self.protocol == ProtocolType::Udp, |buf| gen_error(buf, 0)) >>
@@ -156,6 +171,7 @@ impl IpPort {
     }
 
     /// Write `IpPort` with optional padding.
+    #[rustfmt::skip]
     pub fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize), padding: IpPortPadding) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(self.ip_type()) >>
@@ -170,7 +186,7 @@ impl IpPort {
         IpPort {
             protocol: ProtocolType::Udp,
             ip_addr: saddr.ip(),
-            port: saddr.port()
+            port: saddr.port(),
         }
     }
 
@@ -179,7 +195,7 @@ impl IpPort {
         IpPort {
             protocol: ProtocolType::Tcp,
             ip_addr: saddr.ip(),
-            port: saddr.port()
+            port: saddr.port(),
         }
     }
 
@@ -242,7 +258,7 @@ mod tests {
         let ip_port_1 = IpPort {
             protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
-            port: 12345
+            port: 12345,
         };
         let ip_port_2 = IpPort::from_udp_saddr(ip_port_1.to_saddr());
         assert_eq!(ip_port_2, ip_port_1);
@@ -253,7 +269,7 @@ mod tests {
         let ip_port_1 = IpPort {
             protocol: ProtocolType::Tcp,
             ip_addr: "5.6.7.8".parse().unwrap(),
-            port: 12345
+            port: 12345,
         };
         let ip_port_2 = IpPort::from_tcp_saddr(ip_port_1.to_saddr());
         assert_eq!(ip_port_2, ip_port_1);

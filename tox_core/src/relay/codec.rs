@@ -3,14 +3,14 @@
 
 use std::io::Error as IoError;
 
-use tox_binary_io::*;
-use tox_packet::relay::*;
 use crate::relay::secure::*;
 use crate::stats::*;
+use tox_binary_io::*;
+use tox_packet::relay::*;
 
+use bytes::{Buf, BytesMut};
+use nom::{error::ErrorKind, Err, Needed, Offset};
 use thiserror::Error;
-use nom::{Needed, Offset, Err, error::ErrorKind};
-use bytes::{BytesMut, Buf};
 use tokio_util::codec::{Decoder, Encoder};
 
 /// Error that can happen when decoding `Packet` from bytes
@@ -47,15 +47,13 @@ pub enum DecodeError {
     #[error("IO error: {:?}", error)]
     IoError {
         /// IO error
-        error: IoError
+        error: IoError,
     },
 }
 
 impl From<IoError> for DecodeError {
     fn from(error: IoError) -> DecodeError {
-        DecodeError::IoError {
-            error
-        }
+        DecodeError::IoError { error }
     }
 }
 
@@ -66,37 +64,32 @@ pub enum EncodeError {
     #[error("Serialize Packet error: {:?}", error)]
     SerializeError {
         /// Serialization error
-        error: GenError
+        error: GenError,
     },
     /// General IO error
     #[error("IO error: {:?}", error)]
     IoError {
         /// IO error
-        error: IoError
+        error: IoError,
     },
 }
 
 impl From<IoError> for EncodeError {
     fn from(error: IoError) -> EncodeError {
-        EncodeError::IoError {
-            error
-        }
+        EncodeError::IoError { error }
     }
 }
 
 /// implements tokio-io's Decoder and Encoder to deal with Packet
 pub struct Codec {
     channel: Channel,
-    stats: Stats
+    stats: Stats,
 }
 
 impl Codec {
     /// create a new Codec with the given Channel
     pub fn new(channel: Channel, stats: Stats) -> Codec {
-        Codec {
-            channel,
-            stats
-        }
+        Codec { channel, stats }
     }
 }
 
@@ -107,33 +100,42 @@ impl Decoder for Codec {
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         // deserialize EncryptedPacket
         let (consumed, encrypted_packet) = match EncryptedPacket::from_bytes(buf) {
-            Err(Err::Incomplete(_)) => {
-                return Ok(None)
-            },
+            Err(Err::Incomplete(_)) => return Ok(None),
             Err(Err::Error(error)) => {
-                return Err(DecodeError::DeserializeEncryptedError { error: error.code, buf: buf.to_vec() })
-            },
-            Err(Err::Failure(error)) => {
-                return Err(DecodeError::DeserializeEncryptedError { error: error.code, buf: buf.to_vec() })
-            },
-            Ok((i, encrypted_packet)) => {
-                (buf.offset(i), encrypted_packet)
+                return Err(DecodeError::DeserializeEncryptedError {
+                    error: error.code,
+                    buf: buf.to_vec(),
+                })
             }
+            Err(Err::Failure(error)) => {
+                return Err(DecodeError::DeserializeEncryptedError {
+                    error: error.code,
+                    buf: buf.to_vec(),
+                })
+            }
+            Ok((i, encrypted_packet)) => (buf.offset(i), encrypted_packet),
         };
 
         // decrypt payload
-        let decrypted_data = self.channel.decrypt(&encrypted_packet.payload)
+        let decrypted_data = self
+            .channel
+            .decrypt(&encrypted_packet.payload)
             .map_err(|()| DecodeError::DecryptError)?;
 
         // deserialize Packet
         match Packet::from_bytes(&decrypted_data) {
-            Err(Err::Incomplete(needed)) => Err(DecodeError::IncompleteDecryptedPacket { needed, packet: decrypted_data }),
-            Err(Err::Error(error)) => {
-                Err(DecodeError::DeserializeDecryptedError { error: error.code, packet: decrypted_data })
-            },
-            Err(Err::Failure(error)) => {
-                Err(DecodeError::DeserializeDecryptedError { error: error.code, packet: decrypted_data })
-            },
+            Err(Err::Incomplete(needed)) => Err(DecodeError::IncompleteDecryptedPacket {
+                needed,
+                packet: decrypted_data,
+            }),
+            Err(Err::Error(error)) => Err(DecodeError::DeserializeDecryptedError {
+                error: error.code,
+                packet: decrypted_data,
+            }),
+            Err(Err::Failure(error)) => Err(DecodeError::DeserializeDecryptedError {
+                error: error.code,
+                packet: decrypted_data,
+            }),
             Ok((_i, packet)) => {
                 // Add 1 to incoming counter
                 self.stats.counters.increase_incoming();
@@ -154,7 +156,8 @@ impl Encoder<Packet> for Codec {
 
         // serialize Packet
         let mut packet_buf = [0; MAX_TCP_PACKET_SIZE];
-        let (_, packet_size) = packet.to_bytes((&mut packet_buf, 0))
+        let (_, packet_size) = packet
+            .to_bytes((&mut packet_buf, 0))
             .map_err(|error| EncodeError::SerializeError { error })?;
 
         // encrypt it
@@ -165,10 +168,11 @@ impl Encoder<Packet> for Codec {
 
         // serialize EncryptedPacket to binary form
         let mut encrypted_packet_buf = [0; MAX_TCP_ENC_PACKET_SIZE];
-        let (_, encrypted_packet_size) = encrypted_packet.to_bytes((&mut encrypted_packet_buf, 0))
-            .expect("EncryptedPacket serialize failed");  // there is nothing to fail since
-                                                                // serialized Packet is not longer than 2032 bytes
-                                                                // and we provided 2050 bytes for EncryptedPacket
+        let (_, encrypted_packet_size) = encrypted_packet
+            .to_bytes((&mut encrypted_packet_buf, 0))
+            .expect("EncryptedPacket serialize failed"); // there is nothing to fail since
+                                                         // serialized Packet is not longer than 2032 bytes
+                                                         // and we provided 2050 bytes for EncryptedPacket
         buf.extend_from_slice(&encrypted_packet_buf[..encrypted_packet_size]);
         Ok(())
     }
@@ -176,33 +180,38 @@ impl Encoder<Packet> for Codec {
 
 #[cfg(test)]
 mod tests {
-    use crypto_box::{SalsaBox, SecretKey, aead::{Aead, AeadCore, generic_array::typenum::marker_traits::Unsigned}};
+    use crate::relay::codec::*;
+    use crypto_box::{
+        aead::{generic_array::typenum::marker_traits::Unsigned, Aead, AeadCore},
+        SalsaBox, SecretKey,
+    };
     use rand::thread_rng;
     use tox_packet::dht::CryptoData;
-    use tox_packet::onion::*;
     use tox_packet::ip_port::*;
-    use crate::relay::codec::*;
+    use tox_packet::onion::*;
     use tox_packet::relay::connection_id::ConnectionId;
 
     use std::io::ErrorKind as IoErrorKind;
-    use std::net::{
-      IpAddr,
-      Ipv4Addr,
-      Ipv6Addr,
-    };
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
     #[test]
     fn decode_error_from_io() {
         let error = IoError::new(IoErrorKind::Other, "io error");
         let decode_error = DecodeError::from(error);
-        assert_eq!(unpack!(decode_error, DecodeError::IoError, error).kind(), IoErrorKind::Other);
+        assert_eq!(
+            unpack!(decode_error, DecodeError::IoError, error).kind(),
+            IoErrorKind::Other
+        );
     }
 
     #[test]
     fn encode_error_from_io() {
         let error = IoError::new(IoErrorKind::Other, "io error");
         let encode_error = EncodeError::from(error);
-        assert_eq!(unpack!(encode_error, EncodeError::IoError, error).kind(), IoErrorKind::Other);
+        assert_eq!(
+            unpack!(encode_error, EncodeError::IoError, error).kind(),
+            IoErrorKind::Other
+        );
     }
 
     fn create_channels() -> (Channel, Channel) {
@@ -235,15 +244,28 @@ mod tests {
         let mut bob_codec = Codec::new(bob_channel, stats);
 
         let test_packets = vec![
-            Packet::RouteRequest( RouteRequest { pk: pk.clone() } ),
-            Packet::RouteResponse( RouteResponse { connection_id: ConnectionId::from_index(42), pk: pk.clone() } ),
-            Packet::ConnectNotification( ConnectNotification { connection_id: ConnectionId::from_index(42) } ),
-            Packet::DisconnectNotification( DisconnectNotification { connection_id: ConnectionId::from_index(42) } ),
-            Packet::PingRequest( PingRequest { ping_id: 4242 } ),
-            Packet::PongResponse( PongResponse { ping_id: 4242 } ),
-            Packet::OobSend( OobSend { destination_pk: pk.clone(), data: vec![13; 42] } ),
-            Packet::OobReceive( OobReceive { sender_pk: pk, data: vec![13; 24] } ),
-            Packet::OnionRequest( OnionRequest {
+            Packet::RouteRequest(RouteRequest { pk: pk.clone() }),
+            Packet::RouteResponse(RouteResponse {
+                connection_id: ConnectionId::from_index(42),
+                pk: pk.clone(),
+            }),
+            Packet::ConnectNotification(ConnectNotification {
+                connection_id: ConnectionId::from_index(42),
+            }),
+            Packet::DisconnectNotification(DisconnectNotification {
+                connection_id: ConnectionId::from_index(42),
+            }),
+            Packet::PingRequest(PingRequest { ping_id: 4242 }),
+            Packet::PongResponse(PongResponse { ping_id: 4242 }),
+            Packet::OobSend(OobSend {
+                destination_pk: pk.clone(),
+                data: vec![13; 42],
+            }),
+            Packet::OobReceive(OobReceive {
+                sender_pk: pk,
+                data: vec![13; 24],
+            }),
+            Packet::OnionRequest(OnionRequest {
                 nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
                 ip_port: IpPort {
                     protocol: ProtocolType::Tcp,
@@ -251,9 +273,9 @@ mod tests {
                     port: 12345,
                 },
                 temporary_pk: SecretKey::generate(&mut rng).public_key(),
-                payload: vec![13; 207]
-            } ),
-            Packet::OnionRequest( OnionRequest {
+                payload: vec![13; 207],
+            }),
+            Packet::OnionRequest(OnionRequest {
                 nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
                 ip_port: IpPort {
                     protocol: ProtocolType::Tcp,
@@ -261,32 +283,34 @@ mod tests {
                     port: 54321,
                 },
                 temporary_pk: SecretKey::generate(&mut rng).public_key(),
-                payload: vec![13; 201]
-            } ),
-            Packet::OnionResponse( OnionResponse {
+                payload: vec![13; 201],
+            }),
+            Packet::OnionResponse(OnionResponse {
                 payload: InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
                     sendback_data: 12345,
                     nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
-                    payload: vec![42; 123]
-                })
-            } ),
-            Packet::OnionResponse( OnionResponse {
+                    payload: vec![42; 123],
+                }),
+            }),
+            Packet::OnionResponse(OnionResponse {
                 payload: InnerOnionResponse::OnionDataResponse(OnionDataResponse {
                     nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
                     temporary_pk: SecretKey::generate(&mut rng).public_key(),
-                    payload: vec![42; 123]
-                })
-            } ),
-            Packet::Data( Data {
+                    payload: vec![42; 123],
+                }),
+            }),
+            Packet::Data(Data {
                 connection_id: ConnectionId::from_index(42),
                 data: DataPayload::CryptoData(CryptoData {
                     nonce_last_bytes: 42,
                     payload: vec![42; 123],
                 }),
-            } )
+            }),
         ];
         for packet in test_packets {
-            alice_codec.encode(packet.clone(), &mut buf).expect("Alice should encode");
+            alice_codec
+                .encode(packet.clone(), &mut buf)
+                .expect("Alice should encode");
             let res = bob_codec.decode(&mut buf).unwrap().expect("Bob should decode");
             assert_eq!(packet, res);
 
@@ -327,7 +351,7 @@ mod tests {
         let mut mallory_codec = Codec::new(mallory_channel, stats);
 
         let mut buf = BytesMut::new();
-        let packet = Packet::PingRequest( PingRequest { ping_id: 4242 } );
+        let packet = Packet::PingRequest(PingRequest { ping_id: 4242 });
 
         alice_codec.encode(packet, &mut buf).expect("Alice should encode");
         // Mallory cannot decode the payload of EncryptedPacket
@@ -366,9 +390,7 @@ mod tests {
         // packet with invalid id
         let precomputed_key = SalsaBox::new(&alice_pk, &bob_sk);
         let payload = precomputed_key.encrypt(&bob_nonce, &[0x0F][..]).unwrap();
-        let packet = EncryptedPacket {
-            payload,
-        };
+        let packet = EncryptedPacket { payload };
         let mut packet_bytes = [0; 32];
         let (_, size) = packet.to_bytes((&mut packet_bytes, 0)).unwrap();
 
@@ -384,13 +406,13 @@ mod tests {
         let mut buf = BytesMut::new();
         let stats = Stats::new();
         let mut alice_codec = Codec::new(alice_channel, stats);
-        let packet = Packet::Data( Data {
+        let packet = Packet::Data(Data {
             connection_id: ConnectionId::from_index(42),
             data: DataPayload::CryptoData(CryptoData {
                 nonce_last_bytes: 42,
                 payload: vec![42; 2030],
-            })
-        } );
+            }),
+        });
 
         // Alice cannot serialize Packet because it is too long
         assert!(alice_codec.encode(packet, &mut buf).is_err());

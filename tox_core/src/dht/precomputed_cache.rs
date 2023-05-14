@@ -1,13 +1,13 @@
 //! LRU cache for `SalsaBox`es.
 
-use std::sync::Arc;
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 
 use crypto_box::SalsaBox;
 use lru::LruCache;
 
-use tox_crypto::*;
 use futures::lock::Mutex;
+use tox_crypto::*;
 
 /// LRU cache for `SalsaBox`es.
 ///

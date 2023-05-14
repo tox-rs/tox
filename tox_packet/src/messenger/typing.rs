@@ -3,9 +3,9 @@
 
 use super::*;
 
-use nom::number::complete::le_u8;
 use nom::bytes::complete::tag;
-use nom::error::{ErrorKind, make_error};
+use nom::error::{make_error, ErrorKind};
+use nom::number::complete::le_u8;
 
 /// Typing status of user
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -51,6 +51,7 @@ impl FromBytes for Typing {
 }
 
 impl ToBytes for Typing {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x33) >>
@@ -70,8 +71,5 @@ impl Typing {
 mod tests {
     use super::*;
 
-    encode_decode_test!(
-        typing_encode_decode,
-        Typing::new(TypingStatus::Typing)
-    );
+    encode_decode_test!(typing_encode_decode, Typing::new(TypingStatus::Typing));
 }

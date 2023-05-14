@@ -2,9 +2,9 @@
 
 */
 
-pub mod handshake;
-pub mod secure;
-pub mod codec;
-pub mod server;
 pub mod client;
+pub mod codec;
+pub mod handshake;
 mod links;
+pub mod secure;
+pub mod server;

@@ -5,55 +5,48 @@
 #[cfg(test)]
 #[macro_use]
 mod macros;
+mod bootstrap_info;
+mod cookie;
+mod cookie_request;
+mod cookie_response;
+mod crypto_data;
+mod crypto_handshake;
+mod dht_request;
+mod errors;
+mod lan_discovery;
+mod nodes_request;
+mod nodes_response;
 pub mod packed_node;
 mod ping_request;
 mod ping_response;
-mod nodes_request;
-mod nodes_response;
-mod dht_request;
-mod cookie_request;
-mod cookie_response;
-mod bootstrap_info;
-mod lan_discovery;
-mod crypto_handshake;
-mod crypto_data;
-mod cookie;
-mod errors;
 
-pub use self::ping_request::*;
-pub use self::ping_response::*;
-pub use self::nodes_request::*;
-pub use self::nodes_response::*;
-pub use self::dht_request::*;
+pub use self::bootstrap_info::*;
+pub use self::cookie::*;
 pub use self::cookie_request::*;
 pub use self::cookie_response::*;
-pub use self::bootstrap_info::*;
-pub use self::lan_discovery::*;
-pub use self::crypto_handshake::*;
 pub use self::crypto_data::*;
-pub use self::cookie::*;
+pub use self::crypto_handshake::*;
+pub use self::dht_request::*;
 pub use self::errors::*;
+pub use self::lan_discovery::*;
+pub use self::nodes_request::*;
+pub use self::nodes_response::*;
+pub use self::ping_request::*;
+pub use self::ping_response::*;
 
 use nom::branch::alt;
 use nom::combinator::map;
 
 use cookie_factory::{
-    do_gen,
-    gen_slice,
-    gen_call,
-    gen_cond,
-    gen_be_u8,
-    gen_be_u16,
-    gen_be_u32,
-    gen_be_u64,
-    gen_many_ref
+    do_gen, gen_be_u16, gen_be_u32, gen_be_u64, gen_be_u8, gen_call, gen_cond, gen_many_ref, gen_slice,
 };
 
-use tox_binary_io::*;
 use crate::onion::*;
+use tox_binary_io::*;
 
 pub fn unix_time(time: std::time::SystemTime) -> u64 {
-    let since_the_epoch = time.duration_since(std::time::UNIX_EPOCH)
+    let since_the_epoch = time
+        .duration_since(std::time::UNIX_EPOCH)
         .expect("Current time is earlier than Unix epoch");
 
     since_the_epoch.as_secs()
@@ -107,7 +100,7 @@ pub enum Packet {
     /// [`OnionResponse1`](../onion/struct.OnionResponse1.html) structure.
     OnionResponse1(OnionResponse1),
     /// [`BootstrapInfo`](./struct.BootstrapInfo.html) structure.
-    BootstrapInfo(BootstrapInfo)
+    BootstrapInfo(BootstrapInfo),
 }
 
 impl ToBytes for Packet {
@@ -133,7 +126,7 @@ impl ToBytes for Packet {
             Packet::OnionResponse3(ref p) => p.to_bytes(buf),
             Packet::OnionResponse2(ref p) => p.to_bytes(buf),
             Packet::OnionResponse1(ref p) => p.to_bytes(buf),
-            Packet::BootstrapInfo(ref p) => p.to_bytes(buf)
+            Packet::BootstrapInfo(ref p) => p.to_bytes(buf),
         }
     }
 }

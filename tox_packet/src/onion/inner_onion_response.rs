@@ -18,7 +18,7 @@ pub enum InnerOnionResponse {
     /// [`OnionAnnounceResponse`](./struct.OnionAnnounceResponse.html) structure.
     OnionAnnounceResponse(OnionAnnounceResponse),
     /// [`OnionDataResponse`](./struct.OnionDataResponse.html) structure.
-    OnionDataResponse(OnionDataResponse)
+    OnionDataResponse(OnionDataResponse),
 }
 
 impl ToBytes for InnerOnionResponse {
@@ -33,7 +33,10 @@ impl ToBytes for InnerOnionResponse {
 impl FromBytes for InnerOnionResponse {
     fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
         alt((
-            map(OnionAnnounceResponse::from_bytes, InnerOnionResponse::OnionAnnounceResponse),
+            map(
+                OnionAnnounceResponse::from_bytes,
+                InnerOnionResponse::OnionAnnounceResponse,
+            ),
             map(OnionDataResponse::from_bytes, InnerOnionResponse::OnionDataResponse),
         ))(input)
     }

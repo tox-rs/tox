@@ -3,9 +3,9 @@
 
 use super::*;
 
-use std::str;
-use nom::combinator::{map_res, rest, verify};
 use nom::bytes::complete::tag;
+use nom::combinator::{map_res, rest, verify};
+use std::str;
 
 /// Maximum size in bytes of action message string of action packet
 const MAX_ACTION_MESSAGE_DATA_SIZE: usize = 1372;
@@ -31,12 +31,16 @@ pub struct Action {
 impl FromBytes for Action {
     fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
         let (input, _) = tag("\x41")(input)?;
-        let (input, msg) = map_res(verify(rest, |msg: &[u8]| msg.len() <= MAX_ACTION_MESSAGE_DATA_SIZE), str::from_utf8)(input)?;
+        let (input, msg) = map_res(
+            verify(rest, |msg: &[u8]| msg.len() <= MAX_ACTION_MESSAGE_DATA_SIZE),
+            str::from_utf8,
+        )(input)?;
         Ok((input, Action { msg: msg.to_string() }))
     }
 }
 
 impl ToBytes for Action {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x41) >>
@@ -57,10 +61,7 @@ impl Action {
 mod tests {
     use super::*;
 
-    encode_decode_test!(
-        action_encode_decode,
-        Action::new("1234".to_string())
-    );
+    encode_decode_test!(action_encode_decode, Action::new("1234".to_string()));
 
     #[test]
     fn action_from_bytes_encoding_error() {

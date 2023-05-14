@@ -3,17 +3,18 @@
 
 use super::*;
 
+use crate::dht::*;
 use aead::AeadCore;
 use tox_binary_io::*;
 use tox_crypto::*;
-use crate::dht::*;
 
-use nom::combinator::{rest, rest_len, verify, map};
-use nom::bytes::complete::tag;
 use nom::branch::alt;
+use nom::bytes::complete::tag;
+use nom::combinator::{map, rest, rest_len, verify};
 
 /// Maximum size in bytes of Onion Data Response payload
-pub const MAX_ONION_RESPONSE_PAYLOAD_SIZE: usize = MAX_ONION_CLIENT_DATA_SIZE + crypto_box::KEY_SIZE + <SalsaBox as AeadCore>::TagSize::USIZE;
+pub const MAX_ONION_RESPONSE_PAYLOAD_SIZE: usize =
+    MAX_ONION_CLIENT_DATA_SIZE + crypto_box::KEY_SIZE + <SalsaBox as AeadCore>::TagSize::USIZE;
 
 /** When onion node receives `OnionDataRequest` packet it converts it to
 `OnionDataResponse` and sends to destination node if it announced itself
@@ -38,7 +39,7 @@ pub struct OnionDataResponse {
     /// Temporary `PublicKey` for the current encrypted payload
     pub temporary_pk: PublicKey,
     /// Encrypted payload
-    pub payload: Vec<u8>
+    pub payload: Vec<u8>,
 }
 
 impl FromBytes for OnionDataResponse {
@@ -48,15 +49,19 @@ impl FromBytes for OnionDataResponse {
         let (input, nonce) = Nonce::from_bytes(input)?;
         let (input, temporary_pk) = PublicKey::from_bytes(input)?;
         let (input, payload) = rest(input)?;
-        Ok((input, OnionDataResponse {
-            nonce,
-            temporary_pk,
-            payload: payload.to_vec()
-        }))
+        Ok((
+            input,
+            OnionDataResponse {
+                nonce,
+                temporary_pk,
+                payload: payload.to_vec(),
+            },
+        ))
     }
 }
 
 impl ToBytes for OnionDataResponse {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x86) >>
@@ -71,7 +76,12 @@ impl ToBytes for OnionDataResponse {
 impl OnionDataResponse {
     /// Create `OnionDataResponse` from `OnionDataResponsePayload` encrypting it
     /// with `shared_key` and `nonce`
-    pub fn new(shared_secret: &SalsaBox, temporary_pk: PublicKey, nonce: Nonce, payload: &OnionDataResponsePayload) -> OnionDataResponse {
+    pub fn new(
+        shared_secret: &SalsaBox,
+        temporary_pk: PublicKey,
+        nonce: Nonce,
+        payload: &OnionDataResponsePayload,
+    ) -> OnionDataResponse {
         let mut buf = [0; MAX_ONION_RESPONSE_PAYLOAD_SIZE];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
         let payload = shared_secret.encrypt((&nonce).into(), &buf[..size]).unwrap();
@@ -91,17 +101,12 @@ impl OnionDataResponse {
     - fails to parse as `OnionDataResponsePayload`
     */
     pub fn get_payload(&self, shared_secret: &SalsaBox) -> Result<OnionDataResponsePayload, GetPayloadError> {
-        let decrypted = shared_secret.decrypt((&self.nonce).into(), self.payload.as_slice())
-            .map_err(|AeadError| {
-                GetPayloadError::decrypt()
-            })?;
+        let decrypted = shared_secret
+            .decrypt((&self.nonce).into(), self.payload.as_slice())
+            .map_err(|AeadError| GetPayloadError::decrypt())?;
         match OnionDataResponsePayload::from_bytes(&decrypted) {
-            Err(error) => {
-                Err(GetPayloadError::deserialize(error, decrypted.clone()))
-            },
-            Ok((_, inner)) => {
-                Ok(inner)
-            }
+            Err(error) => Err(GetPayloadError::deserialize(error, decrypted.clone())),
+            Ok((_, inner)) => Ok(inner),
         }
     }
 }
@@ -133,14 +138,18 @@ impl FromBytes for OnionDataResponsePayload {
     fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
         let (input, real_pk) = PublicKey::from_bytes(input)?;
         let (input, payload) = rest(input)?;
-        Ok((input, OnionDataResponsePayload {
-            real_pk,
-            payload: payload.to_vec()
-        }))
+        Ok((
+            input,
+            OnionDataResponsePayload {
+                real_pk,
+                payload: payload.to_vec(),
+            },
+        ))
     }
 }
 
 impl ToBytes for OnionDataResponsePayload {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_slice!(self.real_pk.as_ref()) >>
@@ -152,15 +161,17 @@ impl ToBytes for OnionDataResponsePayload {
 impl OnionDataResponsePayload {
     /// Create `OnionDataResponsePayload` from `OnionDataResponseInnerPayload`
     /// encrypting it with `shared_key` and `nonce`
-    pub fn new(shared_secret: &SalsaBox, real_pk: PublicKey, nonce: &Nonce, payload: &OnionDataResponseInnerPayload) -> OnionDataResponsePayload {
+    pub fn new(
+        shared_secret: &SalsaBox,
+        real_pk: PublicKey,
+        nonce: &Nonce,
+        payload: &OnionDataResponseInnerPayload,
+    ) -> OnionDataResponsePayload {
         let mut buf = [0; MAX_ONION_CLIENT_DATA_SIZE];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
         let payload = shared_secret.encrypt(nonce.into(), &buf[..size]).unwrap();
 
-        OnionDataResponsePayload {
-            real_pk,
-            payload,
-        }
+        OnionDataResponsePayload { real_pk, payload }
     }
 
     /** Decrypt payload and try to parse it as `OnionDataResponseInnerPayload`.
@@ -170,18 +181,17 @@ impl OnionDataResponsePayload {
     - fails to decrypt
     - fails to parse as `OnionDataResponseInnerPayload`
     */
-    pub fn get_payload(&self, nonce: &Nonce, shared_secret: &SalsaBox) -> Result<OnionDataResponseInnerPayload, GetPayloadError> {
-        let decrypted = shared_secret.decrypt(nonce.into(), self.payload.as_slice())
-            .map_err(|AeadError| {
-                GetPayloadError::decrypt()
-            })?;
+    pub fn get_payload(
+        &self,
+        nonce: &Nonce,
+        shared_secret: &SalsaBox,
+    ) -> Result<OnionDataResponseInnerPayload, GetPayloadError> {
+        let decrypted = shared_secret
+            .decrypt(nonce.into(), self.payload.as_slice())
+            .map_err(|AeadError| GetPayloadError::decrypt())?;
         match OnionDataResponseInnerPayload::from_bytes(&decrypted) {
-            Err(error) => {
-                Err(GetPayloadError::deserialize(error, decrypted.clone()))
-            },
-            Ok((_, inner)) => {
-                Ok(inner)
-            }
+            Err(error) => Err(GetPayloadError::deserialize(error, decrypted.clone())),
+            Ok((_, inner)) => Ok(inner),
         }
     }
 }
@@ -200,7 +210,10 @@ pub enum OnionDataResponseInnerPayload {
 impl FromBytes for OnionDataResponseInnerPayload {
     fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
         alt((
-            map(DhtPkAnnouncePayload::from_bytes, OnionDataResponseInnerPayload::DhtPkAnnounce),
+            map(
+                DhtPkAnnouncePayload::from_bytes,
+                OnionDataResponseInnerPayload::DhtPkAnnounce,
+            ),
             map(FriendRequest::from_bytes, OnionDataResponseInnerPayload::FriendRequest),
         ))(input)
     }
@@ -288,7 +301,7 @@ mod tests {
         let invalid_packet = OnionDataResponse {
             nonce: nonce.into(),
             temporary_pk: alice_pk,
-            payload: invalid_payload_encoded
+            payload: invalid_payload_encoded,
         };
         let decoded_payload = invalid_packet.get_payload(&shared_secret);
         assert!(decoded_payload.is_err());
@@ -305,16 +318,14 @@ mod tests {
         let payload = OnionDataResponseInnerPayload::DhtPkAnnounce(DhtPkAnnouncePayload {
             no_reply: 42,
             dht_pk: SecretKey::generate(&mut rng).public_key(),
-            nodes: vec![
-                TcpUdpPackedNode {
-                    ip_port: IpPort {
-                        protocol: ProtocolType::Udp,
-                        ip_addr: "127.0.0.1".parse().unwrap(),
-                        port: 12345
-                    },
-                    pk: SecretKey::generate(&mut rng).public_key(),
+            nodes: vec![TcpUdpPackedNode {
+                ip_port: IpPort {
+                    protocol: ProtocolType::Udp,
+                    ip_addr: "127.0.0.1".parse().unwrap(),
+                    port: 12345,
                 },
-            ],
+                pk: SecretKey::generate(&mut rng).public_key(),
+            }],
         });
         // encode payload with shared secret
         let packet = OnionDataResponsePayload::new(&shared_secret, alice_pk, &nonce, &payload);
@@ -337,16 +348,14 @@ mod tests {
         let payload = OnionDataResponseInnerPayload::DhtPkAnnounce(DhtPkAnnouncePayload {
             no_reply: 42,
             dht_pk: SecretKey::generate(&mut rng).public_key(),
-            nodes: vec![
-                TcpUdpPackedNode {
-                    ip_port: IpPort {
-                        protocol: ProtocolType::Udp,
-                        ip_addr: "127.0.0.1".parse().unwrap(),
-                        port: 12345
-                    },
-                    pk: SecretKey::generate(&mut rng).public_key(),
+            nodes: vec![TcpUdpPackedNode {
+                ip_port: IpPort {
+                    protocol: ProtocolType::Udp,
+                    ip_addr: "127.0.0.1".parse().unwrap(),
+                    port: 12345,
                 },
-            ],
+                pk: SecretKey::generate(&mut rng).public_key(),
+            }],
         });
         // encode payload with shared secret
         let packet = OnionDataResponsePayload::new(&shared_secret, alice_pk, &nonce, &payload);
@@ -368,7 +377,7 @@ mod tests {
         let invalid_payload_encoded = shared_secret.encrypt(&nonce, &invalid_payload[..]).unwrap();
         let invalid_packet = OnionDataResponsePayload {
             real_pk: alice_pk.clone(),
-            payload: invalid_payload_encoded
+            payload: invalid_payload_encoded,
         };
         let decoded_payload = invalid_packet.get_payload(&nonce.into(), &shared_secret);
         assert!(decoded_payload.is_err());
@@ -377,7 +386,7 @@ mod tests {
         let invalid_payload_encoded = shared_secret.encrypt(&nonce, &invalid_payload[..]).unwrap();
         let invalid_packet = OnionDataResponsePayload {
             real_pk: alice_pk,
-            payload: invalid_payload_encoded
+            payload: invalid_payload_encoded,
         };
         let decoded_payload = invalid_packet.get_payload(&nonce.into(), &shared_secret);
         assert!(decoded_payload.is_err());

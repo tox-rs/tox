@@ -1,12 +1,12 @@
 //! Managing requests IDs and timeouts.
 
-use std::collections::HashMap;
-use std::collections::hash_map::Entry;
-use std::time::{Duration, Instant};
 use rand::{CryptoRng, Rng};
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
-use crate::utils::gen_ping_id;
 use crate::time::*;
+use crate::utils::gen_ping_id;
 
 /// Struct that stores and manages requests IDs and timeouts. Every request ID
 /// stores generic companion data.
@@ -70,9 +70,8 @@ impl<T> RequestQueue<T> {
     /// Remove timed out request IDs.
     pub fn clear_timed_out(&mut self) {
         let timeout = self.timeout;
-        self.ping_map.retain(|&_, &mut (time, _)|
-            clock_elapsed(time) <= timeout
-        );
+        self.ping_map
+            .retain(|&_, &mut (time, _)| clock_elapsed(time) <= timeout);
     }
 
     /// Get not timed out requests stored in this `RequestQueue`.

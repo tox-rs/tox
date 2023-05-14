@@ -3,16 +3,16 @@
 
 use super::*;
 
+use crate::dht::*;
 use crypto_box::SalsaBox;
 use tox_binary_io::*;
 use tox_crypto::*;
-use crate::dht::*;
 
 use nom::{
-    number::complete::le_u64,
-    combinator::{rest, rest_len, verify, success, eof},
     bytes::complete::tag,
+    combinator::{eof, rest, rest_len, success, verify},
     multi::many0,
+    number::complete::le_u64,
 };
 
 /** It's used to respond to `OnionAnnounceRequest` packet.
@@ -40,7 +40,7 @@ pub struct OnionAnnounceResponse {
     /// Nonce for the current encrypted payload
     pub nonce: Nonce,
     /// Encrypted payload
-    pub payload: Vec<u8>
+    pub payload: Vec<u8>,
 }
 
 impl FromBytes for OnionAnnounceResponse {
@@ -50,15 +50,19 @@ impl FromBytes for OnionAnnounceResponse {
         let (input, sendback_data) = le_u64(input)?;
         let (input, nonce) = Nonce::from_bytes(input)?;
         let (input, payload) = rest(input)?;
-        Ok((input, OnionAnnounceResponse {
-            sendback_data,
-            nonce,
-            payload: payload.to_vec()
-        }))
+        Ok((
+            input,
+            OnionAnnounceResponse {
+                sendback_data,
+                nonce,
+                payload: payload.to_vec(),
+            },
+        ))
     }
 }
 
 impl ToBytes for OnionAnnounceResponse {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x84) >>
@@ -72,13 +76,21 @@ impl ToBytes for OnionAnnounceResponse {
 
 impl OnionAnnounceResponse {
     /// Create new `OnionAnnounceResponse` object.
-    pub fn new(shared_secret: &SalsaBox, sendback_data: u64, payload: &OnionAnnounceResponsePayload) -> OnionAnnounceResponse {
+    pub fn new(
+        shared_secret: &SalsaBox,
+        sendback_data: u64,
+        payload: &OnionAnnounceResponsePayload,
+    ) -> OnionAnnounceResponse {
         let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng());
         let mut buf = [0; ONION_MAX_PACKET_SIZE];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
         let payload = shared_secret.encrypt(&nonce, &buf[..size]).unwrap();
 
-        OnionAnnounceResponse { sendback_data, nonce: nonce.into(), payload }
+        OnionAnnounceResponse {
+            sendback_data,
+            nonce: nonce.into(),
+            payload,
+        }
     }
 
     /** Decrypt payload and try to parse it as `OnionAnnounceResponsePayload`.
@@ -89,17 +101,12 @@ impl OnionAnnounceResponse {
     - fails to parse as `OnionAnnounceResponsePayload`
     */
     pub fn get_payload(&self, shared_secret: &SalsaBox) -> Result<OnionAnnounceResponsePayload, GetPayloadError> {
-        let decrypted = shared_secret.decrypt((&self.nonce).into(), self.payload.as_slice())
-            .map_err(|AeadError| {
-                GetPayloadError::decrypt()
-            })?;
+        let decrypted = shared_secret
+            .decrypt((&self.nonce).into(), self.payload.as_slice())
+            .map_err(|AeadError| GetPayloadError::decrypt())?;
         match OnionAnnounceResponsePayload::from_bytes(&decrypted) {
-            Err(error) => {
-                Err(GetPayloadError::deserialize(error, decrypted.clone()))
-            },
-            Ok((_, inner)) => {
-                Ok(inner)
-            }
+            Err(error) => Err(GetPayloadError::deserialize(error, decrypted.clone())),
+            Ok((_, inner)) => Ok(inner),
         }
     }
 }
@@ -134,7 +141,7 @@ pub struct OnionAnnounceResponsePayload {
     /// Onion ping id or PublicKey that should be used to send data packets
     pub ping_id_or_pk: [u8; 32],
     /// Up to 4 closest to the requested PublicKey DHT nodes
-    pub nodes: Vec<PackedNode>
+    pub nodes: Vec<PackedNode>,
 }
 
 impl FromBytes for OnionAnnounceResponsePayload {
@@ -144,15 +151,19 @@ impl FromBytes for OnionAnnounceResponsePayload {
         let (input, nodes) = many0(PackedNode::from_bytes)(input)?;
         let (input, _) = verify(success(nodes.len()), |len| *len <= 4_usize)(input)?;
         let (input, _) = eof(input)?;
-        Ok((input, OnionAnnounceResponsePayload {
-            announce_status,
-            ping_id_or_pk,
-            nodes
-        }))
+        Ok((
+            input,
+            OnionAnnounceResponsePayload {
+                announce_status,
+                ping_id_or_pk,
+                nodes,
+            },
+        ))
     }
 }
 
 impl ToBytes for OnionAnnounceResponsePayload {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_call!(|buf, announce_status| AnnounceStatus::to_bytes(announce_status, buf), &self.announce_status) >>
@@ -168,8 +179,8 @@ impl ToBytes for OnionAnnounceResponsePayload {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::thread_rng;
     use crypto_box::SecretKey;
+    use rand::thread_rng;
 
     use std::net::SocketAddr;
 
@@ -187,9 +198,10 @@ mod tests {
         OnionAnnounceResponsePayload {
             announce_status: AnnounceStatus::Found,
             ping_id_or_pk: [42; 32],
-            nodes: vec![
-                PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), SecretKey::generate(&mut thread_rng()).public_key())
-            ]
+            nodes: vec![PackedNode::new(
+                SocketAddr::V4("5.6.7.8:12345".parse().unwrap()),
+                SecretKey::generate(&mut thread_rng()).public_key()
+            )]
         }
     );
 
@@ -202,9 +214,10 @@ mod tests {
         let payload = OnionAnnounceResponsePayload {
             announce_status: AnnounceStatus::Found,
             ping_id_or_pk: [42; 32],
-            nodes: vec![
-                PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), SecretKey::generate(&mut rng).public_key())
-            ]
+            nodes: vec![PackedNode::new(
+                SocketAddr::V4("5.6.7.8:12345".parse().unwrap()),
+                SecretKey::generate(&mut rng).public_key(),
+            )],
         };
         // encode payload with shared secret
         let onion_packet = OnionAnnounceResponse::new(&shared_secret, 12345, &payload);
@@ -224,9 +237,10 @@ mod tests {
         let payload = OnionAnnounceResponsePayload {
             announce_status: AnnounceStatus::Found,
             ping_id_or_pk: [42; 32],
-            nodes: vec![
-                PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), SecretKey::generate(&mut rng).public_key())
-            ]
+            nodes: vec![PackedNode::new(
+                SocketAddr::V4("5.6.7.8:12345".parse().unwrap()),
+                SecretKey::generate(&mut rng).public_key(),
+            )],
         };
         // encode payload with shared secret
         let onion_packet = OnionAnnounceResponse::new(&shared_secret, 12345, &payload);
@@ -249,7 +263,7 @@ mod tests {
         let invalid_onion_announce_response = OnionAnnounceResponse {
             sendback_data: 12345,
             nonce: nonce.into(),
-            payload: invalid_payload_encoded
+            payload: invalid_payload_encoded,
         };
         assert!(invalid_onion_announce_response.get_payload(&shared_secret).is_err());
         // Try short incomplete array
@@ -258,7 +272,7 @@ mod tests {
         let invalid_onion_announce_response = OnionAnnounceResponse {
             sendback_data: 12345,
             nonce: nonce.into(),
-            payload: invalid_payload_encoded
+            payload: invalid_payload_encoded,
         };
         assert!(invalid_onion_announce_response.get_payload(&shared_secret).is_err());
     }

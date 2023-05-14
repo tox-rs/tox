@@ -1,10 +1,11 @@
 //! Functions to work with time
 
-use std::time::{Duration, SystemTime, Instant, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Return number of seconds that have elapsed since Unix epoch.
 pub fn unix_time(time: SystemTime) -> u64 {
-    let since_the_epoch = time.duration_since(UNIX_EPOCH)
+    let since_the_epoch = time
+        .duration_since(UNIX_EPOCH)
         .expect("Current time is earlier than Unix epoch");
     since_the_epoch.as_secs()
 }
@@ -32,7 +33,7 @@ pub fn clock_elapsed(time: Instant) -> Duration {
 
 #[cfg(test)]
 pub mod tests {
-    use super::{clock_now, clock_elapsed};
+    use super::{clock_elapsed, clock_now};
 
     #[tokio::test]
     async fn const_elapsed() {

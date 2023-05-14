@@ -23,10 +23,10 @@ assert_eq!(plaintext,
 
 use std::{convert::TryInto, ops::Deref};
 
-use thiserror::Error;
-use rand::{Rng, thread_rng};
+use rand::{thread_rng, Rng};
 use sha2::{Digest, Sha256};
-use xsalsa20poly1305::{XSalsa20Poly1305, KeyInit, aead::Aead};
+use thiserror::Error;
+use xsalsa20poly1305::{aead::Aead, KeyInit, XSalsa20Poly1305};
 use zeroize::Zeroizing;
 
 /// Length (in bytes) of [`MAGIC_NUMBER`](./constant.MAGIC_NUMBER.html).
@@ -56,7 +56,7 @@ pub struct PassKey {
     // allocate stuff on heap to make sure that sensitive data is not moved
     // around on stack
     /// Key used to encrypt/decrypt data. **DO NOT SAVE**.
-    key: Box<XSalsa20Poly1305>
+    key: Box<XSalsa20Poly1305>,
 }
 
 impl PassKey {
@@ -107,19 +107,16 @@ impl PassKey {
     ```
     */
     pub fn with_salt(passphrase: &[u8], salt: [u8; SALT_LENGTH]) -> Result<PassKey, KeyDerivationError> {
-        if passphrase.is_empty() { return Err(KeyDerivationError::Null) };
+        if passphrase.is_empty() {
+            return Err(KeyDerivationError::Null);
+        };
 
         let passhash = Sha256::digest(passphrase);
         let mut key = Zeroizing::new([0; xsalsa20poly1305::KEY_SIZE]);
         // predefined params for tox encryptsave format
         let params = scrypt::Params::new(14, 8, 2, 32).unwrap();
 
-        scrypt::scrypt(
-            &passhash,
-            &salt,
-            &params,
-            &mut key[..],
-        ).or(Err(KeyDerivationError::Failed))?;
+        scrypt::scrypt(&passhash, &salt, &params, &mut key[..]).or(Err(KeyDerivationError::Failed))?;
 
         let pass_key = PassKey {
             salt,
@@ -151,7 +148,9 @@ impl PassKey {
     ```
     */
     pub fn encrypt(&self, data: &[u8]) -> Result<Vec<u8>, EncryptionError> {
-        if data.is_empty() { return Err(EncryptionError::Null) };
+        if data.is_empty() {
+            return Err(EncryptionError::Null);
+        };
 
         let mut output = Vec::with_capacity(EXTRA_LENGTH + data.len());
         let nonce = XSalsa20Poly1305::generate_nonce(&mut thread_rng());
@@ -159,10 +158,7 @@ impl PassKey {
         output.extend_from_slice(MAGIC_NUMBER);
         output.extend_from_slice(&self.salt);
         output.extend_from_slice(&nonce);
-        output.append(&mut self.key.encrypt(
-            &nonce,
-            data
-        ).or(Err(EncryptionError::Null))?);
+        output.append(&mut self.key.encrypt(&nonce, data).or(Err(EncryptionError::Null))?);
 
         Ok(output)
     }
@@ -195,14 +191,23 @@ impl PassKey {
     ```
     */
     pub fn decrypt(&self, data: &[u8]) -> Result<Vec<u8>, DecryptionError> {
-        if data.is_empty() { return Err(DecryptionError::Null) };
-        if data.len() <= EXTRA_LENGTH { return Err(DecryptionError::InvalidLength) };
-        if !is_encrypted(data) { return Err(DecryptionError::BadFormat) };
+        if data.is_empty() {
+            return Err(DecryptionError::Null);
+        };
+        if data.len() <= EXTRA_LENGTH {
+            return Err(DecryptionError::InvalidLength);
+        };
+        if !is_encrypted(data) {
+            return Err(DecryptionError::BadFormat);
+        };
 
-        let output = self.key.decrypt(
-            (&data[MAGIC_LENGTH+SALT_LENGTH..MAGIC_LENGTH+SALT_LENGTH+xsalsa20poly1305::NONCE_SIZE]).into(),
-            &data[MAGIC_LENGTH+SALT_LENGTH+xsalsa20poly1305::NONCE_SIZE..]
-        ).or(Err(DecryptionError::Failed))?;
+        let output = self
+            .key
+            .decrypt(
+                (&data[MAGIC_LENGTH + SALT_LENGTH..MAGIC_LENGTH + SALT_LENGTH + xsalsa20poly1305::NONCE_SIZE]).into(),
+                &data[MAGIC_LENGTH + SALT_LENGTH + xsalsa20poly1305::NONCE_SIZE..],
+            )
+            .or(Err(DecryptionError::Failed))?;
 
         Ok(output)
     }
@@ -297,9 +302,15 @@ for pos in 0..MAGIC_LENGTH {
 ```
 */
 pub fn pass_decrypt(data: &[u8], passphrase: &[u8]) -> Result<Vec<u8>, DecryptionError> {
-    if data.is_empty() { return Err(DecryptionError::Null) }
-    if data.len() <= EXTRA_LENGTH { return Err(DecryptionError::InvalidLength) }
-    if !is_encrypted(data) { return Err(DecryptionError::BadFormat) }
+    if data.is_empty() {
+        return Err(DecryptionError::Null);
+    }
+    if data.len() <= EXTRA_LENGTH {
+        return Err(DecryptionError::InvalidLength);
+    }
+    if !is_encrypted(data) {
+        return Err(DecryptionError::BadFormat);
+    }
 
     let salt = get_salt(data).ok_or(KeyDerivationError::Failed)?;
     PassKey::with_salt(passphrase, salt)?.decrypt(data)
@@ -321,10 +332,8 @@ assert_eq!(get_salt(&[]), None);
 ```
 */
 pub fn get_salt(data: &[u8]) -> Option<[u8; SALT_LENGTH]> {
-    if is_encrypted(data)
-        && data.len() >= MAGIC_LENGTH + SALT_LENGTH
-    {
-        data[MAGIC_LENGTH..MAGIC_LENGTH+SALT_LENGTH].try_into().ok()
+    if is_encrypted(data) && data.len() >= MAGIC_LENGTH + SALT_LENGTH {
+        data[MAGIC_LENGTH..MAGIC_LENGTH + SALT_LENGTH].try_into().ok()
     } else {
         None
     }
@@ -338,7 +347,7 @@ pub enum KeyDerivationError {
     Null,
     /// Failed to derive key, most likely due to OOM.
     #[error("Failed to derive key, most likely due to OOM")]
-    Failed
+    Failed,
 }
 
 /// Error encrypting data.
@@ -386,7 +395,7 @@ pub enum DecryptionError {
      * some bytes that aren't encrypted were provided after encrypted bytes
     */
     #[error("Failure due to encrypted data being invalid")]
-    Failed
+    Failed,
 }
 
 impl From<KeyDerivationError> for DecryptionError {
@@ -394,7 +403,6 @@ impl From<KeyDerivationError> for DecryptionError {
         DecryptionError::KeyDerivation(err)
     }
 }
-
 
 // PassKey::
 

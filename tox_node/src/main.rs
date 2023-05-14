@@ -1,12 +1,12 @@
-#![type_length_limit="65995950"]
+#![type_length_limit = "65995950"]
 
 #[macro_use]
 extern crate clap;
 #[macro_use]
 extern crate log;
 
-mod node_config;
 mod motd;
+mod node_config;
 
 use std::convert::TryInto;
 use std::fs::File;
@@ -15,25 +15,25 @@ use std::net::SocketAddr;
 
 use anyhow::Error;
 use futures::{channel::mpsc, StreamExt};
-use futures::{future, Future, TryFutureExt, FutureExt};
+use futures::{future, Future, FutureExt, TryFutureExt};
 use itertools::Itertools;
 use rand::thread_rng;
-use tokio::net::{TcpListener, UdpSocket};
-use tokio::runtime;
-use tox::crypto::*;
-use tox::core::dht::server::Server as DhtServer;
-use tox::core::dht::server_ext::dht_run_socket;
-use tox::core::dht::lan_discovery::LanDiscoverySender;
-use tox::core::udp::Server as UdpServer;
-use tox::packet::onion::InnerOnionResponse;
-use tox::packet::relay::OnionRequest;
-use tox::core::relay::server::{Server as TcpServer, tcp_run};
-use tox::core::stats::Stats;
 #[cfg(unix)]
 use syslog::Facility;
+use tokio::net::{TcpListener, UdpSocket};
+use tokio::runtime;
+use tox::core::dht::lan_discovery::LanDiscoverySender;
+use tox::core::dht::server::Server as DhtServer;
+use tox::core::dht::server_ext::dht_run_socket;
+use tox::core::relay::server::{tcp_run, Server as TcpServer};
+use tox::core::stats::Stats;
+use tox::core::udp::Server as UdpServer;
+use tox::crypto::*;
+use tox::packet::onion::InnerOnionResponse;
+use tox::packet::relay::OnionRequest;
 
+use crate::motd::{Counters, Motd};
 use crate::node_config::*;
-use crate::motd::{Motd, Counters};
 
 /// Channel size for onion messages between UDP and TCP relay.
 const ONION_CHANNEL_SIZE: usize = 32;
@@ -59,7 +59,9 @@ async fn bind_socket(addr: SocketAddr) -> UdpSocket {
     let socket = UdpSocket::bind(&addr).await.expect("Failed to bind UDP socket");
     socket.set_broadcast(true).expect("set_broadcast call failed");
     if addr.is_ipv6() {
-        socket.set_multicast_loop_v6(true).expect("set_multicast_loop_v6 call failed");
+        socket
+            .set_multicast_loop_v6(true)
+            .expect("set_multicast_loop_v6 call failed");
     }
     socket
 }
@@ -80,19 +82,29 @@ fn save_keys(keys_file: &str, pk: PublicKey, sk: &SecretKey) {
         .open(keys_file)
         .expect("Failed to create the keys file");
 
-    file.write_all(pk.as_ref()).expect("Failed to save public key to the keys file");
-    file.write_all(sk.as_bytes()).expect("Failed to save secret key to the keys file");
+    file.write_all(pk.as_ref())
+        .expect("Failed to save public key to the keys file");
+    file.write_all(sk.as_bytes())
+        .expect("Failed to save secret key to the keys file");
 }
 
 /// Load DHT keys from a binary file.
 fn load_keys(mut file: File) -> (PublicKey, SecretKey) {
     let mut buf = [0; crypto_box::KEY_SIZE * 2];
-    file.read_exact(&mut buf).expect("Failed to read keys from the keys file");
-    let pk_bytes: [u8; crypto_box::KEY_SIZE] = buf[..crypto_box::KEY_SIZE].try_into().expect("Failed to read public key from the keys file");
-    let sk_bytes: [u8; crypto_box::KEY_SIZE] = buf[crypto_box::KEY_SIZE..].try_into().expect("Failed to read secret key from the keys file");
+    file.read_exact(&mut buf)
+        .expect("Failed to read keys from the keys file");
+    let pk_bytes: [u8; crypto_box::KEY_SIZE] = buf[..crypto_box::KEY_SIZE]
+        .try_into()
+        .expect("Failed to read public key from the keys file");
+    let sk_bytes: [u8; crypto_box::KEY_SIZE] = buf[crypto_box::KEY_SIZE..]
+        .try_into()
+        .expect("Failed to read secret key from the keys file");
     let pk = PublicKey::from(pk_bytes);
     let sk = SecretKey::from(sk_bytes);
-    assert!(pk == sk.public_key(), "The loaded public key does not correspond to the loaded secret key");
+    assert!(
+        pk == sk.public_key(),
+        "The loaded public key does not correspond to the loaded secret key"
+    );
     (pk, sk)
 }
 
@@ -107,14 +119,15 @@ fn load_or_gen_keys(keys_file: &str) -> (PublicKey, SecretKey) {
             let pk = sk.public_key();
             save_keys(keys_file, pk.clone(), &sk);
             (pk, sk)
-        },
-        Err(e) => panic!("Failed to read the keys file: {}", e)
+        }
+        Err(e) => panic!("Failed to read the keys file: {}", e),
     }
 }
 
 /// Run a future with the runtime specified by config.
 fn run<F>(future: F, threads: Threads)
-    where F: Future<Output = Result<(), Error>> + 'static
+where
+    F: Future<Output = Result<(), Error>> + 'static,
 {
     if threads == Threads::N(1) {
         let runtime = runtime::Runtime::new().expect("Failed to create runtime");
@@ -122,12 +135,12 @@ fn run<F>(future: F, threads: Threads)
     } else {
         let mut builder = runtime::Builder::new_multi_thread();
         match threads {
-            Threads::N(n) => { builder.worker_threads(n as usize); },
-            Threads::Auto => { }, // builder will detect number of cores automatically
+            Threads::N(n) => {
+                builder.worker_threads(n as usize);
+            }
+            Threads::Auto => {} // builder will detect number of cores automatically
         }
-        let runtime = builder
-            .build()
-            .expect("Failed to create runtime");
+        let runtime = builder.build().expect("Failed to create runtime");
         runtime.block_on(future).expect("Execution was terminated with error");
     };
 }
@@ -169,7 +182,7 @@ async fn run_tcp(config: &NodeConfig, dht_sk: SecretKey, mut tcp_onion: TcpOnion
         // all onion packets from DHT server
         while tcp_onion.rx.next().await.is_some() {}
 
-        return Ok(())
+        return Ok(());
     }
 
     let onion_tx = tcp_onion.tx;
@@ -185,17 +198,20 @@ async fn run_tcp(config: &NodeConfig, dht_sk: SecretKey, mut tcp_onion: TcpOnion
         let dht_sk = dht_sk.clone();
         async move {
             let listener = TcpListener::bind(&addr).await.expect("Failed to bind TCP listener");
-            tcp_run(&tcp_server_c, listener, dht_sk, stats.clone(), config.tcp_connections_limit)
-                .await
-                .map_err(Error::from)
-        }.boxed()
+            tcp_run(
+                &tcp_server_c,
+                listener,
+                dht_sk,
+                stats.clone(),
+                config.tcp_connections_limit,
+            )
+            .await
+            .map_err(Error::from)
+        }
+        .boxed()
     });
 
-    let tcp_server_future = async {
-        future::select_all(tcp_server_futures)
-            .await
-            .0
-    };
+    let tcp_server_future = async { future::select_all(tcp_server_futures).await.0 };
 
     // let tcp_onion_rx = tcp_onion.rx.clone()
     let tcp_onion_future = async {
@@ -219,7 +235,13 @@ async fn run_tcp(config: &NodeConfig, dht_sk: SecretKey, mut tcp_onion: TcpOnion
     Ok(())
 }
 
-async fn run_udp(config: &NodeConfig, dht_pk: PublicKey, dht_sk: &SecretKey, mut udp_onion: UdpOnion, tcp_stats: Stats) -> Result<(), Error> {
+async fn run_udp(
+    config: &NodeConfig,
+    dht_pk: PublicKey,
+    dht_sk: &SecretKey,
+    mut udp_onion: UdpOnion,
+    tcp_stats: Stats,
+) -> Result<(), Error> {
     let udp_addr = if let Some(udp_addr) = config.udp_addr {
         udp_addr
     } else {
@@ -227,7 +249,7 @@ async fn run_udp(config: &NodeConfig, dht_pk: PublicKey, dht_sk: &SecretKey, mut
         // all onion packets from TCP server
         while udp_onion.rx.next().await.is_some() {}
 
-        return Ok(())
+        return Ok(());
     };
 
     let socket = bind_socket(udp_addr).await;
@@ -244,8 +266,9 @@ async fn run_udp(config: &NodeConfig, dht_pk: PublicKey, dht_sk: &SecretKey, mut
                 .run()
                 .map_err(Error::from)
                 .await
+        } else {
+            Ok(())
         }
-        else { Ok(()) }
     };
 
     let (onion_tx, mut onion_rx) = (udp_onion.tx, udp_onion.rx);
@@ -261,9 +284,7 @@ async fn run_udp(config: &NodeConfig, dht_pk: PublicKey, dht_sk: &SecretKey, mut
     let dht_server_c = dht_server.clone();
     let udp_onion_future = async move {
         while let Some((onion_request, addr)) = onion_rx.next().await {
-            let res = dht_server_c
-                .handle_tcp_onion_request(onion_request, addr)
-                .await;
+            let res = dht_server_c.handle_tcp_onion_request(onion_request, addr).await;
 
             if let Err(err) = res {
                 warn!("Failed to handle TCP onion request: {:?}", err);
@@ -297,24 +318,21 @@ fn main() {
 
     match config.log_type {
         LogType::Stderr => {
-            let env = env_logger::Env::default()
-                .filter_or("RUST_LOG", "info");
-            env_logger::Builder::from_env(env)
-                .init();
-        },
+            let env = env_logger::Env::default().filter_or("RUST_LOG", "info");
+            env_logger::Builder::from_env(env).init();
+        }
         LogType::Stdout => {
-            let env = env_logger::Env::default()
-                .filter_or("RUST_LOG", "info");
+            let env = env_logger::Env::default().filter_or("RUST_LOG", "info");
             env_logger::Builder::from_env(env)
                 .target(env_logger::fmt::Target::Stdout)
                 .init();
-        },
+        }
         #[cfg(unix)]
         LogType::Syslog => {
             syslog::init(Facility::LOG_USER, log::LevelFilter::Info, None)
                 .expect("Failed to initialize syslog backend.");
-        },
-        LogType::None => { },
+        }
+        LogType::None => {}
     }
 
     for key in config.unused.keys() {
@@ -334,8 +352,10 @@ fn main() {
     }
 
     if config.sk_passed_as_arg {
-        warn!("You should not pass the secret key via arguments due to \
-               security reasons. Use the environment variable instead");
+        warn!(
+            "You should not pass the secret key via arguments due to \
+               security reasons. Use the environment variable instead"
+        );
     }
 
     info!("DHT public key: {}", hex::encode(dht_pk.as_ref()).to_uppercase());
@@ -347,15 +367,12 @@ fn main() {
 
     let udp_config = config.clone();
     let udp_dht_sk = dht_sk.clone();
-    let udp_server_future = async move {
-        run_udp(&udp_config, dht_pk, &udp_dht_sk, udp_onion, udp_tcp_stats.clone()).await
-    };
+    let udp_server_future =
+        async move { run_udp(&udp_config, dht_pk, &udp_dht_sk, udp_onion, udp_tcp_stats.clone()).await };
 
     let tcp_config = config.clone();
     let tcp_dht_sk = dht_sk;
-    let tcp_server_future = async move {
-        run_tcp(&tcp_config, tcp_dht_sk, tcp_onion, tcp_tcp_stats).await
-    };
+    let tcp_server_future = async move { run_tcp(&tcp_config, tcp_dht_sk, tcp_onion, tcp_tcp_stats).await };
 
     let future = async move {
         futures::select! {

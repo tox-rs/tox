@@ -3,9 +3,9 @@
 
 use super::*;
 
-use tox_binary_io::*;
 use crate::relay::connection_id::ConnectionId;
 use nom::bytes::complete::tag;
+use tox_binary_io::*;
 
 /** Sent by client to server.
 Sent when client wants the server to forget about the connection related
@@ -32,7 +32,7 @@ Length | Content
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct DisconnectNotification {
     /// The id of the disconnected client
-    pub connection_id: ConnectionId
+    pub connection_id: ConnectionId,
 }
 
 impl FromBytes for DisconnectNotification {
@@ -44,6 +44,7 @@ impl FromBytes for DisconnectNotification {
 }
 
 impl ToBytes for DisconnectNotification {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x03) >>

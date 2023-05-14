@@ -2,10 +2,10 @@
 */
 
 use super::*;
-use std::str;
 use crate::toxid::{NoSpam, NOSPAMBYTES};
 use nom::bytes::complete::tag;
 use nom::combinator::{map_res, verify};
+use std::str;
 
 const MAX_FRIEND_REQUEST_MSG_SIZE: usize = MAX_ONION_CLIENT_DATA_SIZE - (1 + NOSPAMBYTES);
 
@@ -28,14 +28,12 @@ pub struct FriendRequest {
 impl FriendRequest {
     /// Create new object
     pub fn new(nospam: NoSpam, msg: String) -> Self {
-        FriendRequest {
-            nospam,
-            msg,
-        }
+        FriendRequest { nospam, msg }
     }
 }
 
 impl ToBytes for FriendRequest {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x20) >>
@@ -50,11 +48,19 @@ impl FromBytes for FriendRequest {
     fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
         let (input, _) = tag(&[0x20][..])(input)?;
         let (input, nospam) = NoSpam::from_bytes(input)?;
-        let (input, msg) = map_res(verify(rest, |msg: &[u8]| msg.len() <= MAX_FRIEND_REQUEST_MSG_SIZE && !msg.is_empty()), str::from_utf8)(input)?;
-        Ok((input, FriendRequest {
-            nospam,
-            msg: msg.to_string(),
-        }))
+        let (input, msg) = map_res(
+            verify(rest, |msg: &[u8]| {
+                msg.len() <= MAX_FRIEND_REQUEST_MSG_SIZE && !msg.is_empty()
+            }),
+            str::from_utf8,
+        )(input)?;
+        Ok((
+            input,
+            FriendRequest {
+                nospam,
+                msg: msg.to_string(),
+            },
+        ))
     }
 }
 
@@ -98,7 +104,7 @@ mod tests {
         let large_string = String::from_utf8(vec![32u8; MAX_FRIEND_REQUEST_MSG_SIZE + 1]).unwrap();
         let friend_req = FriendRequest {
             nospam: NoSpam([42; NOSPAMBYTES]),
-            msg: large_string
+            msg: large_string,
         };
         let mut buf = [0; MAX_ONION_CLIENT_DATA_SIZE + 1]; // `1` is to provide enough space for success of serializing
         assert!(friend_req.to_bytes((&mut buf, 0)).is_err());

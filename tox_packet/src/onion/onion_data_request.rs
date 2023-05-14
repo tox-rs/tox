@@ -3,14 +3,14 @@
 
 use super::*;
 
-use tox_binary_io::*;
-use tox_crypto::*;
 use crate::dht::*;
 use crate::onion::MAX_ONION_RESPONSE_PAYLOAD_SIZE;
+use tox_binary_io::*;
+use tox_crypto::*;
 
 use nom::{
-    combinator::{rest, rest_len, map_parser, verify},
-    bytes::complete::{take, tag},
+    bytes::complete::{tag, take},
+    combinator::{map_parser, rest, rest_len, verify},
 };
 
 /** It's used to send data requests to dht node using onion paths.
@@ -41,7 +41,7 @@ pub struct InnerOnionDataRequest {
     /// Temporary `PublicKey` for the current encrypted payload
     pub temporary_pk: PublicKey,
     /// Encrypted payload
-    pub payload: Vec<u8>
+    pub payload: Vec<u8>,
 }
 
 impl FromBytes for InnerOnionDataRequest {
@@ -51,16 +51,20 @@ impl FromBytes for InnerOnionDataRequest {
         let (input, nonce) = Nonce::from_bytes(input)?;
         let (input, temporary_pk) = PublicKey::from_bytes(input)?;
         let (input, payload) = rest(input)?;
-        Ok((input, InnerOnionDataRequest {
-            destination_pk,
-            nonce,
-            temporary_pk,
-            payload: payload.to_vec()
-        }))
+        Ok((
+            input,
+            InnerOnionDataRequest {
+                destination_pk,
+                nonce,
+                temporary_pk,
+                payload: payload.to_vec(),
+            },
+        ))
     }
 }
 
 impl ToBytes for InnerOnionDataRequest {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x85) >>
@@ -80,7 +84,7 @@ impl InnerOnionDataRequest {
         destination_pk: PublicKey,
         temporary_pk: PublicKey,
         nonce: Nonce,
-        payload: &OnionDataResponsePayload
+        payload: &OnionDataResponsePayload,
     ) -> InnerOnionDataRequest {
         let mut buf = [0; MAX_ONION_RESPONSE_PAYLOAD_SIZE];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
@@ -100,17 +104,12 @@ impl InnerOnionDataRequest {
     - fails to parse as `OnionDataResponsePayload`
     */
     pub fn get_payload(&self, shared_secret: &SalsaBox) -> Result<OnionDataResponsePayload, GetPayloadError> {
-        let decrypted = shared_secret.decrypt((&self.nonce).into(), self.payload.as_slice())
-            .map_err(|AeadError| {
-                GetPayloadError::decrypt()
-            })?;
+        let decrypted = shared_secret
+            .decrypt((&self.nonce).into(), self.payload.as_slice())
+            .map_err(|AeadError| GetPayloadError::decrypt())?;
         match OnionDataResponsePayload::from_bytes(&decrypted) {
-            Err(error) => {
-                Err(GetPayloadError::deserialize(error, decrypted.clone()))
-            },
-            Ok((_, inner)) => {
-                Ok(inner)
-            }
+            Err(error) => Err(GetPayloadError::deserialize(error, decrypted.clone())),
+            Ok((_, inner)) => Ok(inner),
         }
     }
 }
@@ -137,19 +136,23 @@ pub struct OnionDataRequest {
     /// Inner onion data request that was enclosed in onion packets
     pub inner: InnerOnionDataRequest,
     /// Return address encrypted by the third node from onion chain
-    pub onion_return: OnionReturn
+    pub onion_return: OnionReturn,
 }
 
 impl FromBytes for OnionDataRequest {
     fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
-        let (input, rest_len) = verify(rest_len, |len| *len <= ONION_MAX_PACKET_SIZE && *len >= ONION_RETURN_3_SIZE)(input)?;
-        let (input, inner) = map_parser(take(rest_len - ONION_RETURN_3_SIZE), InnerOnionDataRequest::from_bytes)(input)?;
+        let (input, rest_len) = verify(rest_len, |len| {
+            *len <= ONION_MAX_PACKET_SIZE && *len >= ONION_RETURN_3_SIZE
+        })(input)?;
+        let (input, inner) =
+            map_parser(take(rest_len - ONION_RETURN_3_SIZE), InnerOnionDataRequest::from_bytes)(input)?;
         let (input, onion_return) = OnionReturn::from_bytes(input)?;
         Ok((input, OnionDataRequest { inner, onion_return }))
     }
 }
 
 impl ToBytes for OnionDataRequest {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_call!(|buf, inner| InnerOnionDataRequest::to_bytes(inner, buf), &self.inner) >>
@@ -252,7 +255,7 @@ mod tests {
             destination_pk: real_pk,
             nonce: nonce.into(),
             temporary_pk,
-            payload: invalid_payload_encoded
+            payload: invalid_payload_encoded,
         };
         let decoded_payload = invalid_packet.get_payload(&shared_secret);
         assert!(decoded_payload.is_err());

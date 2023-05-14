@@ -3,9 +3,9 @@
 
 use super::*;
 
-use tox_binary_io::*;
 use crate::onion::InnerOnionResponse;
 use nom::bytes::complete::tag;
+use tox_binary_io::*;
 
 /** Sent by server to client.
 The server just sends payload from `OnionResponse1` packet that it got from a
@@ -22,7 +22,7 @@ variable | Payload
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct OnionResponse {
     /// Inner onion response
-    pub payload: InnerOnionResponse
+    pub payload: InnerOnionResponse,
 }
 
 impl FromBytes for OnionResponse {
@@ -34,6 +34,7 @@ impl FromBytes for OnionResponse {
 }
 
 impl ToBytes for OnionResponse {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x09) >>
@@ -46,9 +47,12 @@ impl ToBytes for OnionResponse {
 mod test {
     use super::*;
 
-    use crypto_box::{SalsaBox, SecretKey, aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned}};
-    use rand::thread_rng;
     use crate::onion::{OnionAnnounceResponse, OnionDataResponse};
+    use crypto_box::{
+        aead::{generic_array::typenum::marker_traits::Unsigned, AeadCore},
+        SalsaBox, SecretKey,
+    };
+    use rand::thread_rng;
 
     encode_decode_test!(
         onion_response_with_announce_encode_decode,

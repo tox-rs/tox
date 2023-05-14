@@ -3,8 +3,8 @@
 
 use super::*;
 
-use nom::number::complete::be_u16;
 use nom::bytes::complete::tag;
+use nom::number::complete::be_u16;
 
 /** Query is a struct that holds info to query a peer in a conference.
 
@@ -30,6 +30,7 @@ impl FromBytes for Query {
 }
 
 impl ToBytes for Query {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x62) >>
@@ -50,8 +51,5 @@ impl Query {
 mod tests {
     use super::*;
 
-    encode_decode_test!(
-        peer_query_encode_decode,
-        Query::new(1)
-    );
+    encode_decode_test!(peer_query_encode_decode, Query::new(1));
 }

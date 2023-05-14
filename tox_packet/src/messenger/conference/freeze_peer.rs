@@ -3,8 +3,8 @@
 
 use super::*;
 
-use nom::number::complete::{be_u16, be_u32};
 use nom::bytes::complete::tag;
+use nom::number::complete::{be_u16, be_u32};
 
 /** Freeze peer is a struct that holds info to send freeze peer message to a conference.
 
@@ -42,16 +42,20 @@ impl FromBytes for FreezePeer {
         let (input, message_id) = be_u32(input)?;
         let (input, _) = tag("\x12")(input)?;
         let (input, freeze_peer_id) = be_u16(input)?;
-        Ok((input, FreezePeer {
-            conference_id,
-            peer_id,
-            message_id,
-            freeze_peer_id,
-        }))
+        Ok((
+            input,
+            FreezePeer {
+                conference_id,
+                peer_id,
+                message_id,
+                freeze_peer_id,
+            },
+        ))
     }
 }
 
 impl ToBytes for FreezePeer {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x63) >>
@@ -80,8 +84,5 @@ impl FreezePeer {
 mod tests {
     use super::*;
 
-    encode_decode_test!(
-        freeze_peer_encode_decode,
-        FreezePeer::new(1, 2, 3, 4)
-    );
+    encode_decode_test!(freeze_peer_encode_decode, FreezePeer::new(1, 2, 3, 4));
 }

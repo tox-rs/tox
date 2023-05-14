@@ -1,14 +1,14 @@
 /*! The inner implementation of client used only by relay server.
 */
 
-use tox_crypto::*;
-use tox_packet::relay::*;
 use crate::relay::links::Links;
 use crate::time::*;
 use crate::utils::*;
+use tox_crypto::*;
+use tox_packet::relay::*;
 
 use std::net::IpAddr;
-use std::time::{Instant, Duration};
+use std::time::{Duration, Instant};
 
 use futures::channel::mpsc;
 use rand::thread_rng;
@@ -46,12 +46,12 @@ pub struct Client {
     /// Last time sent PingRequest packet
     last_pinged: Instant,
     /// Last time received PongResponse
-    last_pong_resp: Instant
+    last_pong_resp: Instant,
 }
 
 impl Client {
     /** Create new Client
-    */
+     */
     pub fn new(tx: mpsc::Sender<Packet>, pk: &PublicKey, ip_addr: IpAddr, port: u16) -> Client {
         Client {
             pk: pk.clone(),
@@ -61,60 +61,60 @@ impl Client {
             links: Links::new(),
             ping_id: 0,
             last_pinged: clock_now(),
-            last_pong_resp: clock_now()
+            last_pong_resp: clock_now(),
         }
     }
 
     /** PK of the `Client`
-    */
+     */
     pub fn pk(&self) -> PublicKey {
         self.pk.clone()
     }
 
     /** `std::net::IpAddr` of the `Client`
-    */
+     */
     pub fn ip_addr(&self) -> IpAddr {
         self.ip_addr
     }
 
     /** Port of the `Client`
-    */
+     */
     pub fn port(&self) -> u16 {
         self.port
     }
 
     /** Last ping_id sent to client.
-    */
+     */
     pub fn ping_id(&self) -> u64 {
         self.ping_id
     }
 
     /** Set last_pong_resp
-    */
+     */
     pub fn set_last_pong_resp(&mut self, time: Instant) {
         self.last_pong_resp = time;
     }
 
     /** Check if PongResponse timed out
-    */
+     */
     pub fn is_pong_timedout(&self) -> bool {
         clock_elapsed(self.last_pong_resp) > TCP_PING_TIMEOUT + TCP_PING_FREQUENCY
     }
 
     /** Check if Ping interval is elapsed
-    */
+     */
     pub fn is_ping_interval_passed(&self) -> bool {
         clock_elapsed(self.last_pinged) >= TCP_PING_FREQUENCY
     }
 
     /** Get the Links of the Client
-    */
+     */
     pub fn links(&self) -> &Links {
         &self.links
     }
 
     /** Get the Links of the Client
-    */
+     */
     pub fn links_mut(&mut self) -> &mut Links {
         &mut self.links
     }

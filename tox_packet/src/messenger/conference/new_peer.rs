@@ -3,8 +3,8 @@
 
 use super::*;
 
-use nom::number::complete::{be_u16, be_u32};
 use nom::bytes::complete::tag;
+use nom::number::complete::{be_u16, be_u32};
 
 use tox_crypto::*;
 
@@ -53,18 +53,22 @@ impl FromBytes for NewPeer {
         let (input, new_peer_id) = be_u16(input)?;
         let (input, long_term_pk) = PublicKey::from_bytes(input)?;
         let (input, dht_pk) = PublicKey::from_bytes(input)?;
-        Ok((input, NewPeer {
-            conference_id,
-            peer_id,
-            message_id,
-            new_peer_id,
-            long_term_pk,
-            dht_pk,
-        }))
+        Ok((
+            input,
+            NewPeer {
+                conference_id,
+                peer_id,
+                message_id,
+                new_peer_id,
+                long_term_pk,
+                dht_pk,
+            },
+        ))
     }
 }
 
 impl ToBytes for NewPeer {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x63) >>
@@ -81,7 +85,14 @@ impl ToBytes for NewPeer {
 
 impl NewPeer {
     /// Create new NewPeer object.
-    pub fn new(conference_id: u16, peer_id: u16, message_id: u32, new_peer_id: u16, long_term_pk: PublicKey, dht_pk: PublicKey) -> Self {
+    pub fn new(
+        conference_id: u16,
+        peer_id: u16,
+        message_id: u32,
+        new_peer_id: u16,
+        long_term_pk: PublicKey,
+        dht_pk: PublicKey,
+    ) -> Self {
         NewPeer {
             conference_id,
             peer_id,
@@ -101,6 +112,13 @@ mod tests {
 
     encode_decode_test!(
         new_peer_encode_decode,
-        NewPeer::new(1, 2, 3, 4, SecretKey::generate(&mut thread_rng()).public_key(), SecretKey::generate(&mut thread_rng()).public_key())
+        NewPeer::new(
+            1,
+            2,
+            3,
+            4,
+            SecretKey::generate(&mut thread_rng()).public_key(),
+            SecretKey::generate(&mut thread_rng()).public_key()
+        )
     );
 }

@@ -2,18 +2,12 @@
 */
 use super::*;
 
-use nom::number::complete::{le_u8, be_u16};
-use nom::combinator::flat_map;
-use nom::error::{ErrorKind, make_error};
 use cookie_factory::gen_if_else;
+use nom::combinator::flat_map;
+use nom::error::{make_error, ErrorKind};
+use nom::number::complete::{be_u16, le_u8};
 
-use std::net::{
-    IpAddr,
-    Ipv4Addr,
-    Ipv6Addr,
-    SocketAddr,
-    SocketAddrV4
-};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4};
 
 use tox_binary_io::*;
 use tox_crypto::*;
@@ -51,6 +45,7 @@ pub struct PackedNode {
 }
 
 impl ToBytes for PackedNode {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_if_else!(self.saddr.is_ipv4(), gen_be_u8!(2), gen_be_u8!(10)) >>
@@ -77,10 +72,12 @@ address.
 
 impl FromBytes for PackedNode {
     fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
-        let (input, addr) = flat_map(le_u8, |b| move |input| match b {
-            2 => map(Ipv4Addr::from_bytes, IpAddr::V4)(input),
-            10 => map(Ipv6Addr::from_bytes, IpAddr::V6)(input),
-            _ => Err(nom::Err::Error(make_error(input, ErrorKind::Switch))),
+        let (input, addr) = flat_map(le_u8, |b| {
+            move |input| match b {
+                2 => map(Ipv4Addr::from_bytes, IpAddr::V4)(input),
+                10 => map(Ipv6Addr::from_bytes, IpAddr::V6)(input),
+                _ => Err(nom::Err::Error(make_error(input, ErrorKind::Switch))),
+            }
         })(input)?;
         let (input, port) = be_u16(input)?;
         let saddr = SocketAddr::new(addr, port);
@@ -93,7 +90,10 @@ impl PackedNode {
     /// Create new `PackedNode`. The IPv6 address will be converted to IPv4 if
     /// it's IPv4-compatible or IPv4-mapped.
     pub fn new(saddr: SocketAddr, pk: PublicKey) -> Self {
-        PackedNode { saddr: PackedNode::ipv6_to_ipv4(saddr), pk }
+        PackedNode {
+            saddr: PackedNode::ipv6_to_ipv4(saddr),
+            pk,
+        }
     }
 
     /// Convert IPv6 address to IPv4 if it's IPv4-compatible or IPv4-mapped.
@@ -107,12 +107,13 @@ impl PackedNode {
                 } else {
                     SocketAddr::V6(v6)
                 }
-            },
+            }
         }
     }
 
     /// to_bytes for TCP
     #[allow(clippy::wrong_self_convention)]
+    #[rustfmt::skip]
     pub fn to_tcp_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_if_else!(self.saddr.is_ipv4(), gen_be_u8!(130), gen_be_u8!(138)) >>
@@ -124,10 +125,12 @@ impl PackedNode {
 
     /// from_bytes for TCP
     pub fn from_tcp_bytes(input: &[u8]) -> IResult<&[u8], Self> {
-        let (input, addr) = flat_map(le_u8, |b| move |input| match b {
-            130 => map(Ipv4Addr::from_bytes, IpAddr::V4)(input),
-            138 => map(Ipv6Addr::from_bytes, IpAddr::V6)(input),
-            _ => Err(nom::Err::Error(make_error(input, ErrorKind::Switch))),
+        let (input, addr) = flat_map(le_u8, |b| {
+            move |input| match b {
+                130 => map(Ipv4Addr::from_bytes, IpAddr::V4)(input),
+                138 => map(Ipv6Addr::from_bytes, IpAddr::V6)(input),
+                _ => Err(nom::Err::Error(make_error(input, ErrorKind::Switch))),
+            }
         })(input)?;
         let (input, port) = be_u16(input)?;
         let saddr = SocketAddr::new(addr, port);
@@ -139,8 +142,7 @@ impl PackedNode {
     pub fn ip_type(&self) -> u8 {
         if self.saddr.is_ipv4() {
             2
-        }
-        else {
+        } else {
             10
         }
     }
@@ -156,7 +158,6 @@ impl PackedNode {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,10 +169,7 @@ mod tests {
         let saddr = "1.2.3.4:12345".parse().unwrap();
 
         let a = PackedNode::new(saddr, pk.clone());
-        let b = PackedNode {
-            saddr,
-            pk,
-        };
+        let b = PackedNode { saddr, pk };
         assert_eq!(a, b);
     }
 
@@ -182,10 +180,7 @@ mod tests {
         let saddr_v4 = "1.2.3.4:12345".parse().unwrap();
 
         let a = PackedNode::new(saddr_v6, pk.clone());
-        let b = PackedNode {
-            saddr: saddr_v4,
-            pk,
-        };
+        let b = PackedNode { saddr: saddr_v4, pk };
         assert_eq!(a, b);
     }
 

@@ -3,12 +3,12 @@
 
 use super::*;
 
-use std::str;
 use nom::{
-    number::complete::be_u16,
-    combinator::{rest, map_res, verify},
     bytes::complete::tag,
+    combinator::{map_res, rest, verify},
+    number::complete::be_u16,
 };
+use std::str;
 
 use super::MAX_NAME_LENGTH_IN_CONFERENCE;
 
@@ -37,15 +37,22 @@ impl FromBytes for Title {
         let (input, _) = tag("\x62")(input)?;
         let (input, conference_id) = be_u16(input)?;
         let (input, _) = tag("\x0a")(input)?;
-        let (input, title) = map_res(verify(rest, |title: &[u8]| title.len() <= MAX_NAME_LENGTH_IN_CONFERENCE), str::from_utf8)(input)?;
-        Ok((input, Title {
-            conference_id,
-            title: title.to_string(),
-        }))
+        let (input, title) = map_res(
+            verify(rest, |title: &[u8]| title.len() <= MAX_NAME_LENGTH_IN_CONFERENCE),
+            str::from_utf8,
+        )(input)?;
+        Ok((
+            input,
+            Title {
+                conference_id,
+                title: title.to_string(),
+            },
+        ))
     }
 }
 
 impl ToBytes for Title {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x62) >>
@@ -60,10 +67,7 @@ impl ToBytes for Title {
 impl Title {
     /// Create new Title object.
     pub fn new(conference_id: u16, title: String) -> Self {
-        Title {
-            conference_id,
-            title,
-        }
+        Title { conference_id, title }
     }
 }
 
@@ -71,10 +75,7 @@ impl Title {
 mod tests {
     use super::*;
 
-    encode_decode_test!(
-        title_encode_decode,
-        Title::new(1, "1234".to_owned())
-    );
+    encode_decode_test!(title_encode_decode, Title::new(1, "1234".to_owned()));
 
     #[test]
     fn title_from_bytes_encoding_error() {
@@ -95,7 +96,7 @@ mod tests {
     #[test]
     fn title_to_bytes_overflow() {
         let large_string = String::from_utf8(vec![32u8; MAX_NAME_LENGTH_IN_CONFERENCE + 1]).unwrap();
-        let large_title = Title::new(1,large_string);
+        let large_title = Title::new(1, large_string);
         let mut buf = [0; MAX_NAME_LENGTH_IN_CONFERENCE + 1 + 2 + 1]; // packet id + conference id + packet kind.
         assert!(large_title.to_bytes((&mut buf, 0)).is_err());
     }

@@ -3,9 +3,9 @@
 
 use super::*;
 
-use std::str;
-use nom::combinator::{map_res, rest, verify};
 use nom::bytes::complete::tag;
+use nom::combinator::{map_res, rest, verify};
+use std::str;
 
 /// Maximum size in bytes of message string of message packet
 const MAX_MESSAGE_DATA_SIZE: usize = 1372;
@@ -30,12 +30,16 @@ pub struct Message {
 impl FromBytes for Message {
     fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
         let (input, _) = tag("\x40")(input)?;
-        let (input, msg) = map_res(verify(rest, |msg: &[u8]| msg.len() <= MAX_MESSAGE_DATA_SIZE), str::from_utf8)(input)?;
+        let (input, msg) = map_res(
+            verify(rest, |msg: &[u8]| msg.len() <= MAX_MESSAGE_DATA_SIZE),
+            str::from_utf8,
+        )(input)?;
         Ok((input, Message { msg: msg.to_string() }))
     }
 }
 
 impl ToBytes for Message {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x40) >>
@@ -56,10 +60,7 @@ impl Message {
 mod tests {
     use super::*;
 
-    encode_decode_test!(
-        message_encode_decode,
-        Message::new("1234".to_string())
-    );
+    encode_decode_test!(message_encode_decode, Message::new("1234".to_string()));
 
     #[test]
     fn message_from_bytes_encoding_error() {

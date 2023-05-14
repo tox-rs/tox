@@ -24,6 +24,7 @@ impl FromBytes for Offline {
 }
 
 impl ToBytes for Offline {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x19)
@@ -35,9 +36,5 @@ impl ToBytes for Offline {
 mod tests {
     use super::*;
 
-    encode_decode_test!(
-        offline_encode_decode,
-        Offline
-    );
-
+    encode_decode_test!(offline_encode_decode, Offline);
 }
