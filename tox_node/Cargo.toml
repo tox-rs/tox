@@ -35,7 +35,7 @@ maintainer-scripts = "dpkg/info"
 
 
 [dependencies]
-clap = { version = "4.0", features = ["cargo", "env"] }
+clap = { version = "4.2", features = ["cargo", "env"] }
 env_logger = "0.10"
 anyhow = "1.0"
 futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
@@ -55,9 +55,9 @@ default-features = false
 features = ["yaml"]
 
 [dependencies.tokio]
-version = "1.27"
+version = "1.28"
 default-features = false
 features = ["net", "time", "rt", "rt-multi-thread"]
 
 [target.'cfg(unix)'.dependencies]
-syslog = "6.0"
+syslog = "6.1"
