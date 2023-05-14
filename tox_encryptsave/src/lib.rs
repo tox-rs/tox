@@ -112,7 +112,7 @@ impl PassKey {
         let passhash = Sha256::digest(passphrase);
         let mut key = Zeroizing::new([0; xsalsa20poly1305::KEY_SIZE]);
         // predefined params for tox encryptsave format
-        let params = scrypt::Params::new(14, 8, 2).unwrap();
+        let params = scrypt::Params::new(14, 8, 2, 32).unwrap();
 
         scrypt::scrypt(
             &passhash,
