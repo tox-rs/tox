@@ -3,10 +3,10 @@
 
 use super::*;
 
-use tox_binary_io::*;
-use crate::dht::{CookieRequest, CookieResponse, CryptoHandshake, CryptoData};
+use crate::dht::{CookieRequest, CookieResponse, CryptoData, CryptoHandshake};
 use crate::relay::connection_id::ConnectionId;
-use nom::{combinator::map, branch::alt};
+use nom::{branch::alt, combinator::map};
+use tox_binary_io::*;
 
 /** Sent by client to server.
 The client sends data with `connection_id` and the server
@@ -37,6 +37,7 @@ impl FromBytes for Data {
 }
 
 impl ToBytes for Data {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_call!(|buf, connection_id| ConnectionId::to_bytes(connection_id, buf), &self.connection_id) >>

@@ -3,9 +3,9 @@
 
 use super::*;
 
-use std::str;
-use nom::combinator::{rest, map_res, verify};
 use nom::bytes::complete::tag;
+use nom::combinator::{map_res, rest, verify};
+use std::str;
 
 /// Maximum size in bytes of nickname string of nickname packet
 const MAX_NICKNAME_DATA_SIZE: usize = 128;
@@ -32,12 +32,21 @@ pub struct Nickname {
 impl FromBytes for Nickname {
     fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
         let (input, _) = tag("\x30")(input)?;
-        let (input, nickname) = map_res(verify(rest, |nickname: &[u8]| nickname.len() <= MAX_NICKNAME_DATA_SIZE), str::from_utf8)(input)?;
-        Ok((input, Nickname { nickname: nickname.to_string() }))
+        let (input, nickname) = map_res(
+            verify(rest, |nickname: &[u8]| nickname.len() <= MAX_NICKNAME_DATA_SIZE),
+            str::from_utf8,
+        )(input)?;
+        Ok((
+            input,
+            Nickname {
+                nickname: nickname.to_string(),
+            },
+        ))
     }
 }
 
 impl ToBytes for Nickname {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x30) >>
@@ -58,10 +67,7 @@ impl Nickname {
 mod tests {
     use super::*;
 
-    encode_decode_test!(
-        nickname_encode_decode,
-        Nickname::new("1234".to_string())
-    );
+    encode_decode_test!(nickname_encode_decode, Nickname::new("1234".to_string()));
 
     #[test]
     fn nickname_from_bytes_encoding_error() {

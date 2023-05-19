@@ -9,10 +9,10 @@ Here, GOOD node is the node responded within 162 seconds, BAD node is the node n
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::time::{Duration, Instant};
 
-use tox_crypto::*;
 use crate::dht::kbucket::*;
-use tox_packet::dht::packed_node::*;
 use crate::time::*;
+use tox_crypto::*;
+use tox_packet::dht::packed_node::*;
 
 /// Ping interval for each node in our lists.
 pub const PING_INTERVAL: Duration = Duration::from_secs(60);
@@ -21,8 +21,7 @@ pub const PING_INTERVAL: Duration = Duration::from_secs(60);
 pub const BAD_NODE_TIMEOUT: Duration = Duration::from_secs(PING_INTERVAL.as_secs() * 2 + 2);
 
 /// The timeout after which a node is discarded completely.
-pub const KILL_NODE_TIMEOUT: Duration =
-    Duration::from_secs(BAD_NODE_TIMEOUT.as_secs() + PING_INTERVAL.as_secs());
+pub const KILL_NODE_TIMEOUT: Duration = Duration::from_secs(BAD_NODE_TIMEOUT.as_secs() + PING_INTERVAL.as_secs());
 
 /// Struct conatains SocketAddrs and timestamps for sending and receiving packet
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -42,11 +41,7 @@ pub struct SockAndTime<T: Into<SocketAddr> + Copy> {
 impl<T: Into<SocketAddr> + Copy> SockAndTime<T> {
     /// Create SockAndTime object
     pub fn new(saddr: Option<T>) -> Self {
-        let last_resp_time = if saddr.is_some() {
-            Some(clock_now())
-        } else {
-            None
-        };
+        let last_resp_time = if saddr.is_some() { Some(clock_now()) } else { None };
         SockAndTime {
             saddr,
             last_resp_time,
@@ -58,18 +53,21 @@ impl<T: Into<SocketAddr> + Copy> SockAndTime<T> {
     /// Check if the address is considered bad i.e. it does not answer on
     /// addresses for `BAD_NODE_TIMEOUT`.
     pub fn is_bad(&self) -> bool {
-        self.last_resp_time.map_or(true, |time| clock_elapsed(time) > BAD_NODE_TIMEOUT)
+        self.last_resp_time
+            .map_or(true, |time| clock_elapsed(time) > BAD_NODE_TIMEOUT)
     }
 
     /// Check if the node is considered discarded i.e. it does not answer on
     /// addresses for `KILL_NODE_TIMEOUT`.
     pub fn is_discarded(&self) -> bool {
-        self.last_resp_time.map_or(true, |time| clock_elapsed(time) > KILL_NODE_TIMEOUT)
+        self.last_resp_time
+            .map_or(true, |time| clock_elapsed(time) > KILL_NODE_TIMEOUT)
     }
 
     /// Check if `PING_INTERVAL` is passed after last ping request.
     pub fn is_ping_interval_passed(&self) -> bool {
-        self.last_ping_req_time.map_or(true, |time| clock_elapsed(time) >= PING_INTERVAL)
+        self.last_ping_req_time
+            .map_or(true, |time| clock_elapsed(time) >= PING_INTERVAL)
     }
 
     /// Get address if it should be pinged and update `last_ping_req_time`.
@@ -147,7 +145,11 @@ impl DhtNode {
 
     /// Returns all available socket addresses of DhtNode
     pub fn get_all_addrs(&self) -> Vec<SocketAddr> {
-        let addrs = self.assoc4.saddr.into_iter().map(SocketAddr::V4)
+        let addrs = self
+            .assoc4
+            .saddr
+            .into_iter()
+            .map(SocketAddr::V4)
             .chain(self.assoc6.saddr.into_iter().map(SocketAddr::V6))
             .collect::<Vec<_>>();
 
@@ -180,11 +182,11 @@ impl DhtNode {
             SocketAddr::V4(v4) => {
                 self.assoc4.ret_saddr = Some(v4);
                 self.assoc4.ret_last_resp_time = Some(clock_now());
-            },
+            }
             SocketAddr::V6(v6) => {
                 self.assoc6.ret_saddr = Some(v6);
                 self.assoc6.ret_last_resp_time = Some(clock_now());
-            },
+            }
         }
     }
 }
@@ -206,15 +208,15 @@ impl KbucketNode for DhtNode {
     type CheckNode = PackedNode;
 
     fn is_outdated(&self, other: &PackedNode) -> bool {
-        self.assoc4.saddr.map(SocketAddr::V4) != Some(other.saddr) &&
-            self.assoc6.saddr.map(SocketAddr::V6) != Some(other.saddr)
+        self.assoc4.saddr.map(SocketAddr::V4) != Some(other.saddr)
+            && self.assoc6.saddr.map(SocketAddr::V6) != Some(other.saddr)
     }
     fn update(&mut self, other: &PackedNode) {
         match other.saddr {
             SocketAddr::V4(sock_v4) => {
                 self.assoc4.saddr = Some(sock_v4);
                 self.assoc4.last_resp_time = Some(clock_now());
-            },
+            }
             SocketAddr::V6(sock_v6) => {
                 self.assoc6.saddr = Some(sock_v6);
                 self.assoc6.last_resp_time = Some(clock_now());
@@ -225,8 +227,9 @@ impl KbucketNode for DhtNode {
         self.is_bad()
     }
     fn eviction_index(nodes: &[Self]) -> Option<usize> {
-        nodes.iter().rposition(|n| n.is_discarded()).or_else(||
-            nodes.iter().rposition(|n| n.is_bad())
-        )
+        nodes
+            .iter()
+            .rposition(|n| n.is_discarded())
+            .or_else(|| nodes.iter().rposition(|n| n.is_bad()))
     }
 }

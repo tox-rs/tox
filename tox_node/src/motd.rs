@@ -10,10 +10,7 @@ pub struct Counters {
 
 impl Counters {
     pub fn new(tcp: Stats, udp: Stats) -> Self {
-        Counters {
-            tcp,
-            udp,
-        }
+        Counters { tcp, udp }
     }
 }
 
@@ -34,7 +31,7 @@ impl Motd {
 
     fn format_n(source: u64) -> String {
         match source {
-            0..=999 => format!("{}",source),
+            0..=999 => format!("{}", source),
             1_000..=999_999 => format!("{0:.1}K", source as f32 / 1_000.0),
             1_000_000..=999_999_999 => format!("{0:.1}M", source as f32 / 1_000_000.0),
             1_000_000_000..=999_999_999_999 => format!("{0:.1}G", source as f32 / 1_000_000_000.0),
@@ -44,9 +41,7 @@ impl Motd {
 
     pub fn format(&self) -> String {
         let start_date = {
-            let format = time::format_description::parse(
-                "[year]-[month]-[day] [hour]:[minute]:[second]",
-            ).unwrap();
+            let format = time::format_description::parse("[year]-[month]-[day] [hour]:[minute]:[second]").unwrap();
             self.start_date.format(&format).unwrap()
         };
 
@@ -55,12 +50,7 @@ impl Motd {
             let days = uptime.whole_days();
             let hours = uptime.whole_hours() - uptime.whole_days() * 24;
             let minutes = uptime.whole_minutes() / 60 - uptime.whole_hours() * 60;
-            format!(
-              "{:0>#2} days {:0>#2} hours {:0>#2} minutes",
-              days,
-              hours,
-              minutes
-            )
+            format!("{:0>#2} days {:0>#2} hours {:0>#2} minutes", days, hours, minutes)
         };
 
         let tcp_packets_in = Self::format_n(self.counters.tcp.counters.incoming());

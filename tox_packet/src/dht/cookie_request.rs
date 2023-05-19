@@ -5,13 +5,13 @@ use super::*;
 
 use aead::{Aead, AeadCore, Error as AeadError};
 use crypto_box::SalsaBox;
-use nom::number::complete::be_u64;
 use nom::bytes::complete::{tag, take};
 use nom::combinator::eof;
+use nom::number::complete::be_u64;
 
+use crate::dht::errors::*;
 use tox_binary_io::*;
 use tox_crypto::*;
-use crate::dht::errors::*;
 
 /** CookieRequest packet struct.
 According to https://zetok.github.io/tox-spec/#net-crypto
@@ -50,6 +50,7 @@ pub struct CookieRequest {
 }
 
 impl ToBytes for CookieRequest {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x18) >>
@@ -66,7 +67,14 @@ impl FromBytes for CookieRequest {
         let (input, pk) = PublicKey::from_bytes(input)?;
         let (input, nonce) = Nonce::from_bytes(input)?;
         let (input, payload) = take(88usize)(input)?;
-        Ok((input, CookieRequest { pk, nonce, payload: payload.to_vec() }))
+        Ok((
+            input,
+            CookieRequest {
+                pk,
+                nonce,
+                payload: payload.to_vec(),
+            },
+        ))
     }
 }
 
@@ -92,17 +100,12 @@ impl CookieRequest {
     - fails to parse `CookieRequestPayload`
     */
     pub fn get_payload(&self, shared_secret: &SalsaBox) -> Result<CookieRequestPayload, GetPayloadError> {
-        let decrypted = shared_secret.decrypt((&self.nonce).into(), self.payload.as_slice())
-            .map_err(|AeadError| {
-                GetPayloadError::decrypt()
-            })?;
+        let decrypted = shared_secret
+            .decrypt((&self.nonce).into(), self.payload.as_slice())
+            .map_err(|AeadError| GetPayloadError::decrypt())?;
         match CookieRequestPayload::from_bytes(&decrypted) {
-            Err(error) => {
-                Err(GetPayloadError::deserialize(error, decrypted.clone()))
-            },
-            Ok((_, payload)) => {
-                Ok(payload)
-            }
+            Err(error) => Err(GetPayloadError::deserialize(error, decrypted.clone())),
+            Ok((_, payload)) => Ok(payload),
         }
     }
 }
@@ -128,6 +131,7 @@ pub struct CookieRequestPayload {
 }
 
 impl ToBytes for CookieRequestPayload {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_slice!(self.pk.as_ref()) >>
@@ -150,7 +154,7 @@ impl FromBytes for CookieRequestPayload {
 #[cfg(test)]
 mod tests {
     use crate::dht::cookie_request::*;
-    use crypto_box::aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned};
+    use crypto_box::aead::{generic_array::typenum::marker_traits::Unsigned, AeadCore};
     use rand::thread_rng;
 
     encode_decode_test!(
@@ -173,13 +177,19 @@ mod tests {
     dht_packet_encrypt_decrypt!(
         cookie_request_payload_encrypt_decrypt,
         CookieRequest,
-        CookieRequestPayload { pk: SecretKey::generate(&mut thread_rng()).public_key(), id: 42 }
+        CookieRequestPayload {
+            pk: SecretKey::generate(&mut thread_rng()).public_key(),
+            id: 42
+        }
     );
 
     dht_packet_encrypt_decrypt_invalid_key!(
         cookie_request_payload_encrypt_decrypt_invalid_key,
         CookieRequest,
-        CookieRequestPayload { pk: SecretKey::generate(&mut thread_rng()).public_key(), id: 42 }
+        CookieRequestPayload {
+            pk: SecretKey::generate(&mut thread_rng()).public_key(),
+            id: 42
+        }
     );
 
     dht_packet_decode_invalid!(cookie_request_decode_invalid, CookieRequest);

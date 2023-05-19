@@ -1,10 +1,10 @@
 //! K-buckets structure
 
-use tox_crypto::*;
 use crate::dht::dht_node::*;
-use tox_packet::dht::packed_node::*;
 use crate::dht::ip_port::IsGlobal;
 use crate::dht::kbucket::*;
+use tox_crypto::*;
+use tox_packet::dht::packed_node::*;
 
 /** K-buckets structure to hold up to
 [`KBUCKET_MAX_ENTRIES`](./constant.KBUCKET_MAX_ENTRIES.html) *
@@ -43,24 +43,20 @@ impl Ktree {
         trace!(target: "Ktree", "Creating new Ktree with PK: {:?}", pk);
         Ktree {
             pk,
-            kbuckets: vec![Kbucket::new(KBUCKET_DEFAULT_SIZE); KBUCKET_MAX_ENTRIES as usize]
+            kbuckets: vec![Kbucket::new(KBUCKET_DEFAULT_SIZE); KBUCKET_MAX_ENTRIES as usize],
         }
     }
 
     /// Get reference to a `DhtNode` by it's `PublicKey`.
     pub fn get_node(&self, pk: &PublicKey) -> Option<&DhtNode> {
-        self.kbucket_index(pk).and_then(|index|
-            self.kbuckets[index]
-                .get_node(&self.pk, pk)
-        )
+        self.kbucket_index(pk)
+            .and_then(|index| self.kbuckets[index].get_node(&self.pk, pk))
     }
 
     /// Get mutable reference to a `DhtNode` by it's `PublicKey`.
     pub fn get_node_mut(&mut self, pk: &PublicKey) -> Option<&mut DhtNode> {
-        self.kbucket_index(pk).and_then(move |index|
-            self.kbuckets[index]
-                .get_node_mut(&self.pk, pk)
-        )
+        self.kbucket_index(pk)
+            .and_then(move |index| self.kbuckets[index].get_node_mut(&self.pk, pk))
     }
 
     /** Return the possible internal index of [`Kbucket`](./struct.Kbucket.html)
@@ -110,7 +106,7 @@ impl Ktree {
             None => {
                 trace!("Failed to remove PK: {:?}", node_pk);
                 None
-            },
+            }
         }
     }
 
@@ -165,8 +161,7 @@ impl Ktree {
     pub fn can_add(&self, new_node: &PackedNode) -> bool {
         match self.kbucket_index(&new_node.pk) {
             None => false,
-            Some(i) =>
-                self.kbuckets[i].can_add(&self.pk, new_node, /* evict */ false),
+            Some(i) => self.kbuckets[i].can_add(&self.pk, new_node, /* evict */ false),
         }
     }
 
@@ -183,24 +178,19 @@ impl Ktree {
     /// Nodes that this iterator produces are sorted by distance to a base
     /// `PublicKey` (in ascending order).
     pub fn iter(&self) -> impl Iterator<Item = &DhtNode> + Clone {
-        self.kbuckets.iter()
-            .rev()
-            .flat_map(|kbucket| kbucket.iter())
+        self.kbuckets.iter().rev().flat_map(|kbucket| kbucket.iter())
     }
 
     /// Create mutable iterator over [`DhtNode`](./struct.DhtNode.html)s in
     /// `Ktree`. Nodes that this iterator produces are sorted by distance to a
     /// base `PublicKey` (in ascending order).
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut DhtNode> {
-        self.kbuckets.iter_mut()
-            .rev()
-            .flat_map(|kbucket| kbucket.iter_mut())
+        self.kbuckets.iter_mut().rev().flat_map(|kbucket| kbucket.iter_mut())
     }
 
     /// Check if all nodes in Ktree are discarded
     pub fn is_all_discarded(&self) -> bool {
-        self.iter()
-            .all(|node| node.is_discarded())
+        self.iter().all(|node| node.is_discarded())
     }
 }
 
@@ -227,7 +217,7 @@ mod tests {
         let pk = PublicKey::from([0; crypto_box::KEY_SIZE]);
         let mut ktree = Ktree::new(pk);
 
-        for i in 0 .. 8 {
+        for i in 0..8 {
             let mut pk = [i + 2; crypto_box::KEY_SIZE];
             // make first bit differ from base pk so all these nodes will get
             // into the first kbucket
@@ -243,18 +233,12 @@ mod tests {
         let mut pk = [1; crypto_box::KEY_SIZE];
         pk[0] = 255;
         let pk = PublicKey::from(pk);
-        let node = PackedNode::new(
-            "1.2.3.5:12345".parse().unwrap(),
-            pk
-        );
+        let node = PackedNode::new("1.2.3.5:12345".parse().unwrap(), pk);
         assert!(!ktree.try_add(node));
 
         // but nodes still can be added to other kbuckets
         let pk = PublicKey::from([1; crypto_box::KEY_SIZE]);
-        let node = PackedNode::new(
-            "1.2.3.5:12346".parse().unwrap(),
-            pk
-        );
+        let node = PackedNode::new("1.2.3.5:12346".parse().unwrap(), pk);
         assert!(ktree.try_add(node));
     }
 
@@ -263,10 +247,7 @@ mod tests {
         let pk = PublicKey::from([0; crypto_box::KEY_SIZE]);
         let mut ktree = Ktree::new(pk.clone());
 
-        let node = PackedNode::new(
-            "1.2.3.5:12345".parse().unwrap(),
-            pk
-        );
+        let node = PackedNode::new("1.2.3.5:12345".parse().unwrap(), pk);
 
         assert!(!ktree.try_add(node));
     }
@@ -280,7 +261,7 @@ mod tests {
 
         let node = PackedNode::new(
             "1.2.3.4:12345".parse().unwrap(),
-            PublicKey::from([1; crypto_box::KEY_SIZE])
+            PublicKey::from([1; crypto_box::KEY_SIZE]),
         );
 
         // "removing" non-existent node
@@ -308,17 +289,21 @@ mod tests {
             PackedNode::new(addr, PublicKey::from([i + 1; crypto_box::KEY_SIZE]))
         }
 
-        for i in 0 .. 8 {
+        for i in 0..8 {
             assert!(ktree.try_add(node_by_idx(i)));
         }
 
-        for count in 1 ..= 4 {
-            let closest: Vec<_> = ktree.get_closest(&PublicKey::from([0; crypto_box::KEY_SIZE]), count, true).into();
-            let should_be = (0 .. count).map(node_by_idx).collect::<Vec<_>>();
+        for count in 1..=4 {
+            let closest: Vec<_> = ktree
+                .get_closest(&PublicKey::from([0; crypto_box::KEY_SIZE]), count, true)
+                .into();
+            let should_be = (0..count).map(node_by_idx).collect::<Vec<_>>();
             assert_eq!(closest, should_be);
 
-            let closest: Vec<_> = ktree.get_closest(&PublicKey::from([255; crypto_box::KEY_SIZE]), count, true).into();
-            let should_be = (8 - count .. 8).rev().map(node_by_idx).collect::<Vec<_>>();
+            let closest: Vec<_> = ktree
+                .get_closest(&PublicKey::from([255; crypto_box::KEY_SIZE]), count, true)
+                .into();
+            let should_be = (8 - count..8).rev().map(node_by_idx).collect::<Vec<_>>();
             assert_eq!(closest, should_be);
         }
     }
@@ -335,7 +320,7 @@ mod tests {
 
         let node = PackedNode::new(
             "1.2.3.5:12345".parse().unwrap(),
-            SecretKey::generate(&mut rng).public_key()
+            SecretKey::generate(&mut rng).public_key(),
         );
 
         assert!(!ktree.contains(&node.pk));
@@ -353,7 +338,7 @@ mod tests {
 
         let node = PackedNode::new(
             "1.2.3.5:12345".parse().unwrap(),
-            SecretKey::generate(&mut rng).public_key()
+            SecretKey::generate(&mut rng).public_key(),
         );
 
         assert!(ktree.can_add(&node));
@@ -376,7 +361,7 @@ mod tests {
             PackedNode::new(addr, PublicKey::from([i + 1; crypto_box::KEY_SIZE]))
         }
 
-        for i in 0 .. 8 {
+        for i in 0..8 {
             assert!(ktree.try_add(node_by_idx(i)));
         }
 
@@ -403,7 +388,7 @@ mod tests {
             PackedNode::new(addr, PublicKey::from([i + 1; crypto_box::KEY_SIZE]))
         }
 
-        for i in 0 .. 8 {
+        for i in 0..8 {
             assert!(ktree.try_add(node_by_idx(i)));
         }
 
@@ -425,13 +410,13 @@ mod tests {
 
         let node = PackedNode::new(
             "1.2.3.4:33445".parse().unwrap(),
-            SecretKey::generate(&mut rng).public_key()
+            SecretKey::generate(&mut rng).public_key(),
         );
         assert!(ktree.try_add(node));
 
         let node = PackedNode::new(
             "1.2.3.5:12345".parse().unwrap(),
-            SecretKey::generate(&mut rng).public_key()
+            SecretKey::generate(&mut rng).public_key(),
         );
         assert!(ktree.try_add(node));
 

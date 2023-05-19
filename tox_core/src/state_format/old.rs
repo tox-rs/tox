@@ -1,22 +1,22 @@
 //! Old **Tox State Format (TSF)**. *__Will be deprecated__ when something
 //! better will become available.*
 
-use std::default::Default;
 use nom::{
-    number::complete::{le_u16, be_u16, le_u8, le_u32, le_u64},
-    combinator::{rest, success, verify, map_parser, map},
-    bytes::complete::{take, tag},
-    multi::{many0, length_data},
-    error::{ErrorKind, make_error},
     branch::alt,
+    bytes::complete::{tag, take},
+    combinator::{map, map_parser, rest, success, verify},
+    error::{make_error, ErrorKind},
+    multi::{length_data, many0},
+    number::complete::{be_u16, le_u16, le_u32, le_u64, le_u8},
 };
 use rand::{CryptoRng, Rng};
+use std::default::Default;
 
 use tox_binary_io::*;
 use tox_crypto::*;
 use tox_packet::dht::packed_node::*;
-use tox_packet::toxid::{NoSpam, NOSPAMBYTES};
 use tox_packet::packed_node::*;
+use tox_packet::toxid::{NoSpam, NOSPAMBYTES};
 
 const REQUEST_MSG_LEN: usize = 1024;
 
@@ -47,7 +47,7 @@ impl NospamKeys {
         NospamKeys {
             nospam: rng.gen(),
             pk,
-            sk
+            sk,
         }
     }
 }
@@ -58,20 +58,17 @@ impl NospamKeys {
 // NoSpam is defined in toxid.rs
 impl FromBytes for NospamKeys {
     fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
-        let (input, _) = tag([0x01,0x00])(input)?;
+        let (input, _) = tag([0x01, 0x00])(input)?;
         let (input, _) = tag(SECTION_MAGIC)(input)?;
         let (input, nospam) = NoSpam::from_bytes(input)?;
         let (input, pk) = PublicKey::from_bytes(input)?;
         let (input, sk) = SecretKey::from_bytes(input)?;
-        Ok((input, NospamKeys {
-            nospam,
-            pk,
-            sk
-        }))
+        Ok((input, NospamKeys { nospam, pk, sk }))
     }
 }
 
 impl ToBytes for NospamKeys {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_le_u16!(0x0001) >>
@@ -96,7 +93,7 @@ pub const NAME_LEN: usize = 128;
 */
 impl FromBytes for Name {
     fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
-        let (input, _) = tag([0x04,0x00])(input)?;
+        let (input, _) = tag([0x04, 0x00])(input)?;
         let (input, _) = tag(SECTION_MAGIC)(input)?;
         let (input, name_bytes) = rest(input)?;
         Ok((input, Name(name_bytes.to_vec())))
@@ -104,6 +101,7 @@ impl FromBytes for Name {
 }
 
 impl ToBytes for Name {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_le_u16!(0x0004) >>
@@ -137,7 +135,7 @@ const DHT_2ND_MAGICAL: u16 = 0x11ce;
 
 impl FromBytes for DhtState {
     fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
-        let (input, _) = tag([0x02,0x00])(input)?;
+        let (input, _) = tag([0x02, 0x00])(input)?;
         let (input, _) = tag(SECTION_MAGIC)(input)?;
         let (input, _) = verify(le_u32, |value| *value == DHT_MAGICAL)(input)?; // check whether beginning of the section matches DHT magic bytes
         let (input, num_of_bytes) = le_u32(input)?;
@@ -149,6 +147,7 @@ impl FromBytes for DhtState {
 }
 
 impl ToBytes for DhtState {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         let start_idx = buf.1;
 
@@ -176,16 +175,16 @@ https://zetok.github.io/tox-spec/#friends-0x03
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum FriendStatus {
     /// Not a friend. (When this can happen and what does it entail?)
-    NotFriend   = 0,
+    NotFriend = 0,
     /// Friend was added.
-    Added       = 1,
+    Added = 1,
     /// Friend request was sent to the friend.
-    FrSent      = 2,
+    FrSent = 2,
     /// Friend confirmed.
     /// (Something like toxcore knowing that friend accepted FR?)
-    Confirmed   = 3,
+    Confirmed = 3,
     /// Friend has come online.
-    Online      = 4,
+    Online = 4,
 }
 
 impl FromBytes for FriendStatus {
@@ -212,9 +211,9 @@ pub enum UserWorkingStatus {
     /// User is `Online`.
     Online = 0,
     /// User is `Away`.
-    Away   = 1,
+    Away = 1,
     /// User is `Busy`.
-    Busy   = 2,
+    Busy = 2,
 }
 
 /// Returns `UserWorkingStatus::Online`.
@@ -245,7 +244,7 @@ pub struct UserStatus(UserWorkingStatus);
 
 impl FromBytes for UserStatus {
     fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
-        let (input, _) = tag([0x06,0x00])(input)?;
+        let (input, _) = tag([0x06, 0x00])(input)?;
         let (input, _) = tag(SECTION_MAGIC)(input)?;
         let (input, user_status) = UserWorkingStatus::from_bytes(input)?;
         Ok((input, UserStatus(user_status)))
@@ -253,6 +252,7 @@ impl FromBytes for UserStatus {
 }
 
 impl ToBytes for UserStatus {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_le_u16!(0x0006) >>
@@ -274,6 +274,7 @@ pub struct StatusMsg(pub Vec<u8>);
 pub const STATUS_MSG_LEN: usize = 1007;
 
 impl ToBytes for StatusMsg {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_le_u16!(0x0005) >>
@@ -285,7 +286,7 @@ impl ToBytes for StatusMsg {
 
 impl FromBytes for StatusMsg {
     fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
-        let (input, _) = tag([0x05,0x00])(input)?;
+        let (input, _) = tag([0x05, 0x00])(input)?;
         let (input, _) = tag(SECTION_MAGIC)(input)?;
         let (input, status_msg_bytes) = rest(input)?;
         Ok((input, StatusMsg(status_msg_bytes.to_vec())))
@@ -306,6 +307,7 @@ impl FromBytes for TcpRelays {
 }
 
 impl ToBytes for TcpRelays {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_le_u16!(0x000a) >>
@@ -329,6 +331,7 @@ impl FromBytes for PathNodes {
 }
 
 impl ToBytes for PathNodes {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_le_u16!(0x000b) >>
@@ -389,7 +392,7 @@ impl FromBytes for FriendState {
         let (input, _) = take(1usize)(input)?;
         let (input, fr_msg_len) = be_u16(input)?;
         let (input, _) = verify(success(fr_msg_len), |len| *len <= REQUEST_MSG_LEN as u16)(input)?;
-        let fr_msg =fr_msg_bytes[..fr_msg_len as usize].to_vec();
+        let fr_msg = fr_msg_bytes[..fr_msg_len as usize].to_vec();
         let (input, name_bytes) = take(NAME_LEN)(input)?;
         let (input, name_len) = be_u16(input)?;
         let (input, _) = verify(success(name_len), |len| *len <= NAME_LEN as u16)(input)?;
@@ -403,21 +406,25 @@ impl FromBytes for FriendState {
         let (input, _) = take(3usize)(input)?;
         let (input, nospam) = NoSpam::from_bytes(input)?;
         let (input, last_seen) = le_u64(input)?;
-        Ok((input, FriendState {
-            friend_status,
-            pk,
-            fr_msg,
-            name,
-            status_msg,
-            user_status,
-            nospam,
-            last_seen,
-        }))
+        Ok((
+            input,
+            FriendState {
+                friend_status,
+                pk,
+                fr_msg,
+                name,
+                status_msg,
+                user_status,
+                nospam,
+                last_seen,
+            },
+        ))
     }
 }
 
 impl ToBytes for FriendState {
     #[allow(clippy::cognitive_complexity)]
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         let mut fr_msg_pad = self.fr_msg.clone();
         let mut name_pad = self.name.0.clone();
@@ -461,6 +468,7 @@ impl FromBytes for Friends {
 }
 
 impl ToBytes for Friends {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_le_u16!(0x0003) >>
@@ -483,6 +491,7 @@ impl FromBytes for Eof {
 }
 
 impl ToBytes for Eof {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_le_u16!(0x00ff) >>
@@ -604,13 +613,17 @@ impl FromBytes for State {
         let (input, _) = tag(&[0; 4][..])(input)?;
         let (input, _) = tag(STATE_MAGIC)(input)?;
         let (input, sections) = many0(map_parser(length_data(map(le_u32, |len| len + 4)), Section::from_bytes))(input)?;
-        Ok((input, State {
-            sections: sections.to_vec(),
-        }))
+        Ok((
+            input,
+            State {
+                sections: sections.to_vec(),
+            },
+        ))
     }
 }
 
 impl ToBytes for State {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_slice!([0; 4]) >>
@@ -681,25 +694,13 @@ mod tests {
         }
     );
 
-    encode_decode_test!(
-        name_encode_decode,
-        Name(vec![0,1,2,3,4])
-    );
+    encode_decode_test!(name_encode_decode, Name(vec![0, 1, 2, 3, 4]));
 
-    encode_decode_test!(
-        status_msg_encode_decode,
-        StatusMsg(vec![0,1,2,3,4,5])
-    );
+    encode_decode_test!(status_msg_encode_decode, StatusMsg(vec![0, 1, 2, 3, 4, 5]));
 
-    encode_decode_test!(
-        eof_encode_decode,
-        Eof
-    );
+    encode_decode_test!(eof_encode_decode, Eof);
 
-    encode_decode_test!(
-        user_status_encode_decode,
-        UserStatus(UserWorkingStatus::Online)
-    );
+    encode_decode_test!(user_status_encode_decode, UserStatus(UserWorkingStatus::Online));
 
     encode_decode_test!(
         tcp_relays_encode_decode,

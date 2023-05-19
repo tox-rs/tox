@@ -4,7 +4,10 @@ use futures::channel::mpsc::SendError;
 use thiserror::Error;
 use tokio::time::error::Elapsed;
 
-use crate::{net_crypto::errors::{KillConnectionError, SendLosslessPacketError}, relay::client::ConnectionError};
+use crate::{
+    net_crypto::errors::{KillConnectionError, SendLosslessPacketError},
+    relay::client::ConnectionError,
+};
 
 /// Error that can happen while removing a friend
 #[derive(Clone, Debug, Eq, PartialEq, Error)]
@@ -37,7 +40,7 @@ pub enum RunError {
     AddTcpConnection(ConnectionError),
     /// Failed to send connection status.
     #[error("Failed to send connection status")]
-    SendToConnectionStatus(SendError)
+    SendToConnectionStatus(SendError),
 }
 
 /// Error that can happen while handling `ShareRelays` packet.
@@ -45,5 +48,5 @@ pub enum RunError {
 pub enum HandleShareRelaysError {
     /// Failed to add TCP connection.
     #[error("Failed to TCP connection")]
-    AddTcpConnection(ConnectionError)
+    AddTcpConnection(ConnectionError),
 }

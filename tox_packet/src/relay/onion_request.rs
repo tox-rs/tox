@@ -3,14 +3,14 @@
 
 use super::*;
 
-use crypto_box::{SalsaBox, aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned}};
+use crate::ip_port::*;
+use crate::onion::{ONION_MAX_PACKET_SIZE, ONION_RETURN_1_SIZE};
+use crypto_box::{
+    aead::{generic_array::typenum::marker_traits::Unsigned, AeadCore},
+    SalsaBox,
+};
 use tox_binary_io::*;
 use tox_crypto::*;
-use crate::ip_port::*;
-use crate::onion::{
-    ONION_MAX_PACKET_SIZE,
-    ONION_RETURN_1_SIZE,
-};
 
 use nom::bytes::complete::tag;
 use nom::combinator::{rest, verify};
@@ -21,7 +21,8 @@ const ONION_MIN_PAYLOAD_SIZE: usize = (SIZE_IPPORT + <SalsaBox as AeadCore>::Tag
 
 /// `OnionRequest1` packet with encrypted payload from `OnionRequest` packet
 /// shouldn't be bigger than `ONION_MAX_PACKET_SIZE`.
-const ONION_MAX_PAYLOAD_SIZE: usize = ONION_MAX_PACKET_SIZE - (1 + NONCEBYTES + crypto_box::KEY_SIZE + ONION_RETURN_1_SIZE);
+const ONION_MAX_PAYLOAD_SIZE: usize =
+    ONION_MAX_PACKET_SIZE - (1 + NONCEBYTES + crypto_box::KEY_SIZE + ONION_RETURN_1_SIZE);
 
 /** Sent by client to server.
 The server will pack payload from this request to `OnionRequest1` packet and send
@@ -54,7 +55,7 @@ pub struct OnionRequest {
     /// Temporary `PublicKey` for the current encrypted payload
     pub temporary_pk: PublicKey,
     /// Encrypted payload
-    pub payload: Vec<u8>
+    pub payload: Vec<u8>,
 }
 
 impl FromBytes for OnionRequest {
@@ -63,15 +64,23 @@ impl FromBytes for OnionRequest {
         let (input, nonce) = Nonce::from_bytes(input)?;
         let (input, ip_port) = IpPort::from_bytes(input, IpPortPadding::WithPadding)?;
         let (input, temporary_pk) = PublicKey::from_bytes(input)?;
-        let (input, payload) = verify(
-            rest,
-            |payload: &[u8]| payload.len() >= ONION_MIN_PAYLOAD_SIZE && payload.len() <= ONION_MAX_PAYLOAD_SIZE
-        )(input)?;
-        Ok((input, OnionRequest { nonce, ip_port, temporary_pk, payload: payload.to_vec() }))
+        let (input, payload) = verify(rest, |payload: &[u8]| {
+            payload.len() >= ONION_MIN_PAYLOAD_SIZE && payload.len() <= ONION_MAX_PAYLOAD_SIZE
+        })(input)?;
+        Ok((
+            input,
+            OnionRequest {
+                nonce,
+                ip_port,
+                temporary_pk,
+                payload: payload.to_vec(),
+            },
+        ))
     }
 }
 
 impl ToBytes for OnionRequest {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_cond!(

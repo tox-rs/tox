@@ -3,17 +3,24 @@
 
 use super::*;
 
-use crate::onion::*;
-use crypto_box::{SalsaBox, aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned}};
 use crate::ip_port::SIZE_IPPORT;
+use crate::onion::*;
 use crate::toxid::NoSpam;
-use nom::combinator::{rest, verify};
+use crypto_box::{
+    aead::{generic_array::typenum::marker_traits::Unsigned, AeadCore},
+    SalsaBox,
+};
 use nom::bytes::complete::tag;
+use nom::combinator::{rest, verify};
 
-const ONION_SEND_BASE: usize =  crypto_box::KEY_SIZE + SIZE_IPPORT + <SalsaBox as AeadCore>::TagSize::USIZE;
+const ONION_SEND_BASE: usize = crypto_box::KEY_SIZE + SIZE_IPPORT + <SalsaBox as AeadCore>::TagSize::USIZE;
 const ONION_SEND_1: usize = xsalsa20poly1305::NONCE_SIZE + ONION_SEND_BASE * 3;
 const MAX_ONION_DATA_SIZE: usize = ONION_MAX_PACKET_SIZE - (ONION_SEND_1 + 1); // 1 is for packet_id
-const MIN_ONION_DATA_REQUEST_SIZE: usize = 1 + crypto_box::KEY_SIZE + xsalsa20poly1305::NONCE_SIZE + crypto_box::KEY_SIZE + <SalsaBox as AeadCore>::TagSize::USIZE; // 1 is for packet_id
+const MIN_ONION_DATA_REQUEST_SIZE: usize = 1
+    + crypto_box::KEY_SIZE
+    + xsalsa20poly1305::NONCE_SIZE
+    + crypto_box::KEY_SIZE
+    + <SalsaBox as AeadCore>::TagSize::USIZE; // 1 is for packet_id
 /// Maximum size in butes of Onion Data Request packet
 pub const MAX_DATA_REQUEST_SIZE: usize = MAX_ONION_DATA_SIZE - MIN_ONION_DATA_REQUEST_SIZE;
 /// Minimum size in bytes of Onion Data Response packet
@@ -42,11 +49,18 @@ impl FromBytes for FriendRequests {
         let (input, _) = tag("\x12")(input)?;
         let (input, nospam) = NoSpam::from_bytes(input)?;
         let (input, message) = verify(rest, |message: &[u8]| message.len() <= MAX_ONION_CLIENT_DATA_SIZE)(input)?;
-        Ok((input, FriendRequests { nospam, message: message.to_vec() }))
+        Ok((
+            input,
+            FriendRequests {
+                nospam,
+                message: message.to_vec(),
+            },
+        ))
     }
 }
 
 impl ToBytes for FriendRequests {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x12) >>
@@ -71,6 +85,6 @@ mod tests {
 
     encode_decode_test!(
         friend_requests_encode_decode,
-        FriendRequests::new(NoSpam([42; NOSPAMBYTES]), vec![1,2,3,4])
+        FriendRequests::new(NoSpam([42; NOSPAMBYTES]), vec![1, 2, 3, 4])
     );
 }

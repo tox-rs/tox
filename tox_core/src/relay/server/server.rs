@@ -1,23 +1,23 @@
 /*! The implementation of relay server
 */
 
+use crate::relay::links::*;
+use crate::relay::server::client::Client;
 use tox_crypto::*;
 use tox_packet::onion::InnerOnionResponse;
-use crate::relay::server::client::Client;
 use tox_packet::relay::connection_id::ConnectionId;
-use crate::relay::links::*;
 use tox_packet::relay::*;
 
-use std::io::{Error, ErrorKind};
 use std::collections::HashMap;
+use std::io::{Error, ErrorKind};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use std::time::{Instant, Duration};
+use std::time::{Duration, Instant};
 
-use futures::{SinkExt, StreamExt};
 use futures::channel::mpsc;
-use tokio::sync::RwLock;
 use futures::stream::FuturesUnordered;
+use futures::{SinkExt, StreamExt};
+use tokio::sync::RwLock;
 
 /// Interval of time for packet sending
 const TCP_SEND_TIMEOUT: Duration = Duration::from_millis(100);
@@ -47,10 +47,7 @@ struct ServerState {
 }
 
 async fn send_packet(packet: Packet, mut tx: mpsc::Sender<Packet>) {
-    tokio::time::timeout(
-        TCP_SEND_TIMEOUT,
-        tx.send(packet)
-    ).await.ok();
+    tokio::time::timeout(TCP_SEND_TIMEOUT, tx.send(packet)).await.ok();
 }
 
 /// Send all packets concurrently. The error in a single sending
@@ -60,7 +57,7 @@ async fn send_packets<T: IntoIterator<Item = (Packet, mpsc::Sender<Packet>)>>(pa
         .into_iter()
         .map(|(packet, tx)| send_packet(packet, tx))
         .collect::<FuturesUnordered<_>>();
-    while futures.next().await.is_some() { };
+    while futures.next().await.is_some() {}
 }
 
 /// The result of handling one TCP `Packet` whose main purpose is to avoid
@@ -90,25 +87,23 @@ impl HandleAction {
             HandleAction::Send(packets) => send_packets(packets).await,
             HandleAction::Onion(packet, saddr) => {
                 if let Some(tx) = onion_sink {
-                    tokio::time::timeout(
-                        TCP_SEND_TIMEOUT,
-                        tx.clone().send((packet, saddr)),
-                    ).await.ok();
+                    tokio::time::timeout(TCP_SEND_TIMEOUT, tx.clone().send((packet, saddr)))
+                        .await
+                        .ok();
                 }
-            },
+            }
         }
     }
 }
 
-
 impl Server {
     /** Create a new `Server` without onion
-    */
+     */
     pub fn new() -> Server {
         Server::default()
     }
     /** Create a new `Server` with onion
-    */
+     */
     pub fn set_udp_onion_sink(&mut self, onion_sink: mpsc::Sender<(OnionRequest, SocketAddr)>) {
         self.onion_sink = Some(onion_sink)
     }
@@ -124,10 +119,10 @@ impl Server {
             vec![]
         };
 
-        state.keys_by_addr
+        state
+            .keys_by_addr
             .insert((client.ip_addr(), client.port()), client.pk());
-        state.connected_clients
-            .insert(client.pk(), client);
+        state.connected_clients.insert(client.pk(), client);
 
         drop(state);
 
@@ -156,13 +151,25 @@ impl Server {
         Ok(())
     }
     /** Send `OnionResponse` packet to the client by it's `std::net::IpAddr`.
-    */
-    pub async fn handle_udp_onion_response(&self, ip_addr: IpAddr, port: u16, payload: InnerOnionResponse) -> Result<(), Error> {
+     */
+    pub async fn handle_udp_onion_response(
+        &self,
+        ip_addr: IpAddr,
+        port: u16,
+        payload: InnerOnionResponse,
+    ) -> Result<(), Error> {
         let state = self.state.read().await;
-        let tx = if let Some(client) = state.keys_by_addr.get(&(ip_addr, port)).and_then(|pk| state.connected_clients.get(pk)) {
+        let tx = if let Some(client) = state
+            .keys_by_addr
+            .get(&(ip_addr, port))
+            .and_then(|pk| state.connected_clients.get(pk))
+        {
             client.tx()
         } else {
-            return Err(Error::new(ErrorKind::Other, "Cannot find client by ip_addr to send onion response"))
+            return Err(Error::new(
+                ErrorKind::Other,
+                "Cannot find client by ip_addr to send onion response",
+            ));
         };
 
         drop(state);
@@ -186,10 +193,10 @@ impl Server {
         // check that the client's address isn't changed
         if let Some(client) = state.connected_clients.get(pk) {
             if client.ip_addr() != ip_addr || client.port() != port {
-                return Err(Error::new(ErrorKind::Other, "Client with pk has different address"))
+                return Err(Error::new(ErrorKind::Other, "Client with pk has different address"));
             }
         } else {
-            return Err(Error::new(ErrorKind::Other, "Cannot find client by pk to shutdown it"))
+            return Err(Error::new(ErrorKind::Other, "Cannot find client by pk to shutdown it"));
         }
 
         let packets = self.shutdown_client_inner(pk, &mut state)?;
@@ -202,34 +209,42 @@ impl Server {
     }
 
     /** Actual shutdown is done here.
-    */
-    fn shutdown_client_inner(&self, pk: &PublicKey, state: &mut ServerState) -> Result<Vec<(Packet, mpsc::Sender<Packet>)>, Error> {
+     */
+    fn shutdown_client_inner(
+        &self,
+        pk: &PublicKey,
+        state: &mut ServerState,
+    ) -> Result<Vec<(Packet, mpsc::Sender<Packet>)>, Error> {
         // remove client by pk from connected_clients
         let client_a = if let Some(client) = state.connected_clients.remove(pk) {
             client
         } else {
-            return Err(Error::new(
-                ErrorKind::Other,
-                "Cannot find client by pk to shutdown it"
-            ))
+            return Err(Error::new(ErrorKind::Other, "Cannot find client by pk to shutdown it"));
         };
 
         state.keys_by_addr.remove(&(client_a.ip_addr(), client_a.port()));
-        let result = client_a.links().iter_links().filter(|link| link.status == LinkStatus::Online).filter_map(|link| {
-            let client_b_pk = link.pk;
-            if let Some(client_b) = state.connected_clients.get_mut(&client_b_pk) {
-                if let Some(a_id_in_client_b) = client_b.links().id_by_pk(pk) {
-                    // they are linked, we should notify client_b
-                    // link from client_b.links should be downgraded
-                    client_b.links_mut().downgrade(a_id_in_client_b);
+        let result = client_a
+            .links()
+            .iter_links()
+            .filter(|link| link.status == LinkStatus::Online)
+            .filter_map(|link| {
+                let client_b_pk = link.pk;
+                if let Some(client_b) = state.connected_clients.get_mut(&client_b_pk) {
+                    if let Some(a_id_in_client_b) = client_b.links().id_by_pk(pk) {
+                        // they are linked, we should notify client_b
+                        // link from client_b.links should be downgraded
+                        client_b.links_mut().downgrade(a_id_in_client_b);
 
-                    let packet = Packet::DisconnectNotification(DisconnectNotification { connection_id: ConnectionId::from_index(a_id_in_client_b) });
-                    return Some((packet, client_b.tx()))
+                        let packet = Packet::DisconnectNotification(DisconnectNotification {
+                            connection_id: ConnectionId::from_index(a_id_in_client_b),
+                        });
+                        return Some((packet, client_b.tx()));
+                    }
                 }
-            }
 
-            None
-        }).collect();
+                None
+            })
+            .collect();
         Ok(result)
     }
     // Here start the impl of `handle_***` methods
@@ -238,23 +253,28 @@ impl Server {
         let mut state = self.state.write().await;
 
         // get client_a
-        let client_a =
-            if let Some(client) = state.connected_clients.get_mut(pk) {
-                client
-            } else {
-                return Err(Error::new(ErrorKind::Other, "RouteRequest: no such PK"))
-            };
+        let client_a = if let Some(client) = state.connected_clients.get_mut(pk) {
+            client
+        } else {
+            return Err(Error::new(ErrorKind::Other, "RouteRequest: no such PK"));
+        };
 
         if pk == &packet.pk {
             // send RouteResponse(0) if client requests its own pk
-            let packet = Packet::RouteResponse(RouteResponse { connection_id: ConnectionId::zero(), pk: pk.clone() });
+            let packet = Packet::RouteResponse(RouteResponse {
+                connection_id: ConnectionId::zero(),
+                pk: pk.clone(),
+            });
             return Ok(HandleAction::one(packet, client_a.tx()));
         }
 
         // check if client_a is already linked
         if let Some(index) = client_a.links().id_by_pk(&packet.pk) {
             // send RouteResponse if client was already linked to pk
-            let packet = Packet::RouteResponse(RouteResponse { connection_id: ConnectionId::from_index(index), pk: packet.pk.clone() });
+            let packet = Packet::RouteResponse(RouteResponse {
+                connection_id: ConnectionId::from_index(index),
+                pk: packet.pk.clone(),
+            });
             return Ok(HandleAction::one(packet, client_a.tx()));
         }
 
@@ -263,11 +283,17 @@ impl Server {
             index
         } else {
             // send RouteResponse(0) if no space to insert new link
-            let packet = Packet::RouteResponse(RouteResponse { connection_id: ConnectionId::zero(), pk: packet.pk.clone() });
+            let packet = Packet::RouteResponse(RouteResponse {
+                connection_id: ConnectionId::zero(),
+                pk: packet.pk.clone(),
+            });
             return Ok(HandleAction::one(packet, client_a.tx()));
         };
 
-        let route_response = Packet::RouteResponse(RouteResponse { connection_id: ConnectionId::from_index(b_id_in_client_a), pk: packet.pk.clone() });
+        let route_response = Packet::RouteResponse(RouteResponse {
+            connection_id: ConnectionId::from_index(b_id_in_client_a),
+            pk: packet.pk.clone(),
+        });
         let route_response_tx = client_a.tx();
 
         // get client_b
@@ -290,12 +316,16 @@ impl Server {
         // we don't care if connect notifications fail
         let client_a = state.connected_clients.get_mut(pk).unwrap();
         client_a.links_mut().upgrade(b_id_in_client_a);
-        let connect_notification_a = Packet::ConnectNotification(ConnectNotification { connection_id: ConnectionId::from_index(b_id_in_client_a) });
+        let connect_notification_a = Packet::ConnectNotification(ConnectNotification {
+            connection_id: ConnectionId::from_index(b_id_in_client_a),
+        });
         let connect_notification_a_tx = client_a.tx();
 
         let client_b = state.connected_clients.get_mut(&packet.pk).unwrap();
         client_b.links_mut().upgrade(a_id_in_client_b);
-        let connect_notification_b = Packet::ConnectNotification(ConnectNotification { connection_id: ConnectionId::from_index(a_id_in_client_b) });
+        let connect_notification_b = Packet::ConnectNotification(ConnectNotification {
+            connection_id: ConnectionId::from_index(a_id_in_client_b),
+        });
         let connect_notification_b_tx = client_b.tx();
 
         Ok(HandleAction::Send(vec![
@@ -306,19 +336,33 @@ impl Server {
     }
 
     async fn handle_route_response(&self, _pk: &PublicKey, _packet: &RouteResponse) -> Result<HandleAction, Error> {
-        Err(Error::new(ErrorKind::Other, "Client must not send RouteResponse to server"))
+        Err(Error::new(
+            ErrorKind::Other,
+            "Client must not send RouteResponse to server",
+        ))
     }
 
-    async fn handle_connect_notification(&self, _pk: &PublicKey, _packet: &ConnectNotification) -> Result<HandleAction, Error> {
+    async fn handle_connect_notification(
+        &self,
+        _pk: &PublicKey,
+        _packet: &ConnectNotification,
+    ) -> Result<HandleAction, Error> {
         // Although normally a client should not send ConnectNotification to server
         //  we ignore it for backward compatibility
         Ok(HandleAction::empty())
     }
-    async fn handle_disconnect_notification(&self, pk: &PublicKey, packet: &DisconnectNotification) -> Result<HandleAction, Error> {
+    async fn handle_disconnect_notification(
+        &self,
+        pk: &PublicKey,
+        packet: &DisconnectNotification,
+    ) -> Result<HandleAction, Error> {
         let index = if let Some(index) = packet.connection_id.index() {
             index
         } else {
-            return Err(Error::new(ErrorKind::Other, "DisconnectNotification: connection id is zero"))
+            return Err(Error::new(
+                ErrorKind::Other,
+                "DisconnectNotification: connection id is zero",
+            ));
         };
 
         let mut state = self.state.write().await;
@@ -329,15 +373,18 @@ impl Server {
             if let Some(link) = client_a.links_mut().take(index) {
                 link
             } else {
-                trace!("DisconnectNotification.connection_id is not linked for the client {:?}", pk);
+                trace!(
+                    "DisconnectNotification.connection_id is not linked for the client {:?}",
+                    pk
+                );
                 // There is possibility that the first client disconnected but the second client
                 // haven't received DisconnectNotification yet and have sent yet another packet.
                 // In this case we don't want to throw an error and force disconnect the second client.
                 // TODO: failure can be used to return an error and handle it inside ServerProcessor
-                return Ok(HandleAction::empty())
+                return Ok(HandleAction::empty());
             }
         } else {
-            return Err(Error::new(ErrorKind::Other, "DisconnectNotification: no such PK"))
+            return Err(Error::new(ErrorKind::Other, "DisconnectNotification: no such PK"));
         };
 
         match a_link.status {
@@ -345,27 +392,29 @@ impl Server {
                 // Do nothing because
                 // client_b has not sent RouteRequest yet to connect to client_a
                 Ok(HandleAction::empty())
-            },
+            }
             LinkStatus::Online => {
                 let client_b_pk = a_link.pk;
                 // get client_b
                 let client_b = if let Some(client) = state.connected_clients.get_mut(&client_b_pk) {
                     client
-                } else  {
+                } else {
                     // client_b is not connected to the server
                     // so ignore DisconnectNotification
-                    return Ok(HandleAction::empty())
+                    return Ok(HandleAction::empty());
                 };
                 let a_id_in_client_b = if let Some(id) = client_b.links().id_by_pk(pk) {
                     id
                 } else {
                     // No a_id_in_client_b
-                    return Ok(HandleAction::empty())
+                    return Ok(HandleAction::empty());
                 };
                 // it is linked, we should notify client_b
                 // link from client_b.links should be downgraded
                 client_b.links_mut().downgrade(a_id_in_client_b);
-                let packet = Packet::DisconnectNotification(DisconnectNotification { connection_id: ConnectionId::from_index(a_id_in_client_b)});
+                let packet = Packet::DisconnectNotification(DisconnectNotification {
+                    connection_id: ConnectionId::from_index(a_id_in_client_b),
+                });
                 Ok(HandleAction::one(packet, client_b.tx()))
             }
         }
@@ -373,11 +422,13 @@ impl Server {
 
     async fn handle_ping_request(&self, pk: &PublicKey, packet: &PingRequest) -> Result<HandleAction, Error> {
         if packet.ping_id == 0 {
-            return Err(Error::new(ErrorKind::Other, "PingRequest.ping_id == 0"))
+            return Err(Error::new(ErrorKind::Other, "PingRequest.ping_id == 0"));
         }
         let state = self.state.read().await;
         if let Some(client_a) = state.connected_clients.get(pk) {
-            let packet = Packet::PongResponse(PongResponse { ping_id: packet.ping_id });
+            let packet = Packet::PongResponse(PongResponse {
+                ping_id: packet.ping_id,
+            });
             Ok(HandleAction::one(packet, client_a.tx()))
         } else {
             Err(Error::new(ErrorKind::Other, "PingRequest: no such PK"))
@@ -386,10 +437,7 @@ impl Server {
 
     async fn handle_pong_response(&self, pk: &PublicKey, packet: &PongResponse) -> Result<HandleAction, Error> {
         if packet.ping_id == 0 {
-            return Err(
-                Error::new(ErrorKind::Other,
-                    "PongResponse.ping_id == 0"
-            ))
+            return Err(Error::new(ErrorKind::Other, "PongResponse.ping_id == 0"));
         }
         let mut state = self.state.write().await;
         if let Some(client_a) = state.connected_clients.get_mut(pk) {
@@ -407,11 +455,14 @@ impl Server {
 
     async fn handle_oob_send(&self, pk: &PublicKey, packet: OobSend) -> Result<HandleAction, Error> {
         if packet.data.is_empty() || packet.data.len() > 1024 {
-            return Err(Error::new(ErrorKind::Other, "OobSend wrong data length"))
+            return Err(Error::new(ErrorKind::Other, "OobSend wrong data length"));
         }
         let state = self.state.read().await;
         if let Some(client_b) = state.connected_clients.get(&packet.destination_pk) {
-            let packet = Packet::OobReceive(OobReceive { sender_pk: pk.clone(), data: packet.data });
+            let packet = Packet::OobReceive(OobReceive {
+                sender_pk: pk.clone(),
+                data: packet.data,
+            });
             Ok(HandleAction::one(packet, client_b.tx()))
         } else {
             Ok(HandleAction::empty())
@@ -419,7 +470,10 @@ impl Server {
     }
 
     async fn handle_oob_receive(&self, _pk: &PublicKey, _packet: &OobReceive) -> Result<HandleAction, Error> {
-        Err(Error::new(ErrorKind::Other, "Client must not send OobReceive to server"))
+        Err(Error::new(
+            ErrorKind::Other,
+            "Client must not send OobReceive to server",
+        ))
     }
 
     async fn handle_onion_request(&self, pk: &PublicKey, packet: OnionRequest) -> Result<HandleAction, Error> {
@@ -429,7 +483,7 @@ impl Server {
                 let saddr = SocketAddr::new(client.ip_addr(), client.port());
                 Ok(HandleAction::Onion(packet, saddr))
             } else {
-               Err(Error::new(ErrorKind::Other, "OnionRequest: no such PK"))
+                Err(Error::new(ErrorKind::Other, "OnionRequest: no such PK"))
             }
         } else {
             // Ignore OnionRequest as the server is not connected to onion subsystem
@@ -438,14 +492,17 @@ impl Server {
     }
 
     async fn handle_onion_response(&self, _pk: &PublicKey, _packet: &OnionResponse) -> Result<HandleAction, Error> {
-        Err(Error::new(ErrorKind::Other, "Client must not send OnionResponse to server"))
+        Err(Error::new(
+            ErrorKind::Other,
+            "Client must not send OnionResponse to server",
+        ))
     }
 
     async fn handle_data(&self, pk: &PublicKey, packet: Data) -> Result<HandleAction, Error> {
         let index = if let Some(index) = packet.connection_id.index() {
             index
         } else {
-            return Err(Error::new(ErrorKind::Other, "Data: connection id is zero"))
+            return Err(Error::new(ErrorKind::Other, "Data: connection id is zero"));
         };
 
         let state = self.state.read().await;
@@ -453,7 +510,7 @@ impl Server {
         // get client_a
         let client_a = if let Some(client) = state.connected_clients.get(pk) {
             client
-        } else  {
+        } else {
             return Err(Error::new(ErrorKind::Other, "Data: no such PK"));
         };
 
@@ -466,7 +523,7 @@ impl Server {
             // haven't received DisconnectNotification yet and have sent yet another packet.
             // In this case we don't want to throw an error and force disconnect the second client.
             // TODO: failure can be used to return an error and handle it inside ServerProcessor
-            return Ok(HandleAction::empty())
+            return Ok(HandleAction::empty());
         };
 
         match a_link.status {
@@ -474,33 +531,38 @@ impl Server {
                 // Do nothing because
                 // client_b has not sent RouteRequest yet to connect to client_a
                 Ok(HandleAction::empty())
-            },
+            }
             LinkStatus::Online => {
                 let client_b_pk = a_link.pk;
                 // get client_b
                 let client_b = if let Some(client) = state.connected_clients.get(&client_b_pk) {
                     client
-                } else  {
+                } else {
                     // Do nothing because client_b is not connected to server
-                    return Ok(HandleAction::empty())
+                    return Ok(HandleAction::empty());
                 };
                 let a_id_in_client_b = if let Some(id) = client_b.links().id_by_pk(pk) {
                     id
                 } else {
                     // No a_id_in_client_b
-                    return Ok(HandleAction::empty())
+                    return Ok(HandleAction::empty());
                 };
                 // it is linked, we should send data to client_b
-                let packet = Packet::Data(Data { connection_id: ConnectionId::from_index(a_id_in_client_b), data: packet.data });
+                let packet = Packet::Data(Data {
+                    connection_id: ConnectionId::from_index(a_id_in_client_b),
+                    data: packet.data,
+                });
                 Ok(HandleAction::one(packet, client_b.tx()))
             }
         }
     }
 
     /** Remove timedout connected clients
-    */
+     */
     fn remove_timedout_clients(&self, state: &mut ServerState) -> Result<Vec<(Packet, mpsc::Sender<Packet>)>, Error> {
-        let keys = state.connected_clients.iter()
+        let keys = state
+            .connected_clients
+            .iter()
             .filter(|(_key, client)| client.is_pong_timedout())
             .map(|(key, _client)| key.clone())
             .collect::<Vec<PublicKey>>();
@@ -516,7 +578,7 @@ impl Server {
     }
 
     /** Send pings to all connected clients and terminate all timed out clients.
-    */
+     */
     pub async fn send_pings(&self) -> Result<(), Error> {
         let mut state = self.state.write().await;
 
@@ -524,7 +586,9 @@ impl Server {
 
         for client in state.connected_clients.values_mut() {
             if client.is_ping_interval_passed() {
-                let packet = Packet::PingRequest(PingRequest { ping_id: client.new_ping_id() });
+                let packet = Packet::PingRequest(PingRequest {
+                    ping_id: client.new_ping_id(),
+                });
                 packets.push((packet, client.tx()));
             }
         }
@@ -541,18 +605,21 @@ impl Server {
 mod tests {
     use super::*;
 
+    use crate::relay::server::client::*;
+    use crate::relay::server::{Client, Server};
     use rand::thread_rng;
     use tox_packet::dht::CryptoData;
     use tox_packet::ip_port::*;
     use tox_packet::onion::*;
-    use crate::relay::server::{Client, Server};
-    use crate::relay::server::client::*;
 
+    use crypto_box::{
+        aead::{generic_array::typenum::marker_traits::Unsigned, AeadCore},
+        SalsaBox,
+    };
     use futures::channel::mpsc;
     use futures::StreamExt;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::time::Duration;
-    use crypto_box::{SalsaBox, aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned}};
 
     use crate::time::*;
 
@@ -590,15 +657,25 @@ mod tests {
         let client_pk_2 = client_2.pk();
 
         // emulate send RouteRequest from client_1
-        server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { pk: client_pk_2.clone() }
-        )).await.unwrap();
+        server
+            .handle_packet(
+                &client_pk_1,
+                Packet::RouteRequest(RouteRequest {
+                    pk: client_pk_2.clone(),
+                }),
+            )
+            .await
+            .unwrap();
 
         // the server should put RouteResponse into rx_1
         let (packet, rx_1) = rx_1.into_future().await;
-        assert_eq!(packet.unwrap(), Packet::RouteResponse(
-            RouteResponse { pk: client_pk_2.clone(), connection_id: ConnectionId::from_index(0) }
-        ));
+        assert_eq!(
+            packet.unwrap(),
+            Packet::RouteResponse(RouteResponse {
+                pk: client_pk_2.clone(),
+                connection_id: ConnectionId::from_index(0)
+            })
+        );
 
         {
             // check links
@@ -614,15 +691,25 @@ mod tests {
         server.insert(client_2).await.unwrap();
 
         // emulate send RouteRequest from client_1 again
-        server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { pk: client_pk_2.clone() }
-        )).await.unwrap();
+        server
+            .handle_packet(
+                &client_pk_1,
+                Packet::RouteRequest(RouteRequest {
+                    pk: client_pk_2.clone(),
+                }),
+            )
+            .await
+            .unwrap();
 
         // the server should put RouteResponse into rx_1
         let (packet, rx_1) = rx_1.into_future().await;
-        assert_eq!(packet.unwrap(), Packet::RouteResponse(
-            RouteResponse { pk: client_pk_2.clone(), connection_id: ConnectionId::from_index(0) }
-        ));
+        assert_eq!(
+            packet.unwrap(),
+            Packet::RouteResponse(RouteResponse {
+                pk: client_pk_2.clone(),
+                connection_id: ConnectionId::from_index(0)
+            })
+        );
 
         {
             // check links
@@ -634,27 +721,43 @@ mod tests {
         }
 
         // emulate send RouteRequest from client_2
-        server.handle_packet(&client_pk_2, Packet::RouteRequest(
-            RouteRequest { pk: client_pk_1.clone() }
-        )).await.unwrap();
+        server
+            .handle_packet(
+                &client_pk_2,
+                Packet::RouteRequest(RouteRequest {
+                    pk: client_pk_1.clone(),
+                }),
+            )
+            .await
+            .unwrap();
 
         // the server should put RouteResponse into rx_2
         let (packet, rx_2) = rx_2.into_future().await;
-        assert_eq!(packet.unwrap(), Packet::RouteResponse(
-            RouteResponse { pk: client_pk_1.clone(), connection_id: ConnectionId::from_index(0) }
-        ));
+        assert_eq!(
+            packet.unwrap(),
+            Packet::RouteResponse(RouteResponse {
+                pk: client_pk_1.clone(),
+                connection_id: ConnectionId::from_index(0)
+            })
+        );
         // AND
         // the server should put ConnectNotification into rx_1
         let (packet, _rx_1) = rx_1.into_future().await;
-        assert_eq!(packet.unwrap(), Packet::ConnectNotification(
-            ConnectNotification { connection_id: ConnectionId::from_index(0) }
-        ));
+        assert_eq!(
+            packet.unwrap(),
+            Packet::ConnectNotification(ConnectNotification {
+                connection_id: ConnectionId::from_index(0)
+            })
+        );
         // AND
         // the server should put ConnectNotification into rx_2
         let (packet, rx_2) = rx_2.into_future().await;
-        assert_eq!(packet.unwrap(), Packet::ConnectNotification(
-            ConnectNotification { connection_id: ConnectionId::from_index(0) }
-        ));
+        assert_eq!(
+            packet.unwrap(),
+            Packet::ConnectNotification(ConnectNotification {
+                connection_id: ConnectionId::from_index(0)
+            })
+        );
 
         {
             // check links
@@ -672,35 +775,46 @@ mod tests {
         }
 
         // emulate send Data from client_1
-        server.handle_packet(&client_pk_1, Packet::Data(
-            Data {
-                connection_id: ConnectionId::from_index(0),
-                data: DataPayload::CryptoData(CryptoData {
-                    nonce_last_bytes: 42,
-                    payload: vec![42; 123],
+        server
+            .handle_packet(
+                &client_pk_1,
+                Packet::Data(Data {
+                    connection_id: ConnectionId::from_index(0),
+                    data: DataPayload::CryptoData(CryptoData {
+                        nonce_last_bytes: 42,
+                        payload: vec![42; 123],
+                    }),
                 }),
-            }
-        )).await.unwrap();
+            )
+            .await
+            .unwrap();
 
         // the server should put Data into rx_2
         let (packet, rx_2) = rx_2.into_future().await;
-        assert_eq!(packet.unwrap(), Packet::Data(
-            Data {
+        assert_eq!(
+            packet.unwrap(),
+            Packet::Data(Data {
                 connection_id: ConnectionId::from_index(0),
                 data: DataPayload::CryptoData(CryptoData {
                     nonce_last_bytes: 42,
                     payload: vec![42; 123],
                 }),
-            }
-        ));
+            })
+        );
 
         // emulate client_1 disconnected
-        server.shutdown_client(&client_pk_1, client_ip_addr_1, client_port_1).await.unwrap();
+        server
+            .shutdown_client(&client_pk_1, client_ip_addr_1, client_port_1)
+            .await
+            .unwrap();
         // the server should put DisconnectNotification into rx_2
         let (packet, _rx_2) = rx_2.into_future().await;
-        assert_eq!(packet.unwrap(), Packet::DisconnectNotification(
-            DisconnectNotification { connection_id: ConnectionId::from_index(0) }
-        ));
+        assert_eq!(
+            packet.unwrap(),
+            Packet::DisconnectNotification(DisconnectNotification {
+                connection_id: ConnectionId::from_index(0)
+            })
+        );
 
         // check client_2.links[client_1] == Registered
         let state = server.state.read().await;
@@ -720,15 +834,25 @@ mod tests {
         server.insert(client_2).await.unwrap();
 
         // emulate send RouteRequest from client_1
-        server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { pk: client_pk_2.clone() }
-        )).await.unwrap();
+        server
+            .handle_packet(
+                &client_pk_1,
+                Packet::RouteRequest(RouteRequest {
+                    pk: client_pk_2.clone(),
+                }),
+            )
+            .await
+            .unwrap();
 
         // the server should put RouteResponse into rx_1
         let (packet, _rx_1) = rx_1.into_future().await;
-        assert_eq!(packet.unwrap(), Packet::RouteResponse(
-            RouteResponse { pk: client_pk_2.clone(), connection_id: ConnectionId::from_index(0) }
-        ));
+        assert_eq!(
+            packet.unwrap(),
+            Packet::RouteResponse(RouteResponse {
+                pk: client_pk_2.clone(),
+                connection_id: ConnectionId::from_index(0)
+            })
+        );
 
         {
             // check links
@@ -753,15 +877,25 @@ mod tests {
         server.insert(client_1).await.unwrap();
 
         // emulate send RouteRequest from client_1
-        server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { pk: client_pk_1.clone() }
-        )).await.unwrap();
+        server
+            .handle_packet(
+                &client_pk_1,
+                Packet::RouteRequest(RouteRequest {
+                    pk: client_pk_1.clone(),
+                }),
+            )
+            .await
+            .unwrap();
 
         // the server should put RouteResponse into rx_1
         let (packet, _rx_1) = rx_1.into_future().await;
-        assert_eq!(packet.unwrap(), Packet::RouteResponse(
-            RouteResponse { pk: client_pk_1, connection_id: ConnectionId::zero() }
-        ));
+        assert_eq!(
+            packet.unwrap(),
+            Packet::RouteResponse(RouteResponse {
+                pk: client_pk_1,
+                connection_id: ConnectionId::zero()
+            })
+        );
     }
     #[tokio::test]
     async fn handle_route_request_too_many_connections() {
@@ -779,15 +913,25 @@ mod tests {
             server.insert(other_client).await.unwrap();
 
             // emulate send RouteRequest from client_1
-            server.handle_packet(&client_pk_1, Packet::RouteRequest(
-                RouteRequest { pk: other_client_pk.clone() }
-            )).await.unwrap();
+            server
+                .handle_packet(
+                    &client_pk_1,
+                    Packet::RouteRequest(RouteRequest {
+                        pk: other_client_pk.clone(),
+                    }),
+                )
+                .await
+                .unwrap();
 
             // the server should put RouteResponse into rx_1
             let (packet, rx_1_nested) = rx_1.into_future().await;
-            assert_eq!(packet.unwrap(), Packet::RouteResponse(
-                RouteResponse { pk: other_client_pk, connection_id: ConnectionId::from_index(i) }
-            ));
+            assert_eq!(
+                packet.unwrap(),
+                Packet::RouteResponse(RouteResponse {
+                    pk: other_client_pk,
+                    connection_id: ConnectionId::from_index(i)
+                })
+            );
             rx_1 = rx_1_nested;
         }
         // and send one more again
@@ -795,15 +939,25 @@ mod tests {
         let other_client_pk = other_client.pk();
         server.insert(other_client).await.unwrap();
         // emulate send RouteRequest from client_1
-        server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { pk: other_client_pk.clone() }
-        )).await.unwrap();
+        server
+            .handle_packet(
+                &client_pk_1,
+                Packet::RouteRequest(RouteRequest {
+                    pk: other_client_pk.clone(),
+                }),
+            )
+            .await
+            .unwrap();
 
         // the server should put RouteResponse into rx_1
         let (packet, _rx_1) = rx_1.into_future().await;
-        assert_eq!(packet.unwrap(), Packet::RouteResponse(
-            RouteResponse { pk: other_client_pk, connection_id: ConnectionId::zero() }
-        ));
+        assert_eq!(
+            packet.unwrap(),
+            Packet::RouteResponse(RouteResponse {
+                pk: other_client_pk,
+                connection_id: ConnectionId::zero()
+            })
+        );
     }
     #[tokio::test]
     async fn handle_connect_notification() {
@@ -814,9 +968,14 @@ mod tests {
         server.insert(client_1).await.unwrap();
 
         // emulate send ConnectNotification from client_1
-        let handle_res = server.handle_packet(&client_pk_1, Packet::ConnectNotification(
-            ConnectNotification { connection_id: ConnectionId::from_index(42) }
-        )).await;
+        let handle_res = server
+            .handle_packet(
+                &client_pk_1,
+                Packet::ConnectNotification(ConnectNotification {
+                    connection_id: ConnectionId::from_index(42),
+                }),
+            )
+            .await;
         assert!(handle_res.is_ok());
     }
     #[tokio::test]
@@ -832,38 +991,64 @@ mod tests {
         server.insert(client_2).await.unwrap();
 
         // emulate send RouteRequest from client_1
-        server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { pk: client_pk_2.clone() }
-        )).await.unwrap();
+        server
+            .handle_packet(
+                &client_pk_1,
+                Packet::RouteRequest(RouteRequest {
+                    pk: client_pk_2.clone(),
+                }),
+            )
+            .await
+            .unwrap();
 
         // the server should put RouteResponse into rx_1
         let (packet, rx_1) = rx_1.into_future().await;
-        assert_eq!(packet.unwrap(), Packet::RouteResponse(
-            RouteResponse { pk: client_pk_2.clone(), connection_id: ConnectionId::from_index(0) }
-        ));
+        assert_eq!(
+            packet.unwrap(),
+            Packet::RouteResponse(RouteResponse {
+                pk: client_pk_2.clone(),
+                connection_id: ConnectionId::from_index(0)
+            })
+        );
 
         // emulate send RouteRequest from client_2
-        server.handle_packet(&client_pk_2, Packet::RouteRequest(
-            RouteRequest { pk: client_pk_1.clone() }
-        )).await.unwrap();
+        server
+            .handle_packet(
+                &client_pk_2,
+                Packet::RouteRequest(RouteRequest {
+                    pk: client_pk_1.clone(),
+                }),
+            )
+            .await
+            .unwrap();
 
         // the server should put RouteResponse into rx_2
         let (packet, rx_2) = rx_2.into_future().await;
-        assert_eq!(packet.unwrap(), Packet::RouteResponse(
-            RouteResponse { pk: client_pk_1.clone(), connection_id: ConnectionId::from_index(0) }
-        ));
+        assert_eq!(
+            packet.unwrap(),
+            Packet::RouteResponse(RouteResponse {
+                pk: client_pk_1.clone(),
+                connection_id: ConnectionId::from_index(0)
+            })
+        );
         // AND
         // the server should put ConnectNotification into rx_1
         let (packet, rx_1) = rx_1.into_future().await;
-        assert_eq!(packet.unwrap(), Packet::ConnectNotification(
-            ConnectNotification { connection_id: ConnectionId::from_index(0) }
-        ));
+        assert_eq!(
+            packet.unwrap(),
+            Packet::ConnectNotification(ConnectNotification {
+                connection_id: ConnectionId::from_index(0)
+            })
+        );
         // AND
         // the server should put ConnectNotification into rx_2
         let (packet, rx_2) = rx_2.into_future().await;
-        assert_eq!(packet.unwrap(), Packet::ConnectNotification(
-            ConnectNotification { connection_id: ConnectionId::from_index(0) }
-        ));
+        assert_eq!(
+            packet.unwrap(),
+            Packet::ConnectNotification(ConnectNotification {
+                connection_id: ConnectionId::from_index(0)
+            })
+        );
 
         {
             // check links
@@ -881,15 +1066,24 @@ mod tests {
         }
 
         // emulate send DisconnectNotification from client_1
-        server.handle_packet(&client_pk_1, Packet::DisconnectNotification(
-            DisconnectNotification { connection_id: ConnectionId::from_index(0) }
-        )).await.unwrap();
+        server
+            .handle_packet(
+                &client_pk_1,
+                Packet::DisconnectNotification(DisconnectNotification {
+                    connection_id: ConnectionId::from_index(0),
+                }),
+            )
+            .await
+            .unwrap();
 
         // the server should put DisconnectNotification into rx_2
         let (packet, _rx_2) = rx_2.into_future().await;
-        assert_eq!(packet.unwrap(), Packet::DisconnectNotification(
-            DisconnectNotification { connection_id: ConnectionId::from_index(0) }
-        ));
+        assert_eq!(
+            packet.unwrap(),
+            Packet::DisconnectNotification(DisconnectNotification {
+                connection_id: ConnectionId::from_index(0)
+            })
+        );
 
         {
             // check links
@@ -906,9 +1100,15 @@ mod tests {
         }
 
         // emulate send DisconnectNotification from client_2
-        server.handle_packet(&client_pk_2, Packet::DisconnectNotification(
-            DisconnectNotification { connection_id: ConnectionId::from_index(0) }
-        )).await.unwrap();
+        server
+            .handle_packet(
+                &client_pk_2,
+                Packet::DisconnectNotification(DisconnectNotification {
+                    connection_id: ConnectionId::from_index(0),
+                }),
+            )
+            .await
+            .unwrap();
 
         {
             // check links
@@ -937,14 +1137,20 @@ mod tests {
         server.insert(client_2).await.unwrap();
 
         // emulate send RouteRequest from client_1
-        server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { pk: client_pk_2 }
-        )).await.unwrap();
+        server
+            .handle_packet(&client_pk_1, Packet::RouteRequest(RouteRequest { pk: client_pk_2 }))
+            .await
+            .unwrap();
 
         // emulate send DisconnectNotification from client_1
-        let handle_res = server.handle_packet(&client_pk_1, Packet::DisconnectNotification(
-            DisconnectNotification { connection_id: ConnectionId::from_index(0) }
-        )).await;
+        let handle_res = server
+            .handle_packet(
+                &client_pk_1,
+                Packet::DisconnectNotification(DisconnectNotification {
+                    connection_id: ConnectionId::from_index(0),
+                }),
+            )
+            .await;
         assert!(handle_res.is_ok());
 
         // check that packets from client_1 did not put anything in client2.rx
@@ -958,9 +1164,14 @@ mod tests {
 
         let client_pk = SecretKey::generate(&mut thread_rng()).public_key();
 
-        let handle_res = server.handle_packet(&client_pk, Packet::DisconnectNotification(
-            DisconnectNotification { connection_id: ConnectionId::zero() }
-        )).await;
+        let handle_res = server
+            .handle_packet(
+                &client_pk,
+                Packet::DisconnectNotification(DisconnectNotification {
+                    connection_id: ConnectionId::zero(),
+                }),
+            )
+            .await;
         assert!(handle_res.is_err());
     }
     #[tokio::test]
@@ -972,15 +1183,14 @@ mod tests {
         server.insert(client_1).await.unwrap();
 
         // emulate send PingRequest from client_1
-        server.handle_packet(&client_pk_1, Packet::PingRequest(
-            PingRequest { ping_id: 42 }
-        )).await.unwrap();
+        server
+            .handle_packet(&client_pk_1, Packet::PingRequest(PingRequest { ping_id: 42 }))
+            .await
+            .unwrap();
 
         // the server should put PongResponse into rx_1
         let (packet, _rx_1) = rx_1.into_future().await;
-        assert_eq!(packet.unwrap(), Packet::PongResponse(
-            PongResponse { ping_id: 42 }
-        ));
+        assert_eq!(packet.unwrap(), Packet::PongResponse(PongResponse { ping_id: 42 }));
     }
     #[tokio::test]
     async fn handle_oob_send() {
@@ -995,15 +1205,26 @@ mod tests {
         server.insert(client_2).await.unwrap();
 
         // emulate send OobSend from client_1
-        server.handle_packet(&client_pk_1, Packet::OobSend(
-            OobSend { destination_pk: client_pk_2, data: vec![13; 1024] }
-        )).await.unwrap();
+        server
+            .handle_packet(
+                &client_pk_1,
+                Packet::OobSend(OobSend {
+                    destination_pk: client_pk_2,
+                    data: vec![13; 1024],
+                }),
+            )
+            .await
+            .unwrap();
 
         // the server should put OobReceive into rx_2
         let (packet, _rx_2) = rx_2.into_future().await;
-        assert_eq!(packet.unwrap(), Packet::OobReceive(
-            OobReceive { sender_pk: client_pk_1, data: vec![13; 1024] }
-        ));
+        assert_eq!(
+            packet.unwrap(),
+            Packet::OobReceive(OobReceive {
+                sender_pk: client_pk_1,
+                data: vec![13; 1024]
+            })
+        );
     }
     #[tokio::test]
     async fn handle_onion_request() {
@@ -1025,7 +1246,7 @@ mod tests {
                 port: 12345,
             },
             temporary_pk: SecretKey::generate(&mut thread_rng()).public_key(),
-            payload: vec![13; 170]
+            payload: vec![13; 170],
         };
         let handle_res = server
             .handle_packet(&client_pk_1, Packet::OnionRequest(request.clone()))
@@ -1051,7 +1272,7 @@ mod tests {
         let payload = InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
             sendback_data: 12345,
             nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
-            payload: vec![42; 123]
+            payload: vec![42; 123],
         });
         let handle_res = server
             .handle_udp_onion_response(client_addr_1, client_port_1, payload.clone())
@@ -1059,9 +1280,7 @@ mod tests {
         assert!(handle_res.is_ok());
 
         let (packet, _) = rx_1.into_future().await;
-        assert_eq!(packet.unwrap(), Packet::OnionResponse(
-            OnionResponse { payload }
-        ));
+        assert_eq!(packet.unwrap(), Packet::OnionResponse(OnionResponse { payload }));
     }
     #[tokio::test]
     async fn insert_with_same_pk() {
@@ -1089,9 +1308,12 @@ mod tests {
         server.insert(client_3).await.unwrap();
 
         let (packet, _) = rx_2.into_future().await;
-        assert_eq!(packet.unwrap(), Packet::DisconnectNotification(
-            DisconnectNotification { connection_id: ConnectionId::from_index(index_2) }
-        ));
+        assert_eq!(
+            packet.unwrap(),
+            Packet::DisconnectNotification(DisconnectNotification {
+                connection_id: ConnectionId::from_index(index_2)
+            })
+        );
 
         let state = server.state.read().await;
         let client = &state.connected_clients[&client_pk_1];
@@ -1114,18 +1336,30 @@ mod tests {
         server.insert(client_2).await.unwrap();
 
         // emulate send RouteRequest from client_1
-        server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { pk: client_pk_2.clone() }
-        )).await.unwrap();
+        server
+            .handle_packet(
+                &client_pk_1,
+                Packet::RouteRequest(RouteRequest {
+                    pk: client_pk_2.clone(),
+                }),
+            )
+            .await
+            .unwrap();
 
         // the server should put RouteResponse into rx_1
         let (packet, _rx_1) = rx_1.into_future().await;
-        assert_eq!(packet.unwrap(), Packet::RouteResponse(
-            RouteResponse { pk: client_pk_2, connection_id: ConnectionId::from_index(0) }
-        ));
+        assert_eq!(
+            packet.unwrap(),
+            Packet::RouteResponse(RouteResponse {
+                pk: client_pk_2,
+                connection_id: ConnectionId::from_index(0)
+            })
+        );
 
         // emulate shutdown
-        let handle_res = server.shutdown_client(&client_pk_1, client_ip_addr_1, client_port_1).await;
+        let handle_res = server
+            .shutdown_client(&client_pk_1, client_ip_addr_1, client_port_1)
+            .await;
         assert!(handle_res.is_ok());
     }
     #[tokio::test]
@@ -1141,26 +1375,39 @@ mod tests {
         server.insert(client_2).await.unwrap();
 
         // emulate send RouteRequest from client_1
-        server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { pk: client_pk_2.clone() }
-        )).await.unwrap();
+        server
+            .handle_packet(
+                &client_pk_1,
+                Packet::RouteRequest(RouteRequest {
+                    pk: client_pk_2.clone(),
+                }),
+            )
+            .await
+            .unwrap();
 
         // the server should put RouteResponse into rx_1
         let (packet, _rx_1) = rx_1.into_future().await;
-        assert_eq!(packet.unwrap(), Packet::RouteResponse(
-            RouteResponse { pk: client_pk_2, connection_id: ConnectionId::from_index(0) }
-        ));
+        assert_eq!(
+            packet.unwrap(),
+            Packet::RouteResponse(RouteResponse {
+                pk: client_pk_2,
+                connection_id: ConnectionId::from_index(0)
+            })
+        );
 
         // emulate send Data from client_1
-        let handle_res = server.handle_packet(&client_pk_1, Packet::Data(
-            Data {
-                connection_id: ConnectionId::from_index(0),
-                data: DataPayload::CryptoData(CryptoData {
-                    nonce_last_bytes: 42,
-                    payload: vec![42; 123],
+        let handle_res = server
+            .handle_packet(
+                &client_pk_1,
+                Packet::Data(Data {
+                    connection_id: ConnectionId::from_index(0),
+                    data: DataPayload::CryptoData(CryptoData {
+                        nonce_last_bytes: 42,
+                        payload: vec![42; 123],
+                    }),
                 }),
-            }
-        )).await;
+            )
+            .await;
         assert!(handle_res.is_ok());
     }
     #[tokio::test]
@@ -1169,15 +1416,18 @@ mod tests {
 
         let client_pk = SecretKey::generate(&mut thread_rng()).public_key();
 
-        let handle_res = server.handle_packet(&client_pk, Packet::Data(
-            Data {
-                connection_id: ConnectionId::zero(),
-                data: DataPayload::CryptoData(CryptoData {
-                    nonce_last_bytes: 42,
-                    payload: vec![42; 123],
+        let handle_res = server
+            .handle_packet(
+                &client_pk,
+                Packet::Data(Data {
+                    connection_id: ConnectionId::zero(),
+                    data: DataPayload::CryptoData(CryptoData {
+                        nonce_last_bytes: 42,
+                        payload: vec![42; 123],
+                    }),
                 }),
-            }
-        )).await;
+            )
+            .await;
         assert!(handle_res.is_err());
     }
 
@@ -1192,9 +1442,15 @@ mod tests {
         server.insert(client_1).await.unwrap();
 
         // emulate send RouteResponse from client_1
-        let handle_res = server.handle_packet(&client_pk_1, Packet::RouteResponse(
-            RouteResponse { pk: client_pk_1.clone(), connection_id: ConnectionId::from_index(42) }
-        )).await;
+        let handle_res = server
+            .handle_packet(
+                &client_pk_1,
+                Packet::RouteResponse(RouteResponse {
+                    pk: client_pk_1.clone(),
+                    connection_id: ConnectionId::from_index(42),
+                }),
+            )
+            .await;
         assert!(handle_res.is_err());
     }
     #[tokio::test]
@@ -1206,9 +1462,14 @@ mod tests {
         server.insert(client_1).await.unwrap();
 
         // emulate send DisconnectNotification from client_1
-        let handle_res = server.handle_packet(&client_pk_1, Packet::DisconnectNotification(
-            DisconnectNotification { connection_id: ConnectionId::from_index(0) }
-        )).await;
+        let handle_res = server
+            .handle_packet(
+                &client_pk_1,
+                Packet::DisconnectNotification(DisconnectNotification {
+                    connection_id: ConnectionId::from_index(0),
+                }),
+            )
+            .await;
         assert!(handle_res.is_ok());
 
         // Necessary to drop tx so that rx.collect() can be finished
@@ -1225,9 +1486,9 @@ mod tests {
         server.insert(client_1).await.unwrap();
 
         // emulate send PingRequest from client_1
-        let handle_res = server.handle_packet(&client_pk_1, Packet::PingRequest(
-            PingRequest { ping_id: 0 }
-        )).await;
+        let handle_res = server
+            .handle_packet(&client_pk_1, Packet::PingRequest(PingRequest { ping_id: 0 }))
+            .await;
         assert!(handle_res.is_err());
     }
     #[tokio::test]
@@ -1239,9 +1500,9 @@ mod tests {
         server.insert(client_1).await.unwrap();
 
         // emulate send PongResponse from client_1
-        let handle_res = server.handle_packet(&client_pk_1, Packet::PongResponse(
-            PongResponse { ping_id: 0 }
-        )).await;
+        let handle_res = server
+            .handle_packet(&client_pk_1, Packet::PongResponse(PongResponse { ping_id: 0 }))
+            .await;
         assert!(handle_res.is_err());
     }
     #[tokio::test]
@@ -1257,9 +1518,15 @@ mod tests {
         server.insert(client_2).await.unwrap();
 
         // emulate send OobSend from client_1
-        let handle_res = server.handle_packet(&client_pk_1, Packet::OobSend(
-            OobSend { destination_pk: client_pk_2, data: vec![] }
-        )).await;
+        let handle_res = server
+            .handle_packet(
+                &client_pk_1,
+                Packet::OobSend(OobSend {
+                    destination_pk: client_pk_2,
+                    data: vec![],
+                }),
+            )
+            .await;
         assert!(handle_res.is_err());
     }
     #[tokio::test]
@@ -1271,15 +1538,18 @@ mod tests {
         server.insert(client_1).await.unwrap();
 
         // emulate send Data from client_1
-        let handle_res = server.handle_packet(&client_pk_1, Packet::Data(
-            Data {
-                connection_id: ConnectionId::from_index(0),
-                data: DataPayload::CryptoData(CryptoData {
-                    nonce_last_bytes: 42,
-                    payload: vec![42; 123],
+        let handle_res = server
+            .handle_packet(
+                &client_pk_1,
+                Packet::Data(Data {
+                    connection_id: ConnectionId::from_index(0),
+                    data: DataPayload::CryptoData(CryptoData {
+                        nonce_last_bytes: 42,
+                        payload: vec![42; 123],
+                    }),
                 }),
-            }
-        )).await;
+            )
+            .await;
         assert!(handle_res.is_ok());
 
         // Necessary to drop tx so that rx.collect() can be finished
@@ -1300,9 +1570,15 @@ mod tests {
         server.insert(client_2).await.unwrap();
 
         // emulate send OobSend from client_1
-        let handle_res = server.handle_packet(&client_pk_1, Packet::OobSend(
-            OobSend { destination_pk: client_pk_2, data: vec![42; 1024 + 1] }
-        )).await;
+        let handle_res = server
+            .handle_packet(
+                &client_pk_1,
+                Packet::OobSend(OobSend {
+                    destination_pk: client_pk_2,
+                    data: vec![42; 1024 + 1],
+                }),
+            )
+            .await;
         assert!(handle_res.is_err());
     }
     #[tokio::test]
@@ -1318,9 +1594,15 @@ mod tests {
         server.insert(client_2).await.unwrap();
 
         // emulate send OobReceive from client_1
-        let handle_res = server.handle_packet(&client_pk_1, Packet::OobReceive(
-            OobReceive { sender_pk: client_pk_2, data: vec![42; 1024] }
-        )).await;
+        let handle_res = server
+            .handle_packet(
+                &client_pk_1,
+                Packet::OobReceive(OobReceive {
+                    sender_pk: client_pk_2,
+                    data: vec![42; 1024],
+                }),
+            )
+            .await;
         assert!(handle_res.is_err());
     }
     #[tokio::test]
@@ -1339,11 +1621,9 @@ mod tests {
                 port: 12345,
             },
             temporary_pk: SecretKey::generate(&mut thread_rng()).public_key(),
-            payload: vec![13; 1500]
+            payload: vec![13; 1500],
         };
-        let handle_res = server
-            .handle_packet(&client_pk_1, Packet::OnionRequest(request))
-            .await;
+        let handle_res = server.handle_packet(&client_pk_1, Packet::OnionRequest(request)).await;
         assert!(handle_res.is_ok());
     }
     #[tokio::test]
@@ -1357,11 +1637,11 @@ mod tests {
         let payload = InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
             sendback_data: 12345,
             nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
-            payload: vec![42; 123]
+            payload: vec![42; 123],
         });
-        let handle_res = server.handle_packet(&client_pk_1, Packet::OnionResponse(
-            OnionResponse { payload }
-        )).await;
+        let handle_res = server
+            .handle_packet(&client_pk_1, Packet::OnionResponse(OnionResponse { payload }))
+            .await;
         assert!(handle_res.is_err());
     }
     #[tokio::test]
@@ -1383,7 +1663,7 @@ mod tests {
         let payload = InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
             sendback_data: 12345,
             nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
-            payload: vec![42; 123]
+            payload: vec![42; 123],
         });
         let handle_res = server
             .handle_udp_onion_response(client_addr_2, client_port_2, payload)
@@ -1401,9 +1681,9 @@ mod tests {
         let client_pk_2 = SecretKey::generate(&mut rng).public_key();
 
         // emulate send RouteRequest from client_pk_1
-        let handle_res = server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { pk: client_pk_2 }
-        )).await;
+        let handle_res = server
+            .handle_packet(&client_pk_1, Packet::RouteRequest(RouteRequest { pk: client_pk_2 }))
+            .await;
         assert!(handle_res.is_err());
     }
     #[tokio::test]
@@ -1412,9 +1692,14 @@ mod tests {
         let client_pk_1 = SecretKey::generate(&mut thread_rng()).public_key();
 
         // emulate send DisconnectNotification from client_1
-        let handle_res = server.handle_packet(&client_pk_1, Packet::DisconnectNotification(
-            DisconnectNotification { connection_id: ConnectionId::from_index(42) }
-        )).await;
+        let handle_res = server
+            .handle_packet(
+                &client_pk_1,
+                Packet::DisconnectNotification(DisconnectNotification {
+                    connection_id: ConnectionId::from_index(42),
+                }),
+            )
+            .await;
         assert!(handle_res.is_err());
     }
     #[tokio::test]
@@ -1428,14 +1713,20 @@ mod tests {
         let client_pk_2 = SecretKey::generate(&mut thread_rng()).public_key();
 
         // emulate send RouteRequest from client_1
-        server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { pk: client_pk_2 }
-        )).await.unwrap();
+        server
+            .handle_packet(&client_pk_1, Packet::RouteRequest(RouteRequest { pk: client_pk_2 }))
+            .await
+            .unwrap();
 
         // emulate send DisconnectNotification from client_1
-        let handle_res = server.handle_packet(&client_pk_1, Packet::DisconnectNotification(
-            DisconnectNotification { connection_id: ConnectionId::from_index(0) }
-        )).await;
+        let handle_res = server
+            .handle_packet(
+                &client_pk_1,
+                Packet::DisconnectNotification(DisconnectNotification {
+                    connection_id: ConnectionId::from_index(0),
+                }),
+            )
+            .await;
         assert!(handle_res.is_ok());
     }
     #[tokio::test]
@@ -1444,9 +1735,9 @@ mod tests {
         let client_pk_1 = SecretKey::generate(&mut thread_rng()).public_key();
 
         // emulate send PingRequest from client_1
-        let handle_res = server.handle_packet(&client_pk_1, Packet::PingRequest(
-            PingRequest { ping_id: 42 }
-        )).await;
+        let handle_res = server
+            .handle_packet(&client_pk_1, Packet::PingRequest(PingRequest { ping_id: 42 }))
+            .await;
         assert!(handle_res.is_err());
     }
     #[tokio::test]
@@ -1455,9 +1746,9 @@ mod tests {
         let client_pk_1 = SecretKey::generate(&mut thread_rng()).public_key();
 
         // emulate send PongResponse from client_1
-        let handle_res = server.handle_packet(&client_pk_1, Packet::PongResponse(
-            PongResponse { ping_id: 42 }
-        )).await;
+        let handle_res = server
+            .handle_packet(&client_pk_1, Packet::PongResponse(PongResponse { ping_id: 42 }))
+            .await;
         assert!(handle_res.is_err());
     }
     #[tokio::test]
@@ -1468,9 +1759,15 @@ mod tests {
         let client_pk_2 = SecretKey::generate(&mut rng).public_key();
 
         // emulate send OobSend from client_1
-        let handle_res = server.handle_packet(&client_pk_1, Packet::OobSend(
-            OobSend { destination_pk: client_pk_2, data: vec![42; 1024] }
-        )).await;
+        let handle_res = server
+            .handle_packet(
+                &client_pk_1,
+                Packet::OobSend(OobSend {
+                    destination_pk: client_pk_2,
+                    data: vec![42; 1024],
+                }),
+            )
+            .await;
         assert!(handle_res.is_ok());
     }
     #[tokio::test]
@@ -1479,15 +1776,18 @@ mod tests {
         let client_pk_1 = SecretKey::generate(&mut thread_rng()).public_key();
 
         // emulate send Data from client_1
-        let handle_res = server.handle_packet(&client_pk_1, Packet::Data(
-            Data {
-                connection_id: ConnectionId::from_index(0),
-                data: DataPayload::CryptoData(CryptoData {
-                    nonce_last_bytes: 42,
-                    payload: vec![42; 123],
+        let handle_res = server
+            .handle_packet(
+                &client_pk_1,
+                Packet::Data(Data {
+                    connection_id: ConnectionId::from_index(0),
+                    data: DataPayload::CryptoData(CryptoData {
+                        nonce_last_bytes: 42,
+                        payload: vec![42; 123],
+                    }),
                 }),
-            }
-        )).await;
+            )
+            .await;
         assert!(handle_res.is_err());
     }
     #[tokio::test]
@@ -1501,26 +1801,39 @@ mod tests {
         let client_pk_2 = SecretKey::generate(&mut thread_rng()).public_key();
 
         // emulate send RouteRequest from client_1
-        server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { pk: client_pk_2.clone() }
-        )).await.unwrap();
+        server
+            .handle_packet(
+                &client_pk_1,
+                Packet::RouteRequest(RouteRequest {
+                    pk: client_pk_2.clone(),
+                }),
+            )
+            .await
+            .unwrap();
 
         // the server should put RouteResponse into rx_1
         let (packet, _rx_1) = rx_1.into_future().await;
-        assert_eq!(packet.unwrap(), Packet::RouteResponse(
-            RouteResponse { pk: client_pk_2, connection_id: ConnectionId::from_index(0) }
-        ));
+        assert_eq!(
+            packet.unwrap(),
+            Packet::RouteResponse(RouteResponse {
+                pk: client_pk_2,
+                connection_id: ConnectionId::from_index(0)
+            })
+        );
 
         // emulate send Data from client_1
-        let handle_res = server.handle_packet(&client_pk_1, Packet::Data(
-            Data {
-                connection_id: ConnectionId::from_index(0),
-                data: DataPayload::CryptoData(CryptoData {
-                    nonce_last_bytes: 42,
-                    payload: vec![42; 123],
+        let handle_res = server
+            .handle_packet(
+                &client_pk_1,
+                Packet::Data(Data {
+                    connection_id: ConnectionId::from_index(0),
+                    data: DataPayload::CryptoData(CryptoData {
+                        nonce_last_bytes: 42,
+                        payload: vec![42; 123],
+                    }),
                 }),
-            }
-        )).await;
+            )
+            .await;
         assert!(handle_res.is_ok());
     }
     #[tokio::test]
@@ -1532,7 +1845,9 @@ mod tests {
         server.insert(client).await.unwrap();
 
         // emulate shutdown
-        let handle_res = server.shutdown_client(&client_pk, "1.2.3.4".parse().unwrap(), 12346).await;
+        let handle_res = server
+            .shutdown_client(&client_pk, "1.2.3.4".parse().unwrap(), 12346)
+            .await;
         assert!(handle_res.is_err());
 
         let state = server.state.read().await;
@@ -1574,18 +1889,30 @@ mod tests {
         let client_pk_2 = SecretKey::generate(&mut thread_rng()).public_key();
 
         // emulate send RouteRequest from client_1
-        server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { pk: client_pk_2.clone() }
-        )).await.unwrap();
+        server
+            .handle_packet(
+                &client_pk_1,
+                Packet::RouteRequest(RouteRequest {
+                    pk: client_pk_2.clone(),
+                }),
+            )
+            .await
+            .unwrap();
 
         // the server should put RouteResponse into rx_1
         let (packet, _rx_1) = rx_1.into_future().await;
-        assert_eq!(packet.unwrap(), Packet::RouteResponse(
-            RouteResponse { pk: client_pk_2, connection_id: ConnectionId::from_index(0) }
-        ));
+        assert_eq!(
+            packet.unwrap(),
+            Packet::RouteResponse(RouteResponse {
+                pk: client_pk_2,
+                connection_id: ConnectionId::from_index(0)
+            })
+        );
 
         // emulate shutdown
-        let handle_res = server.shutdown_client(&client_pk_1, client_ip_addr_1, client_port_1).await;
+        let handle_res = server
+            .shutdown_client(&client_pk_1, client_ip_addr_1, client_port_1)
+            .await;
         assert!(handle_res.is_ok());
     }
     #[tokio::test]
@@ -1603,9 +1930,9 @@ mod tests {
         drop(rx_1);
 
         // emulate send RouteRequest from client_1
-        let handle_res = server.handle_packet(&client_pk_1, Packet::RouteRequest(
-            RouteRequest { pk: client_pk_2 }
-        )).await;
+        let handle_res = server
+            .handle_packet(&client_pk_1, Packet::RouteRequest(RouteRequest { pk: client_pk_2 }))
+            .await;
         assert!(handle_res.is_ok())
     }
     #[tokio::test]
@@ -1629,11 +1956,9 @@ mod tests {
                 port: 12345,
             },
             temporary_pk: SecretKey::generate(&mut thread_rng()).public_key(),
-            payload: vec![13; 170]
+            payload: vec![13; 170],
         };
-        let handle_res = server
-            .handle_packet(&client_pk_1, Packet::OnionRequest(request))
-            .await;
+        let handle_res = server.handle_packet(&client_pk_1, Packet::OnionRequest(request)).await;
         assert!(handle_res.is_ok());
     }
     #[tokio::test]
@@ -1655,7 +1980,6 @@ mod tests {
         let pk_3 = client_3.pk();
         server.insert(client_3).await.unwrap();
 
-
         tokio::time::pause();
         // time when all entries is needed to send PingRequest
         tokio::time::advance(TCP_PING_FREQUENCY + Duration::from_secs(1)).await;
@@ -1664,17 +1988,26 @@ mod tests {
         assert!(sender_res.is_ok());
 
         let (packet, _rx_1) = rx_1.into_future().await;
-        assert_eq!(packet.unwrap(), Packet::PingRequest(
-            PingRequest { ping_id: server.state.read().await.connected_clients[&pk_1].ping_id() }
-        ));
+        assert_eq!(
+            packet.unwrap(),
+            Packet::PingRequest(PingRequest {
+                ping_id: server.state.read().await.connected_clients[&pk_1].ping_id()
+            })
+        );
         let (packet, _rx_2) = rx_2.into_future().await;
-        assert_eq!(packet.unwrap(), Packet::PingRequest(
-            PingRequest { ping_id: server.state.read().await.connected_clients[&pk_2].ping_id() }
-        ));
+        assert_eq!(
+            packet.unwrap(),
+            Packet::PingRequest(PingRequest {
+                ping_id: server.state.read().await.connected_clients[&pk_2].ping_id()
+            })
+        );
         let (packet, _rx_3) = rx_3.into_future().await;
-        assert_eq!(packet.unwrap(), Packet::PingRequest(
-            PingRequest { ping_id: server.state.read().await.connected_clients[&pk_3].ping_id() }
-        ));
+        assert_eq!(
+            packet.unwrap(),
+            Packet::PingRequest(PingRequest {
+                ping_id: server.state.read().await.connected_clients[&pk_3].ping_id()
+            })
+        );
     }
     #[tokio::test]
     async fn tcp_send_remove_timedouts() {

@@ -3,29 +3,36 @@ handshake using [`Diagram`](https://zetok.github.io/tox-spec/#handshake-diagram)
 
 */
 
-pub mod packet;
 pub mod codec;
+pub mod packet;
 
-pub use self::packet::*;
 pub use self::codec::*;
+pub use self::packet::*;
 
-use crypto_box::{SalsaBox, aead::{Aead, AeadCore, Error as AeadError}};
+use crate::relay::secure;
+use crypto_box::{
+    aead::{Aead, AeadCore, Error as AeadError},
+    SalsaBox,
+};
 use tox_binary_io::*;
 use tox_crypto::*;
-use crate::relay::secure;
 
-use futures::{self, StreamExt, SinkExt, TryFutureExt};
+use futures::{self, SinkExt, StreamExt, TryFutureExt};
 use std::io::{Error, ErrorKind};
-use tokio_util::codec::Framed;
 use tokio::net::TcpStream;
+use tokio_util::codec::Framed;
 
 /// Create a handshake from client to server
-pub fn create_client_handshake(client_pk: &PublicKey,
-                           client_sk: &SecretKey,
-                           server_pk: &PublicKey)
-    -> Result<(secure::Session, SalsaBox, ClientHandshake), Error> {
+pub fn create_client_handshake(
+    client_pk: &PublicKey,
+    client_sk: &SecretKey,
+    server_pk: &PublicKey,
+) -> Result<(secure::Session, SalsaBox, ClientHandshake), Error> {
     let session = secure::Session::random();
-    let payload = HandshakePayload { session_pk: session.pk().clone(), session_nonce: *session.nonce() };
+    let payload = HandshakePayload {
+        session_pk: session.pk().clone(),
+        session_nonce: *session.nonce(),
+    };
 
     let mut serialized_payload = [0; PAYLOAD_SIZE];
     // HandshakePayload::to_bytes may not fail because we created buffer with enough size
@@ -45,25 +52,26 @@ pub fn create_client_handshake(client_pk: &PublicKey,
 
 /// Handle received client handshake on the server side.
 /// Return secure::Channel, Client PK, server handshake
-pub fn handle_client_handshake(server_sk: &SecretKey,
-                           client_handshake: &ClientHandshake)
-    -> Result<(secure::Channel, PublicKey, ServerHandshake), Error> {
+pub fn handle_client_handshake(
+    server_sk: &SecretKey,
+    client_handshake: &ClientHandshake,
+) -> Result<(secure::Channel, PublicKey, ServerHandshake), Error> {
     let common_key = SalsaBox::new(&client_handshake.pk, server_sk);
-    let payload_bytes = common_key.decrypt((&client_handshake.nonce).into(), &client_handshake.payload[..])
-        .map_err(
-            |AeadError| Error::new(ErrorKind::Other, "Failed to decrypt ClientHandshake payload")
-        )?;
+    let payload_bytes = common_key
+        .decrypt((&client_handshake.nonce).into(), &client_handshake.payload[..])
+        .map_err(|AeadError| Error::new(ErrorKind::Other, "Failed to decrypt ClientHandshake payload"))?;
 
     let (_, payload) = HandshakePayload::from_bytes(&payload_bytes)
-        .map_err(
-            |_| Error::new(ErrorKind::Other, "Failed to deserialize ClientHandshake payload")
-        )?;
+        .map_err(|_| Error::new(ErrorKind::Other, "Failed to deserialize ClientHandshake payload"))?;
 
     let client_pk = payload.session_pk;
     let client_nonce = payload.session_nonce;
 
     let session = secure::Session::random();
-    let server_payload = HandshakePayload { session_pk: session.pk().clone(), session_nonce: *session.nonce() };
+    let server_payload = HandshakePayload {
+        session_pk: session.pk().clone(),
+        session_nonce: *session.nonce(),
+    };
 
     let mut serialized_payload = [0; PAYLOAD_SIZE];
     // HandshakePayload::to_bytes may not fail because we created buffer with enough size
@@ -81,18 +89,16 @@ pub fn handle_client_handshake(server_sk: &SecretKey,
 }
 
 /// Handle received server handshake on the client side.
-pub fn handle_server_handshake(common_key: &SalsaBox,
-                           client_session: &secure::Session,
-                           server_handshake: &ServerHandshake)
-    -> Result<secure::Channel, Error> {
-    let payload_bytes = common_key.decrypt((&server_handshake.nonce).into(), &server_handshake.payload[..])
-        .map_err(
-            |AeadError| Error::new(ErrorKind::Other, "Failed to decrypt ServerHandshake payload")
-        )?;
+pub fn handle_server_handshake(
+    common_key: &SalsaBox,
+    client_session: &secure::Session,
+    server_handshake: &ServerHandshake,
+) -> Result<secure::Channel, Error> {
+    let payload_bytes = common_key
+        .decrypt((&server_handshake.nonce).into(), &server_handshake.payload[..])
+        .map_err(|AeadError| Error::new(ErrorKind::Other, "Failed to decrypt ServerHandshake payload"))?;
     let (_, payload) = HandshakePayload::from_bytes(&payload_bytes)
-        .map_err(
-            |_| Error::new(ErrorKind::Other, "Failed to deserialize ServerHandshake payload")
-        )?;
+        .map_err(|_| Error::new(ErrorKind::Other, "Failed to deserialize ServerHandshake payload"))?;
 
     let server_pk = payload.session_pk;
     let server_nonce = payload.session_nonce;
@@ -107,28 +113,21 @@ pub async fn make_client_handshake(
     socket: TcpStream,
     client_pk: &PublicKey,
     client_sk: &SecretKey,
-    server_pk: &PublicKey
+    server_pk: &PublicKey,
 ) -> Result<(TcpStream, secure::Channel), Error> {
-    let (session, common_key, handshake) =
-        create_client_handshake(client_pk, client_sk, server_pk)?;
+    let (session, common_key, handshake) = create_client_handshake(client_pk, client_sk, server_pk)?;
 
     let mut client = Framed::new(socket, ClientHandshakeCodec);
-    client.send(handshake)
-        .map_err(|e| {
-            Error::new(
-                ErrorKind::Other,
-                format!("Could not send ClientHandshake {:?}", e),
-            )
-        })
+    client
+        .send(handshake)
+        .map_err(|e| Error::new(ErrorKind::Other, format!("Could not send ClientHandshake {:?}", e)))
         .await?;
 
     let socket = client.into_inner();
     let server = Framed::new(socket, ServerHandshakeCodec);
     let (handshake, server_socket) = server.into_future().await;
     let handshake = match handshake {
-        None => Err(Error::new(
-            ErrorKind::Other, "Option<ServerHandshake> is empty"
-        )),
+        None => Err(Error::new(ErrorKind::Other, "Option<ServerHandshake> is empty")),
         Some(Err(e)) => Err(Error::new(
             ErrorKind::Other,
             format!("Could not read ServerHandshake {:?}", e),
@@ -136,23 +135,20 @@ pub async fn make_client_handshake(
         Some(res) => res,
     }?;
 
-    handle_server_handshake(&common_key, &session, &handshake)
-        .map(|chan| (server_socket.into_inner(), chan))
+    handle_server_handshake(&common_key, &session, &handshake).map(|chan| (server_socket.into_inner(), chan))
 }
 
 /// Receives handshake from the client, processes it and
 /// sends handshake to the client
 pub async fn make_server_handshake(
     socket: TcpStream,
-    server_sk: SecretKey
+    server_sk: SecretKey,
 ) -> Result<(TcpStream, secure::Channel, PublicKey), Error> {
     let client = Framed::new(socket, ClientHandshakeCodec);
 
     let (handshake, client) = client.into_future().await;
     let handshake = match handshake {
-        None => Err(Error::new(
-            ErrorKind::Other, "Option<ClientHandshake> is empty"
-        )),
+        None => Err(Error::new(ErrorKind::Other, "Option<ClientHandshake> is empty")),
         Some(Err(e)) => Err(Error::new(
             ErrorKind::Other,
             format!("Could not read ClientHandshake {:?}", e),
@@ -160,18 +156,14 @@ pub async fn make_server_handshake(
         Some(res) => res,
     }?;
 
-    let (channel, client_pk, server_handshake) =
-        handle_client_handshake(&server_sk, &handshake)?;
+    let (channel, client_pk, server_handshake) = handle_client_handshake(&server_sk, &handshake)?;
 
     let socket = client.into_inner();
     let mut server = Framed::new(socket, ServerHandshakeCodec);
-    server.send(server_handshake).await
-        .map_err(|e| {
-            Error::new(
-                ErrorKind::Other,
-                format!("Could not send ServerHandshake {:?}", e),
-            )
-        })?;
+    server
+        .send(server_handshake)
+        .await
+        .map_err(|e| Error::new(ErrorKind::Other, format!("Could not send ServerHandshake {:?}", e)))?;
 
     let socket = server.into_inner();
     Ok((socket, channel, client_pk))
@@ -181,10 +173,9 @@ pub async fn make_server_handshake(
 mod tests {
     use std::net::SocketAddr;
 
-    use rand::thread_rng;
-    use tox_crypto::*;
-    use crate::relay::*;
     use crate::relay::handshake::*;
+    use crate::relay::*;
+    use rand::thread_rng;
 
     fn create_channels_with_handshake() -> (secure::Channel, secure::Channel) {
         let mut rng = thread_rng();
@@ -194,7 +185,8 @@ mod tests {
         let server_pk = server_sk.public_key();
 
         // client creates a handshake packet
-        let (client_session, common_key, client_handshake) = create_client_handshake(&client_pk, &client_sk, &server_pk).unwrap();
+        let (client_session, common_key, client_handshake) =
+            create_client_handshake(&client_pk, &client_sk, &server_pk).unwrap();
         assert_eq!(handshake::ENC_PAYLOAD_SIZE, client_handshake.payload.len());
         // sends client_handshake via network
         // ..
@@ -202,7 +194,8 @@ mod tests {
         // ..
         // server receives a handshake packet
         // handles it & creates a secure Channel
-        let (server_channel, received_client_pk, server_handshake) = handle_client_handshake(&server_sk, &client_handshake).unwrap();
+        let (server_channel, received_client_pk, server_handshake) =
+            handle_client_handshake(&server_sk, &client_handshake).unwrap();
         assert_eq!(received_client_pk, client_pk);
         // sends server_handshake via network
         // ..
@@ -227,7 +220,10 @@ mod tests {
         // Alice sends it somehow
 
         // Bob receives and decrypts
-        assert_eq!( alice_msg.as_bytes().to_vec(), bob_channel.decrypt(alice_msg_encrypted.as_ref()).unwrap() );
+        assert_eq!(
+            alice_msg.as_bytes().to_vec(),
+            bob_channel.decrypt(alice_msg_encrypted.as_ref()).unwrap()
+        );
 
         // Now Bob encrypts his message
         let bob_msg = "Oh hello Alice!";
@@ -235,7 +231,10 @@ mod tests {
         assert_ne!(bob_msg.as_bytes().to_vec(), bob_msg_encrypted);
         // And sends it back to Alice
 
-        assert_eq!( bob_msg.as_bytes().to_vec(), alice_channel.decrypt(bob_msg_encrypted.as_ref()).unwrap() );
+        assert_eq!(
+            bob_msg.as_bytes().to_vec(),
+            alice_channel.decrypt(bob_msg_encrypted.as_ref()).unwrap()
+        );
     }
     #[test]
     fn client_handshake_with_different_keypair() {
@@ -245,7 +244,8 @@ mod tests {
         let server_pk = SecretKey::generate(&mut rng).public_key();
         let mallory_sk = SecretKey::generate(&mut rng);
 
-        let (_client_session, _common_key, client_handshake) = create_client_handshake(&client_pk, &client_sk, &server_pk).unwrap();
+        let (_client_session, _common_key, client_handshake) =
+            create_client_handshake(&client_pk, &client_sk, &server_pk).unwrap();
         assert!(handle_client_handshake(&mallory_sk, &client_handshake).is_err());
     }
     #[test]
@@ -257,8 +257,10 @@ mod tests {
         let server_pk = server_sk.public_key();
         let mallory_sk = SecretKey::generate(&mut rng);
 
-        let (client_session, _common_key, client_handshake) = create_client_handshake(&client_pk, &client_sk, &server_pk).unwrap();
-        let (_server_channel, _client_pk, server_handshake) = handle_client_handshake(&server_sk, &client_handshake).unwrap();
+        let (client_session, _common_key, client_handshake) =
+            create_client_handshake(&client_pk, &client_sk, &server_pk).unwrap();
+        let (_server_channel, _client_pk, server_handshake) =
+            handle_client_handshake(&server_sk, &client_handshake).unwrap();
         let common_key = SalsaBox::new(&client_pk, &mallory_sk);
         assert!(handle_server_handshake(&common_key, &client_session, &server_handshake).is_err());
     }
@@ -276,7 +278,11 @@ mod tests {
             // bad payload [1,2,3]
             let encrypted_payload = common_key.encrypt(&nonce, &[1, 2, 3][..]).unwrap();
 
-            ClientHandshake { pk: client_pk, nonce: nonce.into(), payload: encrypted_payload }
+            ClientHandshake {
+                pk: client_pk,
+                nonce: nonce.into(),
+                payload: encrypted_payload,
+            }
         };
         assert!(handle_client_handshake(&server_sk, &client_handshake).is_err());
     }
@@ -294,7 +300,10 @@ mod tests {
             // bad payload [1,2,3]
             let server_encrypted_payload = common_key.encrypt(&nonce, &[1, 2, 3][..]).unwrap();
 
-            ServerHandshake { nonce: nonce.into(), payload: server_encrypted_payload }
+            ServerHandshake {
+                nonce: nonce.into(),
+                payload: server_encrypted_payload,
+            }
         };
         assert!(handle_server_handshake(&common_key, &client_session, &server_handshake).is_err());
     }

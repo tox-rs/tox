@@ -3,41 +3,41 @@ Functionality needed to work as a DHT node.
 This module works on top of other modules.
 */
 
-pub mod hole_punching;
 pub mod errors;
+pub mod hole_punching;
 
-use futures::{TryFutureExt, StreamExt, SinkExt, future};
 use futures::channel::mpsc;
+use futures::{future, SinkExt, StreamExt, TryFutureExt};
+use rand::{prelude::SliceRandom, thread_rng, Rng};
 use tokio::sync::RwLock;
-use rand::{Rng, prelude::SliceRandom, thread_rng};
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::{iter, mem};
-use xsalsa20poly1305::{XSalsa20Poly1305, KeyInit};
+use xsalsa20poly1305::{KeyInit, XSalsa20Poly1305};
 
-use crate::time::*;
-use tox_crypto::*;
-use tox_packet::dht::*;
-use tox_packet::dht::packed_node::*;
-use crate::dht::kbucket::*;
-use crate::dht::ktree::*;
-use crate::dht::forced_ktree::*;
-use crate::dht::precomputed_cache::*;
-use tox_packet::onion::*;
-use crate::onion::onion_announce::*;
-use crate::dht::request_queue::*;
-use tox_packet::ip_port::*;
 use crate::dht::dht_friend::*;
 use crate::dht::dht_node::*;
-use crate::dht::server::hole_punching::*;
-use tox_packet::relay::OnionRequest;
+use crate::dht::forced_ktree::*;
 use crate::dht::ip_port::IsGlobal;
-use crate::utils::*;
+use crate::dht::kbucket::*;
+use crate::dht::ktree::*;
+use crate::dht::precomputed_cache::*;
+use crate::dht::request_queue::*;
 use crate::dht::server::errors::*;
+use crate::dht::server::hole_punching::*;
 use crate::io_tokio::*;
+use crate::onion::onion_announce::*;
+use crate::time::*;
+use crate::utils::*;
+use tox_crypto::*;
+use tox_packet::dht::packed_node::*;
+use tox_packet::dht::*;
+use tox_packet::ip_port::*;
+use tox_packet::onion::*;
+use tox_packet::relay::OnionRequest;
 
 /// Shorthand for the transmit half of the message channel.
 type Tx = mpsc::Sender<(Packet, SocketAddr)>;
@@ -112,7 +112,9 @@ struct ServerState {
 impl ServerState {
     /// Adapt `RequestQueue.check_ping_id()`.
     fn check_ping_id(&mut self, ping_id: u64, packet_pk: &PublicKey) -> bool {
-        self.request_queue.check_ping_id(ping_id, |pk| packet_pk.eq(pk)).is_some()
+        self.request_queue
+            .check_ping_id(ping_id, |pk| packet_pk.eq(pk))
+            .is_some()
     }
 }
 
@@ -201,7 +203,8 @@ impl Server {
         let fake_friends_keys = iter::repeat_with(|| SecretKey::generate(&mut rng).public_key())
             .take(FAKE_FRIENDS_NUMBER)
             .collect::<Vec<_>>();
-        let friends = fake_friends_keys.iter()
+        let friends = fake_friends_keys
+            .iter()
             .map(|pk| (pk.clone(), DhtFriend::new(&mut rng, pk.clone())))
             .collect();
 
@@ -253,18 +256,16 @@ impl Server {
 
     /// Check if we have at least one node in good state.
     pub async fn is_connected(&self) -> bool {
-        self.state.read()
-            .await
-            .close_nodes
-            .iter()
-            .any(|node| !node.is_bad())
+        self.state.read().await.close_nodes.iter().any(|node| !node.is_bad())
     }
 
     /// Get all known nodes.
     pub async fn get_all_nodes(&self) -> Vec<PackedNode> {
         let state = self.state.read().await;
 
-        state.close_nodes.iter()
+        state
+            .close_nodes
+            .iter()
             .flat_map(|node| node.to_packed_node())
             .collect::<Vec<PackedNode>>()
     }
@@ -275,7 +276,7 @@ impl Server {
         friends: &HashMap<PublicKey, DhtFriend>,
         base_pk: &PublicKey,
         count: u8,
-        only_global: bool
+        only_global: bool,
     ) -> Kbucket<PackedNode> {
         let mut kbucket = close_nodes.get_closest(base_pk, count, only_global);
 
@@ -310,7 +311,9 @@ impl Server {
         let close_nodes = Server::get_closest_inner(&state.close_nodes, &state.friends, &friend.pk, 4, true);
 
         for node in close_nodes.iter() {
-            friend.nodes_to_bootstrap.try_add(&friend.pk, node.clone(), /* evict */ true);
+            friend
+                .nodes_to_bootstrap
+                .try_add(&friend.pk, node.clone(), /* evict */ true);
         }
 
         state.friends.insert(friend_pk, friend);
@@ -330,7 +333,8 @@ impl Server {
         // Check if we should send `NodesRequest` packet to a random node. This
         // request is sent every second 5 times and then every 20 seconds.
         fn send_random_request(last_nodes_req_time: &mut Instant, random_requests_count: &mut u32) -> bool {
-            if clock_elapsed(*last_nodes_req_time) > NODES_REQ_INTERVAL || *random_requests_count < MAX_BOOTSTRAP_TIMES {
+            if clock_elapsed(*last_nodes_req_time) > NODES_REQ_INTERVAL || *random_requests_count < MAX_BOOTSTRAP_TIMES
+            {
                 *random_requests_count = random_requests_count.saturating_add(1);
                 *last_nodes_req_time = clock_now();
                 true
@@ -344,28 +348,47 @@ impl Server {
         state.request_queue.clear_timed_out();
 
         // Send NodesRequest packets to nodes from the Server
-        self.ping_nodes_to_bootstrap(&mut state.request_queue, &mut state.nodes_to_bootstrap, self.pk.clone()).await
+        self.ping_nodes_to_bootstrap(&mut state.request_queue, &mut state.nodes_to_bootstrap, self.pk.clone())
+            .await
             .map_err(RunError::SendTo)?;
-        self.ping_close_nodes(&mut state.request_queue, state.close_nodes.iter_mut(), self.pk.clone()).await
+        self.ping_close_nodes(&mut state.request_queue, state.close_nodes.iter_mut(), self.pk.clone())
+            .await
             .map_err(RunError::SendTo)?;
         if send_random_request(&mut state.last_nodes_req_time, &mut state.random_requests_count) {
-            self.send_nodes_req_random(&mut state.request_queue, state.close_nodes.iter(), self.pk.clone()).await
+            self.send_nodes_req_random(&mut state.request_queue, state.close_nodes.iter(), self.pk.clone())
+                .await
                 .map_err(RunError::SendTo)?;
         }
 
         // Send NodesRequest packets to nodes from every DhtFriend
         for friend in state.friends.values_mut() {
-            self.ping_nodes_to_bootstrap(&mut state.request_queue, &mut friend.nodes_to_bootstrap, friend.pk.clone()).await
-                .map_err(RunError::SendTo)?;
-            self.ping_close_nodes(&mut state.request_queue, friend.close_nodes.nodes.iter_mut(), friend.pk.clone()).await
-                .map_err(RunError::SendTo)?;
+            self.ping_nodes_to_bootstrap(
+                &mut state.request_queue,
+                &mut friend.nodes_to_bootstrap,
+                friend.pk.clone(),
+            )
+            .await
+            .map_err(RunError::SendTo)?;
+            self.ping_close_nodes(
+                &mut state.request_queue,
+                friend.close_nodes.nodes.iter_mut(),
+                friend.pk.clone(),
+            )
+            .await
+            .map_err(RunError::SendTo)?;
             if send_random_request(&mut friend.last_nodes_req_time, &mut friend.random_requests_count) {
-                self.send_nodes_req_random(&mut state.request_queue, friend.close_nodes.nodes.iter(), friend.pk.clone()).await
-                    .map_err(RunError::SendTo)?
+                self.send_nodes_req_random(
+                    &mut state.request_queue,
+                    friend.close_nodes.nodes.iter(),
+                    friend.pk.clone(),
+                )
+                .await
+                .map_err(RunError::SendTo)?
             }
         }
 
-        self.send_nat_ping_req(&mut state.request_queue, &mut state.friends).await
+        self.send_nat_ping_req(&mut state.request_queue, &mut state.friends)
+            .await
             .map_err(RunError::SendTo)
     }
 
@@ -379,7 +402,10 @@ impl Server {
             self.run_bootstrap_requests_sending(),
         );
 
-        r1?; r2?; r3?; r4?;
+        r1?;
+        r2?;
+        r3?;
+        r4?;
 
         Ok(())
     }
@@ -401,24 +427,18 @@ impl Server {
             wakeups.tick().await;
 
             trace!("Bootstrap wake up");
-            let send_res = tokio::time::timeout(
-                interval,
-                self.send_bootstrap_requests(),
-            ).await;
+            let send_res = tokio::time::timeout(interval, self.send_bootstrap_requests()).await;
 
-            let res =
-                match send_res {
-                    Ok(Ok(_)) => Ok(()),
-                    Ok(Err(e)) =>
-                        Err(RunError::SendTo(e)),
-                    Err(e) =>
-                        Err(RunError::Timeout(e)),
-                };
+            let res = match send_res {
+                Ok(Ok(_)) => Ok(()),
+                Ok(Err(e)) => Err(RunError::SendTo(e)),
+                Err(e) => Err(RunError::Timeout(e)),
+            };
 
             if let Err(ref e) = res {
                 warn!("Failed to send initial bootstrap packets: {}", e);
 
-                return res
+                return res;
             }
         }
     }
@@ -433,13 +453,15 @@ impl Server {
             return Ok(());
         }
 
-        let nodes = state.close_nodes
+        let nodes = state
+            .close_nodes
             .iter()
             .flat_map(|node| node.to_all_packed_nodes())
             .chain(self.initial_bootstrap.iter().cloned());
 
         for node in nodes {
-            self.send_nodes_req(node, &mut state.request_queue, self.pk.clone()).await?;
+            self.send_nodes_req(node, &mut state.request_queue, self.pk.clone())
+                .await?;
         }
 
         Ok(())
@@ -456,20 +478,17 @@ impl Server {
 
             trace!("DHT server wake up");
 
-            let loop_res =
-                tokio::time::timeout(interval, self.dht_main_loop()).await;
+            let loop_res = tokio::time::timeout(interval, self.dht_main_loop()).await;
 
             let res = match loop_res {
                 Ok(Ok(_)) => Ok(()),
-                Ok(Err(e)) =>
-                    Err(e),
-                Err(e) =>
-                    Err(RunError::Timeout(e)),
+                Ok(Err(e)) => Err(e),
+                Err(e) => Err(RunError::Timeout(e)),
             };
 
             if let Err(ref e) = res {
                 warn!("Failed to send DHT periodical packets: {}", e);
-                return res
+                return res;
             }
         }
     }
@@ -497,8 +516,7 @@ impl Server {
         loop {
             wakeups.tick().await;
 
-            self.send_pings().await
-                .map_err(RunError::SendTo)?;
+            self.send_pings().await.map_err(RunError::SendTo)?;
         }
     }
 
@@ -506,7 +524,7 @@ impl Server {
     async fn send_pings(&self) -> Result<(), mpsc::SendError> {
         let nodes_to_ping = mem::replace(
             &mut *self.nodes_to_ping.write().await,
-            Kbucket::<PackedNode>::new(MAX_TO_PING)
+            Kbucket::<PackedNode>::new(MAX_TO_PING),
         );
 
         if nodes_to_ping.is_empty() {
@@ -535,11 +553,18 @@ impl Server {
 
         // If node is friend and we don't know friend's IP address yet then send
         // PingRequest immediately and unconditionally
-        if state.friends.get(&node.pk).map_or(false, |friend| !friend.is_addr_known()) {
+        if state
+            .friends
+            .get(&node.pk)
+            .map_or(false, |friend| !friend.is_addr_known())
+        {
             return self.send_ping_req(node.clone(), &mut state.request_queue).await;
         }
 
-        self.nodes_to_ping.write().await.try_add(&self.pk, node, /* evict */ true);
+        self.nodes_to_ping
+            .write()
+            .await
+            .try_add(&self.pk, node, /* evict */ true);
 
         Ok(())
     }
@@ -547,8 +572,12 @@ impl Server {
     /// Send `NodesRequest` packets to nodes from bootstrap list. This is
     /// necessary to check whether node is alive before adding it to close
     /// nodes lists.
-    async fn ping_nodes_to_bootstrap(&self, request_queue: &mut RequestQueue<PublicKey>, nodes_to_bootstrap: &mut Kbucket<PackedNode>, pk: PublicKey)
-        -> Result<(), mpsc::SendError> {
+    async fn ping_nodes_to_bootstrap(
+        &self,
+        request_queue: &mut RequestQueue<PublicKey>,
+        nodes_to_bootstrap: &mut Kbucket<PackedNode>,
+        pk: PublicKey,
+    ) -> Result<(), mpsc::SendError> {
         let capacity = nodes_to_bootstrap.capacity() as u8;
         let nodes_to_bootstrap = mem::replace(nodes_to_bootstrap, Kbucket::new(capacity));
 
@@ -561,20 +590,26 @@ impl Server {
 
     /// Iterate over nodes from close nodes list and send `NodesRequest` packets
     /// to them if necessary.
-    async fn ping_close_nodes<'a, T>(&self, request_queue: &mut RequestQueue<PublicKey>, nodes: T, pk: PublicKey)
-        -> Result<(), mpsc::SendError>
-        where T: Iterator<Item = &'a mut DhtNode>
+    async fn ping_close_nodes<'a, T>(
+        &self,
+        request_queue: &mut RequestQueue<PublicKey>,
+        nodes: T,
+        pk: PublicKey,
+    ) -> Result<(), mpsc::SendError>
+    where
+        T: Iterator<Item = &'a mut DhtNode>,
     {
-        let nodes = nodes
-            .flat_map(|node| {
-                let ping_addr_v4 = node.assoc4
-                    .ping_addr()
-                    .map(|addr| PackedNode::new(addr.into(), node.pk.clone()));
-                let ping_addr_v6 = node.assoc6
-                    .ping_addr()
-                    .map(|addr| PackedNode::new(addr.into(), node.pk.clone()));
-                ping_addr_v4.into_iter().chain(ping_addr_v6.into_iter())
-            });
+        let nodes = nodes.flat_map(|node| {
+            let ping_addr_v4 = node
+                .assoc4
+                .ping_addr()
+                .map(|addr| PackedNode::new(addr.into(), node.pk.clone()));
+            let ping_addr_v6 = node
+                .assoc6
+                .ping_addr()
+                .map(|addr| PackedNode::new(addr.into(), node.pk.clone()));
+            ping_addr_v4.into_iter().chain(ping_addr_v6.into_iter())
+        });
 
         for node in nodes {
             self.send_nodes_req(node.clone(), request_queue, pk.clone()).await?;
@@ -586,9 +621,14 @@ impl Server {
     /// Send `NodesRequest` packet to a random good node every 20 seconds or if
     /// it was sent less than `NODES_REQ_INTERVAL`. This function should be
     /// called every second.
-    async fn send_nodes_req_random<'a, T>(&self, request_queue: &mut RequestQueue<PublicKey>, nodes: T, pk: PublicKey)
-        -> Result<(), mpsc::SendError>
-        where T: Iterator<Item = &'a DhtNode>
+    async fn send_nodes_req_random<'a, T>(
+        &self,
+        request_queue: &mut RequestQueue<PublicKey>,
+        nodes: T,
+        pk: PublicKey,
+    ) -> Result<(), mpsc::SendError>
+    where
+        T: Iterator<Item = &'a DhtNode>,
     {
         let good_nodes = nodes
             .filter(|&node| !node.is_bad())
@@ -601,10 +641,10 @@ impl Server {
         }
 
         let rng = &mut thread_rng();
-        let mut random_node_idx = rng.gen_range(0 .. good_nodes.len());
+        let mut random_node_idx = rng.gen_range(0..good_nodes.len());
         // Increase probability of sending packet to a close node (has lower index)
         if random_node_idx != 0 {
-            random_node_idx -= rng.gen_range(0 ..= random_node_idx);
+            random_node_idx -= rng.gen_range(0..=random_node_idx);
         }
 
         let random_node = good_nodes[random_node_idx].clone();
@@ -621,8 +661,11 @@ impl Server {
     }
 
     /// Send `PingRequest` packet to the node.
-    async fn send_ping_req(&self, node: PackedNode, request_queue: &mut RequestQueue<PublicKey>)
-        -> Result<(), mpsc::SendError> {
+    async fn send_ping_req(
+        &self,
+        node: PackedNode,
+        request_queue: &mut RequestQueue<PublicKey>,
+    ) -> Result<(), mpsc::SendError> {
         let payload = PingRequestPayload {
             id: request_queue.new_ping_id(&mut thread_rng(), node.pk.clone()),
         };
@@ -635,8 +678,12 @@ impl Server {
     }
 
     /// Send `NodesRequest` packet to the node.
-    async fn send_nodes_req(&self, node: PackedNode, request_queue: &mut RequestQueue<PublicKey>, search_pk: PublicKey)
-        -> Result<(), mpsc::SendError> {
+    async fn send_nodes_req(
+        &self,
+        node: PackedNode,
+        request_queue: &mut RequestQueue<PublicKey>,
+        search_pk: PublicKey,
+    ) -> Result<(), mpsc::SendError> {
         // Check if packet is going to be sent to ourselves.
         if self.pk == node.pk {
             trace!("Attempt to send NodesRequest to ourselves.");
@@ -656,8 +703,11 @@ impl Server {
     }
 
     /// Send `NatPingRequest` packet to all friends and try to punch holes.
-    async fn send_nat_ping_req(&self, request_queue: &mut RequestQueue<PublicKey>, friends: &mut HashMap<PublicKey, DhtFriend>)
-        -> Result<(), mpsc::SendError> {
+    async fn send_nat_ping_req(
+        &self,
+        request_queue: &mut RequestQueue<PublicKey>,
+        friends: &mut HashMap<PublicKey, DhtFriend>,
+    ) -> Result<(), mpsc::SendError> {
         for friend in friends.values_mut() {
             if friend.is_addr_known() {
                 continue;
@@ -671,7 +721,11 @@ impl Server {
 
             self.punch_holes(request_queue, friend, &addrs).await?;
 
-            if friend.hole_punch.last_send_ping_time.map_or(true, |time| clock_elapsed(time) >= PUNCH_INTERVAL) {
+            if friend
+                .hole_punch
+                .last_send_ping_time
+                .map_or(true, |time| clock_elapsed(time) >= PUNCH_INTERVAL)
+            {
                 friend.hole_punch.last_send_ping_time = Some(clock_now());
                 let payload = DhtRequestPayload::NatPingRequest(NatPingRequest {
                     id: friend.hole_punch.ping_id,
@@ -690,8 +744,12 @@ impl Server {
     }
 
     /// Try to punch holes to specified friend.
-    async fn punch_holes(&self, request_queue: &mut RequestQueue<PublicKey>, friend: &mut DhtFriend, returned_addrs: &[SocketAddr])
-        -> Result<(), mpsc::SendError> {
+    async fn punch_holes(
+        &self,
+        request_queue: &mut RequestQueue<PublicKey>,
+        friend: &mut DhtFriend,
+        returned_addrs: &[SocketAddr],
+    ) -> Result<(), mpsc::SendError> {
         let punch_addrs = friend.hole_punch.next_punch_addrs(returned_addrs);
         let mut tx = self.tx.clone();
         let payload = PingRequestPayload {
@@ -703,9 +761,10 @@ impl Server {
             &payload,
         ));
 
-        let packets = punch_addrs.into_iter().map(|addr| {
-            (packet.clone(), addr)
-        }).collect::<Vec<_>>();
+        let packets = punch_addrs
+            .into_iter()
+            .map(|addr| (packet.clone(), addr))
+            .collect::<Vec<_>>();
 
         let mut stream = futures::stream::iter(packets).map(Ok);
         tx.send_all(&mut stream).await
@@ -713,10 +772,15 @@ impl Server {
 
     /// Send `NatPingRequest` packet to all close nodes of friend in the hope
     /// that they will redirect it to this friend.
-    async fn send_nat_ping_req_inner(&self, friend: &DhtFriend, nat_ping_req_packet: DhtRequest)
-        -> Result<(), mpsc::SendError> {
+    async fn send_nat_ping_req_inner(
+        &self,
+        friend: &DhtFriend,
+        nat_ping_req_packet: DhtRequest,
+    ) -> Result<(), mpsc::SendError> {
         let packet = Packet::DhtRequest(nat_ping_req_packet);
-        let nodes = friend.close_nodes.nodes
+        let nodes = friend
+            .close_nodes
+            .nodes
             .iter()
             .flat_map(|node| node.to_packed_node().into_iter());
 
@@ -735,35 +799,34 @@ impl Server {
     /// Handle received `PingRequest` packet and response with `PingResponse`
     /// packet. If node that sent this packet is not present in close nodes list
     /// and can be added there then it will be added to ping list.
-    pub async fn handle_ping_req(&self, packet: PingRequest, addr: SocketAddr)
-        -> Result<(), HandlePacketError> {
+    pub async fn handle_ping_req(&self, packet: PingRequest, addr: SocketAddr) -> Result<(), HandlePacketError> {
         let precomputed_key = self.precomputed_keys.get(packet.pk.clone()).await;
         let payload = match packet.get_payload(&precomputed_key) {
             Err(e) => return future::err(HandlePacketError::GetPayload(e)).await,
             Ok(payload) => payload,
         };
 
-        let resp_payload = PingResponsePayload {
-            id: payload.id,
-        };
-        let ping_resp = Packet::PingResponse(PingResponse::new(
-            &precomputed_key,
-            self.pk.clone(),
-            &resp_payload,
-        ));
+        let resp_payload = PingResponsePayload { id: payload.id };
+        let ping_resp = Packet::PingResponse(PingResponse::new(&precomputed_key, self.pk.clone(), &resp_payload));
 
         future::try_join(
             self.ping_add(PackedNode::new(addr, packet.pk)),
             self.send_to(addr, ping_resp),
         )
-            .map_ok(drop)
-            .map_err(HandlePacketError::SendTo)
-            .await
+        .map_ok(drop)
+        .map_err(HandlePacketError::SendTo)
+        .await
     }
 
     /// Add node to close list after we received a response from it. If it's a
     /// friend then send it's IP address to appropriate sink.
-    async fn try_add_to_close(&self, state: &mut ServerState, payload_id: u64, node: PackedNode, check_ping_id: bool) -> Result<(), HandlePacketError> {
+    async fn try_add_to_close(
+        &self,
+        state: &mut ServerState,
+        payload_id: u64,
+        node: PackedNode,
+        check_ping_id: bool,
+    ) -> Result<(), HandlePacketError> {
         if check_ping_id && !state.check_ping_id(payload_id, &node.pk) {
             return Err(HandlePacketError::PingIdMismatch);
         }
@@ -774,7 +837,8 @@ impl Server {
         }
         if state.friends.contains_key(&node.pk) {
             let sink = self.friend_saddr_sink.read().await.clone();
-            maybe_send_unbounded(sink, node).await
+            maybe_send_unbounded(sink, node)
+                .await
                 .map_err(HandlePacketError::FriendSaddr)
         } else {
             Ok(())
@@ -794,14 +858,19 @@ impl Server {
             return Err(HandlePacketError::ZeroPingId);
         }
 
-        self.try_add_to_close(&mut *self.state.write().await, payload.id, PackedNode::new(addr, packet.pk), true).await
+        self.try_add_to_close(
+            &mut *self.state.write().await,
+            payload.id,
+            PackedNode::new(addr, packet.pk),
+            true,
+        )
+        .await
     }
 
     /// Handle received `NodesRequest` packet and respond with `NodesResponse`
     /// packet. If node that sent this packet is not present in close nodes list
     /// and can be added there then it will be added to ping list.
-    pub async fn handle_nodes_req(&self, packet: NodesRequest, addr: SocketAddr)
-        -> Result<(), HandlePacketError> {
+    pub async fn handle_nodes_req(&self, packet: NodesRequest, addr: SocketAddr) -> Result<(), HandlePacketError> {
         let precomputed_key = self.precomputed_keys.get(packet.pk.clone()).await;
         let payload = match packet.get_payload(&precomputed_key) {
             Err(e) => return Err(HandlePacketError::GetPayload(e)),
@@ -814,19 +883,15 @@ impl Server {
             nodes: close_nodes.into(),
             id: payload.id,
         };
-        let nodes_resp = Packet::NodesResponse(NodesResponse::new(
-            &precomputed_key,
-            self.pk.clone(),
-            &resp_payload,
-        ));
+        let nodes_resp = Packet::NodesResponse(NodesResponse::new(&precomputed_key, self.pk.clone(), &resp_payload));
 
         future::try_join(
             self.ping_add(PackedNode::new(addr, packet.pk)),
             self.send_to(addr, nodes_resp),
         )
-            .map_ok(drop)
-            .map_err(HandlePacketError::SendTo)
-            .await
+        .map_ok(drop)
+        .map_err(HandlePacketError::SendTo)
+        .await
     }
 
     /// Add nodes to bootstrap nodes list to send `NodesRequest` packet to them
@@ -839,12 +904,16 @@ impl Server {
             }
 
             if state.close_nodes.can_add(node) {
-                state.nodes_to_bootstrap.try_add(&self.pk, node.clone(), /* evict */ true);
+                state
+                    .nodes_to_bootstrap
+                    .try_add(&self.pk, node.clone(), /* evict */ true);
             }
 
             for friend in state.friends.values_mut() {
                 if friend.can_add_to_close(node) {
-                    friend.nodes_to_bootstrap.try_add(&friend.pk, node.clone(), /* evict */ true);
+                    friend
+                        .nodes_to_bootstrap
+                        .try_add(&friend.pk, node.clone(), /* evict */ true);
                 }
             }
 
@@ -856,8 +925,7 @@ impl Server {
     /// that sent this packet to close nodes lists. Nodes from response will be
     /// added to bootstrap nodes list to send `NodesRequest` packet to them
     /// later.
-    pub async fn handle_nodes_resp(&self, packet: NodesResponse, addr: SocketAddr)
-        -> Result<(), HandlePacketError> {
+    pub async fn handle_nodes_resp(&self, packet: NodesResponse, addr: SocketAddr) -> Result<(), HandlePacketError> {
         let precomputed_key = self.precomputed_keys.get(packet.pk.clone()).await;
 
         let payload = match packet.get_payload(&precomputed_key) {
@@ -870,7 +938,8 @@ impl Server {
         if state.check_ping_id(payload.id, &packet.pk) {
             trace!("Received nodes with NodesResponse from {}: {:?}", addr, payload.nodes);
 
-            self.try_add_to_close(&mut state, payload.id, PackedNode::new(addr, packet.pk.clone()), false).await?;
+            self.try_add_to_close(&mut state, payload.id, PackedNode::new(addr, packet.pk.clone()), false)
+                .await?;
 
             // Process nodes from NodesResponse
             self.add_bootstrap_nodes(&mut state, &payload.nodes, &packet.pk).await;
@@ -884,7 +953,13 @@ impl Server {
     }
 
     /// Update returned socket address and time of receiving packet
-    fn update_returned_addr(&self, node: &PackedNode, packet_pk: &PublicKey, close_nodes: &mut ForcedKtree, friends: &mut HashMap<PublicKey, DhtFriend>) {
+    fn update_returned_addr(
+        &self,
+        node: &PackedNode,
+        packet_pk: &PublicKey,
+        close_nodes: &mut ForcedKtree,
+        friends: &mut HashMap<PublicKey, DhtFriend>,
+    ) {
         if self.pk == node.pk {
             if let Some(node_to_update) = close_nodes.get_node_mut(packet_pk) {
                 node_to_update.update_returned_addr(node.saddr);
@@ -900,9 +975,10 @@ impl Server {
 
     /// Handle received `DhtRequest` packet, redirect it if it's sent for
     /// someone else or parse it and handle the payload if it's sent for us.
-    pub async fn handle_dht_req(&self, packet: DhtRequest, addr: SocketAddr)
-        -> Result<(), HandlePacketError> { // TODO: split to functions
-        if packet.rpk == self.pk { // the target peer is me
+    pub async fn handle_dht_req(&self, packet: DhtRequest, addr: SocketAddr) -> Result<(), HandlePacketError> {
+        // TODO: split to functions
+        if packet.rpk == self.pk {
+            // the target peer is me
             self.handle_dht_req_for_us(packet, addr).await
         } else {
             self.handle_dht_req_for_others(packet).await
@@ -948,9 +1024,14 @@ impl Server {
     /// Redirect received `DhtRequest` packet.
     async fn handle_dht_req_for_others(&self, packet: DhtRequest) -> Result<(), HandlePacketError> {
         let state = self.state.read().await;
-        if let Some(node) = state.close_nodes.get_node(&packet.rpk).and_then(|node| node.to_packed_node()) {
+        if let Some(node) = state
+            .close_nodes
+            .get_node(&packet.rpk)
+            .and_then(|node| node.to_packed_node())
+        {
             let packet = Packet::DhtRequest(packet);
-            self.send_to(node.saddr, packet).await
+            self.send_to(node.saddr, packet)
+                .await
                 .map_err(HandlePacketError::SendTo)?;
         }
 
@@ -958,8 +1039,11 @@ impl Server {
     }
 
     /// Set last received ping time for `DhtFriend`.
-    async fn set_friend_hole_punch_last_recv_ping_time(&self, spk: &PublicKey, ping_time: Instant)
-        -> Result<(), HandlePacketError> {
+    async fn set_friend_hole_punch_last_recv_ping_time(
+        &self,
+        spk: &PublicKey,
+        ping_time: Instant,
+    ) -> Result<(), HandlePacketError> {
         let mut state = self.state.write().await;
         match state.friends.get_mut(spk) {
             None => Err(HandlePacketError::NoFriend),
@@ -972,19 +1056,24 @@ impl Server {
 
     /// Handle received `NatPingRequest` packet and respond with
     /// `NatPingResponse` packet.
-    async fn handle_nat_ping_req(&self, payload: NatPingRequest, spk: PublicKey, addr: SocketAddr) -> Result<(), HandlePacketError> {
-        self.set_friend_hole_punch_last_recv_ping_time(&spk, clock_now()).await?;
+    async fn handle_nat_ping_req(
+        &self,
+        payload: NatPingRequest,
+        spk: PublicKey,
+        addr: SocketAddr,
+    ) -> Result<(), HandlePacketError> {
+        self.set_friend_hole_punch_last_recv_ping_time(&spk, clock_now())
+            .await?;
 
-        let resp_payload = DhtRequestPayload::NatPingResponse(NatPingResponse {
-            id: payload.id,
-        });
+        let resp_payload = DhtRequestPayload::NatPingResponse(NatPingResponse { id: payload.id });
         let nat_ping_resp = Packet::DhtRequest(DhtRequest::new(
             &self.precomputed_keys.get(spk.clone()).await,
             spk,
             self.pk.clone(),
             &resp_payload,
         ));
-        self.send_to(addr, nat_ping_resp).await
+        self.send_to(addr, nat_ping_resp)
+            .await
             .map_err(HandlePacketError::SendTo)
     }
 
@@ -992,7 +1081,7 @@ impl Server {
     /// it's correct.
     async fn handle_nat_ping_resp(&self, payload: NatPingResponse, spk: &PublicKey) -> Result<(), HandlePacketError> {
         if payload.id == 0 {
-            return Err(HandlePacketError::ZeroPingId)
+            return Err(HandlePacketError::ZeroPingId);
         }
 
         let mut state = self.state.write().await;
@@ -1018,8 +1107,7 @@ impl Server {
 
     /// Handle received `LanDiscovery` packet and response with `NodesRequest`
     /// packet.
-    pub async fn handle_lan_discovery(&self, packet: &LanDiscovery, addr: SocketAddr)
-        -> Result<(), HandlePacketError> {
+    pub async fn handle_lan_discovery(&self, packet: &LanDiscovery, addr: SocketAddr) -> Result<(), HandlePacketError> {
         // LanDiscovery is optional
         if !self.lan_discovery_enabled {
             return Ok(());
@@ -1032,14 +1120,22 @@ impl Server {
 
         let mut state = self.state.write().await;
 
-        self.send_nodes_req(PackedNode::new(addr, packet.pk.clone()), &mut state.request_queue, self.pk.clone())
-            .await
-            .map_err(HandlePacketError::SendTo)
+        self.send_nodes_req(
+            PackedNode::new(addr, packet.pk.clone()),
+            &mut state.request_queue,
+            self.pk.clone(),
+        )
+        .await
+        .map_err(HandlePacketError::SendTo)
     }
 
     /// Handle received `OnionRequest0` packet and send `OnionRequest1` packet
     /// to the next peer.
-    pub async fn handle_onion_request_0(&self, packet: OnionRequest0, addr: SocketAddr) -> Result<(), HandlePacketError> {
+    pub async fn handle_onion_request_0(
+        &self,
+        packet: OnionRequest0,
+        addr: SocketAddr,
+    ) -> Result<(), HandlePacketError> {
         let onion_symmetric_key = self.onion_symmetric_key.read().await;
         let onion_return = OnionReturn::new(
             &mut thread_rng(),
@@ -1060,19 +1156,24 @@ impl Server {
             payload: payload.inner,
             onion_return,
         });
-        self.send_to(payload.ip_port.to_saddr(), next_packet).await
+        self.send_to(payload.ip_port.to_saddr(), next_packet)
+            .await
             .map_err(HandlePacketError::SendTo)
     }
 
     /// Handle received `OnionRequest1` packet and send `OnionRequest2` packet
     /// to the next peer.
-    pub async fn handle_onion_request_1(&self, packet: OnionRequest1, addr: SocketAddr) -> Result<(), HandlePacketError> {
+    pub async fn handle_onion_request_1(
+        &self,
+        packet: OnionRequest1,
+        addr: SocketAddr,
+    ) -> Result<(), HandlePacketError> {
         let onion_symmetric_key = self.onion_symmetric_key.read().await;
         let onion_return = OnionReturn::new(
             &mut thread_rng(),
             &onion_symmetric_key,
             &IpPort::from_udp_saddr(addr),
-            Some(&packet.onion_return)
+            Some(&packet.onion_return),
         );
         let shared_secret = self.precomputed_keys.get(packet.temporary_pk.clone()).await;
         let payload = packet.get_payload(&shared_secret);
@@ -1086,13 +1187,18 @@ impl Server {
             payload: payload.inner,
             onion_return,
         });
-        self.send_to(payload.ip_port.to_saddr(), next_packet).await
+        self.send_to(payload.ip_port.to_saddr(), next_packet)
+            .await
             .map_err(HandlePacketError::SendTo)
     }
 
     /// Handle received `OnionRequest2` packet and send `OnionAnnounceRequest`
     /// or `OnionDataRequest` packet to the next peer.
-    pub async fn handle_onion_request_2(&self, packet: OnionRequest2, addr: SocketAddr) -> Result<(), HandlePacketError> {
+    pub async fn handle_onion_request_2(
+        &self,
+        packet: OnionRequest2,
+        addr: SocketAddr,
+    ) -> Result<(), HandlePacketError> {
         let onion_symmetric_key = self.onion_symmetric_key.read().await;
         let onion_return = OnionReturn::new(
             &mut thread_rng(),
@@ -1108,16 +1214,15 @@ impl Server {
         };
 
         let next_packet = match payload.inner {
-            InnerOnionRequest::InnerOnionAnnounceRequest(inner) => Packet::OnionAnnounceRequest(OnionAnnounceRequest {
-                inner,
-                onion_return,
-            }),
-            InnerOnionRequest::InnerOnionDataRequest(inner) => Packet::OnionDataRequest(OnionDataRequest {
-                inner,
-                onion_return,
-            }),
+            InnerOnionRequest::InnerOnionAnnounceRequest(inner) => {
+                Packet::OnionAnnounceRequest(OnionAnnounceRequest { inner, onion_return })
+            }
+            InnerOnionRequest::InnerOnionDataRequest(inner) => {
+                Packet::OnionDataRequest(OnionDataRequest { inner, onion_return })
+            }
         };
-        self.send_to(payload.ip_port.to_saddr(), next_packet).await
+        self.send_to(payload.ip_port.to_saddr(), next_packet)
+            .await
             .map_err(HandlePacketError::SendTo)
     }
 
@@ -1126,14 +1231,14 @@ impl Server {
         &self,
         payload: &OnionAnnounceRequestPayload,
         packet: &OnionAnnounceRequest,
-        addr: SocketAddr
+        addr: SocketAddr,
     ) -> (AnnounceStatus, [u8; 32]) {
         let mut onion_announce = self.onion_announce.write().await;
         onion_announce.handle_onion_announce_request(
             payload,
             packet.inner.pk.clone(),
             packet.onion_return.clone(),
-            addr
+            addr,
         )
     }
 
@@ -1143,20 +1248,22 @@ impl Server {
     /// The response packet will contain up to 4 closest to `search_pk` nodes
     /// from ktree. They are used to search closest to long term `PublicKey`
     /// nodes to announce.
-    pub async fn handle_onion_announce_request(&self, packet: OnionAnnounceRequest, addr: SocketAddr) -> Result<(), HandlePacketError> {
+    pub async fn handle_onion_announce_request(
+        &self,
+        packet: OnionAnnounceRequest,
+        addr: SocketAddr,
+    ) -> Result<(), HandlePacketError> {
         let shared_secret = self.precomputed_keys.get(packet.inner.pk.clone()).await;
         let payload = match packet.inner.get_payload(&shared_secret) {
             Err(e) => return Err(HandlePacketError::GetPayload(e)),
             Ok(payload) => payload,
         };
 
-        let (announce_status, ping_id_or_pk) = self.get_onion_announce_ping_id_or_pk(
-            &payload,
-            &packet,
-            addr,
-        ).await;
+        let (announce_status, ping_id_or_pk) = self.get_onion_announce_ping_id_or_pk(&payload, &packet, addr).await;
 
-        let close_nodes = self.get_closest(&payload.search_pk, 4, IsGlobal::is_global(&addr.ip())).await;
+        let close_nodes = self
+            .get_closest(&payload.search_pk, 4, IsGlobal::is_global(&addr.ip()))
+            .await;
 
         let response_payload = OnionAnnounceResponsePayload {
             announce_status,
@@ -1165,24 +1272,28 @@ impl Server {
         };
         let response = OnionAnnounceResponse::new(&shared_secret, payload.sendback_data, &response_payload);
 
-        self.send_to(addr, Packet::OnionResponse3(OnionResponse3 {
-            onion_return: packet.onion_return,
-            payload: InnerOnionResponse::OnionAnnounceResponse(response),
-        }))
-            .await
-            .map_err(HandlePacketError::SendTo)
+        self.send_to(
+            addr,
+            Packet::OnionResponse3(OnionResponse3 {
+                onion_return: packet.onion_return,
+                payload: InnerOnionResponse::OnionAnnounceResponse(response),
+            }),
+        )
+        .await
+        .map_err(HandlePacketError::SendTo)
     }
 
     /// Handle received `OnionDataRequest` packet and send `OnionResponse3`
     /// packet with inner `OnionDataResponse` to destination node through its
     /// onion path.
-    pub async fn handle_onion_data_request(&self, packet: OnionDataRequest)
-        -> Result<(), HandlePacketError> {
+    pub async fn handle_onion_data_request(&self, packet: OnionDataRequest) -> Result<(), HandlePacketError> {
         let onion_announce = self.onion_announce.read().await;
         match onion_announce.handle_data_request(packet) {
-            Ok((response, addr)) => self.send_to(addr, Packet::OnionResponse3(response)).await
+            Ok((response, addr)) => self
+                .send_to(addr, Packet::OnionResponse3(response))
+                .await
                 .map_err(HandlePacketError::SendTo),
-            Err(e) => Err(HandlePacketError::Onion(e))
+            Err(e) => Err(HandlePacketError::Onion(e)),
         }
     }
 
@@ -1198,16 +1309,17 @@ impl Server {
                 // onion key. So we do not consider this as error.
                 trace!("Failed to decrypt onion_return from OnionResponse3: {}", e);
                 return Ok(());
-            },
+            }
             Ok(payload) => payload,
         };
 
         if let (ip_port, Some(next_onion_return)) = payload {
             let next_packet = Packet::OnionResponse2(OnionResponse2 {
                 onion_return: next_onion_return,
-                payload: packet.payload
+                payload: packet.payload,
             });
-            self.send_to(ip_port.to_saddr(), next_packet).await
+            self.send_to(ip_port.to_saddr(), next_packet)
+                .await
                 .map_err(HandlePacketError::SendTo)
         } else {
             Err(HandlePacketError::OnionResponseNext)
@@ -1226,16 +1338,17 @@ impl Server {
                 // onion key. So we do not consider this as error.
                 trace!("Failed to decrypt onion_return from OnionResponse2: {}", e);
                 return Ok(());
-            },
+            }
             Ok(payload) => payload,
         };
 
         if let (ip_port, Some(next_onion_return)) = payload {
             let next_packet = Packet::OnionResponse1(OnionResponse1 {
                 onion_return: next_onion_return,
-                payload: packet.payload
+                payload: packet.payload,
             });
-            self.send_to(ip_port.to_saddr(), next_packet).await
+            self.send_to(ip_port.to_saddr(), next_packet)
+                .await
                 .map_err(HandlePacketError::SendTo)
         } else {
             Err(HandlePacketError::OnionResponseNext)
@@ -1254,8 +1367,8 @@ impl Server {
                 // paths expiration. It means that we can get packets with old
                 // onion key. So we do not consider this as error.
                 trace!("Failed to decrypt onion_return from OnionResponse1: {}", e);
-                return Ok(())
-            },
+                return Ok(());
+            }
             Ok(payload) => payload,
         };
 
@@ -1266,17 +1379,21 @@ impl Server {
                         InnerOnionResponse::OnionAnnounceResponse(inner) => Packet::OnionAnnounceResponse(inner),
                         InnerOnionResponse::OnionDataResponse(inner) => Packet::OnionDataResponse(inner),
                     };
-                    self.send_to(ip_port.to_saddr(), next_packet).await
+                    self.send_to(ip_port.to_saddr(), next_packet)
+                        .await
                         .map_err(HandlePacketError::SendTo)
-                },
+                }
                 ProtocolType::Tcp => {
                     if let Some(ref tcp_onion_sink) = self.tcp_onion_sink {
-                        tcp_onion_sink.clone().send((packet.payload, ip_port.to_saddr())).await
+                        tcp_onion_sink
+                            .clone()
+                            .send((packet.payload, ip_port.to_saddr()))
+                            .await
                             .map_err(HandlePacketError::OnionResponseRedirectSend)
                     } else {
                         Err(HandlePacketError::OnionResponseRedirect)
                     }
-                },
+                }
             }
         } else {
             Err(HandlePacketError::OnionResponseNext)
@@ -1291,29 +1408,36 @@ impl Server {
 
     /// Handle `OnionRequest` from TCP relay and send `OnionRequest1` packet
     /// to the next node in the onion path.
-    pub async fn handle_tcp_onion_request(&self, packet: OnionRequest, addr: SocketAddr)
-        -> Result<(), mpsc::SendError> {
+    pub async fn handle_tcp_onion_request(
+        &self,
+        packet: OnionRequest,
+        addr: SocketAddr,
+    ) -> Result<(), mpsc::SendError> {
         let onion_symmetric_key = self.onion_symmetric_key.read().await;
 
         let onion_return = OnionReturn::new(
             &mut thread_rng(),
             &onion_symmetric_key,
             &IpPort::from_tcp_saddr(addr),
-            None // no previous onion return
+            None, // no previous onion return
         );
         let next_packet = Packet::OnionRequest1(OnionRequest1 {
             nonce: packet.nonce,
             temporary_pk: packet.temporary_pk,
             payload: packet.payload,
-            onion_return
+            onion_return,
         });
         self.send_to(packet.ip_port.to_saddr(), next_packet).await
     }
 
     /// Handle `BootstrapInfo` packet and response with `BootstrapInfo` packet.
-    pub async fn handle_bootstrap_info(&self, packet: &BootstrapInfo, addr: SocketAddr) -> Result<(), HandlePacketError> {
+    pub async fn handle_bootstrap_info(
+        &self,
+        packet: &BootstrapInfo,
+        addr: SocketAddr,
+    ) -> Result<(), HandlePacketError> {
         if packet.motd.len() != BOOSTRAP_CLIENT_MAX_MOTD_LENGTH {
-            return Err(HandlePacketError::BootstrapInfoLength)
+            return Err(HandlePacketError::BootstrapInfoLength);
         }
 
         if let Some(ref bootstrap_info) = self.bootstrap_info {
@@ -1330,8 +1454,7 @@ impl Server {
                 version: bootstrap_info.version,
                 motd,
             });
-            self.send_to(addr, packet).await
-                .map_err(HandlePacketError::SendTo)?;
+            self.send_to(addr, packet).await.map_err(HandlePacketError::SendTo)?;
         }
 
         Ok(())
@@ -1388,8 +1511,11 @@ mod tests {
     use super::*;
     use tox_binary_io::*;
 
+    use crypto_box::{
+        aead::{generic_array::typenum::marker_traits::Unsigned, AeadCore},
+        SalsaBox,
+    };
     use std::net::SocketAddr;
-    use crypto_box::{SalsaBox, aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned}};
 
     const ONION_RETURN_1_PAYLOAD_SIZE: usize = ONION_RETURN_1_SIZE - xsalsa20poly1305::NONCE_SIZE;
     const ONION_RETURN_2_PAYLOAD_SIZE: usize = ONION_RETURN_2_SIZE - xsalsa20poly1305::NONCE_SIZE;
@@ -1405,8 +1531,14 @@ mod tests {
         }
     }
 
-    fn create_node() -> (Server, SalsaBox, PublicKey, SecretKey,
-            mpsc::Receiver<(Packet, SocketAddr)>, SocketAddr) {
+    fn create_node() -> (
+        Server,
+        SalsaBox,
+        PublicKey,
+        SecretKey,
+        mpsc::Receiver<(Packet, SocketAddr)>,
+        SocketAddr,
+    ) {
         let mut rng = thread_rng();
         let sk = SecretKey::generate(&mut rng);
         let pk = sk.public_key();
@@ -1444,13 +1576,22 @@ mod tests {
         alice.add_friend(friend_pk.clone()).await;
 
         let packed_node = PackedNode::new("127.0.0.1:33445".parse().unwrap(), bob_pk.clone());
-        assert!(alice.state.write().await.friends.get_mut(&friend_pk).unwrap().try_add_to_close(packed_node));
+        assert!(alice
+            .state
+            .write()
+            .await
+            .friends
+            .get_mut(&friend_pk)
+            .unwrap()
+            .try_add_to_close(packed_node));
 
         // adding the same friend shouldn't replace existing `DhtFriend`
         alice.add_friend(friend_pk.clone()).await;
 
         // so it should still contain the added node
-        assert!(alice.state.read().await.friends[&friend_pk].close_nodes.contains(&friend_pk, &bob_pk));
+        assert!(alice.state.read().await.friends[&friend_pk]
+            .close_nodes
+            .contains(&friend_pk, &bob_pk));
     }
 
     #[tokio::test]
@@ -1556,20 +1697,26 @@ mod tests {
 
         let mut state = alice.state.write().await;
 
-        rx.take(2).map(|(packet, addr_to_send)| {
-            assert_eq!(addr_to_send, addr);
+        rx.take(2)
+            .map(|(packet, addr_to_send)| {
+                assert_eq!(addr_to_send, addr);
 
-            if let Packet::PingResponse(ping_resp) = packet {
-                let precomputed_key = SalsaBox::new(&ping_resp.pk, &bob_sk);
-                let ping_resp_payload = ping_resp.get_payload(&precomputed_key).unwrap();
-                assert_eq!(ping_resp_payload.id, req_payload.id);
-            } else {
-                let ping_req = unpack!(packet, Packet::PingRequest);
-                let precomputed_key = SalsaBox::new(&ping_req.pk, &bob_sk);
-                let ping_req_payload = ping_req.get_payload(&precomputed_key).unwrap();
-                assert!(state.request_queue.check_ping_id(ping_req_payload.id, |pk| pk == &bob_pk).is_some());
-            }
-        }).collect::<Vec<_>>().await;
+                if let Packet::PingResponse(ping_resp) = packet {
+                    let precomputed_key = SalsaBox::new(&ping_resp.pk, &bob_sk);
+                    let ping_resp_payload = ping_resp.get_payload(&precomputed_key).unwrap();
+                    assert_eq!(ping_resp_payload.id, req_payload.id);
+                } else {
+                    let ping_req = unpack!(packet, Packet::PingRequest);
+                    let precomputed_key = SalsaBox::new(&ping_req.pk, &bob_sk);
+                    let ping_req_payload = ping_req.get_payload(&precomputed_key).unwrap();
+                    assert!(state
+                        .request_queue
+                        .check_ping_id(ping_req_payload.id, |pk| pk == &bob_pk)
+                        .is_some());
+                }
+            })
+            .collect::<Vec<_>>()
+            .await;
 
         // In case of friend with yet unknown address we should send ping
         // request immediately instead of adding node to nodes_to_ping list
@@ -1585,7 +1732,10 @@ mod tests {
         let ping_req = PingRequest::new(&precomp, alice.pk.clone(), &req_payload);
 
         let res = alice.handle_ping_req(ping_req, addr).await;
-        assert!(matches!(res, Err(HandlePacketError::GetPayload(GetPayloadError::Decrypt))));
+        assert!(matches!(
+            res,
+            Err(HandlePacketError::GetPayload(GetPayloadError::Decrypt))
+        ));
     }
 
     // handle_ping_resp
@@ -1598,7 +1748,12 @@ mod tests {
         let packed_node = PackedNode::new(addr, bob_pk.clone());
         assert!(alice.state.write().await.close_nodes.try_add(packed_node));
 
-        let ping_id = alice.state.write().await.request_queue.new_ping_id(&mut thread_rng(), bob_pk.clone());
+        let ping_id = alice
+            .state
+            .write()
+            .await
+            .request_queue
+            .new_ping_id(&mut thread_rng(), bob_pk.clone());
 
         let resp_payload = PingResponsePayload { id: ping_id };
         let ping_resp = PingResponse::new(&precomp, bob_pk.clone(), &resp_payload);
@@ -1634,7 +1789,12 @@ mod tests {
         let packed_node = PackedNode::new(addr, bob_pk.clone());
         assert!(alice.state.write().await.close_nodes.try_add(packed_node));
 
-        let ping_id = alice.state.write().await.request_queue.new_ping_id(&mut thread_rng(), bob_pk.clone());
+        let ping_id = alice
+            .state
+            .write()
+            .await
+            .request_queue
+            .new_ping_id(&mut thread_rng(), bob_pk.clone());
 
         let resp_payload = PingResponsePayload { id: ping_id };
         let ping_resp = PingResponse::new(&precomp, bob_pk, &resp_payload);
@@ -1659,7 +1819,12 @@ mod tests {
         let packed_node = PackedNode::new(addr, bob_pk.clone());
         assert!(alice.state.write().await.close_nodes.try_add(packed_node));
 
-        let ping_id = alice.state.write().await.request_queue.new_ping_id(&mut thread_rng(), bob_pk.clone());
+        let ping_id = alice
+            .state
+            .write()
+            .await
+            .request_queue
+            .new_ping_id(&mut thread_rng(), bob_pk.clone());
 
         let resp_payload = PingResponsePayload { id: ping_id };
         let ping_resp = PingResponse::new(&precomp, bob_pk.clone(), &resp_payload);
@@ -1680,14 +1845,22 @@ mod tests {
         let packed_node = PackedNode::new(addr, bob_pk.clone());
         assert!(alice.state.write().await.close_nodes.try_add(packed_node));
 
-        let ping_id = alice.state.write().await.request_queue.new_ping_id(&mut thread_rng(), bob_pk);
+        let ping_id = alice
+            .state
+            .write()
+            .await
+            .request_queue
+            .new_ping_id(&mut thread_rng(), bob_pk);
 
         // can't be decrypted payload since packet contains wrong key
         let payload = PingResponsePayload { id: ping_id };
         let ping_resp = PingResponse::new(&precomp, alice.pk.clone(), &payload);
 
         let res = alice.handle_ping_resp(ping_resp, addr).await;
-        assert!(matches!(res, Err(HandlePacketError::GetPayload(GetPayloadError::Decrypt))));
+        assert!(matches!(
+            res,
+            Err(HandlePacketError::GetPayload(GetPayloadError::Decrypt))
+        ));
     }
 
     #[tokio::test]
@@ -1711,7 +1884,12 @@ mod tests {
         let packed_node = PackedNode::new(addr, bob_pk.clone());
         assert!(alice.state.write().await.close_nodes.try_add(packed_node));
 
-        let ping_id = alice.state.write().await.request_queue.new_ping_id(&mut thread_rng(), bob_pk.clone());
+        let ping_id = alice
+            .state
+            .write()
+            .await
+            .request_queue
+            .new_ping_id(&mut thread_rng(), bob_pk.clone());
 
         let payload = PingResponsePayload { id: ping_id + 1 };
         let ping_resp = PingResponse::new(&precomp, bob_pk, &payload);
@@ -1729,7 +1907,10 @@ mod tests {
 
         assert!(alice.state.write().await.close_nodes.try_add(packed_node.clone()));
 
-        let req_payload = NodesRequestPayload { pk: bob_pk.clone(), id: 42 };
+        let req_payload = NodesRequestPayload {
+            pk: bob_pk.clone(),
+            id: 42,
+        };
         let nodes_req = NodesRequest::new(&precomp, bob_pk.clone(), &req_payload);
 
         alice.handle_nodes_req(nodes_req, addr).await.unwrap();
@@ -1756,9 +1937,19 @@ mod tests {
         alice.add_friend(bob_pk.clone()).await;
 
         let packed_node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), bob_pk.clone());
-        assert!(alice.state.write().await.friends.get_mut(&bob_pk).unwrap().try_add_to_close(packed_node.clone()));
+        assert!(alice
+            .state
+            .write()
+            .await
+            .friends
+            .get_mut(&bob_pk)
+            .unwrap()
+            .try_add_to_close(packed_node.clone()));
 
-        let req_payload = NodesRequestPayload { pk: bob_pk.clone(), id: 42 };
+        let req_payload = NodesRequestPayload {
+            pk: bob_pk.clone(),
+            id: 42,
+        };
         let nodes_req = NodesRequest::new(&precomp, bob_pk.clone(), &req_payload);
 
         alice.handle_nodes_req(nodes_req, addr).await.unwrap();
@@ -1786,7 +1977,10 @@ mod tests {
 
         assert!(alice.state.write().await.close_nodes.try_add(packed_node));
 
-        let req_payload = NodesRequestPayload { pk: bob_pk.clone(), id: 42 };
+        let req_payload = NodesRequestPayload {
+            pk: bob_pk.clone(),
+            id: 42,
+        };
         let nodes_req = NodesRequest::new(&precomp, bob_pk.clone(), &req_payload);
 
         let delay = BAD_NODE_TIMEOUT + Duration::from_secs(1);
@@ -1820,7 +2014,10 @@ mod tests {
 
         assert!(alice.state.write().await.close_nodes.try_add(packed_node));
 
-        let req_payload = NodesRequestPayload { pk: bob_pk.clone(), id: 42 };
+        let req_payload = NodesRequestPayload {
+            pk: bob_pk.clone(),
+            id: 42,
+        };
         let nodes_req = NodesRequest::new(&precomp, bob_pk.clone(), &req_payload);
 
         alice.handle_nodes_req(nodes_req, addr).await.unwrap();
@@ -1849,7 +2046,10 @@ mod tests {
         let nodes_req = NodesRequest::new(&precomp, alice.pk.clone(), &req_payload);
 
         let res = alice.handle_nodes_req(nodes_req, addr).await;
-        assert!(matches!(res, Err(HandlePacketError::GetPayload(GetPayloadError::Decrypt))));
+        assert!(matches!(
+            res,
+            Err(HandlePacketError::GetPayload(GetPayloadError::Decrypt))
+        ));
     }
 
     // handle_nodes_resp
@@ -1860,11 +2060,22 @@ mod tests {
 
         alice.add_friend(bob_pk.clone()).await;
 
-        let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key());
+        let node = PackedNode::new(
+            "127.0.0.1:12345".parse().unwrap(),
+            SecretKey::generate(&mut rng).public_key(),
+        );
 
-        let ping_id = alice.state.write().await.request_queue.new_ping_id(&mut rng, bob_pk.clone());
+        let ping_id = alice
+            .state
+            .write()
+            .await
+            .request_queue
+            .new_ping_id(&mut rng, bob_pk.clone());
 
-        let resp_payload = NodesResponsePayload { nodes: vec![node.clone()], id: ping_id };
+        let resp_payload = NodesResponsePayload {
+            nodes: vec![node.clone()],
+            id: ping_id,
+        };
         let nodes_resp = NodesResponse::new(&precomp, bob_pk.clone(), &resp_payload);
 
         tokio::time::pause();
@@ -1908,11 +2119,22 @@ mod tests {
         let packed_node = PackedNode::new(addr, bob_pk.clone());
         assert!(alice.state.write().await.close_nodes.try_add(packed_node));
 
-        let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key());
+        let node = PackedNode::new(
+            "127.0.0.1:12345".parse().unwrap(),
+            SecretKey::generate(&mut rng).public_key(),
+        );
 
-        let ping_id = alice.state.write().await.request_queue.new_ping_id(&mut rng, bob_pk.clone());
+        let ping_id = alice
+            .state
+            .write()
+            .await
+            .request_queue
+            .new_ping_id(&mut rng, bob_pk.clone());
 
-        let resp_payload = NodesResponsePayload { nodes: vec![node], id: ping_id };
+        let resp_payload = NodesResponsePayload {
+            nodes: vec![node],
+            id: ping_id,
+        };
         let nodes_resp = NodesResponse::new(&precomp, bob_pk.clone(), &resp_payload);
 
         alice.handle_nodes_resp(nodes_resp, addr).await.unwrap();
@@ -1930,13 +2152,20 @@ mod tests {
         let (alice, precomp, _bob_pk, _bob_sk, _rx, addr) = create_node();
 
         // can't be decrypted payload since packet contains wrong key
-        let resp_payload = NodesResponsePayload { nodes: vec![
-            PackedNode::new("127.0.0.1:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key())
-        ], id: 38 };
+        let resp_payload = NodesResponsePayload {
+            nodes: vec![PackedNode::new(
+                "127.0.0.1:12345".parse().unwrap(),
+                SecretKey::generate(&mut rng).public_key(),
+            )],
+            id: 38,
+        };
         let nodes_resp = NodesResponse::new(&precomp, alice.pk.clone(), &resp_payload);
 
         let res = alice.handle_nodes_resp(nodes_resp, addr).await;
-        assert!(matches!(res, Err(HandlePacketError::GetPayload(GetPayloadError::Decrypt))));
+        assert!(matches!(
+            res,
+            Err(HandlePacketError::GetPayload(GetPayloadError::Decrypt))
+        ));
     }
 
     #[tokio::test]
@@ -1944,9 +2173,13 @@ mod tests {
         let mut rng = thread_rng();
         let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
 
-        let resp_payload = NodesResponsePayload { nodes: vec![
-            PackedNode::new("127.0.0.1:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key())
-        ], id: 0 };
+        let resp_payload = NodesResponsePayload {
+            nodes: vec![PackedNode::new(
+                "127.0.0.1:12345".parse().unwrap(),
+                SecretKey::generate(&mut rng).public_key(),
+            )],
+            id: 0,
+        };
         let nodes_resp = NodesResponse::new(&precomp, bob_pk, &resp_payload);
 
         alice.handle_nodes_resp(nodes_resp, addr).await.unwrap();
@@ -1962,13 +2195,19 @@ mod tests {
         let mut rng = thread_rng();
         let (alice, precomp, bob_pk, _bob_sk, rx, addr) = create_node();
 
-        let ping_id = alice.state.write().await.request_queue.new_ping_id(&mut rng, bob_pk.clone());
+        let ping_id = alice
+            .state
+            .write()
+            .await
+            .request_queue
+            .new_ping_id(&mut rng, bob_pk.clone());
 
         let resp_payload = NodesResponsePayload {
-            nodes: vec![
-                PackedNode::new("127.0.0.1:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key())
-            ],
-            id: ping_id + 1
+            nodes: vec![PackedNode::new(
+                "127.0.0.1:12345".parse().unwrap(),
+                SecretKey::generate(&mut rng).public_key(),
+            )],
+            id: ping_id + 1,
         };
         let nodes_resp = NodesResponse::new(&precomp, bob_pk, &resp_payload);
 
@@ -2036,11 +2275,14 @@ mod tests {
             rpk: alice.pk.clone(),
             spk: bob_pk,
             nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
-            payload: vec![42; 123]
+            payload: vec![42; 123],
         };
 
         let res = alice.handle_dht_req(dht_req, addr).await;
-        assert!(matches!(res, Err(HandlePacketError::GetPayload(GetPayloadError::Decrypt))));
+        assert!(matches!(
+            res,
+            Err(HandlePacketError::GetPayload(GetPayloadError::Decrypt))
+        ));
     }
 
     // handle_nat_ping_request
@@ -2114,7 +2356,12 @@ mod tests {
         let (alice, precomp, bob_pk, _bob_sk, _rx, addr) = create_node();
 
         // error case, incorrect ping_id
-        let ping_id = alice.state.write().await.request_queue.new_ping_id(&mut thread_rng(), bob_pk.clone());
+        let ping_id = alice
+            .state
+            .write()
+            .await
+            .request_queue
+            .new_ping_id(&mut thread_rng(), bob_pk.clone());
 
         let nat_res = NatPingResponse { id: ping_id + 1 };
         let nat_payload = DhtRequestPayload::NatPingResponse(nat_res);
@@ -2135,12 +2382,12 @@ mod tests {
         let ip_port = IpPort {
             protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
-            port: 12345
+            port: 12345,
         };
         let payload = OnionRequest0Payload {
             ip_port: ip_port.clone(),
             temporary_pk: temporary_pk.clone(),
-            inner: inner.clone()
+            inner: inner.clone(),
         };
         let packet = OnionRequest0::new(&precomp, bob_pk, &payload);
 
@@ -2170,11 +2417,14 @@ mod tests {
         let packet = OnionRequest0 {
             nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             temporary_pk: SecretKey::generate(&mut rng).public_key(),
-            payload: vec![42; 123] // not encrypted with dht pk
+            payload: vec![42; 123], // not encrypted with dht pk
         };
 
         let res = alice.handle_onion_request_0(packet, addr).await;
-        assert!(matches!(res, Err(HandlePacketError::GetPayload(GetPayloadError::Decrypt))));
+        assert!(matches!(
+            res,
+            Err(HandlePacketError::GetPayload(GetPayloadError::Decrypt))
+        ));
     }
 
     // handle_onion_request_1
@@ -2188,16 +2438,16 @@ mod tests {
         let ip_port = IpPort {
             protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
-            port: 12345
+            port: 12345,
         };
         let payload = OnionRequest1Payload {
             ip_port: ip_port.clone(),
             temporary_pk: temporary_pk.clone(),
-            inner: inner.clone()
+            inner: inner.clone(),
         };
         let onion_return = OnionReturn {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
-            payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
+            payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE],
         };
         let packet = OnionRequest1::new(&precomp, bob_pk, &payload, onion_return);
 
@@ -2230,12 +2480,15 @@ mod tests {
             payload: vec![42; 123], // not encrypted with dht pk
             onion_return: OnionReturn {
                 nonce: [42; xsalsa20poly1305::NONCE_SIZE],
-                payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
-            }
+                payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE],
+            },
         };
 
         let res = alice.handle_onion_request_1(packet, addr).await;
-        assert!(matches!(res, Err(HandlePacketError::GetPayload(GetPayloadError::Decrypt))));
+        assert!(matches!(
+            res,
+            Err(HandlePacketError::GetPayload(GetPayloadError::Decrypt))
+        ));
     }
 
     // handle_onion_request_2
@@ -2247,20 +2500,20 @@ mod tests {
         let inner = InnerOnionAnnounceRequest {
             nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             pk: SecretKey::generate(&mut rng).public_key(),
-            payload: vec![42; 123]
+            payload: vec![42; 123],
         };
         let ip_port = IpPort {
             protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
-            port: 12345
+            port: 12345,
         };
         let payload = OnionRequest2Payload {
             ip_port: ip_port.clone(),
-            inner: InnerOnionRequest::InnerOnionAnnounceRequest(inner.clone())
+            inner: InnerOnionRequest::InnerOnionAnnounceRequest(inner.clone()),
         };
         let onion_return = OnionReturn {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
-            payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
+            payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE],
         };
         let packet = OnionRequest2::new(&precomp, bob_pk, &payload, onion_return);
 
@@ -2290,20 +2543,20 @@ mod tests {
             destination_pk: SecretKey::generate(&mut rng).public_key(),
             nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             temporary_pk: SecretKey::generate(&mut rng).public_key(),
-            payload: vec![42; 123]
+            payload: vec![42; 123],
         };
         let ip_port = IpPort {
             protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
-            port: 12345
+            port: 12345,
         };
         let payload = OnionRequest2Payload {
             ip_port: ip_port.clone(),
-            inner: InnerOnionRequest::InnerOnionDataRequest(inner.clone())
+            inner: InnerOnionRequest::InnerOnionDataRequest(inner.clone()),
         };
         let onion_return = OnionReturn {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
-            payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
+            payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE],
         };
         let packet = OnionRequest2::new(&precomp, bob_pk, &payload, onion_return);
 
@@ -2335,12 +2588,15 @@ mod tests {
             payload: vec![42; 123], // not encrypted with dht pk
             onion_return: OnionReturn {
                 nonce: [42; xsalsa20poly1305::NONCE_SIZE],
-                payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
-            }
+                payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE],
+            },
         };
 
         let res = alice.handle_onion_request_2(packet, addr).await;
-        assert!(matches!(res, Err(HandlePacketError::GetPayload(GetPayloadError::Decrypt))));
+        assert!(matches!(
+            res,
+            Err(HandlePacketError::GetPayload(GetPayloadError::Decrypt))
+        ));
     }
 
     // handle_onion_announce_request
@@ -2354,16 +2610,16 @@ mod tests {
             ping_id: INITIAL_PING_ID,
             search_pk: SecretKey::generate(&mut rng).public_key(),
             data_pk: SecretKey::generate(&mut rng).public_key(),
-            sendback_data
+            sendback_data,
         };
         let inner = InnerOnionAnnounceRequest::new(&precomp, bob_pk, &payload);
         let onion_return = OnionReturn {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
-            payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
+            payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE],
         };
         let packet = OnionAnnounceRequest {
             inner,
-            onion_return: onion_return.clone()
+            onion_return: onion_return.clone(),
         };
 
         alice.handle_onion_announce_request(packet, addr).await.unwrap();
@@ -2393,19 +2649,22 @@ mod tests {
         let inner = InnerOnionAnnounceRequest {
             nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             pk: bob_pk,
-            payload: vec![42; 123]
+            payload: vec![42; 123],
         };
         let onion_return = OnionReturn {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
-            payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
+            payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE],
         };
         let packet = OnionAnnounceRequest {
             inner,
-            onion_return: onion_return.clone()
+            onion_return: onion_return.clone(),
         };
 
         let res = alice.handle_onion_announce_request(packet, addr).await;
-        assert!(matches!(res, Err(HandlePacketError::GetPayload(GetPayloadError::Decrypt))));
+        assert!(matches!(
+            res,
+            Err(HandlePacketError::GetPayload(GetPayloadError::Decrypt))
+        ));
     }
 
     // handle_onion_data_request
@@ -2420,16 +2679,16 @@ mod tests {
             ping_id: INITIAL_PING_ID,
             search_pk: SecretKey::generate(&mut rng).public_key(),
             data_pk: SecretKey::generate(&mut rng).public_key(),
-            sendback_data: 42
+            sendback_data: 42,
         };
         let inner = InnerOnionAnnounceRequest::new(&precomp, bob_pk.clone(), &payload);
         let onion_return = OnionReturn {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
-            payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE]
+            payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE],
         };
         let packet = OnionAnnounceRequest {
             inner,
-            onion_return: onion_return.clone()
+            onion_return: onion_return.clone(),
         };
 
         alice.handle_onion_announce_request(packet, addr).await.unwrap();
@@ -2446,12 +2705,12 @@ mod tests {
             ping_id: payload.ping_id_or_pk,
             search_pk: SecretKey::generate(&mut rng).public_key(),
             data_pk: SecretKey::generate(&mut rng).public_key(),
-            sendback_data: 42
+            sendback_data: 42,
         };
         let inner = InnerOnionAnnounceRequest::new(&precomp, bob_pk.clone(), &payload);
         let packet = OnionAnnounceRequest {
             inner,
-            onion_return: onion_return.clone()
+            onion_return: onion_return.clone(),
         };
 
         alice.handle_onion_announce_request(packet, addr).await.unwrap();
@@ -2465,11 +2724,11 @@ mod tests {
             destination_pk: bob_pk,
             nonce,
             temporary_pk: temporary_pk.clone(),
-            payload: payload.clone()
+            payload: payload.clone(),
         };
         let packet = OnionDataRequest {
             inner,
-            onion_return: onion_return.clone()
+            onion_return: onion_return.clone(),
         };
 
         alice.handle_onion_data_request(packet).await.unwrap();
@@ -2500,21 +2759,26 @@ mod tests {
         let ip_port = IpPort {
             protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
-            port: 12345
+            port: 12345,
         };
         let next_onion_return = OnionReturn {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
-            payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
+            payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE],
         };
-        let onion_return = OnionReturn::new(&mut thread_rng(), &onion_symmetric_key, &ip_port, Some(&next_onion_return));
+        let onion_return = OnionReturn::new(
+            &mut thread_rng(),
+            &onion_symmetric_key,
+            &ip_port,
+            Some(&next_onion_return),
+        );
         let payload = InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
             sendback_data: 12345,
             nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
-            payload: vec![42; 123]
+            payload: vec![42; 123],
         });
         let packet = OnionResponse3 {
             onion_return,
-            payload: payload.clone()
+            payload: payload.clone(),
         };
 
         alice.handle_onion_response_3(packet).await.unwrap();
@@ -2536,17 +2800,14 @@ mod tests {
 
         let onion_return = OnionReturn {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
-            payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE] // not encrypted with onion_symmetric_key
+            payload: vec![42; ONION_RETURN_3_PAYLOAD_SIZE], // not encrypted with onion_symmetric_key
         };
         let payload = InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
             sendback_data: 12345,
             nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
-            payload: vec![42; 123]
+            payload: vec![42; 123],
         });
-        let packet = OnionResponse3 {
-            onion_return,
-            payload
-        };
+        let packet = OnionResponse3 { onion_return, payload };
 
         alice.handle_onion_response_3(packet).await.unwrap();
 
@@ -2566,17 +2827,17 @@ mod tests {
         let ip_port = IpPort {
             protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
-            port: 12345
+            port: 12345,
         };
         let onion_return = OnionReturn::new(&mut thread_rng(), &onion_symmetric_key, &ip_port, None);
         let inner = OnionDataResponse {
             nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             temporary_pk: SecretKey::generate(&mut rng).public_key(),
-            payload: vec![42; 123]
+            payload: vec![42; 123],
         };
         let packet = OnionResponse3 {
             onion_return,
-            payload: InnerOnionResponse::OnionDataResponse(inner.clone())
+            payload: InnerOnionResponse::OnionDataResponse(inner.clone()),
         };
 
         let res = alice.handle_onion_response_3(packet).await;
@@ -2593,21 +2854,26 @@ mod tests {
         let ip_port = IpPort {
             protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
-            port: 12345
+            port: 12345,
         };
         let next_onion_return = OnionReturn {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
-            payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
+            payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE],
         };
-        let onion_return = OnionReturn::new(&mut thread_rng(), &onion_symmetric_key, &ip_port, Some(&next_onion_return));
+        let onion_return = OnionReturn::new(
+            &mut thread_rng(),
+            &onion_symmetric_key,
+            &ip_port,
+            Some(&next_onion_return),
+        );
         let payload = InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
             sendback_data: 12345,
             nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
-            payload: vec![42; 123]
+            payload: vec![42; 123],
         });
         let packet = OnionResponse2 {
             onion_return,
-            payload: payload.clone()
+            payload: payload.clone(),
         };
 
         alice.handle_onion_response_2(packet).await.unwrap();
@@ -2629,17 +2895,14 @@ mod tests {
 
         let onion_return = OnionReturn {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
-            payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE] // not encrypted with onion_symmetric_key
+            payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE], // not encrypted with onion_symmetric_key
         };
         let payload = InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
             sendback_data: 12345,
             nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
-            payload: vec![42; 123]
+            payload: vec![42; 123],
         });
-        let packet = OnionResponse2 {
-            onion_return,
-            payload
-        };
+        let packet = OnionResponse2 { onion_return, payload };
 
         alice.handle_onion_response_2(packet).await.unwrap();
 
@@ -2659,17 +2922,17 @@ mod tests {
         let ip_port = IpPort {
             protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
-            port: 12345
+            port: 12345,
         };
         let onion_return = OnionReturn::new(&mut thread_rng(), &onion_symmetric_key, &ip_port, None);
         let inner = OnionDataResponse {
             nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             temporary_pk: SecretKey::generate(&mut rng).public_key(),
-            payload: vec![42; 123]
+            payload: vec![42; 123],
         };
         let packet = OnionResponse2 {
             onion_return,
-            payload: InnerOnionResponse::OnionDataResponse(inner.clone())
+            payload: InnerOnionResponse::OnionDataResponse(inner.clone()),
         };
 
         let res = alice.handle_onion_response_2(packet).await;
@@ -2686,17 +2949,17 @@ mod tests {
         let ip_port = IpPort {
             protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
-            port: 12345
+            port: 12345,
         };
         let onion_return = OnionReturn::new(&mut thread_rng(), &onion_symmetric_key, &ip_port, None);
         let inner = OnionAnnounceResponse {
             sendback_data: 12345,
             nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
-            payload: vec![42; 123]
+            payload: vec![42; 123],
         };
         let packet = OnionResponse1 {
             onion_return,
-            payload: InnerOnionResponse::OnionAnnounceResponse(inner.clone())
+            payload: InnerOnionResponse::OnionAnnounceResponse(inner.clone()),
         };
 
         alice.handle_onion_response_1(packet).await.unwrap();
@@ -2721,17 +2984,17 @@ mod tests {
         let ip_port = IpPort {
             protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
-            port: 12345
+            port: 12345,
         };
         let onion_return = OnionReturn::new(&mut thread_rng(), &onion_symmetric_key, &ip_port, None);
         let inner = OnionDataResponse {
             nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             temporary_pk: SecretKey::generate(&mut rng).public_key(),
-            payload: vec![42; 123]
+            payload: vec![42; 123],
         };
         let packet = OnionResponse1 {
             onion_return,
-            payload: InnerOnionResponse::OnionDataResponse(inner.clone())
+            payload: InnerOnionResponse::OnionDataResponse(inner.clone()),
         };
 
         alice.handle_onion_response_1(packet).await.unwrap();
@@ -2757,17 +3020,17 @@ mod tests {
         let ip_port = IpPort {
             protocol: ProtocolType::Tcp,
             ip_addr: "5.6.7.8".parse().unwrap(),
-            port: 12345
+            port: 12345,
         };
         let onion_return = OnionReturn::new(&mut thread_rng(), &onion_symmetric_key, &ip_port, None);
         let inner = InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
             sendback_data: 12345,
             nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
-            payload: vec![42; 123]
+            payload: vec![42; 123],
         });
         let packet = OnionResponse1 {
             onion_return,
-            payload: inner.clone()
+            payload: inner.clone(),
         };
 
         alice.handle_onion_response_1(packet).await.unwrap();
@@ -2788,17 +3051,17 @@ mod tests {
         let ip_port = IpPort {
             protocol: ProtocolType::Tcp,
             ip_addr: "5.6.7.8".parse().unwrap(),
-            port: 12345
+            port: 12345,
         };
         let onion_return = OnionReturn::new(&mut thread_rng(), &onion_symmetric_key, &ip_port, None);
         let inner = OnionAnnounceResponse {
             sendback_data: 12345,
             nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
-            payload: vec![42; 123]
+            payload: vec![42; 123],
         };
         let packet = OnionResponse1 {
             onion_return,
-            payload: InnerOnionResponse::OnionAnnounceResponse(inner.clone())
+            payload: InnerOnionResponse::OnionAnnounceResponse(inner.clone()),
         };
 
         let res = alice.handle_onion_response_1(packet).await;
@@ -2811,17 +3074,14 @@ mod tests {
 
         let onion_return = OnionReturn {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
-            payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE] // not encrypted with onion_symmetric_key
+            payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE], // not encrypted with onion_symmetric_key
         };
         let payload = InnerOnionResponse::OnionAnnounceResponse(OnionAnnounceResponse {
             sendback_data: 12345,
             nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
-            payload: vec![42; 123]
+            payload: vec![42; 123],
         });
-        let packet = OnionResponse1 {
-            onion_return,
-            payload
-        };
+        let packet = OnionResponse1 { onion_return, payload };
 
         alice.handle_onion_response_1(packet).await.unwrap();
 
@@ -2841,21 +3101,26 @@ mod tests {
         let ip_port = IpPort {
             protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
-            port: 12345
+            port: 12345,
         };
         let next_onion_return = OnionReturn {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
-            payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
+            payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE],
         };
-        let onion_return = OnionReturn::new(&mut thread_rng(), &onion_symmetric_key, &ip_port, Some(&next_onion_return));
+        let onion_return = OnionReturn::new(
+            &mut thread_rng(),
+            &onion_symmetric_key,
+            &ip_port,
+            Some(&next_onion_return),
+        );
         let inner = OnionDataResponse {
             nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             temporary_pk: SecretKey::generate(&mut rng).public_key(),
-            payload: vec![42; 123]
+            payload: vec![42; 123],
         };
         let packet = OnionResponse1 {
             onion_return,
-            payload: InnerOnionResponse::OnionDataResponse(inner.clone())
+            payload: InnerOnionResponse::OnionDataResponse(inner.clone()),
         };
 
         let res = alice.handle_onion_response_1(packet).await;
@@ -2872,10 +3137,22 @@ mod tests {
         let friend_pk = friend_sk.public_key();
 
         let nodes = [
-            PackedNode::new("127.1.1.1:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key()),
-            PackedNode::new("127.1.1.2:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key()),
-            PackedNode::new("127.1.1.3:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key()),
-            PackedNode::new("127.1.1.4:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key()),
+            PackedNode::new(
+                "127.1.1.1:12345".parse().unwrap(),
+                SecretKey::generate(&mut rng).public_key(),
+            ),
+            PackedNode::new(
+                "127.1.1.2:12345".parse().unwrap(),
+                SecretKey::generate(&mut rng).public_key(),
+            ),
+            PackedNode::new(
+                "127.1.1.3:12345".parse().unwrap(),
+                SecretKey::generate(&mut rng).public_key(),
+            ),
+            PackedNode::new(
+                "127.1.1.4:12345".parse().unwrap(),
+                SecretKey::generate(&mut rng).public_key(),
+            ),
         ];
         alice.add_friend(friend_pk.clone()).await;
 
@@ -2899,7 +3176,10 @@ mod tests {
                 let nat_ping_req_payload = nat_ping_req.get_payload(&precomputed_key).unwrap();
                 let nat_ping_req_payload = unpack!(nat_ping_req_payload, DhtRequestPayload::NatPingRequest);
 
-                assert_eq!(alice.state.read().await.friends[&friend_pk].hole_punch.ping_id, nat_ping_req_payload.id);
+                assert_eq!(
+                    alice.state.read().await.friends[&friend_pk].hole_punch.ping_id,
+                    nat_ping_req_payload.id
+                );
                 break;
             }
             rx = rx1;
@@ -2968,13 +3248,13 @@ mod tests {
         let ip_port = IpPort {
             protocol: ProtocolType::Udp,
             ip_addr: "5.6.7.8".parse().unwrap(),
-            port: 12345
+            port: 12345,
         };
         let packet = OnionRequest {
             nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             ip_port: ip_port.clone(),
             temporary_pk: temporary_pk.clone(),
-            payload: payload.clone()
+            payload: payload.clone(),
         };
 
         alice.handle_tcp_onion_request(packet, addr).await.unwrap();
@@ -3003,29 +3283,48 @@ mod tests {
         let node_pk = node_sk.public_key();
 
         let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), node_pk.clone());
-        assert!(alice.state.write().await.nodes_to_bootstrap.try_add(&alice.pk, pn, /* evict */ true));
+        assert!(alice
+            .state
+            .write()
+            .await
+            .nodes_to_bootstrap
+            .try_add(&alice.pk, pn, /* evict */ true));
 
         let pn = PackedNode::new("127.0.0.1:33445".parse().unwrap(), bob_pk.clone());
-        assert!(alice.state.write().await.nodes_to_bootstrap.try_add(&alice.pk, pn, /* evict */ true));
+        assert!(alice
+            .state
+            .write()
+            .await
+            .nodes_to_bootstrap
+            .try_add(&alice.pk, pn, /* evict */ true));
 
         alice.dht_main_loop().await.unwrap();
 
         let mut state = alice.state.write().await;
 
-        rx.take(2).map(|(packet, addr)| {
-            let nodes_req = unpack!(packet, Packet::NodesRequest);
-            if addr == "127.0.0.1:33445".parse().unwrap() {
-                let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
-                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(state.request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &bob_pk).is_some());
-                assert_eq!(nodes_req_payload.pk, alice.pk);
-            } else {
-                let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
-                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(state.request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &node_pk).is_some());
-                assert_eq!(nodes_req_payload.pk, alice.pk);
-            }
-        }).collect::<Vec<_>>().await;
+        rx.take(2)
+            .map(|(packet, addr)| {
+                let nodes_req = unpack!(packet, Packet::NodesRequest);
+                if addr == "127.0.0.1:33445".parse().unwrap() {
+                    let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
+                    let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
+                    assert!(state
+                        .request_queue
+                        .check_ping_id(nodes_req_payload.id, |pk| pk == &bob_pk)
+                        .is_some());
+                    assert_eq!(nodes_req_payload.pk, alice.pk);
+                } else {
+                    let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
+                    let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
+                    assert!(state
+                        .request_queue
+                        .check_ping_id(nodes_req_payload.id, |pk| pk == &node_pk)
+                        .is_some());
+                    assert_eq!(nodes_req_payload.pk, alice.pk);
+                }
+            })
+            .collect::<Vec<_>>()
+            .await;
     }
 
     #[tokio::test]
@@ -3036,27 +3335,44 @@ mod tests {
         let node_pk = node_sk.public_key();
 
         let pn = PackedNode::new("127.1.1.1:12345".parse().unwrap(), node_pk.clone());
-        assert!(alice.nodes_to_ping.write().await.try_add(&alice.pk, pn, /* evict */ true));
+        assert!(alice
+            .nodes_to_ping
+            .write()
+            .await
+            .try_add(&alice.pk, pn, /* evict */ true));
 
         let pn = PackedNode::new("127.0.0.1:33445".parse().unwrap(), bob_pk.clone());
-        assert!(alice.nodes_to_ping.write().await.try_add(&alice.pk, pn, /* evict */ true));
+        assert!(alice
+            .nodes_to_ping
+            .write()
+            .await
+            .try_add(&alice.pk, pn, /* evict */ true));
 
         alice.send_pings().await.unwrap();
 
         let mut state = alice.state.write().await;
 
-        rx.take(2).map(|(packet, addr)| {
-            let nodes_req = unpack!(packet, Packet::PingRequest);
-            if addr == "127.0.0.1:33445".parse().unwrap() {
-                let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
-                let ping_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(state.request_queue.check_ping_id(ping_req_payload.id, |pk| pk == &bob_pk).is_some());
-            } else {
-                let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
-                let ping_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(state.request_queue.check_ping_id(ping_req_payload.id, |pk| pk == &node_pk).is_some());
-            }
-        }).collect::<Vec<_>>().await;
+        rx.take(2)
+            .map(|(packet, addr)| {
+                let nodes_req = unpack!(packet, Packet::PingRequest);
+                if addr == "127.0.0.1:33445".parse().unwrap() {
+                    let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
+                    let ping_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
+                    assert!(state
+                        .request_queue
+                        .check_ping_id(ping_req_payload.id, |pk| pk == &bob_pk)
+                        .is_some());
+                } else {
+                    let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
+                    let ping_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
+                    assert!(state
+                        .request_queue
+                        .check_ping_id(ping_req_payload.id, |pk| pk == &node_pk)
+                        .is_some());
+                }
+            })
+            .collect::<Vec<_>>()
+            .await;
     }
 
     #[tokio::test]
@@ -3089,20 +3405,29 @@ mod tests {
         let mut state = alice.state.write().await;
 
         // 3 = 2 packets sent by ping_close_nodes + 1 packet sent by send_nodes_req_random
-        rx.take(3).map(|(packet, addr)| {
-            let nodes_req = unpack!(packet, Packet::NodesRequest);
-            if addr == "127.0.0.1:33445".parse().unwrap() {
-                let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
-                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(state.request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &bob_pk).is_some());
-                assert_eq!(nodes_req_payload.pk, alice.pk);
-            } else {
-                let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
-                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(state.request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &node_pk).is_some());
-                assert_eq!(nodes_req_payload.pk, alice.pk);
-            }
-        }).collect::<Vec<_>>().await;
+        rx.take(3)
+            .map(|(packet, addr)| {
+                let nodes_req = unpack!(packet, Packet::NodesRequest);
+                if addr == "127.0.0.1:33445".parse().unwrap() {
+                    let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
+                    let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
+                    assert!(state
+                        .request_queue
+                        .check_ping_id(nodes_req_payload.id, |pk| pk == &bob_pk)
+                        .is_some());
+                    assert_eq!(nodes_req_payload.pk, alice.pk);
+                } else {
+                    let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
+                    let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
+                    assert!(state
+                        .request_queue
+                        .check_ping_id(nodes_req_payload.id, |pk| pk == &node_pk)
+                        .is_some());
+                    assert_eq!(nodes_req_payload.pk, alice.pk);
+                }
+            })
+            .collect::<Vec<_>>()
+            .await;
     }
 
     #[tokio::test]
@@ -3123,7 +3448,7 @@ mod tests {
 
         // Random request should be sent every second MAX_BOOTSTRAP_TIMES times
         // This loop will produce MAX_BOOTSTRAP_TIMES random packets
-        for _ in 0 .. MAX_BOOTSTRAP_TIMES {
+        for _ in 0..MAX_BOOTSTRAP_TIMES {
             alice.dht_main_loop().await.unwrap();
 
             let (received, rx1) = rx.into_future().await;
@@ -3170,20 +3495,29 @@ mod tests {
 
         let mut state = alice.state.write().await;
 
-        rx.take(2).map(|(packet, addr)| {
-            let nodes_req = unpack!(packet, Packet::NodesRequest);
-            if addr == "127.0.0.1:33445".parse().unwrap() {
-                let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
-                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(state.request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &bob_pk).is_some());
-                assert_eq!(nodes_req_payload.pk, friend_pk);
-            } else {
-                let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
-                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(state.request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &node_pk).is_some());
-                assert_eq!(nodes_req_payload.pk, friend_pk);
-            }
-        }).collect::<Vec<_>>().await;
+        rx.take(2)
+            .map(|(packet, addr)| {
+                let nodes_req = unpack!(packet, Packet::NodesRequest);
+                if addr == "127.0.0.1:33445".parse().unwrap() {
+                    let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
+                    let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
+                    assert!(state
+                        .request_queue
+                        .check_ping_id(nodes_req_payload.id, |pk| pk == &bob_pk)
+                        .is_some());
+                    assert_eq!(nodes_req_payload.pk, friend_pk);
+                } else {
+                    let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
+                    let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
+                    assert!(state
+                        .request_queue
+                        .check_ping_id(nodes_req_payload.id, |pk| pk == &node_pk)
+                        .is_some());
+                    assert_eq!(nodes_req_payload.pk, friend_pk);
+                }
+            })
+            .collect::<Vec<_>>()
+            .await;
     }
 
     #[tokio::test]
@@ -3213,20 +3547,29 @@ mod tests {
         let mut state = alice.state.write().await;
 
         // 3 = 2 packets sent by ping_close_nodes + 1 packet sent by send_nodes_req_random
-        rx.take(3).map(|(packet, addr)| {
-            let nodes_req = unpack!(packet, Packet::NodesRequest);
-            if addr == "127.0.0.1:33445".parse().unwrap() {
-                let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
-                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(state.request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &bob_pk).is_some());
-                assert_eq!(nodes_req_payload.pk, friend_pk);
-            } else {
-                let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
-                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(state.request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &node_pk).is_some());
-                assert_eq!(nodes_req_payload.pk, friend_pk);
-            }
-        }).collect::<Vec<_>>().await;
+        rx.take(3)
+            .map(|(packet, addr)| {
+                let nodes_req = unpack!(packet, Packet::NodesRequest);
+                if addr == "127.0.0.1:33445".parse().unwrap() {
+                    let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
+                    let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
+                    assert!(state
+                        .request_queue
+                        .check_ping_id(nodes_req_payload.id, |pk| pk == &bob_pk)
+                        .is_some());
+                    assert_eq!(nodes_req_payload.pk, friend_pk);
+                } else {
+                    let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
+                    let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
+                    assert!(state
+                        .request_queue
+                        .check_ping_id(nodes_req_payload.id, |pk| pk == &node_pk)
+                        .is_some());
+                    assert_eq!(nodes_req_payload.pk, friend_pk);
+                }
+            })
+            .collect::<Vec<_>>()
+            .await;
     }
 
     #[tokio::test]
@@ -3253,8 +3596,16 @@ mod tests {
 
         // Random request should be sent every second MAX_BOOTSTRAP_TIMES times
         // This loop will produce MAX_BOOTSTRAP_TIMES random packets
-        for _ in 0 .. MAX_BOOTSTRAP_TIMES {
-            alice.state.write().await.friends.get_mut(&friend_pk).unwrap().hole_punch.last_send_ping_time = Some(clock_now());
+        for _ in 0..MAX_BOOTSTRAP_TIMES {
+            alice
+                .state
+                .write()
+                .await
+                .friends
+                .get_mut(&friend_pk)
+                .unwrap()
+                .hole_punch
+                .last_send_ping_time = Some(clock_now());
             alice.dht_main_loop().await.unwrap();
 
             let (received, rx1) = rx.into_future().await;
@@ -3302,18 +3653,27 @@ mod tests {
 
         let mut state = alice.state.write().await;
 
-        rx.take(2).map(|(packet, addr)| {
-            let nodes_req = unpack!(packet, Packet::NodesRequest);
-            if addr == "[FF::01]:33445".parse().unwrap() {
-                let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
-                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(state.request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &bob_pk).is_some());
-            } else {
-                let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
-                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(state.request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &node_pk).is_some());
-            }
-        }).collect::<Vec<_>>().await;
+        rx.take(2)
+            .map(|(packet, addr)| {
+                let nodes_req = unpack!(packet, Packet::NodesRequest);
+                if addr == "[FF::01]:33445".parse().unwrap() {
+                    let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
+                    let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
+                    assert!(state
+                        .request_queue
+                        .check_ping_id(nodes_req_payload.id, |pk| pk == &bob_pk)
+                        .is_some());
+                } else {
+                    let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
+                    let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
+                    assert!(state
+                        .request_queue
+                        .check_ping_id(nodes_req_payload.id, |pk| pk == &node_pk)
+                        .is_some());
+                }
+            })
+            .collect::<Vec<_>>()
+            .await;
     }
 
     #[tokio::test]
@@ -3335,18 +3695,27 @@ mod tests {
 
         let mut state = alice.state.write().await;
 
-        rx.take(2).map(|(packet, addr)| {
-            let nodes_req = unpack!(packet, Packet::NodesRequest);
-            if addr == "[FF::01]:33445".parse().unwrap() {
-                let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
-                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(state.request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &bob_pk).is_some());
-            } else {
-                let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
-                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(state.request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &node_pk).is_some());
-            }
-        }).collect::<Vec<_>>().await;
+        rx.take(2)
+            .map(|(packet, addr)| {
+                let nodes_req = unpack!(packet, Packet::NodesRequest);
+                if addr == "[FF::01]:33445".parse().unwrap() {
+                    let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
+                    let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
+                    assert!(state
+                        .request_queue
+                        .check_ping_id(nodes_req_payload.id, |pk| pk == &bob_pk)
+                        .is_some());
+                } else {
+                    let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
+                    let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
+                    assert!(state
+                        .request_queue
+                        .check_ping_id(nodes_req_payload.id, |pk| pk == &node_pk)
+                        .is_some());
+                }
+            })
+            .collect::<Vec<_>>()
+            .await;
     }
 
     #[tokio::test]
@@ -3397,18 +3766,27 @@ mod tests {
 
         let mut state = alice.state.write().await;
 
-        rx.take(2).map(|(packet, addr)| {
-            let nodes_req = unpack!(packet, Packet::NodesRequest);
-            if addr == "[FF::01]:33445".parse().unwrap() {
-                let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
-                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(state.request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &bob_pk).is_some());
-            } else {
-                let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
-                let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
-                assert!(state.request_queue.check_ping_id(nodes_req_payload.id, |pk| pk == &node_pk).is_some());
-            }
-        }).collect::<Vec<_>>().await;
+        rx.take(2)
+            .map(|(packet, addr)| {
+                let nodes_req = unpack!(packet, Packet::NodesRequest);
+                if addr == "[FF::01]:33445".parse().unwrap() {
+                    let precomputed_key = SalsaBox::new(&nodes_req.pk, &bob_sk);
+                    let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
+                    assert!(state
+                        .request_queue
+                        .check_ping_id(nodes_req_payload.id, |pk| pk == &bob_pk)
+                        .is_some());
+                } else {
+                    let precomputed_key = SalsaBox::new(&nodes_req.pk, &node_sk);
+                    let nodes_req_payload = nodes_req.get_payload(&precomputed_key).unwrap();
+                    assert!(state
+                        .request_queue
+                        .check_ping_id(nodes_req_payload.id, |pk| pk == &node_pk)
+                        .is_some());
+                }
+            })
+            .collect::<Vec<_>>()
+            .await;
     }
 
     #[tokio::test]
@@ -3442,12 +3820,23 @@ mod tests {
         let mut state = alice.state.write().await;
 
         for pk in &alice.fake_friends_keys {
-            let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key());
+            let node = PackedNode::new(
+                "127.0.0.1:12345".parse().unwrap(),
+                SecretKey::generate(&mut rng).public_key(),
+            );
             assert!(state.friends.get_mut(pk).unwrap().close_nodes.try_add(pk, node, true));
         }
 
-        let node = PackedNode::new("127.0.0.1:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key());
-        assert!(state.friends.get_mut(&friend_pk).unwrap().close_nodes.try_add(&friend_pk, node.clone(), true));
+        let node = PackedNode::new(
+            "127.0.0.1:12345".parse().unwrap(),
+            SecretKey::generate(&mut rng).public_key(),
+        );
+        assert!(state
+            .friends
+            .get_mut(&friend_pk)
+            .unwrap()
+            .close_nodes
+            .try_add(&friend_pk, node.clone(), true));
 
         drop(state);
 
@@ -3466,7 +3855,12 @@ mod tests {
         let (alice, _precomp, _bob_pk, _bob_sk, _rx, _addr) = create_node();
 
         assert!(!alice.is_connected().await);
-        alice.add_node(PackedNode::new("127.0.0.1:12345".parse().unwrap(), SecretKey::generate(&mut rng).public_key())).await;
+        alice
+            .add_node(PackedNode::new(
+                "127.0.0.1:12345".parse().unwrap(),
+                SecretKey::generate(&mut rng).public_key(),
+            ))
+            .await;
         assert!(alice.is_connected().await);
     }
 }

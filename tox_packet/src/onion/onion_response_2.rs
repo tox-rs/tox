@@ -3,8 +3,8 @@
 
 use super::*;
 
-use nom::combinator::{rest_len, map_parser, verify};
 use nom::bytes::complete::{tag, take};
+use nom::combinator::{map_parser, rest_len, verify};
 
 use tox_binary_io::*;
 
@@ -28,7 +28,7 @@ pub struct OnionResponse2 {
     /// Return address encrypted by the second node from onion chain
     pub onion_return: OnionReturn,
     /// Encrypted payload
-    pub payload: InnerOnionResponse
+    pub payload: InnerOnionResponse,
 }
 
 impl FromBytes for OnionResponse2 {
@@ -42,6 +42,7 @@ impl FromBytes for OnionResponse2 {
 }
 
 impl ToBytes for OnionResponse2 {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x8d) >>
@@ -55,8 +56,8 @@ impl ToBytes for OnionResponse2 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crypto_box::{SalsaBox, aead::generic_array::typenum::marker_traits::Unsigned};
     use crypto_box::aead::AeadCore;
+    use crypto_box::{aead::generic_array::typenum::marker_traits::Unsigned, SalsaBox};
 
     const ONION_RETURN_2_PAYLOAD_SIZE: usize = ONION_RETURN_2_SIZE - xsalsa20poly1305::NONCE_SIZE;
 

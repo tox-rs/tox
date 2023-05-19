@@ -3,10 +3,10 @@
 
 use super::*;
 
-use nom::number::complete::{be_u8, be_u16};
 use nom::bytes::complete::tag;
-use nom::multi::many0;
 use nom::combinator::map_res;
+use nom::multi::many0;
+use nom::number::complete::{be_u16, be_u8};
 use std::str;
 
 use tox_crypto::*;
@@ -40,14 +40,18 @@ impl FromBytes for QueryResponse {
         let (input, conference_id) = be_u16(input)?;
         let (input, _) = tag("\x09")(input)?;
         let (input, peer_infos) = many0(PeerInfo::from_bytes)(input)?;
-        Ok((input, QueryResponse {
-            conference_id,
-            peer_infos: peer_infos.to_vec()
-        }))
+        Ok((
+            input,
+            QueryResponse {
+                conference_id,
+                peer_infos: peer_infos.to_vec(),
+            },
+        ))
     }
 }
 
 impl ToBytes for QueryResponse {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x62) >>
@@ -96,16 +100,20 @@ impl FromBytes for PeerInfo {
         let (input, temp_pk) = PublicKey::from_bytes(input)?;
         let (input, length) = be_u8(input)?;
         let (input, nickname) = map_res(take(length), str::from_utf8)(input)?;
-        Ok((input, PeerInfo {
-            peer_id,
-            real_pk,
-            temp_pk,
-            nickname: nickname.to_string(),
-        }))
+        Ok((
+            input,
+            PeerInfo {
+                peer_id,
+                real_pk,
+                temp_pk,
+                nickname: nickname.to_string(),
+            },
+        ))
     }
 }
 
 impl ToBytes for PeerInfo {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u16!(self.peer_id) >>
@@ -138,19 +146,23 @@ mod tests {
 
     encode_decode_test!(
         query_response_encode_decode,
-        QueryResponse::new(1, vec![
-            PeerInfo {
-                peer_id: 1,
-                real_pk: SecretKey::generate(&mut thread_rng()).public_key(),
-                temp_pk: SecretKey::generate(&mut thread_rng()).public_key(),
-                nickname: "1234".to_owned(),
-            },
-            PeerInfo {
-                peer_id: 2,
-                real_pk: SecretKey::generate(&mut thread_rng()).public_key(),
-                temp_pk: SecretKey::generate(&mut thread_rng()).public_key(),
-                nickname: "56789".to_owned(),
-            }])
+        QueryResponse::new(
+            1,
+            vec![
+                PeerInfo {
+                    peer_id: 1,
+                    real_pk: SecretKey::generate(&mut thread_rng()).public_key(),
+                    temp_pk: SecretKey::generate(&mut thread_rng()).public_key(),
+                    nickname: "1234".to_owned(),
+                },
+                PeerInfo {
+                    peer_id: 2,
+                    real_pk: SecretKey::generate(&mut thread_rng()).public_key(),
+                    temp_pk: SecretKey::generate(&mut thread_rng()).public_key(),
+                    nickname: "56789".to_owned(),
+                }
+            ]
+        )
     );
 
     #[test]
@@ -178,7 +190,7 @@ mod tests {
             temp_pk: SecretKey::generate(&mut rng).public_key(),
             nickname: large_string,
         };
-        let mut buf = [0; MAX_NAME_LENGTH_IN_CONFERENCE + 2 + 32 + 32+ 1]; // peer_id(2) + real_pk(32) + temp_pk(32) + length(1)
+        let mut buf = [0; MAX_NAME_LENGTH_IN_CONFERENCE + 2 + 32 + 32 + 1]; // peer_id(2) + real_pk(32) + temp_pk(32) + length(1)
         assert!(peer_info.to_bytes((&mut buf, 0)).is_err());
     }
 }

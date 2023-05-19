@@ -3,28 +3,28 @@
 
 pub mod errors;
 
-use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use futures::{FutureExt, StreamExt, SinkExt, future};
 use futures::channel::mpsc;
+use futures::{future, FutureExt, SinkExt, StreamExt};
 use tokio::sync::RwLock;
 
-use tox_binary_io::*;
-use tox_crypto::*;
 use crate::dht::dht_node::BAD_NODE_TIMEOUT;
-use tox_packet::dht::packed_node::PackedNode;
 use crate::dht::server::Server as DhtServer;
 use crate::friend_connection::errors::*;
-use tox_packet::friend_connection::*;
-use crate::net_crypto::NetCrypto;
 use crate::net_crypto::errors::KillConnectionError;
+use crate::net_crypto::NetCrypto;
 use crate::onion::client::OnionClient;
 use crate::relay::client::Connections as TcpConnections;
 use crate::time::*;
+use tox_binary_io::*;
+use tox_crypto::*;
+use tox_packet::dht::packed_node::PackedNode;
+use tox_packet::friend_connection::*;
 
 /// Shorthand for the transmit half of the message channel for sending a
 /// connection status when it becomes connected or disconnected. The key is a
@@ -143,13 +143,15 @@ impl FriendConnections {
             };
             self.net_crypto.remove_friend(friend_pk.clone()).await;
             self.onion_client.remove_friend(friend_pk.clone()).await;
-            self.net_crypto.kill_connection(friend_pk.clone())
-                .then(|res| future::ready(match res {
-                    Err(ref e)
-                    if e == &KillConnectionError::NoConnection =>
-                        Ok(()),
-                    res => res,
-                })).await
+            self.net_crypto
+                .kill_connection(friend_pk.clone())
+                .then(|res| {
+                    future::ready(match res {
+                        Err(ref e) if e == &KillConnectionError::NoConnection => Ok(()),
+                        res => res,
+                    })
+                })
+                .await
                 .map_err(RemoveFriendError::KillConnection)
         } else {
             Err(RemoveFriendError::NoFriend)
@@ -157,11 +159,17 @@ impl FriendConnections {
     }
 
     /// Handle received `ShareRelays` packet.
-    pub async fn handle_share_relays(&self, friend_pk: PublicKey, share_relays: ShareRelays) -> Result<(), HandleShareRelaysError> {
+    pub async fn handle_share_relays(
+        &self,
+        friend_pk: PublicKey,
+        share_relays: ShareRelays,
+    ) -> Result<(), HandleShareRelaysError> {
         if let Some(friend) = self.friends.read().await.get(&friend_pk) {
             if let Some(ref dht_pk) = friend.dht_pk {
                 for node in share_relays.relays {
-                    self.tcp_connections.add_relay_connection(node.saddr, node.pk, dht_pk.clone()).await
+                    self.tcp_connections
+                        .add_relay_connection(node.saddr, node.pk, dht_pk.clone())
+                        .await
                         .map_err(HandleShareRelaysError::AddTcpConnection)?;
                 }
             }
@@ -178,7 +186,10 @@ impl FriendConnections {
     }
 
     /// Handle the stream of found DHT `PublicKey`s.
-    async fn handle_dht_pk(&self, dht_pk_rx: &mut mpsc::UnboundedReceiver<(PublicKey, PublicKey)>) -> Result<(), RunError> {
+    async fn handle_dht_pk(
+        &self,
+        dht_pk_rx: &mut mpsc::UnboundedReceiver<(PublicKey, PublicKey)>,
+    ) -> Result<(), RunError> {
         let dht = self.dht.clone();
         let net_crypto = self.net_crypto.clone();
         let onion_client = self.onion_client.clone();
@@ -194,15 +205,15 @@ impl FriendConnections {
                     if let Some(ref dht_pk) = friend.dht_pk {
                         dht.remove_friend(dht_pk.clone()).await;
 
-                        net_crypto.kill_connection(real_pk.clone())
-                            .then(|res| future::ready(
-                                match res {
-                                    Err(ref e)
-                                        if e == &KillConnectionError::NoConnection =>
-                                        Ok(()),
+                        net_crypto
+                            .kill_connection(real_pk.clone())
+                            .then(|res| {
+                                future::ready(match res {
+                                    Err(ref e) if e == &KillConnectionError::NoConnection => Ok(()),
                                     res => res,
-                                }
-                            )).await
+                                })
+                            })
+                            .await
                             .map_err(RunError::KillConnection)?;
                         // TODO: handle error properly after migrating the TCP client to failure
                         tcp_connections.remove_connection(dht_pk.clone()).await.ok();
@@ -221,12 +232,16 @@ impl FriendConnections {
     }
 
     /// Handle the stream of found IP addresses.
-    async fn handle_friend_saddr(&self, friend_saddr_rx: &mut mpsc::UnboundedReceiver<PackedNode>) -> Result<(), RunError> {
+    async fn handle_friend_saddr(
+        &self,
+        friend_saddr_rx: &mut mpsc::UnboundedReceiver<PackedNode>,
+    ) -> Result<(), RunError> {
         let net_crypto = self.net_crypto.clone();
         let friends = self.friends.clone();
         while let Some(ref node) = friend_saddr_rx.next().await {
             let mut friends = friends.write().await;
-            let friend = friends.values_mut()
+            let friend = friends
+                .values_mut()
                 .find(|friend| friend.dht_pk.as_ref() == Some(&node.pk));
             if let Some(friend) = friend {
                 friend.saddr_time = Some(clock_now());
@@ -246,7 +261,10 @@ impl FriendConnections {
     }
 
     /// Handle the stream of connection statuses.
-    async fn handle_connection_status(&self, connnection_status_rx: &mut mpsc::UnboundedReceiver<(PublicKey, bool)>) -> Result<(), RunError> {
+    async fn handle_connection_status(
+        &self,
+        connnection_status_rx: &mut mpsc::UnboundedReceiver<(PublicKey, bool)>,
+    ) -> Result<(), RunError> {
         let onion_client = self.onion_client.clone();
         let friends = self.friends.clone();
         let connection_status_tx = self.connection_status_tx.clone();
@@ -269,7 +287,9 @@ impl FriendConnections {
                     friend.connected = status;
                     onion_client.set_friend_connected(real_pk.clone(), status).await;
                     if let Some(mut connection_status_tx) = connection_status_tx.read().await.clone() {
-                        connection_status_tx.send((real_pk, status)).await
+                        connection_status_tx
+                            .send((real_pk, status))
+                            .await
                             .map_err(RunError::SendToConnectionStatus)?;
                     }
                 }
@@ -285,17 +305,19 @@ impl FriendConnections {
         let relays = self.tcp_connections.get_random_relays(MAX_SHARED_RELAYS as u8).await;
         if !relays.is_empty() {
             for relay in &relays {
-                self.tcp_connections.add_connection(relay.pk.clone(), friend_pk.clone()).await
+                self.tcp_connections
+                    .add_connection(relay.pk.clone(), friend_pk.clone())
+                    .await
                     .map_err(RunError::AddTcpConnection)?;
             }
 
-            let share_relays = ShareRelays {
-                relays,
-            };
+            let share_relays = ShareRelays { relays };
             let mut buf = vec![0; 154];
             let (_, size) = share_relays.to_bytes((&mut buf, 0)).unwrap();
             buf.truncate(size);
-            self.net_crypto.send_lossless(friend_pk, buf).await
+            self.net_crypto
+                .send_lossless(friend_pk, buf)
+                .await
                 .map_err(RunError::SendTo)
         } else {
             Ok(())
@@ -306,30 +328,46 @@ impl FriendConnections {
     async fn main_loop(&self) -> Result<(), RunError> {
         for friend in self.friends.write().await.values_mut() {
             if friend.connected {
-                if friend.ping_received_time.map_or(true, |time| clock_elapsed(time) >= FRIEND_CONNECTION_TIMEOUT) {
-                    self.net_crypto.kill_connection(friend.real_pk.clone())
-                        .then(|res| future::ready(match res {
-                            Err(ref e)
-                            if e == &KillConnectionError::NoConnection =>
-                                Ok(()),
-                            res => res,
-                        })).await
+                if friend
+                    .ping_received_time
+                    .map_or(true, |time| clock_elapsed(time) >= FRIEND_CONNECTION_TIMEOUT)
+                {
+                    self.net_crypto
+                        .kill_connection(friend.real_pk.clone())
+                        .then(|res| {
+                            future::ready(match res {
+                                Err(ref e) if e == &KillConnectionError::NoConnection => Ok(()),
+                                res => res,
+                            })
+                        })
+                        .await
                         .map_err(RunError::KillConnection)?;
                     continue;
                 }
 
-                if friend.ping_sent_time.map_or(true, |time| clock_elapsed(time) >= FRIEND_PING_INTERVAL) {
-                    self.net_crypto.send_lossless(friend.real_pk.clone(), vec![PACKET_ID_ALIVE]).await
+                if friend
+                    .ping_sent_time
+                    .map_or(true, |time| clock_elapsed(time) >= FRIEND_PING_INTERVAL)
+                {
+                    self.net_crypto
+                        .send_lossless(friend.real_pk.clone(), vec![PACKET_ID_ALIVE])
+                        .await
                         .map_err(RunError::SendTo)?;
                     friend.ping_sent_time = Some(clock_now());
                 }
 
-                if friend.share_relays_time.map_or(true, |time| clock_elapsed(time) >= SHARE_RELAYS_INTERVAL) {
+                if friend
+                    .share_relays_time
+                    .map_or(true, |time| clock_elapsed(time) >= SHARE_RELAYS_INTERVAL)
+                {
                     self.share_relays(friend.real_pk.clone()).await?;
                     friend.share_relays_time = Some(clock_now());
                 }
             } else {
-                if friend.dht_pk_time.map_or(false, |time| clock_elapsed(time) >= FRIEND_DHT_TIMEOUT) {
+                if friend
+                    .dht_pk_time
+                    .map_or(false, |time| clock_elapsed(time) >= FRIEND_DHT_TIMEOUT)
+                {
                     if let Some(ref dht_pk) = friend.dht_pk {
                         self.dht.remove_friend(dht_pk.clone()).await;
                     }
@@ -337,13 +375,18 @@ impl FriendConnections {
                     friend.dht_pk_time = None;
                 }
 
-                if friend.saddr_time.map_or(false, |time| clock_elapsed(time) >= FRIEND_DHT_TIMEOUT) {
+                if friend
+                    .saddr_time
+                    .map_or(false, |time| clock_elapsed(time) >= FRIEND_DHT_TIMEOUT)
+                {
                     friend.saddr = None;
                     friend.saddr_time = None;
                 }
 
                 if let Some(ref dht_pk) = friend.dht_pk {
-                    self.net_crypto.add_connection(friend.real_pk.clone(), dht_pk.clone()).await;
+                    self.net_crypto
+                        .add_connection(friend.real_pk.clone(), dht_pk.clone())
+                        .await;
                     if let Some(saddr) = friend.saddr {
                         self.net_crypto.set_friend_udp_addr(friend.real_pk.clone(), saddr).await;
                     }
@@ -370,7 +413,7 @@ impl FriendConnections {
 
             if let Err(ref e) = res {
                 warn!("Failed to send friend's periodical packets: {}", e);
-                return res
+                return res;
             }
         }
     }
@@ -414,10 +457,13 @@ mod tests {
     use super::*;
     use rand::thread_rng;
 
-    use tox_packet::dht::{Packet as DhtPacket, *};
     use crate::dht::precomputed_cache::*;
     use crate::net_crypto::*;
-    use crypto_box::{SalsaBox, aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned}};
+    use crypto_box::{
+        aead::{generic_array::typenum::marker_traits::Unsigned, AeadCore},
+        SalsaBox,
+    };
+    use tox_packet::dht::{Packet as DhtPacket, *};
 
     type DhtRx = mpsc::Receiver<(DhtPacket, SocketAddr)>;
     type LosslessRx = mpsc::UnboundedReceiver<(PublicKey, Vec<u8>)>;
@@ -446,12 +492,7 @@ mod tests {
             real_sk,
             precomputed_keys,
         });
-        let friend_connections = FriendConnections::new(
-            dht,
-            tcp_connections,
-            onion_client,
-            net_crypto
-        );
+        let friend_connections = FriendConnections::new(dht, tcp_connections, onion_client, net_crypto);
         (friend_connections, udp_rx, lossless_rx)
     }
 
@@ -481,18 +522,29 @@ mod tests {
         let (_relay_incoming_rx, _relay_outgoing_rx, relay_pk) = friend_connections.tcp_connections.add_client().await;
         // ignore result future since it spawns the connection which should be
         // executed inside tokio context
-        let _ = friend_connections.tcp_connections.add_connection(relay_pk, friend_dht_pk.clone());
+        let _ = friend_connections
+            .tcp_connections
+            .add_connection(relay_pk, friend_dht_pk.clone());
 
-        let session_precomputed_key = SalsaBox::new(&SecretKey::generate(&mut rng).public_key(), &SecretKey::generate(&mut rng));
+        let session_precomputed_key = SalsaBox::new(
+            &SecretKey::generate(&mut rng).public_key(),
+            &SecretKey::generate(&mut rng),
+        );
         let sent_nonce = SalsaBox::generate_nonce(&mut rng).into();
-        friend_connections.net_crypto.add_established_connection(
-            SecretKey::generate(&mut rng).public_key(),
-            friend_pk.clone(),
-            sent_nonce,
-            [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
-            session_precomputed_key.clone()
-        ).await;
-        friend_connections.net_crypto.set_friend_udp_addr(friend_pk.clone(), saddr).await;
+        friend_connections
+            .net_crypto
+            .add_established_connection(
+                SecretKey::generate(&mut rng).public_key(),
+                friend_pk.clone(),
+                sent_nonce,
+                [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
+                session_precomputed_key.clone(),
+            )
+            .await;
+        friend_connections
+            .net_crypto
+            .set_friend_udp_addr(friend_pk.clone(), saddr)
+            .await;
 
         friend_connections.remove_friend(friend_pk.clone()).await.unwrap();
 
@@ -527,29 +579,47 @@ mod tests {
         friend.dht_pk_time = Some(now);
         friend.saddr = Some(saddr);
         friend.saddr_time = Some(now);
-        friend_connections.friends.write().await.insert(friend_pk.clone(), friend);
+        friend_connections
+            .friends
+            .write()
+            .await
+            .insert(friend_pk.clone(), friend);
         friend_connections.dht.add_friend(friend_dht_pk.clone()).await;
         friend_connections.net_crypto.add_friend(friend_pk.clone()).await;
         friend_connections.onion_client.add_friend(friend_pk.clone()).await;
         let (_relay_incoming_rx, _relay_outgoing_rx, relay_pk) = friend_connections.tcp_connections.add_client().await;
         // ignore result future since it spawns the connection which should be
         // executed inside tokio context
-        let _ = friend_connections.tcp_connections.add_connection(relay_pk, friend_dht_pk.clone());
+        let _ = friend_connections
+            .tcp_connections
+            .add_connection(relay_pk, friend_dht_pk.clone());
 
-        let session_precomputed_key = SalsaBox::new(&SecretKey::generate(&mut rng).public_key(), &SecretKey::generate(&mut rng));
+        let session_precomputed_key = SalsaBox::new(
+            &SecretKey::generate(&mut rng).public_key(),
+            &SecretKey::generate(&mut rng),
+        );
         let sent_nonce = SalsaBox::generate_nonce(&mut rng).into();
-        friend_connections.net_crypto.add_established_connection(
-            SecretKey::generate(&mut rng).public_key(),
-            friend_pk.clone(),
-            sent_nonce,
-            [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
-            session_precomputed_key.clone()
-        ).await;
-        friend_connections.net_crypto.set_friend_udp_addr(friend_pk.clone(), saddr).await;
+        friend_connections
+            .net_crypto
+            .add_established_connection(
+                SecretKey::generate(&mut rng).public_key(),
+                friend_pk.clone(),
+                sent_nonce,
+                [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
+                session_precomputed_key.clone(),
+            )
+            .await;
+        friend_connections
+            .net_crypto
+            .set_friend_udp_addr(friend_pk.clone(), saddr)
+            .await;
 
         let new_friend_dht_pk = SecretKey::generate(&mut rng).public_key();
         let (mut dht_pk_tx, mut dht_pk_rx) = mpsc::unbounded();
-        dht_pk_tx.send((friend_pk.clone(), new_friend_dht_pk.clone())).await.unwrap();
+        dht_pk_tx
+            .send((friend_pk.clone(), new_friend_dht_pk.clone()))
+            .await
+            .unwrap();
         drop(dht_pk_tx);
 
         let delay = Duration::from_secs(1);
@@ -559,8 +629,14 @@ mod tests {
 
         assert!(!friend_connections.dht.has_friend(&friend_dht_pk).await);
         assert!(friend_connections.dht.has_friend(&new_friend_dht_pk).await);
-        assert_eq!(friend_connections.net_crypto.connection_dht_pk(&friend_pk).await, Some(new_friend_dht_pk.clone()));
-        assert_eq!(friend_connections.onion_client.friend_dht_pk(&friend_pk).await, Some(new_friend_dht_pk.clone()));
+        assert_eq!(
+            friend_connections.net_crypto.connection_dht_pk(&friend_pk).await,
+            Some(new_friend_dht_pk.clone())
+        );
+        assert_eq!(
+            friend_connections.onion_client.friend_dht_pk(&friend_pk).await,
+            Some(new_friend_dht_pk.clone())
+        );
         assert!(!friend_connections.tcp_connections.has_connection(&friend_dht_pk).await);
 
         let friend = &friend_connections.friends.read().await[&friend_pk];
@@ -590,18 +666,31 @@ mod tests {
         let mut friend = Friend::new(friend_pk.clone());
         friend.dht_pk = Some(friend_dht_pk.clone());
         friend.dht_pk_time = Some(now);
-        friend_connections.friends.write().await.insert(friend_pk.clone(), friend);
+        friend_connections
+            .friends
+            .write()
+            .await
+            .insert(friend_pk.clone(), friend);
 
         let saddr = "127.0.0.1:12345".parse().unwrap();
         let (mut friend_saddr_tx, mut friend_saddr_rx) = mpsc::unbounded();
-        friend_saddr_tx.send(PackedNode::new(saddr, friend_dht_pk.clone())).await.unwrap();
+        friend_saddr_tx
+            .send(PackedNode::new(saddr, friend_dht_pk.clone()))
+            .await
+            .unwrap();
         drop(friend_saddr_tx);
 
         let delay = Duration::from_secs(1);
         tokio::time::advance(delay).await;
 
-        friend_connections.handle_friend_saddr(&mut friend_saddr_rx).await.unwrap();
-        assert_eq!(friend_connections.net_crypto.connection_saddr(&friend_pk).await, Some(saddr));
+        friend_connections
+            .handle_friend_saddr(&mut friend_saddr_rx)
+            .await
+            .unwrap();
+        assert_eq!(
+            friend_connections.net_crypto.connection_saddr(&friend_pk).await,
+            Some(saddr)
+        );
 
         let friend = &friend_connections.friends.read().await[&friend_pk];
         assert_eq!(friend.dht_pk, Some(friend_dht_pk));
@@ -624,14 +713,21 @@ mod tests {
         friend.dht_pk_time = Some(now);
         friend.ping_sent_time = Some(now);
         friend.share_relays_time = Some(now);
-        friend_connections.friends.write().await.insert(friend_pk.clone(), friend);
+        friend_connections
+            .friends
+            .write()
+            .await
+            .insert(friend_pk.clone(), friend);
         friend_connections.onion_client.add_friend(friend_pk.clone()).await;
 
         let (mut connnection_status_tx, mut connnection_status_rx) = mpsc::unbounded();
         connnection_status_tx.send((friend_pk.clone(), true)).await.unwrap();
         drop(connnection_status_tx);
 
-        friend_connections.handle_connection_status(&mut connnection_status_rx).await.unwrap();
+        friend_connections
+            .handle_connection_status(&mut connnection_status_rx)
+            .await
+            .unwrap();
 
         let friend = &friend_connections.friends.read().await[&friend_pk];
         assert!(friend.connected);
@@ -655,15 +751,25 @@ mod tests {
         friend.dht_pk = Some(friend_dht_pk);
         friend.dht_pk_time = Some(now);
         friend.connected = true;
-        friend_connections.friends.write().await.insert(friend_pk.clone(), friend);
+        friend_connections
+            .friends
+            .write()
+            .await
+            .insert(friend_pk.clone(), friend);
         friend_connections.onion_client.add_friend(friend_pk.clone()).await;
-        friend_connections.onion_client.set_friend_connected(friend_pk.clone(), true).await;
+        friend_connections
+            .onion_client
+            .set_friend_connected(friend_pk.clone(), true)
+            .await;
 
         let (mut connnection_status_tx, mut connnection_status_rx) = mpsc::unbounded();
         connnection_status_tx.send((friend_pk.clone(), false)).await.unwrap();
         drop(connnection_status_tx);
 
-        friend_connections.handle_connection_status(&mut connnection_status_rx).await.unwrap();
+        friend_connections
+            .handle_connection_status(&mut connnection_status_rx)
+            .await
+            .unwrap();
 
         let friend = &friend_connections.friends.read().await[&friend_pk];
         assert!(!friend.connected);
@@ -690,18 +796,31 @@ mod tests {
         friend.ping_sent_time = Some(now);
         friend.share_relays_time = Some(now);
         friend.connected = true;
-        friend_connections.friends.write().await.insert(friend_pk.clone(), friend);
+        friend_connections
+            .friends
+            .write()
+            .await
+            .insert(friend_pk.clone(), friend);
 
-        let session_precomputed_key = SalsaBox::new(&SecretKey::generate(&mut rng).public_key(), &SecretKey::generate(&mut rng));
+        let session_precomputed_key = SalsaBox::new(
+            &SecretKey::generate(&mut rng).public_key(),
+            &SecretKey::generate(&mut rng),
+        );
         let sent_nonce = SalsaBox::generate_nonce(&mut rng).into();
-        friend_connections.net_crypto.add_established_connection(
-            SecretKey::generate(&mut rng).public_key(),
-            friend_pk.clone(),
-            sent_nonce,
-            [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
-            session_precomputed_key.clone()
-        ).await;
-        friend_connections.net_crypto.set_friend_udp_addr(friend_pk, saddr).await;
+        friend_connections
+            .net_crypto
+            .add_established_connection(
+                SecretKey::generate(&mut rng).public_key(),
+                friend_pk.clone(),
+                sent_nonce,
+                [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
+                session_precomputed_key.clone(),
+            )
+            .await;
+        friend_connections
+            .net_crypto
+            .set_friend_udp_addr(friend_pk, saddr)
+            .await;
 
         tokio::time::pause();
         tokio::time::advance(FRIEND_CONNECTION_TIMEOUT + Duration::from_secs(1)).await;
@@ -737,18 +856,31 @@ mod tests {
         friend.ping_received_time = Some(now);
         friend.share_relays_time = Some(now);
         friend.connected = true;
-        friend_connections.friends.write().await.insert(friend_pk.clone(), friend);
+        friend_connections
+            .friends
+            .write()
+            .await
+            .insert(friend_pk.clone(), friend);
 
-        let session_precomputed_key = SalsaBox::new(&SecretKey::generate(&mut rng).public_key(), &SecretKey::generate(&mut rng));
+        let session_precomputed_key = SalsaBox::new(
+            &SecretKey::generate(&mut rng).public_key(),
+            &SecretKey::generate(&mut rng),
+        );
         let sent_nonce = SalsaBox::generate_nonce(&mut rng).into();
-        friend_connections.net_crypto.add_established_connection(
-            SecretKey::generate(&mut rng).public_key(),
-            friend_pk.clone(),
-            sent_nonce,
-            [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
-            session_precomputed_key.clone()
-        ).await;
-        friend_connections.net_crypto.set_friend_udp_addr(friend_pk.clone(), saddr).await;
+        friend_connections
+            .net_crypto
+            .add_established_connection(
+                SecretKey::generate(&mut rng).public_key(),
+                friend_pk.clone(),
+                sent_nonce,
+                [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
+                session_precomputed_key.clone(),
+            )
+            .await;
+        friend_connections
+            .net_crypto
+            .set_friend_udp_addr(friend_pk.clone(), saddr)
+            .await;
 
         let delay = Duration::from_secs(1);
         tokio::time::advance(delay).await;
@@ -787,18 +919,31 @@ mod tests {
         friend.ping_received_time = Some(now);
         friend.ping_sent_time = Some(now);
         friend.connected = true;
-        friend_connections.friends.write().await.insert(friend_pk.clone(), friend);
+        friend_connections
+            .friends
+            .write()
+            .await
+            .insert(friend_pk.clone(), friend);
 
-        let session_precomputed_key = SalsaBox::new(&SecretKey::generate(&mut rng).public_key(), &SecretKey::generate(&mut rng));
+        let session_precomputed_key = SalsaBox::new(
+            &SecretKey::generate(&mut rng).public_key(),
+            &SecretKey::generate(&mut rng),
+        );
         let sent_nonce = SalsaBox::generate_nonce(&mut rng).into();
-        friend_connections.net_crypto.add_established_connection(
-            SecretKey::generate(&mut rng).public_key(),
-            friend_pk.clone(),
-            sent_nonce,
-            [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
-            session_precomputed_key.clone()
-        ).await;
-        friend_connections.net_crypto.set_friend_udp_addr(friend_pk.clone(), saddr).await;
+        friend_connections
+            .net_crypto
+            .add_established_connection(
+                SecretKey::generate(&mut rng).public_key(),
+                friend_pk.clone(),
+                sent_nonce,
+                [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
+                session_precomputed_key.clone(),
+            )
+            .await;
+        friend_connections
+            .net_crypto
+            .set_friend_udp_addr(friend_pk.clone(), saddr)
+            .await;
 
         let (_relay_incoming_rx, _relay_outgoing_rx, relay_pk) = friend_connections.tcp_connections.add_client().await;
 
@@ -841,7 +986,11 @@ mod tests {
         friend.saddr_time = Some(now + delay);
         friend.ping_received_time = Some(now);
         friend.ping_sent_time = Some(now);
-        friend_connections.friends.write().await.insert(friend_pk.clone(), friend);
+        friend_connections
+            .friends
+            .write()
+            .await
+            .insert(friend_pk.clone(), friend);
 
         tokio::time::advance(delay).await;
 
@@ -872,7 +1021,11 @@ mod tests {
         friend.saddr_time = Some(now);
         friend.ping_received_time = Some(now);
         friend.ping_sent_time = Some(now);
-        friend_connections.friends.write().await.insert(friend_pk.clone(), friend);
+        friend_connections
+            .friends
+            .write()
+            .await
+            .insert(friend_pk.clone(), friend);
 
         tokio::time::advance(delay).await;
         friend_connections.main_loop().await.unwrap();
@@ -894,7 +1047,11 @@ mod tests {
         let mut friend = Friend::new(friend_pk.clone());
         friend.dht_pk = Some(friend_dht_pk.clone());
         friend.connected = true;
-        friend_connections.friends.write().await.insert(friend_pk.clone(), friend);
+        friend_connections
+            .friends
+            .write()
+            .await
+            .insert(friend_pk.clone(), friend);
 
         let relay_pk = SecretKey::generate(&mut rng).public_key();
         let relay_saddr = "127.0.0.1:12345".parse().unwrap();
@@ -902,7 +1059,10 @@ mod tests {
             relays: vec![PackedNode::new(relay_saddr, relay_pk.clone())],
         };
 
-        friend_connections.handle_share_relays(friend_pk, share_relays).await.unwrap();
+        friend_connections
+            .handle_share_relays(friend_pk, share_relays)
+            .await
+            .unwrap();
 
         assert!(friend_connections.tcp_connections.has_relay(&relay_pk).await);
         assert!(friend_connections.tcp_connections.has_connection(&friend_dht_pk).await);
@@ -921,7 +1081,11 @@ mod tests {
         friend.ping_received_time = Some(now);
         friend.ping_sent_time = Some(now);
         friend.connected = true;
-        friend_connections.friends.write().await.insert(friend_pk.clone(), friend);
+        friend_connections
+            .friends
+            .write()
+            .await
+            .insert(friend_pk.clone(), friend);
 
         let duration = Duration::from_secs(1);
         tokio::time::advance(duration).await;
@@ -944,21 +1108,24 @@ mod tests {
         friend_connections.add_friend(friend_pk.clone()).await;
 
         let (connection_status_tx, mut connection_status_rx) = mpsc::unbounded();
-        friend_connections.set_connection_status_sink(connection_status_tx).await;
+        friend_connections
+            .set_connection_status_sink(connection_status_tx)
+            .await;
 
         // the ordering is essential since `run` adds its handlers that should
         // be done before packets handling
-        let run_future = friend_connections.run()
-            .map(Result::unwrap);
+        let run_future = friend_connections.run().map(Result::unwrap);
 
         let precomputed_key = SalsaBox::new(friend_connections.net_crypto.real_pk(), &friend_sk);
-        let cookie = friend_connections.net_crypto.get_cookie(&mut rng, friend_pk.clone(), friend_dht_pk);
+        let cookie = friend_connections
+            .net_crypto
+            .get_cookie(&mut rng, friend_pk.clone(), friend_dht_pk);
         let sent_nonce = SalsaBox::generate_nonce(&mut rng).into();
         let friend_session_sk = SecretKey::generate(&mut rng);
         let friend_session_pk = friend_session_sk.public_key();
         let our_cookie = EncryptedCookie {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
-            payload: vec![42; 88]
+            payload: vec![42; 88],
         };
         let handshake_payload = CryptoHandshakePayload {
             base_nonce: sent_nonce,
@@ -970,7 +1137,10 @@ mod tests {
 
         let net_crypto = friend_connections.net_crypto.clone();
         let packets_future = async {
-            net_crypto.handle_udp_crypto_handshake(&handshake, friend_saddr).await.unwrap();
+            net_crypto
+                .handle_udp_crypto_handshake(&handshake, friend_saddr)
+                .await
+                .unwrap();
 
             let session_pk = net_crypto.get_session_pk(&friend_pk).await.unwrap();
             let session_precomputed_key = SalsaBox::new(&session_pk, &friend_session_sk);
@@ -982,7 +1152,10 @@ mod tests {
             };
             let crypto_data = CryptoData::new(&session_precomputed_key, sent_nonce, &crypto_data_payload);
 
-            net_crypto.handle_udp_crypto_data(&crypto_data, friend_saddr).await.unwrap();
+            net_crypto
+                .handle_udp_crypto_data(&crypto_data, friend_saddr)
+                .await
+                .unwrap();
 
             let (received, _lossless_rx) = lossless_rx.into_future().await;
             let (received_pk, received_data) = received.unwrap();

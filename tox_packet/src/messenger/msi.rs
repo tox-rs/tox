@@ -3,15 +3,15 @@
 
 use super::*;
 
+use bitflags::*;
 use nom::{
-    Err,
     bytes::complete::tag,
     combinator::{rest_len, verify},
-    error::{Error, ErrorKind, make_error},
+    error::{make_error, Error, ErrorKind},
     multi::many_till,
-    number::complete::le_u8
+    number::complete::le_u8,
+    Err,
 };
-use bitflags::*;
 
 /// Maximum size in bytes of msi message packet
 const MAX_MSI_PAYLOAD_SIZE: usize = 256;
@@ -81,6 +81,7 @@ impl FromBytes for Request {
 }
 
 impl ToBytes for Request {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_le_u8!(0x01) >> // Request
@@ -99,6 +100,7 @@ impl FromBytes for MsiError {
 }
 
 impl ToBytes for MsiError {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_le_u8!(0x02) >> // MsiError
@@ -124,6 +126,7 @@ impl FromBytes for Capabilities {
 }
 
 impl ToBytes for Capabilities {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_le_u8!(0x03) >> // Capabilities
@@ -242,9 +245,15 @@ impl Msi {
         let mut capabilities = None;
         for sub in sub_packets {
             match sub {
-                MsiSubPacket::Request(req) => { request = Some(req); },
-                MsiSubPacket::MsiError(err) => { error = Some(err); },
-                MsiSubPacket::Capabilities(capa) => { capabilities = Some(capa); },
+                MsiSubPacket::Request(req) => {
+                    request = Some(req);
+                }
+                MsiSubPacket::MsiError(err) => {
+                    error = Some(err);
+                }
+                MsiSubPacket::Capabilities(capa) => {
+                    capabilities = Some(capa);
+                }
             };
         }
         let request = if let Some(request) = request {
@@ -277,6 +286,7 @@ impl FromBytes for Msi {
 }
 
 impl ToBytes for Msi {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_le_u8!(0x45) >>
@@ -294,14 +304,16 @@ mod tests {
 
     encode_decode_test!(
         msi_encode_decode,
-        Msi::new(RequestKind::Init, Some(MsiErrorKind::MsiNone), CapabilitiesKind::SEND_AUDIO)
+        Msi::new(
+            RequestKind::Init,
+            Some(MsiErrorKind::MsiNone),
+            CapabilitiesKind::SEND_AUDIO
+        )
     );
 
     #[test]
     fn msi_from_bytes_too_long() {
-        let mut input = vec![0x45,
-            1, 1, 1,
-        ];
+        let mut input = vec![0x45, 1, 1, 1];
         let too_long = [47; MAX_MSI_PAYLOAD_SIZE];
         input.extend_from_slice(&too_long);
         assert!(Msi::from_bytes(&input).is_err());
@@ -309,8 +321,8 @@ mod tests {
 
     #[test]
     fn msi_redundant() {
-        let input = [0x45,
-            1, 1, 1, // request
+        let input = [
+            0x45, 1, 1, 1, // request
             1, 1, 2, // redundant request
             2, 1, 1, // last error
             3, 1, 4, // last capabilities
@@ -320,11 +332,12 @@ mod tests {
         let (_rest, value) = Msi::from_bytes(&input).unwrap();
         let mut buf = [0; MAX_MSI_PAYLOAD_SIZE];
         let (after_value, size) = value.to_bytes((&mut buf, 0)).unwrap();
-        assert_eq!(after_value[..size], [0x45,
-            1, 1, 3, // last request of input
-            2, 1, 1,
-            3, 1, 4,
-            0,
-        ])
+        assert_eq!(
+            after_value[..size],
+            [
+                0x45, 1, 1, 3, // last request of input
+                2, 1, 1, 3, 1, 4, 0,
+            ]
+        )
     }
 }

@@ -5,13 +5,15 @@
 // FIXME: ↑ improve
 // TODO: ↓ add logging
 
-
 use std::fmt;
 
-use nom::combinator::map;
-use nom::bytes::complete::take;
-use rand::{CryptoRng, Rng, distributions::{Distribution, Standard}};
 use cookie_factory::{do_gen, gen_slice};
+use nom::bytes::complete::take;
+use nom::combinator::map;
+use rand::{
+    distributions::{Distribution, Standard},
+    CryptoRng, Rng,
+};
 
 use tox_binary_io::*;
 use tox_crypto::*;
@@ -62,8 +64,11 @@ assert_eq!(format!("{:X}", NoSpam([255, 255, 255, 255])), "FFFFFFFF");
 */
 impl fmt::UpperHex for NoSpam {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:02X}{:02X}{:02X}{:02X}",
-               self.0[0], self.0[1], self.0[2], self.0[3])
+        write!(
+            f,
+            "{:02X}{:02X}{:02X}{:02X}",
+            self.0[0], self.0[1], self.0[2], self.0[3]
+        )
     }
 }
 
@@ -92,9 +97,7 @@ impl FromBytes for NoSpam {
 
 impl ToBytes for NoSpam {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        do_gen!(buf,
-            gen_slice!(&self.0)
-        )
+        do_gen!(buf, gen_slice!(&self.0))
     }
 }
 
@@ -225,12 +228,13 @@ impl FromBytes for ToxId {
     fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
         let (input, pk) = PublicKey::from_bytes(input)?;
         let (input, nospam) = NoSpam::from_bytes(input)?;
-        let (input, checksum) = map(take(CHECKSUMBYTES), |bytes: &[u8]| { [bytes[0], bytes[1]] })(input)?;
+        let (input, checksum) = map(take(CHECKSUMBYTES), |bytes: &[u8]| [bytes[0], bytes[1]])(input)?;
         Ok((input, ToxId { pk, nospam, checksum }))
     }
 }
 
 impl ToBytes for ToxId {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_slice!(self.pk.as_ref()) >>
@@ -327,10 +331,7 @@ mod tests {
 
     // NoSpam::from_bytes()
 
-    encode_decode_test!(
-        no_spam_encode_decode,
-        NoSpam([42; NOSPAMBYTES])
-    );
+    encode_decode_test!(no_spam_encode_decode, NoSpam([42; NOSPAMBYTES]));
 
     // ToxId::
 

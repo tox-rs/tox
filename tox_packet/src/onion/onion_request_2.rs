@@ -3,13 +3,13 @@
 
 use super::*;
 
-use nom::combinator::{rest_len, verify, eof};
+use crypto_box::{aead::Error as AeadError, SalsaBox};
 use nom::bytes::complete::{tag, take};
-use crypto_box::{SalsaBox, aead::Error as AeadError};
+use nom::combinator::{eof, rest_len, verify};
 
+use crate::dht::*;
 use tox_binary_io::*;
 use tox_crypto::*;
-use crate::dht::*;
 
 /** Third onion request packet. It's sent from the second to the third node from
 onion chain. Payload should be encrypted with temporary generated `SecretKey` and
@@ -37,7 +37,7 @@ pub struct OnionRequest2 {
     /// Encrypted payload
     pub payload: Vec<u8>,
     /// Return address encrypted by the second node from onion chain
-    pub onion_return: OnionReturn
+    pub onion_return: OnionReturn,
 }
 
 impl FromBytes for OnionRequest2 {
@@ -49,16 +49,20 @@ impl FromBytes for OnionRequest2 {
         let (input, rest_len) = verify(rest_len, |rest_len| *rest_len >= ONION_RETURN_2_SIZE)(input)?;
         let (input, payload) = take(rest_len - ONION_RETURN_2_SIZE)(input)?;
         let (input, onion_return) = OnionReturn::from_bytes(input)?;
-        Ok((input, OnionRequest2 {
-            nonce,
-            temporary_pk,
-            payload: payload.to_vec(),
-            onion_return
-        }))
+        Ok((
+            input,
+            OnionRequest2 {
+                nonce,
+                temporary_pk,
+                payload: payload.to_vec(),
+                onion_return,
+            },
+        ))
     }
 }
 
 impl ToBytes for OnionRequest2 {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x82) >>
@@ -73,13 +77,23 @@ impl ToBytes for OnionRequest2 {
 
 impl OnionRequest2 {
     /// Create new `OnionRequest2` object.
-    pub fn new(shared_secret: &SalsaBox, temporary_pk: PublicKey, payload: &OnionRequest2Payload, onion_return: OnionReturn) -> OnionRequest2 {
+    pub fn new(
+        shared_secret: &SalsaBox,
+        temporary_pk: PublicKey,
+        payload: &OnionRequest2Payload,
+        onion_return: OnionReturn,
+    ) -> OnionRequest2 {
         let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng());
         let mut buf = [0; ONION_MAX_PACKET_SIZE];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
         let payload = shared_secret.encrypt(&nonce, &buf[..size]).unwrap();
 
-        OnionRequest2 { nonce: nonce.into(), temporary_pk, payload, onion_return }
+        OnionRequest2 {
+            nonce: nonce.into(),
+            temporary_pk,
+            payload,
+            onion_return,
+        }
     }
 
     /** Decrypt payload and try to parse it as `OnionRequest2Payload`.
@@ -90,17 +104,12 @@ impl OnionRequest2 {
     - fails to parse as `OnionRequest2Payload`
     */
     pub fn get_payload(&self, shared_secret: &SalsaBox) -> Result<OnionRequest2Payload, GetPayloadError> {
-        let decrypted = shared_secret.decrypt((&self.nonce).into(), self.payload.as_slice())
-            .map_err(|AeadError| {
-                GetPayloadError::decrypt()
-            })?;
+        let decrypted = shared_secret
+            .decrypt((&self.nonce).into(), self.payload.as_slice())
+            .map_err(|AeadError| GetPayloadError::decrypt())?;
         match OnionRequest2Payload::from_bytes(&decrypted) {
-            Err(error) => {
-                Err(GetPayloadError::deserialize(error, decrypted.clone()))
-            },
-            Ok((_, inner)) => {
-                Ok(inner)
-            }
+            Err(error) => Err(GetPayloadError::deserialize(error, decrypted.clone())),
+            Ok((_, inner)) => Ok(inner),
         }
     }
 }
@@ -126,7 +135,7 @@ pub struct OnionRequest2Payload {
     /// Address of the next node in the onion path
     pub ip_port: IpPort,
     /// Inner onion request
-    pub inner: InnerOnionRequest
+    pub inner: InnerOnionRequest,
 }
 
 impl FromBytes for OnionRequest2Payload {
@@ -134,14 +143,12 @@ impl FromBytes for OnionRequest2Payload {
         let (input, ip_port) = IpPort::from_udp_bytes(input, IpPortPadding::WithPadding)?;
         let (input, inner) = InnerOnionRequest::from_bytes(input)?;
         let (input, _) = eof(input)?;
-        Ok((input, OnionRequest2Payload {
-            ip_port,
-            inner
-        }))
+        Ok((input, OnionRequest2Payload { ip_port, inner }))
     }
 }
 
 impl ToBytes for OnionRequest2Payload {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_call!(|buf, ip_port| IpPort::to_udp_bytes(ip_port, buf, IpPortPadding::WithPadding), &self.ip_port) >>
@@ -200,18 +207,18 @@ mod tests {
             ip_port: IpPort {
                 protocol: ProtocolType::Udp,
                 ip_addr: "5.6.7.8".parse().unwrap(),
-                port: 12345
+                port: 12345,
             },
             inner: InnerOnionRequest::InnerOnionDataRequest(InnerOnionDataRequest {
                 destination_pk: SecretKey::generate(&mut rng).public_key(),
                 nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
                 temporary_pk: SecretKey::generate(&mut rng).public_key(),
-                payload: vec![42; 123]
-            })
+                payload: vec![42; 123],
+            }),
         };
         let onion_return = OnionReturn {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
-            payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
+            payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE],
         };
         // encode payload with shared secret
         let onion_packet = OnionRequest2::new(&shared_secret, alice_pk, &payload, onion_return);
@@ -233,18 +240,18 @@ mod tests {
             ip_port: IpPort {
                 protocol: ProtocolType::Udp,
                 ip_addr: "5.6.7.8".parse().unwrap(),
-                port: 12345
+                port: 12345,
             },
             inner: InnerOnionRequest::InnerOnionDataRequest(InnerOnionDataRequest {
                 destination_pk: SecretKey::generate(&mut rng).public_key(),
                 nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
                 temporary_pk: SecretKey::generate(&mut rng).public_key(),
-                payload: vec![42; 123]
-            })
+                payload: vec![42; 123],
+            }),
         };
         let onion_return = OnionReturn {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
-            payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
+            payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE],
         };
         // encode payload with shared secret
         let onion_packet = OnionRequest2::new(&shared_secret, alice_pk, &payload, onion_return);
@@ -271,8 +278,8 @@ mod tests {
             payload: invalid_payload_encoded,
             onion_return: OnionReturn {
                 nonce: [42; xsalsa20poly1305::NONCE_SIZE],
-                payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
-            }
+                payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE],
+            },
         };
         assert!(invalid_onion_request_2.get_payload(&shared_secret).is_err());
         // Try short incomplete array
@@ -284,8 +291,8 @@ mod tests {
             payload: invalid_payload_encoded,
             onion_return: OnionReturn {
                 nonce: [42; xsalsa20poly1305::NONCE_SIZE],
-                payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE]
-            }
+                payload: vec![42; ONION_RETURN_2_PAYLOAD_SIZE],
+            },
         };
         assert!(invalid_onion_request_2.get_payload(&shared_secret).is_err());
     }

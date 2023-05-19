@@ -3,8 +3,8 @@
 
 use super::*;
 
-use nom::number::complete::be_u16;
 use nom::bytes::complete::tag;
+use nom::number::complete::be_u16;
 
 /** PeerOnline is a struct that holds info to notify adding new peer to a conference.
 
@@ -35,15 +35,19 @@ impl FromBytes for PeerOnline {
         let (input, conference_id) = be_u16(input)?;
         let (input, conference_type) = ConferenceType::from_bytes(input)?;
         let (input, unique_id) = ConferenceUid::from_bytes(input)?;
-        Ok((input, PeerOnline {
-            conference_id,
-            conference_type,
-            unique_id,
-        }))
+        Ok((
+            input,
+            PeerOnline {
+                conference_id,
+                conference_type,
+                unique_id,
+            },
+        ))
     }
 }
 
 impl ToBytes for PeerOnline {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x61) >>

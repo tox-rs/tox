@@ -3,10 +3,10 @@ It is used to transfer chunk of file data to a friend.
 */
 
 use nom::{
-    AsBytes,
-    number::complete::le_u8,
-    combinator::{rest, rest_len, verify},
     bytes::complete::tag,
+    combinator::{rest, rest_len, verify},
+    number::complete::le_u8,
+    AsBytes,
 };
 
 use super::*;
@@ -39,11 +39,18 @@ impl FromBytes for FileData {
         let (input, file_id) = le_u8(input)?;
         let (input, _) = verify(rest_len, |len| *len <= MAX_FILE_DATA_SIZE)(input)?;
         let (input, data) = rest(input)?;
-        Ok((input, FileData { file_id, data: data.to_vec() }))
+        Ok((
+            input,
+            FileData {
+                file_id,
+                data: data.to_vec(),
+            },
+        ))
     }
 }
 
 impl ToBytes for FileData {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x52) >>
@@ -65,10 +72,7 @@ impl FileData {
 mod tests {
     use super::*;
 
-    encode_decode_test!(
-        file_data_encode_decode,
-        FileData::new(1, vec![1,2,3,4])
-    );
+    encode_decode_test!(file_data_encode_decode, FileData::new(1, vec![1, 2, 3, 4]));
 
     #[test]
     fn file_data_from_bytes_too_long() {

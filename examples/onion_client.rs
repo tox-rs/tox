@@ -1,25 +1,25 @@
 #[macro_use]
 extern crate log;
 
-use std::net::{SocketAddr, IpAddr};
+use std::net::{IpAddr, SocketAddr};
 
 use anyhow::Error;
-use futures::future::FutureExt;
-use futures::stream::StreamExt;
-use futures::sink::SinkExt;
 use futures::channel::mpsc;
+use futures::future::FutureExt;
+use futures::sink::SinkExt;
+use futures::stream::StreamExt;
 use rand::thread_rng;
 use tokio_util::udp::UdpFramed;
 
-use tox_crypto::*;
-use tox_packet::dht::*;
-use tox_packet::dht::packed_node::PackedNode;
 use tox_core::dht::codec::*;
 use tox_core::dht::ip_port::IsGlobal;
 use tox_core::dht::server::Server;
 use tox_core::onion::client::*;
 use tox_core::relay::client::Connections;
 use tox_core::stats::Stats;
+use tox_crypto::*;
+use tox_packet::dht::packed_node::PackedNode;
+use tox_packet::dht::*;
 
 mod common;
 
@@ -57,6 +57,7 @@ async fn main() -> Result<(), Error> {
     let (tx, mut rx) = mpsc::channel(32);
 
     let local_addr: SocketAddr = "0.0.0.0:33445".parse().unwrap(); // 0.0.0.0 for IPv4
+
     // let local_addr: SocketAddr = "[::]:33445".parse().unwrap(); // [::] for IPv6
 
     let is_ipv4 = local_addr.is_ipv4();
@@ -108,19 +109,21 @@ async fn main() -> Result<(), Error> {
                 Packet::OnionAnnounceResponse(packet) => {
                     let is_global = IsGlobal::is_global(&addr.ip());
 
-                    onion_client.handle_announce_response(&packet, is_global).await
+                    onion_client
+                        .handle_announce_response(&packet, is_global)
+                        .await
                         .map_err(Error::from)
-                },
-                Packet::OnionDataResponse(packet) =>
-                    onion_client.handle_data_response(&packet).await
-                        .map_err(Error::from),
+                }
+                Packet::OnionDataResponse(packet) => {
+                    onion_client.handle_data_response(&packet).await.map_err(Error::from)
+                }
                 _ => Ok(()),
             };
 
             if let Err(err) = res {
                 error!("Failed to handle packet: {:?}", err);
 
-                return Err(err)
+                return Err(err);
             }
         }
 
@@ -129,7 +132,9 @@ async fn main() -> Result<(), Error> {
 
     let network_writer = async {
         while let Some((packet, mut addr)) = rx.next().await {
-            if is_ipv4 && addr.is_ipv6() { continue }
+            if is_ipv4 && addr.is_ipv6() {
+                continue;
+            }
 
             if !is_ipv4 {
                 if let IpAddr::V4(ip) = addr.ip() {
@@ -138,22 +143,20 @@ async fn main() -> Result<(), Error> {
             }
 
             trace!("Sending packet {:?} to {:?}", packet, addr);
-            sink.send((packet, addr)).await
-                .map_err(Error::from)?
+            sink.send((packet, addr)).await.map_err(Error::from)?
         }
 
         Ok(())
     };
 
-    let dht_pk_future = dht_pk_rx
-        .for_each(|(real_pk, dht_pk)| {
-            let real_pk = hex::encode(real_pk.as_ref());
-            let dht_pk = hex::encode(dht_pk);
+    let dht_pk_future = dht_pk_rx.for_each(|(real_pk, dht_pk)| {
+        let real_pk = hex::encode(real_pk.as_ref());
+        let dht_pk = hex::encode(dht_pk);
 
-            println!("Found DHT PK for {} - {}", real_pk, dht_pk);
+        println!("Found DHT PK for {} - {}", real_pk, dht_pk);
 
-            futures::future::ready(())
-        });
+        futures::future::ready(())
+    });
 
     info!("Running onion client on {}", local_addr);
 

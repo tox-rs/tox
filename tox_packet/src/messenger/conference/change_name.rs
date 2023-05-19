@@ -3,12 +3,12 @@
 
 use super::*;
 
-use std::str;
 use nom::{
-    number::complete::{be_u16, be_u32},
-    combinator::{rest, map_res, verify},
     bytes::complete::tag,
+    combinator::{map_res, rest, verify},
+    number::complete::{be_u16, be_u32},
 };
+use std::str;
 
 use super::MAX_NAME_LENGTH_IN_CONFERENCE;
 
@@ -47,17 +47,24 @@ impl FromBytes for ChangeName {
         let (input, peer_id) = be_u16(input)?;
         let (input, message_id) = be_u32(input)?;
         let (input, _) = tag("\x30")(input)?;
-        let (input, name) = map_res(verify(rest, |name: &[u8]| name.len() <= MAX_NAME_LENGTH_IN_CONFERENCE), str::from_utf8)(input)?;
-        Ok((input, ChangeName {
-            conference_id,
-            peer_id,
-            message_id,
-            name: name.to_string(),
-        }))
+        let (input, name) = map_res(
+            verify(rest, |name: &[u8]| name.len() <= MAX_NAME_LENGTH_IN_CONFERENCE),
+            str::from_utf8,
+        )(input)?;
+        Ok((
+            input,
+            ChangeName {
+                conference_id,
+                peer_id,
+                message_id,
+                name: name.to_string(),
+            },
+        ))
     }
 }
 
 impl ToBytes for ChangeName {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x63) >>
@@ -87,10 +94,7 @@ impl ChangeName {
 mod tests {
     use super::*;
 
-    encode_decode_test!(
-        change_name_encode_decode,
-        ChangeName::new(1, 2, 3, "1234".to_owned())
-    );
+    encode_decode_test!(change_name_encode_decode, ChangeName::new(1, 2, 3, "1234".to_owned()));
 
     #[test]
     fn change_name_from_bytes_encoding_error() {
@@ -111,7 +115,7 @@ mod tests {
     #[test]
     fn change_name_to_bytes_overflow() {
         let large_string = String::from_utf8(vec![32u8; MAX_NAME_LENGTH_IN_CONFERENCE + 1]).unwrap();
-        let large_name = ChangeName::new(1,2, 3, large_string);
+        let large_name = ChangeName::new(1, 2, 3, large_string);
         let mut buf = [0; MAX_NAME_LENGTH_IN_CONFERENCE + 1 + 2 + 2 + 4 + 1]; // packet id + conference id + peer id + message id + message kind.
         assert!(large_name.to_bytes((&mut buf, 0)).is_err());
     }

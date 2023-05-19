@@ -3,9 +3,9 @@
 
 use super::*;
 
+use nom::bytes::complete::tag;
 use tox_binary_io::*;
 use tox_crypto::*;
-use nom::bytes::complete::tag;
 
 /** Sent by client to server.
 Send a routing request to the server that we want to connect
@@ -35,6 +35,7 @@ impl FromBytes for RouteRequest {
 }
 
 impl ToBytes for RouteRequest {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x00) >>

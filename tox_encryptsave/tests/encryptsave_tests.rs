@@ -7,7 +7,6 @@ fn is_encrypted_test() {
     assert!(is_encrypted(include_bytes!("ciphertext")));
 }
 
-
 #[test]
 fn pass_encrypt_error_test() {
     // empty data
@@ -26,7 +25,10 @@ fn pass_encrypt_test() {
     assert!(is_encrypted(&encrypted));
 
     assert_eq!(plaintext.len() + EXTRA_LENGTH, encrypted.len());
-    assert_eq!(&plaintext as &[u8], &pass_decrypt(&encrypted, &passphrase).unwrap() as &[u8]);
+    assert_eq!(
+        &plaintext as &[u8],
+        &pass_decrypt(&encrypted, &passphrase).unwrap() as &[u8]
+    );
 
     let encrypted2 = pass_encrypt(&plaintext, &passphrase).unwrap();
     assert_ne!(encrypted, encrypted2);
@@ -68,7 +70,10 @@ fn pass_decrypt_error_failed_test() {
     let mut bad_ciphertext = Vec::with_capacity(EXTRA_LENGTH + 123);
     bad_ciphertext.extend_from_slice(&ciphertext[..EXTRA_LENGTH]);
     bad_ciphertext.extend_from_slice(&[42; 123]);
-    assert_eq!(pass_decrypt(&bad_ciphertext, b"encryptsave"), Err(DecryptionError::Failed));
+    assert_eq!(
+        pass_decrypt(&bad_ciphertext, b"encryptsave"),
+        Err(DecryptionError::Failed)
+    );
 }
 
 #[test]
@@ -77,16 +82,13 @@ fn pass_decrypt_test() {
     let plaintext = b"Hello world.\n";
     let ciphertext = include_bytes!("ciphertext");
 
-    assert_eq!(
-        pass_decrypt(ciphertext, passphrase).unwrap(),
-        plaintext
-    );
+    assert_eq!(pass_decrypt(ciphertext, passphrase).unwrap(), plaintext);
 }
 
 #[test]
 fn get_salt_test() {
     let ciphertext = include_bytes!("ciphertext");
-    let salt = &ciphertext[MAGIC_LENGTH .. MAGIC_LENGTH + SALT_LENGTH];
+    let salt = &ciphertext[MAGIC_LENGTH..MAGIC_LENGTH + SALT_LENGTH];
 
     assert_eq!(get_salt(ciphertext).unwrap(), salt);
 }

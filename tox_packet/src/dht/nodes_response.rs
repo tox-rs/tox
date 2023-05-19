@@ -5,16 +5,16 @@ use super::*;
 use aead::{Aead, AeadCore, Error as AeadError};
 use crypto_box::SalsaBox;
 use nom::{
-    multi::count,
-    number::complete::{le_u8, be_u64},
-    combinator::{rest, eof, verify},
     bytes::complete::tag,
+    combinator::{eof, rest, verify},
+    multi::count,
+    number::complete::{be_u64, le_u8},
 };
 
+use crate::dht::errors::*;
+use crate::dht::packed_node::PackedNode;
 use tox_binary_io::*;
 use tox_crypto::*;
-use crate::dht::packed_node::PackedNode;
-use crate::dht::errors::*;
 
 /** Nodes response packet struct. When DHT node receives `NodesRequest` it
 should respond with `NodesResponse` that contains up to to 4 closest nodes to
@@ -44,6 +44,7 @@ pub struct NodesResponse {
 }
 
 impl ToBytes for NodesResponse {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x04) >>
@@ -86,18 +87,13 @@ impl NodesResponse {
     - fails to parse as given packet type
     */
     pub fn get_payload(&self, shared_secret: &SalsaBox) -> Result<NodesResponsePayload, GetPayloadError> {
-        let decrypted = shared_secret.decrypt((&self.nonce).into(), self.payload.as_slice())
-            .map_err(|AeadError| {
-                GetPayloadError::decrypt()
-            })?;
+        let decrypted = shared_secret
+            .decrypt((&self.nonce).into(), self.payload.as_slice())
+            .map_err(|AeadError| GetPayloadError::decrypt())?;
 
         match NodesResponsePayload::from_bytes(&decrypted) {
-            Err(error) => {
-                Err(GetPayloadError::deserialize(error, decrypted.clone()))
-            },
-            Ok((_, payload)) => {
-                Ok(payload)
-            }
+            Err(error) => Err(GetPayloadError::deserialize(error, decrypted.clone())),
+            Ok((_, payload)) => Ok(payload),
         }
     }
 }
@@ -131,6 +127,7 @@ pub struct NodesResponsePayload {
 }
 
 impl ToBytes for NodesResponsePayload {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_cond!(self.nodes.len() > 4, |buf| gen_error(buf, 0)) >>
@@ -155,14 +152,18 @@ impl FromBytes for NodesResponsePayload {
 mod tests {
     use crate::dht::nodes_response::*;
     use crate::dht::Packet;
-    use std::net::SocketAddr;
     use rand::thread_rng;
+    use std::net::SocketAddr;
 
     encode_decode_test!(
         nodes_response_payload_encode_decode,
-        NodesResponsePayload { nodes: vec![
-            PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), SecretKey::generate(&mut thread_rng()).public_key())
-        ], id: 42 }
+        NodesResponsePayload {
+            nodes: vec![PackedNode::new(
+                SocketAddr::V4("5.6.7.8:12345".parse().unwrap()),
+                SecretKey::generate(&mut thread_rng()).public_key()
+            )],
+            id: 42
+        }
     );
 
     dht_packet_encode_decode!(nodes_response_encode_decode, NodesResponse);
@@ -170,17 +171,25 @@ mod tests {
     dht_packet_encrypt_decrypt!(
         nodes_response_payload_encrypt_decrypt,
         NodesResponse,
-        NodesResponsePayload { nodes: vec![
-            PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), SecretKey::generate(&mut thread_rng()).public_key())
-        ], id: 42 }
+        NodesResponsePayload {
+            nodes: vec![PackedNode::new(
+                SocketAddr::V4("5.6.7.8:12345".parse().unwrap()),
+                SecretKey::generate(&mut thread_rng()).public_key()
+            )],
+            id: 42
+        }
     );
 
     dht_packet_encrypt_decrypt_invalid_key!(
         nodes_response_payload_encrypt_decrypt_invalid_key,
         NodesResponse,
-        NodesResponsePayload { nodes: vec![
-            PackedNode::new(SocketAddr::V4("5.6.7.8:12345".parse().unwrap()), SecretKey::generate(&mut thread_rng()).public_key())
-        ], id: 42 }
+        NodesResponsePayload {
+            nodes: vec![PackedNode::new(
+                SocketAddr::V4("5.6.7.8:12345".parse().unwrap()),
+                SecretKey::generate(&mut thread_rng()).public_key()
+            )],
+            id: 42
+        }
     );
 
     dht_packet_decode_invalid!(nodes_response_decode_invalid, NodesResponse);

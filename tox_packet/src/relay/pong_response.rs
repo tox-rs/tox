@@ -5,8 +5,8 @@ use super::*;
 
 use tox_binary_io::*;
 
-use nom::number::complete::be_u64;
 use nom::bytes::complete::tag;
+use nom::number::complete::be_u64;
 
 /** Sent by both client and server, both will respond.
 The server should respond to ping packets with pong packets with the same `ping_id`
@@ -24,18 +24,19 @@ Length | Content
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct PongResponse {
     /// The id of ping to respond
-    pub ping_id: u64
+    pub ping_id: u64,
 }
 
 impl FromBytes for PongResponse {
     fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
         let (input, _) = tag("\x05")(input)?;
         let (input, ping_id) = be_u64(input)?;
-        Ok((input, PongResponse {  ping_id }))
+        Ok((input, PongResponse { ping_id }))
     }
 }
 
 impl ToBytes for PongResponse {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x05) >>
@@ -48,10 +49,5 @@ impl ToBytes for PongResponse {
 mod test {
     use super::*;
 
-    encode_decode_test!(
-        pong_response_encode_decode,
-        PongResponse {
-            ping_id: 12345
-        }
-    );
+    encode_decode_test!(pong_response_encode_decode, PongResponse { ping_id: 12345 });
 }

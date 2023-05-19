@@ -6,8 +6,11 @@ use thiserror::Error;
 use tokio::time::error::Elapsed;
 use tox_packet::dht::GetPayloadError;
 
-use crate::onion::{client::errors::{HandleAnnounceResponseError, HandleDataResponseError}, onion_announce::HandleDataRequestError};
 use crate::net_crypto::errors::HandlePacketError as HandleNetCryptoPacketError;
+use crate::onion::{
+    client::errors::{HandleAnnounceResponseError, HandleDataResponseError},
+    onion_announce::HandleDataRequestError,
+};
 
 /// Error that can happen when calling `handle_*` of packet.
 #[derive(Debug, Error)]

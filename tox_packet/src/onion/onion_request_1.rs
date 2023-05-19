@@ -3,14 +3,14 @@
 
 use super::*;
 
-use crypto_box::aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned};
-use tox_binary_io::*;
 use crate::dht::*;
+use crypto_box::aead::{generic_array::typenum::marker_traits::Unsigned, AeadCore};
+use tox_binary_io::*;
 
 use crypto_box::aead::{Aead, Error as AeadError};
 use nom::{
+    bytes::complete::{tag, take},
     combinator::{rest, rest_len, verify},
-    bytes::complete::{take, tag}
 };
 
 /// Encrypted payload should contain at least `IpPort` struct.
@@ -42,7 +42,7 @@ pub struct OnionRequest1 {
     /// Encrypted payload
     pub payload: Vec<u8>,
     /// Return address encrypted by the first node from onion chain
-    pub onion_return: OnionReturn
+    pub onion_return: OnionReturn,
 }
 
 impl FromBytes for OnionRequest1 {
@@ -51,19 +51,25 @@ impl FromBytes for OnionRequest1 {
         let (input, _) = tag(&[0x81][..])(input)?;
         let (input, nonce) = Nonce::from_bytes(input)?;
         let (input, temporary_pk) = PublicKey::from_bytes(input)?;
-        let (input, rest_len) = verify(rest_len, |rest_len| *rest_len >= ONION_REQUEST_1_MIN_PAYLOAD_SIZE + ONION_RETURN_1_SIZE)(input)?;
+        let (input, rest_len) = verify(rest_len, |rest_len| {
+            *rest_len >= ONION_REQUEST_1_MIN_PAYLOAD_SIZE + ONION_RETURN_1_SIZE
+        })(input)?;
         let (input, payload) = take(rest_len - ONION_RETURN_1_SIZE)(input)?;
         let (input, onion_return) = OnionReturn::from_bytes(input)?;
-        Ok((input, OnionRequest1 {
-            nonce,
-            temporary_pk,
-            payload: payload.to_vec(),
-            onion_return
-        }))
+        Ok((
+            input,
+            OnionRequest1 {
+                nonce,
+                temporary_pk,
+                payload: payload.to_vec(),
+                onion_return,
+            },
+        ))
     }
 }
 
 impl ToBytes for OnionRequest1 {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_cond!(
@@ -82,13 +88,23 @@ impl ToBytes for OnionRequest1 {
 
 impl OnionRequest1 {
     /// Create new `OnionRequest1` object.
-    pub fn new(shared_secret: &SalsaBox, temporary_pk: PublicKey, payload: &OnionRequest1Payload, onion_return: OnionReturn) -> OnionRequest1 {
+    pub fn new(
+        shared_secret: &SalsaBox,
+        temporary_pk: PublicKey,
+        payload: &OnionRequest1Payload,
+        onion_return: OnionReturn,
+    ) -> OnionRequest1 {
         let nonce = SalsaBox::generate_nonce(&mut rand::thread_rng());
         let mut buf = [0; ONION_MAX_PACKET_SIZE];
         let (_, size) = payload.to_bytes((&mut buf, 0)).unwrap();
         let payload = shared_secret.encrypt(&nonce, &buf[..size]).unwrap();
 
-        OnionRequest1 { nonce: nonce.into(), temporary_pk, payload, onion_return }
+        OnionRequest1 {
+            nonce: nonce.into(),
+            temporary_pk,
+            payload,
+            onion_return,
+        }
     }
 
     /** Decrypt payload and try to parse it as `OnionRequest1Payload`.
@@ -99,17 +115,12 @@ impl OnionRequest1 {
     - fails to parse as `OnionRequest1Payload`
     */
     pub fn get_payload(&self, shared_secret: &SalsaBox) -> Result<OnionRequest1Payload, GetPayloadError> {
-        let decrypted = shared_secret.decrypt((&self.nonce).into(), self.payload.as_slice())
-            .map_err(|AeadError| {
-                GetPayloadError::decrypt()
-            })?;
+        let decrypted = shared_secret
+            .decrypt((&self.nonce).into(), self.payload.as_slice())
+            .map_err(|AeadError| GetPayloadError::decrypt())?;
         match OnionRequest1Payload::from_bytes(&decrypted) {
-            Err(error) => {
-                Err(GetPayloadError::deserialize(error, decrypted.clone()))
-            },
-            Ok((_, inner)) => {
-                Ok(inner)
-            }
+            Err(error) => Err(GetPayloadError::deserialize(error, decrypted.clone())),
+            Ok((_, inner)) => Ok(inner),
         }
     }
 }
@@ -136,7 +147,7 @@ pub struct OnionRequest1Payload {
     /// Temporary `PublicKey` for the current encrypted payload
     pub temporary_pk: PublicKey,
     /// Inner onion payload
-    pub inner: Vec<u8>
+    pub inner: Vec<u8>,
 }
 
 impl FromBytes for OnionRequest1Payload {
@@ -144,15 +155,19 @@ impl FromBytes for OnionRequest1Payload {
         let (input, ip_port) = IpPort::from_udp_bytes(input, IpPortPadding::WithPadding)?;
         let (input, temporary_pk) = PublicKey::from_bytes(input)?;
         let (input, inner) = rest(input)?;
-        Ok((input, OnionRequest1Payload {
-            ip_port,
-            temporary_pk,
-            inner: inner.to_vec()
-        }))
+        Ok((
+            input,
+            OnionRequest1Payload {
+                ip_port,
+                temporary_pk,
+                inner: inner.to_vec(),
+            },
+        ))
     }
 }
 
 impl ToBytes for OnionRequest1Payload {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_call!(|buf, ip_port| IpPort::to_udp_bytes(ip_port, buf, IpPortPadding::WithPadding), &self.ip_port) >>
@@ -206,14 +221,14 @@ mod tests {
             ip_port: IpPort {
                 protocol: ProtocolType::Udp,
                 ip_addr: "5.6.7.8".parse().unwrap(),
-                port: 12345
+                port: 12345,
             },
             temporary_pk: SecretKey::generate(&mut rng).public_key(),
-            inner: vec![42; ONION_REQUEST_1_MIN_PAYLOAD_SIZE]
+            inner: vec![42; ONION_REQUEST_1_MIN_PAYLOAD_SIZE],
         };
         let onion_return = OnionReturn {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
-            payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
+            payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE],
         };
         // encode payload with shared secret
         let onion_packet = OnionRequest1::new(&shared_secret, alice_pk, &payload, onion_return);
@@ -235,14 +250,14 @@ mod tests {
             ip_port: IpPort {
                 protocol: ProtocolType::Udp,
                 ip_addr: "5.6.7.8".parse().unwrap(),
-                port: 12345
+                port: 12345,
             },
             temporary_pk: SecretKey::generate(&mut rng).public_key(),
-            inner: vec![42; ONION_REQUEST_1_MIN_PAYLOAD_SIZE]
+            inner: vec![42; ONION_REQUEST_1_MIN_PAYLOAD_SIZE],
         };
         let onion_return = OnionReturn {
             nonce: [42; xsalsa20poly1305::NONCE_SIZE],
-            payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
+            payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE],
         };
         // encode payload with shared secret
         let onion_packet = OnionRequest1::new(&shared_secret, alice_pk, &payload, onion_return);
@@ -269,8 +284,8 @@ mod tests {
             payload: invalid_payload_encoded,
             onion_return: OnionReturn {
                 nonce: [42; xsalsa20poly1305::NONCE_SIZE],
-                payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
-            }
+                payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE],
+            },
         };
         assert!(invalid_onion_request_1.get_payload(&shared_secret).is_err());
         // Try short incomplete array
@@ -282,8 +297,8 @@ mod tests {
             payload: invalid_payload_encoded,
             onion_return: OnionReturn {
                 nonce: [42; xsalsa20poly1305::NONCE_SIZE],
-                payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE]
-            }
+                payload: vec![42; ONION_RETURN_1_PAYLOAD_SIZE],
+            },
         };
         assert!(invalid_onion_request_1.get_payload(&shared_secret).is_err());
     }

@@ -3,9 +3,9 @@ It is used to start transferring file to a friend.
 */
 
 use nom::{
-    combinator::{rest, map_res, verify},
-    number::complete::le_u8,
     bytes::complete::tag,
+    combinator::{map_res, rest, verify},
+    number::complete::le_u8,
 };
 
 use std::str;
@@ -45,18 +45,25 @@ impl FromBytes for FileSendRequest {
         let (input, file_type) = FileType::from_bytes(input)?;
         let (input, file_size) = be_u64(input)?;
         let (input, file_unique_id) = FileUid::from_bytes(input)?;
-        let (input, file_name) = map_res(verify(rest, |file_name: &[u8]| file_name.len() <= MAX_FILESEND_FILENAME_LENGTH), str::from_utf8)(input)?;
-        Ok((input, FileSendRequest {
-            file_id,
-            file_type,
-            file_size,
-            file_unique_id,
-            file_name: file_name.to_string(),
-        }))
+        let (input, file_name) = map_res(
+            verify(rest, |file_name: &[u8]| file_name.len() <= MAX_FILESEND_FILENAME_LENGTH),
+            str::from_utf8,
+        )(input)?;
+        Ok((
+            input,
+            FileSendRequest {
+                file_id,
+                file_type,
+                file_size,
+                file_unique_id,
+                file_name: file_name.to_string(),
+            },
+        ))
     }
 }
 
 impl ToBytes for FileSendRequest {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x50) >>
@@ -93,7 +100,9 @@ mod tests {
 
     #[test]
     fn file_send_request_from_bytes_encoding_error() {
-        let mut packet = vec![0x50, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff];
+        let mut packet = vec![
+            0x50, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff,
+        ];
         packet.extend_from_slice(&[42; FILE_UID_BYTES]);
         let err_string = vec![0, 159, 146, 150]; // not UTF8 bytes.
         packet.extend_from_slice(&err_string);
@@ -102,7 +111,9 @@ mod tests {
 
     #[test]
     fn file_send_request_from_bytes_overflow() {
-        let mut packet = vec![0x50, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff];
+        let mut packet = vec![
+            0x50, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff,
+        ];
         packet.extend_from_slice(&[42; FILE_UID_BYTES]);
         let large_string = vec![32; MAX_FILESEND_FILENAME_LENGTH + 1];
         packet.extend_from_slice(&large_string);
@@ -112,7 +123,7 @@ mod tests {
     #[test]
     fn file_send_request_to_bytes_overflow() {
         let large_string = String::from_utf8(vec![32u8; MAX_FILESEND_FILENAME_LENGTH + 1]).unwrap();
-        let large_msg = FileSendRequest::new(1,FileType::Data,0xff00, FileUid([42; FILE_UID_BYTES]), large_string);
+        let large_msg = FileSendRequest::new(1, FileType::Data, 0xff00, FileUid([42; FILE_UID_BYTES]), large_string);
         let mut buf = [0; MAX_FILESEND_FILENAME_LENGTH + 1 + 4 + 8 + FILE_UID_BYTES]; // provide needed space for serialize.
         assert!(large_msg.to_bytes((&mut buf, 0)).is_err());
     }

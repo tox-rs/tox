@@ -1,17 +1,16 @@
-pub use nom::IResult;
 pub use cookie_factory::GenError;
+pub use nom::IResult;
 
+use cookie_factory::{do_gen, gen_be_u8, gen_le_u16, gen_slice};
 use nom::bytes::streaming::take;
 use nom::combinator::{map, map_opt};
 use nom::multi::count;
-use nom::number::complete::{le_u8, le_u16};
-use cookie_factory::{do_gen, gen_be_u8, gen_le_u16, gen_slice};
+use nom::number::complete::{le_u16, le_u8};
 
-use std::{convert::TryInto, net::{
-    IpAddr,
-    Ipv4Addr,
-    Ipv6Addr,
-}};
+use std::{
+    convert::TryInto,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+};
 
 #[cfg(feature = "crypto")]
 pub use crypto::*;
@@ -41,9 +40,7 @@ impl ToBytes for IpAddr {
 
 impl FromBytes for Ipv4Addr {
     fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
-        map(count(le_u8, 4),
-            |v| Ipv4Addr::new(v[0], v[1], v[2], v[3])
-        )(input)
+        map(count(le_u8, 4), |v| Ipv4Addr::new(v[0], v[1], v[2], v[3]))(input)
     }
 }
 
@@ -53,13 +50,14 @@ impl<const N: usize> ToBytes for [u8; N] {
     }
 }
 
-impl <const N: usize> FromBytes for [u8; N] {
+impl<const N: usize> FromBytes for [u8; N] {
     fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
         map_opt(take(N), |bytes: &[u8]| bytes.try_into().ok())(input)
     }
 }
 
 impl ToBytes for Ipv4Addr {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         let o = self.octets();
         do_gen!(buf,
@@ -73,13 +71,14 @@ impl ToBytes for Ipv4Addr {
 
 impl FromBytes for Ipv6Addr {
     fn from_bytes(i: &[u8]) -> IResult<&[u8], Self> {
-        map(count(le_u16, 8),
-            |v| Ipv6Addr::new(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7])
-        )(i)
+        map(count(le_u16, 8), |v| {
+            Ipv6Addr::new(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7])
+        })(i)
     }
 }
 
 impl ToBytes for Ipv6Addr {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         let s = self.segments();
         do_gen!(buf,

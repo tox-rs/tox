@@ -142,28 +142,19 @@ pub enum HandlePacketError {
 
 impl HandlePacketError {
     pub(crate) fn invalid_request_id(expect: u64, got: u64) -> HandlePacketError {
-        HandlePacketError::InvalidRequestId {
-            expect,
-            got,
-        }
+        HandlePacketError::InvalidRequestId { expect, got }
     }
 
     pub(crate) fn no_udp_connection(addr: SocketAddr) -> HandlePacketError {
-        HandlePacketError::NoUdpConnection {
-            addr,
-        }
+        HandlePacketError::NoUdpConnection { addr }
     }
 
     pub(crate) fn no_tcp_connection(pk: PublicKey) -> HandlePacketError {
-        HandlePacketError::NoTcpConnection {
-            pk,
-        }
+        HandlePacketError::NoTcpConnection { pk }
     }
 
     pub(crate) fn packet_id(id: u8) -> HandlePacketError {
-        HandlePacketError::PacketId {
-            id,
-        }
+        HandlePacketError::PacketId { id }
     }
 }
 

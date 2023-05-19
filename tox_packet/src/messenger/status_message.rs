@@ -5,9 +5,9 @@ This packet is sent to my friends every time they become online, or whenever my 
 
 use super::*;
 
-use std::str;
-use nom::combinator::{rest, map_res, verify};
 use nom::bytes::complete::tag;
+use nom::combinator::{map_res, rest, verify};
+use std::str;
 
 /// Maximum size in bytes of status message string
 const MAX_STATUS_MESSAGE_DATA_SIZE: usize = 1007;
@@ -32,12 +32,16 @@ pub struct StatusMessage(String);
 impl FromBytes for StatusMessage {
     fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
         let (input, _) = tag("\x31")(input)?;
-        let (input, message) = map_res(verify(rest, |message: &[u8]| message.len() <= MAX_STATUS_MESSAGE_DATA_SIZE), str::from_utf8)(input)?;
+        let (input, message) = map_res(
+            verify(rest, |message: &[u8]| message.len() <= MAX_STATUS_MESSAGE_DATA_SIZE),
+            str::from_utf8,
+        )(input)?;
         Ok((input, StatusMessage(message.to_string())))
     }
 }
 
 impl ToBytes for StatusMessage {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x31) >>
@@ -58,10 +62,7 @@ impl StatusMessage {
 mod tests {
     use super::*;
 
-    encode_decode_test!(
-        status_message_encode_decode,
-        StatusMessage::new("Happy!".to_string())
-    );
+    encode_decode_test!(status_message_encode_decode, StatusMessage::new("Happy!".to_string()));
 
     #[test]
     fn status_message_from_bytes_encoding_error() {

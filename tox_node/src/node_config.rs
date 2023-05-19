@@ -1,15 +1,18 @@
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::num::ParseIntError;
 use std::str::FromStr;
-use std::collections::HashMap;
 
+use clap::{
+    builder::{ArgPredicate, PossibleValue},
+    value_parser, Arg, ArgAction, ArgGroup, ArgMatches, Command, ValueEnum,
+};
 use config::{Config, File as CfgFile, FileFormat as CfgFileFormat};
-use serde::{de, Deserialize, Deserializer};
-use serde_yaml::Value;
-use clap::{Arg, ArgAction, ArgGroup, ArgMatches, builder::{ArgPredicate, PossibleValue}, Command, ValueEnum, value_parser};
 use hex::FromHex;
 use itertools::Itertools;
+use serde::{de, Deserialize, Deserializer};
+use serde_yaml::Value;
 use tox::crypto::*;
 use tox::packet::dht::packed_node::PackedNode;
 use tox::packet::dht::BOOSTRAP_SERVER_MAX_MOTD_LENGTH;
@@ -20,7 +23,7 @@ pub enum Threads {
     /// Detect number of threads automatically by the number of CPU cores.
     Auto,
     /// Exact number of threads.
-    N(u16)
+    N(u16),
 }
 
 impl FromStr for Threads {
@@ -89,25 +92,30 @@ impl BootstrapNode {
             Err(e) => {
                 warn!("Failed to resolve bootstrap node address '{}': {}", self.addr, e);
                 Vec::new().into_iter()
-            },
+            }
         };
         addrs.map(move |addr| PackedNode::new(addr, pk.clone()))
     }
 }
 
-fn de_from_hex<'de, D>(deserializer: D) -> Result<PublicKey, D::Error> where D: Deserializer<'de> {
+fn de_from_hex<'de, D>(deserializer: D) -> Result<PublicKey, D::Error>
+where
+    D: Deserializer<'de>,
+{
     let s = String::deserialize(deserializer)?;
 
-    let bootstrap_pk_bytes: [u8; 32] = FromHex::from_hex(s)
-        .map_err(|e| de::Error::custom(format!("Can't make bytes from hex string {:?}", e)))?;
+    let bootstrap_pk_bytes: [u8; 32] =
+        FromHex::from_hex(s).map_err(|e| de::Error::custom(format!("Can't make bytes from hex string {:?}", e)))?;
     Ok(PublicKey::from(bootstrap_pk_bytes))
 }
 
-fn de_threads<'de, D>(deserializer: D) -> Result<Threads, D::Error> where D: Deserializer<'de> {
+fn de_threads<'de, D>(deserializer: D) -> Result<Threads, D::Error>
+where
+    D: Deserializer<'de>,
+{
     let s = String::deserialize(deserializer)?;
 
-    Threads::from_str(&s)
-        .map_err(|e| de::Error::custom(format!("threads: {:?}", e)))
+    Threads::from_str(&s).map_err(|e| de::Error::custom(format!("threads: {:?}", e)))
 }
 
 /// Config parsed from command line arguments.
@@ -160,10 +168,12 @@ fn create_sk_arg() -> Arg {
     Arg::new("secret-key")
         .short('s')
         .long("secret-key")
-        .help("DHT secret key. Note that you should not pass the key via \
+        .help(
+            "DHT secret key. Note that you should not pass the key via \
                arguments due to security reasons. Use this argument for \
                test purposes only. In the real world use the environment \
-               variable instead")
+               variable instead",
+        )
         .num_args(1)
         .conflicts_with("keys-file")
         .env("TOX_SECRET_KEY")
@@ -285,11 +295,16 @@ pub fn cli_parse() -> NodeConfig {
 /// Parse settings from a saved file.
 fn parse_config(config_path: &str) -> NodeConfig {
     let config_builder = Config::builder()
-        .set_default("log-type", "Stderr").expect("Can't set default value for `log-type`")
-        .set_default("motd", "This is tox-rs").expect("Can't set default value for `motd`")
-        .set_default("lan-discovery", "False").expect("Can't set default value for `lan-discovery`")
-        .set_default("threads", "1").expect("Can't set default value for `threads`")
-        .set_default("tcp-connections-limit", "512").expect("Can't set default value for `tcp-connections-limit`")
+        .set_default("log-type", "Stderr")
+        .expect("Can't set default value for `log-type`")
+        .set_default("motd", "This is tox-rs")
+        .expect("Can't set default value for `motd`")
+        .set_default("lan-discovery", "False")
+        .expect("Can't set default value for `lan-discovery`")
+        .set_default("threads", "1")
+        .expect("Can't set default value for `threads`")
+        .set_default("tcp-connections-limit", "512")
+        .expect("Can't set default value for `tcp-connections-limit`")
         .add_source(CfgFile::new(config_path, CfgFileFormat::Yaml));
 
     let config_file = match config_builder.build() {
@@ -309,8 +324,10 @@ fn parse_config(config_path: &str) -> NodeConfig {
 fn run_derive_pk(matches: &ArgMatches) -> ! {
     let sk_passed_as_arg = matches.contains_id("secret-key");
     if sk_passed_as_arg {
-        panic!("You should not pass the secret key via arguments due to \
-               security reasons. Use the environment variable instead");
+        panic!(
+            "You should not pass the secret key via arguments due to \
+               security reasons. Use the environment variable instead"
+        );
     }
 
     let pk_from_arg = matches.get_one::<String>("secret-key").map(|s| {
@@ -322,12 +339,20 @@ fn run_derive_pk(matches: &ArgMatches) -> ! {
 
         let mut buf = [0; crypto_box::KEY_SIZE * 2];
         use std::io::Read;
-        file.read_exact(&mut buf).expect("Failed to read keys from the keys file");
-        let pk_bytes: [u8; crypto_box::KEY_SIZE] = buf[..crypto_box::KEY_SIZE].try_into().expect("Failed to read public key from the keys file");
-        let sk_bytes: [u8; crypto_box::KEY_SIZE] = buf[crypto_box::KEY_SIZE..].try_into().expect("Failed to read secret key from the keys file");
+        file.read_exact(&mut buf)
+            .expect("Failed to read keys from the keys file");
+        let pk_bytes: [u8; crypto_box::KEY_SIZE] = buf[..crypto_box::KEY_SIZE]
+            .try_into()
+            .expect("Failed to read public key from the keys file");
+        let sk_bytes: [u8; crypto_box::KEY_SIZE] = buf[crypto_box::KEY_SIZE..]
+            .try_into()
+            .expect("Failed to read secret key from the keys file");
         let pk = PublicKey::from(pk_bytes);
         let sk = SecretKey::from(sk_bytes);
-        assert!(pk == sk.public_key(), "The loaded public key does not correspond to the loaded secret key");
+        assert!(
+            pk == sk.public_key(),
+            "The loaded public key does not correspond to the loaded secret key"
+        );
         pk
     });
 
@@ -351,7 +376,9 @@ fn run_args(matches: &ArgMatches) -> NodeConfig {
 
     let tcp_addrs: Vec<SocketAddr> = matches.get_many("tcp-address").unwrap_or_default().copied().collect();
 
-    let tcp_connections_limit = matches.get_one::<usize>("tcp-connections-limit").copied()
+    let tcp_connections_limit = matches
+        .get_one::<usize>("tcp-connections-limit")
+        .copied()
         .unwrap_or(512);
 
     let sk = matches.get_one::<String>("secret-key").map(|s| {
@@ -412,13 +439,7 @@ mod tests {
     #[test]
     fn args_udp_only() {
         let saddr = "127.0.0.1:33445";
-        let matches = app().get_matches_from(vec![
-            "tox-node",
-            "--keys-file",
-            "./keys",
-            "--udp-address",
-            saddr,
-        ]);
+        let matches = app().get_matches_from(vec!["tox-node", "--keys-file", "./keys", "--udp-address", saddr]);
         let config = run_args(&matches);
         assert_eq!(config.keys_file.unwrap(), "./keys");
         assert_eq!(config.udp_addr.unwrap(), saddr.parse().unwrap());
@@ -442,10 +463,10 @@ mod tests {
         let config = run_args(&matches);
         assert_eq!(config.keys_file.unwrap(), "./keys");
         assert!(config.udp_addr.is_none());
-        assert_eq!(config.tcp_addrs, vec![
-            saddr_1.parse().unwrap(),
-            saddr_2.parse().unwrap()
-        ]);
+        assert_eq!(
+            config.tcp_addrs,
+            vec![saddr_1.parse().unwrap(), saddr_2.parse().unwrap()]
+        );
         assert!(!config.lan_discovery_enabled);
     }
 
@@ -492,21 +513,13 @@ mod tests {
 
     #[test]
     fn args_udp_or_tcp_required() {
-        let matches = app().try_get_matches_from(vec![
-            "tox-node",
-            "--keys-file",
-            "./keys",
-        ]);
+        let matches = app().try_get_matches_from(vec!["tox-node", "--keys-file", "./keys"]);
         assert!(matches.is_err());
     }
 
     #[test]
     fn args_keys_file_or_secret_key_required() {
-        let matches = app().try_get_matches_from(vec![
-            "tox-node",
-            "--udp-address",
-            "127.0.0.1:33445",
-        ]);
+        let matches = app().try_get_matches_from(vec!["tox-node", "--udp-address", "127.0.0.1:33445"]);
         assert!(matches.is_err());
     }
 
@@ -615,7 +628,7 @@ mod tests {
             "--udp-address",
             "127.0.0.1:33445",
             "--log-type",
-            "None"
+            "None",
         ]);
         let config = run_args(&matches);
         assert_eq!(config.log_type, LogType::None);
@@ -630,7 +643,7 @@ mod tests {
             "--tcp-address",
             "127.0.0.1:33445",
             "--tcp-connections-limit",
-            "42"
+            "42",
         ]);
         let config = run_args(&matches);
         assert_eq!(config.tcp_connections_limit, 42);
@@ -645,7 +658,7 @@ mod tests {
             "--udp-address",
             "127.0.0.1:33445",
             "--tcp-connections-limit",
-            "42"
+            "42",
         ]);
         assert!(matches.is_err());
     }
@@ -659,7 +672,7 @@ mod tests {
             "--udp-address",
             "127.0.0.1:33445",
             "--threads",
-            "42"
+            "42",
         ]);
         let config = run_args(&matches);
         assert_eq!(config.threads, Threads::N(42));
@@ -667,12 +680,7 @@ mod tests {
 
     #[test]
     fn args_derive_pk_keys_file() {
-        let matches = app().get_matches_from(vec![
-            "tox-node",
-            "derive-pk",
-            "--keys-file",
-            "./keys",
-        ]);
+        let matches = app().get_matches_from(vec!["tox-node", "derive-pk", "--keys-file", "./keys"]);
         let matches = matches.subcommand_matches("derive-pk").unwrap();
         assert_eq!("./keys", matches.get_one::<String>("keys-file").unwrap());
     }
@@ -680,12 +688,7 @@ mod tests {
     #[test]
     fn args_derive_pk_secret_key() {
         let sk_str = "d7f04a6db2c12f1eae0229c72e6bc429ca894541acc5f292da0e4d9a47827774";
-        let matches = app().get_matches_from(vec![
-            "tox-node",
-            "derive-pk",
-            "--secret-key",
-            sk_str
-        ]);
+        let matches = app().get_matches_from(vec!["tox-node", "derive-pk", "--secret-key", sk_str]);
         let matches = matches.subcommand_matches("derive-pk").unwrap();
         assert_eq!(sk_str, matches.get_one::<String>("secret-key").unwrap());
     }

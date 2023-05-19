@@ -4,24 +4,17 @@
 use tox_binary_io::*;
 
 mod alive;
-mod share_relays;
 mod friend_requests;
+mod share_relays;
 
 pub use self::alive::*;
-pub use self::share_relays::*;
 pub use self::friend_requests::*;
+pub use self::share_relays::*;
 
 use nom::branch::alt;
 use nom::combinator::map;
 
-use cookie_factory::{
-    do_gen,
-    gen_slice,
-    gen_call,
-    gen_cond,
-    gen_be_u8,
-    gen_many_ref
-};
+use cookie_factory::{do_gen, gen_be_u8, gen_call, gen_cond, gen_many_ref, gen_slice};
 
 /** Friend connection packet enum that encapsulates all types of Friend connection packets.
 */
@@ -61,17 +54,14 @@ mod tests {
     use rand::thread_rng;
 
     use super::*;
-    use crate::toxid::{NoSpam, NOSPAMBYTES};
     use crate::dht::packed_node::*;
+    use crate::toxid::{NoSpam, NOSPAMBYTES};
 
-    encode_decode_test!(
-        packet_alive_encode_decode,
-        Packet::Alive(Alive)
-    );
+    encode_decode_test!(packet_alive_encode_decode, Packet::Alive(Alive));
 
     encode_decode_test!(
         packet_friend_requests_encode_decode,
-        Packet::FriendRequests(FriendRequests::new(NoSpam([42; NOSPAMBYTES]), vec![1,2,3,4]))
+        Packet::FriendRequests(FriendRequests::new(NoSpam([42; NOSPAMBYTES]), vec![1, 2, 3, 4]))
     );
 
     encode_decode_test!(

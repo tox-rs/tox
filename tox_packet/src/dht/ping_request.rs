@@ -2,16 +2,19 @@
 */
 use super::*;
 
-use crypto_box::{SalsaBox, aead::{Aead, AeadCore, Error as AeadError}};
+use crypto_box::{
+    aead::{Aead, AeadCore, Error as AeadError},
+    SalsaBox,
+};
 use nom::{
-    number::complete::be_u64,
-    combinator::{eof, rest},
     bytes::complete::tag,
+    combinator::{eof, rest},
+    number::complete::be_u64,
 };
 
+use crate::dht::errors::*;
 use tox_binary_io::*;
 use tox_crypto::*;
-use crate::dht::errors::*;
 
 /** Ping request packet struct. Every 60 seconds DHT node sends `PingRequest`
 packet to peers to check whether it is alive. When `PingRequest` is received
@@ -43,6 +46,7 @@ pub struct PingRequest {
 }
 
 impl ToBytes for PingRequest {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x00) >>
@@ -86,18 +90,13 @@ impl PingRequest {
     - fails to parse as given packet type
     */
     pub fn get_payload(&self, shared_secret: &SalsaBox) -> Result<PingRequestPayload, GetPayloadError> {
-        let decrypted = shared_secret.decrypt((&self.nonce).into(), self.payload.as_slice())
-            .map_err(|AeadError| {
-                GetPayloadError::decrypt()
-            })?;
+        let decrypted = shared_secret
+            .decrypt((&self.nonce).into(), self.payload.as_slice())
+            .map_err(|AeadError| GetPayloadError::decrypt())?;
 
         match PingRequestPayload::from_bytes(&decrypted) {
-            Err(error) => {
-                Err(GetPayloadError::deserialize(error, decrypted.clone()))
-            },
-            Ok((_, payload)) => {
-                Ok(payload)
-            }
+            Err(error) => Err(GetPayloadError::deserialize(error, decrypted.clone())),
+            Ok((_, payload)) => Ok(payload),
         }
     }
 }
@@ -140,6 +139,7 @@ impl FromBytes for PingRequestPayload {
 }
 
 impl ToBytes for PingRequestPayload {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x00) >>
@@ -153,10 +153,7 @@ mod tests {
     use crate::dht::ping_request::*;
     use crate::dht::Packet;
 
-    encode_decode_test!(
-        ping_request_payload_encode_decode,
-        PingRequestPayload { id: 42 }
-    );
+    encode_decode_test!(ping_request_payload_encode_decode, PingRequestPayload { id: 42 });
 
     dht_packet_encode_decode!(ping_request_encode_decode, PingRequest);
 

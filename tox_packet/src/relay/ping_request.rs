@@ -5,8 +5,8 @@ use super::*;
 
 use tox_binary_io::*;
 
-use nom::number::complete::be_u64;
 use nom::bytes::complete::tag;
+use nom::number::complete::be_u64;
 
 /** Sent by both client and server, both will respond.
 Ping packets are used to know if the other side of the connection is still
@@ -32,7 +32,7 @@ Length | Content
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct PingRequest {
     /// The id of ping
-    pub ping_id: u64
+    pub ping_id: u64,
 }
 
 impl FromBytes for PingRequest {
@@ -44,6 +44,7 @@ impl FromBytes for PingRequest {
 }
 
 impl ToBytes for PingRequest {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x04) >>
@@ -56,10 +57,5 @@ impl ToBytes for PingRequest {
 mod test {
     use super::*;
 
-    encode_decode_test!(
-        ping_request_encode_decode,
-        PingRequest {
-            ping_id: 12345
-        }
-    );
+    encode_decode_test!(ping_request_encode_decode, PingRequest { ping_id: 12345 });
 }

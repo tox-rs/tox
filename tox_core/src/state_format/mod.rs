@@ -10,6 +10,5 @@ moved out of toxcore into a separate library and maintained there.*
 https://zetok.github.io/tox-spec/#state-format
 */
 
-
 // FIXME: use new dht code instead of old
 pub mod old;

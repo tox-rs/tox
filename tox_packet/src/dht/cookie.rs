@@ -2,20 +2,23 @@
 */
 
 use super::*;
-use nom::number::complete::be_u64;
-use nom::combinator::eof;
 use nom::bytes::complete::take;
-use sha2::{Digest, Sha512};
+use nom::combinator::eof;
+use nom::number::complete::be_u64;
+use rand::{CryptoRng, Rng};
 use sha2::digest::typenum::Unsigned;
 use sha2::digest::OutputSizeUser;
-use xsalsa20poly1305::{XSalsa20Poly1305, aead::{Aead, Error as AeadError}};
-use rand::{CryptoRng, Rng};
+use sha2::{Digest, Sha512};
+use xsalsa20poly1305::{
+    aead::{Aead, Error as AeadError},
+    XSalsa20Poly1305,
+};
 
 use std::{convert::TryInto, time::SystemTime};
 
+use crate::dht::errors::*;
 use tox_binary_io::*;
 use tox_crypto::*;
-use crate::dht::errors::*;
 
 /// Number of seconds that generated cookie is valid
 pub const COOKIE_TIMEOUT: u64 = 15;
@@ -88,6 +91,7 @@ impl FromBytes for Cookie {
 }
 
 impl ToBytes for Cookie {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u64!(self.time) >>
@@ -119,11 +123,18 @@ impl FromBytes for EncryptedCookie {
     fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
         let (input, nonce) = <[u8; xsalsa20poly1305::NONCE_SIZE]>::from_bytes(input)?;
         let (input, payload) = take(88usize)(input)?;
-        Ok((input, EncryptedCookie { nonce, payload: payload.to_vec() }))
+        Ok((
+            input,
+            EncryptedCookie {
+                nonce,
+                payload: payload.to_vec(),
+            },
+        ))
     }
 }
 
 impl ToBytes for EncryptedCookie {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_slice!(self.nonce.as_ref()) >>
@@ -153,17 +164,12 @@ impl EncryptedCookie {
     - fails to parse `Cookie`
     */
     pub fn get_payload(&self, symmetric_key: &XSalsa20Poly1305) -> Result<Cookie, GetPayloadError> {
-        let decrypted = symmetric_key.decrypt(&self.nonce.into(), self.payload.as_slice())
-            .map_err(|AeadError| {
-                GetPayloadError::decrypt()
-            })?;
+        let decrypted = symmetric_key
+            .decrypt(&self.nonce.into(), self.payload.as_slice())
+            .map_err(|AeadError| GetPayloadError::decrypt())?;
         match Cookie::from_bytes(&decrypted) {
-            Err(error) => {
-                Err(GetPayloadError::deserialize(error, decrypted.clone()))
-            },
-            Ok((_, payload)) => {
-                Ok(payload)
-            }
+            Err(error) => Err(GetPayloadError::deserialize(error, decrypted.clone())),
+            Ok((_, payload)) => Ok(payload),
         }
     }
     /// Calculate SHA512 hash of encrypted cookie together with nonce
@@ -178,8 +184,11 @@ impl EncryptedCookie {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nom::{
+        error::{Error, ErrorKind},
+        Err,
+    };
     use rand::thread_rng;
-    use nom::{Err, error::{Error, ErrorKind}};
     use xsalsa20poly1305::KeyInit;
 
     encode_decode_test!(
@@ -203,7 +212,10 @@ mod tests {
     fn cookie_encrypt_decrypt() {
         let mut rng = thread_rng();
         let symmetric_key = XSalsa20Poly1305::new(&XSalsa20Poly1305::generate_key(&mut rng));
-        let payload = Cookie::new(SecretKey::generate(&mut rng).public_key(), SecretKey::generate(&mut rng).public_key());
+        let payload = Cookie::new(
+            SecretKey::generate(&mut rng).public_key(),
+            SecretKey::generate(&mut rng).public_key(),
+        );
         // encode payload with symmetric key
         let encrypted_cookie = EncryptedCookie::new(&mut rng, &symmetric_key, &payload);
         // decode payload with symmetric key
@@ -217,7 +229,10 @@ mod tests {
         let mut rng = thread_rng();
         let symmetric_key = XSalsa20Poly1305::new(&XSalsa20Poly1305::generate_key(&mut rng));
         let eve_symmetric_key = XSalsa20Poly1305::new(&XSalsa20Poly1305::generate_key(&mut rng));
-        let payload = Cookie::new(SecretKey::generate(&mut rng).public_key(), SecretKey::generate(&mut rng).public_key());
+        let payload = Cookie::new(
+            SecretKey::generate(&mut rng).public_key(),
+            SecretKey::generate(&mut rng).public_key(),
+        );
         // encode payload with symmetric key
         let encrypted_cookie = EncryptedCookie::new(&mut rng, &symmetric_key, &payload);
         // try to decode payload with eve's symmetric key
@@ -236,33 +251,42 @@ mod tests {
         let invalid_payload_encoded = symmetric_key.encrypt(&nonce, &invalid_payload[..]).unwrap();
         let invalid_encrypted_cookie = EncryptedCookie {
             nonce: nonce.into(),
-            payload: invalid_payload_encoded
+            payload: invalid_payload_encoded,
         };
         let decoded_payload = invalid_encrypted_cookie.get_payload(&symmetric_key);
         let error = decoded_payload.err().unwrap();
-        assert_eq!(error, GetPayloadError::Deserialize {
-            error: Err::Error(Error::new(vec![42; 51], ErrorKind::Eof)),
-            payload: invalid_payload.to_vec()
-        });
+        assert_eq!(
+            error,
+            GetPayloadError::Deserialize {
+                error: Err::Error(Error::new(vec![42; 51], ErrorKind::Eof)),
+                payload: invalid_payload.to_vec()
+            }
+        );
         // Try short incomplete array
         let invalid_payload = [];
         let invalid_payload_encoded = symmetric_key.encrypt(&nonce, &invalid_payload[..]).unwrap();
         let invalid_encrypted_cookie = EncryptedCookie {
             nonce: nonce.into(),
-            payload: invalid_payload_encoded
+            payload: invalid_payload_encoded,
         };
         let decoded_payload = invalid_encrypted_cookie.get_payload(&symmetric_key);
         let error = decoded_payload.err().unwrap();
-        assert_eq!(error, GetPayloadError::Deserialize {
-            error: Err::Error(Error::new(vec![], ErrorKind::Eof)),
-            payload: invalid_payload.to_vec()
-        });
+        assert_eq!(
+            error,
+            GetPayloadError::Deserialize {
+                error: Err::Error(Error::new(vec![], ErrorKind::Eof)),
+                payload: invalid_payload.to_vec()
+            }
+        );
     }
 
     #[test]
     fn cookie_timed_out() {
         let mut rng = thread_rng();
-        let mut cookie = Cookie::new(SecretKey::generate(&mut rng).public_key(), SecretKey::generate(&mut rng).public_key());
+        let mut cookie = Cookie::new(
+            SecretKey::generate(&mut rng).public_key(),
+            SecretKey::generate(&mut rng).public_key(),
+        );
         assert!(!cookie.is_timed_out());
         cookie.time -= COOKIE_TIMEOUT + 1;
         assert!(cookie.is_timed_out());
@@ -274,16 +298,16 @@ mod tests {
         let payload = vec![42; 88];
         let cookie = EncryptedCookie {
             nonce,
-            payload: payload.clone()
+            payload: payload.clone(),
         };
 
         let cookie_1 = EncryptedCookie {
             nonce,
-            payload: vec![43; 88]
+            payload: vec![43; 88],
         };
         let cookie_2 = EncryptedCookie {
             nonce: [43; xsalsa20poly1305::NONCE_SIZE],
-            payload
+            payload,
         };
 
         assert_ne!(cookie.hash(), cookie_1.hash());

@@ -72,13 +72,13 @@ impl<T> PacketsArray<T> {
     /// packet with this index already exists
     pub fn insert(&mut self, index: u32, packet: T) -> Result<(), PacketsArrayError> {
         if index.overflowing_sub(self.buffer_start).0 >= CRYPTO_PACKET_BUFFER_SIZE {
-            return Err(PacketsArrayError::too_big(index))
+            return Err(PacketsArrayError::too_big(index));
         }
 
         let i = real_index(index);
 
         if self.buffer[i].is_some() {
-            return Err(PacketsArrayError::already_exist(index))
+            return Err(PacketsArrayError::already_exist(index));
         }
 
         self.buffer[i] = Some(Box::new(packet));
@@ -94,7 +94,7 @@ impl<T> PacketsArray<T> {
     /// Returns an error when the buffer is full
     pub fn push_back(&mut self, packet: T) -> Result<(), PacketsArrayError> {
         if self.len() == CRYPTO_PACKET_BUFFER_SIZE {
-            return Err(PacketsArrayError::ArrayFull)
+            return Err(PacketsArrayError::ArrayFull);
         }
 
         self.buffer[real_index(self.buffer_end)] = Some(Box::new(packet));
@@ -106,7 +106,7 @@ impl<T> PacketsArray<T> {
     /// Get packet at the start index and increment index if the packet exists
     pub fn pop_front(&mut self) -> Option<T> {
         if self.buffer_start == self.buffer_end {
-            return None
+            return None;
         }
 
         let i = real_index(self.buffer_start);
@@ -122,7 +122,7 @@ impl<T> PacketsArray<T> {
         let len = self.len();
 
         if self.buffer_end.overflowing_sub(index).0 > len || index.overflowing_sub(self.buffer_start).0 >= len {
-            return false
+            return false;
         }
 
         self.buffer[real_index(index)].is_some()
@@ -133,7 +133,7 @@ impl<T> PacketsArray<T> {
         let len = self.len();
 
         if self.buffer_end.overflowing_sub(index).0 > len || index.overflowing_sub(self.buffer_start).0 >= len {
-            return None
+            return None;
         }
 
         self.buffer[real_index(index)].as_deref()
@@ -144,7 +144,7 @@ impl<T> PacketsArray<T> {
         let len = self.len();
 
         if self.buffer_end.overflowing_sub(index).0 > len || index.overflowing_sub(self.buffer_start).0 >= len {
-            return None
+            return None;
         }
 
         self.buffer[real_index(index)].as_deref_mut()
@@ -156,7 +156,7 @@ impl<T> PacketsArray<T> {
         let len = self.len();
 
         if self.buffer_end.overflowing_sub(index).0 > len || index.overflowing_sub(self.buffer_start).0 >= len {
-            return None
+            return None;
         }
 
         self.buffer[real_index(index)].take().map(|packet| *packet)
@@ -168,11 +168,11 @@ impl<T> PacketsArray<T> {
     /// index is lower then end index
     pub fn set_buffer_end(&mut self, index: u32) -> Result<(), PacketsArrayError> {
         if index.overflowing_sub(self.buffer_start).0 > CRYPTO_PACKET_BUFFER_SIZE {
-            return Err(PacketsArrayError::too_big(index))
+            return Err(PacketsArrayError::too_big(index));
         }
 
         if index.overflowing_sub(self.buffer_end).0 > CRYPTO_PACKET_BUFFER_SIZE {
-            return Err(PacketsArrayError::lower_index(index))
+            return Err(PacketsArrayError::lower_index(index));
         }
 
         self.buffer_end = index;
@@ -187,10 +187,10 @@ impl<T> PacketsArray<T> {
         let len = self.len();
 
         if self.buffer_end.overflowing_sub(index).0 > len || index.overflowing_sub(self.buffer_start).0 > len {
-            return Err(PacketsArrayError::outside_index(index))
+            return Err(PacketsArrayError::outside_index(index));
         }
 
-        for packet in &mut self.buffer[real_index(self.buffer_start) .. real_index(index)] {
+        for packet in &mut self.buffer[real_index(self.buffer_start)..real_index(index)] {
             *packet = None;
         }
 
@@ -208,13 +208,13 @@ impl<T> PacketsArray<T> {
             let (first, second) = self.buffer.split_at_mut(start);
             second.iter_mut().chain(first.iter_mut().take(end))
         } else {
-            [].iter_mut().chain(self.buffer[start ..].iter_mut().take(end - start))
+            [].iter_mut().chain(self.buffer[start..].iter_mut().take(end - start))
         };
-        iter.enumerate().flat_map(move |(i, packet)|
-            packet.iter_mut().map(move |packet|
-                (buffer_start.overflowing_add(i as u32).0, &mut **packet)
-            )
-        )
+        iter.enumerate().flat_map(move |(i, packet)| {
+            packet
+                .iter_mut()
+                .map(move |packet| (buffer_start.overflowing_add(i as u32).0, &mut **packet))
+        })
     }
 }
 
@@ -264,13 +264,23 @@ mod tests {
         let mut array = PacketsArray::<()>::new();
         let res = array.insert(CRYPTO_PACKET_BUFFER_SIZE, ());
         assert!(res.is_err());
-        assert_eq!(res.err().unwrap(), PacketsArrayError::TooBig { index: CRYPTO_PACKET_BUFFER_SIZE });
+        assert_eq!(
+            res.err().unwrap(),
+            PacketsArrayError::TooBig {
+                index: CRYPTO_PACKET_BUFFER_SIZE
+            }
+        );
         assert_eq!(array.buffer_start, 0);
         assert_eq!(array.buffer_end, 0);
         array.buffer_start = u32::max_value();
         let res = array.insert(CRYPTO_PACKET_BUFFER_SIZE - 1, ());
         assert!(res.is_err());
-        assert_eq!(res.err().unwrap(), PacketsArrayError::TooBig { index: CRYPTO_PACKET_BUFFER_SIZE - 1 });
+        assert_eq!(
+            res.err().unwrap(),
+            PacketsArrayError::TooBig {
+                index: CRYPTO_PACKET_BUFFER_SIZE - 1
+            }
+        );
         assert_eq!(array.buffer_start, u32::max_value());
         assert_eq!(array.buffer_end, 0);
     }
@@ -389,7 +399,12 @@ mod tests {
         let mut array = PacketsArray::<()>::new();
         let res = array.set_buffer_end(CRYPTO_PACKET_BUFFER_SIZE + 1);
         assert!(res.is_err());
-        assert_eq!(res.err().unwrap(), PacketsArrayError::TooBig { index: CRYPTO_PACKET_BUFFER_SIZE + 1 });
+        assert_eq!(
+            res.err().unwrap(),
+            PacketsArrayError::TooBig {
+                index: CRYPTO_PACKET_BUFFER_SIZE + 1
+            }
+        );
         assert_eq!(array.buffer_start, 0);
         assert_eq!(array.buffer_end, 0);
     }
@@ -458,10 +473,7 @@ mod tests {
         assert!(array.insert(0, ()).is_ok());
         assert!(array.insert(2, ()).is_ok());
         assert!(array.insert(5, ()).is_ok());
-        assert_eq!(
-            array.iter_mut().map(|(i, _)| i).collect::<Vec<_>>(),
-            vec![0, 2, 5]
-        );
+        assert_eq!(array.iter_mut().map(|(i, _)| i).collect::<Vec<_>>(), vec![0, 2, 5]);
     }
 
     #[test]

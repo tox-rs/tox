@@ -1,11 +1,11 @@
 /*! Codecs to deal with ClientHandshake and ServerHandshake in terms of tokio-io
 */
 
-use tox_binary_io::*;
 use crate::relay::handshake::packet::*;
+use tox_binary_io::*;
 
+use bytes::{Buf, BytesMut};
 use nom::{Err, Offset};
-use bytes::{BytesMut, Buf};
 use std::io::{Error, ErrorKind};
 use tokio_util::codec::{Decoder, Encoder};
 
@@ -18,13 +18,9 @@ impl Decoder for ClientHandshakeCodec {
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         let (consumed, handshake) = match ClientHandshake::from_bytes(buf) {
-            Err(Err::Incomplete(_)) => {
-                return Ok(None)
-            },
+            Err(Err::Incomplete(_)) => return Ok(None),
             Err(_) => unreachable!("ClientHandshake cannot be deserialized with error"),
-            Ok((i, handshake)) => {
-                (buf.offset(i), handshake)
-            }
+            Ok((i, handshake)) => (buf.offset(i), handshake),
         };
         buf.advance(consumed);
         Ok(Some(handshake))
@@ -36,14 +32,10 @@ impl Encoder<ClientHandshake> for ClientHandshakeCodec {
 
     fn encode(&mut self, handshake: ClientHandshake, buf: &mut BytesMut) -> Result<(), Self::Error> {
         let mut handshake_buf = [0; CLIENT_HANDSHAKE_SIZE];
-        handshake.to_bytes((&mut handshake_buf, 0))
-            .map(|(handshake_buf, handshake_size)|
-                buf.extend_from_slice(&handshake_buf[..handshake_size])
-            )
-            .map_err(|e|
-                Error::new(ErrorKind::Other,
-                           format!("Client handshake serialize error: {:?}", e))
-            )
+        handshake
+            .to_bytes((&mut handshake_buf, 0))
+            .map(|(handshake_buf, handshake_size)| buf.extend_from_slice(&handshake_buf[..handshake_size]))
+            .map_err(|e| Error::new(ErrorKind::Other, format!("Client handshake serialize error: {:?}", e)))
     }
 }
 
@@ -56,13 +48,9 @@ impl Decoder for ServerHandshakeCodec {
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         let (consumed, handshake) = match ServerHandshake::from_bytes(buf) {
-            Err(Err::Incomplete(_)) => {
-                return Ok(None)
-            },
+            Err(Err::Incomplete(_)) => return Ok(None),
             Err(_) => unreachable!("ServerHandshake cannot be deserialized with error"),
-            Ok((i, handshake)) => {
-                (buf.offset(i), handshake)
-            }
+            Ok((i, handshake)) => (buf.offset(i), handshake),
         };
         buf.advance(consumed);
         Ok(Some(handshake))
@@ -74,14 +62,10 @@ impl Encoder<ServerHandshake> for ServerHandshakeCodec {
 
     fn encode(&mut self, handshake: ServerHandshake, buf: &mut BytesMut) -> Result<(), Self::Error> {
         let mut handshake_buf = [0; SERVER_HANDSHAKE_SIZE];
-        handshake.to_bytes((&mut handshake_buf, 0))
-            .map(|(handshake_buf, handshake_size)|
-                buf.extend_from_slice(&handshake_buf[..handshake_size])
-            )
-            .map_err(|e|
-                Error::new(ErrorKind::Other,
-                           format!("Server handshake serialize error: {:?}", e))
-            )
+        handshake
+            .to_bytes((&mut handshake_buf, 0))
+            .map(|(handshake_buf, handshake_size)| buf.extend_from_slice(&handshake_buf[..handshake_size]))
+            .map_err(|e| Error::new(ErrorKind::Other, format!("Server handshake serialize error: {:?}", e)))
     }
 }
 
@@ -89,14 +73,17 @@ impl Encoder<ServerHandshake> for ServerHandshakeCodec {
 mod tests {
     use crate::relay::handshake::codec::*;
     use bytes::BytesMut;
-    use crypto_box::{SalsaBox, SecretKey, aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned}};
+    use crypto_box::{
+        aead::{generic_array::typenum::marker_traits::Unsigned, AeadCore},
+        SalsaBox, SecretKey,
+    };
     use rand::thread_rng;
 
     #[test]
     fn client_encode_decode() {
         let pk = SecretKey::generate(&mut thread_rng()).public_key();
         let mut buf = BytesMut::new();
-        let mut codec = ClientHandshakeCodec { };
+        let mut codec = ClientHandshakeCodec {};
         let handshake = ClientHandshake {
             pk,
             nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
@@ -109,7 +96,7 @@ mod tests {
     #[test]
     fn client_decode_incomplete() {
         let mut buf = BytesMut::new();
-        let mut codec = ClientHandshakeCodec { };
+        let mut codec = ClientHandshakeCodec {};
         assert!(codec.decode(&mut buf).unwrap().is_none());
     }
     #[test]
@@ -121,13 +108,13 @@ mod tests {
             payload: vec![42; ENC_PAYLOAD_SIZE + 1],
         };
         let mut buf = BytesMut::new();
-        let mut codec = ClientHandshakeCodec { };
+        let mut codec = ClientHandshakeCodec {};
         assert!(codec.encode(handshake, &mut buf).is_err());
     }
     #[test]
     fn server_encode_decode() {
         let mut buf = BytesMut::new();
-        let mut codec = ServerHandshakeCodec { };
+        let mut codec = ServerHandshakeCodec {};
         let handshake = ServerHandshake {
             nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             payload: vec![42; ENC_PAYLOAD_SIZE],
@@ -139,13 +126,13 @@ mod tests {
     #[test]
     fn server_decode_incomplete() {
         let mut buf = BytesMut::new();
-        let mut codec = ServerHandshakeCodec { };
+        let mut codec = ServerHandshakeCodec {};
         assert!(codec.decode(&mut buf).unwrap().is_none());
     }
     #[test]
     fn server_encode_too_big() {
         let mut buf = BytesMut::new();
-        let mut codec = ServerHandshakeCodec { };
+        let mut codec = ServerHandshakeCodec {};
         let handshake = ServerHandshake {
             nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             payload: vec![42; ENC_PAYLOAD_SIZE + 1],

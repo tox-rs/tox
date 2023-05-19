@@ -1,18 +1,18 @@
 //! Crypto connection implementation.
 
+use crypto_box::{aead::AeadCore, SalsaBox};
+use rand::{thread_rng, Rng};
 use std::convert::Into;
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::time::{Duration, Instant};
-use crypto_box::{SalsaBox, aead::AeadCore};
-use rand::{thread_rng, Rng};
 use xsalsa20poly1305::XSalsa20Poly1305;
 
 use super::packets_array::*;
 
 use crate::dht::ip_port::IsGlobal;
+use crate::time::*;
 use tox_crypto::*;
 use tox_packet::dht::*;
-use crate::time::*;
 
 /// Interval in ms between sending cookie request/handshake packets.
 pub const CRYPTO_SEND_PACKET_INTERVAL_MS: u64 = 1000;
@@ -85,7 +85,7 @@ pub struct StatusPacketWithTime {
     /// When packet was sent last time
     pub sent_time: Instant,
     /// How many times packet was sent
-    pub num_sent: u8
+    pub num_sent: u8,
 }
 
 impl StatusPacketWithTime {
@@ -94,7 +94,7 @@ impl StatusPacketWithTime {
         StatusPacketWithTime {
             packet: StatusPacket::CookieRequest(packet),
             sent_time: clock_now(),
-            num_sent: 0
+            num_sent: 0,
         }
     }
 
@@ -103,7 +103,7 @@ impl StatusPacketWithTime {
         StatusPacketWithTime {
             packet: StatusPacket::CryptoHandshake(packet),
             sent_time: clock_now(),
-            num_sent: 0
+            num_sent: 0,
         }
     }
 
@@ -197,7 +197,7 @@ pub struct SentPacket {
     pub sent_time: Instant,
     /// True if a request was received for this packet and rtt was elapsed at
     /// that moment
-    pub requested: bool
+    pub requested: bool,
 }
 
 impl SentPacket {
@@ -206,7 +206,7 @@ impl SentPacket {
         SentPacket {
             data,
             sent_time: clock_now(),
-            requested: false
+            requested: false,
         }
     }
 }
@@ -215,15 +215,13 @@ impl SentPacket {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RecvPacket {
     /// Packet data
-    pub data: Vec<u8>
+    pub data: Vec<u8>,
 }
 
 impl RecvPacket {
     /// Create new `RecvPacket`
     pub fn new(data: Vec<u8>) -> RecvPacket {
-        RecvPacket {
-            data
-        }
+        RecvPacket { data }
     }
 }
 
@@ -292,7 +290,6 @@ pub struct CryptoConnection {
     pub request_packet_sent_time: Option<Instant>,
 
     // Stats for congestion control
-
     /// Time since the last stats calculation.
     pub stats_calculation_time: Instant,
     /// Number of received lossless packets since the last rate calculation.
@@ -323,7 +320,13 @@ pub struct CryptoConnection {
 impl CryptoConnection {
     /// Create new `CryptoConnection` with `CookieRequesting` status. This
     /// function is used when we initiate crypto connection with a friend.
-    pub fn new(dht_precomputed_key: &SalsaBox, dht_pk: PublicKey, real_pk: PublicKey, peer_real_pk: PublicKey, peer_dht_pk: PublicKey) -> CryptoConnection {
+    pub fn new(
+        dht_precomputed_key: &SalsaBox,
+        dht_pk: PublicKey,
+        real_pk: PublicKey,
+        peer_real_pk: PublicKey,
+        peer_dht_pk: PublicKey,
+    ) -> CryptoConnection {
         let mut rng = thread_rng();
         let session_sk = SecretKey::generate(&mut rng);
         let session_pk = session_sk.public_key();
@@ -331,12 +334,12 @@ impl CryptoConnection {
         let cookie_request_id = rng.gen();
         let cookie_request_payload = CookieRequestPayload {
             pk: real_pk,
-            id: cookie_request_id
+            id: cookie_request_id,
         };
         let cookie_request = CookieRequest::new(dht_precomputed_key, dht_pk, &cookie_request_payload);
         let status = ConnectionStatus::CookieRequesting {
             cookie_request_id,
-            packet: StatusPacketWithTime::new_cookie_request(cookie_request)
+            packet: StatusPacketWithTime::new_cookie_request(cookie_request),
         };
 
         CryptoConnection {
@@ -397,7 +400,7 @@ impl CryptoConnection {
             sent_nonce: sent_nonce.into(),
             received_nonce,
             session_precomputed_key: SalsaBox::new(&peer_session_pk, &session_sk),
-            packet: StatusPacketWithTime::new_crypto_handshake(handshake)
+            packet: StatusPacketWithTime::new_crypto_handshake(handshake),
         };
 
         CryptoConnection {
@@ -442,7 +445,7 @@ impl CryptoConnection {
                 } else {
                     None
                 }
-            },
+            }
             ConnectionStatus::Established { .. } => None,
         }
     }
@@ -520,8 +523,8 @@ impl CryptoConnection {
 
     /// Check if we received the last UDP packet not later than 8 seconds ago
     pub fn is_udp_alive(&self) -> bool {
-        self.udp_addr_v4.as_ref().map_or(false, |addr| addr.is_alive()) ||
-            self.udp_addr_v6.as_ref().map_or(false, |addr| addr.is_alive())
+        self.udp_addr_v4.as_ref().map_or(false, |addr| addr.is_alive())
+            || self.udp_addr_v6.as_ref().map_or(false, |addr| addr.is_alive())
     }
 
     /// Check if we should send UDP packet regardless of whether UDP is dead or
@@ -535,7 +538,8 @@ impl CryptoConnection {
     /// Calculate packets receive rate.
     fn calculate_recv_rate(&mut self, now: Instant) {
         let dt = now - self.stats_calculation_time;
-        self.packet_recv_rate = f64::from(self.packets_received) / (dt.as_secs() as f64 + f64::from(dt.subsec_millis()) / 1000.0);
+        self.packet_recv_rate =
+            f64::from(self.packets_received) / (dt.as_secs() as f64 + f64::from(dt.subsec_millis()) / 1000.0);
     }
 
     /// Calculate packets send rate.
@@ -560,9 +564,8 @@ impl CryptoConnection {
 
         // Based on rtt offset in number of positions for last_num_packets arrays (one position equals 50 ms)
         let delay = ((
-            self.rtt.as_secs() * 1000 +
-                u64::from(self.rtt.subsec_millis()) +
-                PACKET_COUNTER_AVERAGE_INTERVAL_MS / 2 // add half of the interval to make delay rounded
+            self.rtt.as_secs() * 1000 + u64::from(self.rtt.subsec_millis()) + PACKET_COUNTER_AVERAGE_INTERVAL_MS / 2
+            // add half of the interval to make delay rounded
         ) / PACKET_COUNTER_AVERAGE_INTERVAL_MS) as usize;
         let delay = delay.min(CONGESTION_MAX_DELAY);
 
@@ -571,7 +574,7 @@ impl CryptoConnection {
         // ...++++++++++++..x......
         let mut total_sent = 0;
         let mut total_resent = 0;
-        for i in 0 .. CONGESTION_QUEUE_ARRAY_SIZE {
+        for i in 0..CONGESTION_QUEUE_ARRAY_SIZE {
             let i = (n_p_pos + (CONGESTION_MAX_DELAY - delay) + i) % CONGESTION_LAST_SENT_ARRAY_SIZE;
             total_sent += self.last_num_packets_sent[i] as i32;
             total_resent += self.last_num_packets_resent[i] as i32;
@@ -596,17 +599,21 @@ impl CryptoConnection {
         let send_array_time = f64::from(send_array_len) / min_speed;
 
         // And, finally, estimated packets send rate
-        let packet_send_rate = if send_array_time > SEND_QUEUE_CLEARANCE_TIME && send_array_len > CRYPTO_MIN_QUEUE_LENGTH {
-            // It will take more than SEND_QUEUE_CLEARANCE_TIME seconds to send
-            // all packets from send queue. Reduce packets send rate in this case
-            min_speed / (send_array_time / SEND_QUEUE_CLEARANCE_TIME)
-        } else if self.last_congestion_event.map_or(true, |time| (now - time) > CONGESTION_EVENT_TIMEOUT) {
-            // Congestion event happened long ago so increase packets send rate
-            min_speed * 1.2
-        } else {
-            // Congestion event happened recently so decrease packets send rate
-            min_speed * 0.9
-        };
+        let packet_send_rate =
+            if send_array_time > SEND_QUEUE_CLEARANCE_TIME && send_array_len > CRYPTO_MIN_QUEUE_LENGTH {
+                // It will take more than SEND_QUEUE_CLEARANCE_TIME seconds to send
+                // all packets from send queue. Reduce packets send rate in this case
+                min_speed / (send_array_time / SEND_QUEUE_CLEARANCE_TIME)
+            } else if self
+                .last_congestion_event
+                .map_or(true, |time| (now - time) > CONGESTION_EVENT_TIMEOUT)
+            {
+                // Congestion event happened long ago so increase packets send rate
+                min_speed * 1.2
+            } else {
+                // Congestion event happened recently so decrease packets send rate
+                min_speed * 0.9
+            };
         let packet_send_rate = packet_send_rate.max(CRYPTO_PACKET_MIN_RATE);
         let packet_send_rate_requested = min_speed_request * 1.2;
         let packet_send_rate_requested = packet_send_rate_requested.max(packet_send_rate);
@@ -633,9 +640,11 @@ impl CryptoConnection {
 
     /// Calculate the interval in ms for request packet.
     pub fn request_packet_interval(&self) -> Duration {
-        let request_packet_interval = REQUEST_PACKETS_COMPARE_CONSTANT / ((f64::from(self.recv_array.len()) + 1.0) / (self.packet_recv_rate + 1.0));
+        let request_packet_interval = REQUEST_PACKETS_COMPARE_CONSTANT
+            / ((f64::from(self.recv_array.len()) + 1.0) / (self.packet_recv_rate + 1.0));
         let request_packet_interval = request_packet_interval.min(
-            CRYPTO_PACKET_MIN_RATE / self.packet_recv_rate * CRYPTO_SEND_PACKET_INTERVAL_MS as f64 + PACKET_COUNTER_AVERAGE_INTERVAL_MS as f64
+            CRYPTO_PACKET_MIN_RATE / self.packet_recv_rate * CRYPTO_SEND_PACKET_INTERVAL_MS as f64
+                + PACKET_COUNTER_AVERAGE_INTERVAL_MS as f64,
         );
         let request_packet_interval = (request_packet_interval.round() as u64)
             .max(PACKET_COUNTER_AVERAGE_INTERVAL_MS) // lower bound
@@ -657,7 +666,10 @@ impl CryptoConnection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crypto_box::{SalsaBox, aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned}};
+    use crypto_box::{
+        aead::{generic_array::typenum::marker_traits::Unsigned, AeadCore},
+        SalsaBox,
+    };
 
     #[tokio::test]
     async fn status_packet_should_be_sent() {
@@ -666,7 +678,7 @@ mod tests {
         let mut packet = StatusPacketWithTime::new_cookie_request(CookieRequest {
             pk: SecretKey::generate(&mut rng).public_key(),
             nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
-            payload: vec![42; 88]
+            payload: vec![42; 88],
         });
 
         assert!(packet.should_be_sent());
@@ -695,7 +707,7 @@ mod tests {
         let mut packet = StatusPacketWithTime::new_cookie_request(CookieRequest {
             pk: SecretKey::generate(&mut rng).public_key(),
             nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
-            payload: vec![42; 88]
+            payload: vec![42; 88],
         });
 
         assert!(!packet.is_timed_out());
@@ -802,7 +814,10 @@ mod tests {
         connection.status = ConnectionStatus::Established {
             sent_nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             received_nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
-            session_precomputed_key: SalsaBox::new(&SecretKey::generate(&mut rng).public_key(), &SecretKey::generate(&mut rng)),
+            session_precomputed_key: SalsaBox::new(
+                &SecretKey::generate(&mut rng).public_key(),
+                &SecretKey::generate(&mut rng),
+            ),
         };
 
         assert!(!connection.is_not_confirmed());
@@ -823,16 +838,19 @@ mod tests {
         let crypto_handshake = CryptoHandshake {
             cookie: EncryptedCookie {
                 nonce: [42; xsalsa20poly1305::NONCE_SIZE],
-                payload: vec![42; 88]
+                payload: vec![42; 88],
             },
             nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
-            payload: vec![42; 248]
+            payload: vec![42; 248],
         };
 
         connection.status = ConnectionStatus::NotConfirmed {
             sent_nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
             received_nonce: [42; <SalsaBox as AeadCore>::NonceSize::USIZE],
-            session_precomputed_key: SalsaBox::new(&SecretKey::generate(&mut rng).public_key(), &SecretKey::generate(&mut rng)),
+            session_precomputed_key: SalsaBox::new(
+                &SecretKey::generate(&mut rng).public_key(),
+                &SecretKey::generate(&mut rng),
+            ),
             packet: StatusPacketWithTime::new_crypto_handshake(crypto_handshake),
         };
 

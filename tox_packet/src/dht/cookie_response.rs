@@ -1,19 +1,20 @@
 /*! CookieResponse packet
 */
 
-use crypto_box::{SalsaBox, aead::{Aead, AeadCore, Error as AeadError}};
-use nom::number::complete::be_u64;
+use crypto_box::{
+    aead::{Aead, AeadCore, Error as AeadError},
+    SalsaBox,
+};
 use nom::bytes::complete::{tag, take};
 use nom::combinator::eof;
+use nom::number::complete::be_u64;
 
-use cookie_factory::{
-    do_gen, gen_slice, gen_be_u8, gen_call, gen_be_u64
-};
+use cookie_factory::{do_gen, gen_be_u64, gen_be_u8, gen_call, gen_slice};
 
-use tox_binary_io::*;
-use tox_crypto::*;
 use crate::dht::cookie::EncryptedCookie;
 use crate::dht::errors::*;
+use tox_binary_io::*;
+use tox_crypto::*;
 
 /** Response to a `CookieRequest` packet.
 
@@ -43,11 +44,18 @@ impl FromBytes for CookieResponse {
         let (input, nonce) = Nonce::from_bytes(input)?;
         let (input, payload) = take(136usize)(input)?;
         let (input, _) = eof(input)?;
-        Ok((input, CookieResponse { nonce, payload: payload.to_vec() }))
+        Ok((
+            input,
+            CookieResponse {
+                nonce,
+                payload: payload.to_vec(),
+            },
+        ))
     }
 }
 
 impl ToBytes for CookieResponse {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0x19) >>
@@ -78,17 +86,12 @@ impl CookieResponse {
     - fails to parse `CookieResponsePayload`
     */
     pub fn get_payload(&self, shared_secret: &SalsaBox) -> Result<CookieResponsePayload, GetPayloadError> {
-        let decrypted = shared_secret.decrypt((&self.nonce).into(), self.payload.as_slice())
-            .map_err(|AeadError| {
-                GetPayloadError::decrypt()
-            })?;
+        let decrypted = shared_secret
+            .decrypt((&self.nonce).into(), self.payload.as_slice())
+            .map_err(|AeadError| GetPayloadError::decrypt())?;
         match CookieResponsePayload::from_bytes(&decrypted) {
-            Err(error) => {
-                Err(GetPayloadError::deserialize(error, decrypted.clone()))
-            },
-            Ok((_, payload)) => {
-                Ok(payload)
-            }
+            Err(error) => Err(GetPayloadError::deserialize(error, decrypted.clone())),
+            Ok((_, payload)) => Ok(payload),
         }
     }
 }
@@ -125,9 +128,9 @@ impl FromBytes for CookieResponsePayload {
 
 impl ToBytes for CookieResponsePayload {
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
-        do_gen!(buf,
-            gen_call!(|buf, cookie| EncryptedCookie::to_bytes(cookie, buf), &self.cookie) >>
-            gen_be_u64!(self.id)
+        do_gen!(
+            buf,
+            gen_call!(|buf, cookie| EncryptedCookie::to_bytes(cookie, buf), &self.cookie) >> gen_be_u64!(self.id)
         )
     }
 }
@@ -137,8 +140,11 @@ mod tests {
     use std::num::NonZeroUsize;
 
     use super::*;
-    use nom::{Needed, Err, error::{Error, ErrorKind}};
-    use crypto_box::aead::{AeadCore, generic_array::typenum::marker_traits::Unsigned};
+    use crypto_box::aead::{generic_array::typenum::marker_traits::Unsigned, AeadCore};
+    use nom::{
+        error::{Error, ErrorKind},
+        Err, Needed,
+    };
     use rand::thread_rng;
 
     encode_decode_test!(
@@ -216,26 +222,32 @@ mod tests {
         let invalid_payload_encoded = shared_secret.encrypt(&nonce, &invalid_payload[..]).unwrap();
         let invalid_packet = CookieResponse {
             nonce: nonce.into(),
-            payload: invalid_payload_encoded
+            payload: invalid_payload_encoded,
         };
         let decoded_payload = invalid_packet.get_payload(&shared_secret);
         let error = decoded_payload.err().unwrap();
-        assert_eq!(error, GetPayloadError::Deserialize {
-            error: Err::Error(Error::new(vec![42; 3], ErrorKind::Eof)),
-            payload: invalid_payload.to_vec()
-        });
+        assert_eq!(
+            error,
+            GetPayloadError::Deserialize {
+                error: Err::Error(Error::new(vec![42; 3], ErrorKind::Eof)),
+                payload: invalid_payload.to_vec()
+            }
+        );
         // Try short incomplete array
         let invalid_payload = [];
         let invalid_payload_encoded = shared_secret.encrypt(&nonce, &invalid_payload[..]).unwrap();
         let invalid_packet = CookieResponse {
             nonce: nonce.into(),
-            payload: invalid_payload_encoded
+            payload: invalid_payload_encoded,
         };
         let decoded_payload = invalid_packet.get_payload(&shared_secret);
         let error = decoded_payload.err().unwrap();
-        assert_eq!(error, GetPayloadError::Deserialize {
-            error: Err::Incomplete(Needed::Size(NonZeroUsize::new(24).unwrap())),
-            payload: invalid_payload.to_vec()
-        });
+        assert_eq!(
+            error,
+            GetPayloadError::Deserialize {
+                error: Err::Incomplete(Needed::Size(NonZeroUsize::new(24).unwrap())),
+                payload: invalid_payload.to_vec()
+            }
+        );
     }
 }

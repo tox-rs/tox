@@ -3,14 +3,14 @@ Statistics of incoming/outgoing packets
 This is used by both Udp codec and Tcp codec.
 */
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 /// Struct for various counters
 #[derive(Clone, Default)]
 pub struct Stats {
     /// incoming/outgoing counters
-    pub counters: Arc<Counters>
+    pub counters: Arc<Counters>,
 }
 
 impl Stats {

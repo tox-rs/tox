@@ -3,14 +3,11 @@
 
 use super::*;
 
-use nom::{
-    number::complete::be_u32,
-    combinator::rest
-};
+use nom::{combinator::rest, number::complete::be_u32};
 
-use tox_binary_io::*;
-use nom::combinator::verify;
 use nom::bytes::complete::tag;
+use nom::combinator::verify;
+use tox_binary_io::*;
 
 /** Sent by both client and server, only server will respond.
 When server receives this packet it may respond with the version of the library
@@ -49,6 +46,7 @@ pub const BOOSTRAP_SERVER_MAX_MOTD_LENGTH: usize = 256;
 pub const BOOSTRAP_CLIENT_MAX_MOTD_LENGTH: usize = 73;
 
 impl ToBytes for BootstrapInfo {
+    #[rustfmt::skip]
     fn to_bytes<'a>(&self, buf: (&'a mut [u8], usize)) -> Result<(&'a mut [u8], usize), GenError> {
         do_gen!(buf,
             gen_be_u8!(0xf0) >>
@@ -63,7 +61,13 @@ impl FromBytes for BootstrapInfo {
         let (input, _) = tag(&[0xf0][..])(input)?;
         let (input, version) = be_u32(input)?;
         let (input, motd) = verify(rest, |motd: &[u8]| motd.len() <= BOOSTRAP_SERVER_MAX_MOTD_LENGTH)(input)?;
-        Ok((input, BootstrapInfo { version, motd: motd.to_vec() }))
+        Ok((
+            input,
+            BootstrapInfo {
+                version,
+                motd: motd.to_vec(),
+            },
+        ))
     }
 }
 
@@ -75,7 +79,7 @@ mod tests {
         bootstrap_info_encode_decode,
         BootstrapInfo {
             version: 1717,
-            motd: vec![1,2,3,4],
+            motd: vec![1, 2, 3, 4],
         }
     );
 }
