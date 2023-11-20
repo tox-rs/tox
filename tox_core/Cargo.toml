@@ -39,7 +39,7 @@ crypto_box = "0.8"
 [dependencies.tokio]
 version = "1.28"
 default-features = false
-features = ["net", "sync", "time"]
+features = ["net", "rt", "sync", "time"]
 
 [dependencies.tokio-util]
 version = "0.7"
