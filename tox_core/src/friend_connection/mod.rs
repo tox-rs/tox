@@ -426,6 +426,10 @@ impl FriendConnections {
         self.onion_client.set_dht_pk_sink(dht_pk_tx.clone()).await;
         self.net_crypto.set_dht_pk_sink(dht_pk_tx).await;
 
+        let (dht_pk_announce_tx, dht_pk_announce_rx) = mpsc::unbounded();
+        self.dht.set_dht_pk_announce_sink(dht_pk_announce_tx).await;
+        self.onion_client.set_dht_pk_announce_sink(dht_pk_announce_rx).await;
+
         let (friend_saddr_tx, mut friend_saddr_rx) = mpsc::unbounded();
         self.dht.set_friend_saddr_sink(friend_saddr_tx).await;
 
@@ -1176,5 +1180,71 @@ mod tests {
             _ = join.fuse() => {},
             _ = connection_status_future.fuse() => {},
         }
+    }
+
+    #[tokio::test]
+    async fn dht_pk_announce_middleware_chain() {
+        // Regression test for the friend-handshake stall at the onion-announce step.
+        // Verifies that a `DhtPkAnnounce` payload received via a plain DHT Request is
+        // forwarded through the new `DhtServer` → `UnboundedSender` → `OnionClient`
+        // chain and registered as the friend's DHT key.
+        let mut rng = thread_rng();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
+        let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
+        let dht = DhtServer::new(udp_tx, dht_pk.clone(), dht_sk.clone());
+        let tcp_connections = TcpConnections::new(dht_pk.clone(), dht_sk.clone(), tcp_incoming_tx);
+        let onion_client = OnionClient::new(dht.clone(), tcp_connections.clone(), real_sk.clone(), real_pk.clone());
+
+        let friend_sk = SecretKey::generate(&mut rng);
+        let friend_pk = friend_sk.public_key();
+        let friend_dht_pk = SecretKey::generate(&mut rng).public_key();
+
+        onion_client.add_friend(friend_pk.clone()).await;
+
+        // Both layers follow the protocol exactly as tox generates such packets
+        // in `OnionClient::send_dht_pk_dht_request`: the outer `DhtRequest`
+        // payload is encrypted with the shared key derived from the peer's DHT
+        // key pair (`peer_dht_pk`, `our_dht_sk`), and the inner `DhtPkAnnounce`
+        // payload is encrypted with the shared key derived from the peer's
+        // long-term key pair (`peer_real_pk`, `our_real_sk`).
+        let dht_shared_secret = SalsaBox::new(&friend_dht_pk, &dht_sk);
+        let announce_shared_secret = SalsaBox::new(&friend_pk, &real_sk);
+        let dht_pk_announce = DhtPkAnnounce::new(
+            &announce_shared_secret,
+            friend_pk.clone(),
+            &DhtPkAnnouncePayload::new(friend_dht_pk.clone(), vec![]),
+        );
+        let packet = DhtPacket::DhtRequest(DhtRequest::new(
+            &dht_shared_secret,
+            dht_pk.clone(),        // rpk: recipient = this server's DHT public key
+            friend_dht_pk.clone(), // spk: sender = peer's DHT public key
+            &DhtRequestPayload::DhtPkAnnounce(dht_pk_announce),
+        ));
+        let packet_inner = match packet {
+            DhtPacket::DhtRequest(inner) => inner,
+            _ => unreachable!(),
+        };
+        let saddr: SocketAddr = "127.0.0.1:12345".parse().unwrap();
+
+        // Install the missing link: forward payloads from DhtServer to OnionClient.
+        let (announce_tx, announce_rx) = mpsc::unbounded();
+        dht.set_dht_pk_announce_sink(announce_tx).await;
+        onion_client.set_dht_pk_announce_sink(announce_rx).await;
+
+        dht.handle_dht_req(packet_inner, saddr).await.unwrap();
+
+        // Drain the forwarded announce through OnionClient (the same call that
+        // `onion_client.run()` performs inside its periodic loop).
+        onion_client.drain_dht_pk_announce().await.unwrap();
+
+        // The friend's DHT key must have been registered by handle_dht_pk_announce.
+        assert_eq!(
+            onion_client.friend_dht_pk(&friend_pk).await,
+            Some(friend_dht_pk.clone())
+        );
     }
 }
