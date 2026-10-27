@@ -9,6 +9,7 @@ pub mod hole_punching;
 use futures::channel::mpsc;
 use futures::{future, SinkExt, StreamExt, TryFutureExt};
 use rand::{prelude::SliceRandom, thread_rng, Rng};
+use tokio::sync::broadcast;
 use tokio::sync::RwLock;
 
 use std::collections::HashMap;
@@ -44,6 +45,12 @@ type Tx = mpsc::Sender<(Packet, SocketAddr)>;
 
 /// Shorthand for the transmit half of the TCP onion channel.
 type TcpOnionTx = mpsc::Sender<(InnerOnionResponse, SocketAddr)>;
+
+/// Shorthand for the sink that forwards raw `DhtPkAnnounce` packets received
+/// via DHT to the higher-level `OnionClient`. The announce carries the
+/// sender's long-term `PublicKey` in plaintext, so `DhtServer` can route it
+/// without being able to decrypt its payload.
+type DhtPkAnnounceSink = broadcast::Sender<(PublicKey, DhtPkAnnounce)>;
 
 /// Number of random `NodesRequest` packet to send every second one per second.
 /// After random requests count exceeds this number `NODES_REQ_INTERVAL` will be
@@ -186,7 +193,7 @@ pub struct Server {
     /// `handle_dht_pk_announce` to register the peer's DHT key.
     /// `None` in pure DHT bootstrap mode where no friend connections are
     /// established.
-    dht_pk_announce_sink: Arc<RwLock<Option<mpsc::UnboundedSender<(PublicKey, DhtPkAnnounce)>>>>,
+    dht_pk_announce_sink: Arc<RwLock<Option<DhtPkAnnounceSink>>>,
     /// If LAN discovery is enabled `Server` will handle `LanDiscovery` packets
     /// and send `NodesRequest` packets in reply.
     lan_discovery_enabled: bool,
@@ -1018,16 +1025,15 @@ impl Server {
                 // which DhtServer does not have. The raw announce is forwarded to
                 // OnionClient, which decrypts it and calls handle_dht_pk_announce.
                 let sink = self.dht_pk_announce_sink.read().await.clone();
-                match sink {
-                    Some(mut tx) => {
-                        if let Err(e) = tx.send((packet.spk.clone(), dht_pk_announce)).await {
-                            warn!("Failed to forward DhtPkAnnounce to OnionClient: {:?}", e);
-                        }
+                if let Some(tx) = sink {
+                    if let Err(e) = tx.send((packet.spk.clone(), dht_pk_announce)) {
+                        warn!("Failed to forward DhtPkAnnounce to OnionClient: {:?}", e);
                     }
-                    None => {
-                        // Pure-DHT-server mode (e.g. tox_node bootstrap): no onion client registered.
-                        trace!("DhtPkAnnounce dropped: no sink installed");
-                    }
+                } else {
+                    // Pure-DHT-server mode (e.g. tox_node bootstrap): no onion client
+                    // registered. Silently discard the announce, matching the previous
+                    // behaviour of dropping it when no sink was installed.
+                    trace!("DhtPkAnnounce dropped: no sink installed");
                 }
                 Ok(())
             }
@@ -1523,8 +1529,12 @@ impl Server {
         *self.friend_saddr_sink.write().await = Some(friend_saddr_sink);
     }
 
-    /// Set sink to forward incoming `DhtPkAnnounce` payloads
-    pub async fn set_dht_pk_announce_sink(&self, sink: mpsc::UnboundedSender<(PublicKey, DhtPkAnnounce)>) {
+    /// Set the sink to forward incoming `DhtPkAnnounce` payloads to the
+    /// higher-level `OnionClient`. In pure DHT bootstrap mode (no friend
+    /// connections established) the sender is simply dropped and announces are
+    /// silently discarded, which matches the previous behaviour of silently
+    /// dropping them when no sink was installed.
+    pub async fn set_dht_pk_announce_sink(&self, sink: DhtPkAnnounceSink) {
         *self.dht_pk_announce_sink.write().await = Some(sink);
     }
 

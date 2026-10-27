@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 
 use futures::channel::mpsc;
 use futures::{future, FutureExt, SinkExt, StreamExt};
+use tokio::sync::broadcast;
 use tokio::sync::RwLock;
 
 use crate::dht::dht_node::BAD_NODE_TIMEOUT;
@@ -426,7 +427,12 @@ impl FriendConnections {
         self.onion_client.set_dht_pk_sink(dht_pk_tx.clone()).await;
         self.net_crypto.set_dht_pk_sink(dht_pk_tx).await;
 
-        let (dht_pk_announce_tx, dht_pk_announce_rx) = mpsc::unbounded();
+        // The announce bridge uses a bounded tokio broadcast channel: the
+        // `DhtServer` side sends without awaiting (broadcast senders are not
+        // async), and the `OnionClient` receiver is wrapped in an Arc<Mutex<_>>
+        // so it can be polled without holding the onion state lock across an
+        // await. Capacity 16 keeps latency under one second of announces.
+        let (dht_pk_announce_tx, dht_pk_announce_rx) = broadcast::channel(16);
         self.dht.set_dht_pk_announce_sink(dht_pk_announce_tx).await;
         self.onion_client.set_dht_pk_announce_sink(dht_pk_announce_rx).await;
 
@@ -459,7 +465,10 @@ impl FriendConnections {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::stream::FuturesUnordered;
     use rand::thread_rng;
+    use std::future::Future;
+    use std::pin::Pin;
 
     use crate::dht::precomputed_cache::*;
     use crate::net_crypto::*;
@@ -467,10 +476,19 @@ mod tests {
         aead::{generic_array::typenum::marker_traits::Unsigned, AeadCore},
         SalsaBox,
     };
+    use tox_packet::dht::packed_node::PackedNode;
     use tox_packet::dht::{Packet as DhtPacket, *};
+    use tox_packet::friend_connection::PACKET_ID_ALIVE;
 
     type DhtRx = mpsc::Receiver<(DhtPacket, SocketAddr)>;
     type LosslessRx = mpsc::UnboundedReceiver<(PublicKey, Vec<u8>)>;
+
+    impl FriendConnections {
+        /// Test helper: whether the orchestrator knows this friend is connected.
+        async fn friend_is_connected(&self, pk: &PublicKey) -> bool {
+            self.friends.read().await.get(pk).map_or(false, |f| f.connected)
+        }
+    }
 
     fn create_friend_connections() -> (FriendConnections, DhtRx, LosslessRx) {
         let mut rng = thread_rng();
@@ -1231,7 +1249,7 @@ mod tests {
         let saddr: SocketAddr = "127.0.0.1:12345".parse().unwrap();
 
         // Install the missing link: forward payloads from DhtServer to OnionClient.
-        let (announce_tx, announce_rx) = mpsc::unbounded();
+        let (announce_tx, announce_rx) = broadcast::channel(16);
         dht.set_dht_pk_announce_sink(announce_tx).await;
         onion_client.set_dht_pk_announce_sink(announce_rx).await;
 
@@ -1246,5 +1264,505 @@ mod tests {
             onion_client.friend_dht_pk(&friend_pk).await,
             Some(friend_dht_pk.clone())
         );
+    }
+
+    /// Full peer stack for end-to-end tests: DHT server, TCP relay client,
+    /// onion client, net crypto and the friend connections orchestrator,
+    /// plus a virtual UDP address and the sinks to observe outgoing traffic.
+    struct TestPeer {
+        udp_addr: SocketAddr,
+        real_pk: PublicKey,
+        dht_pk: PublicKey,
+        dht: DhtServer,
+        #[allow(dead_code)]
+        tcp_connections: TcpConnections,
+        onion_client: OnionClient,
+        net_crypto: NetCrypto,
+        friend_connections: FriendConnections,
+        /// Outgoing UDP packets of this peer (the wire).
+        udp_rx: mpsc::Receiver<(DhtPacket, SocketAddr)>,
+        /// Delivered lossless packets: `(sender long-term key, data)`.
+        lossless_rx: LosslessRx,
+    }
+
+    impl TestPeer {
+        fn new(udp_addr: SocketAddr) -> Self {
+            let mut rng = thread_rng();
+            let dht_sk = SecretKey::generate(&mut rng);
+            let dht_pk = dht_sk.public_key();
+            let real_sk = SecretKey::generate(&mut rng);
+            let real_pk = real_sk.public_key();
+
+            let (udp_tx, udp_rx) = mpsc::channel(32);
+            let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
+            let (lossless_tx, lossless_rx) = mpsc::unbounded();
+            let (lossy_tx, _lossy_rx) = mpsc::unbounded();
+
+            let dht = DhtServer::new(udp_tx.clone(), dht_pk.clone(), dht_sk.clone());
+            let tcp_connections = TcpConnections::new(dht_pk.clone(), dht_sk.clone(), tcp_incoming_tx);
+            let onion_client = OnionClient::new(dht.clone(), tcp_connections.clone(), real_sk.clone(), real_pk.clone());
+            let precomputed_keys = PrecomputedCache::new(dht_sk.clone(), 8);
+            let net_crypto = NetCrypto::new(NetCryptoNewArgs {
+                udp_tx,
+                lossless_tx,
+                lossy_tx,
+                dht_pk: dht_pk.clone(),
+                dht_sk: dht_sk.clone(),
+                real_pk: real_pk.clone(),
+                real_sk: real_sk.clone(),
+                precomputed_keys,
+            });
+            let friend_connections = FriendConnections::new(
+                dht.clone(),
+                tcp_connections.clone(),
+                onion_client.clone(),
+                net_crypto.clone(),
+            );
+
+            TestPeer {
+                udp_addr,
+                real_pk,
+                dht_pk,
+                dht,
+                tcp_connections,
+                onion_client,
+                net_crypto,
+                friend_connections,
+                udp_rx,
+                lossless_rx,
+            }
+        }
+    }
+
+    /// Peer handle: cheap `Arc`-backed clones of the very same instances the
+    /// peer stack uses, so the test body can drive and inspect them while the
+    /// router task moves the packets around.
+    #[derive(Clone)]
+    struct PeerHandle {
+        udp_addr: SocketAddr,
+        real_pk: PublicKey,
+        dht_pk: PublicKey,
+        dht: DhtServer,
+        onion_client: OnionClient,
+        net_crypto: NetCrypto,
+        friend_connections: FriendConnections,
+    }
+
+    impl PeerHandle {
+        /// Dispatch a packet that arrived from `from` into this peer's modules.
+        ///
+        /// This mirrors `crate::udp::Server::handle_packet`. Protocol errors
+        /// are ignored on purpose (background noise from other subsystems);
+        /// the test asserts on observable state instead.
+        async fn dispatch_from(&self, packet: DhtPacket, from: SocketAddr) {
+            match packet {
+                DhtPacket::PingRequest(p) => {
+                    let _ = self.dht.handle_ping_req(p, from).await;
+                }
+                DhtPacket::PingResponse(p) => {
+                    let _ = self.dht.handle_ping_resp(p, from).await;
+                }
+                DhtPacket::NodesRequest(p) => {
+                    let _ = self.dht.handle_nodes_req(p, from).await;
+                }
+                DhtPacket::NodesResponse(p) => {
+                    let _ = self.dht.handle_nodes_resp(p, from).await;
+                }
+                DhtPacket::CookieRequest(p) => {
+                    let _ = self.net_crypto.handle_udp_cookie_request(&p, from).await;
+                }
+                DhtPacket::CookieResponse(p) => {
+                    let _ = self.net_crypto.handle_udp_cookie_response(&p, from).await;
+                }
+                DhtPacket::CryptoHandshake(p) => {
+                    let _ = self.net_crypto.handle_udp_crypto_handshake(&p, from).await;
+                }
+                DhtPacket::CryptoData(p) => {
+                    let _ = self.net_crypto.handle_udp_crypto_data(&p, from).await;
+                }
+                DhtPacket::DhtRequest(p) => {
+                    let _ = self.dht.handle_dht_req(p, from).await;
+                }
+                // Onion packets are not part of the tested handshake path.
+                _ => {}
+            }
+        }
+    }
+
+    /// Virtual UDP network between two peers: forwards every packet from one
+    /// peer's wire to the other peer, rewriting the source address to the
+    /// sender's virtual address so that replies route back correctly.
+    ///
+    /// The router owns both UDP receivers, which is what makes the design
+    /// work: the test body never touches `udp_rx`, so there is no lock
+    /// contention and no guard held across an await.
+    async fn run_cross_router(
+        mut alice_rx: mpsc::Receiver<(DhtPacket, SocketAddr)>,
+        mut bob_rx: mpsc::Receiver<(DhtPacket, SocketAddr)>,
+        alice: PeerHandle,
+        bob: PeerHandle,
+    ) {
+        loop {
+            futures::select! {
+                packet = alice_rx.next().fuse() => {
+                    match packet {
+                        Some((packet, _to)) => bob.dispatch_from(packet, alice.udp_addr).await,
+                        None => return,
+                    }
+                }
+                packet = bob_rx.next().fuse() => {
+                    match packet {
+                        Some((packet, _to)) => alice.dispatch_from(packet, bob.udp_addr).await,
+                        None => return,
+                    }
+                }
+            }
+        }
+    }
+
+    /// A background driver future. The lifetime is not `'static` on purpose:
+    /// `FriendConnections::run`, `NetCrypto::run` and `OnionClient::run` all
+    /// borrow `&self`, and the driver handles live in the test body.
+    type DriverFut<'a> = Pin<Box<dyn Future<Output = ()> + 'a>>;
+
+    /// Pump the background drivers until `condition` holds or the budget runs
+    /// out. Virtual time is advanced in small steps so that the periodic
+    /// retransmission timers of the crypto layer actually fire.
+    async fn pump_until<F, Fut>(
+        drivers: &mut FuturesUnordered<DriverFut<'_>>,
+        budget: Duration,
+        label: &str,
+        mut condition: F,
+    ) where
+        F: FnMut() -> Fut,
+        Fut: std::future::Future<Output = bool>,
+    {
+        let deadline = tokio::time::Instant::now() + budget;
+        loop {
+            if condition().await {
+                return;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                panic!("timed out while waiting for: {}", label);
+            }
+            // Move virtual time forward first, so that the periodic
+            // retransmission timers of the crypto layer fire, then let the
+            // drivers and the router task run. The order matters: with paused
+            // time a `sleep` branch would never complete, because only
+            // `advance` moves the clock.
+            tokio::time::advance(Duration::from_millis(50)).await;
+            tokio::select! {
+                _ = drivers.next() => {},
+                _ = tokio::task::yield_now() => {},
+            }
+        }
+    }
+
+    /// End-to-end friendship handshake: `add_friend` -> DhtPkAnnounce via
+    /// DhtRequest (PATCH-001 bridge) -> friend.dht_pk registration ->
+    /// cookie handshake -> Established -> lossless delivery.
+    ///
+    /// The path is driven entirely by production code paths:
+    /// `OnionClient::send_dht_pk_dht_request` produces a real `DhtRequest`
+    /// carrying an encrypted `DhtPkAnnounce`; `DhtServer` forwards it to the
+    /// `dht_pk_announce_sink`; `OnionClient::drain_dht_pk_announce` (invoked
+    /// by the running `onion_client.run()`) decrypts and delivers it to
+    /// `handle_dht_pk_announce`; `FriendConnections::handle_dht_pk` triggers
+    /// `NetCrypto::add_connection`; the virtual network routes the cookie
+    /// handshake; the result is `Established` and lossless packets.
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn handshake_from_dhtpk_announce_to_established() {
+        // The drivers are not `Send` (the onion and crypto layers use
+        // `rand::ThreadRng`), so they must be polled on a single thread. A
+        // `LocalSet` gives us a place where `spawn_local` is allowed, so the
+        // virtual network can run as a background task next to the drivers.
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async { handshake_from_dhtpk_announce_to_established_inner().await })
+            .await;
+    }
+
+    /// Body of the end-to-end friendship handshake test, executed inside a
+    /// `LocalSet` (see the wrapper above).
+    async fn handshake_from_dhtpk_announce_to_established_inner() {
+        let alice = TestPeer::new("127.0.0.1:33445".parse().unwrap());
+        let bob = TestPeer::new("127.0.0.1:33446".parse().unwrap());
+
+        let (alice_status_tx, mut alice_status_rx) = mpsc::unbounded();
+        alice
+            .friend_connections
+            .set_connection_status_sink(alice_status_tx)
+            .await;
+        let (bob_status_tx, mut bob_status_rx) = mpsc::unbounded();
+        bob.friend_connections.set_connection_status_sink(bob_status_tx).await;
+
+        let alice_handle = PeerHandle {
+            udp_addr: alice.udp_addr,
+            real_pk: alice.real_pk.clone(),
+            dht_pk: alice.dht_pk.clone(),
+            dht: alice.dht.clone(),
+            onion_client: alice.onion_client.clone(),
+            net_crypto: alice.net_crypto.clone(),
+            friend_connections: alice.friend_connections.clone(),
+        };
+        let bob_handle = PeerHandle {
+            udp_addr: bob.udp_addr,
+            real_pk: bob.real_pk.clone(),
+            dht_pk: bob.dht_pk.clone(),
+            dht: bob.dht.clone(),
+            onion_client: bob.onion_client.clone(),
+            net_crypto: bob.net_crypto.clone(),
+            friend_connections: bob.friend_connections.clone(),
+        };
+
+        // Drive each peer's three background tasks (`friend_connections::run`,
+        // `net_crypto::run`, `onion_client::run`) inline on this thread. The
+        // futures are not `Send` (the onion and crypto layers use
+        // `rand::ThreadRng`), so they cannot be spawned onto a worker thread;
+        // polling them through a `FuturesUnordered` inside the test body keeps
+        // everything on one thread while the router task still runs.
+        let mut drivers: FuturesUnordered<DriverFut<'_>> = FuturesUnordered::new();
+        drivers.push(Box::pin(alice_handle.friend_connections.run().map(|_| ())));
+        drivers.push(Box::pin(alice_handle.net_crypto.run().map(|_| ())));
+        drivers.push(Box::pin(alice_handle.onion_client.run().map(|_| ())));
+        drivers.push(Box::pin(alice_handle.dht.run().map(|_| ())));
+        drivers.push(Box::pin(bob_handle.friend_connections.run().map(|_| ())));
+        drivers.push(Box::pin(bob_handle.net_crypto.run().map(|_| ())));
+        drivers.push(Box::pin(bob_handle.onion_client.run().map(|_| ())));
+        drivers.push(Box::pin(bob_handle.dht.run().map(|_| ())));
+
+        // Give the drivers a chance to install the inter-module channels that
+        // `FriendConnections::run()` sets up before any packet is produced.
+        for _ in 0..16 {
+            tokio::task::yield_now().await;
+        }
+
+        // Virtual UDP network between the peers.
+        let router = tokio::task::spawn_local(run_cross_router(
+            alice.udp_rx,
+            bob.udp_rx,
+            alice_handle.clone(),
+            bob_handle.clone(),
+        ));
+
+        // Both peers add each other as friends first.
+        alice_handle
+            .friend_connections
+            .add_friend(bob_handle.real_pk.clone())
+            .await;
+        bob_handle
+            .friend_connections
+            .add_friend(alice_handle.real_pk.clone())
+            .await;
+
+        // Pre-provision the peer's DHT public key so that the announce can be
+        // produced and routed, and register the peer as a DHT friend so that
+        // its node can be added to the local ktree.
+        alice_handle
+            .onion_client
+            .set_friend_dht_pk(bob_handle.real_pk.clone(), bob_handle.dht_pk.clone())
+            .await;
+        bob_handle
+            .onion_client
+            .set_friend_dht_pk(alice_handle.real_pk.clone(), alice_handle.dht_pk.clone())
+            .await;
+        alice_handle.dht.add_friend(bob_handle.dht_pk.clone()).await;
+        bob_handle.dht.add_friend(alice_handle.dht_pk.clone()).await;
+
+        // Bootstrap each other into the local close nodes list via the
+        // production `ping_node` path: NodesRequest -> NodesResponse ->
+        // try_add_to_close. This is a precondition for
+        // `send_dht_pk_dht_request` to find a non-empty destination list.
+        alice_handle
+            .dht
+            .ping_node(PackedNode::new(bob_handle.udp_addr, bob_handle.dht_pk.clone()))
+            .await
+            .unwrap();
+        bob_handle
+            .dht
+            .ping_node(PackedNode::new(alice_handle.udp_addr, alice_handle.dht_pk.clone()))
+            .await
+            .unwrap();
+
+        // Pump the drivers until both peers learned each other's DHT node.
+        let alice_dht = alice_handle.dht.clone();
+        let bob_dht = bob_handle.dht.clone();
+        let bob_dht_pk = bob_handle.dht_pk.clone();
+        let alice_dht_pk = alice_handle.dht_pk.clone();
+        pump_until(
+            &mut drivers,
+            Duration::from_secs(10),
+            "DHT peers to learn each other",
+            || {
+                let (alice_dht, bob_dht) = (alice_dht.clone(), bob_dht.clone());
+                let (bob_dht_pk, alice_dht_pk) = (bob_dht_pk.clone(), alice_dht_pk.clone());
+                Box::pin(async move {
+                    let alice_knows_bob = alice_dht.get_closest(&bob_dht_pk, 1, false).await.len() == 1;
+                    let bob_knows_alice = bob_dht.get_closest(&alice_dht_pk, 1, false).await.len() == 1;
+                    alice_knows_bob && bob_knows_alice
+                })
+            },
+        )
+        .await;
+
+        assert!(
+            alice_handle.dht.get_closest(&bob_dht_pk, 1, false).await.len() == 1,
+            "alice did not learn bob's DHT node"
+        );
+        assert!(
+            bob_handle.dht.get_closest(&alice_dht_pk, 1, false).await.len() == 1,
+            "bob did not learn alice's DHT node"
+        );
+
+        // Now trigger the real announce path: production code builds a
+        // `DhtRequest` carrying an encrypted `DhtPkAnnounce` and sends it to
+        // the peer over the virtual network.
+        alice_handle
+            .onion_client
+            .send_dht_pk_dht_request_for_test(bob_handle.real_pk.clone())
+            .await
+            .expect("failed to build the DhtPkAnnounce request");
+
+        // Pump until bob registered alice's DHT key through the PATCH-001
+        // bridge (`DhtServer` -> `dht_pk_announce_sink` -> `OnionClient`).
+        let bob_onion = bob_handle.onion_client.clone();
+        let alice_real_pk = alice_handle.real_pk.clone();
+        pump_until(
+            &mut drivers,
+            Duration::from_secs(20),
+            "friend.dht_pk registration",
+            || {
+                let bob_onion = bob_onion.clone();
+                let alice_real_pk = alice_real_pk.clone();
+                Box::pin(async move { bob_onion.friend_dht_pk(&alice_real_pk).await.is_some() })
+            },
+        )
+        .await;
+
+        assert_eq!(
+            bob_handle.onion_client.friend_dht_pk(&alice_handle.real_pk).await,
+            Some(alice_handle.dht_pk.clone()),
+            "bob did not register alice's DHT key via the DhtPkAnnounce bridge"
+        );
+
+        // The registered DHT key must have triggered `NetCrypto::add_connection`
+        // through `FriendConnections::handle_dht_pk`, which is the precondition
+        // for the cookie handshake.
+        let alice_net_crypto = alice_handle.net_crypto.clone();
+        let bob_net_crypto = bob_handle.net_crypto.clone();
+        let alice_real_pk = alice_handle.real_pk.clone();
+        let bob_real_pk = bob_handle.real_pk.clone();
+        pump_until(
+            &mut drivers,
+            Duration::from_secs(10),
+            "crypto connection creation",
+            || {
+                let (alice_net_crypto, bob_net_crypto) = (alice_net_crypto.clone(), bob_net_crypto.clone());
+                let (alice_real_pk, bob_real_pk) = (alice_real_pk.clone(), bob_real_pk.clone());
+                Box::pin(async move {
+                    // `NetCrypto::connections` is keyed by the peer's long term key.
+                    alice_net_crypto.connection_dht_pk(&bob_real_pk).await.is_some()
+                        && bob_net_crypto.connection_dht_pk(&alice_real_pk).await.is_some()
+                })
+            },
+        )
+        .await;
+
+        assert_eq!(
+            alice_handle.net_crypto.connection_dht_pk(&bob_handle.real_pk).await,
+            Some(bob_handle.dht_pk.clone()),
+            "alice has no crypto connection for bob"
+        );
+        assert_eq!(
+            bob_handle.net_crypto.connection_dht_pk(&alice_handle.real_pk).await,
+            Some(alice_handle.dht_pk.clone()),
+            "bob has no crypto connection for alice"
+        );
+
+        // Let the cookie handshake run to completion.
+        pump_until(&mut drivers, Duration::from_secs(30), "cookie handshake", || {
+            let (alice_net_crypto, bob_net_crypto) = (alice_net_crypto.clone(), bob_net_crypto.clone());
+            let (alice_real_pk, bob_real_pk) = (alice_real_pk.clone(), bob_real_pk.clone());
+            Box::pin(async move {
+                alice_net_crypto.is_connection_established(&bob_real_pk).await
+                    && bob_net_crypto.is_connection_established(&alice_real_pk).await
+            })
+        })
+        .await;
+
+        assert!(
+            alice_handle
+                .net_crypto
+                .is_connection_established(&bob_handle.real_pk)
+                .await,
+            "alice's connection to bob is not established"
+        );
+        assert!(
+            bob_handle
+                .net_crypto
+                .is_connection_established(&alice_handle.real_pk)
+                .await,
+            "bob's connection to alice is not established"
+        );
+
+        // The orchestrator must have consumed the Online event from net crypto
+        // and marked the friend as connected. This happens on the next driver
+        // tick, so pump until it lands.
+        let alice_fc = alice_handle.friend_connections.clone();
+        let bob_fc = bob_handle.friend_connections.clone();
+        let alice_check_pk = bob_handle.real_pk.clone();
+        let bob_check_pk = alice_handle.real_pk.clone();
+        pump_until(
+            &mut drivers,
+            Duration::from_secs(10),
+            "orchestrator online state",
+            || {
+                let (alice_fc, bob_fc) = (alice_fc.clone(), bob_fc.clone());
+                let (alice_check_pk, bob_check_pk) = (alice_check_pk.clone(), bob_check_pk.clone());
+                Box::pin(async move {
+                    alice_fc.friend_is_connected(&alice_check_pk).await
+                        && bob_fc.friend_is_connected(&bob_check_pk).await
+                })
+            },
+        )
+        .await;
+
+        assert!(
+            alice_handle
+                .friend_connections
+                .friend_is_connected(&bob_handle.real_pk)
+                .await,
+            "alice's orchestrator does not consider bob connected"
+        );
+        assert!(
+            bob_handle
+                .friend_connections
+                .friend_is_connected(&alice_handle.real_pk)
+                .await,
+            "bob's orchestrator does not consider alice connected"
+        );
+        let (status_pk, status) = alice_status_rx.next().await.expect("no status event for alice");
+        assert_eq!(status_pk, bob_handle.real_pk);
+        assert!(status, "alice received a non-online status event");
+        let (status_pk, status) = bob_status_rx.next().await.expect("no status event for bob");
+        assert_eq!(status_pk, alice_handle.real_pk);
+        assert!(status, "bob received a non-online status event");
+
+        // A lossless packet must now be deliverable in both directions.
+        alice_handle
+            .net_crypto
+            .send_lossless(bob_handle.real_pk.clone(), vec![PACKET_ID_ALIVE])
+            .await
+            .expect("failed to send the lossless packet");
+
+        let mut bob_lossless = bob.lossless_rx;
+        let received = tokio::time::timeout(Duration::from_secs(10), bob_lossless.next()).await;
+        let received = received
+            .expect("timed out waiting for lossless packet")
+            .expect("lossless channel closed");
+        assert_eq!(received.0, alice_handle.real_pk);
+        assert_eq!(received.1, vec![PACKET_ID_ALIVE]);
+
+        router.abort();
     }
 }

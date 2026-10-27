@@ -48,7 +48,10 @@ type FriendRequestTx = mpsc::UnboundedSender<(PublicKey, FriendRequest)>;
 /// The peer's long-term `PublicKey` (needed to look up the friend) is carried
 /// as an explicit field of the announce itself, since the inner payload is
 /// encrypted with the long-term key pair that DhtServer does not have.
-type DhtPkAnnounceRx = mpsc::UnboundedReceiver<(PublicKey, DhtPkAnnounce)>;
+/// Uses a broadcast channel: the sender side is synchronous (no `await` needed
+/// inside `DhtServer::handle_dht_req_for_us`) and the receiver can be polled
+/// without holding the onion state lock across an await.
+type DhtPkAnnounceRx = tokio::sync::broadcast::Receiver<(PublicKey, DhtPkAnnounce)>;
 
 /// Number of friend's close nodes to store.
 const MAX_ONION_FRIEND_NODES: u8 = 8;
@@ -322,7 +325,9 @@ struct OnionClientState {
     /// `DhtServer::handle_dht_req_for_us`. The driver drains this channel
     /// and feeds `onion_client.handle_dht_pk_announce` to register the
     /// peer's DHT key — completing the friend handshake.
-    dht_pk_announce_rx: Option<DhtPkAnnounceRx>,
+    /// Wrapped in `Arc<Mutex<>>` because `broadcast::Receiver` is not `Clone`;
+    /// the owner is moved out of this field by `drain_dht_pk_announce`.
+    dht_pk_announce_rx: Option<Arc<Mutex<DhtPkAnnounceRx>>>,
 }
 
 impl OnionClientState {
@@ -386,39 +391,57 @@ impl OnionClient {
         self.state.lock().await.friend_request_tx = Some(friend_request_sink)
     }
 
-    /// Install the receiver for incoming DhtPkAnnounce payloads
+    /// Install the receiver for incoming DhtPkAnnounce payloads.
     pub async fn set_dht_pk_announce_sink(&self, rx: DhtPkAnnounceRx) {
-        self.state.lock().await.dht_pk_announce_rx = Some(rx);
+        let mut state = self.state.lock().await;
+        state.dht_pk_announce_rx = Some(Arc::new(Mutex::new(rx)));
     }
 
     /// Drain one pending `DhtPkAnnounce` packet (if any), decrypt its inner
     /// payload and feed it to `handle_dht_pk_announce`.
+    ///
+    /// Returns `true` when an announce was consumed. The receiver is cloned
+    /// out of the state lock and dropped before awaiting on the channel, so
+    /// this method never holds the state lock across an await:
+    /// `handle_dht_pk_announce` locks the same state, and the driver polls
+    /// this method concurrently with the announce/search loops that also take
+    /// the lock.
     pub(crate) async fn drain_dht_pk_announce(&self) -> Result<bool, RunError> {
-        let mut state = self.state.lock().await;
-        let item = match state.dht_pk_announce_rx.as_mut() {
-            Some(rx) => rx.next().await,
-            None => return Ok(false),
+        // Move the receiver out of the state lock into a local Arc<Mutex<_>>
+        // that can be locked independently. This avoids holding the state
+        // lock across the `recv()` await below.
+        let rx = {
+            let state = self.state.lock().await;
+            state.dht_pk_announce_rx.as_ref().cloned()
         };
-        drop(state);
-        match item {
-            Some((sender_pk, announce)) => {
-                // Decrypt the inner payload using the peer's long-term key pair.
-                // If decryption fails, log and continue -- the peer will retry.
-                let shared_secret = SalsaBox::new(&announce.real_pk, &self.real_sk);
-                if let Ok(payload) = announce.get_payload(&shared_secret) {
-                    if let Err(e) = self.handle_dht_pk_announce(announce.real_pk.clone(), payload).await {
-                        trace!("handle_dht_pk_announce rejected packet: {:?}", e);
-                    }
-                } else {
-                    trace!(
-                        "DhtPkAnnounce: failed to decrypt inner payload from sender_pk={:?}",
-                        sender_pk
-                    );
-                }
-                Ok(true)
+
+        // `tokio::sync::broadcast::Receiver::recv` is not a `Stream`, so call it
+        // directly on the MutexGuard. `RecvError::Closed` and `Lagged` are both
+        // treated as "no announce available": lagging means the consumer fell
+        // behind, and the peer will retransmit the announce periodically.
+        let item = if let Some(rx) = rx {
+            rx.lock().await.recv().await.ok()
+        } else {
+            None
+        };
+        let Some((sender_pk, announce)) = item else {
+            return Ok(false);
+        };
+
+        // Decrypt the inner payload using the peer's long-term key pair.
+        // If decryption fails, log and continue -- the peer will retry.
+        let shared_secret = SalsaBox::new(&announce.real_pk, &self.real_sk);
+        if let Ok(payload) = announce.get_payload(&shared_secret) {
+            if let Err(e) = self.handle_dht_pk_announce(announce.real_pk.clone(), payload).await {
+                trace!("handle_dht_pk_announce rejected packet: {:?}", e);
             }
-            None => Ok(false),
+        } else {
+            trace!(
+                "DhtPkAnnounce: failed to decrypt inner payload from sender_pk={:?}",
+                sender_pk
+            );
         }
+        Ok(true)
     }
 
     /// Check if a node was pinged recently.
@@ -737,6 +760,16 @@ impl OnionClient {
         if let Some(friend) = state.friends.get_mut(&real_pk) {
             friend.dht_pk = Some(dht_pk);
         }
+    }
+
+    /// Returns our long-term public key.
+    pub fn real_pk(&self) -> &PublicKey {
+        &self.real_pk
+    }
+
+    /// Returns our DHT public key.
+    pub fn dht_pk(&self) -> PublicKey {
+        self.dht.pk.clone()
     }
 
     /// Generic function for sending search and announce requests to close nodes.
@@ -1142,6 +1175,25 @@ mod tests {
                 .friends
                 .get(pk)
                 .map_or(false, |friend| friend.connected)
+        }
+
+        /// Test helper: let `send_dht_pk_dht_request` run for a given friend so that
+        /// a real `DhtPkAnnounce` over `DhtRequest` is produced using production
+        /// code paths.
+        pub(crate) async fn send_dht_pk_dht_request_for_test(
+            &self,
+            friend_pk: PublicKey,
+        ) -> Result<(), mpsc::SendError> {
+            let mut friend = {
+                let mut state = self.state.lock().await;
+                state.friends.get_mut(&friend_pk).cloned()
+            };
+            let mut friend = match friend.take() {
+                Some(f) => f,
+                None => return Ok(()),
+            };
+            // `send_dht_pk_dht_request` is private; re-run it once with the friend.
+            self.send_dht_pk_dht_request(&mut friend).await
         }
     }
 
@@ -2253,7 +2305,7 @@ mod tests {
             _ => unreachable!(),
         };
 
-        let (announce_tx, announce_rx) = mpsc::unbounded();
+        let (announce_tx, announce_rx) = tokio::sync::broadcast::channel(16);
         dht.set_dht_pk_announce_sink(announce_tx).await;
         onion_client.set_dht_pk_announce_sink(announce_rx).await;
 
