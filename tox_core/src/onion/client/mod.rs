@@ -15,6 +15,7 @@ use futures::channel::mpsc;
 use futures::lock::Mutex;
 use futures::{FutureExt, SinkExt, StreamExt};
 use rand::{thread_rng, Rng};
+use tokio::sync::broadcast;
 
 use crate::dht::ip_port::IsGlobal;
 use crate::dht::kbucket::*;
@@ -61,6 +62,11 @@ const MAX_ONION_ANNOUNCE_NODES: u8 = 12;
 
 /// Timeout for onion announce packets.
 const ANNOUNCE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long `drain_dht_pk_announce` sleeps when no announce bridge is
+/// installed (pure DHT bootstrap mode) or all senders were dropped, so the
+/// branch in `OnionClient::run`'s `tokio::select!` never spins hot.
+const ANNOUNCE_DRAIN_IDLE_INTERVAL: Duration = Duration::from_secs(5);
 
 /// How many attempts to reach a node we should make.
 const ONION_NODE_MAX_PINGS: u32 = 3;
@@ -397,16 +403,19 @@ impl OnionClient {
         state.dht_pk_announce_rx = Some(Arc::new(Mutex::new(rx)));
     }
 
-    /// Drain one pending `DhtPkAnnounce` packet (if any), decrypt its inner
-    /// payload and feed it to `handle_dht_pk_announce`.
+    /// Wait for the next `DhtPkAnnounce` packet, decrypt its inner payload and
+    /// feed it to `handle_dht_pk_announce`.
     ///
-    /// Returns `true` when an announce was consumed. The receiver is cloned
-    /// out of the state lock and dropped before awaiting on the channel, so
-    /// this method never holds the state lock across an await:
-    /// `handle_dht_pk_announce` locks the same state, and the driver polls
-    /// this method concurrently with the announce/search loops that also take
-    /// the lock.
-    pub(crate) async fn drain_dht_pk_announce(&self) -> Result<bool, RunError> {
+    /// The receiver is cloned out of the state lock and the state lock is
+    /// released before awaiting on the channel, so this method never holds the
+    /// state lock across an await: `handle_dht_pk_announce` locks the same
+    /// state, and the driver polls this method concurrently with the
+    /// announce/search loops that also take the lock.
+    ///
+    /// The call blocks until an announce arrives, so the branch in
+    /// `OnionClient::run`'s `tokio::select!` is not ready most of the time
+    /// and the periodic wake-up branch keeps making progress.
+    pub(crate) async fn drain_dht_pk_announce(&self) -> Result<(), RunError> {
         // Move the receiver out of the state lock into a local Arc<Mutex<_>>
         // that can be locked independently. This avoids holding the state
         // lock across the `recv()` await below.
@@ -414,34 +423,63 @@ impl OnionClient {
             let state = self.state.lock().await;
             state.dht_pk_announce_rx.as_ref().cloned()
         };
-
-        // `tokio::sync::broadcast::Receiver::recv` is not a `Stream`, so call it
-        // directly on the MutexGuard. `RecvError::Closed` and `Lagged` are both
-        // treated as "no announce available": lagging means the consumer fell
-        // behind, and the peer will retransmit the announce periodically.
-        let item = if let Some(rx) = rx {
-            rx.lock().await.recv().await.ok()
-        } else {
-            None
+        let Some(rx) = rx else {
+            // No sink installed (pure DHT bootstrap mode): nothing to drain.
+            // Sleep until the channel is installed or the driver shuts down,
+            // so this branch never spins in the outer `tokio::select!` loop.
+            tokio::time::sleep(ANNOUNCE_DRAIN_IDLE_INTERVAL).await;
+            return Ok(());
         };
-        let Some((sender_pk, announce)) = item else {
-            return Ok(false);
+
+        let mut rx = rx.lock().await;
+        // Wait for the next announce. The broadcast channel keeps only the
+        // last `capacity` messages; when the consumer falls behind, the oldest
+        // announces are dropped (`Lagged`). That is acceptable here: each
+        // announce carries a strictly increasing `no_reply` and the peer
+        // retransmits every `DHT_DHTPK_SEND_INTERVAL`, so the newest message
+        // supersedes the lost ones. Lagging is logged, not fatal.
+        let (sender_pk, announce) = match rx.recv().await {
+            Ok(item) => item,
+            Err(broadcast::error::RecvError::Lagged(n)) => {
+                warn!(
+                    "OnionClient DhtPkAnnounce receiver lagged by {} messages; \
+                     relying on peer retransmission",
+                    n
+                );
+                // The receiver is still usable, but the announced message is
+                // lost. Return and let the caller retry.
+                return Ok(());
+            }
+            Err(broadcast::error::RecvError::Closed) => {
+                // All senders dropped: keep waiting instead of returning an
+                // error that would kill the onion client driver.
+                drop(rx);
+                tokio::time::sleep(ANNOUNCE_DRAIN_IDLE_INTERVAL).await;
+                return Ok(());
+            }
         };
 
         // Decrypt the inner payload using the peer's long-term key pair.
-        // If decryption fails, log and continue -- the peer will retry.
+        // Protocol errors are logged and skipped -- the peer will retransmit.
+        //
+        // The receiver lock is released before handling the packet: the
+        // handler takes the onion state lock, and holding two locks at once
+        // would widen the deadlock window for no benefit.
+        drop(rx);
         let shared_secret = SalsaBox::new(&announce.real_pk, &self.real_sk);
-        if let Ok(payload) = announce.get_payload(&shared_secret) {
-            if let Err(e) = self.handle_dht_pk_announce(announce.real_pk.clone(), payload).await {
-                trace!("handle_dht_pk_announce rejected packet: {:?}", e);
+        match announce.get_payload(&shared_secret) {
+            Ok(payload) => {
+                if let Err(e) = self.handle_dht_pk_announce(announce.real_pk.clone(), payload).await {
+                    trace!("handle_dht_pk_announce rejected packet: {:?}", e);
+                }
             }
-        } else {
-            trace!(
-                "DhtPkAnnounce: failed to decrypt inner payload from sender_pk={:?}",
-                sender_pk
-            );
+            Err(e) => trace!(
+                "DhtPkAnnounce: failed to decrypt inner payload from sender_pk={:?}: {:?}",
+                sender_pk,
+                e
+            ),
         }
-        Ok(true)
+        Ok(())
     }
 
     /// Check if a node was pinged recently.
@@ -1175,25 +1213,6 @@ mod tests {
                 .friends
                 .get(pk)
                 .map_or(false, |friend| friend.connected)
-        }
-
-        /// Test helper: let `send_dht_pk_dht_request` run for a given friend so that
-        /// a real `DhtPkAnnounce` over `DhtRequest` is produced using production
-        /// code paths.
-        pub(crate) async fn send_dht_pk_dht_request_for_test(
-            &self,
-            friend_pk: PublicKey,
-        ) -> Result<(), mpsc::SendError> {
-            let mut friend = {
-                let mut state = self.state.lock().await;
-                state.friends.get_mut(&friend_pk).cloned()
-            };
-            let mut friend = match friend.take() {
-                Some(f) => f,
-                None => return Ok(()),
-            };
-            // `send_dht_pk_dht_request` is private; re-run it once with the friend.
-            self.send_dht_pk_dht_request(&mut friend).await
         }
     }
 

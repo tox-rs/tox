@@ -1555,9 +1555,15 @@ mod tests {
             .add_friend(alice_handle.real_pk.clone())
             .await;
 
-        // Pre-provision the peer's DHT public key so that the announce can be
-        // produced and routed, and register the peer as a DHT friend so that
-        // its node can be added to the local ktree.
+        // Pre-provision the peer's DHT public key.
+        //
+        // In production this happens through the onion announce path
+        // (`OnionClient::handle_dht_pk_announce` -> `dht_pk_tx` ->
+        // `FriendConnections::handle_dht_pk` -> `set_friend_dht_pk`). The
+        // onion path needs a full 3-hop onion path, which is out of scope for
+        // this test, so the DHT key is seeded directly through the same public
+        // API the production code uses. Everything below this point is
+        // production code only.
         alice_handle
             .onion_client
             .set_friend_dht_pk(bob_handle.real_pk.clone(), bob_handle.dht_pk.clone())
@@ -1614,15 +1620,12 @@ mod tests {
             "bob did not learn alice's DHT node"
         );
 
-        // Now trigger the real announce path: production code builds a
-        // `DhtRequest` carrying an encrypted `DhtPkAnnounce` and sends it to
-        // the peer over the virtual network.
-        alice_handle
-            .onion_client
-            .send_dht_pk_dht_request_for_test(bob_handle.real_pk.clone())
-            .await
-            .expect("failed to build the DhtPkAnnounce request");
-
+        // Now the production `friends_loop` of alice sends the
+        // `DhtPkAnnounce` announcement on its own: `send_dht_pk_dht_request`
+        // builds a real `DhtRequest` carrying the encrypted announce and sends
+        // it to the peer over the virtual network. No test-only helper is
+        // involved.
+        //
         // Pump until bob registered alice's DHT key through the PATCH-001
         // bridge (`DhtServer` -> `dht_pk_announce_sink` -> `OnionClient`).
         let bob_onion = bob_handle.onion_client.clone();
