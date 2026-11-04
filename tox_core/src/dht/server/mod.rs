@@ -184,7 +184,7 @@ pub struct Server {
     /// None if there is no TCP relay
     tcp_onion_sink: Option<TcpOnionTx>,
     /// Sink to forward `DhtPkAnnounce` packets to the higher-level `OnionClient`.
-    /// The payload is encrypted with the peer's long-term key pair. 
+    /// The payload is encrypted with the peer's long-term key pair.
     /// None in pure DHT bootstrap mode where no friend connections are
     /// established.
     dht_pk_announce_sink: Arc<RwLock<Option<DhtPkAnnounceSink>>>,

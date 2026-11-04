@@ -181,10 +181,13 @@ async fn main() -> Result<(), Error> {
                             .await
                     }
                     DataPayload::CryptoData(packet) => {
-                        net_crypto_c
-                            .handle_tcp_crypto_data(&packet, sender_pk)
-                            .map_err(Error::from)
-                            .await
+                        if let Err(e) = net_crypto_c
+                            .handle_tcp_crypto_data(&packet, sender_pk.clone())
+                            .await 
+                        {
+                            error!("Failed to handle TCP CryptoData from {:?}: {:?}", sender_pk, e);
+                        }
+                        Ok(())
                     }
                 },
                 IncomingPacket::Oob(_sender_pk, _packet) => Ok(()),
@@ -218,12 +221,13 @@ async fn main() -> Result<(), Error> {
                 }
                 PACKET_ID_SHARE_RELAYS => match ShareRelays::from_bytes(&packet) {
                     Ok((_, share_relays)) => {
-                        friend_connections_c
-                            .handle_share_relays(pk, share_relays)
-                            .map_err(Error::from)
-                            .await?
+                        if let Err(e) = friend_connections_c.handle_share_relays(pk.clone(), share_relays).await {
+                            error!("Failed to handle ShareRelays from {:?}: {:?}", pk, e);
+                        }
                     }
-                    _ => return Err(Error::msg("Failed to parse ShareRelays")),
+                    Err(e) => {
+                        warn!("Failed to parse ShareRelays from {:?}: {:?}", pk, e);
+                    }
                 },
                 0x18 => {
                     // PACKET_ID_ONLINE
