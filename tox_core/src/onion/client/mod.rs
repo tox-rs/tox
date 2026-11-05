@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use crypto_box::{aead::AeadCore, SalsaBox};
 use futures::channel::mpsc;
 use futures::lock::Mutex;
-use futures::{SinkExt, StreamExt};
+use futures::{FutureExt, SinkExt, StreamExt};
 use rand::{thread_rng, Rng};
 
 use crate::dht::ip_port::IsGlobal;
@@ -43,6 +43,10 @@ type DhtPkTx = mpsc::UnboundedSender<(PublicKey, PublicKey)>;
 /// requests when we get them. The key is a long term key.
 type FriendRequestTx = mpsc::UnboundedSender<(PublicKey, FriendRequest)>;
 
+/// Shorthand for the receive half of the message channel used to forward
+/// incoming `DhtPkAnnounce` packets from `DhtServer` to `onion_client.run()`.
+type DhtPkAnnounceRx = tokio::sync::mpsc::UnboundedReceiver<(PublicKey, DhtPkAnnounce)>;
+
 /// Number of friend's close nodes to store.
 const MAX_ONION_FRIEND_NODES: u8 = 8;
 
@@ -51,6 +55,9 @@ const MAX_ONION_ANNOUNCE_NODES: u8 = 12;
 
 /// Timeout for onion announce packets.
 const ANNOUNCE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long `drain_dht_pk_announce` sleeps when no announce bridge is installed
+const ANNOUNCE_DRAIN_IDLE_INTERVAL: Duration = Duration::from_secs(5);
 
 /// How many attempts to reach a node we should make.
 const ONION_NODE_MAX_PINGS: u32 = 3;
@@ -292,7 +299,6 @@ impl<'a> AnnouncePacketData<'a> {
 }
 
 /// Onion client state.
-#[derive(Clone)]
 struct OnionClientState {
     /// Pool of random onion paths.
     paths_pool: PathsPool,
@@ -308,6 +314,9 @@ struct OnionClientState {
     /// Sink to send friend requests when we get them. The key is a long term
     /// key.
     friend_request_tx: Option<FriendRequestTx>,
+    /// Receiver for incoming `DhtPkAnnounce` payloads forwarded from
+    /// `DhtServer::handle_dht_req_for_us`.
+    dht_pk_announce_rx: Option<DhtPkAnnounceRx>,
 }
 
 impl OnionClientState {
@@ -319,6 +328,7 @@ impl OnionClientState {
             friends: HashMap::new(),
             dht_pk_tx: None,
             friend_request_tx: None,
+            dht_pk_announce_rx: None,
         }
     }
 }
@@ -342,6 +352,39 @@ pub struct OnionClient {
     data_pk: PublicKey,
     /// Onion client state.
     state: Arc<Mutex<OnionClientState>>,
+}
+
+/// Receiver reinstallation guard: put the `DhtPkAnnounce` receiver back into
+/// `OnionClientState` in `Drop`, no matter how the `drain` future is exited.
+struct ReinstallOnDrop<'a> {
+    client: &'a OnionClient,
+    rx: Option<DhtPkAnnounceRx>,
+}
+
+impl<'a> Drop for ReinstallOnDrop<'a> {
+    fn drop(&mut self) {
+        if let Some(rx) = self.rx.take() {
+            if let Some(mut state) = self.client.state.try_lock() {
+                if state.dht_pk_announce_rx.is_none() {
+                    state.dht_pk_announce_rx = Some(rx);
+                } else {
+                    debug!("ReinstallOnDrop skipped: receiver already present (another drain is consuming)");
+                }
+            } else {
+                warn!("ReinstallOnDrop skipped: lock currently held, dropping channel");
+            }
+        }
+    }
+}
+
+impl<'a> ReinstallOnDrop<'a> {
+    /// The guard keeps ownership of the receiver throughout the entire `await`,
+    /// so if the future is cancelled the `Drop` impl still holds the receiver
+    /// and can reinstall it into state.
+    pub(crate) async fn recv_one(&mut self) -> Option<(PublicKey, DhtPkAnnounce)> {
+        let rx = self.rx.as_mut()?;
+        rx.recv().await
+    }
 }
 
 impl OnionClient {
@@ -368,6 +411,48 @@ impl OnionClient {
     /// Set sink to receive `FriendRequest`s.
     pub async fn set_friend_request_sink(&self, friend_request_sink: FriendRequestTx) {
         self.state.lock().await.friend_request_tx = Some(friend_request_sink)
+    }
+
+    /// Install the receiver for incoming DhtPkAnnounce payloads.
+    pub async fn set_dht_pk_announce_sink(&self, rx: DhtPkAnnounceRx) {
+        let mut state = self.state.lock().await;
+        state.dht_pk_announce_rx = Some(rx);
+    }
+
+    /// Wait for the next `DhtPkAnnounce` packet, decrypt its inner payload and
+    /// feed it to `handle_dht_pk_announce`.
+    pub(crate) async fn drain_dht_pk_announce(&self) -> Result<(), RunError> {
+        let rx_opt = {
+            let mut state = self.state.lock().await;
+            state.dht_pk_announce_rx.take()
+        };
+        let Some(rx) = rx_opt else {
+            // Sleep until the channel is installed or the driver shuts down.
+            tokio::time::sleep(ANNOUNCE_DRAIN_IDLE_INTERVAL).await;
+            return Ok(());
+        };
+
+        let mut handle = ReinstallOnDrop {
+            client: self,
+            rx: Some(rx),
+        };
+
+        let Some((_, announce)) = handle.recv_one().await else {
+            warn!("DhtPkAnnounce: all announce senders dropped, channel closed");
+            return Ok(());
+        };
+
+        let shared_secret = SalsaBox::new(&announce.real_pk, &self.real_sk);
+        match announce.get_payload(&shared_secret) {
+            Ok(payload) => {
+                if let Err(e) = self.handle_dht_pk_announce(announce.real_pk, payload).await {
+                    trace!("handle_dht_pk_announce rejected packet: {:?}", e);
+                }
+            }
+            Err(e) => debug!("DhtPkAnnounce: failed to decrypt inner payload from sender pk: {:?}", e),
+        }
+
+        Ok(())
     }
 
     /// Check if a node was pinged recently.
@@ -575,31 +660,33 @@ impl OnionClient {
         friend_pk: PublicKey,
         dht_pk_announce: DhtPkAnnouncePayload,
     ) -> Result<(), HandleDhtPkAnnounceError> {
-        let mut state = self.state.lock().await;
+        let (dht_pk, tx) = {
+            let mut state = self.state.lock().await;
+            let friend = state
+                .friends
+                .get_mut(&friend_pk)
+                .ok_or(HandleDhtPkAnnounceError::NoFriendWithPk)?;
 
-        let friend = match state.friends.get_mut(&friend_pk) {
-            Some(friend) => friend,
-            None => return Err(HandleDhtPkAnnounceError::NoFriendWithPk),
+            if dht_pk_announce.no_reply <= friend.last_no_reply {
+                return Err(HandleDhtPkAnnounceError::InvalidNoReply);
+            }
+            friend.last_no_reply = dht_pk_announce.no_reply;
+            let dht_pk = dht_pk_announce.dht_pk.clone();
+            friend.dht_pk = Some(dht_pk.clone());
+            friend.last_seen = Some(clock_now());
+
+            let tx = state.dht_pk_tx.clone();
+            (dht_pk, tx)
         };
 
-        if dht_pk_announce.no_reply <= friend.last_no_reply {
-            return Err(HandleDhtPkAnnounceError::InvalidNoReply);
-        }
-
-        friend.last_no_reply = dht_pk_announce.no_reply;
-        friend.dht_pk = Some(dht_pk_announce.dht_pk.clone());
-        friend.last_seen = Some(clock_now());
-
-        let tx = state.dht_pk_tx.clone();
-        let dht_pk = dht_pk_announce.dht_pk.clone();
-        maybe_send_unbounded(tx, (friend_pk, dht_pk))
+        maybe_send_unbounded(tx, (friend_pk, dht_pk.clone()))
             .await
             .map_err(HandleDhtPkAnnounceError::SendTo)?;
 
-        for node in dht_pk_announce.nodes.into_iter() {
+        for node in dht_pk_announce.nodes {
             match node.ip_port.protocol {
                 ProtocolType::Udp => {
-                    let packed_node = PackedNode::new(node.ip_port.to_saddr(), node.pk.clone());
+                    let packed_node = PackedNode::new(node.ip_port.to_saddr(), node.pk);
                     self.dht
                         .ping_node(packed_node)
                         .await
@@ -607,7 +694,7 @@ impl OnionClient {
                 }
                 ProtocolType::Tcp => {
                     self.tcp_connections
-                        .add_relay_connection(node.ip_port.to_saddr(), node.pk, dht_pk_announce.dht_pk.clone())
+                        .add_relay_connection(node.ip_port.to_saddr(), node.pk, dht_pk.clone())
                         .await
                         .map_err(HandleDhtPkAnnounceError::AddRelay)?;
                 }
@@ -686,6 +773,16 @@ impl OnionClient {
         if let Some(friend) = state.friends.get_mut(&real_pk) {
             friend.dht_pk = Some(dht_pk);
         }
+    }
+
+    /// Returns our long-term public key.
+    pub fn real_pk(&self) -> &PublicKey {
+        &self.real_pk
+    }
+
+    /// Returns our DHT public key.
+    pub fn dht_pk(&self) -> PublicKey {
+        self.dht.pk.clone()
     }
 
     /// Generic function for sending search and announce requests to close nodes.
@@ -1043,15 +1140,25 @@ impl OnionClient {
         let mut wakeups = tokio::time::interval(interval);
 
         loop {
-            wakeups.tick().await;
+            // `select_biased!` polls the branches in declaration order, so the
+            // periodic tick branch always wins over an already-ready announce
+            // branch. This keeps the announce/search loop deterministic.
+            futures::select_biased! {
+                _ = wakeups.tick().fuse() => {
+                    trace!("Onion client sender wake up");
 
-            trace!("Onion client sender wake up");
+                    let mut state = self.state.lock().await;
+                    self.populate_path_nodes(&mut state).await;
 
-            let mut state = self.state.lock().await;
-            self.populate_path_nodes(&mut state).await;
+                    self.announce_loop(&mut state).await?;
+                    self.friends_loop(&mut state).await?;
 
-            self.announce_loop(&mut state).await?;
-            self.friends_loop(&mut state).await?;
+                    Ok(())
+                }
+                announce = self.drain_dht_pk_announce().fuse() => {
+                    announce
+                }
+            }?;
         }
     }
 }
@@ -2144,6 +2251,162 @@ mod tests {
                 HandleDhtPkAnnounceError::InvalidNoReply
             ))
         ));
+    }
+
+    #[tokio::test]
+    async fn handle_dht_pk_announce_dht_request_path() {
+        // Regression test for the friend-handshake stall at the onion-announce step.
+        let mut rng = thread_rng();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
+        let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
+        let dht = DhtServer::new(udp_tx, dht_pk.clone(), dht_sk.clone());
+        let tcp_connections = TcpConnections::new(dht_pk.clone(), dht_sk.clone(), tcp_incoming_tx);
+        let onion_client = OnionClient::new(dht.clone(), tcp_connections, real_sk.clone(), real_pk.clone());
+
+        let friend_sk = SecretKey::generate(&mut rng);
+        let friend_pk = friend_sk.public_key();
+        let friend_dht_pk = SecretKey::generate(&mut rng).public_key();
+
+        onion_client.add_friend(friend_pk.clone()).await;
+        dht.add_friend(friend_dht_pk.clone()).await;
+
+        // Both layers follow the protocol exactly as tox generates such packets
+        // in `OnionClient::send_dht_pk_dht_request`.
+        let dht_shared_secret = SalsaBox::new(&friend_dht_pk, &dht_sk);
+        let announce_shared_secret = SalsaBox::new(&friend_pk, &real_sk);
+        let dht_pk_announce = DhtPkAnnounce::new(
+            &announce_shared_secret,
+            friend_pk.clone(),
+            &DhtPkAnnouncePayload::new(friend_dht_pk.clone(), vec![]),
+        );
+        let packet = Packet::DhtRequest(DhtRequest::new(
+            &dht_shared_secret,
+            dht_pk.clone(),        // rpk: recipient = this server's DHT public key
+            friend_dht_pk.clone(), // spk: sender = peer's DHT public key
+            &DhtRequestPayload::DhtPkAnnounce(dht_pk_announce),
+        ));
+
+        let packet_inner = match packet {
+            Packet::DhtRequest(inner) => inner,
+            _ => unreachable!(),
+        };
+
+        let (announce_tx, announce_rx) = tokio::sync::mpsc::unbounded_channel();
+        dht.set_dht_pk_announce_sink(announce_tx).await;
+        onion_client.set_dht_pk_announce_sink(announce_rx).await;
+
+        let saddr: SocketAddr = "127.0.0.1:12345".parse().unwrap();
+        dht.handle_dht_req(packet_inner, saddr).await.unwrap();
+
+        onion_client.drain_dht_pk_announce().await.unwrap();
+
+        assert_eq!(onion_client.friend_dht_pk(&friend_pk).await, Some(friend_dht_pk));
+    }
+
+    #[tokio::test]
+    async fn drain_dht_pk_announce_cancelation_safety() {
+        use std::net::SocketAddr;
+
+        let mut rng = thread_rng();
+        let dht_sk = SecretKey::generate(&mut rng);
+        let dht_pk = dht_sk.public_key();
+        let real_sk = SecretKey::generate(&mut rng);
+        let real_pk = real_sk.public_key();
+        let (udp_tx, _udp_rx) = mpsc::channel(1);
+        let (tcp_incoming_tx, _tcp_incoming_rx) = mpsc::unbounded();
+        let dht = DhtServer::new(udp_tx, dht_pk.clone(), dht_sk.clone());
+        let tcp_connections = TcpConnections::new(dht_pk.clone(), dht_sk.clone(), tcp_incoming_tx);
+        let onion_client = OnionClient::new(dht.clone(), tcp_connections, real_sk.clone(), real_pk.clone());
+
+        let friend_sk = SecretKey::generate(&mut rng);
+        let friend_pk = friend_sk.public_key();
+        let friend_dht_pk = SecretKey::generate(&mut rng).public_key();
+
+        onion_client.add_friend(friend_pk.clone()).await;
+        dht.add_friend(friend_dht_pk.clone()).await;
+
+        let saddr: SocketAddr = "127.0.0.1:12345".parse().unwrap();
+
+        // Phase 1: normal full drain (control).
+        let dht_shared_secret = SalsaBox::new(&friend_dht_pk, &dht_sk);
+        let announce_shared_secret = SalsaBox::new(&friend_pk, &real_sk);
+        let dht_pk_announce = DhtPkAnnounce::new(
+            &announce_shared_secret,
+            friend_pk.clone(),
+            &DhtPkAnnouncePayload::new(friend_dht_pk.clone(), vec![]),
+        );
+        let packet = Packet::DhtRequest(DhtRequest::new(
+            &dht_shared_secret,
+            dht_pk.clone(),
+            friend_dht_pk.clone(),
+            &DhtRequestPayload::DhtPkAnnounce(dht_pk_announce),
+        ));
+        let packet_inner = match packet {
+            Packet::DhtRequest(inner) => inner,
+            _ => unreachable!(),
+        };
+
+        let (tx1, rx1) = tokio::sync::mpsc::unbounded_channel();
+        dht.set_dht_pk_announce_sink(tx1).await;
+        onion_client.set_dht_pk_announce_sink(rx1).await;
+        dht.handle_dht_req(packet_inner, saddr).await.unwrap();
+        onion_client.drain_dht_pk_announce().await.unwrap();
+        assert_eq!(
+            onion_client.friend_dht_pk(&friend_pk).await,
+            Some(friend_dht_pk.clone()),
+            "normal drain path must register friend dht_pk"
+        );
+
+        // Phase 2: cancel a drain while it is pending on `recv().await`.
+        let drain = Box::pin(onion_client.drain_dht_pk_announce());
+        tokio::select! {
+            _ = drain => panic!("drain completed without a message — recv should have blocked here"),
+            _ = tokio::time::sleep(Duration::from_millis(100)) => { /* cancelled, as intended */ }
+        }
+        tokio::task::yield_now().await;
+
+        // Phase 3: the receiver must already be back in state after cancellation.
+        let rx_in_state = onion_client.state.lock().await.dht_pk_announce_rx.is_some();
+        assert!(
+            rx_in_state,
+            "receiver orphaned after cancellation — ReinstallOnDrop::drop did not reinstall it"
+        );
+
+        // Phase 4: a fresh drain after cancellation must still work.
+        let dht_shared_secret = SalsaBox::new(&friend_dht_pk, &dht_sk);
+        let announce_shared_secret = SalsaBox::new(&friend_pk, &real_sk);
+        let dht_pk_announce = DhtPkAnnounce::new(
+            &announce_shared_secret,
+            friend_pk.clone(),
+            &DhtPkAnnouncePayload::new(friend_dht_pk.clone(), vec![]),
+        );
+        let packet = Packet::DhtRequest(DhtRequest::new(
+            &dht_shared_secret,
+            dht_pk.clone(),
+            friend_dht_pk.clone(),
+            &DhtRequestPayload::DhtPkAnnounce(dht_pk_announce),
+        ));
+        let packet_inner = match packet {
+            Packet::DhtRequest(inner) => inner,
+            _ => unreachable!(),
+        };
+
+        let mut drain2 = Box::pin(onion_client.drain_dht_pk_announce());
+        dht.handle_dht_req(packet_inner, saddr).await.unwrap();
+        let drain_result = tokio::time::timeout(Duration::from_millis(2000), &mut drain2)
+            .await
+            .expect("fresh drain after cancellation must complete");
+        let _ = drain_result;
+
+        assert_eq!(
+            onion_client.friend_dht_pk(&friend_pk).await,
+            Some(friend_dht_pk),
+            "second announcement must register even after cancellation"
+        );
     }
 
     #[tokio::test]

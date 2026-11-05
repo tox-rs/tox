@@ -1250,6 +1250,15 @@ mod tests {
             }
         }
 
+        /// Test helper: whether the crypto connection with the peer is fully established.
+        pub async fn is_connection_established(&self, pk: &PublicKey) -> bool {
+            if let Some(connection) = self.connections.read().await.get(pk) {
+                connection.read().await.is_established()
+            } else {
+                false
+            }
+        }
+
         pub async fn add_established_connection(
             &self,
             peer_dht_pk: PublicKey,

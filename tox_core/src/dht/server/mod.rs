@@ -45,6 +45,10 @@ type Tx = mpsc::Sender<(Packet, SocketAddr)>;
 /// Shorthand for the transmit half of the TCP onion channel.
 type TcpOnionTx = mpsc::Sender<(InnerOnionResponse, SocketAddr)>;
 
+/// Shorthand for the sink that forwards raw `DhtPkAnnounce` packets received
+/// via DHT to the higher-level `OnionClient`.
+type DhtPkAnnounceSink = tokio::sync::mpsc::UnboundedSender<(PublicKey, DhtPkAnnounce)>;
+
 /// Number of random `NodesRequest` packet to send every second one per second.
 /// After random requests count exceeds this number `NODES_REQ_INTERVAL` will be
 /// used.
@@ -179,6 +183,11 @@ pub struct Server {
     /// should be redirected to TCP sender trough this sink
     /// None if there is no TCP relay
     tcp_onion_sink: Option<TcpOnionTx>,
+    /// Sink to forward `DhtPkAnnounce` packets to the higher-level `OnionClient`.
+    /// The payload is encrypted with the peer's long-term key pair.
+    /// None in pure DHT bootstrap mode where no friend connections are
+    /// established.
+    dht_pk_announce_sink: Arc<RwLock<Option<DhtPkAnnounceSink>>>,
     /// If LAN discovery is enabled `Server` will handle `LanDiscovery` packets
     /// and send `NodesRequest` packets in reply.
     lan_discovery_enabled: bool,
@@ -232,6 +241,7 @@ impl Server {
             nodes_to_ping: Arc::new(RwLock::new(Kbucket::new(MAX_TO_PING))),
             bootstrap_info: None,
             tcp_onion_sink: None,
+            dht_pk_announce_sink: Default::default(),
             lan_discovery_enabled: true,
             is_ipv6_enabled: false,
             initial_bootstrap: Vec::new(),
@@ -1003,9 +1013,19 @@ impl Server {
                 debug!("Received nat ping response");
                 self.handle_nat_ping_resp(nat_payload, &packet.spk).await
             }
-            DhtRequestPayload::DhtPkAnnounce(_dht_pk_payload) => {
+            DhtRequestPayload::DhtPkAnnounce(dht_pk_announce) => {
                 debug!("Received DHT PublicKey Announce");
-                // TODO: handle this packet in onion client
+                // The raw announce is forwarded to OnionClient.
+                let sink = self.dht_pk_announce_sink.read().await.clone();
+                if let Some(tx) = sink {
+                    if let Err(e) = tx.send((packet.spk.clone(), dht_pk_announce)) {
+                        warn!("Failed to forward DhtPkAnnounce to OnionClient: {:?}", e);
+                    }
+                } else {
+                    // Pure-DHT-server mode (e.g. tox_node bootstrap): no onion client
+                    // registered. Silently discard the announce.
+                    trace!("DhtPkAnnounce dropped: no sink installed");
+                }
                 Ok(())
             }
             DhtRequestPayload::HardeningRequest(_dht_pk_payload) => {
@@ -1498,6 +1518,12 @@ impl Server {
     /// Set sink to send friend's `SocketAddr` when it gets known.
     pub async fn set_friend_saddr_sink(&self, friend_saddr_sink: mpsc::UnboundedSender<PackedNode>) {
         *self.friend_saddr_sink.write().await = Some(friend_saddr_sink);
+    }
+
+    /// Set the sink to forward incoming `DhtPkAnnounce` payloads to the
+    /// higher-level `OnionClient`.
+    pub async fn set_dht_pk_announce_sink(&self, sink: DhtPkAnnounceSink) {
+        *self.dht_pk_announce_sink.write().await = Some(sink);
     }
 
     /// Get `SalsaBox`s cache.
